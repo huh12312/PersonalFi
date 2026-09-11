@@ -16,11 +16,11 @@
 
 | WP | Package | Model | Agent type | Depends on | Status |
 |---|---|---|---|---|---|
-| 0.1 | Monorepo skeleton, kernel types (Money, Quantity, DateOnly, Clock, ids), typed config, Drizzle + migration runner, boundary lint, base CI | Opus | backend-architect | — | pending |
-| 0.2 | SecretBox envelope encryption + KEK custody + auth (passkeys, TOTP, recovery codes, sessions, rate limiting) | Opus | security-engineer | 0.1 | pending |
-| 0.3 | `domain_events` outbox, consumer pump, pg-boss jobs, scheduler, feature flags | Opus | backend-architect | 0.1 | pending |
-| 0.4 | Dockerfiles (Alpine), hardened compose, Caddy, backup/restore + `just restore-drill`, Renovate, license gate, gitleaks, full CI matrix | Sonnet | devops-architect | 0.1 | pending |
-| 0.5 | Frontend scaffold: Vite + React 19 + TanStack, Tailwind v4 tokens, shadcn/Base UI vendored, OpenAPI client generation, login/unlock shell, app frame | Sonnet | frontend-architect | 0.1 | pending |
+| 0.1 | Monorepo skeleton, kernel types (Money, Quantity, DateOnly, Clock, ids), typed config, Drizzle + migration runner, boundary lint, base CI | Opus | backend-architect | — | **done** e8e6338 (78 tests, lint, ownership check green) |
+| 0.2 | SecretBox envelope encryption + KEK custody + auth (passkeys, TOTP, recovery codes, sessions, rate limiting) | Opus | security-engineer | 0.1 | in progress (worktree) |
+| 0.3 | `domain_events` outbox, consumer pump, pg-boss jobs, scheduler, feature flags | Opus | backend-architect | 0.1 | in progress (worktree) |
+| 0.4 | Dockerfiles (Alpine), hardened compose, Caddy, backup/restore + `just restore-drill`, Renovate, license gate, gitleaks, full CI matrix | Sonnet | devops-architect | 0.1 | in progress (worktree) |
+| 0.5 | Frontend scaffold: Vite + React 19 + TanStack, Tailwind v4 tokens, shadcn/Base UI vendored, OpenAPI client generation, login/unlock shell, app frame | Sonnet | frontend-architect | 0.1 | in progress (worktree) |
 | 0.6 | Test harness: property tests for Money, migration tests, demo-seed generator skeleton, Playwright smoke | Sonnet | quality-engineer | 0.1, 0.3 | pending |
 | 0.7 | Phase 0 gate: security review of P0 evidence, boundary/license CI green, simplify pass, RUNBOOK | Opus | security-engineer + refactoring-expert | all | pending |
 
@@ -33,3 +33,5 @@
 ## Log
 
 - 2026-09-11: repo initialized, MIT license and baseline docs committed. pnpm and just installed via npm global. Wave A dispatched.
+- 2026-09-11: WP 0.1 verified (`just check` green: prettier, eslint, schema-ownership 85 tables claimed, 78 tests) and committed as e8e6338. Deviations accepted: TS 6.0.3 (typescript-eslint peer range), no build step (Node 26 type stripping), local eslint boundary rule, `@core/*`/`@ctx/*` naming, hand-rolled DateOnly. Findings propagated: postgres:18 volume path is `/var/lib/postgresql`; MPL-2.0 `lightningcss` is dev-only and must be excluded from the runtime image.
+- 2026-09-11: Wave B dispatched in isolated worktrees, each on its own dev database (`personalfi_wp02`, `personalfi_wp03`) and its own migration number (0002_identity, 0003_platform) to avoid merge collisions. Lockfile conflicts will be resolved by regenerating on merge.
