@@ -1,0 +1,149 @@
+# SPDX-License-Identifier: MIT
+#
+# Base CI for WP 0.1. WP 0.4 extends this with the image build, SBOM, trivy,
+# the license gate, gitleaks over full history, and cosign signing. Job names are
+# stable; add jobs rather than renaming these.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Postinstall scripts are disabled repo-wide; nothing in CI may re-enable them.
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      # pnpm is installed from a pinned version rather than via a third-party
+      # action: one fewer supply-chain edge for the same result.
+      - run: npm install --global pnpm@12.4.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+
+  lint:
+    name: lint (eslint + boundaries + schema ownership)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: npm install --global pnpm@12.4.1
+      - run: pnpm install --frozen-lockfile
+
+      - name: formatting
+        run: pnpm run lint:format
+
+      # Includes personalfi/layer-imports: a context importing another context,
+      # the kernel importing infrastructure, process.env outside @core/config, or
+      # a wall-clock read outside Clock all fail here.
+      - name: eslint and import boundaries
+        run: pnpm run lint:eslint
+
+      - name: schema ownership
+        run: pnpm run lint:schema-ownership
+
+  test:
+    name: unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: npm install --global pnpm@12.4.1
+      - run: pnpm install --frozen-lockfile
+
+      # No DATABASE_URL: the db project skips itself, proving the unit suite
+      # genuinely needs no Postgres.
+      - name: unit tests
+        run: pnpm exec vitest run --project kernel --project config --project api
+
+  migration-test:
+    name: migration test (postgres 18)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24
+        env:
+          POSTGRES_USER: personalfi
+          POSTGRES_PASSWORD: personalfi
+          POSTGRES_DB: personalfi_ci
+          POSTGRES_INITDB_ARGS: '--locale=C --encoding=UTF8'
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U personalfi -d personalfi_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgres://personalfi:personalfi@127.0.0.1:5432/personalfi_ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: npm install --global pnpm@12.4.1
+      - run: pnpm install --frozen-lockfile
+
+      - name: apply migrations to an empty database
+        run: pnpm run migrate
+
+      - name: applying twice is a no-op
+        run: pnpm run migrate
+
+      # Covers the advisory lock, transactional rollback, checksum drift, and the
+      # node-postgres type parsers that money and quantity correctness rest on.
+      - name: migration integration tests
+        run: pnpm exec vitest run --project db
+
+  openapi-current:
+    name: openapi spec is current
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: npm install --global pnpm@12.4.1
+      - run: pnpm install --frozen-lockfile
+
+      # A drifted spec means the generated frontend client no longer matches the
+      # server, which nobody notices until it is in front of the user.
+      - name: regenerate and diff
+        run: |
+          pnpm run openapi
+          git diff --exit-code -- packages/contracts/openapi/openapi.json

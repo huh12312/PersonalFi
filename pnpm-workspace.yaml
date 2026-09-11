@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+packages:
+  - apps/*
+  - packages/*
+  - packages/contexts/*
+
+# Decision D14: a package must have been public for seven days before we will
+# install it. The May 2026 TanStack worm shipped with valid SLSA attestations;
+# a cooldown is the only control that would have caught it. Renovate uses the
+# same window, so proposals and installs agree.
+minimumReleaseAge: 10080
+
+# .npmrc sets ignore-scripts=true globally. Every postinstall in the tree must be
+# named here with a verdict, so "does anything run code at install time?" has a
+# written answer rather than a shrug.
+allowBuilds:
+  # Dev-only (vite/vitest/drizzle-kit). esbuild's postinstall only validates the
+  # platform binary that its optional dependency already provides, so skipping it
+  # costs nothing and removes the last install-time script in the tree.
+  esbuild: false

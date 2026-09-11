@@ -1,0 +1,224 @@
+// SPDX-License-Identifier: MIT
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import pg from 'pg';
+import { installTypeParsers } from './types.ts';
+
+const { Client } = pg;
+
+/**
+ * Advisory lock key for migrations: the ASCII bytes of `PFMIGRAT` as a signed
+ * int64. Any value works as long as it never changes; a constant means two
+ * `api` containers starting at once cannot both migrate.
+ */
+export const MIGRATION_ADVISORY_LOCK_KEY = 0x50464d4947524154n;
+
+export const DEFAULT_MIGRATIONS_DIR = join(import.meta.dirname, '..', 'migrations');
+
+const FILENAME_PATTERN = /^(\d{4})_([a-z0-9_]+)\.sql$/;
+
+export interface MigrationFile {
+  readonly version: string;
+  readonly name: string;
+  readonly path: string;
+  readonly sql: string;
+  readonly checksum: string;
+}
+
+export interface AppliedMigration {
+  readonly version: string;
+  readonly name: string;
+  readonly checksum: string;
+  readonly executionMs: number;
+}
+
+export interface MigrationLogger {
+  info(message: string): void;
+  warn(message: string): void;
+}
+
+const consoleLogger: MigrationLogger = {
+  info: (message) => process.stdout.write(`${message}\n`),
+  warn: (message) => process.stderr.write(`${message}\n`),
+};
+
+export class MigrationError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'MigrationError';
+    this.code = code;
+  }
+}
+
+function checksumOf(sql: string): string {
+  // Normalise line endings so a checkout on another platform does not read as drift.
+  return createHash('sha256').update(sql.replaceAll('\r\n', '\n'), 'utf8').digest('hex');
+}
+
+/** Read and validate the migration directory, in lexical (= chronological) order. */
+export function readMigrationFiles(dir: string = DEFAULT_MIGRATIONS_DIR): MigrationFile[] {
+  const entries = readdirSync(dir)
+    .filter((entry) => entry.endsWith('.sql'))
+    .sort();
+  const seen = new Set<string>();
+  return entries.map((entry) => {
+    const match = FILENAME_PATTERN.exec(entry);
+    if (match === null) {
+      throw new MigrationError(
+        'migration.bad_filename',
+        `${entry}: migrations must be named NNNN_snake_case.sql`,
+      );
+    }
+    const [, version = '', name = ''] = match;
+    if (seen.has(version)) {
+      throw new MigrationError(
+        'migration.duplicate_version',
+        `duplicate migration version ${version}`,
+      );
+    }
+    seen.add(version);
+    const path = join(dir, entry);
+    const sql = readFileSync(path, 'utf8');
+    return { version, name, path, sql, checksum: checksumOf(sql) };
+  });
+}
+
+const BOOTSTRAP_SQL = `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version      TEXT        PRIMARY KEY,
+  name         TEXT        NOT NULL,
+  checksum     TEXT        NOT NULL,
+  applied_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  execution_ms INTEGER     NOT NULL
+);`;
+
+export interface RunMigrationsOptions {
+  readonly databaseUrl: string;
+  readonly migrationsDir?: string;
+  readonly logger?: MigrationLogger;
+  /** Report what would run, change nothing. */
+  readonly dryRun?: boolean;
+}
+
+export interface RunMigrationsResult {
+  readonly applied: readonly AppliedMigration[];
+  readonly alreadyApplied: number;
+  readonly pending: readonly string[];
+}
+
+/**
+ * Apply every pending migration, in order, under an advisory lock.
+ *
+ * Forward-only: there are no down migrations. For a single-user app the recovery
+ * path is restore-from-backup, and a maintained-but-never-tested `down` script is
+ * false comfort. Each file runs in its own transaction together with its
+ * bookkeeping row, so a failure leaves a consistent, resumable state.
+ */
+export async function runMigrations(options: RunMigrationsOptions): Promise<RunMigrationsResult> {
+  installTypeParsers();
+  const logger = options.logger ?? consoleLogger;
+  const files = readMigrationFiles(options.migrationsDir ?? DEFAULT_MIGRATIONS_DIR);
+  const client = new Client({ connectionString: options.databaseUrl });
+  await client.connect();
+
+  const applied: AppliedMigration[] = [];
+  try {
+    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_ADVISORY_LOCK_KEY.toString()]);
+    await client.query(BOOTSTRAP_SQL);
+
+    const { rows } = await client.query<{ version: string; checksum: string; name: string }>(
+      'SELECT version, name, checksum FROM schema_migrations ORDER BY version',
+    );
+    const alreadyApplied = new Map(rows.map((row) => [row.version, row]));
+
+    const pending: string[] = [];
+    for (const file of files) {
+      const record = alreadyApplied.get(file.version);
+      if (record !== undefined) {
+        if (record.checksum !== file.checksum) {
+          throw new MigrationError(
+            'migration.drift',
+            `${file.version}_${file.name}.sql changed after it was applied ` +
+              `(recorded ${record.checksum.slice(0, 12)}, file ${file.checksum.slice(0, 12)}). ` +
+              'Applied migrations are immutable: add a new migration instead.',
+          );
+        }
+        continue;
+      }
+      pending.push(`${file.version}_${file.name}`);
+    }
+
+    if (options.dryRun === true) {
+      return { applied: [], alreadyApplied: alreadyApplied.size, pending };
+    }
+
+    for (const file of files) {
+      if (alreadyApplied.has(file.version)) continue;
+      const startedAt = performance.now();
+      try {
+        await client.query('BEGIN');
+        await client.query(file.sql);
+        const executionMs = Math.round(performance.now() - startedAt);
+        await client.query(
+          'INSERT INTO schema_migrations (version, name, checksum, execution_ms) VALUES ($1, $2, $3, $4)',
+          [file.version, file.name, file.checksum, executionMs],
+        );
+        await client.query('COMMIT');
+        applied.push({
+          version: file.version,
+          name: file.name,
+          checksum: file.checksum,
+          executionMs,
+        });
+        logger.info(`applied ${file.version}_${file.name} in ${executionMs}ms`);
+      } catch (cause) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw new MigrationError(
+          'migration.failed',
+          `${file.version}_${file.name}.sql failed and was rolled back: ${(cause as Error).message}`,
+        );
+      }
+    }
+
+    if (applied.length === 0) logger.info('database is up to date; nothing to apply');
+    return { applied, alreadyApplied: alreadyApplied.size, pending: [] };
+  } finally {
+    await client
+      .query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_KEY.toString()])
+      .catch(() => undefined);
+    await client.end();
+  }
+}
+
+/** Anything that can run a text query: a `pg.Pool`, a `pg.Client`, or a test double. */
+export interface MigrationQueryable {
+  query(text: string): Promise<unknown>;
+}
+
+/**
+ * Migrations on disk that the database has not applied. `/ready` stays false
+ * while this is non-empty, so a container never serves traffic against a schema
+ * it does not match.
+ */
+export async function pendingMigrations(
+  queryable: MigrationQueryable,
+  migrationsDir: string = DEFAULT_MIGRATIONS_DIR,
+): Promise<string[]> {
+  const files = readMigrationFiles(migrationsDir);
+  let applied: Set<string>;
+  try {
+    const result = (await queryable.query('SELECT version FROM schema_migrations')) as {
+      rows: ReadonlyArray<{ version: string }>;
+    };
+    applied = new Set(result.rows.map((row) => row.version));
+  } catch {
+    // The bookkeeping table does not exist yet: everything is pending.
+    applied = new Set();
+  }
+  return files
+    .filter((file) => !applied.has(file.version))
+    .map((file) => `${file.version}_${file.name}`);
+}

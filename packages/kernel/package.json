@@ -1,0 +1,17 @@
+{
+  "name": "@core/kernel",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "decimal.js": "10.6.0",
+    "uuid": "14.0.2"
+  },
+  "devDependencies": {
+    "fast-check": "4.9.0"
+  }
+}

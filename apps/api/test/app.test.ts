@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: MIT
+import { loadConfig, type AppConfig } from '@core/config';
+import type pg from 'pg';
+import { describe, expect, it } from 'vitest';
+import { CORRELATION_ID_HEADER, buildApp } from '../src/app.ts';
+import { REDACTED_PATHS } from '../src/logging.ts';
+
+function testConfig(): AppConfig {
+  return loadConfig({
+    env: {
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'silent',
+      DATABASE_URL: 'postgres://test:test@127.0.0.1:1/test',
+      SECRETS_DIR: '/nonexistent',
+    },
+    readSecret: () => {
+      const error = new Error('ENOENT') as NodeJS.ErrnoException;
+      error.code = 'ENOENT';
+      throw error;
+    },
+  });
+}
+
+/** A pool that never connects: readiness must degrade, not hang or crash. */
+const unreachablePool = {
+  connect: () => Promise.reject(new Error('ECONNREFUSED')),
+  query: () => Promise.reject(new Error('ECONNREFUSED')),
+} as unknown as pg.Pool;
+
+describe('API shell', () => {
+  it('answers /health without touching the database', async () => {
+    // An orchestrator that restarts the API because Postgres is slow turns a
+    // blip into an outage, so liveness must not depend on readiness.
+    const app = await buildApp({ config: testConfig(), pool: unreachablePool });
+    const response = await app.inject({ method: 'GET', url: '/health' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ status: 'ok', service: 'api', version: '0.1.0' });
+    await app.close();
+  });
+
+  it('reports 503 problem details from /ready when the database is unreachable', async () => {
+    const app = await buildApp({ config: testConfig(), pool: unreachablePool });
+    const response = await app.inject({ method: 'GET', url: '/ready' });
+    expect(response.statusCode).toBe(503);
+    expect(response.headers['content-type']).toContain('application/problem+json');
+    const problem = response.json() as Record<string, unknown>;
+    expect(problem['code']).toBe('database_unavailable');
+    expect(problem['status']).toBe(503);
+    expect(problem['type']).toBe('https://personalfi.local/problems/database_unavailable');
+    expect(typeof problem['correlationId']).toBe('string');
+    await app.close();
+  });
+
+  it('returns RFC 9457 problem details for an unknown route', async () => {
+    const app = await buildApp({ config: testConfig(), pool: unreachablePool });
+    const response = await app.inject({ method: 'GET', url: '/nope' });
+    expect(response.statusCode).toBe(404);
+    expect(response.headers['content-type']).toContain('application/problem+json');
+    const problem = response.json() as Record<string, unknown>;
+    expect(problem['code']).toBe('route_not_found');
+    // The client switches on `code`, never on `detail`; assert both exist.
+    expect(problem['title']).toBe('Not Found');
+    expect(problem['detail']).toContain('/nope');
+    await app.close();
+  });
+
+  it('echoes a supplied correlation id and mints one otherwise', async () => {
+    const app = await buildApp({ config: testConfig(), pool: unreachablePool });
+
+    const supplied = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { [CORRELATION_ID_HEADER]: 'sync-run-42' },
+    });
+    expect(supplied.headers[CORRELATION_ID_HEADER]).toBe('sync-run-42');
+
+    const minted = await app.inject({ method: 'GET', url: '/health' });
+    expect(minted.headers[CORRELATION_ID_HEADER]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    await app.close();
+  });
+
+  it('generates an OpenAPI document from the route schemas', async () => {
+    const app = await buildApp({ config: testConfig(), pool: unreachablePool });
+    await app.ready();
+    const spec = app.swagger() as {
+      openapi: string;
+      paths: Record<string, Record<string, { operationId?: string }>>;
+    };
+    expect(spec.openapi).toBe('3.1.0');
+    expect(Object.keys(spec.paths).sort()).toEqual(['/health', '/ready']);
+    expect(spec.paths['/health']?.['get']?.operationId).toBe('getHealth');
+    await app.close();
+  });
+
+  it('redacts every credential-shaped field name', () => {
+    // This list is a P0 control: no token and no account number may reach a log.
+    for (const path of [
+      '*.access_token',
+      '*.client_secret',
+      '*.account_number',
+      '*.routing_number',
+      '*.password',
+      'req.headers.authorization',
+      'req.headers.cookie',
+    ]) {
+      expect(REDACTED_PATHS).toContain(path);
+    }
+  });
+});

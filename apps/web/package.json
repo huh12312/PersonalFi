@@ -1,0 +1,11 @@
+{
+  "name": "@app/web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Placeholder. WP 0.5 fills this in: React 19 + Vite 7 + TanStack Router/Query, Tailwind v4, visx. Nothing here yet on purpose — the API shell must not grow a frontend dependency by accident.",
+  "scripts": {
+    "build": "echo 'apps/web is a placeholder until WP 0.5' && exit 0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://personalfi.local/contracts/advisor/0.1.0.json",
+  "title": "PersonalFi Advisor contract",
+  "description": "Placeholder. Phase 2 (WP 2.x) fills in the AdvisorSnapshot input and the Insight[] output with evidence refs, confidence, severity ceiling, and requires_review. Versioned independently of the HTTP API because built-in rules, a local model, and the sidecar all deliver through it.",
+  "version": "0.1.0",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": "0.1.0",
+      "description": "Contract version. Consumers pin a major and must reject anything they do not understand."
+    }
+  },
+  "required": ["version"],
+  "additionalProperties": true
+}

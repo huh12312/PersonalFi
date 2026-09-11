@@ -1,0 +1,22 @@
+{
+  "name": "@core/db",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./columns": "./src/columns.ts",
+    "./migrate": "./src/migrate.ts"
+  },
+  "dependencies": {
+    "@core/config": "workspace:*",
+    "@core/kernel": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.10"
+  }
+}

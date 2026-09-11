@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: MIT
+#
+# Development database only.
+#
+# The production stack — Caddy, api, worker, migrator, backup, and the hardening
+# that goes with them — is WP 0.4's, and deliberately not here: a dev compose file
+# that quietly grows into a production one is how a bind on 0.0.0.0 ends up in
+# front of a ledger.
+#
+#   just db-up      start it
+#   just migrate    apply migrations
+#   just db-down    stop it (keeps the volume)
+#   just db-reset   stop it and destroy the volume
+
+name: personalfi-dev
+
+services:
+  db:
+    # Pinned to a patch tag, and to Alpine 3.24 to match decision D13. Renovate
+    # proposes the bump; nothing floats on its own.
+    image: postgres:18.6-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: personalfi
+      POSTGRES_PASSWORD: personalfi
+      POSTGRES_DB: personalfi_dev
+      # Deterministic collation: an index built under a different locale is a
+      # corruption bug that only shows up on a restore.
+      POSTGRES_INITDB_ARGS: '--locale=C --encoding=UTF8'
+      TZ: UTC
+      PGTZ: UTC
+    command:
+      - postgres
+      - -c
+      - log_statement=none
+      - -c
+      - log_min_duration_statement=250
+    ports:
+      # Loopback only, and 5433 so it cannot collide with a system Postgres.
+      - '127.0.0.1:5433:5432'
+    volumes:
+      # Postgres 18 images store data in a major-version subdirectory and expect
+      # the mount one level up, at /var/lib/postgresql. Mounting .../data instead
+      # makes the container refuse to start. This also matters for WP 0.4: the
+      # production volume and the backup scripts must use the same path.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U personalfi -d personalfi_dev']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  pgdata:
+    name: personalfi_dev_pgdata

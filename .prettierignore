@@ -1,0 +1,7 @@
+node_modules
+dist
+coverage
+pnpm-lock.yaml
+docs/research
+docs/plan
+packages/contracts/openapi/openapi.json

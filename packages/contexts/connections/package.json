@@ -1,0 +1,16 @@
+{
+  "name": "@ctx/connections",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./schema/index.ts"
+  },
+  "dependencies": {
+    "@core/db": "workspace:*",
+    "@core/kernel": "workspace:*",
+    "drizzle-orm": "0.45.2"
+  }
+}

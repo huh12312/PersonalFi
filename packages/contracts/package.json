@@ -1,0 +1,15 @@
+{
+  "name": "@core/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./openapi.json": "./openapi/openapi.json",
+    "./advisor.schema.json": "./advisor/advisor.schema.json"
+  },
+  "dependencies": {
+    "@core/kernel": "workspace:*"
+  }
+}
