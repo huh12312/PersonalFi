@@ -169,7 +169,7 @@ function main(): number {
       // Tests are exempt: a migration test has to assert that `users` exists, and
       // a test fixture that seeds another context's table creates no runtime
       // coupling. Table *ownership* above is still enforced in test files.
-      if (file.endsWith('.test.ts') || /(^|\/)test\//.test(rel)) return;
+      if (file.endsWith('.test.ts') || /(^|\/)test\//.test(file)) return;
       if (NON_OWNING_PREFIXES.some((prefix) => file.startsWith(prefix))) return;
       for (const match of contents.matchAll(SQL_REFERENCE)) {
         const table = match[1];
