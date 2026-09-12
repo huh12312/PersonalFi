@@ -300,20 +300,38 @@ restore-drill:
 # Filesystem scan (deps + secrets + misconfig) and an image scan of every
 # image this repo builds. HIGH/CRITICAL only, unfixed CVEs ignored (06 §5.5);
 # suppress a specific finding in .trivyignore with an expiry and a reason.
+#
+# Same trivy digest as CI's `trivy-fs`/`docker-build-scan` jobs (WP 0.4 close-out
+# fix: this recipe previously pinned the floating tag `aquasec/trivy:0.68.0`,
+# which was never a real published tag — `0.68.1`/`0.68.2` exist, `0.68.0` does
+# not — so `just scan` failed outright with "no such manifest" before it ever
+# ran a scan. Also previously passed no `--ignorefile`, which would have failed
+# on the very suppressions .trivyignore documents as expected findings.
+TRIVY_IMAGE := "aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969"
+
 scan:
-    docker run --rm -v "{{justfile_directory()}}:/repo" aquasec/trivy:0.68.0 fs --scanners vuln,secret,misconfig /repo
+    docker run --rm -v "{{justfile_directory()}}:/repo" {{TRIVY_IMAGE}} \
+      fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
+        --ignorefile /repo/.trivyignore --exit-code 1 /repo
     just build
-    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.68.0 \
-      image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 personalfi/api:dev
-    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.68.0 \
-      image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 personalfi/backup:dev
-    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.68.0 \
-      image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 personalfi/proxy:dev
+    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "{{justfile_directory()}}:/repo" {{TRIVY_IMAGE}} \
+      image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /repo/.trivyignore --exit-code 1 personalfi/api:dev
+    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "{{justfile_directory()}}:/repo" {{TRIVY_IMAGE}} \
+      image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /repo/.trivyignore --exit-code 1 personalfi/backup:dev
+    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "{{justfile_directory()}}:/repo" {{TRIVY_IMAGE}} \
+      image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /repo/.trivyignore --exit-code 1 personalfi/proxy:dev
 
 # SPDX + CycloneDX SBOMs for every image this repo builds (06 §5.4/§7.2 — the
 # syft SBOM is the output of record; THIRD_PARTY.md is generated separately by
 # `just licenses` from the npm dependency tree, which is the finer-grained of
 # the two for the license gate specifically).
+#
+# Same syft digest as CI's `docker-build-scan`/release.yml jobs (WP 0.4
+# close-out fix: this recipe previously pinned `anchore/syft:1.18.0`, which
+# was never a real published tag — the oldest tag on Docker Hub today is
+# `v1.43.0` — so `just sbom` failed outright with "no such manifest").
+SYFT_IMAGE := "anchore/syft:v1.51.1@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c"
+
 sbom:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -322,7 +340,7 @@ sbom:
     for image in api backup proxy; do
       docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
         -v "{{justfile_directory()}}/docs/evidence/sbom:/out" \
-        anchore/syft:1.18.0 "personalfi/${image}:dev" \
+        {{SYFT_IMAGE}} "personalfi/${image}:dev" \
         -o "spdx-json=/out/${image}.spdx.json" -o "cyclonedx-json=/out/${image}.cdx.json"
     done
     echo "sbom: wrote docs/evidence/sbom/{api,backup,proxy}.{spdx,cdx}.json"

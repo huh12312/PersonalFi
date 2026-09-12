@@ -34,7 +34,7 @@ report for this work package.
 
 `proxy` was started with `docker compose up -d --no-deps proxy` specifically
 to still capture real evidence for it (its own boot does not depend on
-`api`; only its *healthcheck* does, since that checks `api:8080/health`
+`api`; only its _healthcheck_ does, since that checks `api:8080/health`
 through itself). It logs the expected `502` reverse-proxy error against a
 nonexistent `api` service, which is the correct behavior given the state
 above, not a defect.
@@ -45,13 +45,13 @@ above, not a defect.
 docker inspect --format='{{.HostConfig.ReadonlyRootfs}} {{.Config.User}} {{.HostConfig.CapDrop}} {{.HostConfig.SecurityOpt}}' <container>
 ```
 
-| Service    | ReadonlyRootfs | User        | CapDrop | SecurityOpt              | Restart policy | Log driver           |
-| ---------- | -------------- | ----------- | ------- | ------------------------ | -------------- | --------------------- |
+| Service    | ReadonlyRootfs | User          | CapDrop | SecurityOpt                | Restart policy   | Log driver            |
+| ---------- | -------------- | ------------- | ------- | -------------------------- | ---------------- | --------------------- |
 | `proxy`    | `true`         | `10003:10003` | `[ALL]` | `[no-new-privileges:true]` | `unless-stopped` | `json-file` (10m × 5) |
 | `api`      | `true`         | `10001:10001` | `[ALL]` | `[no-new-privileges:true]` | `unless-stopped` | `json-file` (10m × 5) |
 | `worker`   | `true`         | `10001:10001` | `[ALL]` | `[no-new-privileges:true]` | `unless-stopped` | `json-file` (10m × 5) |
 | `migrator` | `true`         | `10001:10001` | `[ALL]` | `[no-new-privileges:true]` | `no`             | `json-file` (10m × 5) |
-| `db`       | `false`\*      | `70:70`     | `[ALL]` | `[no-new-privileges:true]` | `unless-stopped` | `json-file` (10m × 5) |
+| `db`       | `false`\*      | `70:70`       | `[ALL]` | `[no-new-privileges:true]` | `unless-stopped` | `json-file` (10m × 5) |
 | `backup`   | `true`         | `10002:10002` | `[ALL]` | `[no-new-privileges:true]` | `unless-stopped` | `json-file` (10m × 5) |
 
 \* `db`'s rootfs is intentionally writable, scoped to the named `pgdata`
@@ -171,7 +171,7 @@ rather than just reading the compose file — both fixed within this package:
 1. **Malformed Postgres image digest.** `compose.yml` pinned
    `postgres:18.6-alpine3.24@sha256:...b` — 63 hex characters, one short of a
    valid sha256 digest. `docker compose up` failed immediately with `invalid
-   checksum digest length`. Fixed to the correct, verified digest
+checksum digest length`. Fixed to the correct, verified digest
    (`...b2`) in `compose.yml` and in the `restore-drill` justfile recipe.
 2. **Secret file permissions (`chmod 400`) are unreadable by the containers
    that consume them.** Docker Compose's file-based secrets provider (and a
@@ -183,7 +183,7 @@ rather than just reading the compose file — both fixed within this package:
    host user running `just` — a `0400` file only that host user can read
    fails inside every one of those containers, with `db` failing first
    (`docker-entrypoint.sh: line 21: /run/secrets/pg_password: Permission
-   denied`). Fixed to `0444` in `RUNBOOK.md`, `just gen-master-key`, and the
+denied`). Fixed to `0444` in `RUNBOOK.md`, `just gen-master-key`, and the
    new `just gen-pg-secrets` recipe, with the actual confidentiality
    boundary (the `0700` `secrets/` directory, which only the host user and
    root can even traverse into) documented at each call site so the change
@@ -192,3 +192,76 @@ rather than just reading the compose file — both fixed within this package:
 A third bug (bad-characters-in-a-URL — see the coordinator's report) was
 fixed in the same pass: see `just gen-pg-secrets` and `RUNBOOK.md`'s "Create
 secrets" section.
+
+## Close-out re-verification (2026-09-12, second pass)
+
+This work package's evidence was re-run in full from a clean state after the
+snapshot commit (0812909) to confirm nothing above had drifted and to finish
+the remaining gates. All of the following were re-executed on this host,
+independently of the run recorded above:
+
+- `docker compose config` and `bash scripts/compose-hardening-check.sh` — both
+  pass (3 compose files checked: `compose.yml`, `compose.dev.yml`,
+  `compose.override.example.yml`).
+- `docker compose down -v` to clear a stale container set left by the killed
+  agent (`personalfi-migrator-1 Exited (1)`, `personalfi-api-1`/`personalfi-worker-1`
+  stuck `Created`, `personalfi-proxy-1 unhealthy` — the exact symptom this
+  document already attributes to the `ROLE` enum gap below), then `just build`
+  from scratch and `docker compose up -d` again.
+- **The `ROLE` enum gap is still present and still reproduces identically**:
+  `packages/config/src/schema.ts` still declares
+  `ROLE: z.enum(['api', 'worker'])`, `migrator` still exits 1 with
+  `ROLE: Invalid option: expected one of "api"|"worker"`, and `api`/`worker`
+  still never leave `Created`. This is unchanged from the first pass and is
+  still out of this work package's scope (collision rule: no edits under
+  `packages/`) — flagged again, more prominently, in `wp0.4-summary.md`, since
+  it is the one gap that blocks the literal exit-criterion sentence "proxy ->
+  api /health works through Caddy" from being demonstrated end to end.
+  `proxy`, `db`, and `backup` booted and passed their healthchecks again,
+  identically to the first pass; `docker inspect` hardening flags,
+  `docker compose ps` port exposure, image sizes (api 347MB, backup 200MB,
+  proxy 163MB), the read-only-rootfs live check, and the lightningcss absence
+  check were all reproduced byte-for-byte against freshly rebuilt images.
+- **Found and fixed: `just scan` and `just sbom` were both broken.** Both
+  recipes pinned tags that do not exist on Docker Hub —
+  `aquasec/trivy:0.68.0` (only `0.68.1`/`0.68.2` were ever published) and
+  `anchore/syft:1.18.0` (the oldest published tag is `v1.43.0`) — so either
+  recipe failed immediately with `no such manifest` before scanning anything;
+  `just scan` also never passed `--ignorefile`, so even with a valid tag it
+  would have failed on the suppressions `.trivyignore` documents as expected.
+  Repinned both to the exact digests `ci.yml`/`release.yml` already use
+  (`aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969`,
+  `anchore/syft:v1.51.1@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c`)
+  and added `--ignorefile /repo/.trivyignore` to every `trivy image`
+  invocation in `scan`, matching what `fs` already had documented as intent. Verified by actually running
+  `just scan` end to end after the fix: `trivy fs` and all three `trivy
+image` scans (api, backup, proxy) report 0 HIGH/CRITICAL findings against
+  freshly rebuilt images, consistent with the first pass's trivy results
+  above and with `.trivyignore`'s documented suppressions.
+- License gate (`node scripts/check-licenses.ts`) re-run clean: 260 prod / 620
+  dev package entries, `PASS`, and `THIRD_PARTY.md` regenerated with zero
+  diff against the committed copy (no lockfile drift since the snapshot).
+  Full detail in `wp0.4-license-gate.md`.
+- `just restore-drill` re-run end to end with a freshly generated throwaway
+  age keypair (the identity from the first pass was never retained, by
+  design — see `docker/backup/backup.sh`'s header): took a real backup with
+  `docker compose exec backup /usr/local/bin/backup.sh`, decrypted and
+  restored it into a scratch Postgres container, and wrote
+  `docs/evidence/ops/restore-drill-20260912.md`. Table counts on both sides
+  are 0 (expected — the `ROLE` gap above means no migration has ever run
+  against this stack), and the drill's own throwaway-api/`ready` check
+  correctly reports `fail` for the same reason, exactly as the drill script's
+  own comment ("not necessarily an infra defect") anticipates.
+- `renovate.json` validated with
+  `docker run --rm renovate/renovate:41 renovate-config-validator --strict`:
+  `INFO: Config validated successfully`.
+- Spot-checked 5 (more than the requested 3) pinned Action SHAs in
+  `ci.yml`/`release.yml` against the GitHub API — `actions/checkout` (`v7.0.1`),
+  `actions/setup-node` (`v7.0.0`), `docker/build-push-action` (`v7.3.0`),
+  `sigstore/cosign-installer` (`v4.1.2`), `softprops/action-gh-release`
+  (`v3.0.3`) — via `GET /repos/<owner>/<repo>/commits/<sha>` and `GET
+/repos/<owner>/<repo>/tags`: every SHA resolves to a real commit and matches
+  the tag named in its trailing comment (the `git/refs/tags/<tag>` endpoint
+  returns a different SHA for annotated tags — that's the tag _object_, not
+  the commit it points at, and is expected; the `tags` list endpoint's
+  `commit.sha` is what actually needs to match, and does, for all five).
