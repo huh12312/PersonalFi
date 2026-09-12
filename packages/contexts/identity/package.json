@@ -11,6 +11,10 @@
   "dependencies": {
     "@core/db": "workspace:*",
     "@core/kernel": "workspace:*",
-    "drizzle-orm": "0.45.2"
+    "@core/secretbox": "workspace:*",
+    "@simplewebauthn/server": "14.0.0",
+    "drizzle-orm": "0.45.2",
+    "otpauth": "9.5.2",
+    "zod": "4.5.4"
   }
 }

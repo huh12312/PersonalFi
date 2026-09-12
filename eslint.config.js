@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
-import { boundariesPlugin } from './scripts/eslint-boundaries.js';
+import { boundariesPlugin, CRYPTO_PRIMITIVES } from './scripts/eslint-boundaries.js';
 
 /**
  * Flat config. Three layers:
@@ -93,6 +93,46 @@ export default tseslint.config(
         {
           selector: 'NewExpression[callee.name="Date"][arguments.length=0]',
           message: 'Inject a Clock from @core/kernel instead of constructing new Date().',
+        },
+      ],
+    },
+  },
+
+  // Cryptography has exactly one legitimate call site (03 §2, WP 0.2).
+  //
+  // `personalfi/layer-imports` already denies the primitive packages everywhere
+  // outside `packages/secretbox/`. This adds the two halves that an allow-list
+  // cannot express: `node:crypto` is a *builtin*, allowed at every layer for
+  // `readFile` and friends, and within `@core/secretbox` itself the primitives
+  // must stay in `src/primitives.ts` rather than spreading across the package.
+  //
+  // The failure this prevents is not a broken cipher. It is the second call site
+  // that reuses a nonce, drops the AAD, or compares a tag with `===`.
+  {
+    files: ['apps/**/*.ts', 'packages/**/*.ts'],
+    ignores: ['packages/secretbox/src/primitives.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'node:crypto',
+              message:
+                'Cryptography lives in @core/secretbox. Use SecretBox.seal/open, or one of the ' +
+                'primitives it re-exports (randomBytes, sha256, constantTimeEqual).',
+            },
+            {
+              name: 'crypto',
+              message: 'Use @core/secretbox; and prefer the node: prefix for builtins.',
+            },
+          ],
+          patterns: CRYPTO_PRIMITIVES.map((name) => ({
+            group: [name, `${name}/*`],
+            message:
+              `${name} may be imported only in packages/secretbox/src/primitives.ts, the single ` +
+              'audited crypto call site. Reach it through @core/secretbox.',
+          })),
         },
       ],
     },

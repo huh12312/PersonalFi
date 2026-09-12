@@ -42,6 +42,22 @@ const UNIVERSAL = ['zod'];
 const TEST_ONLY = ['vitest', 'fast-check'];
 
 /**
+ * Cryptographic primitive libraries. Importable **only** inside
+ * `packages/secretbox/`, and within that package only from `src/primitives.ts`
+ * (the second half of that rule lives in `eslint.config.js`, because it is a
+ * file-path restriction rather than a layer one).
+ *
+ * This is the mechanised form of 03 §2: envelope encryption is worth nothing if a
+ * second call site elsewhere in the tree reaches for `createCipheriv`, picks a
+ * 12-byte nonce from `Math.random`, and forgets the AAD. Protocol libraries that
+ * happen to contain crypto — `@simplewebauthn/server`, `otpauth` — are not on this
+ * list: they are allow-listed to `@ctx/identity` by the layer policy below,
+ * because a passkey implementation is an authentication protocol, not a primitive
+ * anyone could misuse into a nonce reuse.
+ */
+const CRYPTO_PRIMITIVES = ['@noble/ciphers', '@noble/hashes', 'hash-wasm'];
+
+/**
  * Layer policy, most specific path prefix first.
  *
  * `allow` lists bare package names (subpaths are matched by prefix, so `@core/db`
@@ -93,6 +109,39 @@ const LAYERS = [
       'the cycle would be permanent.',
   },
   {
+    name: 'secretbox',
+    prefix: 'packages/secretbox/',
+    allow: ['@core/kernel', '@core/config', '@core/db', ...CRYPTO_PRIMITIVES, ...UNIVERSAL],
+    allowNodeBuiltins: true,
+    why:
+      'The cryptography chokepoint. It is the only package allowed to import a ' +
+      'cipher, a KDF or a hash, and in exchange it imports nothing above ' +
+      'infrastructure: it must never know what a Plaid item or a session is.',
+  },
+  {
+    name: 'identity',
+    prefix: 'packages/contexts/identity/',
+    // The authentication protocol libraries live here and nowhere else. They are
+    // listed against this one context rather than all of them because a context
+    // that needs to verify a WebAuthn assertion is, by definition, this context.
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      '@core/contracts',
+      '@core/platform',
+      '@core/secretbox',
+      '@simplewebauthn/server',
+      'otpauth',
+      'drizzle-orm',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'Identity owns authentication. It reaches primitives only through ' +
+      '@core/secretbox — a direct cipher import here would defeat the chokepoint.',
+  },
+  {
     name: 'context',
     prefix: 'packages/contexts/',
     allow: [
@@ -101,6 +150,7 @@ const LAYERS = [
       '@core/db',
       '@core/contracts',
       '@core/platform',
+      '@core/secretbox',
       'drizzle-orm',
       ...UNIVERSAL,
     ],
@@ -108,7 +158,8 @@ const LAYERS = [
     why:
       'A context may depend on the shared kernel and on infrastructure, never on ' +
       'another context. Where a cycle seems necessary the answer is a domain event ' +
-      'through @core/platform, not an import.',
+      'through @core/platform, not an import. Anything it must encrypt goes through ' +
+      '@core/secretbox.',
   },
   {
     name: 'app',
@@ -174,8 +225,12 @@ const rule = {
     const allowNodeBuiltins = layer.allowNodeBuiltins || isTest;
 
     const packageRoot = packageRootOf(relativePath);
-    const contextName =
-      layer.name === 'context' ? `@ctx/${relativePath.split('/')[2]}` : `@core/${layer.name}`;
+    // A layer may be scoped to a single context (`identity`), so key the package
+    // name off the path rather than the layer name: getting this wrong would make
+    // a context's imports of *itself* look like a cross-context violation.
+    const contextName = relativePath.startsWith('packages/contexts/')
+      ? `@ctx/${relativePath.split('/')[2]}`
+      : `@core/${layer.name}`;
 
     function check(node, specifierNode) {
       if (specifierNode?.type !== 'Literal' || typeof specifierNode.value !== 'string') return;
@@ -244,4 +299,4 @@ export const boundariesPlugin = {
   rules: { 'layer-imports': rule },
 };
 
-export { LAYERS };
+export { LAYERS, CRYPTO_PRIMITIVES };

@@ -8,7 +8,9 @@
 export {
   loadConfig,
   describeConfig,
+  describeKek,
   type AppConfig,
+  type KekConfig,
   type LoadConfigOptions,
   type PublicEnvironmentConfig,
 } from './load.ts';
@@ -17,6 +19,8 @@ export { redact, isRedacted, REDACTED_MARKER, type Redacted } from './redacted.t
 export {
   environmentSchema,
   SECRET_SPECS,
+  KEK_ARGON2_FLOORS,
+  type Argon2Params,
   type EnvironmentConfig,
   type SecretName,
 } from './schema.ts';

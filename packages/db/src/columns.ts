@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: MIT
-import { bigint, boolean, char, date, numeric, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  boolean,
+  char,
+  customType,
+  date,
+  numeric,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 /**
  * The column vocabulary every table in PersonalFi is built from.
@@ -78,4 +87,26 @@ export function rateColumn(name: string) {
 
 export function flagColumn(name: string) {
   return boolean(name);
+}
+
+/**
+ * Raw bytes, as `Uint8Array` rather than `Buffer`.
+ *
+ * Two kinds of column use it and both are security-critical: a `SecretBox` storage
+ * envelope (`version||key_id||nonce||ciphertext+tag`) and a SHA-256 token digest.
+ * Neither is text, and neither must ever be coaxed into a string — a ciphertext
+ * that goes through `toString()` is a ciphertext that has been silently corrupted
+ * by UTF-8 replacement, which surfaces as "decryption fails sometimes".
+ *
+ * `Uint8Array` rather than `Buffer` because the crypto primitives speak it and
+ * because a `Buffer` prints its contents in a stack trace far too readily.
+ */
+const byteaType = customType<{ data: Uint8Array; driverData: Buffer }>({
+  dataType: () => 'bytea',
+  toDriver: (value) => Buffer.from(value),
+  fromDriver: (value) => new Uint8Array(value),
+});
+
+export function byteaColumn(name: string) {
+  return byteaType(name);
 }
