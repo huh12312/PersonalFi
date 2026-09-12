@@ -14,7 +14,9 @@ minimumReleaseAge: 10080
 # named here with a verdict, so "does anything run code at install time?" has a
 # written answer rather than a shrug.
 allowBuilds:
-  '@swc/core': set this to true or false
+  # Dev-only (@vitejs/plugin-react). Same shape as esbuild: the platform binary is
+  # an optional dependency; the postinstall only validates it.
+  '@swc/core': false
   # Dev-only (vite/vitest/drizzle-kit). esbuild's postinstall only validates the
   # platform binary that its optional dependency already provides, so skipping it
   # costs nothing and removes the last install-time script in the tree.

@@ -22,6 +22,7 @@ import { boundariesPlugin, CRYPTO_PRIMITIVES } from './scripts/eslint-boundaries
 export default tseslint.config(
   {
     ignores: [
+      '.claude/**',
       '**/node_modules/**',
       '**/dist/**',
       '**/coverage/**',
