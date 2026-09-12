@@ -84,7 +84,9 @@ describeWithDb('scheduler', () => {
     expect(await scheduler.tick()).toBe(0);
     await scheduler.stop();
 
-    const jobs = await database.db.execute<{ count: string }>(sql`SELECT count(*)::text AS count FROM jobs`);
+    const jobs = await database.db.execute<{ count: string }>(
+      sql`SELECT count(*)::text AS count FROM jobs`,
+    );
     expect(jobs.rows[0]?.count).toBe('1');
 
     const next = await database.db.execute<{ next_run_at: Date }>(
@@ -112,7 +114,9 @@ describeWithDb('scheduler', () => {
     expect([workerA.isLeader(), workerB.isLeader()].filter(Boolean)).toHaveLength(1);
     expect(firedA + firedB).toBe(1);
 
-    const jobs = await database.db.execute<{ count: string }>(sql`SELECT count(*)::text AS count FROM jobs`);
+    const jobs = await database.db.execute<{ count: string }>(
+      sql`SELECT count(*)::text AS count FROM jobs`,
+    );
     expect(jobs.rows[0]?.count).toBe('1');
 
     await workerA.stop();
@@ -139,7 +143,9 @@ describeWithDb('scheduler', () => {
   it('skips a disabled schedule and does not re-enable it on redeploy', async () => {
     const clock = mutableClock('2026-03-01T12:00:00Z');
     await seedNightlySync(clock);
-    await database.db.execute(sql`UPDATE schedules SET enabled = false WHERE name = 'sync.nightly'`);
+    await database.db.execute(
+      sql`UPDATE schedules SET enabled = false WHERE name = 'sync.nightly'`,
+    );
 
     // A redeploy calls upsertSchedule again. The user's choice must survive it.
     await seedNightlySync(clock);

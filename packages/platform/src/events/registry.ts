@@ -38,7 +38,11 @@ export interface EventDefinition<TSchema extends z.ZodType = z.ZodType> {
   /** `upcasts[n]` turns a version-`n` payload into a version-`n+1` one. */
   readonly upcasts: Readonly<Record<number, (payload: unknown) => unknown>>;
   /** Build a `NewEvent` ready for `appendEvent`. Validates the payload eagerly. */
-  create(payload: z.infer<TSchema>, context: EventContext, clock?: Clock): NewEvent<z.infer<TSchema>>;
+  create(
+    payload: z.infer<TSchema>,
+    context: EventContext,
+    clock?: Clock,
+  ): NewEvent<z.infer<TSchema>>;
   /** Narrow an envelope from the pump to this definition's payload type. */
   parse(envelope: EventEnvelope): EventEnvelope<z.infer<TSchema>>;
   /** Type guard for a handler switching over several event types. */
@@ -170,9 +174,7 @@ export interface EventRegistry {
  * in one process share state and makes "which events does this deployment know
  * about?" unanswerable when half the modules are behind a disabled flag.
  */
-export function createEventRegistry(
-  definitions: readonly EventDefinition[] = [],
-): EventRegistry {
+export function createEventRegistry(definitions: readonly EventDefinition[] = []): EventRegistry {
   const byType = new Map<string, EventDefinition>();
 
   const registry: EventRegistry = {

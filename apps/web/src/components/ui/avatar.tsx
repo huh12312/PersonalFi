@@ -24,7 +24,10 @@ export function Avatar({ className, ...props }: ComponentProps<typeof BaseAvatar
 
 export const AvatarImage = BaseAvatar.Image;
 
-export function AvatarFallback({ className, ...props }: ComponentProps<typeof BaseAvatar.Fallback>) {
+export function AvatarFallback({
+  className,
+  ...props
+}: ComponentProps<typeof BaseAvatar.Fallback>) {
   return (
     <BaseAvatar.Fallback
       className={cn('text-caption font-medium text-text-secondary', className)}

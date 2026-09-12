@@ -8,7 +8,7 @@ Cryptography itself lives one layer down in **`@core/secretbox`**, which owns
 `encryption_keys`. That split is forced by the boundary lint rather than chosen for
 taste: `personalfi/layer-imports` denies `@ctx/*` → `@ctx/*`, so a `SecretBox` owned
 by this context could never be the chokepoint `@ctx/connections` and
-`@ctx/integrations` must call. Identity is the *first consumer* of SecretBox (the
+`@ctx/integrations` must call. Identity is the _first consumer_ of SecretBox (the
 TOTP seed), not its owner.
 
 Exactly one context may write a table, and only that context may read it directly.

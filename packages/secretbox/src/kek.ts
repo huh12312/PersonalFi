@@ -83,7 +83,10 @@ export function assertParamsAtOrAboveFloor(params: Argon2Params, floor: Argon2Pa
     );
   }
   if (problems.length > 0) {
-    throw new SecretBoxError('params_below_floor', `Argon2id parameters rejected: ${problems.join('; ')}`);
+    throw new SecretBoxError(
+      'params_below_floor',
+      `Argon2id parameters rejected: ${problems.join('; ')}`,
+    );
   }
 }
 

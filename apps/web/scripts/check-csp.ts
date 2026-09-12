@@ -89,7 +89,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log(`OK — ${htmlFiles.length} HTML file(s) under dist/ have no inline <script> or style=.`);
+  console.log(
+    `OK — ${htmlFiles.length} HTML file(s) under dist/ have no inline <script> or style=.`,
+  );
 }
 
 await main();

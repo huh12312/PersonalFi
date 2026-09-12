@@ -140,12 +140,7 @@ export {
   type TransactionalExecutor,
   type PlatformLogger,
 } from './executor.ts';
-export {
-  PlatformError,
-  ConsumerHandlerError,
-  serializeError,
-  describeError,
-} from './errors.ts';
+export { PlatformError, ConsumerHandlerError, serializeError, describeError } from './errors.ts';
 export {
   EVENT_SEQUENCE_ADVISORY_LOCK_KEY,
   SCHEDULER_ADVISORY_LOCK_KEY,

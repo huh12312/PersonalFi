@@ -103,7 +103,9 @@ describeWithDb('job queue', () => {
     expect(third.id).toBe(first.id);
     expect(metrics.snapshot().counters['platform.jobs.deduped{kind=test.work}']).toBe(2);
 
-    const rows = await database.db.execute<{ count: string }>(sql`SELECT count(*)::text AS count FROM jobs`);
+    const rows = await database.db.execute<{ count: string }>(
+      sql`SELECT count(*)::text AS count FROM jobs`,
+    );
     expect(rows.rows[0]?.count).toBe('1');
   });
 
@@ -251,7 +253,9 @@ describeWithDb('job queue', () => {
   });
 
   it('rejects a job kind that is not lower_snake dotted', async () => {
-    await expect(enqueueJob(database.db, input({ kind: 'Test.Work' }))).rejects.toThrow(/job kind/i);
+    await expect(enqueueJob(database.db, input({ kind: 'Test.Work' }))).rejects.toThrow(
+      /job kind/i,
+    );
   });
 
   /**

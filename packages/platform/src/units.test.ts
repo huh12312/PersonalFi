@@ -94,7 +94,11 @@ describe('metrics', () => {
 describe('nextCronOccurrence', () => {
   it('resolves in the given zone, not the container zone', () => {
     // 03:15 New York on a normal day is 07:15 UTC.
-    const next = nextCronOccurrence('15 3 * * *', 'America/New_York', new Date('2026-03-01T12:00:00Z'));
+    const next = nextCronOccurrence(
+      '15 3 * * *',
+      'America/New_York',
+      new Date('2026-03-01T12:00:00Z'),
+    );
     expect(next.toISOString()).toBe('2026-03-02T08:15:00.000Z');
   });
 
@@ -102,8 +106,16 @@ describe('nextCronOccurrence', () => {
     // 2026-03-08 is the US spring-forward. 03:15 local must stay 03:15 local,
     // which means the UTC instant moves by an hour. The daily net-worth seal
     // depends on this: sealing at 02:15 local would seal the wrong calendar day.
-    const before = nextCronOccurrence('15 3 * * *', 'America/New_York', new Date('2026-03-06T12:00:00Z'));
-    const after = nextCronOccurrence('15 3 * * *', 'America/New_York', new Date('2026-03-09T12:00:00Z'));
+    const before = nextCronOccurrence(
+      '15 3 * * *',
+      'America/New_York',
+      new Date('2026-03-06T12:00:00Z'),
+    );
+    const after = nextCronOccurrence(
+      '15 3 * * *',
+      'America/New_York',
+      new Date('2026-03-09T12:00:00Z'),
+    );
     expect(before.toISOString()).toBe('2026-03-07T08:15:00.000Z');
     expect(after.toISOString()).toBe('2026-03-10T07:15:00.000Z');
   });

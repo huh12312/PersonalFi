@@ -41,7 +41,15 @@ import {
   KEK_SALT_BYTES,
   type UnlockState,
 } from './kek.ts';
-import { aeadOpen, aeadSeal, randomBytes, randomKey, randomNonce, wipe, type Argon2Params } from './primitives.ts';
+import {
+  aeadOpen,
+  aeadSeal,
+  randomBytes,
+  randomKey,
+  randomNonce,
+  wipe,
+  type Argon2Params,
+} from './primitives.ts';
 import {
   findActiveKeyByScope,
   findKeyById,
@@ -189,7 +197,11 @@ export class SecretBox {
   // ------------------------------------------------------------------ seal
 
   /** Seal bytes into a storage envelope for `ref`. The result goes in a `bytea`. */
-  async seal(ref: ColumnRef, plaintext: Uint8Array, options: SealOptions = {}): Promise<Uint8Array> {
+  async seal(
+    ref: ColumnRef,
+    plaintext: Uint8Array,
+    options: SealOptions = {},
+  ): Promise<Uint8Array> {
     if (plaintext.length > MAX_PLAINTEXT_BYTES) {
       throw new SecretBoxError('plaintext_too_large', 'plaintext exceeds 1 MiB');
     }
@@ -202,7 +214,11 @@ export class SecretBox {
     return encodeEnvelope({ version: ENVELOPE_VERSION, keyId: key.id, nonce, ciphertext });
   }
 
-  async sealText(ref: ColumnRef, plaintext: string, options: SealOptions = {}): Promise<Uint8Array> {
+  async sealText(
+    ref: ColumnRef,
+    plaintext: string,
+    options: SealOptions = {},
+  ): Promise<Uint8Array> {
     return this.seal(ref, new TextEncoder().encode(plaintext), options);
   }
 
@@ -254,7 +270,9 @@ export class SecretBox {
     const nextVersion = (await maxVersion(this.#db, this.#userId, 'kek', KEK_SCOPE)) + 1;
 
     const salt = randomBytes(KEK_SALT_BYTES);
-    const derived = await deriveKek(newPassphrase, salt, this.#kdfParams, () => this.#clock.nowMs());
+    const derived = await deriveKek(newPassphrase, salt, this.#kdfParams, () =>
+      this.#clock.nowMs(),
+    );
 
     // Unwrap everything under the old KEK *before* the new one is installed. A row
     // wrapped under an even older generation cannot be unwrapped and will throw
@@ -333,7 +351,12 @@ export class SecretBox {
    * in last night's backup.
    */
   async destroyRecordKey(table: string, rowId: string): Promise<boolean> {
-    const key = await findActiveKeyByScope(this.#db, this.#userId, 'dek', recordScope(table, rowId));
+    const key = await findActiveKeyByScope(
+      this.#db,
+      this.#userId,
+      'dek',
+      recordScope(table, rowId),
+    );
     if (key === null) return false;
     await retireKey(this.#db, key.id, this.#clock.now());
     const cached = this.#dekCache.get(key.id);

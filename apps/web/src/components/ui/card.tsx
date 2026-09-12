@@ -25,7 +25,8 @@ const cardVariants = cva('rounded-lg border border-border-hairline bg-bg-surface
   defaultVariants: { elevation: 'flat', padding: 'default' },
 });
 
-export interface CardProps extends HTMLAttributes<HTMLDivElement>, VariantProps<typeof cardVariants> {}
+export interface CardProps
+  extends HTMLAttributes<HTMLDivElement>, VariantProps<typeof cardVariants> {}
 
 export function Card({ className, elevation, padding, ...props }: CardProps) {
   return <div className={cn(cardVariants({ elevation, padding }), className)} {...props} />;
@@ -36,9 +37,7 @@ export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElemen
 }
 
 export function CardTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
-  return (
-    <h3 className={cn('text-h2 text-text-primary', className)} {...props} />
-  );
+  return <h3 className={cn('text-h2 text-text-primary', className)} {...props} />;
 }
 
 export function CardDescription({ className, ...props }: HTMLAttributes<HTMLParagraphElement>) {

@@ -150,7 +150,9 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
   function applySession(reply: FastifyReply, issued: IssuedSession): void {
     const maxAge = Math.max(
       1,
-      Math.ceil((issued.session.familyExpiresAt.getTime() - issued.session.createdAt.getTime()) / 1_000),
+      Math.ceil(
+        (issued.session.familyExpiresAt.getTime() - issued.session.createdAt.getTime()) / 1_000,
+      ),
     );
     setSessionCookies(reply, cookiePolicy, {
       accessToken: issued.accessToken,
@@ -607,7 +609,10 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
         const identity = runtime.requireIdentity();
         const session = await requireFreshSession(request);
         const user = await identity.users.findById(session.userId);
-        const enrolment = await identity.totp.enrol(session.userId, user?.displayName ?? 'PersonalFi');
+        const enrolment = await identity.totp.enrol(
+          session.userId,
+          user?.displayName ?? 'PersonalFi',
+        );
         return { enrolmentId: enrolment.id, secret: enrolment.secret, uri: enrolment.uri };
       },
     );

@@ -90,7 +90,13 @@ export function formatMoney(value: MoneyKernel, options: FormatMoneyOptions = {}
     compact = false,
     currencyDisplay = 'symbol',
   } = options;
-  const formatter = currencyFormatter(locale, value.currency, signDisplay, compact, currencyDisplay);
+  const formatter = currencyFormatter(
+    locale,
+    value.currency,
+    signDisplay,
+    compact,
+    currencyDisplay,
+  );
   return withProperMinusSign(formatter.format(asNumericLiteral(MoneyKernel.formatAmount(value))));
 }
 

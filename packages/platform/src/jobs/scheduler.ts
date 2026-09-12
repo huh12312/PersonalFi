@@ -10,7 +10,11 @@ import {
   type PlatformLogger,
   type TransactionalExecutor,
 } from '../executor.ts';
-import { SCHEDULER_ADVISORY_LOCK_KEY, tryAcquireAdvisoryLease, type AdvisoryLease } from '../locks.ts';
+import {
+  SCHEDULER_ADVISORY_LOCK_KEY,
+  tryAcquireAdvisoryLease,
+  type AdvisoryLease,
+} from '../locks.ts';
 import { METRIC, type Metrics } from '../metrics.ts';
 import { enqueueJob } from './queue.ts';
 

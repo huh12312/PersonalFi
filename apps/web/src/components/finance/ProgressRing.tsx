@@ -65,7 +65,10 @@ export function ProgressRing({
           fill="none"
           strokeWidth={strokeWidth}
           strokeLinecap="round"
-          className={cn(toneForValue(value), 'transition-[stroke-dashoffset] duration-base ease-standard')}
+          className={cn(
+            toneForValue(value),
+            'transition-[stroke-dashoffset] duration-base ease-standard',
+          )}
           strokeDasharray={circumference}
           strokeDashoffset={circumference * (1 - primaryFraction)}
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
@@ -87,7 +90,10 @@ export function ProgressRing({
         )}
       </svg>
       {children !== undefined && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center" aria-hidden="true">
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center"
+          aria-hidden="true"
+        >
           {children}
         </div>
       )}

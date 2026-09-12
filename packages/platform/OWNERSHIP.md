@@ -36,7 +36,7 @@ a comment: a table defined outside its owning package, or claimed twice, fails C
 - `feature_flags`
 
 `feature_flags` moved here from `@core/db` in WP 0.3. `packages/db/OWNERSHIP.md`
-anticipated the split: the flag *service* lives next to the consumers and
+anticipated the split: the flag _service_ lives next to the consumers and
 schedules it gates, so the table follows it. `0001_initial.sql` still creates the
 table; only the owner changed, which is a documentation change, not a migration.
 

@@ -22,7 +22,14 @@ export interface StatTileProps {
  * media query (§8.4), so the same tile works in a 4-col dashboard slot or a
  * full-width mobile stack.
  */
-export function StatTile({ label, value, delta, icon, size = 'display', className }: StatTileProps) {
+export function StatTile({
+  label,
+  value,
+  delta,
+  icon,
+  size = 'display',
+  className,
+}: StatTileProps) {
   return (
     <div className={cn('@container', className)}>
       <div className="flex items-center gap-2 text-small text-text-secondary">
@@ -32,7 +39,9 @@ export function StatTile({ label, value, delta, icon, size = 'display', classNam
       <div
         className={cn(
           'mt-1 text-text-primary',
-          size === 'hero' ? 'text-[38px]/[42px] @sm:text-hero' : 'text-[28px]/[34px] @sm:text-display',
+          size === 'hero'
+            ? 'text-[38px]/[42px] @sm:text-hero'
+            : 'text-[28px]/[34px] @sm:text-display',
         )}
       >
         {value}

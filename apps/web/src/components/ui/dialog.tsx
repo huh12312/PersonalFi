@@ -62,7 +62,10 @@ export function DialogContent({
         {...props}
       >
         {variant === 'sheet' && (
-          <div className="mx-auto mb-4 h-1 w-10 shrink-0 rounded-full bg-border-strong" aria-hidden="true" />
+          <div
+            className="mx-auto mb-4 h-1 w-10 shrink-0 rounded-full bg-border-strong"
+            aria-hidden="true"
+          />
         )}
         {children}
         {showClose && (
@@ -90,6 +93,9 @@ export function DialogDescription({
   ...props
 }: ComponentProps<typeof BaseDialog.Description>) {
   return (
-    <BaseDialog.Description className={cn('mt-1 text-small text-text-muted', className)} {...props} />
+    <BaseDialog.Description
+      className={cn('mt-1 text-small text-text-muted', className)}
+      {...props}
+    />
   );
 }

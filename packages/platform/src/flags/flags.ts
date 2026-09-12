@@ -96,8 +96,7 @@ export function createFlagService(options: FlagServiceOptions): FlagService {
   let watching: Promise<void> | null = null;
 
   async function load(userId: string): Promise<Map<string, boolean>> {
-    const fresh =
-      cache !== null && cachedUserId === userId && clock.nowMs() - cachedAtMs < ttlMs;
+    const fresh = cache !== null && cachedUserId === userId && clock.nowMs() - cachedAtMs < ttlMs;
     if (fresh && cache !== null) return cache;
 
     const rows = await db.execute<{ key: string; enabled: boolean }>(sql`

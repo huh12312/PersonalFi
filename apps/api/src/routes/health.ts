@@ -19,7 +19,9 @@ const outboxSchema = z
     maxSeq: z.string().describe('Highest event sequence, as a string: it is a bigint.'),
     maxLagEvents: z.int().describe('Events the furthest-behind consumer has not read.'),
     oldestUnprocessedAgeSeconds: z.number().nullable(),
-    failedConsumers: z.array(z.string()).describe('Consumers stopped at an event they cannot handle.'),
+    failedConsumers: z
+      .array(z.string())
+      .describe('Consumers stopped at an event they cannot handle.'),
   })
   .meta({ id: 'OutboxHealth' });
 
@@ -162,10 +164,14 @@ export const healthRoutes = (options: HealthRouteOptions): FastifyPluginAsyncZod
           );
         }
         if (outbox.maxLagEvents > maxLag) {
-          degradedReasons.push(`outbox lag is ${String(outbox.maxLagEvents)} events (limit ${String(maxLag)})`);
+          degradedReasons.push(
+            `outbox lag is ${String(outbox.maxLagEvents)} events (limit ${String(maxLag)})`,
+          );
         }
         if (queue.stalled > 0) {
-          degradedReasons.push(`${String(queue.stalled)} job(s) have a stale heartbeat; is a worker running?`);
+          degradedReasons.push(
+            `${String(queue.stalled)} job(s) have a stale heartbeat; is a worker running?`,
+          );
         }
         if (queue.oldestPendingAgeSeconds !== null && queue.oldestPendingAgeSeconds > maxWait) {
           degradedReasons.push(

@@ -4,7 +4,13 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { latestConfigSnapshot, recordConfigSnapshot } from '../src/config-snapshot.ts';
 import { createFlagService, PLATFORM_FLAGS, type FlagDefinition } from '../src/flags/flags.ts';
-import { ADMIN_URL, createTestDatabase, recordingLogger, waitFor, type TestDatabase } from './harness.ts';
+import {
+  ADMIN_URL,
+  createTestDatabase,
+  recordingLogger,
+  waitFor,
+  type TestDatabase,
+} from './harness.ts';
 
 const describeWithDb = ADMIN_URL === undefined ? describe.skip : describe;
 
@@ -72,7 +78,9 @@ describeWithDb('feature flags', () => {
       INSERT INTO feature_flags (user_id, key, enabled)
       VALUES (${database.userId}::uuid, 'module.investments', true)
     `);
-    expect(await flags.isEnabled(database.userId, 'module.investments'), 'still cached').toBe(false);
+    expect(await flags.isEnabled(database.userId, 'module.investments'), 'still cached').toBe(
+      false,
+    );
 
     clock.advanceMs(31_000);
     expect(await flags.isEnabled(database.userId, 'module.investments')).toBe(true);
@@ -86,8 +94,18 @@ describeWithDb('feature flags', () => {
    */
   it('invalidates every process cache when any process writes a flag', async () => {
     const clock = mutableClock('2026-03-01T12:00:00Z');
-    const apiSide = createFlagService({ db: database.db, defaults: DEFAULTS, clock, ttlMs: 600_000 });
-    const workerSide = createFlagService({ db: database.db, defaults: DEFAULTS, clock, ttlMs: 600_000 });
+    const apiSide = createFlagService({
+      db: database.db,
+      defaults: DEFAULTS,
+      clock,
+      ttlMs: 600_000,
+    });
+    const workerSide = createFlagService({
+      db: database.db,
+      defaults: DEFAULTS,
+      clock,
+      ttlMs: 600_000,
+    });
     await workerSide.watch(database.pool);
 
     expect(await workerSide.isEnabled(database.userId, 'module.investments')).toBe(false);

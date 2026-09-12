@@ -10,7 +10,11 @@ import {
   type PlatformLogger,
   type TransactionalExecutor,
 } from '../executor.ts';
-import { JOB_REAPER_ADVISORY_LOCK_KEY, tryAcquireAdvisoryLease, type AdvisoryLease } from '../locks.ts';
+import {
+  JOB_REAPER_ADVISORY_LOCK_KEY,
+  tryAcquireAdvisoryLease,
+  type AdvisoryLease,
+} from '../locks.ts';
 import { METRIC, type Metrics } from '../metrics.ts';
 import { CHANNEL, createNotifyListener, type NotifyListener } from '../notify.ts';
 
@@ -216,9 +220,11 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
 
     const heartbeat = setInterval(() => {
       void db
-        .execute(sql`
+        .execute(
+          sql`
           UPDATE jobs SET heartbeat_at = now() WHERE id = ${job.id}::uuid AND locked_by = ${workerId}
-        `)
+        `,
+        )
         .catch((cause: unknown) => {
           logger.warn({ jobId: job.id, err: describeError(cause) }, 'heartbeat failed');
         });

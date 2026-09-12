@@ -253,7 +253,10 @@ export class AuthFlows {
     registrationToken?: string | undefined;
     session?: SessionRecord | undefined;
     context: RequestContext;
-  }): Promise<{ userId: string; options: Awaited<ReturnType<WebAuthnService['startRegistration']>> }> {
+  }): Promise<{
+    userId: string;
+    options: Awaited<ReturnType<WebAuthnService['startRegistration']>>;
+  }> {
     await this.#limiter.consume('register', subjectOf(input.context));
 
     let userId: string;
@@ -290,7 +293,11 @@ export class AuthFlows {
     friendlyName: string;
     issueSession: boolean;
     context: RequestContext;
-  }): Promise<{ credential: CredentialSummary; session: IssuedSession | null; credentialCount: number }> {
+  }): Promise<{
+    credential: CredentialSummary;
+    session: IssuedSession | null;
+    credentialCount: number;
+  }> {
     const credential = await this.#webauthn.finishRegistration({
       userId: input.userId,
       response: input.response,

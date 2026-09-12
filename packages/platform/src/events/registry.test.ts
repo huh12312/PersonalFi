@@ -39,7 +39,11 @@ describe('defineEvent', () => {
   it('rejects a payload that does not match its schema, at the publisher', () => {
     // Better here than three weeks later in a consumer replaying from seq 0.
     expect(() =>
-      TransactionsUpserted.create({ accountId: 'not-a-uuid', addedIds: [], count: 0 }, context(), clock),
+      TransactionsUpserted.create(
+        { accountId: 'not-a-uuid', addedIds: [], count: 0 },
+        context(),
+        clock,
+      ),
     ).toThrow();
   });
 

@@ -212,8 +212,7 @@
 /* ---------------------------------------------------------------------- */
 
 @theme {
-  --font-sans:
-    'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Color utilities: bg-page, text-primary, border-hairline, fill-money-pos, ... */

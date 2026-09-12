@@ -87,9 +87,7 @@ async function main(): Promise<void> {
     }
 
     if (problems.length > 0) {
-      console.error(
-        'OpenAPI client is out of sync with packages/contracts/openapi/openapi.json:',
-      );
+      console.error('OpenAPI client is out of sync with packages/contracts/openapi/openapi.json:');
       for (const problem of problems) console.error(`  - ${problem}`);
       console.error('\nRun `pnpm --filter @app/web gen` and commit the result.');
       process.exitCode = 1;

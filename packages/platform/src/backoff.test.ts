@@ -30,23 +30,33 @@ const attemptArb = fc.integer({ min: 1, max: 200 });
 describe('backoffDelayMs', () => {
   it('always returns a finite, non-negative integer no greater than maxMs', () => {
     fc.assert(
-      fc.property(attemptArb, optionsArb, fc.double({ min: 0, max: 1, noNaN: true }), (attempt, options, draw) => {
-        const delay = backoffDelayMs(attempt, options, () => draw);
-        expect(Number.isInteger(delay)).toBe(true);
-        expect(delay).toBeGreaterThanOrEqual(0);
-        expect(delay).toBeLessThanOrEqual(options.maxMs);
-      }),
+      fc.property(
+        attemptArb,
+        optionsArb,
+        fc.double({ min: 0, max: 1, noNaN: true }),
+        (attempt, options, draw) => {
+          const delay = backoffDelayMs(attempt, options, () => draw);
+          expect(Number.isInteger(delay)).toBe(true);
+          expect(delay).toBeGreaterThanOrEqual(0);
+          expect(delay).toBeLessThanOrEqual(options.maxMs);
+        },
+      ),
       { numRuns: 500 },
     );
   });
 
   it('never exceeds its own ceiling for the attempt', () => {
     fc.assert(
-      fc.property(attemptArb, optionsArb, fc.double({ min: 0, max: 1, noNaN: true }), (attempt, options, draw) => {
-        expect(backoffDelayMs(attempt, options, () => draw)).toBeLessThanOrEqual(
-          backoffCeilingMs(attempt, options),
-        );
-      }),
+      fc.property(
+        attemptArb,
+        optionsArb,
+        fc.double({ min: 0, max: 1, noNaN: true }),
+        (attempt, options, draw) => {
+          expect(backoffDelayMs(attempt, options, () => draw)).toBeLessThanOrEqual(
+            backoffCeilingMs(attempt, options),
+          );
+        },
+      ),
       { numRuns: 500 },
     );
   });

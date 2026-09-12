@@ -211,6 +211,7 @@ function mapTotp(row: Record<string, unknown>): TotpRow {
     digits: Number(row['digits']),
     periodSeconds: Number(row['period_seconds']),
     algorithm: String(row['algorithm']),
-    lastUsedStep: lastUsedStep === null || lastUsedStep === undefined ? null : BigInt(String(lastUsedStep)),
+    lastUsedStep:
+      lastUsedStep === null || lastUsedStep === undefined ? null : BigInt(String(lastUsedStep)),
   };
 }

@@ -124,7 +124,10 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope {
   }
   const version = bytes[0];
   if (version !== ENVELOPE_VERSION) {
-    throw new SecretBoxError('envelope_malformed', `unsupported envelope version ${String(version)}`);
+    throw new SecretBoxError(
+      'envelope_malformed',
+      `unsupported envelope version ${String(version)}`,
+    );
   }
   return {
     version,

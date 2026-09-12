@@ -165,9 +165,7 @@ export class SecurityRuntime {
       'key custody: unlocked',
     );
     if (state.rotationRecommended) {
-      logger.warn(
-        'the stored KEK was derived with parameters below the current floor; rotate it',
-      );
+      logger.warn('the stored KEK was derived with parameters below the current floor; rotate it');
     }
   }
 }

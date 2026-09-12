@@ -2,13 +2,14 @@
 import { systemClock, type Clock } from '@core/kernel';
 import { sql } from 'drizzle-orm';
 import type pg from 'pg';
-import {
-  DEFAULT_CONSUMER_BACKOFF,
-  backoffDelayMs,
-  type BackoffOptions,
-} from '../backoff.ts';
+import { DEFAULT_CONSUMER_BACKOFF, backoffDelayMs, type BackoffOptions } from '../backoff.ts';
 import { ConsumerHandlerError, describeError } from '../errors.ts';
-import { silentLogger, type Executor, type PlatformLogger, type TransactionalExecutor } from '../executor.ts';
+import {
+  silentLogger,
+  type Executor,
+  type PlatformLogger,
+  type TransactionalExecutor,
+} from '../executor.ts';
 import {
   CONSUMER_ADVISORY_LOCK_CLASS,
   tryAcquireNamedAdvisoryLease,
@@ -271,10 +272,7 @@ export function createConsumerPump(options: ConsumerPumpOptions): ConsumerPump {
     return handled;
   }
 
-  async function handleOne(
-    consumer: RegisteredConsumer,
-    event: EventEnvelope,
-  ): Promise<void> {
+  async function handleOne(consumer: RegisteredConsumer, event: EventEnvelope): Promise<void> {
     await db.transaction(async (tx) => {
       // The receipt is claimed first and in the same transaction as everything
       // else. If this consumer has already processed the event — a crash between
@@ -371,7 +369,13 @@ export function createConsumerPump(options: ConsumerPumpOptions): ConsumerPump {
       WHERE consumer_name = ${consumer.name}
     `);
     logger.warn(
-      { consumer: consumer.name, seq: String(event.seq), attempts, delayMs: delay, err: describeError(cause) },
+      {
+        consumer: consumer.name,
+        seq: String(event.seq),
+        attempts,
+        delayMs: delay,
+        err: describeError(cause),
+      },
       'consumer handler failed; retrying with backoff',
     );
   }

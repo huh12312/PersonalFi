@@ -5,9 +5,6 @@ import { cn } from '../../lib/cn.ts';
 
 export function Label({ className, ...props }: LabelHTMLAttributes<HTMLLabelElement>) {
   return (
-    <label
-      className={cn('text-small font-medium text-text-secondary', className)}
-      {...props}
-    />
+    <label className={cn('text-small font-medium text-text-secondary', className)} {...props} />
   );
 }

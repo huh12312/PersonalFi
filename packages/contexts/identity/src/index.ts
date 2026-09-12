@@ -70,7 +70,11 @@ export function createIdentityContext(options: IdentityContextOptions): Identity
   });
   const totp = new TotpService({ db, clock, secretBox: options.secretBox });
   const recoveryCodes = new RecoveryCodeService({ db, clock });
-  const sessions = new SessionService({ db, clock, ttls: options.sessionTtls ?? DEFAULT_SESSION_TTLS });
+  const sessions = new SessionService({
+    db,
+    clock,
+    ttls: options.sessionTtls ?? DEFAULT_SESSION_TTLS,
+  });
   const rateLimiter = new RateLimiter({
     db,
     clock,

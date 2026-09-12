@@ -4,7 +4,11 @@ import type { ComponentProps } from 'react';
 
 import { cn } from '../../lib/cn.ts';
 
-export function Separator({ className, orientation = 'horizontal', ...props }: ComponentProps<typeof BaseSeparator>) {
+export function Separator({
+  className,
+  orientation = 'horizontal',
+  ...props
+}: ComponentProps<typeof BaseSeparator>) {
   return (
     <BaseSeparator
       orientation={orientation}

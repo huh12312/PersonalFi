@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: MIT
-import { byteaColumn, createdAtColumn, idColumn, instantColumn, userIdColumn } from '@core/db/columns';
+import {
+  byteaColumn,
+  createdAtColumn,
+  idColumn,
+  instantColumn,
+  userIdColumn,
+} from '@core/db/columns';
 import { integer, jsonb, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**

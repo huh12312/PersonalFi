@@ -10,10 +10,10 @@ apps/api and the Dockerfiles are out of this work package's scope.
 
 - `docs/research/03-security-architecture.md` §4.4 specifies the
   authoritative target header: strict, nonce-based, `script-src
-  'nonce-{RANDOM}' 'strict-dynamic'`, no `'unsafe-inline'` anywhere, plus
+'nonce-{RANDOM}' 'strict-dynamic'`, no `'unsafe-inline'` anywhere, plus
   `require-trusted-types-for 'script'`.
 - `docs/research/05-frontend-architecture.md` §7.3 documents a narrower,
-  *deliberate* compromise on `style-src`: React writes `style="..."`
+  _deliberate_ compromise on `style-src`: React writes `style="..."`
   attributes for dynamic values (progress-ring arcs, chart gradients,
   `StatTile` layout), and there is no practical way to put a matching nonce
   on every one of those attribute writes. It proposes CSP Level 3's split
@@ -61,10 +61,10 @@ globally. Everything else in the app never talks to a third-party origin
    checks for `style=` attributes in `dist/**/*.html`. `index.html` itself
    never carries one; Tailwind emits real, hashed `.css` files.
 3. **Content-hashed assets**, so `Cache-Control: public, max-age=31536000,
-   immutable` is safe for everything except `index.html`.
+immutable` is safe for everything except `index.html`.
 4. **The pre-render theme/privacy write in `src/main.tsx`** (docs/research/05
    §2.7) runs from an external module script (`<script type="module"
-   src="/src/main.tsx">` in dev, a hashed bundle in prod) — never an inline
+src="/src/main.tsx">` in dev, a hashed bundle in prod) — never an inline
    script — so it needs no special CSP carve-out at all, only the same nonce
    every other script tag gets under `strict-dynamic`.
 
@@ -88,7 +88,7 @@ the nonce is per-request.
    - generate a cryptographically random nonce per request (≥128 bits,
      base64url — the same primitive already used for session tokens);
    - insert `nonce="{RANDOM}"` on the app's one `<script type="module"
-     src="/assets/index-HASH.js">` tag (the only script tag Vite emits into
+src="/assets/index-HASH.js">` tag (the only script tag Vite emits into
      `index.html`; everything `strict-dynamic` loads afterward inherits trust
      from it, so no other tag needs a nonce attribute);
    - set the same `{RANDOM}` value in the `Content-Security-Policy` response

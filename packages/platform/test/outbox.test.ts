@@ -46,7 +46,9 @@ describeWithDb('domain_events outbox', () => {
 
     expect(recorded.seq).toBeGreaterThan(0n);
     expect(recorded.recordedAt).toBeInstanceOf(Date);
-    expect(metrics.snapshot().counters['platform.events.appended{type=ledger.TransactionsUpserted}']).toBe(1);
+    expect(
+      metrics.snapshot().counters['platform.events.appended{type=ledger.TransactionsUpserted}'],
+    ).toBe(1);
   });
 
   /**
@@ -161,7 +163,9 @@ describeWithDb('domain_events outbox', () => {
   it('appends a batch in the order given', async () => {
     const batch = [event(1), event(2), event(3)];
     const recorded = await appendEvents(database.db, batch);
-    expect(recorded.map((e) => e.seq)).toEqual([...recorded].sort((a, b) => Number(a.seq - b.seq)).map((e) => e.seq));
+    expect(recorded.map((e) => e.seq)).toEqual(
+      [...recorded].sort((a, b) => Number(a.seq - b.seq)).map((e) => e.seq),
+    );
     expect(recorded[0]!.seq).toBeLessThan(recorded[2]!.seq);
   });
 

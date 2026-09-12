@@ -3,7 +3,12 @@ import { useState } from 'react';
 import type { HTMLAttributes } from 'react';
 
 import { cn } from '../../lib/cn.ts';
-import { formatMoney, formatMoneyForScreenReader, parseWireMoney, signOf } from '../../lib/money.ts';
+import {
+  formatMoney,
+  formatMoneyForScreenReader,
+  parseWireMoney,
+  signOf,
+} from '../../lib/money.ts';
 import type { WireMoney } from '../../lib/money.ts';
 import { useHideAmounts } from '../../lib/privacy.ts';
 

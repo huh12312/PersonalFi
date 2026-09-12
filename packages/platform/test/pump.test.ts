@@ -14,7 +14,13 @@ import {
 } from '../src/events/pump.ts';
 import { defineEvent } from '../src/events/registry.ts';
 import { createMetrics } from '../src/metrics.ts';
-import { ADMIN_URL, createTestDatabase, recordingLogger, waitFor, type TestDatabase } from './harness.ts';
+import {
+  ADMIN_URL,
+  createTestDatabase,
+  recordingLogger,
+  waitFor,
+  type TestDatabase,
+} from './harness.ts';
 
 const describeWithDb = ADMIN_URL === undefined ? describe.skip : describe;
 
@@ -103,7 +109,11 @@ describeWithDb('consumer pump', () => {
         ON CONFLICT (user_id, key) DO NOTHING
       `);
     });
-    const pump = createConsumerPump({ pool: database.pool, db: database.db, consumers: [consumer] });
+    const pump = createConsumerPump({
+      pool: database.pool,
+      db: database.db,
+      consumers: [consumer],
+    });
 
     await publish(3);
     await pump.drain();
@@ -125,7 +135,9 @@ describeWithDb('consumer pump', () => {
     await second.drain();
 
     expect(sideEffects, 'the handler must not run again').toBe(3);
-    expect(metrics.snapshot().counters['platform.events.skipped_duplicate{consumer=test.idempotent@v1}']).toBe(3);
+    expect(
+      metrics.snapshot().counters['platform.events.skipped_duplicate{consumer=test.idempotent@v1}'],
+    ).toBe(3);
 
     // And the offset still advanced, so the consumer is not stuck in a loop.
     const offset = await database.db.execute<{ last_seq: bigint }>(
@@ -238,7 +250,9 @@ describeWithDb('consumer pump', () => {
     expect(row.failed_error).toContain('never be handled');
     // Crucially: it did NOT advance past the poison event.
     expect(BigInt(row.last_seq)).toBe(0n);
-    expect(logger.lines.some((line) => line.level === 'error' && line.msg?.includes('dead-lettered'))).toBe(true);
+    expect(
+      logger.lines.some((line) => line.level === 'error' && line.msg?.includes('dead-lettered')),
+    ).toBe(true);
   });
 
   it('lets an operator skip a dead-lettered event, deliberately and explicitly', async () => {
@@ -247,9 +261,13 @@ describeWithDb('consumer pump', () => {
       db: database.db,
       random: () => 0,
       consumers: [
-        registerConsumer('test.skippable@v1', (event) => {
-          if (event.seq === 1n) throw new Error('poison');
-        }, { maxAttempts: 2 }),
+        registerConsumer(
+          'test.skippable@v1',
+          (event) => {
+            if (event.seq === 1n) throw new Error('poison');
+          },
+          { maxAttempts: 2 },
+        ),
       ],
     });
 
@@ -292,7 +310,11 @@ describeWithDb('consumer pump', () => {
   it('replays from a chosen seq, clearing receipts so handlers actually re-run', async () => {
     const seen: bigint[] = [];
     const consumer = registerConsumer('test.replay@v1', (event) => void seen.push(event.seq));
-    const pump = createConsumerPump({ pool: database.pool, db: database.db, consumers: [consumer] });
+    const pump = createConsumerPump({
+      pool: database.pool,
+      db: database.db,
+      consumers: [consumer],
+    });
 
     const seqs = await publish(4);
     await pump.drain();
@@ -311,7 +333,9 @@ describeWithDb('consumer pump', () => {
     const pump = createConsumerPump({
       pool: database.pool,
       db: database.db,
-      consumers: [registerConsumer('investments.holdings@v1', (event) => void seen.push(event.seq))],
+      consumers: [
+        registerConsumer('investments.holdings@v1', (event) => void seen.push(event.seq)),
+      ],
     });
     expect(await pump.runConsumerOnce('investments.holdings@v1')).toBe(6);
     expect(seen).toHaveLength(6);
@@ -324,9 +348,13 @@ describeWithDb('consumer pump', () => {
       db: database.db,
       random: () => 0,
       consumers: [
-        registerConsumer('test.broken@v1', () => {
-          throw new Error('always');
-        }, { maxAttempts: 1 }),
+        registerConsumer(
+          'test.broken@v1',
+          () => {
+            throw new Error('always');
+          },
+          { maxAttempts: 1 },
+        ),
         registerConsumer('test.healthy@v1', (event) => void healthy.push(event.seq)),
       ],
     });
@@ -357,11 +385,15 @@ describeWithDb('consumer pump', () => {
 
     await pump.start();
     try {
-      await waitFor(() => seen.length === 0, { timeoutMs: 1_000, what: 'the pump to settle' }).catch(
-        () => undefined,
-      );
+      await waitFor(() => seen.length === 0, {
+        timeoutMs: 1_000,
+        what: 'the pump to settle',
+      }).catch(() => undefined);
       await publish(1);
-      await waitFor(() => seen.length === 1, { timeoutMs: 8_000, what: 'a NOTIFY-driven delivery' });
+      await waitFor(() => seen.length === 1, {
+        timeoutMs: 8_000,
+        what: 'a NOTIFY-driven delivery',
+      });
     } finally {
       await pump.stop();
     }

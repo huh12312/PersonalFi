@@ -137,9 +137,8 @@ export class SessionService {
 
   async issue(options: IssueOptions): Promise<IssuedSession> {
     const now = this.#clock.now();
-    const familyWindow = options.trustedDevice === true
-      ? this.#ttls.trustedSeconds
-      : this.#ttls.absoluteSeconds;
+    const familyWindow =
+      options.trustedDevice === true ? this.#ttls.trustedSeconds : this.#ttls.absoluteSeconds;
     const familyExpiresAt = new Date(now.getTime() + familyWindow * 1_000);
     const familyId = newId();
     return this.#insertGeneration({
