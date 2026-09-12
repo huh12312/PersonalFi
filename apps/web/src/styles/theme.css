@@ -1,0 +1,322 @@
+/* SPDX-License-Identifier: MIT */
+
+/*
+ * Design tokens — CSS-first Tailwind v4 config (no tailwind.config.js).
+ *
+ * Two layers, per docs/research/05-frontend-architecture.md §2.1:
+ *   1. This file's `:root` / `[data-theme]` blocks hold the *runtime* values
+ *      (they flip with light/dark and are what a component or an inline
+ *      visx `fill="var(--money-pos)"` actually reads).
+ *   2. The `@theme` block maps Tailwind utility names (`bg-page`, `text-primary`,
+ *      `rounded-lg`, `duration-base`, ...) onto those same custom properties,
+ *      so a Tailwind class and a raw CSS var are always the same source of
+ *      truth. Never hard-code a hex value in a component — reference the
+ *      token.
+ *
+ * The full token table (with contrast ratios and validator output) is
+ * documented in `src/styles/tokens.md`. Keep the two in sync by hand; there
+ * are few enough tokens that a generator would be more code than it saves.
+ */
+
+/* ---------------------------------------------------------------------- */
+/* 1. Runtime values                                                       */
+/* ---------------------------------------------------------------------- */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg-page: #f7f7f5;
+  --bg-surface: #ffffff;
+  --bg-surface-raised: #ffffff;
+  --bg-subtle: #f1f1ee;
+  --bg-inset: #eaeae6;
+  --border-hairline: rgba(11, 11, 11, 0.1);
+  --border-strong: #d6d6d0;
+
+  /* Text */
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #6b6a64;
+  --focus-ring: #1f5fb0;
+
+  /* Accent (exactly one) */
+  --accent: #2a78d6;
+  --accent-text: #1f5fb0;
+  --accent-contrast: #ffffff;
+  --accent-wash: #eaf2fd;
+
+  /* Money semantics — CVD-safe teal/vermilion, never green/red (§2.2) */
+  --money-pos: #0f8a68;
+  --money-pos-text: #0a6f54;
+  --money-neg: #d2452f;
+  --money-neg-text: #b8391f;
+  --money-neutral: #6b6a64;
+
+  /* Status (fixed, never themed) */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  /* Categorical series — fixed order, never cycled (§2.2) */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+
+  /* Sequential ramp (heatmaps, Monte Carlo bands), light -> dark */
+  --seq-1: #cde2fb;
+  --seq-2: #b7d3f6;
+  --seq-3: #9ec5f4;
+  --seq-4: #86b6ef;
+  --seq-5: #6da7ec;
+  --seq-6: #5598e7;
+  --seq-7: #3987e5;
+  --seq-8: #2a78d6;
+  --seq-9: #256abf;
+  --seq-10: #1c5cab;
+  --seq-11: #184f95;
+  --seq-12: #104281;
+  --seq-13: #0d366b;
+
+  /* Diverging midpoint (month-over-month change) */
+  --diverging-mid: #f0efec;
+
+  /* Chart chrome */
+  --chart-gridline: #e1e0d9;
+  --chart-axis-ink: #898781;
+
+  /* Elevation (shadow layer; dark mode overrides to near-transparent, §2.4) */
+  --shadow-elev-1: 0 1px 2px rgba(11, 11, 11, 0.04);
+  --shadow-elev-2: 0 4px 12px rgba(11, 11, 11, 0.06);
+  --shadow-elev-3: 0 16px 40px rgba(11, 11, 11, 0.12);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-page: #0e1012;
+  --bg-surface: #16181a;
+  --bg-surface-raised: #1c1f22;
+  --bg-subtle: #202326;
+  --bg-inset: #0a0c0d;
+  --border-hairline: rgba(255, 255, 255, 0.1);
+  --border-strong: #33373b;
+
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #9a9a92;
+  --focus-ring: #6da7ec;
+
+  --accent: #3987e5;
+  --accent-text: #3987e5;
+  --accent-contrast: #0b0b0b;
+  --accent-wash: #132537;
+
+  --money-pos: #1ba277;
+  --money-pos-text: #3ec49a;
+  --money-neg: #e8604a;
+  --money-neg-text: #ff8a6e;
+  --money-neutral: #9a9a92;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  --diverging-mid: #383835;
+  --chart-gridline: #2c2c2a;
+  --chart-axis-ink: #898781;
+
+  /* Dark mode expresses elevation via surface + hairline, not shadow (§2.4) */
+  --shadow-elev-1: none;
+  --shadow-elev-2: none;
+  --shadow-elev-3: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* System preference is the default until the user picks explicitly (data-theme
+   is then 'light' | 'dark', written by src/lib/theme.ts + persisted). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --bg-page: #0e1012;
+    --bg-surface: #16181a;
+    --bg-surface-raised: #1c1f22;
+    --bg-subtle: #202326;
+    --bg-inset: #0a0c0d;
+    --border-hairline: rgba(255, 255, 255, 0.1);
+    --border-strong: #33373b;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #9a9a92;
+    --focus-ring: #6da7ec;
+    --accent: #3987e5;
+    --accent-text: #3987e5;
+    --accent-contrast: #0b0b0b;
+    --accent-wash: #132537;
+    --money-pos: #1ba277;
+    --money-pos-text: #3ec49a;
+    --money-neg: #e8604a;
+    --money-neg-text: #ff8a6e;
+    --money-neutral: #9a9a92;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --diverging-mid: #383835;
+    --chart-gridline: #2c2c2a;
+    --chart-axis-ink: #898781;
+    --shadow-elev-1: none;
+    --shadow-elev-2: none;
+    --shadow-elev-3: 0 16px 40px rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* 2. Motion — collapses under prefers-reduced-motion, once, globally      */
+/* ---------------------------------------------------------------------- */
+
+:root {
+  --dur-instant: 100ms;
+  --dur-fast: 160ms;
+  --dur-base: 220ms;
+  --dur-slow: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.3, 0, 1, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 0ms;
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* 3. Tailwind theme mapping                                               */
+/* ---------------------------------------------------------------------- */
+
+@theme {
+  --font-sans:
+    'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Color utilities: bg-page, text-primary, border-hairline, fill-money-pos, ... */
+  --color-bg-page: var(--bg-page);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-surface-raised: var(--bg-surface-raised);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-bg-inset: var(--bg-inset);
+  --color-border-hairline: var(--border-hairline);
+  --color-border-strong: var(--border-strong);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-focus-ring: var(--focus-ring);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-accent-wash: var(--accent-wash);
+  --color-money-pos: var(--money-pos);
+  --color-money-pos-text: var(--money-pos-text);
+  --color-money-neg: var(--money-neg);
+  --color-money-neg-text: var(--money-neg-text);
+  --color-money-neutral: var(--money-neutral);
+  --color-status-good: var(--status-good);
+  --color-status-warning: var(--status-warning);
+  --color-status-serious: var(--status-serious);
+  --color-status-critical: var(--status-critical);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+  --color-series-6: var(--series-6);
+  --color-series-7: var(--series-7);
+  --color-series-8: var(--series-8);
+
+  /* Spacing — 4px base (§2.4) */
+  --spacing-0: 0px;
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-7: 28px;
+  --spacing-8: 32px;
+  --spacing-10: 40px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+  --spacing-20: 80px;
+
+  /* Radii (§2.4) */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 28px;
+  --radius-full: 9999px;
+
+  /* Type scale — tabular figures live on --type-mono-num utility (§2.3) */
+  --text-hero: 48px;
+  --text-hero--line-height: 52px;
+  --text-hero--font-weight: 600;
+  --text-hero--letter-spacing: -0.025em;
+  --text-display: 34px;
+  --text-display--line-height: 40px;
+  --text-display--font-weight: 600;
+  --text-display--letter-spacing: -0.02em;
+  --text-h1: 24px;
+  --text-h1--line-height: 32px;
+  --text-h1--font-weight: 600;
+  --text-h1--letter-spacing: -0.015em;
+  --text-h2: 19px;
+  --text-h2--line-height: 28px;
+  --text-h2--font-weight: 600;
+  --text-h2--letter-spacing: -0.01em;
+  --text-h3: 16px;
+  --text-h3--line-height: 24px;
+  --text-h3--font-weight: 600;
+  --text-body: 15px;
+  --text-body--line-height: 22px;
+  --text-body-strong: 15px;
+  --text-body-strong--line-height: 22px;
+  --text-body-strong--font-weight: 550;
+  --text-small: 13px;
+  --text-small--line-height: 18px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-caption--letter-spacing: 0.01em;
+
+  /* Motion */
+  --duration-instant: var(--dur-instant);
+  --duration-fast: var(--dur-fast);
+  --duration-base: var(--dur-base);
+  --duration-slow: var(--dur-slow);
+  --ease-standard: var(--ease-standard);
+  --ease-exit: var(--ease-exit);
+
+  /* Breakpoints (§8.4 — shell decisions only; @container for everything else).
+     `xs` (0px, the sitemap's mobile default) needs no prefix — Tailwind is
+     mobile-first, so unprefixed utilities already are the xs breakpoint. */
+  --breakpoint-sm: 480px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1440px;
+}

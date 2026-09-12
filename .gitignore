@@ -19,3 +19,10 @@ secrets/
 pgdata/
 backups/
 docs/evidence/**/*.raw
+
+# apps/web: generated OpenAPI client (WP 0.5). Regenerate with `pnpm --filter
+# @app/web gen`; `pnpm --filter @app/web gen:check` fails CI on drift.
+apps/web/src/api/generated/
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/.vite/

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <!--
+      Two `theme-color` metas (light/dark via media query) rather than one
+      value updated at runtime — this keeps the very first compositor frame
+      (browser chrome color on mobile) correct with zero JS, CSP-compatible.
+    -->
+    <meta name="theme-color" content="#F7F7F5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0E1012" media="(prefers-color-scheme: dark)" />
+    <meta
+      name="description"
+      content="PersonalFi — self-hosted personal finance. No CDNs, no analytics, no third-party requests."
+    />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+    <!-- Self-hosted Inter Variable, preloaded (memo §2.3). No Google Fonts, no CDN. -->
+    <link
+      rel="preload"
+      href="/fonts/inter-variable-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="/src/styles/base.css" />
+    <title>PersonalFi</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!--
+      Module script, not inline: CSP `script-src` allows only 'self'/nonce, so
+      the pre-render theme/privacy application (05-frontend-architecture.md
+      §2.7) happens as the first synchronous statements of this external
+      module, before React ever mounts. `base.css` hides <body> under
+      `html:not([data-theme-ready])` so there is no flash of the wrong theme
+      or of unblurred amounts, without a blocking inline <script>.
+    -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

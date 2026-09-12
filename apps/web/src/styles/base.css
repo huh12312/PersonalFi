@@ -1,0 +1,129 @@
+/* SPDX-License-Identifier: MIT */
+@import 'tailwindcss';
+@import './theme.css';
+
+/* ---------------------------------------------------------------------- */
+/* Self-hosted font. No @import, no CDN — a single local `url()` (§2.3,§7.4)*/
+/* ---------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-variable-latin.woff2') format('woff2');
+}
+
+/* ---------------------------------------------------------------------- */
+/* Pre-hydration flash prevention (§2.7) — no inline <script> under CSP, so */
+/* `src/main.tsx`'s first synchronous statements set data-theme-ready and  */
+/* data-privacy on <html> before mounting React; until then the body stays */
+/* invisible instead of flashing the wrong theme or unblurred amounts.     */
+/* ---------------------------------------------------------------------- */
+
+html:not([data-theme-ready]) body {
+  visibility: hidden;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Base element styles                                                     */
+/* ---------------------------------------------------------------------- */
+
+* {
+  border-color: var(--border-hairline);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation; /* kill the 300ms tap delay (§8.3) */
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.47;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Every focusable element gets a visible, high-contrast ring. Never
+   `outline: none` without this replacement (WCAG 2.4.7). */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: var(--accent-wash);
+  color: var(--text-primary);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Money & numeric alignment (§2.3, §2.7)                                  */
+/* ---------------------------------------------------------------------- */
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Privacy "hide amounts" toggle (§2.7)                                    */
+/*                                                                          */
+/* - geometry (charts) is exempt: a blurred chart is useless, the shape is */
+/*   not the secret — components opt out with `.money-sensitive-geometry`. */
+/* - `aria-hidden` is deliberately NOT applied: a screen reader reading a   */
+/*   blurred amount aloud is exactly the shoulder-surfing case privacy     */
+/*   mode defends against, so the real value only reaches an `aria-label`  */
+/*   on focus/hover, same as the visual reveal.                            */
+/* ---------------------------------------------------------------------- */
+
+[data-privacy='on'] .money-sensitive {
+  filter: blur(7px);
+  user-select: none;
+  transition: filter var(--dur-fast) var(--ease-standard);
+}
+
+[data-privacy='on'] .money-sensitive:focus-visible,
+[data-privacy='on'] .money-sensitive:hover {
+  filter: none;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Reduced motion — see also the duration-token collapse in theme.css      */
+/* ---------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Skeleton shimmer, disabled under reduced motion above. */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-inset) 25%,
+    var(--bg-subtle) 37%,
+    var(--bg-inset) 63%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  border-radius: var(--radius-md);
+}

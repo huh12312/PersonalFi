@@ -5,3 +5,5 @@ pnpm-lock.yaml
 docs/research
 docs/plan
 packages/contracts/openapi/openapi.json
+apps/web/src/api/generated
+apps/web/src/routeTree.gen.ts
