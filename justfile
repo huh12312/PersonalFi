@@ -424,3 +424,7 @@ gen-master-key:
     # (compose.yml's secrets header has the same note).
     chmod 0444 "${SECRETS_DIR}/master_key"
     echo "wrote ${SECRETS_DIR}/master_key — back it up somewhere that is not this host"
+
+# Install git hooks (lefthook). Not run at install time: install scripts are off.
+hooks:
+    pnpm exec lefthook install

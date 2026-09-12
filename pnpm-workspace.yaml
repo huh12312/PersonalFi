@@ -21,3 +21,6 @@ allowBuilds:
   # platform binary that its optional dependency already provides, so skipping it
   # costs nothing and removes the last install-time script in the tree.
   esbuild: false
+  # lefthook's postinstall runs `lefthook install`; we run that explicitly via
+  # `just hooks` instead of at install time. Its binary ships as an optional dep.
+  lefthook: false

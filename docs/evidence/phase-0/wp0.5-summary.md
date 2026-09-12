@@ -20,18 +20,18 @@ that could not be fixed under the collision rules.
 
 ## Verification results
 
-| Check | Command | Result |
-| --- | --- | --- |
-| Typecheck | `pnpm --filter @app/web typecheck` | **Green** |
-| ESLint (incl. jsx-a11y) | `pnpm exec eslint apps/web` | **Green**, 0 problems |
-| Prettier | `pnpm exec prettier --check apps/web` | **Green** |
-| Unit/component tests | `pnpm --filter @app/web test` | **Green** — 4 files, 12 tests |
-| Build + CSP gate | `pnpm --filter @app/web build` | **Green** — runs `gen`, `tsc -b`, `vite build`, `node scripts/check-csp.ts`, all pass |
-| OpenAPI drift | `pnpm --filter @app/web gen && pnpm --filter @app/web gen:check` | **Green** — "matches the current OpenAPI contract (17 files)" |
-| Playwright smoke | `pnpm --filter @app/web exec playwright test` (after `playwright install chromium`) | **Green** — 2/2, dev server on `localhost:5183` per `playwright.config.ts`'s `webServer` block |
-| Root `pnpm test` | `pnpm test` | **Green** — 17 root files/176 tests + `@app/web`'s 4 files/12 tests, all passing |
-| Root `pnpm run lint:eslint` | `pnpm run lint:eslint` | Fails, but only on `packages/testkit/src/database.ts` (2 `no-restricted-properties` errors) — outside this package's scope |
-| `just check` | `just check` | Fails at the `lint` step: `packages/testkit` again (prettier: 5 files; eslint: same 2 errors as above) — `typecheck` passed clean first; `test` never ran because `just`'s recipe chain (`typecheck lint test`) stops at the first failure, but `pnpm run test` was independently verified green above |
+| Check                       | Command                                                                             | Result                                                                                                                                                                                                                                                                                                 |
+| --------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Typecheck                   | `pnpm --filter @app/web typecheck`                                                  | **Green**                                                                                                                                                                                                                                                                                              |
+| ESLint (incl. jsx-a11y)     | `pnpm exec eslint apps/web`                                                         | **Green**, 0 problems                                                                                                                                                                                                                                                                                  |
+| Prettier                    | `pnpm exec prettier --check apps/web`                                               | **Green**                                                                                                                                                                                                                                                                                              |
+| Unit/component tests        | `pnpm --filter @app/web test`                                                       | **Green** — 4 files, 12 tests                                                                                                                                                                                                                                                                          |
+| Build + CSP gate            | `pnpm --filter @app/web build`                                                      | **Green** — runs `gen`, `tsc -b`, `vite build`, `node scripts/check-csp.ts`, all pass                                                                                                                                                                                                                  |
+| OpenAPI drift               | `pnpm --filter @app/web gen && pnpm --filter @app/web gen:check`                    | **Green** — "matches the current OpenAPI contract (17 files)"                                                                                                                                                                                                                                          |
+| Playwright smoke            | `pnpm --filter @app/web exec playwright test` (after `playwright install chromium`) | **Green** — 2/2, dev server on `localhost:5183` per `playwright.config.ts`'s `webServer` block                                                                                                                                                                                                         |
+| Root `pnpm test`            | `pnpm test`                                                                         | **Green** — 17 root files/176 tests + `@app/web`'s 4 files/12 tests, all passing                                                                                                                                                                                                                       |
+| Root `pnpm run lint:eslint` | `pnpm run lint:eslint`                                                              | Fails, but only on `packages/testkit/src/database.ts` (2 `no-restricted-properties` errors) — outside this package's scope                                                                                                                                                                             |
+| `just check`                | `just check`                                                                        | Fails at the `lint` step: `packages/testkit` again (prettier: 5 files; eslint: same 2 errors as above) — `typecheck` passed clean first; `test` never ran because `just`'s recipe chain (`typecheck lint test`) stops at the first failure, but `pnpm run test` was independently verified green above |
 
 Route file warning that was present mid-session (`dev.kitchen-sink.test.tsx`
 being scanned as a candidate route file by the TanStack Router Vite plugin)
@@ -82,8 +82,8 @@ inert and correctly guarded).
 - `<NetWorthAreaChart>`: `@visx`-based placeholder with mock 90-day series,
   used on both the dashboard (`_app.index.tsx`) and the kitchen sink.
 - Auth shells: `PasskeyRegisterFlow`, `LoginScreen` (passkey + TOTP fallback
-  + recovery code), `KekUnlockScreen`, `LockScreen`/`IdleLockOverlay` (idle
-  soft-lock, `src/lib/idle.ts`).
+  - recovery code), `KekUnlockScreen`, `LockScreen`/`IdleLockOverlay` (idle
+    soft-lock, `src/lib/idle.ts`).
 - `/dev/kitchen-sink` renders every primitive above in both themes (light and
   dark sections, one page, per 05 §9's "no Storybook" decision).
 - jsx-a11y: active and enforced (`eslint.config.js` lines ~210-220, scoped to
@@ -109,8 +109,8 @@ inert and correctly guarded).
    no existing types anywhere to augment) and
    `src/types/jest-axe-matchers.d.ts` (augments Vitest's `Assertion` /
    `AsymmetricMatchersContaining` with `toHaveNoViolations` — kept in a
-   separate module-scoped file because augmenting an *existing* typed module
-   and declaring a *new* one need opposite file shapes, and mixing them in
+   separate module-scoped file because augmenting an _existing_ typed module
+   and declaring a _new_ one need opposite file shapes, and mixing them in
    one file silently erased Vitest's own exports for every other test file
    the first time this was tried).
 2. **Real a11y bug, found by the new test**: the kitchen sink's `Switch` +
@@ -126,7 +126,7 @@ inert and correctly guarded).
    `<button aria-label>`s, unaffected).
 3. **`check-csp.ts` false positive**: the CSP gate's inline-`<script>` regex
    doesn't know about HTML comments, and `index.html`'s own source comment
-   explaining *why* there's no inline script literally contains the string
+   explaining _why_ there's no inline script literally contains the string
    `<script>.` — the regex matched that prose as a violation and failed the
    build every time. Fixed by stripping HTML comments
    (`<!--[\s\S]*?-->`) from each file's content before scanning, in
@@ -180,7 +180,7 @@ each zod schema's registry) that doesn't currently exist anywhere in
 Given this, `apps/web/src/api/pending-contracts.ts` was **kept as the
 source of truth for all `/auth/*` types**, per the brief's own instruction
 to "prefer generated... keep pending-contracts.ts only for what the contract
-lacks" — the contract currently *lacks* usable shapes for every endpoint that
+lacks" — the contract currently _lacks_ usable shapes for every endpoint that
 returns `AuthOk`/`Problem`/etc., which in practice is nearly all of them.
 Swapping the auth screens over today, as `pending-contracts.ts`'s original
 header comment promised ("a one-file change"), would have traded a
@@ -227,46 +227,46 @@ place.
 
 ## Dependency list with licenses (apps/web, direct deps only)
 
-| Package | Version | License |
-| --- | --- | --- |
-| @base-ui-components/react | 1.0.0-rc.0 | MIT |
-| @core/kernel (workspace) | workspace:* | MIT |
-| @hey-api/client-fetch | 0.13.1 | MIT |
-| @hey-api/openapi-ts | 0.99.0 | MIT |
-| @hookform/resolvers | 5.9.1 | MIT |
-| @playwright/test | 1.62.1 | Apache-2.0 |
-| @simplewebauthn/browser | 14.0.0 | MIT |
-| @tailwindcss/vite | 4.3.3 | MIT |
-| @tanstack/react-query(-devtools) | 5.102.8 | MIT |
-| @tanstack/react-router(-devtools) | 1.170.32 / 1.167.1 | MIT |
-| @tanstack/react-table | 8.21.3 | MIT |
-| @tanstack/react-virtual | 3.14.10 | MIT |
-| @tanstack/router-plugin | 1.168.35 | MIT |
-| @testing-library/{jest-dom,react,user-event} | 7.0.1 / 16.3.3 / 14.6.7 | MIT |
-| @types/react(-dom) | 19.2.18 / 19.2.7 | MIT |
-| @visx/* (axis, brush, curve, event, gradient, group, responsive, scale, shape, tooltip) | 4.0.0 | MIT |
-| @vitejs/plugin-react-swc | 4.3.3 | MIT |
-| @vitest/coverage-v8 | 5.0.0 | MIT |
-| axe-core | 4.13.0 | MPL-2.0 |
-| class-variance-authority | 0.7.1 | Apache-2.0 |
-| clsx | 2.1.1 | MIT |
-| cmdk | 1.1.1 | MIT |
-| d3-array / d3-scale / d3-shape / d3-time-format | 3.2.4 / 4.0.2 / 3.2.0 / 4.1.0 | ISC |
-| date-fns | 4.4.0 | MIT |
-| happy-dom | 20.14.0 | MIT |
-| jest-axe | 11.0.0 | MIT |
-| lucide-react | 1.40.0 | ISC |
-| react / react-dom | 19.2.8 | MIT |
-| react-hook-form | 7.87.0 | MIT |
-| sonner | 2.0.8 | MIT |
-| tailwind-merge | 3.6.0 | MIT |
-| tailwindcss | 4.3.3 | MIT |
-| typescript | 6.0.3 | Apache-2.0 |
-| vite | 7.3.6 | MIT |
-| vite-plugin-pwa | 1.3.0 | MIT |
-| vitest | 5.0.0 | MIT |
-| workbox-precaching / workbox-routing / workbox-strategies / workbox-window | 7.4.1 | MIT |
-| zod | 4.5.4 | MIT |
+| Package                                                                                 | Version                       | License    |
+| --------------------------------------------------------------------------------------- | ----------------------------- | ---------- |
+| @base-ui-components/react                                                               | 1.0.0-rc.0                    | MIT        |
+| @core/kernel (workspace)                                                                | workspace:*                   | MIT        |
+| @hey-api/client-fetch                                                                   | 0.13.1                        | MIT        |
+| @hey-api/openapi-ts                                                                     | 0.99.0                        | MIT        |
+| @hookform/resolvers                                                                     | 5.9.1                         | MIT        |
+| @playwright/test                                                                        | 1.62.1                        | Apache-2.0 |
+| @simplewebauthn/browser                                                                 | 14.0.0                        | MIT        |
+| @tailwindcss/vite                                                                       | 4.3.3                         | MIT        |
+| @tanstack/react-query(-devtools)                                                        | 5.102.8                       | MIT        |
+| @tanstack/react-router(-devtools)                                                       | 1.170.32 / 1.167.1            | MIT        |
+| @tanstack/react-table                                                                   | 8.21.3                        | MIT        |
+| @tanstack/react-virtual                                                                 | 3.14.10                       | MIT        |
+| @tanstack/router-plugin                                                                 | 1.168.35                      | MIT        |
+| @testing-library/{jest-dom,react,user-event}                                            | 7.0.1 / 16.3.3 / 14.6.7       | MIT        |
+| @types/react(-dom)                                                                      | 19.2.18 / 19.2.7              | MIT        |
+| @visx/* (axis, brush, curve, event, gradient, group, responsive, scale, shape, tooltip) | 4.0.0                         | MIT        |
+| @vitejs/plugin-react-swc                                                                | 4.3.3                         | MIT        |
+| @vitest/coverage-v8                                                                     | 5.0.0                         | MIT        |
+| axe-core                                                                                | 4.13.0                        | MPL-2.0    |
+| class-variance-authority                                                                | 0.7.1                         | Apache-2.0 |
+| clsx                                                                                    | 2.1.1                         | MIT        |
+| cmdk                                                                                    | 1.1.1                         | MIT        |
+| d3-array / d3-scale / d3-shape / d3-time-format                                         | 3.2.4 / 4.0.2 / 3.2.0 / 4.1.0 | ISC        |
+| date-fns                                                                                | 4.4.0                         | MIT        |
+| happy-dom                                                                               | 20.14.0                       | MIT        |
+| jest-axe                                                                                | 11.0.0                        | MIT        |
+| lucide-react                                                                            | 1.40.0                        | ISC        |
+| react / react-dom                                                                       | 19.2.8                        | MIT        |
+| react-hook-form                                                                         | 7.87.0                        | MIT        |
+| sonner                                                                                  | 2.0.8                         | MIT        |
+| tailwind-merge                                                                          | 3.6.0                         | MIT        |
+| tailwindcss                                                                             | 4.3.3                         | MIT        |
+| typescript                                                                              | 6.0.3                         | Apache-2.0 |
+| vite                                                                                    | 7.3.6                         | MIT        |
+| vite-plugin-pwa                                                                         | 1.3.0                         | MIT        |
+| vitest                                                                                  | 5.0.0                         | MIT        |
+| workbox-precaching / workbox-routing / workbox-strategies / workbox-window              | 7.4.1                         | MIT        |
+| zod                                                                                     | 4.5.4                         | MIT        |
 
 No copyleft (GPL/AGPL/LGPL) licenses; MPL-2.0 (`axe-core`) is a
 devDependency only (test tooling, never bundled into `dist/`). All
@@ -321,7 +321,7 @@ shipping — `sourcemap: 'hidden'`):
   `src/api/generated/`, failing the build if they differ (catches "someone
   edited the OpenAPI contract but forgot to regenerate the client").
 - **CSP**: `scripts/check-csp.ts` runs as the last step of `pnpm --filter
-  @app/web build`, after `vite build` and the PWA precache-manifest
+@app/web build`, after `vite build` and the PWA precache-manifest
   injection, and greps every `dist/**/*.html` for an inline `<script>`
   (no `src`) or a bare `style="..."` attribute — both forbidden by the
   strict nonce-based CSP the proxy will ship. Now strips HTML comments

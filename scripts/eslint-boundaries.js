@@ -98,9 +98,37 @@ const LAYERS = [
       'the column vocabulary from here, so the arrow points one way only.',
   },
   {
+    name: 'testkit',
+    prefix: 'packages/testkit/',
+    allow: ['@core/kernel', '@core/db', '@core/platform', 'drizzle-orm', 'pg', ...UNIVERSAL],
+    allowNodeBuiltins: true,
+    why:
+      'Test infrastructure shared by every *-db suite: a scratch database per suite, ' +
+      'process-spawning helpers, golden-fixture I/O. Depends on nothing above db/platform ' +
+      'so no context ever needs @core/testkit as a production dependency.',
+  },
+  {
+    name: 'seed',
+    prefix: 'packages/seed/',
+    allow: ['@core/kernel', ...UNIVERSAL],
+    allowNodeBuiltins: true,
+    why:
+      'The demo-seed generator is a pure function of a seed integer. It produces typed ' +
+      'in-memory data (Phase 1 maps it to real schema) and must not depend on @core/db: ' +
+      'it owns no table (see OWNERSHIP.md).',
+  },
+  {
     name: 'platform',
     prefix: 'packages/platform/',
-    allow: ['@core/kernel', '@core/db', 'drizzle-orm', 'pg', 'cron-parser', ...UNIVERSAL],
+    allow: [
+      '@core/kernel',
+      '@core/db',
+      '@core/testkit',
+      'drizzle-orm',
+      'pg',
+      'cron-parser',
+      ...UNIVERSAL,
+    ],
     allowNodeBuiltins: true,
     why:
       '@core/platform is infrastructure every context depends on, so it must depend ' +
