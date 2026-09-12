@@ -53,6 +53,36 @@ export default defineConfig({
         },
       },
       {
+        // `@core/testkit`'s own source lives in `test/`, not `src/` (see its
+        // package.json and OWNERSHIP.md): it reads TEST_ADMIN_DATABASE_URL and
+        // spawns real processes, both of which the repo's lint rules — the
+        // process.env ban outside @core/config, the Date.now() ban outside
+        // Clock — only exempt for a `test/` directory. It is dev/test tooling
+        // through and through, so the exemption fits the code, not just the
+        // linter.
+        //
+        // Includes both plain unit tests (golden fixtures, `endPool` timeout)
+        // and `describe.skipIf(ADMIN_URL === undefined)` suites that need a
+        // real Postgres — see docs/TESTING.md. Not split into a `-db` project
+        // like `platform`/`secretbox`/`identity`: every file here already
+        // guards its own database-dependent `describe` blocks, so a laptop
+        // with no database running still gets the (larger) unit-test share of
+        // this project green.
+        root: './packages/testkit',
+        test: {
+          name: 'testkit',
+          include: ['test/**/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 30_000,
+          hookTimeout: 60_000,
+        },
+      },
+      {
+        root: './packages/seed',
+        test: { name: 'seed', include: ['src/**/*.test.ts'], environment: 'node' },
+      },
+      {
         root: './packages/secretbox',
         test: { name: 'secretbox', include: ['src/**/*.test.ts'], environment: 'node' },
       },

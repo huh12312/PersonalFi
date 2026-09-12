@@ -10,9 +10,11 @@ import {
   differenceInDays,
   endOfMonth,
   fromEpochDay,
+  month,
   parseDateOnly,
   startOfMonth,
   toEpochDay,
+  year,
 } from './date-only.ts';
 import { InvalidValueError } from './errors.ts';
 
@@ -78,6 +80,41 @@ describe('DateOnly', () => {
         const moved = addMonths(date, months);
         expect(startOfMonth(moved) <= moved && moved <= endOfMonth(moved)).toBe(true);
       }),
+    );
+  });
+
+  it('round-trips when clamping cannot happen: day <= 28 goes forward and back exactly', () => {
+    // Restricted to day <= 28 on purpose: every calendar month has at least 28
+    // days, so neither the forward move nor the `-months` move back can ever
+    // clamp, and the round trip is then a property of the arithmetic, not an
+    // artifact of which months happen to be long enough. Above 28 the
+    // "clamps to the end of the month" test already covers the (deliberately
+    // lossy) alternative.
+    fc.assert(
+      fc.property(
+        arbDate,
+        fc.integer({ min: 1, max: 28 }),
+        fc.integer({ min: -240, max: 240 }),
+        (date, dayOfMonth, months) => {
+          const anchor = dateOnly(year(date), month(date), dayOfMonth);
+          expect(addMonths(addMonths(anchor, months), -months)).toBe(anchor);
+        },
+      ),
+    );
+  });
+
+  it('composes: moving by a then b months matches moving by a + b, day <= 28', () => {
+    fc.assert(
+      fc.property(
+        arbDate,
+        fc.integer({ min: 1, max: 28 }),
+        fc.integer({ min: -120, max: 120 }),
+        fc.integer({ min: -120, max: 120 }),
+        (date, dayOfMonth, a, b) => {
+          const anchor = dateOnly(year(date), month(date), dayOfMonth);
+          expect(addMonths(addMonths(anchor, a), b)).toBe(addMonths(anchor, a + b));
+        },
+      ),
     );
   });
 

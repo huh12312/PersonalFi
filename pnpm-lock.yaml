@@ -679,6 +679,38 @@ importers:
         specifier: 4.12.0
         version: 4.12.0
 
+  packages/seed:
+    dependencies:
+      '@core/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+    devDependencies:
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
+
+  packages/testkit:
+    dependencies:
+      '@core/db':
+        specifier: workspace:*
+        version: link:../db
+      '@core/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@core/platform':
+        specifier: workspace:*
+        version: link:../platform
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+
 packages:
 
   '@adobe/css-tools@4.5.0':

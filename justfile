@@ -79,6 +79,12 @@ migrate-new name:
     HEADER
     echo "created $file"
 
+# Print summary counts for the deterministic demo-seed generator (@core/seed).
+# `seed=N` picks the PRNG seed (default 1); the dataset itself is never written
+# to disk by this recipe — pass `--out=DIR` yourself via the CLI for that.
+seed-stats seed="1":
+    pnpm exec node packages/seed/src/cli.ts --seed={{seed}} --stats
+
 # Regenerate the checked-in OpenAPI document from the live route schemas.
 openapi:
     pnpm run openapi
