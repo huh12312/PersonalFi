@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+node_modules
+**/node_modules
+dist
+build
+coverage
+.turbo
+.git
+.github
+.vscode
+.idea
+*.log
+.env
+.env.*
+!.env.example
+secrets
+.drizzle
+docs
+*.md
+!README.md
+!THIRD_PARTY.md

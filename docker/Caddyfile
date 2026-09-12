@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: MIT
+#
+# Zero-public-ingress by default (D12). Two ways this gets reached:
+#
+#   1. LAN mode (default). Caddy's internal CA issues a real certificate for
+#      `personalfi.lan` with no ACME and no public DNS. Install the root CA
+#      once per client with `just trust-ca` (RUNBOOK.md). This is what
+#      `docker compose up` gives you out of the box.
+#
+#   2. Tailscale Serve (remote access). Tailscale runs on the HOST (not as a
+#      compose service — it needs no route into `backend` or `sidecar`, only
+#      into whatever Caddy publishes on 127.0.0.1), terminates TLS itself with
+#      a real Let's Encrypt certificate from the tailnet's MagicDNS name, and
+#      reverse-proxies to Caddy's plain-HTTP internal listener:
+#
+#        tailscale serve --bg --https=443 http://127.0.0.1:${PROXY_HTTP_PORT:-8080}
+#
+#      Serve (never Funnel) keeps this on the tailnet only, authenticated by
+#      WireGuard device identity — see RUNBOOK.md "Enabling remote access".
+#      Because Tailscale already terminates TLS for that path, Caddy's own
+#      `tls internal` on the LAN hostname is untouched and irrelevant to it.
+#
+# Caddy listens on unprivileged container ports (8443/8080), mapped by compose
+# to whatever host ports are configured — never 0.0.0.0, only the configured
+# bind address — so the proxy container needs no NET_BIND_SERVICE capability
+# and keeps `cap_drop: [ALL]` with zero exceptions.
+
+{
+	admin off
+	email {$CADDY_ACME_EMAIL:chris@thebrutus.org}
+	# `tls internal` below issues from this local CA; no ACME account is
+	# actually used while LAN mode is the only mode in play.
+}
+
+# ---------- LAN mode: personalfi.lan over Caddy's internal CA ----------
+{$PERSONALFI_HOSTNAME:personalfi.lan}:8443 {
+	tls internal
+
+	encode zstd gzip
+
+	# CSP nonce: apps/api sets a per-request nonce and interpolates it into
+	# the response before this header is added downstream by the app itself
+	# for HTML responses; the placeholder here covers everything Caddy serves
+	# directly (errors, non-HTML). Replace {nonce-placeholder} tooling lives
+	# in apps/api once the SPA ships (WP 0.5) — tracked, not yet wired.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options    "nosniff"
+		X-Frame-Options           "DENY"
+		Referrer-Policy           "no-referrer"
+		Cross-Origin-Opener-Policy   "same-origin"
+		Cross-Origin-Embedder-Policy "require-corp"
+		Cross-Origin-Resource-Policy "same-origin"
+		Permissions-Policy "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'nonce-{nonce-placeholder}'; style-src 'self' 'nonce-{nonce-placeholder}'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		-Server
+	}
+
+	# Never let the internal-CA cert or a probe reach the API's real routes
+	# from outside the LAN by accident — Caddy's own bind address does that
+	# job (compose.yml), this is defense in depth only.
+	handle /api/* {
+		reverse_proxy api:8080 {
+			header_up X-Forwarded-Proto https
+		}
+	}
+	handle /health {
+		reverse_proxy api:8080
+	}
+	handle {
+		# apps/web is WP 0.5's SPA; until it ships, everything else also goes
+		# to the API so the stack is testable end-to-end today.
+		reverse_proxy api:8080
+	}
+}
+
+# ---------- plain HTTP listener for Tailscale Serve to reverse-proxy into ----------
+# Deliberately no `tls internal` here: Tailscale terminates TLS itself before
+# this is ever reached (see header comment). Only bound to the configured
+# LAN/loopback address in compose.yml, same as the HTTPS listener — this is
+# not a second public surface, it is the target `tailscale serve` proxies to.
+:8080 {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy        "no-referrer"
+		-Server
+	}
+
+	handle /api/* {
+		reverse_proxy api:8080 {
+			header_up X-Forwarded-Proto https
+		}
+	}
+	handle {
+		reverse_proxy api:8080
+	}
+}

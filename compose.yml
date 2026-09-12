@@ -1,0 +1,333 @@
+# SPDX-License-Identifier: MIT
+#
+# Production stack (WP 0.4; master plan D12-D15, D24, §4 security baseline).
+#
+#   docker compose up -d                       -> proxy, api, worker, migrator, db, backup
+#   docker compose --profile sidecar up -d     -> + placeholder sidecar scaffold (Phase 6)
+#   docker compose --profile local-llm up -d   -> + placeholder Ollama scaffold (Phase 5)
+#   docker compose --profile webhooks up -d    -> + placeholder webhook listener scaffold
+#
+# `compose.dev.yml` is the *other* file (dev-only Postgres). This file is never
+# layered on top of it and never the other way around — see that file's header.
+#
+# Network topology (3 networks, not the 4 in memo 06 §2.1's sketch — see the
+# `backend` network comment below for why that's a deliberate simplification,
+# not an oversight):
+#   frontend  bridge            proxy <-> api only.
+#   backend   bridge            api, worker, db, migrator, backup. Carries both
+#                                internal DB traffic and each service's own
+#                                outbound HTTPS (Plaid, Coinbase, Tiingo, B2, ...).
+#   sidecar   internal: true    placeholder services only right now. `db` never
+#                                joins it, so P0-8 ("sidecar cannot resolve or
+#                                reach db") holds structurally, by construction,
+#                                regardless of what `backend` allows.
+#
+# Only `proxy` publishes a port, and only to `${BIND_ADDRESS}` (default
+# 127.0.0.1 — see .env.example). CI greps this file for `privileged`,
+# `network_mode: host`, `pid: host`, and a docker.sock mount and fails the
+# build if it finds any (P0-6 evidence, .github/workflows/ci.yml
+# `no-dangerous-compose-settings` job).
+
+x-common: &common
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+  environment:
+    TZ: UTC
+
+x-app-image: &app-image
+  image: ${REGISTRY:-personalfi}/api:${PERSONALFI_VERSION:-dev}
+  build:
+    context: .
+    dockerfile: docker/api.Dockerfile
+
+networks:
+  frontend: {}
+  backend: {}
+  sidecar: { internal: true }
+
+volumes:
+  pgdata: {}
+  caddy_data: {}
+  caddy_config: {}
+  backups: {}
+
+secrets:
+  # Read by @core/config (packages/config/src/schema.ts SECRET_SPECS): the
+  # full `postgres://...` connection string, consumed by api, worker, and
+  # migrator alike — they all call the same `loadConfig()`.
+  database_url:
+    file: ./secrets/database_url.txt
+  # Postgres's own bootstrap credential. Not one of the four secret names the
+  # WP 0.4 brief lists (database_url, master_key, age_recipient, b2_*) — added
+  # because `postgres:18.6-alpine3.24`'s own entrypoint and the backup/restore
+  # scripts need a bare password, not a full connection URL, and compose has
+  # no way to derive one from the other at declaration time. Documented
+  # deviation, not an oversight.
+  pg_password:
+    file: ./secrets/pg_password.txt
+  # Reserved: WP 0.2 wires KEK custody (D5) and starts consuming this in
+  # apps/api. Declared and mounted now so that work package touches no
+  # compose file. Placeholder content until then (`just secrets-init`).
+  master_key:
+    file: ./secrets/master_key.txt
+  # age *recipient* (public key) only — see docker/backup/backup.sh header for
+  # why the backup container never holds the matching private key.
+  age_recipient:
+    file: ./secrets/age_recipient.txt
+  # Optional: only read by backup.sh when RCLONE_REMOTE is set. Placeholder
+  # files are fine (and the default) when B2 push is not in use.
+  b2_key_id:
+    file: ./secrets/b2_key_id.txt
+  b2_application_key:
+    file: ./secrets/b2_application_key.txt
+
+services:
+  proxy:
+    <<: *common
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    networks: [frontend]
+    ports:
+      # LAN/Tailscale bind address only, never 0.0.0.0 (see .env.example).
+      # Caddy listens on unprivileged container ports 8443/8080 internally
+      # (see docker/Caddyfile header) specifically so this service needs no
+      # NET_BIND_SERVICE capability and can keep cap_drop: [ALL] with zero
+      # exceptions — a deliberate change from memo 06 §2.5's sketch, which
+      # mapped host 443/80 straight onto container 443/80.
+      - "${BIND_ADDRESS:-127.0.0.1}:${PROXY_HTTPS_PORT:-443}:8443"
+      - "${BIND_ADDRESS:-127.0.0.1}:${PROXY_HTTP_PORT:-80}:8080"
+    environment:
+      TZ: UTC
+      PERSONALFI_HOSTNAME: ${PERSONALFI_HOSTNAME:-personalfi.lan}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:-chris@thebrutus.org}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+      - /config/caddy:size=16m
+    # Upstream's own image is not verified read-only-rootfs safe (Caddy writes
+    # its autosave/lock state under /config at points other than the named
+    # volume mount in some code paths) and does not drop root by default — see
+    # docker/Caddyfile's header for why it still needs no capabilities. Revisit
+    # `read_only: true` here once that's verified against this exact image.
+    read_only: false
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources: { limits: { cpus: "0.50", memory: 128M } }
+
+  api:
+    <<: [*common, *app-image]
+    environment:
+      TZ: UTC
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: "8080"
+      BASE_URL: https://${PERSONALFI_HOSTNAME:-personalfi.lan}
+      SECRETS_DIR: /run/secrets
+      ROLE: api
+    secrets: [database_url, master_key]
+    networks: [frontend, backend]
+    tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
+    user: "10001:10001"
+    depends_on:
+      db: { condition: service_healthy }
+      migrator: { condition: service_completed_successfully }
+    healthcheck:
+      # /ready (not /health): this is what other services' depends_on should
+      # wait on — DB reachable *and* migrations current, per
+      # apps/api/src/routes/health.ts's own doc comment.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+    deploy:
+      resources: { limits: { cpus: "2.0", memory: 768M } }
+
+  worker:
+    <<: [*common, *app-image]
+    environment:
+      TZ: UTC
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SECRETS_DIR: /run/secrets
+      ROLE: worker
+    secrets: [database_url, master_key]
+    networks: [backend]
+    tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
+    user: "10001:10001"
+    depends_on:
+      db: { condition: service_healthy }
+      migrator: { condition: service_completed_successfully }
+    healthcheck:
+      # Placeholder until WP 0.3 lands apps/api/src/worker.ts: a real check
+      # should assert a pg-boss heartbeat row is fresh, matching the pattern
+      # `/ready` uses for api. Nothing in this compose file depends_on
+      # worker's health today, so this only affects `docker compose ps` output.
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 60s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    deploy:
+      resources: { limits: { cpus: "1.0", memory: 512M } }
+
+  migrator:
+    <<: *app-image
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+    environment:
+      TZ: UTC
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SECRETS_DIR: /run/secrets
+      ROLE: migrator
+    secrets: [database_url]
+    networks: [backend]
+    tmpfs: ["/tmp:size=16m,mode=1777,noexec,nosuid,nodev"]
+    user: "10001:10001"
+    depends_on:
+      db: { condition: service_healthy }
+
+  db:
+    <<: *common
+    image: postgres:18.6-alpine3.24@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b
+    networks: [backend]
+    user: "70:70"
+    read_only: false # postgres needs to write its own data dir; scoped to the named volume below.
+    environment:
+      TZ: UTC
+      PGTZ: UTC
+      POSTGRES_USER: personalfi
+      POSTGRES_DB: personalfi
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8 --data-checksums"
+    secrets: [pg_password]
+    volumes:
+      # Postgres 18 images store data in a major-version subdirectory and
+      # expect the mount one level up, at /var/lib/postgresql — same path
+      # compose.dev.yml uses, and for the same reason (see that file's
+      # comment). The backup/restore scripts and this path must always agree.
+      - pgdata:/var/lib/postgresql
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+      - /run/postgresql:size=64m,uid=70,gid=70
+    shm_size: "256m"
+    command:
+      - postgres
+      - -c
+      - max_connections=40
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - wal_level=replica
+      - -c
+      - log_min_duration_statement=500
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U personalfi -d personalfi"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    deploy:
+      resources: { limits: { cpus: "2.0", memory: 1G } }
+
+  backup:
+    <<: *common
+    image: ${REGISTRY:-personalfi}/backup:${PERSONALFI_VERSION:-dev}
+    build:
+      context: docker
+      dockerfile: backup.Dockerfile
+    networks: [backend]
+    user: "10002:10002"
+    environment:
+      TZ: UTC
+      PGHOST: db
+      PGUSER: personalfi
+      PGDATABASE: personalfi
+      PGPASSWORD_FILE: /run/secrets/pg_password
+      AGE_RECIPIENTS_FILE: /run/secrets/age_recipient
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-2}
+      # Empty (default) = local-only backups. Set to e.g. "b2:personalfi-backups"
+      # to also push to Backblaze B2 — see RUNBOOK.md.
+      RCLONE_REMOTE: ${RCLONE_REMOTE:-}
+      B2_KEY_ID_FILE: /run/secrets/b2_key_id
+      B2_APPLICATION_KEY_FILE: /run/secrets/b2_application_key
+    secrets: [pg_password, age_recipient, b2_key_id, b2_application_key]
+    volumes:
+      - backups:/backups
+    tmpfs: ["/tmp:size=256m,mode=1777,noexec,nosuid,nodev"]
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "backup-loop.sh"]
+      interval: 5m
+      timeout: 5s
+      start_period: 10s
+      retries: 1
+    deploy:
+      resources: { limits: { cpus: "0.50", memory: 256M } }
+
+  # ---------- profile: sidecar (Phase 6, D23) ----------
+  # Placeholder only — proves the network/profile wiring now so a future WP
+  # adds services, not topology. Does nothing: sleeps forever, never listens,
+  # never reaches `backend` (db) or `frontend`.
+  sidecar-placeholder:
+    <<: *common
+    profiles: ["sidecar"]
+    image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+    networks: [sidecar]
+    user: "65534:65534" # nobody:nobody
+    command: ["sleep", "infinity"]
+    tmpfs: ["/tmp:size=8m"]
+    deploy:
+      resources: { limits: { cpus: "0.10", memory: 32M } }
+
+  # ---------- profile: local-llm (Phase 5) ----------
+  # Placeholder for Ollama. Real service is profile-gated because it budgets
+  # several GB of RAM (06 §2.5) that most `up`s should not pay for.
+  local-llm-placeholder:
+    <<: *common
+    profiles: ["local-llm"]
+    image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+    networks: [sidecar]
+    user: "65534:65534"
+    command: ["sleep", "infinity"]
+    tmpfs: ["/tmp:size=8m"]
+    deploy:
+      resources: { limits: { cpus: "0.10", memory: 32M } }
+
+  # ---------- profile: webhooks (optional, D12/06 §3.3) ----------
+  # Placeholder for the future minimal-exposure webhook listener. Off by
+  # default: the default deployment has no public listener at all (polling
+  # is the primary Plaid sync path — D12).
+  webhooks-placeholder:
+    <<: *common
+    profiles: ["webhooks"]
+    image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+    networks: [backend]
+    user: "65534:65534"
+    command: ["sleep", "infinity"]
+    tmpfs: ["/tmp:size=8m"]
+    deploy:
+      resources: { limits: { cpus: "0.10", memory: 32M } }
