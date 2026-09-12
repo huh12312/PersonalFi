@@ -1,4 +1,11 @@
 // SPDX-License-Identifier: MIT
+// `config_snapshots.hash` is a content fingerprint, not a security control: it
+// deduplicates identical boots so the table does not grow one row per restart.
+// Nothing is authenticated, compared in constant time, or kept secret by it, so
+// the single-crypto-call-site rule (03 §2, enforced below) has nothing to
+// protect here — and routing it through @core/secretbox would make the platform
+// depend on the crypto package to hash a settings object.
+// eslint-disable-next-line no-restricted-imports -- SHA-256 as a dedupe key, not cryptography
 import { createHash } from 'node:crypto';
 import { newId } from '@core/kernel';
 import { sql } from 'drizzle-orm';

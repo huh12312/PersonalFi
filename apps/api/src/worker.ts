@@ -104,6 +104,11 @@ async function main(): Promise<void> {
         pollIntervalMs: config.env.EVENT_POLL_INTERVAL_MS,
       });
       await pump.start();
+    } else {
+      // Phase 0, or every module switched off. Say so: "the pump is not
+      // running" is a five-second diagnosis from a log line and a long one from
+      // an outbox that is quietly not draining.
+      logger.info({}, 'no enabled module registered a consumer; the event pump is not running');
     }
 
     if (modules.jobs.length > 0) {
@@ -120,6 +125,8 @@ async function main(): Promise<void> {
         ...(config.env.WORKER_ID === undefined ? {} : { workerId: config.env.WORKER_ID }),
       });
       await runner.start();
+    } else {
+      logger.info({}, 'no enabled module registered a job handler; the job runner is not running');
     }
 
     if (await platform.flags.isEnabled(userId, 'platform.scheduler')) {

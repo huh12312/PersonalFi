@@ -134,6 +134,8 @@ export {
   type MetricLabels,
 } from './metrics.ts';
 export { platformExecutor } from './database.ts';
+export { toInstant, toInstantOrNull, type TimestampValue } from './instants.ts';
+export { createSleeper, type Sleeper } from './sleep.ts';
 export {
   silentLogger,
   type Executor,

@@ -10,6 +10,7 @@ import {
   type PlatformLogger,
   type TransactionalExecutor,
 } from '../executor.ts';
+import { toInstant, toInstantOrNull, type TimestampValue } from '../instants.ts';
 import {
   CONSUMER_ADVISORY_LOCK_CLASS,
   tryAcquireNamedAdvisoryLease,
@@ -17,6 +18,7 @@ import {
 } from '../locks.ts';
 import { CONSUMER_STATUS_ORDINAL, METRIC, type Metrics } from '../metrics.ts';
 import { CHANNEL, createNotifyListener, type NotifyListener } from '../notify.ts';
+import { createSleeper } from '../sleep.ts';
 import type { EventEnvelope, Redaction } from './envelope.ts';
 
 /**
@@ -142,8 +144,8 @@ interface EventRow extends Record<string, unknown> {
   event_type: string;
   event_version: number;
   payload: unknown;
-  occurred_at: Date;
-  recorded_at: Date;
+  occurred_at: TimestampValue;
+  recorded_at: TimestampValue;
   correlation_id: string;
   causation_id: string | null;
   redaction: string;
@@ -159,8 +161,8 @@ function toEnvelope(row: EventRow): EventEnvelope {
     eventType: row.event_type,
     eventVersion: row.event_version,
     payload: row.payload,
-    occurredAt: row.occurred_at,
-    recordedAt: row.recorded_at,
+    occurredAt: toInstant(row.occurred_at),
+    recordedAt: toInstant(row.recorded_at),
     correlationId: row.correlation_id,
     causationId: row.causation_id,
     redaction: row.redaction as Redaction,
@@ -185,38 +187,60 @@ export function createConsumerPump(options: ConsumerPumpOptions): ConsumerPump {
   let listener: NotifyListener | null = null;
   const loops: Array<Promise<void>> = [];
   const leases = new Map<string, AdvisoryLease>();
+  const sleeper = createSleeper();
 
-  async function ensureOffsetRow(consumer: RegisteredConsumer): Promise<void> {
+  async function ensureOffsetRow(name: string): Promise<void> {
     await db.execute(sql`
       INSERT INTO event_consumer_offsets (consumer_name)
-      VALUES (${consumer.name})
+      VALUES (${name})
       ON CONFLICT (consumer_name) DO NOTHING
     `);
   }
 
-  async function readOffset(name: string): Promise<{
+  interface OffsetState {
     lastSeq: bigint;
     status: ConsumerStatus;
     failedCount: number;
     retryAfter: Date | null;
-  }> {
-    const result = await db.execute<{
-      last_seq: bigint;
-      status: string;
-      failed_count: number;
-      retry_after: Date | null;
-    }>(sql`
-      SELECT last_seq, status, failed_count, retry_after
-      FROM event_consumer_offsets
-      WHERE consumer_name = ${name}
-    `);
-    const row = result.rows[0];
-    return {
-      lastSeq: row === undefined ? 0n : BigInt(row.last_seq),
-      status: (row?.status ?? 'running') as ConsumerStatus,
-      failedCount: row?.failed_count ?? 0,
-      retryAfter: row?.retry_after ?? null,
+  }
+
+  /**
+   * Read a consumer's bookkeeping row, creating it if this is its first sight.
+   *
+   * The create is not an optimisation, it is the precondition for every write
+   * further down: advancing the offset and counting a failure are both `UPDATE …
+   * WHERE consumer_name = $1`, and against a missing row they match nothing and
+   * report success. The consumer then re-reads the same events forever — masked,
+   * because `processed_events` still deduplicates the side effect — and a poison
+   * event never reaches `maxAttempts`, so it never dead-letters either. Cheap
+   * insurance: on the hot path this is one indexed SELECT and nothing else.
+   */
+  async function readOffset(name: string): Promise<OffsetState> {
+    const select = async (): Promise<OffsetState | undefined> => {
+      const result = await db.execute<{
+        last_seq: bigint;
+        status: string;
+        failed_count: number;
+        retry_after: TimestampValue | null;
+      }>(sql`
+        SELECT last_seq, status, failed_count, retry_after
+        FROM event_consumer_offsets
+        WHERE consumer_name = ${name}
+      `);
+      const row = result.rows[0];
+      if (row === undefined) return undefined;
+      return {
+        lastSeq: BigInt(row.last_seq),
+        status: row.status as ConsumerStatus,
+        failedCount: row.failed_count,
+        retryAfter: toInstantOrNull(row.retry_after),
+      };
     };
+
+    const existing = await select();
+    if (existing !== undefined) return existing;
+    await ensureOffsetRow(name);
+    return (await select()) ?? { lastSeq: 0n, status: 'running', failedCount: 0, retryAfter: null };
   }
 
   /**
@@ -398,21 +422,19 @@ export function createConsumerPump(options: ConsumerPumpOptions): ConsumerPump {
    * is session-scoped, so a dropped connection releases it).
    */
   async function loop(consumer: RegisteredConsumer): Promise<void> {
-    await ensureOffsetRow(consumer);
+    await ensureOffsetRow(consumer.name);
     while (running) {
-      let lease = leases.get(consumer.name);
-      if (lease === undefined) {
+      if (!leases.has(consumer.name)) {
         const acquired = await tryAcquireNamedAdvisoryLease(
           pool,
           CONSUMER_ADVISORY_LOCK_CLASS,
           consumer.name,
         );
         if (acquired === null) {
-          await sleep(leaseRetryMs);
+          await sleeper.sleep(leaseRetryMs);
           continue;
         }
         leases.set(consumer.name, acquired);
-        lease = acquired;
         logger.debug({ consumer: consumer.name }, 'consumer lease acquired');
       }
 
@@ -430,12 +452,12 @@ export function createConsumerPump(options: ConsumerPumpOptions): ConsumerPump {
         if (handled > 0) await publishLag();
       } catch (cause) {
         logger.error({ consumer: consumer.name, err: describeError(cause) }, 'consumer loop error');
-        await sleep(1_000);
+        await sleeper.sleep(1_000);
         continue;
       }
 
       if (!running) break;
-      await (listener?.wait(pollIntervalMs) ?? sleep(pollIntervalMs));
+      await (listener?.wait(pollIntervalMs) ?? sleeper.sleep(pollIntervalMs));
     }
   }
 
@@ -455,6 +477,9 @@ export function createConsumerPump(options: ConsumerPumpOptions): ConsumerPump {
 
     async stop() {
       running = false;
+      // A consumer parked on `leaseRetryMs` — the second worker, waiting its
+      // turn — would otherwise hold shutdown for fifteen seconds.
+      sleeper.wake();
       await listener?.close();
       listener = null;
       await Promise.allSettled(loops);
@@ -480,17 +505,9 @@ export function createConsumerPump(options: ConsumerPumpOptions): ConsumerPump {
     async runConsumerOnce(name) {
       const consumer = byName.get(name);
       if (consumer === undefined) return 0;
-      await ensureOffsetRow(consumer);
       return await pumpBatch(consumer);
     },
   };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
 }
 
 /**

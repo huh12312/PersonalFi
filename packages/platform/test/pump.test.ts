@@ -256,6 +256,11 @@ describeWithDb('consumer pump', () => {
   });
 
   it('lets an operator skip a dead-lettered event, deliberately and explicitly', async () => {
+    // `seq` is whatever the sequence hands out. Asserting on the literal 1n
+    // silently depends on `TRUNCATE … RESTART IDENTITY` having run first, which
+    // makes the test a hostage to suite ordering; the published seqs are right
+    // here, so use them.
+    const poison: { seq: bigint | undefined } = { seq: undefined };
     const pump = createConsumerPump({
       pool: database.pool,
       db: database.db,
@@ -264,14 +269,15 @@ describeWithDb('consumer pump', () => {
         registerConsumer(
           'test.skippable@v1',
           (event) => {
-            if (event.seq === 1n) throw new Error('poison');
+            if (event.seq === poison.seq) throw new Error('poison');
           },
           { maxAttempts: 2 },
         ),
       ],
     });
 
-    await publish(3);
+    const seqs = await publish(3);
+    poison.seq = seqs[0];
     for (let round = 0; round < 4; round += 1) await pump.drain();
 
     expect(await skipFailedEvent(database.db, 'test.skippable@v1')).toBe(true);
@@ -281,7 +287,7 @@ describeWithDb('consumer pump', () => {
       sql`SELECT status, last_seq FROM event_consumer_offsets WHERE consumer_name = 'test.skippable@v1'`,
     );
     expect(offset.rows[0]!.status).toBe('running');
-    expect(BigInt(offset.rows[0]!.last_seq)).toBe(3n);
+    expect(BigInt(offset.rows[0]!.last_seq)).toBe(seqs[2]!);
   });
 
   it('does nothing while a consumer is paused', async () => {
@@ -406,10 +412,10 @@ describeWithDb('consumer pump', () => {
       consumers: [registerConsumer('test.lagging@v1', () => undefined)],
     });
     await pump.runConsumerOnce('test.lagging@v1');
-    await publish(4);
+    const seqs = await publish(4);
 
     const health = await outboxHealth(database.db);
-    expect(health.maxSeq).toBe(4n);
+    expect(health.maxSeq).toBe(seqs[3]!);
     expect(health.maxLagEvents).toBe(4);
     expect(health.failedConsumers).toEqual([]);
     expect(health.oldestUnprocessedAgeSeconds).toBeGreaterThanOrEqual(0);

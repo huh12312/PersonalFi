@@ -2,6 +2,7 @@
 import { sql } from 'drizzle-orm';
 import type { Executor } from '../executor.ts';
 import { PlatformError } from '../errors.ts';
+import { toInstant, type TimestampValue } from '../instants.ts';
 import { METRIC, type Metrics } from '../metrics.ts';
 import { newEventSchema, type EventEnvelope, type NewEvent } from './envelope.ts';
 
@@ -51,7 +52,7 @@ import { newEventSchema, type EventEnvelope, type NewEvent } from './envelope.ts
 
 interface AppendRow extends Record<string, unknown> {
   out_seq: bigint;
-  out_recorded_at: Date;
+  out_recorded_at: TimestampValue;
 }
 
 export interface AppendOptions {
@@ -102,7 +103,7 @@ export async function appendEvent<TPayload>(
   return {
     ...event,
     seq: BigInt(row.out_seq),
-    recordedAt: row.out_recorded_at,
+    recordedAt: toInstant(row.out_recorded_at),
   };
 }
 

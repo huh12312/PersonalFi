@@ -10,12 +10,14 @@ import {
   type PlatformLogger,
   type TransactionalExecutor,
 } from '../executor.ts';
+import { toInstantOrNull, type TimestampValue } from '../instants.ts';
 import {
   SCHEDULER_ADVISORY_LOCK_KEY,
   tryAcquireAdvisoryLease,
   type AdvisoryLease,
 } from '../locks.ts';
 import { METRIC, type Metrics } from '../metrics.ts';
+import { createSleeper } from '../sleep.ts';
 import { enqueueJob } from './queue.ts';
 
 /**
@@ -69,7 +71,7 @@ interface DueScheduleRow extends Record<string, unknown> {
   job_kind: string;
   job_payload: unknown;
   jitter_seconds: number;
-  next_run_at: Date | null;
+  next_run_at: TimestampValue | null;
 }
 
 /**
@@ -155,6 +157,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   let running = false;
   let lease: AdvisoryLease | null = null;
   let loopPromise: Promise<void> | null = null;
+  const sleeper = createSleeper();
 
   async function tick(): Promise<number> {
     const now = clock.now();
@@ -171,7 +174,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
         // The occurrence identity is the time it was *due*, not the time we got
         // round to it. Two workers a second apart therefore compute the same
         // dedupe key and the second one enqueues nothing.
-        const firedFor = row.next_run_at ?? now;
+        const firedFor = toInstantOrNull(row.next_run_at) ?? now;
         const jitterMs =
           row.jitter_seconds > 0 ? Math.floor(random() * row.jitter_seconds * 1_000) : 0;
 
@@ -232,7 +235,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
           logger.error({ err: describeError(cause) }, 'scheduler tick failed');
         }
       }
-      await sleep(tickIntervalMs);
+      await sleeper.sleep(tickIntervalMs);
     }
   }
 
@@ -246,6 +249,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
 
     async stop() {
       running = false;
+      sleeper.wake();
       await Promise.allSettled([loopPromise]);
       loopPromise = null;
       await lease?.release();
@@ -271,11 +275,4 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
 
     isLeader: () => lease !== null,
   };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
 }

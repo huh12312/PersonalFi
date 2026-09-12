@@ -84,17 +84,30 @@ export async function createTestDatabase(name: string): Promise<TestDatabase> {
     },
 
     async close() {
-      await pool.end();
+      await endPool(pool);
     },
 
     async drop() {
-      await pool.end().catch(() => undefined);
+      // `pool.end()` waits for every checked-out client to be released, and a
+      // test that failed before calling `stop()` has left an advisory-lease
+      // connection checked out forever. Without the timeout the whole suite
+      // reports "hook timed out" instead of the assertion that actually failed.
+      await endPool(pool);
       const cleanup = new pg.Client({ connectionString: ADMIN_URL });
       await cleanup.connect();
+      // FORCE terminates whatever the leaked pool client was still holding.
       await cleanup.query(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
       await cleanup.end();
     },
   };
+}
+
+async function endPool(pool: pg.Pool, timeoutMs = 5_000): Promise<void> {
+  const giveUp = new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    timer.unref?.();
+  });
+  await Promise.race([pool.end().catch(() => undefined), giveUp]);
 }
 
 /** A logger that records what it was told, for asserting on warn/error paths. */

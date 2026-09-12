@@ -17,6 +17,7 @@ import {
 } from '../locks.ts';
 import { METRIC, type Metrics } from '../metrics.ts';
 import { CHANNEL, createNotifyListener, type NotifyListener } from '../notify.ts';
+import { createSleeper } from '../sleep.ts';
 
 /**
  * The execute side of the job queue.
@@ -139,6 +140,7 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
   let reaperLease: AdvisoryLease | null = null;
   const inFlight = new Set<Promise<void>>();
   const shutdown = new AbortController();
+  const sleeper = createSleeper();
 
   if (kinds.length === 0) {
     throw new PlatformError(
@@ -398,23 +400,31 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
       // A full sweep that claimed work probably has more waiting; go straight
       // round again rather than sleeping on a notification that already fired.
       if (claimedAny && inFlight.size < concurrency) continue;
-      await (listener?.wait(pollIntervalMs) ?? sleep(pollIntervalMs));
+      await (listener?.wait(pollIntervalMs) ?? sleeper.sleep(pollIntervalMs));
     }
   }
 
+  /**
+   * The reaper's own loop.
+   *
+   * Every step is inside the `try`, including taking the lease. Acquiring it
+   * needs a connection, and the case that matters is the pool going away
+   * underneath a loop that is still marked `running` — a `stop()` racing the
+   * sleep, or a test harness calling `pool.end()`. Left uncaught that becomes an
+   * unhandled rejection that kills the worker process during shutdown, which is
+   * the one moment it must not die noisily. Dropping the lease and trying again
+   * next pass is always safe: another worker reaping instead is the design.
+   */
   async function reaperLoop(): Promise<void> {
     while (running) {
-      if (reaperLease === null) {
-        reaperLease = await tryAcquireAdvisoryLease(pool, JOB_REAPER_ADVISORY_LOCK_KEY);
+      try {
+        reaperLease ??= await tryAcquireAdvisoryLease(pool, JOB_REAPER_ADVISORY_LOCK_KEY);
+        if (reaperLease !== null) await reclaimStalled();
+      } catch (cause) {
+        reaperLease = null;
+        logger.warn({ err: describeError(cause) }, 'reaper pass failed; retrying');
       }
-      if (reaperLease !== null) {
-        try {
-          await reclaimStalled();
-        } catch (cause) {
-          logger.error({ err: describeError(cause) }, 'reaper failed');
-        }
-      }
-      await sleep(Math.max(1_000, reclaimAfterMs / 2));
+      await sleeper.sleep(Math.max(1_000, reclaimAfterMs / 2));
     }
   }
 
@@ -441,6 +451,9 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     async stop() {
       if (!running) return;
       running = false;
+      // Wake both loops out of their poll/reaper sleeps before waiting on them,
+      // or `stop()` inherits the longest interval as its floor.
+      sleeper.wake();
       await listener?.close();
       listener = null;
 
@@ -482,13 +495,6 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     reclaimStalled,
     inFlight: () => inFlight.size,
   };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
 }
 
 /** Read one job. For tests, the maintenance page, and the job detail view. */

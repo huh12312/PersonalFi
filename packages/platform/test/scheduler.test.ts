@@ -2,6 +2,7 @@
 import { mutableClock } from '@core/kernel';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { toInstant, type TimestampValue } from '../src/instants.ts';
 import { createScheduler, upsertSchedule } from '../src/jobs/scheduler.ts';
 import { ADMIN_URL, createTestDatabase, type TestDatabase } from './harness.ts';
 
@@ -38,11 +39,11 @@ describeWithDb('scheduler', () => {
 
   it('stores the next occurrence in the user timezone, not the container zone', async () => {
     await seedNightlySync();
-    const rows = await database.db.execute<{ next_run_at: Date; timezone: string }>(
+    const rows = await database.db.execute<{ next_run_at: TimestampValue; timezone: string }>(
       sql`SELECT next_run_at, timezone FROM schedules WHERE name = 'sync.nightly'`,
     );
     expect(rows.rows[0]?.timezone).toBe('America/New_York');
-    expect(rows.rows[0]?.next_run_at.toISOString()).toBe('2026-03-02T08:15:00.000Z');
+    expect(toInstant(rows.rows[0]!.next_run_at).toISOString()).toBe('2026-03-02T08:15:00.000Z');
   });
 
   it('enqueues one job when a schedule comes due, and sets the next occurrence', async () => {
@@ -62,11 +63,12 @@ describeWithDb('scheduler', () => {
     // The occurrence identity is when it was *due*, not when we got round to it.
     expect(jobs.rows[0]?.dedupe_key).toBe('schedule:sync.nightly:2026-03-02T08:15:00.000Z');
 
-    const rows = await database.db.execute<{ last_run_at: Date; next_run_at: Date }>(
-      sql`SELECT last_run_at, next_run_at FROM schedules WHERE name = 'sync.nightly'`,
-    );
-    expect(rows.rows[0]?.last_run_at.toISOString()).toBe('2026-03-02T08:20:00.000Z');
-    expect(rows.rows[0]?.next_run_at.toISOString()).toBe('2026-03-03T08:15:00.000Z');
+    const rows = await database.db.execute<{
+      last_run_at: TimestampValue;
+      next_run_at: TimestampValue;
+    }>(sql`SELECT last_run_at, next_run_at FROM schedules WHERE name = 'sync.nightly'`);
+    expect(toInstant(rows.rows[0]!.last_run_at).toISOString()).toBe('2026-03-02T08:20:00.000Z');
+    expect(toInstant(rows.rows[0]!.next_run_at).toISOString()).toBe('2026-03-03T08:15:00.000Z');
   });
 
   /**
@@ -89,10 +91,10 @@ describeWithDb('scheduler', () => {
     );
     expect(jobs.rows[0]?.count).toBe('1');
 
-    const next = await database.db.execute<{ next_run_at: Date }>(
+    const next = await database.db.execute<{ next_run_at: TimestampValue }>(
       sql`SELECT next_run_at FROM schedules WHERE name = 'sync.nightly'`,
     );
-    expect(next.rows[0]?.next_run_at.toISOString()).toBe('2026-03-06T08:15:00.000Z');
+    expect(toInstant(next.rows[0]!.next_run_at).toISOString()).toBe('2026-03-06T08:15:00.000Z');
   });
 
   /**
@@ -205,8 +207,10 @@ describeWithDb('scheduler', () => {
     await scheduler.tick();
     await scheduler.stop();
 
-    const jobs = await database.db.execute<{ run_after: Date }>(sql`SELECT run_after FROM jobs`);
-    const delaySeconds = (jobs.rows[0]!.run_after.getTime() - clock.nowMs()) / 1_000;
+    const jobs = await database.db.execute<{ run_after: TimestampValue }>(
+      sql`SELECT run_after FROM jobs`,
+    );
+    const delaySeconds = (toInstant(jobs.rows[0]!.run_after).getTime() - clock.nowMs()) / 1_000;
     expect(delaySeconds).toBeGreaterThan(1_100);
     expect(delaySeconds).toBeLessThanOrEqual(1_200);
   });

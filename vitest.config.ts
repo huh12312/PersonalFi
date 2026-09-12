@@ -53,8 +53,59 @@ export default defineConfig({
         },
       },
       {
+        root: './packages/secretbox',
+        test: { name: 'secretbox', include: ['src/**/*.test.ts'], environment: 'node' },
+      },
+      {
+        // The envelope's round trip is a property of the `bytea` column, and P0-1
+        // ("read the raw column, assert no plaintext") cannot be asserted against
+        // a fake at all. Skips itself when DATABASE_URL is unset.
+        root: './packages/secretbox',
+        test: {
+          name: 'secretbox-db',
+          include: ['test/**/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 30_000,
+          hookTimeout: 120_000,
+        },
+      },
+      {
+        root: './packages/contexts/identity',
+        test: { name: 'identity', include: ['src/**/*.test.ts'], environment: 'node' },
+      },
+      {
+        // Sessions, lockout and TOTP replay are all "does the database enforce
+        // this?" questions: single-use is an `UPDATE ... WHERE used_at IS NULL`,
+        // and rate limiting that survives a restart is by definition not in
+        // memory. Skips itself when DATABASE_URL is unset.
+        root: './packages/contexts/identity',
+        test: {
+          name: 'identity-db',
+          include: ['test/**/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 30_000,
+          hookTimeout: 120_000,
+        },
+      },
+      {
         root: './apps/api',
-        test: { name: 'api', include: ['test/**/*.test.ts'], environment: 'node' },
+        test: { name: 'api', include: ['test/*.test.ts'], environment: 'node' },
+      },
+      {
+        // The log-hygiene evidence (P0-12) boots the real application against a
+        // real database, because what it asserts is that nothing secret reaches
+        // the log on the path a real boot takes.
+        root: './apps/api',
+        test: {
+          name: 'api-db',
+          include: ['test/db/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 30_000,
+          hookTimeout: 120_000,
+        },
       },
     ],
     coverage: {
