@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: MIT
+#
+# Template for a local `compose.override.yml` layered on top of the hardened
+# production `compose.yml` (docker compose reads `compose.override.yml`
+# automatically, with no `-f` flag, if it exists next to `compose.yml`).
+#
+# Copy this file to `compose.override.yml` (gitignored) and trim it to what
+# you actually need. Nothing here is required for `docker compose up` to
+# work — it exists for the handful of things that are awkward with the
+# production file's hardening turned all the way up:
+#
+#   * a psql/pgAdmin GUI client on the host,
+#   * reading `docker compose logs` without `-f` chasing rotated files,
+#   * loosening `read_only`/`cap_drop` temporarily while debugging a container
+#     that will not start, rather than editing compose.yml itself and
+#     forgetting to revert it.
+#
+# Do not use this file's patterns as a template for compose.yml itself — the
+# whole point of compose.yml is that these exceptions are opt-in and local,
+# never the default a fresh clone gets.
+
+services:
+  # Publish Postgres to loopback so a host GUI client (TablePlus, DBeaver,
+  # `psql` outside the container) can connect directly. Never uncomment the
+  # equivalent for a shared/LAN host — this is for a single-developer machine
+  # only, and it is still loopback-only, never 0.0.0.0.
+  # db:
+  #   ports:
+  #     - '127.0.0.1:5432:5432'
+
+  # Relax the API's read-only rootfs while iterating on something that writes
+  # somewhere unexpected (a stray temp file, a misconfigured cache dir). Find
+  # the real fix before removing this override — `read_only: true` in
+  # compose.yml is load-bearing, not decorative.
+  # api:
+  #   read_only: false
+
+  # Bump log verbosity locally without touching the checked-in default.
+  # api:
+  #   environment:
+  #     LOG_LEVEL: debug
+  # worker:
+  #   environment:
+  #     LOG_LEVEL: debug
+
+  # Widen the proxy's LAN bind so a phone/tablet on the same network can reach
+  # it without Tailscale. Still never 0.0.0.0 on a machine holding financial
+  # data — use the actual LAN IP of the host.
+  # proxy:
+  #   ports:
+  #     - '192.168.1.50:443:8443'
+  #     - '192.168.1.50:80:8080'

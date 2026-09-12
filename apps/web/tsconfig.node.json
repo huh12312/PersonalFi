@@ -15,7 +15,9 @@
     "playwright.config.ts",
     "vitest.config.ts",
     "openapi-ts.config.ts",
+    "openapi-ts.shared.mjs",
     "scripts/**/*.mjs",
-    "scripts/**/*.ts"
+    "scripts/**/*.ts",
+    "e2e/**/*.ts"
   ]
 }

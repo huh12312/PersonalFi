@@ -4,6 +4,7 @@ import { RouterProvider } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
 import { Toaster } from 'sonner';
 
+import { TooltipProvider } from '../components/ui/tooltip.tsx';
 import { usePrivacyShortcut } from '../lib/privacy.ts';
 import { queryClient } from './query-client.ts';
 import { router } from './router.tsx';
@@ -33,15 +34,17 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-      {/* role="status" toasts only — errors that must stop work use a route
-          errorComponent or a field-level message, never a toast alone (05 §4.4). */}
-      <Toaster richColors closeButton position="bottom-right" />
-      {DevTools !== null && (
-        <Suspense fallback={null}>
-          <DevTools />
-        </Suspense>
-      )}
+      <TooltipProvider>
+        <RouterProvider router={router} />
+        {/* role="status" toasts only — errors that must stop work use a route
+            errorComponent or a field-level message, never a toast alone (05 §4.4). */}
+        <Toaster richColors closeButton position="bottom-right" />
+        {DevTools !== null && (
+          <Suspense fallback={null}>
+            <DevTools />
+          </Suspense>
+        )}
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }

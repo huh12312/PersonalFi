@@ -112,6 +112,36 @@ drill-worker-restart:
 compose-lint:
     bash scripts/compose-hardening-check.sh
 
+# Generate Postgres's bootstrap password and the matching database_url secret
+# (RUNBOOK.md "Create secrets" step 1-2). Hex, not base64: `postgres://` is a
+# URL, and a base64 password can contain `/`, `+`, or `=`, any of which
+# either breaks URL parsing outright or silently changes what the URL means
+# (a `/` reads as a path separator, not part of the password) — this is a
+# real bug that broke `just dev` for the whole team once already. Hex is
+# alphanumeric-only, so it is never ambiguous inside a URL and never needs
+# percent-encoding in the first place. Refuses to overwrite an existing
+# `pg_password`, same as `gen-master-key`.
+gen-pg-secrets:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "${SECRETS_DIR}"
+    if [[ -e "${SECRETS_DIR}/pg_password" ]]; then
+      echo "refusing to overwrite ${SECRETS_DIR}/pg_password" >&2
+      exit 1
+    fi
+    umask 077
+    openssl rand -hex 32 > "${SECRETS_DIR}/pg_password"
+    printf 'postgres://personalfi:%s@db:5432/personalfi\n' \
+      "$(cat "${SECRETS_DIR}/pg_password")" > "${SECRETS_DIR}/database_url"
+    # Parse it back before trusting it: a URL-unsafe password should never
+    # reach this point given the hex alphabet above, but a broken
+    # database_url is exactly the class of bug this recipe exists to
+    # prevent, so it checks its own output rather than assuming.
+    node -e "new URL(require('node:fs').readFileSync(process.argv[1], 'utf8').trim())" \
+      "${SECRETS_DIR}/database_url"
+    chmod 0444 "${SECRETS_DIR}/pg_password" "${SECRETS_DIR}/database_url"
+    echo "wrote ${SECRETS_DIR}/pg_password and ${SECRETS_DIR}/database_url"
+
 # Build the api/worker/migrator, backup, and proxy images.
 build:
     docker compose build
@@ -359,5 +389,14 @@ gen-master-key:
     umask 077
     node -e 'process.stdout.write(require("node:crypto").randomBytes(48).toString("base64url"))' \
       > "${SECRETS_DIR}/master_key"
-    chmod 0400 "${SECRETS_DIR}/master_key"
+    # 0444, not 0400: Docker Compose's file-secret provider preserves this
+    # file's own uid/mode verbatim inside every container that mounts it
+    # rather than remapping to that service's runtime user (no per-service
+    # uid/gid/mode override outside Swarm mode), and api/worker/migrator run
+    # as uid 10001 — not whichever uid ran `just`. 0400 here means the
+    # container can never read its own KEK. The actual confidentiality
+    # boundary is SECRETS_DIR's own 0700, which only you and root can even
+    # traverse into; 0444 on the file inside it does not weaken that
+    # (compose.yml's secrets header has the same note).
+    chmod 0444 "${SECRETS_DIR}/master_key"
     echo "wrote ${SECRETS_DIR}/master_key — back it up somewhere that is not this host"

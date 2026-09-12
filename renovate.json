@@ -1,0 +1,67 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard", "helpers:pinGitHubActionDigests"],
+  "timezone": "America/New_York",
+  "schedule": ["* 0-6 * * 1"],
+  "prConcurrentLimit": 3,
+  "dependencyDashboardApproval": false,
+  "minimumReleaseAge": "7 days",
+  "packageRules": [
+    {
+      "description": "Non-major, non-0.x dependencies: grouped and auto-merged. Safe only because typecheck/lint/test/migration-test/gitleaks/license-gate/trivy/compose-hardening are all blocking on the same PR (D14).",
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchCurrentVersion": "!/^0/",
+      "groupName": "all non-major dependencies",
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Major bumps and anything still at 0.x always need a human.",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "0.x packages have no SemVer guarantee — never auto-merge, regardless of update type.",
+      "matchCurrentVersion": "/^0/",
+      "automerge": false
+    },
+    {
+      "description": "Docker base images: digest-pinned everywhere already (D13); Renovate proposes the digest bump, never a floating tag.",
+      "matchDatasources": ["docker"],
+      "pinDigests": true
+    },
+    {
+      "description": "GitHub Actions: same digest-pinning policy as Docker images — every action in .github/workflows/*.yml is pinned to a commit SHA, never a tag (06 §5.1).",
+      "matchDatasources": ["github-runners", "github-tags", "github-releases"],
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "description": "Node is pinned to the 26.x line (D1) until a deliberate LTS-line decision.",
+      "matchPackageNames": ["node"],
+      "allowedVersions": "/^26\\./"
+    },
+    {
+      "description": "Postgres major-version bumps are a dump/restore project, not a Renovate PR (D2).",
+      "matchPackageNames": ["postgres"],
+      "allowedVersions": "/^18\\./",
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "The pnpm version pinned in package.json's packageManager field and CI's `npm install --global pnpm@...` line move together, deliberately, not on Renovate's schedule.",
+      "matchPackageNames": ["pnpm"],
+      "enabled": false
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": ["at any time"],
+    "labels": ["security"],
+    "dependencyDashboardApproval": false
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["* 0-6 1 * *"]
+  }
+}

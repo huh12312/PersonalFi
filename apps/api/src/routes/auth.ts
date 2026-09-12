@@ -49,6 +49,32 @@ const webauthnPayload = z
   .record(z.string(), z.unknown())
   .describe('A WebAuthn response as produced by @simplewebauthn/browser.');
 
+/**
+ * Widen a SimpleWebAuthn options object to the record the schema serialises.
+ *
+ * `PublicKeyCredentialCreationOptionsJSON` is an interface with no index
+ * signature, so TypeScript refuses `as Record<string, unknown>` outright (TS2352)
+ * even though every value is already plain JSON — the library builds these out of
+ * strings, numbers and base64url, and `generateRegistrationOptions` is what
+ * defines their shape. The two-step widening through `unknown` is the honest
+ * spelling of "this is JSON and the schema above says so"; the alternative, a
+ * hand-written Zod mirror of the WebAuthn types, is a second and weaker spec that
+ * would start rejecting valid responses the first time a browser adds a field.
+ */
+function asJsonObject(value: object): Record<string, unknown> {
+  return value as unknown as Record<string, unknown>;
+}
+
+/**
+ * The inverse, at the boundary where a validated request body goes back into the
+ * library that defines its type. `T` is inferred from the parameter it is passed
+ * to, so the call sites below name no WebAuthn type and `apps/api` needs no
+ * dependency on `@simplewebauthn/server`.
+ */
+function asWebAuthnResponse<T>(value: Record<string, unknown>): T {
+  return value as unknown as T;
+}
+
 const okResponse = z.object({ ok: z.literal(true) }).meta({ id: 'AuthOk' });
 
 const unlockStateResponse = z
@@ -265,7 +291,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
             context: contextOf(request),
           }),
         );
-        return { userId: result.userId, options: result.options as Record<string, unknown> };
+        return { userId: result.userId, options: asJsonObject(result.options) };
       },
     );
 
@@ -300,7 +326,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
         const result = await mapAuthErrors(() =>
           identity.flows.completeRegistration({
             userId: request.body.userId,
-            response: request.body.response as never,
+            response: asWebAuthnResponse(request.body.response),
             friendlyName: request.body.friendlyName,
             issueSession: existingSession === null,
             context: contextOf(request),
@@ -335,7 +361,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
       async () => {
         const identity = runtime.requireIdentity();
         const options = await identity.webauthn.startAuthentication('authentication');
-        return { options: options as Record<string, unknown> };
+        return { options: asJsonObject(options) };
       },
     );
 
@@ -358,7 +384,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
         const identity = runtime.requireIdentity();
         const issued = await mapAuthErrors(() =>
           identity.flows.loginWithPasskey({
-            response: request.body.response as never,
+            response: asWebAuthnResponse(request.body.response),
             trustedDevice: request.body.trustedDevice,
             context: contextOf(request),
           }),
@@ -444,7 +470,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
         const identity = runtime.requireIdentity();
         const session = await requireSession(request);
         const options = await identity.webauthn.startAuthentication('step_up', session.userId);
-        return { options: options as Record<string, unknown> };
+        return { options: asJsonObject(options) };
       },
     );
 
@@ -470,7 +496,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
         const freshUntil = await mapAuthErrors(() =>
           identity.flows.stepUp({
             session,
-            response: request.body.response as never,
+            response: asWebAuthnResponse(request.body.response),
             context: contextOf(request),
           }),
         );

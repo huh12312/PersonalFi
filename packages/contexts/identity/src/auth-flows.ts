@@ -17,18 +17,18 @@ import type { Clock } from '@core/kernel';
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
 import type { IdentityQueryable } from './db.ts';
 import { AuthError } from './errors.ts';
-import { RateLimiter } from './rate-limit.ts';
-import { RecoveryCodeService } from './recovery.ts';
+import type { RateLimiter } from './rate-limit.ts';
+import type { RecoveryCodeService } from './recovery.ts';
 import {
   listSecurityEvents,
   recordSecurityEvent,
   type RequestContext,
   type SecurityEventSummary,
 } from './security-events.ts';
-import { SessionService, type IssuedSession, type SessionRecord } from './sessions.ts';
-import { TotpService } from './totp.ts';
-import { UserService } from './users.ts';
-import { WebAuthnService, type CredentialSummary } from './webauthn.ts';
+import type { IssuedSession, SessionRecord, SessionService } from './sessions.ts';
+import type { TotpService } from './totp.ts';
+import type { UserService } from './users.ts';
+import type { CredentialSummary, WebAuthnService } from './webauthn.ts';
 
 export interface AuthFlowOptions {
   readonly db: IdentityQueryable;

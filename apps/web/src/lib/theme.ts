@@ -48,13 +48,24 @@ export function getThemePreference(): ThemePreference {
 
 /** React hook: the user's stored preference, re-rendering on change (any tab). */
 export function useThemePreference(): [ThemePreference, (next: ThemePreference) => void] {
-  const preference = useSyncExternalStore(store.subscribe, store.get, () => 'system');
+  // Explicit type argument: without it, `T` infers from the three callbacks'
+  // return types as the widened `string` rather than the `ThemePreference`
+  // union, and every downstream use of `preference` fails to typecheck.
+  const preference = useSyncExternalStore<ThemePreference>(
+    store.subscribe,
+    store.get,
+    () => 'system',
+  );
   return [preference, setThemePreference];
 }
 
 /** React hook: the *resolved* light/dark value, tracking OS changes while on 'system'. */
 export function useResolvedTheme(): ResolvedTheme {
-  const preference = useSyncExternalStore(store.subscribe, store.get, () => 'system');
+  const preference = useSyncExternalStore<ThemePreference>(
+    store.subscribe,
+    store.get,
+    () => 'system',
+  );
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   return useSyncExternalStore(
     (listener) => {

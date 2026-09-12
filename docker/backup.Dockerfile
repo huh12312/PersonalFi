@@ -22,7 +22,9 @@ RUN apk add --no-cache \
       postgresql18-client=18.6-r0 \
       age=1.3.1-r6 \
       rclone=1.74.1-r2 \
-      tzdata=2026c-r0 && \
+      tzdata=2026c-r0 \
+      libssl3=3.5.8-r0 \
+      libcrypto3=3.5.8-r0 && \
     addgroup -g 10002 -S backup && \
     adduser -u 10002 -S -G backup -H -D -s /sbin/nologin backup && \
     mkdir -p /backups && chown 10002:10002 /backups

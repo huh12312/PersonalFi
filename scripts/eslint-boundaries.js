@@ -111,7 +111,18 @@ const LAYERS = [
   {
     name: 'secretbox',
     prefix: 'packages/secretbox/',
-    allow: ['@core/kernel', '@core/config', '@core/db', ...CRYPTO_PRIMITIVES, ...UNIVERSAL],
+    // `drizzle-orm` is here for `schema/encryption-keys.ts` only. The runtime
+    // path deliberately uses raw parameterised SQL (see `src/store.ts`); the
+    // Drizzle definition exists so `lint:schema-ownership` can see the claim on
+    // `encryption_keys` and so a later migration tool can see the shape.
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      'drizzle-orm',
+      ...CRYPTO_PRIMITIVES,
+      ...UNIVERSAL,
+    ],
     allowNodeBuiltins: true,
     why:
       'The cryptography chokepoint. It is the only package allowed to import a ' +

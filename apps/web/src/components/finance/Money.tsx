@@ -64,6 +64,15 @@ export function Money({
         colorBySign && sign === 'zero' && 'text-money-neutral',
         className,
       )}
+      // A `<button>` would satisfy jsx-a11y's interactivity check natively, but
+      // `<Money>` routinely nests inside a clickable transaction row — a
+      // `<button>` inside a `<button>` is invalid HTML and breaks the outer
+      // row's own click target. `tabIndex` here isn't standing in for a click
+      // action; it's making a *disclosure* (focus/hover reveal) reachable by
+      // keyboard, exactly like a native `<abbr title>` or masked password
+      // field's reveal toggle — reachable, but not a control that does
+      // something when activated.
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
       tabIndex={isHidden ? 0 : undefined}
       onFocus={() => setRevealed(true)}
       onBlur={() => setRevealed(false)}

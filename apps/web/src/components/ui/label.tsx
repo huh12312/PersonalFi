@@ -3,8 +3,19 @@ import type { LabelHTMLAttributes } from 'react';
 
 import { cn } from '../../lib/cn.ts';
 
-export function Label({ className, ...props }: LabelHTMLAttributes<HTMLLabelElement>) {
+export function Label({
+  className,
+  htmlFor,
+  children,
+  ...props
+}: LabelHTMLAttributes<HTMLLabelElement>) {
   return (
-    <label className={cn('text-small font-medium text-text-secondary', className)} {...props} />
+    <label
+      htmlFor={htmlFor}
+      className={cn('text-small font-medium text-text-secondary', className)}
+      {...props}
+    >
+      {children}
+    </label>
   );
 }

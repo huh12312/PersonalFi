@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: MIT
 #
-# Base CI for WP 0.1. WP 0.4 extends this with the image build, SBOM, trivy,
-# the license gate, gitleaks over full history, and cosign signing. Job names are
-# stable; add jobs rather than renaming these.
+# Base CI from WP 0.1 (typecheck, lint, test, migration-test, openapi-current)
+# plus WP 0.4's supply-chain gates: gitleaks over full history, the license
+# gate, compose hardening, trivy (filesystem and per-image), and per-image
+# SBOMs. Cosign signing and the multi-arch GHCR publish live in release.yml,
+# tags only — nothing here pushes anywhere. Job names are stable; add jobs
+# rather than renaming these.
 name: CI
 
 on:
@@ -147,3 +150,160 @@ jobs:
         run: |
           pnpm run openapi
           git diff --exit-code -- packages/contracts/openapi/openapi.json
+
+  gitleaks:
+    name: gitleaks (secrets, full history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # full history — gitleaks scans every reachable commit, not just HEAD
+
+      # Run via the upstream image rather than a third-party wrapper action:
+      # same rationale as pinning pnpm's own version above (D14) — one fewer
+      # supply-chain edge. False positives get a fingerprint entry in
+      # .gitleaksignore, reviewed, never a blanket rule relaxation.
+      - name: gitleaks detect
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" -w /repo \
+            zricethezav/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
+            detect --source . --redact --exit-code 1 -i .gitleaksignore
+
+  license-gate:
+    name: license gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: npm install --global pnpm@12.4.1
+      - run: pnpm install --frozen-lockfile
+
+      # Fails on: a deny-listed license or package name (licenses.policy.yaml),
+      # or UNKNOWN/unparseable anywhere (D15, 06 §5.4). Also regenerates
+      # THIRD_PARTY.md — the diff check below is what makes "generated,
+      # committed, CI fails on drift" (06 §7.2) actually true rather than
+      # aspirational.
+      - name: run the license gate
+        run: node scripts/check-licenses.ts
+      - name: THIRD_PARTY.md is current
+        run: git diff --exit-code -- THIRD_PARTY.md
+
+  compose-hardening:
+    name: compose hardening (no privileged/host-net/host-pid/docker.sock)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: grep every compose file (P0-6)
+        run: bash scripts/compose-hardening-check.sh
+
+  trivy-fs:
+    name: trivy filesystem scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: .trivyignore has no expired suppressions
+        run: |
+          today="$(date -u +%Y-%m-%d)"
+          expired=0
+          while IFS= read -r line; do
+            [[ "$line" =~ \#\#[[:space:]]*expires:[[:space:]]*([0-9]{4}-[0-9]{2}-[0-9]{2}) ]] || continue
+            expiry="${BASH_REMATCH[1]}"
+            if [[ "$expiry" < "$today" ]]; then
+              echo "::error::.trivyignore entry expired on $expiry: $line"
+              expired=1
+            fi
+          done < .trivyignore
+          exit "$expired"
+
+      - name: trivy fs (deps + secrets + misconfig)
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" \
+            aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+            fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
+              --ignorefile /repo/.trivyignore --exit-code 1 /repo
+
+  docker-build-scan:
+    name: docker build + trivy image scan (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            dockerfile: docker/api.Dockerfile
+            context: .
+          - image: backup
+            dockerfile: docker/backup.Dockerfile
+            context: docker
+          - image: proxy
+            dockerfile: docker/caddy.Dockerfile
+            context: docker
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # Single-arch (the runner's own arch), loaded into the local docker
+      # daemon so trivy/syft below can scan it directly. release.yml does the
+      # real multi-arch, pushed, signed build; this build exists to scan.
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          load: true
+          tags: personalfi/${{ matrix.image }}:ci
+          cache-from: type=gha,scope=ci-${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=ci-${{ matrix.image }}
+
+      - name: trivy image scan
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "${{ github.workspace }}:/repo" \
+            aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+            image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /repo/.trivyignore --exit-code 1 \
+              personalfi/${{ matrix.image }}:ci
+
+      # D14/D15: Vite's MPL-2.0 lightningcss is a devDependency of apps/web and
+      # must never reach the runtime image — see docker/api.Dockerfile's
+      # header for the `pnpm install --filter-prod=@app/api... --prod`
+      # mechanism that is supposed to keep it out. This is the check that
+      # proves it, not just asserts it.
+      - name: assert lightningcss (MPL-2.0, dev-only) is absent from the api image
+        if: matrix.image == 'api'
+        run: |
+          if docker run --rm --entrypoint sh personalfi/api:ci -c \
+              "find / -xdev -iname '*lightningcss*' 2>/dev/null" | grep -q .; then
+            echo "::error::lightningcss found in the api runtime image — a dev-only MPL-2.0 dependency leaked in"
+            exit 1
+          fi
+          echo "lightningcss: absent (verified)"
+
+      - name: sbom (syft, SPDX + CycloneDX)
+        run: |
+          mkdir -p sbom
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "${{ github.workspace }}/sbom:/out" \
+            anchore/syft:v1.51.1@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c \
+            "personalfi/${{ matrix.image }}:ci" \
+            -o "spdx-json=/out/${{ matrix.image }}.spdx.json" \
+            -o "cyclonedx-json=/out/${{ matrix.image }}.cdx.json"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-${{ matrix.image }}
+          path: sbom/
+          retention-days: 90

@@ -8,6 +8,7 @@ coverage/
 .env.*
 !.env.example
 secrets/
+compose.override.yml
 .drizzle/
 *.age
 *.pem
@@ -26,6 +27,7 @@ apps/web/src/api/generated/
 apps/web/test-results/
 apps/web/playwright-report/
 apps/web/.vite/
+*.tsbuildinfo
 
 # agent worktrees
 .claude/

@@ -343,6 +343,11 @@ export class WebAuthnService {
    *
    * `UPDATE ... RETURNING` rather than select-then-update so that two concurrent
    * requests cannot both claim the same challenge.
+   *
+   * The `id DESC` tiebreak matters: ids are UUIDv7 and therefore time-ordered, so
+   * when two challenges share a `created_at` — a frozen clock in a test, or two
+   * requests inside the same microsecond — "newest" stays well defined instead of
+   * resolving to whatever the planner happened to return first.
    */
   async #consumeChallenge(userId: string | null, purpose: ChallengePurpose): Promise<string> {
     const now = this.#clock.now();
@@ -354,7 +359,7 @@ export class WebAuthnService {
            AND consumed_at IS NULL
            AND expires_at > $1
            AND (user_id IS NOT DISTINCT FROM $3 OR $3 IS NULL)
-         ORDER BY created_at DESC
+         ORDER BY created_at DESC, id DESC
          LIMIT 1
          FOR UPDATE SKIP LOCKED
        )

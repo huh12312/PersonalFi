@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT
+# Fingerprint allowlist for gitleaks full-history scans (`just gitleaks`,
+# CI's `gitleaks` job). One entry per confirmed false positive, each with a
+# one-line reason — this file is reviewed, not rubber-stamped.
+#
+# Format: <commit>:<file>:<rule-id>:<line>  (gitleaks prints this as
+# "Fingerprint:" on a match; copy it verbatim).
+
+# False positive: "Tiingo" (a market-data provider name) trips the
+# generic-api-key entropy heuristic in prose, not a secret. Verified by
+# reading docs/plan/00-master-implementation-plan.md at this commit — no
+# credential of any kind appears on that line.
+9069911469d73fe6b5e8a8c889f11c6a2a0e97ed:docs/plan/00-master-implementation-plan.md:generic-api-key:9

@@ -1,9 +1,24 @@
 // SPDX-License-Identifier: MIT
 import { loadConfig, type AppConfig } from '@core/config';
 import type pg from 'pg';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { CORRELATION_ID_HEADER, buildApp } from '../src/app.ts';
 import { REDACTED_PATHS } from '../src/logging.ts';
+import { createTempSecrets } from './helpers/secrets.ts';
+
+/**
+ * One temp secrets directory for the file, disposed at the end.
+ *
+ * `master_key` is required from WP 0.2 on, so `loadConfig` now fails without it —
+ * which is the intended behaviour (a box that boots without the passphrase can
+ * neither read a provider token nor write one) and is why the shell tests grew a
+ * real directory instead of a stubbed reader.
+ */
+const secrets = createTempSecrets();
+
+afterAll(() => {
+  secrets.dispose();
+});
 
 function testConfig(): AppConfig {
   return loadConfig({
@@ -11,12 +26,7 @@ function testConfig(): AppConfig {
       NODE_ENV: 'test',
       LOG_LEVEL: 'silent',
       DATABASE_URL: 'postgres://test:test@127.0.0.1:1/test',
-      SECRETS_DIR: '/nonexistent',
-    },
-    readSecret: () => {
-      const error = new Error('ENOENT') as NodeJS.ErrnoException;
-      error.code = 'ENOENT';
-      throw error;
+      SECRETS_DIR: secrets.dir,
     },
   });
 }
@@ -31,7 +41,7 @@ describe('API shell', () => {
   it('answers /health without touching the database', async () => {
     // An orchestrator that restarts the API because Postgres is slow turns a
     // blip into an outage, so liveness must not depend on readiness.
-    const app = await buildApp({ config: testConfig(), pool: unreachablePool });
+    const { app } = await buildApp({ config: testConfig(), pool: unreachablePool });
     const response = await app.inject({ method: 'GET', url: '/health' });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ status: 'ok', service: 'api', version: '0.1.0' });
@@ -39,7 +49,7 @@ describe('API shell', () => {
   });
 
   it('reports 503 problem details from /ready when the database is unreachable', async () => {
-    const app = await buildApp({ config: testConfig(), pool: unreachablePool });
+    const { app } = await buildApp({ config: testConfig(), pool: unreachablePool });
     const response = await app.inject({ method: 'GET', url: '/ready' });
     expect(response.statusCode).toBe(503);
     expect(response.headers['content-type']).toContain('application/problem+json');
@@ -52,7 +62,7 @@ describe('API shell', () => {
   });
 
   it('returns RFC 9457 problem details for an unknown route', async () => {
-    const app = await buildApp({ config: testConfig(), pool: unreachablePool });
+    const { app } = await buildApp({ config: testConfig(), pool: unreachablePool });
     const response = await app.inject({ method: 'GET', url: '/nope' });
     expect(response.statusCode).toBe(404);
     expect(response.headers['content-type']).toContain('application/problem+json');
@@ -65,7 +75,7 @@ describe('API shell', () => {
   });
 
   it('echoes a supplied correlation id and mints one otherwise', async () => {
-    const app = await buildApp({ config: testConfig(), pool: unreachablePool });
+    const { app } = await buildApp({ config: testConfig(), pool: unreachablePool });
 
     const supplied = await app.inject({
       method: 'GET',
@@ -82,15 +92,42 @@ describe('API shell', () => {
   });
 
   it('generates an OpenAPI document from the route schemas', async () => {
-    const app = await buildApp({ config: testConfig(), pool: unreachablePool });
+    const { app } = await buildApp({ config: testConfig(), pool: unreachablePool });
     await app.ready();
     const spec = app.swagger() as {
       openapi: string;
       paths: Record<string, Record<string, { operationId?: string }>>;
     };
     expect(spec.openapi).toBe('3.1.0');
-    expect(Object.keys(spec.paths).sort()).toEqual(['/health', '/ready']);
     expect(spec.paths['/health']?.['get']?.operationId).toBe('getHealth');
+
+    // The auth surface is part of the contract the generated frontend client is
+    // built from: a route that exists on the server but not in the spec is a
+    // route the UI cannot call, and nobody notices until it is in front of a user.
+    const paths = Object.keys(spec.paths);
+    for (const route of [
+      '/health',
+      '/ready',
+      '/auth/unlock-state',
+      '/auth/session',
+      '/auth/register/options',
+      '/auth/register/verify',
+      '/auth/login/options',
+      '/auth/login/verify',
+      '/auth/totp/verify',
+      '/auth/recovery-code/verify',
+      '/auth/step-up/options',
+      '/auth/step-up/verify',
+      '/auth/refresh',
+      '/auth/logout',
+      '/auth/credentials',
+      '/auth/totp/enroll',
+      '/auth/totp/confirm',
+      '/auth/recovery-codes',
+      '/auth/events',
+    ]) {
+      expect(paths).toContain(route);
+    }
     await app.close();
   });
 

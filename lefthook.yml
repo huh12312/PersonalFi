@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: MIT
+#
+# Local git hooks (06 §9.3; master plan D14/P0-10 — "gitleaks ... clean").
+#
+# Lefthook over a Python `pre-commit` framework config, and over the npm
+# `lefthook` wrapper package: it is a single MIT-licensed Go binary with no
+# install-time script of its own, which matters here specifically because
+# `.npmrc` sets `ignore-scripts=true` repo-wide (D14) and nothing may carve
+# out an exception for a new devDependency's postinstall just to fetch a
+# binary Renovate would then also need to track. Install the binary natively,
+# once, outside npm entirely:
+#
+#   brew install lefthook          # macOS
+#   pacman -S lefthook              # Arch (or: paru -S lefthook-bin, AUR)
+#   go install github.com/evilmartians/lefthook@latest
+#   # or download a release asset directly:
+#   # https://github.com/evilmartians/lefthook/releases
+#
+# Then, once per clone:
+#
+#   lefthook install
+#
+# Every check below runs through a tool this repo already requires (pnpm,
+# ESLint, Prettier, Docker for gitleaks) — installing `lefthook` is the only
+# new thing a contributor's machine needs.
+
+pre-commit:
+  parallel: true
+  commands:
+    # THE important one (06 §9.3): catches a Plaid/Coinbase/B2 secret before
+    # it ever leaves the working tree, using the same image and the same
+    # .gitleaksignore CI's `gitleaks` job uses — one policy, two enforcement
+    # points. `protect --staged` reads the git index directly, so this needs
+    # the whole repo (including .git) mounted, not just the staged files.
+    gitleaks:
+      run: >-
+        docker run --rm -v "$(pwd):/repo" -w /repo
+        zricethezav/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9
+        protect --staged --redact --exit-code 1 -i .gitleaksignore
+
+    prettier:
+      glob: '*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml,css}'
+      run: pnpm exec prettier --check {staged_files}
+
+    eslint:
+      glob: '*.{ts,tsx,js,mjs}'
+      run: pnpm exec eslint {staged_files}
+
+    # P0-6: catches `privileged`/`network_mode: host`/`pid: host`/a mounted
+    # Docker socket before it is even committed, not just in CI.
+    compose-hardening:
+      glob: 'compose*.{yml,yaml}'
+      run: bash scripts/compose-hardening-check.sh

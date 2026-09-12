@@ -70,7 +70,19 @@ describe('migration files', () => {
     // Bookkeeping tables are not user-scoped; everything else must be, from the
     // first migration, because retrofitting an ownership column means rewriting
     // every query in the app.
-    const exempt = new Set(['schema_migrations', 'users']);
+    //
+    // The exemptions are deliberately few, and each one is a table that describes
+    // *the deployment* rather than the account holder: the migration ledger, the
+    // account holder's own row, how far each consumer has read, and what the
+    // configuration looked like at a given boot. Adding to this set should feel
+    // like a decision — if a table holds anything Chris entered or a provider
+    // returned, it carries `user_id`.
+    const exempt = new Set([
+      'schema_migrations',
+      'users',
+      'event_consumer_offsets',
+      'config_snapshots',
+    ]);
     for (const file of readMigrationFiles()) {
       const statements = ddlOf(file.sql)
         .split(/CREATE\s+TABLE/i)
@@ -118,10 +130,38 @@ describeWithDb('runMigrations', () => {
       const { rows } = await client.query<{ table_name: string }>(
         "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name",
       );
+      // Spelled out rather than counted, and alphabetical because the query is,
+      // so adding a table is a deliberate edit here too. A migration that quietly
+      // creates a table nobody expected is how an ownership claim and the schema
+      // drift apart — and `lint:schema-ownership` only sees the claims, not what
+      // actually landed in the database.
+      //
+      // 0001_init: feature_flags, schema_migrations, users.
+      // 0002_identity: encryption_keys (@core/secretbox) and the nine
+      //   @ctx/identity tables.
+      // 0003_platform: config_snapshots, domain_events, event_consumer_offsets,
+      //   job_runs, jobs, processed_events, schedules.
       expect(rows.map((row) => row.table_name)).toEqual([
+        'auth_attempts',
+        'auth_lockouts',
+        'config_snapshots',
+        'domain_events',
+        'encryption_keys',
+        'event_consumer_offsets',
         'feature_flags',
+        'job_runs',
+        'jobs',
+        'processed_events',
+        'recovery_codes',
+        'registration_tokens',
+        'schedules',
         'schema_migrations',
+        'security_events',
+        'sessions',
+        'totp_secrets',
         'users',
+        'webauthn_challenges',
+        'webauthn_credentials',
       ]);
 
       const recorded = await client.query<{ version: string; checksum: string }>(

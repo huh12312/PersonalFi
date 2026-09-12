@@ -70,7 +70,12 @@ COPY docker/entrypoint.mjs ./entrypoint.mjs
 
 # ---------- runtime ----------
 FROM ${NODE_IMAGE} AS runtime
+# `apk upgrade` (not a version pin): CVE-2026-14456 (OpenSSL DoS, fixed
+# upstream in 3.5.8-r0) postdates this base image's last build but is already
+# in Alpine 3.24's index — verified with `trivy image` during WP 0.4. Revisit
+# once a Renovate-proposed base-image digest bump makes this redundant.
 RUN apk add --no-cache tini && \
+    apk upgrade --no-cache libssl3 libcrypto3 && \
     addgroup -g 10001 -S app && \
     adduser -u 10001 -S -G app -H -D -s /sbin/nologin app
 

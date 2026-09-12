@@ -57,11 +57,21 @@ volumes:
   backups: {}
 
 secrets:
+  # No `.txt` extensions: Docker mounts each of these at `/run/secrets/<name
+  # declared here>` regardless of the source filename on the host, but the
+  # *host-side* filename is not free to pick independently — it has to match
+  # what `.env.example` documents and what `just gen-master-key` (WP 0.2)
+  # actually writes, both of which are extension-less (`${SECRETS_DIR}/
+  # database_url`, `${SECRETS_DIR}/master_key`). Matching that here, rather
+  # than inventing a second, `.txt`-suffixed convention, is what makes
+  # "write a high-entropy passphrase to ${SECRETS_DIR}/master_key" in
+  # packages/config/src/schema.ts's own hint text literally true.
+  #
   # Read by @core/config (packages/config/src/schema.ts SECRET_SPECS): the
   # full `postgres://...` connection string, consumed by api, worker, and
   # migrator alike — they all call the same `loadConfig()`.
   database_url:
-    file: ./secrets/database_url.txt
+    file: ./secrets/database_url
   # Postgres's own bootstrap credential. Not one of the four secret names the
   # WP 0.4 brief lists (database_url, master_key, age_recipient, b2_*) — added
   # because `postgres:18.6-alpine3.24`'s own entrypoint and the backup/restore
@@ -69,27 +79,30 @@ secrets:
   # no way to derive one from the other at declaration time. Documented
   # deviation, not an oversight.
   pg_password:
-    file: ./secrets/pg_password.txt
-  # Reserved: WP 0.2 wires KEK custody (D5) and starts consuming this in
-  # apps/api. Declared and mounted now so that work package touches no
-  # compose file. Placeholder content until then (`just secrets-init`).
+    file: ./secrets/pg_password
+  # WP 0.2 wires KEK custody (D5) and consumes this in apps/api; `just
+  # gen-master-key` writes it. Declared and mounted here so that work package
+  # touches no compose file.
   master_key:
-    file: ./secrets/master_key.txt
+    file: ./secrets/master_key
   # age *recipient* (public key) only — see docker/backup/backup.sh header for
   # why the backup container never holds the matching private key.
   age_recipient:
-    file: ./secrets/age_recipient.txt
+    file: ./secrets/age_recipient
   # Optional: only read by backup.sh when RCLONE_REMOTE is set. Placeholder
   # files are fine (and the default) when B2 push is not in use.
   b2_key_id:
-    file: ./secrets/b2_key_id.txt
+    file: ./secrets/b2_key_id
   b2_application_key:
-    file: ./secrets/b2_application_key.txt
+    file: ./secrets/b2_application_key
 
 services:
   proxy:
     <<: *common
-    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    image: ${REGISTRY:-personalfi}/proxy:${PERSONALFI_VERSION:-dev}
+    build:
+      context: docker
+      dockerfile: caddy.Dockerfile
     networks: [frontend]
     ports:
       # LAN/Tailscale bind address only, never 0.0.0.0 (see .env.example).
@@ -110,13 +123,16 @@ services:
       - caddy_config:/config
     tmpfs:
       - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+      # Caddy's admin-API autosave state (admin is off, but the on-disk config
+      # snapshot it writes on load is not) lives under /config/caddy; keeping
+      # the parent /config read-only and only this one subdirectory writable
+      # keeps read_only:true above meaningful rather than nominal.
       - /config/caddy:size=16m
-    # Upstream's own image is not verified read-only-rootfs safe (Caddy writes
-    # its autosave/lock state under /config at points other than the named
-    # volume mount in some code paths) and does not drop root by default — see
-    # docker/Caddyfile's header for why it still needs no capabilities. Revisit
-    # `read_only: true` here once that's verified against this exact image.
-    read_only: false
+    # docker/caddy.Dockerfile builds a non-root, capability-stripped image
+    # specifically so this can be true (see that file's header for the
+    # cap_drop+no-new-privileges+file-capability conflict it fixes) — verified
+    # by booting this exact image with these exact flags during WP 0.4.
+    user: '10003:10003'
     depends_on:
       api: { condition: service_healthy }
     healthcheck:
@@ -216,7 +232,7 @@ services:
 
   db:
     <<: *common
-    image: postgres:18.6-alpine3.24@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b
+    image: postgres:18.6-alpine3.24@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     networks: [backend]
     user: '70:70'
     read_only: false # postgres needs to write its own data dir; scoped to the named volume below.

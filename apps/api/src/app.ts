@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: MIT
+// `@fastify/cookie` is imported for its value (the plugin) *and* for the module
+// augmentation it carries: `request.cookies`, `reply.setCookie` and
+// `reply.clearCookie` only exist on the Fastify types once this module is part of
+// the type program. Importing it here — the composition root, where the plugin is
+// actually registered — is what makes `auth/cookies.ts` typecheck.
+import fastifyCookie from '@fastify/cookie';
 import fastifySwagger from '@fastify/swagger';
 import type { AppConfig } from '@core/config';
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
-import { newId } from '@core/kernel';
+import { newId, systemClock, type Clock } from '@core/kernel';
 import type { TransactionalExecutor } from '@core/platform';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import {
@@ -12,8 +18,12 @@ import {
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 import type pg from 'pg';
+import type { CookiePolicy } from './auth/cookies.ts';
+import { assertCsrf } from './auth/csrf.ts';
+import { SecurityRuntime } from './auth/runtime.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
+import { authRoutes } from './routes/auth.ts';
 import { healthRoutes } from './routes/health.ts';
 
 export const CORRELATION_ID_HEADER = 'x-correlation-id';
@@ -27,18 +37,34 @@ export interface BuildAppOptions {
    * shell against an unreachable pool without a migrated database behind it.
    */
   readonly platformDb?: TransactionalExecutor;
+  /** Injectable so a session-expiry test does not have to wait eight hours. */
+  readonly clock?: Clock;
+}
+
+/**
+ * The shell and the key custody that outlives one request.
+ *
+ * `security` is returned rather than hidden inside the instance because exactly
+ * one caller needs it — `main.ts`, to zero the KEK on `SIGTERM` (P0-2). Hanging it
+ * off `app` as a decorator would put the custodian of the key-encryption key on an
+ * object that every plugin and every route handler already holds a reference to.
+ */
+export interface BuiltApp {
+  readonly app: FastifyInstance;
+  readonly security: SecurityRuntime;
 }
 
 /**
  * The API shell.
  *
- * Deliberately empty of domain routes: WP 0.2 onward mount their own context
- * routers here. What this file owns is the cross-cutting behaviour every route
- * inherits — correlation ids, redacted structured logs, schema-first validation
- * and serialisation, and RFC 9457 errors.
+ * What this file owns is the cross-cutting behaviour every route inherits —
+ * correlation ids, redacted structured logs, schema-first validation and
+ * serialisation, RFC 9457 errors, cookie parsing and the CSRF gate — plus the
+ * composition of the contexts whose routes it mounts.
  */
-export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
+export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   const { config, pool } = options;
+  const clock = options.clock ?? systemClock;
 
   const app = Fastify({
     logger: buildLoggerOptions(config),
@@ -67,6 +93,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  // Parsing only. No `secret`, so no signed cookies: the session cookie is an
+  // opaque 256-bit random token whose authority comes from a row in `sessions`,
+  // and a signature over it would add a second key to protect for no gain.
+  await app.register(fastifyCookie);
+
   await app.register(fastifySwagger, {
     openapi: {
       openapi: '3.1.0',
@@ -79,13 +110,36 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         license: { name: 'MIT', identifier: 'MIT' },
       },
       servers: [{ url: config.env.BASE_URL }],
-      tags: [{ name: 'system', description: 'Liveness, readiness, and operational endpoints.' }],
+      tags: [
+        { name: 'system', description: 'Liveness, readiness, and operational endpoints.' },
+        {
+          name: 'auth',
+          description:
+            'Passkeys, TOTP fallback, recovery codes, sessions and step-up. Tokens travel in ' +
+            '`__Host-` cookies and never in a response body.',
+        },
+      ],
     },
     transform: jsonSchemaTransform,
   });
 
   app.addHook('onSend', async (request, reply) => {
     reply.header(CORRELATION_ID_HEADER, request.id);
+  });
+
+  /**
+   * The CSRF gate, applied to **every** mutation in the application rather than to
+   * the auth routes alone (P1-3).
+   *
+   * Mounting it at the root is the point: a cross-site `POST /connections` that
+   * rides an ambient session cookie is exactly as damaging as a cross-site
+   * `POST /auth/logout`, and a per-router hook is a control that a future router
+   * forgets to add. `assertCsrf` returns immediately for safe methods, so the cost
+   * on a `GET` is one `Set.has`.
+   */
+  const cookiePolicy: CookiePolicy = { secure: config.env.SESSION_COOKIE_SECURE };
+  app.addHook('onRequest', async (request) => {
+    assertCsrf(request, { allowedOrigins: config.allowedOrigins, cookiePolicy });
   });
 
   app.setErrorHandler((error, request, reply) => {
@@ -128,5 +182,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     }),
   );
 
-  return app;
+  // Constructed, not initialised: deriving the KEK is six seconds of Argon2id and
+  // must not happen inside `buildApp`, which `emit-openapi` and the shell tests
+  // call with no database behind them. `main.ts` initialises before it listens;
+  // `/auth/unlock-state` initialises lazily so that `just bootstrap-user` can
+  // create the user while the API is already up.
+  const security = new SecurityRuntime({ config, db: pool, clock, logger: app.log });
+
+  await app.register(authRoutes({ runtime: security, cookiePolicy }));
+
+  return { app, security };
 }

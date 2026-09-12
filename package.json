@@ -16,7 +16,7 @@
     "lint:schema-ownership": "node scripts/check-schema-ownership.ts",
     "lint:format": "prettier --check .",
     "format": "prettier --write .",
-    "test": "vitest run",
+    "test": "vitest run && pnpm --filter @app/web test",
     "test:watch": "vitest",
     "migrate": "node packages/db/src/cli/migrate.ts",
     "openapi": "node apps/api/src/cli/emit-openapi.ts",

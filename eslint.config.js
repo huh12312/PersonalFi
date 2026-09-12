@@ -70,8 +70,19 @@ export default tseslint.config(
     files: ['apps/**/*.ts', 'packages/**/*.ts'],
     // Test files and the fixtures they boot are exempt: a harness that spawns a
     // worker process has to read the environment it was given, and a test that
-    // waits for a deadline has to read a wall clock.
-    ignores: ['packages/config/src/**', '**/*.test.ts', '**/test/**', '**/drizzle.config.ts'],
+    // waits for a deadline has to read a wall clock. `apps/web/playwright.config.ts`
+    // is exempt for the same reason as `drizzle.config.ts`: it is a build-tool
+    // config consumed only by the Playwright CLI, never bundled into the app, and
+    // `process.env.CI` is the standard, documented way every Playwright config
+    // detects a CI runner — there is no `@core/config` to route it through outside
+    // a server process.
+    ignores: [
+      'packages/config/src/**',
+      '**/*.test.ts',
+      '**/test/**',
+      '**/drizzle.config.ts',
+      'apps/web/playwright.config.ts',
+    ],
     rules: {
       'no-restricted-properties': [
         'error',
@@ -122,9 +133,17 @@ export default tseslint.config(
   //
   // The failure this prevents is not a broken cipher. It is the second call site
   // that reuses a nonce, drops the AAD, or compares a tag with `===`.
+  //
+  // `packages/db/src/migrate.ts` is the one carve-out, and it is forced rather
+  // than chosen: it takes a SHA-256 of each migration *file* so the runner can
+  // refuse to start when an already-merged migration changes. That is file
+  // integrity, not application cryptography — there is no key, no nonce and no
+  // AAD to get wrong — and it could not reach `@core/secretbox` in any case,
+  // because `@core/secretbox` depends on `@core/db` and the import would be a
+  // cycle.
   {
     files: ['apps/**/*.ts', 'packages/**/*.ts'],
-    ignores: ['packages/secretbox/src/primitives.ts'],
+    ignores: ['packages/secretbox/src/primitives.ts', 'packages/db/src/migrate.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -169,9 +188,23 @@ export default tseslint.config(
   },
 
   // Config files and scripts are plain JS and are not part of the type program.
+  //
+  // They also run on Node, and `no-undef` has no way to know that: the TypeScript
+  // files get `process`, `Buffer` and friends from `@types/node`, which a `.js` or
+  // `.mjs` file has no equivalent of. Declaring the globals here is the only place
+  // it can be done — ESLint 10 removed `/* eslint-env node */` — and it is why
+  // `docker/entrypoint.mjs` and this file itself lint at all.
+  //
+  // `languageOptions` is merged with `disableTypeChecked`'s rather than spread
+  // beside it: that preset sets `languageOptions.parserOptions` to turn the type
+  // program off, so an object spread in either order would silently drop one half.
   {
     files: ['**/*.js', '**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      ...tseslint.configs.disableTypeChecked.languageOptions,
+      globals: { ...globals.node },
+    },
   },
 
   // apps/web: browser globals (no-undef), JSX a11y, and React hooks

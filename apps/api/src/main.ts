@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   });
 
   const platform = buildPlatform({ config, pool });
-  const app = await buildApp({ config, pool, platformDb: platform.db });
+  const { app, security } = await buildApp({ config, pool, platformDb: platform.db });
 
   // Recorded at boot, in the log and in `config_snapshots`, so "what changed?"
   // after a behaviour shift is answerable months later rather than argued about.
@@ -45,15 +45,30 @@ async function main(): Promise<void> {
   }
   app.log.info({ config: describeConfig(config), configHash }, 'configuration loaded');
 
+  // Derive the KEK before the socket opens, so the first request after a restart
+  // does not pay six seconds of Argon2id (03 §2.2 Tier 1: boot is unattended).
+  //
+  // Deliberately not fatal. `SecurityRuntime` resolves to `locked`/`not_started`
+  // rather than throwing when there is no user yet or the passphrase does not
+  // match, and in both states the right behaviour is an API that serves /health
+  // and /auth/unlock-state and says what is wrong — not a crash loop that tells
+  // the operator nothing.
+  await security.initialise();
+
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'shutting down');
     try {
       await app.close();
+      // After the last request has drained: zeroes the KEK and every cached DEK
+      // (P0-2), so a heap dump or a core file taken after shutdown does not
+      // contain the key that opens every provider credential.
+      security.destroy();
       await platform.flags.close();
       await pool.end();
       process.exit(0);
     } catch (error) {
       app.log.error({ err: error }, 'shutdown failed');
+      security.destroy();
       process.exit(1);
     }
   };

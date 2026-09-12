@@ -1,0 +1,150 @@
+// SPDX-License-Identifier: MIT
+import { useNavigate } from '@tanstack/react-router';
+import { startRegistration } from '@simplewebauthn/browser';
+import { CheckCircle2, Loader2, ShieldPlus } from 'lucide-react';
+import { useState } from 'react';
+import type { ReactNode } from 'react';
+
+import {
+  useFinishRegistrationMutation,
+  useStartRegistrationMutation,
+} from '../../api/pending-contracts.ts';
+import { Button } from '../../components/ui/button.tsx';
+import { Input } from '../../components/ui/input.tsx';
+import { Label } from '../../components/ui/label.tsx';
+
+export interface PasskeyRegisterFlowProps {
+  /** The one-time enrolment token from `just bootstrap-user` (first run). Omitted when a stepped-up session is adding a second authenticator instead. */
+  registrationToken?: string | undefined;
+}
+
+type Step = 'first' | 'second' | 'done';
+
+/**
+ * First-run passkey enrolment (05-frontend-architecture.md §7.1): register
+ * one passkey, then immediately prompt for a **second** — "a single
+ * authenticator on a self-hosted app is a lockout waiting to happen." The
+ * second step is explicitly skippable; it is a recommendation, not a gate.
+ */
+export function PasskeyRegisterFlow({ registrationToken }: PasskeyRegisterFlowProps) {
+  const navigate = useNavigate();
+  const [step, setStep] = useState<Step>('first');
+  const [friendlyName, setFriendlyName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const startMutation = useStartRegistrationMutation();
+  const finishMutation = useFinishRegistrationMutation();
+  const busy = startMutation.isPending || finishMutation.isPending;
+
+  async function enrol(name: string): Promise<void> {
+    setError(null);
+    try {
+      const { userId, options } = await startMutation.mutateAsync(
+        step === 'first' && registrationToken !== undefined ? { registrationToken } : {},
+      );
+      const response = await startRegistration({ optionsJSON: options as never });
+      const result = await finishMutation.mutateAsync({
+        userId,
+        friendlyName: name,
+        response: response as never,
+      });
+      setStep(result.enrolSecondAuthenticator && step === 'first' ? 'second' : 'done');
+    } catch (cause) {
+      setError(
+        cause instanceof Error && cause.name === 'NotAllowedError'
+          ? 'That was cancelled. Try again when you’re ready.'
+          : 'Could not create that passkey. Try again.',
+      );
+    }
+  }
+
+  if (step === 'done') {
+    return (
+      <Frame>
+        <IconCircle tone="good">
+          <CheckCircle2 size={22} aria-hidden="true" />
+        </IconCircle>
+        <h1 className="mt-3 text-h2 text-text-primary">You’re all set</h1>
+        <p className="mt-1 text-small text-text-muted">Your passkeys are ready.</p>
+        <Button className="mt-5 w-full" onClick={() => void navigate({ to: '/' })}>
+          Continue to PersonalFi
+        </Button>
+      </Frame>
+    );
+  }
+
+  return (
+    <Frame>
+      <IconCircle tone="accent">
+        <ShieldPlus size={22} aria-hidden="true" />
+      </IconCircle>
+      <h1 className="mt-3 text-h2 text-text-primary">
+        {step === 'first' ? 'Set up a passkey' : 'Add a backup passkey'}
+      </h1>
+      <p className="mt-1 text-small text-text-muted">
+        {step === 'first'
+          ? 'Your face, fingerprint, or device PIN replaces a password.'
+          : 'A phone, a security key, or another browser — so one lost device can’t lock you out.'}
+      </p>
+
+      <form
+        className="mt-5 text-left"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void enrol(friendlyName || (step === 'first' ? 'My passkey' : 'Backup passkey'));
+        }}
+      >
+        <Label htmlFor="friendly-name">Name this passkey</Label>
+        <Input
+          id="friendly-name"
+          className="mt-1.5"
+          placeholder={step === 'first' ? 'e.g. MacBook Touch ID' : 'e.g. iPhone'}
+          value={friendlyName}
+          onChange={(event) => setFriendlyName(event.target.value)}
+          maxLength={64}
+        />
+        {error !== null && (
+          <p role="alert" className="mt-1.5 text-small text-status-critical">
+            {error}
+          </p>
+        )}
+        <Button type="submit" className="mt-4 w-full" disabled={busy}>
+          {busy && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+          {step === 'first' ? 'Create passkey' : 'Add passkey'}
+        </Button>
+        {step === 'second' && (
+          <button
+            type="button"
+            className="mt-3 w-full text-small text-text-muted hover:underline"
+            onClick={() => setStep('done')}
+          >
+            Skip for now
+          </button>
+        )}
+      </form>
+    </Frame>
+  );
+}
+
+function Frame({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-bg-page px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-border-hairline bg-bg-surface p-6 text-center">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function IconCircle({ tone, children }: { tone: 'good' | 'accent'; children: ReactNode }) {
+  return (
+    <div
+      className={
+        'mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-bg-subtle ' +
+        (tone === 'good' ? 'text-status-good' : 'text-accent-text')
+      }
+    >
+      {children}
+    </div>
+  );
+}

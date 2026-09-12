@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: MIT
+#
+# Single source of truth for the license gate (memo 06 §5.4, master plan D15,
+# P0 §4 supply-chain items under D14). Consumed by scripts/check-licenses.ts
+# (`just licenses`, CI's `license-gate` job) — one list, not four.
+#
+# Scope: the RUNTIME dependency tree only, i.e. `pnpm licenses list --prod`
+# at the workspace root. devDependencies are exempt from the `allow` /
+# `reviewRequired` / `deny` copyleft checks below (we do not distribute them)
+# but are NOT exempt from `denyPackages` or the `UNKNOWN`/unparseable rule —
+# an undeclared license is all-rights-reserved by default, dev or not.
+
+# Clean, no-review-needed licenses for runtime dependencies.
+allow:
+  - MIT
+  - MIT-0
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - Apache-2.0
+  - ISC
+  - 0BSD
+  - Unlicense
+  - CC0-1.0
+  - Python-2.0
+  - PSF-2.0
+  - Zlib
+  - BlueOak-1.0.0
+  # Attribution-only data license (browser/caniuse data via caniuse-lite,
+  # pulled in transitively by autoprefixer/browserslist). Permissive, no
+  # copyleft, dev-only in this tree today — allowed outright rather than
+  # routed to review.
+  - CC-BY-4.0
+
+# Weak/file-level copyleft: allowed for an unmodified, dynamically-consumed
+# dependency (we never statically link or vendor-modify these), but flagged
+# in THIRD_PARTY.md and the gate's output for a human look rather than a
+# silent pass. MPL-2.0's only known occurrence in this tree (lightningcss,
+# pulled in by Vite) is devDependency-only and must never reach the runtime
+# image — verified separately by grepping the built image (WP 0.4 evidence).
+reviewRequired:
+  - MPL-2.0
+  - EPL-2.0
+  - CDDL-1.0
+  - CDDL-1.1
+  - LGPL-2.0
+  - LGPL-2.0-only
+  - LGPL-2.0-or-later
+  - LGPL-2.1
+  - LGPL-2.1-only
+  - LGPL-2.1-or-later
+  - LGPL-3.0
+  - LGPL-3.0-only
+  - LGPL-3.0-or-later
+
+# Hard fail — the build stops. Prefix matching applies (e.g. `GPL-2.0` also
+# catches `GPL-2.0-only` / `GPL-2.0-or-later` / `GPL-2.0+`), because SPDX
+# expression style varies by package. `UNKNOWN` covers anything pnpm could
+# not resolve to a license at all.
+deny:
+  - GPL-1.0
+  - GPL-2.0
+  - GPL-3.0
+  - AGPL-1.0
+  - AGPL-3.0
+  - SSPL-1.0
+  - BUSL-1.1
+  - Elastic-2.0
+  - Commons-Clause
+  - CC-BY-NC
+  - UNKNOWN
+
+# Named-package deny-list: fails regardless of the license the package
+# declares. Seeded from master plan D15 plus the WP 0.4 brief's additions —
+# either a licensing trap (dual-licensed/relicensed upstream), a native
+# binding this Alpine/no-native-deps policy avoids on principle (D13:
+# "use @node-rs/argon2, avoid better-sqlite3"), or a maintenance/security
+# posture we don't want silently reappearing as a transitive dependency.
+# Case-sensitive, exact package name.
+denyPackages:
+  - hyperformula
+  - Levenshtein
+  - python-Levenshtein
+  - fuzzywuzzy
+  - ofxtools
+  - beancount
+  - sodium-native
+  - argon2
+  - better-sqlite3

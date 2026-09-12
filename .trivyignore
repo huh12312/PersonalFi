@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: MIT
+#
+# Trivy vulnerability suppressions (06 §5.5). Every entry is:
+#
+#   <CVE-ID> exp:YYYY-MM-DD  ## expires: YYYY-MM-DD — one-line reason
+#
+# `exp:YYYY-MM-DD` is trivy's own syntax — it stops honoring the suppression
+# after that date, so the finding comes back on its own rather than staying
+# silenced forever. `## expires: ...` restates the same date in a form
+# `trivy-fs`'s own CI step also greps for, as a second, tool-independent
+# tripwire. A suppression is a snooze, not a decision.
+
+# js-yaml 4.2.0 (CVE-2026-59869, CVE-2026-84375, GHSA-5p4m-2wfm-xmqj: YAML
+# parser DoS / quadratic-CPU findings) — transitive via
+# @hey-api/json-schema-ref-parser <- @hey-api/openapi-ts, a WP 0.5
+# (apps/web) build-time OpenAPI codegen devDependency. It never reaches any
+# image WP 0.4 builds: docker/api.Dockerfile's `pnpm install --prod
+# --filter-prod=@app/api...` excludes devDependencies and `rm -rf apps/web`
+# entirely (verified — see docs/evidence/phase-0/wp0.4-container-hardening.md).
+# The fix is a lockfile bump, which is out of this package's scope (WP 0.4 may
+# not run `pnpm install` or touch dependencies — see justfile/CI collision
+# notes); flagged for whichever package owns apps/web's dependency tree.
+CVE-2026-59869 exp:2026-10-12 ## expires: 2026-10-12 — js-yaml transitive via @hey-api/openapi-ts (apps/web devDependency, never shipped); needs a lockfile bump outside WP 0.4's scope
+CVE-2026-84375 exp:2026-10-12 ## expires: 2026-10-12 — js-yaml transitive via @hey-api/openapi-ts (apps/web devDependency, never shipped); needs a lockfile bump outside WP 0.4's scope
+GHSA-5p4m-2wfm-xmqj exp:2026-10-12 ## expires: 2026-10-12 — js-yaml transitive via @hey-api/openapi-ts (apps/web devDependency, never shipped); needs a lockfile bump outside WP 0.4's scope
+
+# personalfi/proxy's `usr/bin/caddy` binary (gobinary scanner): stale
+# golang.org/x/net, golang.org/x/crypto, golang.org/x/text, gRPC-Go, and Go
+# stdlib versions baked into upstream `caddy:2-alpine`'s last compiled
+# build — confirmed this is upstream's *current* published image, not a
+# stale pin on our side (`docker pull caddy:2-alpine` resolves to the exact
+# digest docker/caddy.Dockerfile already pins). docker/caddy.Dockerfile's
+# `apk del curl c-ares` + `apk upgrade libssl3 libcrypto3` already removed
+# every *Alpine-package* finding this image had (23 of the original 40); what
+# remains is compiled into the Go binary itself and needs an upstream
+# rebuild, not an apk operation. Renovate watches this image's digest — a
+# fixed upstream build becomes a routine bump. Short expiry (2 weeks, not the
+# usual month) because this is upstream's problem to fix, and it should not
+# quietly become permanent.
+CVE-2026-27145 exp:2026-09-26 ## expires: 2026-09-26 — stale Go stdlib in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-33818 exp:2026-09-26 ## expires: 2026-09-26 — stale Go stdlib in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-39821 exp:2026-09-26 ## expires: 2026-09-26 — stale Go stdlib in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-39822 exp:2026-09-26 ## expires: 2026-09-26 — stale Go stdlib in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-42504 exp:2026-09-26 ## expires: 2026-09-26 — stale Go stdlib in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-46600 exp:2026-09-26 ## expires: 2026-09-26 — stale golang.org/x/net in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-56852 exp:2026-09-26 ## expires: 2026-09-26 — stale golang.org/x/text in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-56853 exp:2026-09-26 ## expires: 2026-09-26 — stale Go stdlib in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-56854 exp:2026-09-26 ## expires: 2026-09-26 — stale golang.org/x/crypto in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-56858 exp:2026-09-26 ## expires: 2026-09-26 — stale Go stdlib in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-56859 exp:2026-09-26 ## expires: 2026-09-26 — stale Go stdlib in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-56860 exp:2026-09-26 ## expires: 2026-09-26 — stale Go stdlib in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-56862 exp:2026-09-26 ## expires: 2026-09-26 — stale Go stdlib in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-84304 exp:2026-09-26 ## expires: 2026-09-26 — stale google.golang.org/grpc in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+CVE-2026-84445 exp:2026-09-26 ## expires: 2026-09-26 — stale google.golang.org/grpc in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
+GHSA-hrxh-6v49-42gf exp:2026-09-26 ## expires: 2026-09-26 — stale dependency in upstream caddy:2-alpine's compiled binary; needs an upstream image rebuild
