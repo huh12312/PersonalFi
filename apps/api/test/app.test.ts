@@ -131,6 +131,60 @@ describe('API shell', () => {
     await app.close();
   });
 
+  /**
+   * Every `$ref` in the document resolves to a schema that is actually present.
+   *
+   * A regression test with an incident behind it: the swagger plugin was
+   * registered with `transform` but not `transformObject`, so routes were
+   * rewritten to `#/components/schemas/Problem` while `components.schemas` stayed
+   * `{}`. Fastify serves that document without complaint — nothing validates a
+   * served spec — and the damage lands a layer away, where `openapi-ts` turns
+   * every dangling ref into `unknown`. A generated client that types its payloads
+   * as `unknown` still compiles, which is what makes it expensive: the UI keeps
+   * building, and the types stop meaning anything.
+   *
+   * Written against the whole document rather than a list of expected names, so
+   * it covers the routes WP 0.3 onward adds without anyone remembering to extend
+   * it.
+   */
+  it('emits a resolvable schema for every $ref it generates', async () => {
+    const { app } = await buildApp({ config: testConfig(), pool: unreachablePool });
+    await app.ready();
+    const spec = app.swagger() as {
+      components?: { schemas?: Record<string, unknown> };
+    };
+
+    const defined = new Set(Object.keys(spec.components?.schemas ?? {}));
+    expect(defined.size).toBeGreaterThan(0);
+
+    const referenced = new Set<string>();
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (typeof node !== 'object' || node === null) return;
+      for (const [key, value] of Object.entries(node)) {
+        if (key === '$ref' && typeof value === 'string') referenced.add(value);
+        else walk(value);
+      }
+    };
+    walk(spec);
+
+    // Every ref is local and resolvable. A remote `$ref` would also be a bug here:
+    // the spec is committed and consumed offline by the client generator.
+    const dangling = [...referenced].filter((ref) => {
+      const name = ref.replace('#/components/schemas/', '');
+      return !ref.startsWith('#/components/schemas/') || !defined.has(name);
+    });
+    expect(dangling, `unresolvable $ref(s): ${dangling.join(', ')}`).toEqual([]);
+
+    // The named response models the UI actually binds to. Listed explicitly
+    // because the sweep above would still pass if they silently stopped being
+    // hoisted and every route inlined its schema instead.
+    for (const name of ['Problem', 'AuthOk', 'UnlockState', 'SessionState', 'Credential']) {
+      expect(defined, `${name} must be a named schema`).toContain(name);
+    }
+    await app.close();
+  });
+
   it('redacts every credential-shaped field name', () => {
     // This list is a P0 control: no token and no account number may reach a log.
     for (const path of [

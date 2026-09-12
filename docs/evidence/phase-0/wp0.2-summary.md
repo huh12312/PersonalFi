@@ -174,6 +174,50 @@ Only credentials are sealed in Phase 0. Bulk encryption of memo and description
 columns is P2. The `epoch` key policy exists _now_ precisely so that adding it
 later is a backfill rather than a schema migration.
 
+### Fixed in passing: `ROLE` rejected the migrator
+
+`environmentSchema.ROLE` was `z.enum(['api', 'worker'])` while
+`docker/entrypoint.mjs` dispatches on `api | worker | migrator` and `compose.yml`
+sets `ROLE: migrator` on the one-shot migrator container. `loadConfig` runs
+_before_ the first migration, so the migrator exited 78 (EX_CONFIG) and, because
+`api` and `worker` gate on it completing, `docker compose up` never started the
+stack — on a config key nothing branches on.
+
+The enum is now `['api', 'worker', 'migrator', 'cli']`, matching `ProcessRole` in
+`@core/platform` and adding `cli` for the operator commands
+(`bootstrap-user`, an ad-hoc `migrate`). The three lists cannot be unified into
+one type — `@core/config` may import nothing but `@core/kernel`, and
+`@core/platform` may not import `@core/config`, so the arrows never point back —
+so `load.test.ts` pins the accepted set instead, with the sync obligation named in
+both files.
+
+### Fixed in passing: the OpenAPI document had no `components.schemas`
+
+`@fastify/swagger` was registered with `transform` but not `transformObject`.
+`transform` rewrites each route's schema to a `$ref`, but only `transformObject`
+hoists the `.meta({ id })` schemas into `components.schemas` — so the committed
+spec carried eight `$ref`s (`Problem`, `AuthOk`, `UnlockState`, `SessionState`,
+`Credential`, `SecurityEvent`, `HealthResponse`, `ReadyResponse`) against an empty
+`components.schemas: {}`.
+
+Nothing validates a served spec, so this was silent on the API side. The damage
+landed a layer away: `openapi-ts` resolves a dangling ref to `unknown`, and a
+generated client that types its payloads as `unknown` still compiles — the UI
+keeps building and the types quietly stop meaning anything.
+
+One line in `apps/api/src/app.ts` (`transformObject: jsonSchemaTransformObject`).
+`apps/web`'s `pnpm --filter @app/web gen` now emits real models — `AuthOk`,
+`UnlockState`, `SessionState`, `Credential`, `SecurityEvent`, `Problem` — with the
+Zod `.describe()` text carried through as doc comments. The only remaining
+`unknown`s in the generated types are the `[key: string]: unknown` index
+signatures on the WebAuthn payloads and `SecurityEvent.detail`, which are opaque
+**by design** (see the note on `webauthnPayload` in `routes/auth.ts`).
+
+`apps/api/test/app.test.ts` — _"emits a resolvable schema for every `$ref` it
+generates"_ — now walks the whole document and fails on any unresolvable ref, so
+this cannot recur for the routes later phases add. Verified by reverting the
+one-line fix and watching that test, and only that test, go red.
+
 ### Carried forward
 
 | Item                                                         | Owner                                                                                                                                                                                           |

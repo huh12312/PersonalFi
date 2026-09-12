@@ -12,12 +12,27 @@ export const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
   /**
-   * Which process this is. One image, two commands (08 §3.2): `api` serves HTTP,
-   * `worker` runs the consumer pump, the job runners, and the scheduler. Keeping
-   * it in config rather than in the entrypoint means every log line and every
-   * `config_snapshots` row says which role wrote it.
+   * Which process this is. One image, several commands (08 §3.2, D13): `api`
+   * serves HTTP, `worker` runs the consumer pump, the job runners and the
+   * scheduler, `migrator` is the one-shot that applies migrations before either
+   * starts, and `cli` covers the operator commands (`bootstrap-user`, an ad-hoc
+   * `migrate`). Keeping it in config rather than in the entrypoint means every log
+   * line and every `config_snapshots` row says which role wrote it.
+   *
+   * **This list must stay a superset of the roles anything else can set.** It is
+   * validated at boot, before a socket is opened or a migration is applied, so a
+   * role missing from here is not a mislabelled log line — it is a container that
+   * exits 78 and takes the stack down with it. Two places set it:
+   *
+   * - `docker/entrypoint.mjs`, whose `ENTRYPOINTS` map dispatches on the same
+   *   strings (`api`, `worker`, `migrator`);
+   * - `ProcessRole` in `@core/platform`, the type `recordConfigSnapshot` accepts.
+   *
+   * They cannot share one type: `@core/config` may import nothing but
+   * `@core/kernel`, and `@core/platform` may not import `@core/config` at all, so
+   * the arrows never point back. `load.test.ts` pins the set instead.
    */
-  ROLE: z.enum(['api', 'worker']).default('api'),
+  ROLE: z.enum(['api', 'worker', 'migrator', 'cli']).default('api'),
 
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   LOG_PRETTY: z.stringbool().default(false),

@@ -10,7 +10,791 @@
     }
   },
   "components": {
-    "schemas": {}
+    "schemas": {
+      "ProblemInput": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Stable URI identifying the problem kind."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short, human-readable summary. Does not change per occurrence."
+          },
+          "status": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "HTTP status code."
+          },
+          "detail": {
+            "description": "Explanation specific to this occurrence.",
+            "type": "string"
+          },
+          "instance": {
+            "description": "URI of the specific occurrence.",
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable machine code the client switches on."
+          },
+          "correlationId": {
+            "type": "string",
+            "description": "Quote this when reporting the failure."
+          },
+          "errors": {
+            "description": "Field-level validation failures.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "message"
+              ]
+            }
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code",
+          "correlationId"
+        ],
+        "description": "RFC 9457 problem details."
+      },
+      "AuthOkInput": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "UnlockStateInput": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "unlocked",
+              "locked"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "no_passphrase",
+              "passphrase_mismatch",
+              "not_started"
+            ]
+          },
+          "bootstrapped": {
+            "type": "boolean",
+            "description": "Whether a user account exists yet."
+          },
+          "kekVersion": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "rotationRecommended": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "state",
+          "bootstrapped"
+        ]
+      },
+      "SessionStateInput": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "displayTimezone": {
+            "type": "string"
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "webauthn",
+              "totp",
+              "recovery_code",
+              "bootstrap"
+            ]
+          },
+          "trustedDevice": {
+            "type": "boolean"
+          },
+          "fresh": {
+            "type": "boolean",
+            "description": "Whether a step-up assertion is still within its window."
+          },
+          "idleExpiresAt": {
+            "type": "string"
+          },
+          "absoluteExpiresAt": {
+            "type": "string"
+          },
+          "credentialCount": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "totpEnrolled": {
+            "type": "boolean"
+          },
+          "recoveryCodesRemaining": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "displayTimezone",
+          "authMethod",
+          "trustedDevice",
+          "fresh",
+          "idleExpiresAt",
+          "absoluteExpiresAt",
+          "credentialCount",
+          "totpEnrolled",
+          "recoveryCodesRemaining"
+        ]
+      },
+      "CredentialInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "credentialId": {
+            "type": "string"
+          },
+          "friendlyName": {
+            "type": "string"
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "aaguid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "backedUp": {
+            "type": "boolean"
+          },
+          "deviceType": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "credentialId",
+          "friendlyName",
+          "transports",
+          "aaguid",
+          "backedUp",
+          "deviceType",
+          "createdAt",
+          "lastUsedAt"
+        ]
+      },
+      "SecurityEventInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "occurredAt",
+          "kind",
+          "outcome",
+          "detail"
+        ]
+      },
+      "HealthResponseInput": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok"
+          },
+          "service": {
+            "type": "string",
+            "const": "api"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service",
+          "version"
+        ]
+      },
+      "OutboxHealthInput": {
+        "type": "object",
+        "properties": {
+          "maxSeq": {
+            "type": "string",
+            "description": "Highest event sequence, as a string: it is a bigint."
+          },
+          "maxLagEvents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Events the furthest-behind consumer has not read."
+          },
+          "oldestUnprocessedAgeSeconds": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "failedConsumers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Consumers stopped at an event they cannot handle."
+          }
+        },
+        "required": [
+          "maxSeq",
+          "maxLagEvents",
+          "oldestUnprocessedAgeSeconds",
+          "failedConsumers"
+        ]
+      },
+      "QueueHealthInput": {
+        "type": "object",
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "running": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "dead": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "stalled": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Running jobs whose worker stopped heartbeating."
+          },
+          "oldestPendingAgeSeconds": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "pending",
+          "running",
+          "dead",
+          "stalled",
+          "oldestPendingAgeSeconds"
+        ]
+      },
+      "ReadyResponseInput": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "degraded"
+            ]
+          },
+          "database": {
+            "type": "string",
+            "const": "reachable"
+          },
+          "migrations": {
+            "type": "string",
+            "const": "current"
+          },
+          "outbox": {
+            "$ref": "#/components/schemas/OutboxHealthInput"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueueHealthInput"
+          },
+          "degradedReasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "status",
+          "database",
+          "migrations"
+        ]
+      },
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Stable URI identifying the problem kind."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short, human-readable summary. Does not change per occurrence."
+          },
+          "status": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "HTTP status code."
+          },
+          "detail": {
+            "description": "Explanation specific to this occurrence.",
+            "type": "string"
+          },
+          "instance": {
+            "description": "URI of the specific occurrence.",
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable machine code the client switches on."
+          },
+          "correlationId": {
+            "type": "string",
+            "description": "Quote this when reporting the failure."
+          },
+          "errors": {
+            "description": "Field-level validation failures.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "message"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code",
+          "correlationId"
+        ],
+        "additionalProperties": false,
+        "description": "RFC 9457 problem details."
+      },
+      "AuthOk": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "additionalProperties": false
+      },
+      "UnlockState": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "unlocked",
+              "locked"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "no_passphrase",
+              "passphrase_mismatch",
+              "not_started"
+            ]
+          },
+          "bootstrapped": {
+            "type": "boolean",
+            "description": "Whether a user account exists yet."
+          },
+          "kekVersion": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "rotationRecommended": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "state",
+          "bootstrapped"
+        ],
+        "additionalProperties": false
+      },
+      "SessionState": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "displayTimezone": {
+            "type": "string"
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "webauthn",
+              "totp",
+              "recovery_code",
+              "bootstrap"
+            ]
+          },
+          "trustedDevice": {
+            "type": "boolean"
+          },
+          "fresh": {
+            "type": "boolean",
+            "description": "Whether a step-up assertion is still within its window."
+          },
+          "idleExpiresAt": {
+            "type": "string"
+          },
+          "absoluteExpiresAt": {
+            "type": "string"
+          },
+          "credentialCount": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "totpEnrolled": {
+            "type": "boolean"
+          },
+          "recoveryCodesRemaining": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "displayTimezone",
+          "authMethod",
+          "trustedDevice",
+          "fresh",
+          "idleExpiresAt",
+          "absoluteExpiresAt",
+          "credentialCount",
+          "totpEnrolled",
+          "recoveryCodesRemaining"
+        ],
+        "additionalProperties": false
+      },
+      "Credential": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "credentialId": {
+            "type": "string"
+          },
+          "friendlyName": {
+            "type": "string"
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "aaguid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "backedUp": {
+            "type": "boolean"
+          },
+          "deviceType": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "credentialId",
+          "friendlyName",
+          "transports",
+          "aaguid",
+          "backedUp",
+          "deviceType",
+          "createdAt",
+          "lastUsedAt"
+        ],
+        "additionalProperties": false
+      },
+      "SecurityEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "occurredAt",
+          "kind",
+          "outcome",
+          "detail"
+        ],
+        "additionalProperties": false
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok"
+          },
+          "service": {
+            "type": "string",
+            "const": "api"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "OutboxHealth": {
+        "type": "object",
+        "properties": {
+          "maxSeq": {
+            "type": "string",
+            "description": "Highest event sequence, as a string: it is a bigint."
+          },
+          "maxLagEvents": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Events the furthest-behind consumer has not read."
+          },
+          "oldestUnprocessedAgeSeconds": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "failedConsumers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Consumers stopped at an event they cannot handle."
+          }
+        },
+        "required": [
+          "maxSeq",
+          "maxLagEvents",
+          "oldestUnprocessedAgeSeconds",
+          "failedConsumers"
+        ],
+        "additionalProperties": false
+      },
+      "QueueHealth": {
+        "type": "object",
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "running": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "dead": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "stalled": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Running jobs whose worker stopped heartbeating."
+          },
+          "oldestPendingAgeSeconds": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "pending",
+          "running",
+          "dead",
+          "stalled",
+          "oldestPendingAgeSeconds"
+        ],
+        "additionalProperties": false
+      },
+      "ReadyResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "degraded"
+            ]
+          },
+          "database": {
+            "type": "string",
+            "const": "reachable"
+          },
+          "migrations": {
+            "type": "string",
+            "const": "current"
+          },
+          "outbox": {
+            "$ref": "#/components/schemas/OutboxHealth"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueueHealth"
+          },
+          "degradedReasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "status",
+          "database",
+          "migrations"
+        ],
+        "additionalProperties": false
+      }
+    }
   },
   "paths": {
     "/health": {

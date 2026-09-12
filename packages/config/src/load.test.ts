@@ -45,6 +45,42 @@ describe('loadConfig', () => {
     expect(config.env.DEMO_MODE).toBe(false);
     expect(config.isTest).toBe(true);
     expect(config.isProduction).toBe(false);
+    // `api` so that `docker run <image>` with no ROLE does something sane.
+    expect(config.env.ROLE).toBe('api');
+  });
+
+  /**
+   * Every role the image can actually be started as must load.
+   *
+   * This is a regression test with a real incident behind it: `ROLE` was
+   * `z.enum(['api', 'worker'])` while `docker/entrypoint.mjs` dispatched on
+   * `api | worker | migrator` and `compose.yml` set `ROLE: migrator` on the
+   * one-shot migrator. `loadConfig` runs *before* the first migration, so the
+   * migrator exited 78 (EX_CONFIG), and because `api` and `worker` gate on it
+   * completing, the whole stack never started — on a config key that nothing
+   * branches on.
+   *
+   * The list is duplicated here on purpose. `@core/config` may import nothing but
+   * `@core/kernel`, so it cannot reference `ProcessRole` from `@core/platform`,
+   * and reading `entrypoint.mjs` from a unit test would couple config to the
+   * Docker layout. A duplicated list with a failing test is the cheap half of
+   * that trade; a silent 78 in production is the expensive half.
+   */
+  it('accepts every role the entrypoint and the snapshot table can produce', () => {
+    // Keep in sync with `ENTRYPOINTS` in docker/entrypoint.mjs and `ProcessRole`
+    // in packages/platform/src/config-snapshot.ts.
+    for (const role of ['api', 'worker', 'migrator', 'cli'] as const) {
+      const config = loadConfig({ env: env({ ROLE: role }), readSecret: secretsFrom({}) });
+      expect(config.env.ROLE, `ROLE=${role} must load`).toBe(role);
+    }
+  });
+
+  it('still rejects a role nothing can start as', () => {
+    // The enum is a guard, not a free-text field: a typo'd `ROLE: wroker` in
+    // compose should fail loudly at boot rather than silently run as the default.
+    expect(() =>
+      loadConfig({ env: env({ ROLE: 'wroker' }), readSecret: secretsFrom({}) }),
+    ).toThrowError(ConfigError);
   });
 
   it('prefers a file-mounted secret over the environment variable', () => {

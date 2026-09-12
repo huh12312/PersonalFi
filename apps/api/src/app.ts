@@ -13,6 +13,7 @@ import type { TransactionalExecutor } from '@core/platform';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import {
   jsonSchemaTransform,
+  jsonSchemaTransformObject,
   serializerCompiler,
   validatorCompiler,
   type ZodTypeProvider,
@@ -121,6 +122,18 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       ],
     },
     transform: jsonSchemaTransform,
+    /**
+     * Hoist every `.meta({ id })` schema into `components.schemas`.
+     *
+     * `transform` alone rewrites a *route's* schema to a `$ref` but never emits
+     * the thing being referenced, so the document ends up with
+     * `#/components/schemas/Problem` pointing at an empty `components.schemas`.
+     * Fastify serves it happily — nothing validates a served spec — and the
+     * breakage lands one layer away, where `openapi-ts` generates the frontend
+     * client and every dangling ref becomes `unknown`. A typed client that types
+     * its payloads as `unknown` is worse than no client: it compiles.
+     */
+    transformObject: jsonSchemaTransformObject,
   });
 
   app.addHook('onSend', async (request, reply) => {
