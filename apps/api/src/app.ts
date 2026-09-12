@@ -3,6 +3,7 @@ import fastifySwagger from '@fastify/swagger';
 import type { AppConfig } from '@core/config';
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { newId } from '@core/kernel';
+import type { TransactionalExecutor } from '@core/platform';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import {
   jsonSchemaTransform,
@@ -20,6 +21,12 @@ export const CORRELATION_ID_HEADER = 'x-correlation-id';
 export interface BuildAppOptions {
   readonly config: AppConfig;
   readonly pool: pg.Pool;
+  /**
+   * Optional platform handle. When supplied, `/ready` also reports outbox lag
+   * and queue health. Optional rather than required so a test can build the
+   * shell against an unreachable pool without a migrated database behind it.
+   */
+  readonly platformDb?: TransactionalExecutor;
 }
 
 /**
@@ -110,7 +117,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     return reply.code(404).type(PROBLEM_CONTENT_TYPE).send(problem);
   });
 
-  await app.register(healthRoutes({ pool, version: OPENAPI_CONTRACT_VERSION }));
+  await app.register(
+    healthRoutes({
+      pool,
+      version: OPENAPI_CONTRACT_VERSION,
+      ...(options.platformDb === undefined ? {} : { platformDb: options.platformDb }),
+      maxOutboxLagEvents: config.env.READINESS_MAX_OUTBOX_LAG_EVENTS,
+      maxQueueWaitSeconds: config.env.READINESS_MAX_QUEUE_WAIT_SECONDS,
+      failOnDegraded: config.env.READINESS_FAIL_ON_DEGRADED,
+    }),
+  );
 
   return app;
 }

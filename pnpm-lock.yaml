@@ -178,6 +178,9 @@ importers:
       eslint:
         specifier: 10.10.0
         version: 10.10.0
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
       prettier:
         specifier: 3.9.6
         version: 3.9.6
@@ -208,6 +211,9 @@ importers:
       '@core/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@core/platform':
+        specifier: workspace:*
+        version: link:../../packages/platform
       '@fastify/swagger':
         specifier: 9.8.1
         version: 9.8.1
@@ -420,6 +426,31 @@ importers:
       fast-check:
         specifier: 4.9.0
         version: 4.9.0
+
+  packages/platform:
+    dependencies:
+      '@core/db':
+        specifier: workspace:*
+        version: link:../db
+      '@core/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      cron-parser:
+        specifier: 5.10.0
+        version: 5.10.0
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+      zod:
+        specifier: 4.5.4
+        version: 4.5.4
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
 packages:
 
@@ -1286,6 +1317,10 @@ packages:
     resolution: {integrity: sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==}
     engines: {node: '>=18'}
 
+  cron-parser@5.10.0:
+    resolution: {integrity: sha512-izNAxJyRWUP8ljBoDSub5WyrVOUlT4SLGShswE7eoRBpp6QUsSycYxLBMJlbshgPBMcPT/nrfgjNY2918ayv2A==}
+    engines: {node: '>=18'}
+
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
@@ -1725,6 +1760,10 @@ packages:
   locate-path@6.0.0:
     resolution: {integrity: sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==}
     engines: {node: '>=10'}
+
+  luxon@3.7.2:
+    resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
+    engines: {node: '>=12'}
 
   magic-string@1.2.3:
     resolution: {integrity: sha512-Bpb0W2TbLKOZ7vJnOUnVRGq3WL2p+ISV29M6hYPL1AFCpyKZpdr5ytiXoTSSxRVhg8YW7f65+6gbG8WG6PCa/g==}
@@ -2777,6 +2816,10 @@ snapshots:
 
   cookie@1.1.1: {}
 
+  cron-parser@5.10.0:
+    dependencies:
+      luxon: 3.7.2
+
   cross-spawn@7.0.6:
     dependencies:
       path-key: 3.1.1
@@ -3188,6 +3231,8 @@ snapshots:
   locate-path@6.0.0:
     dependencies:
       p-locate: 5.0.0
+
+  luxon@3.7.2: {}
 
   magic-string@1.2.3:
     dependencies:

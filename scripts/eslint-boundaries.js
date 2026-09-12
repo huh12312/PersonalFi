@@ -11,11 +11,15 @@
  *
  * The rule it enforces:
  *
- *     kernel   imports nothing but its own two decimal/uuid primitives
+ *     kernel    imports nothing but its own two decimal/uuid primitives
  *       ^
  *     config, contracts, db
  *       ^
- *     contexts  — may use kernel/config/db/contracts, NEVER another context
+ *     platform  — the outbox, the queue, the scheduler, flags. NEVER a context:
+ *                 the whole reason the outbox exists is that platform does not
+ *                 know who is listening.
+ *       ^
+ *     contexts  — may use kernel/config/db/contracts/platform, NEVER another context
  *       ^
  *     apps      — the composition root; the only layer allowed to wire things up
  */
@@ -78,6 +82,17 @@ const LAYERS = [
       'the column vocabulary from here, so the arrow points one way only.',
   },
   {
+    name: 'platform',
+    prefix: 'packages/platform/',
+    allow: ['@core/kernel', '@core/db', 'drizzle-orm', 'pg', 'cron-parser', ...UNIVERSAL],
+    allowNodeBuiltins: true,
+    why:
+      '@core/platform is infrastructure every context depends on, so it must depend ' +
+      'on none of them. A platform that imported @ctx/ledger to check one thing would ' +
+      'put the outbox downstream of the context the outbox exists to decouple, and ' +
+      'the cycle would be permanent.',
+  },
+  {
     name: 'context',
     prefix: 'packages/contexts/',
     allow: [
@@ -85,14 +100,15 @@ const LAYERS = [
       '@core/config',
       '@core/db',
       '@core/contracts',
+      '@core/platform',
       'drizzle-orm',
       ...UNIVERSAL,
     ],
     allowNodeBuiltins: true,
     why:
       'A context may depend on the shared kernel and on infrastructure, never on ' +
-      'another context. Where a cycle seems necessary the answer is a domain event, ' +
-      'not an import.',
+      'another context. Where a cycle seems necessary the answer is a domain event ' +
+      'through @core/platform, not an import.',
   },
   {
     name: 'app',

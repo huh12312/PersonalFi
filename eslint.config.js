@@ -59,7 +59,10 @@ export default tseslint.config(
   // read from anywhere cannot be validated anywhere.
   {
     files: ['apps/**/*.ts', 'packages/**/*.ts'],
-    ignores: ['packages/config/src/**', '**/*.test.ts', '**/drizzle.config.ts'],
+    // Test files and the fixtures they boot are exempt: a harness that spawns a
+    // worker process has to read the environment it was given, and a test that
+    // waits for a deadline has to read a wall clock.
+    ignores: ['packages/config/src/**', '**/*.test.ts', '**/test/**', '**/drizzle.config.ts'],
     rules: {
       'no-restricted-properties': [
         'error',
@@ -79,7 +82,7 @@ export default tseslint.config(
   // clock is what makes those tests deterministic rather than flaky.
   {
     files: ['apps/**/*.ts', 'packages/**/*.ts'],
-    ignores: ['packages/kernel/src/clock.ts', '**/*.test.ts'],
+    ignores: ['packages/kernel/src/clock.ts', '**/*.test.ts', '**/test/**'],
     rules: {
       'no-restricted-syntax': [
         'error',
@@ -98,6 +101,7 @@ export default tseslint.config(
   {
     files: [
       '**/*.test.ts',
+      '**/test/**/*.ts',
       'scripts/**/*.ts',
       'packages/db/src/cli/**/*.ts',
       'apps/api/src/cli/**/*.ts',

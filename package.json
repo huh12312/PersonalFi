@@ -20,13 +20,15 @@
     "test:watch": "vitest",
     "migrate": "node packages/db/src/cli/migrate.ts",
     "openapi": "node apps/api/src/cli/emit-openapi.ts",
-    "dev:api": "node --watch apps/api/src/main.ts"
+    "dev:api": "node --watch apps/api/src/main.ts",
+    "dev:worker": "node --watch apps/api/src/worker.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "26.4.1",
     "@vitest/coverage-v8": "5.0.0",
     "eslint": "10.10.0",
+    "fast-check": "4.9.0",
     "prettier": "3.9.6",
     "typescript": "6.0.3",
     "typescript-eslint": "8.69.0",

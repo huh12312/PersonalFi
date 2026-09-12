@@ -8,13 +8,16 @@
   "scripts": {
     "start": "node ./src/main.ts",
     "dev": "node --watch ./src/main.ts",
-    "openapi": "node ./src/cli/emit-openapi.ts"
+    "openapi": "node ./src/cli/emit-openapi.ts",
+    "start:worker": "node ./src/worker.ts",
+    "dev:worker": "node --watch ./src/worker.ts"
   },
   "dependencies": {
     "@core/config": "workspace:*",
     "@core/contracts": "workspace:*",
     "@core/db": "workspace:*",
     "@core/kernel": "workspace:*",
+    "@core/platform": "workspace:*",
     "@fastify/swagger": "9.8.1",
     "fastify": "5.12.3",
     "fastify-type-provider-zod": "7.0.0",

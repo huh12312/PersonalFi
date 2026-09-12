@@ -11,6 +11,14 @@ import { z } from 'zod';
 export const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
+  /**
+   * Which process this is. One image, two commands (08 §3.2): `api` serves HTTP,
+   * `worker` runs the consumer pump, the job runners, and the scheduler. Keeping
+   * it in config rather than in the entrypoint means every log line and every
+   * `config_snapshots` row says which role wrote it.
+   */
+  ROLE: z.enum(['api', 'worker']).default('api'),
+
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   LOG_PRETTY: z.stringbool().default(false),
 
@@ -37,6 +45,40 @@ export const environmentSchema = z.object({
 
   /** Refuse to start if a real provider credential is present (08 §6.8). */
   DEMO_MODE: z.stringbool().default(false),
+
+  // --- Worker (WP 0.3) ---------------------------------------------------
+  //
+  // Every one of these has a defensible default; they exist so an operator can
+  // slow the worker down on a small box without editing code, and so a test can
+  // drive the loops fast without waiting out a production poll interval.
+
+  /** Identifies this worker in `jobs.locked_by`. Defaults to a fresh uuid. */
+  WORKER_ID: z.string().min(1).optional(),
+  /** Jobs in flight in one worker process, across all kinds. */
+  WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(4),
+  /** Fallback poll for the consumer pump. LISTEN/NOTIFY is the fast path. */
+  EVENT_POLL_INTERVAL_MS: z.coerce.number().int().min(50).default(5_000),
+  JOB_POLL_INTERVAL_MS: z.coerce.number().int().min(50).default(5_000),
+  JOB_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(250).default(15_000),
+  /** How long a graceful shutdown waits for in-flight jobs before aborting. */
+  WORKER_SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(30_000),
+  SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(250).default(30_000),
+
+  // --- Readiness thresholds ----------------------------------------------
+
+  /** Outbox lag above this marks `/ready` degraded. */
+  READINESS_MAX_OUTBOX_LAG_EVENTS: z.coerce.number().int().min(0).default(1_000),
+  /** A runnable job waiting longer than this marks `/ready` degraded. */
+  READINESS_MAX_QUEUE_WAIT_SECONDS: z.coerce.number().int().min(0).default(900),
+  /**
+   * Whether a degraded platform makes `/ready` return 503.
+   *
+   * Off by default, and that is a deliberate operational choice rather than
+   * laziness: the API is how the operator *sees* that the worker is wedged. An
+   * API that takes itself out of rotation because a consumer is stuck hides the
+   * maintenance page behind the very failure it is meant to report.
+   */
+  READINESS_FAIL_ON_DEGRADED: z.stringbool().default(false),
 });
 
 export type EnvironmentConfig = z.infer<typeof environmentSchema>;

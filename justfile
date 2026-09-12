@@ -33,7 +33,7 @@ test:
 
 # Unit tests only; needs no database.
 test-unit:
-    pnpm exec vitest run --project kernel --project config --project api
+    pnpm exec vitest run --project kernel --project config --project api --project platform
 
 # Start the dev database and wait for it to accept connections.
 db-up:
@@ -86,3 +86,13 @@ openapi:
 # Run the API against the dev database.
 dev:
     LOG_PRETTY=true pnpm run dev:api
+
+# Run the background worker: consumer pump, job runners, scheduler.
+# Same image and same code as the API in production; only ROLE differs (WP 0.4).
+worker:
+    ROLE=worker LOG_PRETTY=true pnpm run dev:worker
+
+# Phase 0 exit criterion: kill a worker mid-job and prove the restart resumes it.
+# Writes its transcript to docs/evidence/phase-0/.
+drill-worker-restart:
+    pnpm exec node scripts/wp03-worker-restart-drill.ts

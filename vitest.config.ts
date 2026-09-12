@@ -32,6 +32,27 @@ export default defineConfig({
         },
       },
       {
+        root: './packages/platform',
+        test: { name: 'platform', include: ['src/**/*.test.ts'], environment: 'node' },
+      },
+      {
+        // Everything here needs a real Postgres, and says why in its own file:
+        // SKIP LOCKED, advisory locks, ON CONFLICT and transaction rollback are
+        // properties of the database, and a fake would only assert that the fake
+        // works. Skips itself when DATABASE_URL is unset.
+        root: './packages/platform',
+        test: {
+          name: 'platform-db',
+          include: ['test/**/*.test.ts'],
+          environment: 'node',
+          // Each suite owns a scratch database, but they all share one server and
+          // several take advisory locks; serial keeps failures readable.
+          fileParallelism: false,
+          testTimeout: 30_000,
+          hookTimeout: 60_000,
+        },
+      },
+      {
         root: './apps/api',
         test: { name: 'api', include: ['test/**/*.test.ts'], environment: 'node' },
       },

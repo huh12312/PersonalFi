@@ -7,8 +7,11 @@
  * fails immediately and loudly instead of at 03:15 during a sync.
  */
 import { ConfigError, describeConfig, loadConfig } from '@core/config';
+import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { createPool } from '@core/db';
+import { recordConfigSnapshot } from '@core/platform';
 import { buildApp } from './app.ts';
+import { buildPlatform } from './platform.ts';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -20,16 +23,33 @@ async function main(): Promise<void> {
     applicationName: 'personalfi-api',
   });
 
-  const app = await buildApp({ config, pool });
+  const platform = buildPlatform({ config, pool });
+  const app = await buildApp({ config, pool, platformDb: platform.db });
 
-  // Recorded at boot so "what changed?" after a behaviour shift is answerable.
+  // Recorded at boot, in the log and in `config_snapshots`, so "what changed?"
+  // after a behaviour shift is answerable months later rather than argued about.
   // `describeConfig` omits every secret by construction.
-  app.log.info({ config: describeConfig(config) }, 'configuration loaded');
+  //
+  // Deliberately not fatal: a database that is up but not yet migrated should
+  // still get an API that can say so on /ready, rather than a crash loop.
+  let configHash: string | undefined;
+  try {
+    const snapshot = await recordConfigSnapshot(platform.db, {
+      role: 'api',
+      payload: describeConfig(config),
+      appVersion: OPENAPI_CONTRACT_VERSION,
+    });
+    configHash = snapshot.hash;
+  } catch (error) {
+    app.log.warn({ err: error }, 'could not record the config snapshot; continuing');
+  }
+  app.log.info({ config: describeConfig(config), configHash }, 'configuration loaded');
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'shutting down');
     try {
       await app.close();
+      await platform.flags.close();
       await pool.end();
       process.exit(0);
     } catch (error) {
