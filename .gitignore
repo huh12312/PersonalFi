@@ -26,3 +26,6 @@ apps/web/src/api/generated/
 apps/web/test-results/
 apps/web/playwright-report/
 apps/web/.vite/
+
+# agent worktrees
+.claude/
