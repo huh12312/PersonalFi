@@ -43,13 +43,31 @@ if (target === undefined) {
   process.exit(78); // EX_CONFIG
 }
 
+import { existsSync } from 'node:fs';
+
 try {
   await import(target);
 } catch (error) {
   if (error instanceof Error && 'code' in error && error.code === 'ERR_MODULE_NOT_FOUND') {
-    process.stderr.write(
-      `entrypoint: ROLE=${ROLE} target "${target}" does not exist in this image yet.\n`,
-    );
+    // ERR_MODULE_NOT_FOUND fires for *any* unresolved specifier in the whole
+    // import graph, not just for `target`. Blaming `target` unconditionally is
+    // how a missing workspace package in the image's prune step (see
+    // api.Dockerfile) reported itself as "main.ts does not exist" while main.ts
+    // was sitting right there — a wrong answer costs a full rebuild to disprove.
+    // So: check whether the target is actually absent, and otherwise print what
+    // Node actually failed to resolve.
+    if (existsSync(target)) {
+      process.stderr.write(
+        `entrypoint: ROLE=${ROLE} target "${target}" exists, but something it imports does not resolve.\n` +
+          `  ${error.message}\n` +
+          '  This usually means the image build pruned a workspace package that is in the\n' +
+          "  production dependency closure. Check api.Dockerfile's deploy stage.\n",
+      );
+    } else {
+      process.stderr.write(
+        `entrypoint: ROLE=${ROLE} target "${target}" does not exist in this image yet.\n`,
+      );
+    }
     process.exit(78);
   }
   throw error;

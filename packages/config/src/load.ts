@@ -129,7 +129,11 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     }
 
     if (value === undefined) {
-      if (spec.required) {
+      // Required-ness is per role (`SECRET_SPECS[].requiredForRoles`): the
+      // one-shot migrator applies DDL and has no use for the KEK passphrase, so
+      // demanding it there would only force the passphrase to be mounted into a
+      // container that must never hold it.
+      if (spec.requiredForRoles.includes(env.ROLE)) {
         problems.push({ key: `secret:${spec.name}`, problem: 'is missing', hint: spec.hint });
       }
       continue;

@@ -75,6 +75,55 @@ describe('loadConfig', () => {
     }
   });
 
+  /**
+   * The migrator must load with exactly the secrets `compose.yml` grants it.
+   *
+   * Second half of the same incident, and the reason the test above did not catch
+   * it: `secretsFrom` supplies `master_key` by default, so "every role loads" was
+   * only ever asserted against a secrets directory richer than the one the
+   * migrator actually gets. `compose.yml` gives that service
+   * `secrets: [database_url]` and nothing else — correctly, because it applies
+   * DDL and never unwraps a DEK — while `master_key` was `required: true` for
+   * every role. The migrator therefore exited non-zero at boot, and `api` and
+   * `worker` gate on it with `service_completed_successfully`, so
+   * `docker compose up` on a clean box produced no API at all.
+   *
+   * The fix must not be "mount the passphrase into the migrator too": that would
+   * hand the key that opens every provider credential to a container with no use
+   * for it. So this test pins the narrow claim — migrator boots *without* the
+   * passphrase — and the one below pins that nothing else does.
+   */
+  it('starts the migrator with only the secrets compose grants it (no master_key)', () => {
+    const config = loadConfig({
+      env: env({ ROLE: 'migrator' }),
+      readSecret: secretsFrom({ master_key: undefined }),
+    });
+    expect(config.env.ROLE).toBe('migrator');
+    expect(config.secrets.master_key).toBeUndefined();
+    expect(config.databaseUrl.reveal()).toBe(VALID_URL);
+  });
+
+  it('still refuses to start api, worker or cli without the passphrase', () => {
+    // The exemption is for the migrator alone. Any role that can reach a DEK —
+    // the API, the sync worker, and `bootstrap-user` — must fail closed.
+    for (const role of ['api', 'worker', 'cli'] as const) {
+      let thrown: unknown;
+      try {
+        loadConfig({
+          env: env({ ROLE: role }),
+          readSecret: secretsFrom({ master_key: undefined }),
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, `ROLE=${role} must refuse to start`).toBeInstanceOf(ConfigError);
+      expect(
+        (thrown as ConfigError).problems.some((p) => p.key === 'secret:master_key'),
+        `ROLE=${role} must name the missing passphrase`,
+      ).toBe(true);
+    }
+  });
+
   it('still rejects a role nothing can start as', () => {
     // The enum is a guard, not a free-text field: a typo'd `ROLE: wroker` in
     // compose should fail loudly at boot rather than silently run as the default.

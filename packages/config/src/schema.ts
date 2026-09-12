@@ -173,6 +173,19 @@ export const KEK_ARGON2_FLOORS: Readonly<Record<'production' | 'development', Ar
   });
 
 /**
+ * Which process roles must have a given secret before the process may start.
+ *
+ * Requiring a secret is a per-role question, not a global one, and getting it
+ * wrong fails in both directions. Too lax and the API discovers a missing
+ * passphrase at 03:15 during a sync. Too strict and a container that has no use
+ * for the secret refuses to boot unless it is handed one — which is how a
+ * one-shot migrator ends up mounting the KEK passphrase "to make compose work",
+ * widening the blast radius of the single most valuable secret in the system to
+ * a container that only ever runs DDL.
+ */
+export type RequiredForRoles = readonly EnvironmentConfig['ROLE'][];
+
+/**
  * Declared secrets. Each is read from `${SECRETS_DIR}/<file>`; nothing here is
  * ever read from an env var in production.
  */
@@ -180,7 +193,7 @@ export const SECRET_SPECS = [
   {
     name: 'database_url',
     file: 'database_url',
-    required: false,
+    requiredForRoles: [] as RequiredForRoles,
     envFallback: 'DATABASE_URL',
     hint: 'write the Postgres URL to ${SECRETS_DIR}/database_url, or set DATABASE_URL for local dev',
   },
@@ -196,13 +209,24 @@ export const SECRET_SPECS = [
      * backing file is a `systemd-creds`-encrypted credential delivered as a
      * Docker secret on tmpfs.
      *
-     * Required: a box that boots without it can neither read a Plaid token nor
-     * write one, so starting anyway would mean discovering the problem at 03:15
-     * during a sync rather than at `docker compose up`.
+     * Required for `api`, `worker` and `cli`: a box that boots without it can
+     * neither read a Plaid token nor write one, so starting anyway would mean
+     * discovering the problem at 03:15 during a sync rather than at
+     * `docker compose up`.
+     *
+     * **Deliberately not required for `migrator`.** The migrator applies DDL and
+     * never touches a DEK, so `compose.yml` correctly grants it only
+     * `database_url`. Requiring the passphrase for every role regardless made the
+     * one-shot migrator exit non-zero at boot, and because `api` and `worker`
+     * both `depends_on: {migrator: {condition: service_completed_successfully}}`,
+     * that took the entire stack down — `docker compose up` on a clean box
+     * produced no API at all. The two ways out were to mount the KEK passphrase
+     * into a container that has no use for it, or to state the requirement per
+     * role; this is the second. Found by the Phase 0 security gate.
      */
     name: 'master_key',
     file: 'master_key',
-    required: true,
+    requiredForRoles: ['api', 'worker', 'cli'] as RequiredForRoles,
     envFallback: undefined,
     hint:
       'write a high-entropy passphrase to ${SECRETS_DIR}/master_key (mode 0400). ' +

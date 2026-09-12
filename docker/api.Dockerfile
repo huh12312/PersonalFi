@@ -39,31 +39,53 @@ ENV npm_config_target_libc=musl
 RUN npm install --global pnpm@12.4.1
 
 WORKDIR /app
-# The lockfile spans all 18 workspace projects, so pnpm needs every
-# package.json present to resolve it — hence the full-repo COPY — but
+# The lockfile spans every workspace project, so pnpm needs every package.json
+# present to resolve it — hence the full-repo COPY — but
 # `--filter-prod=@app/api...` (select @app/api and only the workspace projects
 # its *production* dependency graph touches) plus `--prod` (skip
-# devDependencies everywhere) together materialize node_modules for exactly
-# five projects: @app/api, @core/kernel, @core/config, @core/db,
-# @core/contracts. Nothing else in the workspace is installed.
+# devDependencies everywhere) together materialize node_modules for only the
+# projects @app/api actually needs at runtime. Nothing else is installed.
 COPY . .
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked \
     pnpm install --frozen-lockfile --prod --filter-prod=@app/api...
 
-# Strip everything not needed to run: other workspace packages entirely (their
-# source was only needed so pnpm could resolve the lockfile above), tests,
-# dev-only config files inside the packages we keep. What remains is exactly
-# apps/api + the four @core/* packages + their resolved node_modules.
-RUN rm -rf apps/web packages/contexts scripts docs .github \
+# Strip everything not needed to run: workspace projects outside @app/api's
+# production closure (their source was only needed so pnpm could resolve the
+# lockfile above), tests, and dev-only config files inside the projects we keep.
+#
+# The keep-set is **asked of pnpm, not hardcoded**, and that is the whole point
+# of this stage. It used to be a literal `rm -rf apps/web packages/contexts ...`
+# with a sibling comment naming "exactly five projects". Then `apps/api` grew a
+# dependency on `@ctx/identity` (the auth surface) and nobody updated the list,
+# so the image shipped an `apps/api` whose very first import — `@ctx/identity`
+# from `auth/runtime.ts` — resolved to a symlink into a directory this line had
+# just deleted. `docker compose up` produced an api container that exited 78 in
+# a restart loop, and because the entrypoint reports any ERR_MODULE_NOT_FOUND in
+# the whole import graph as "target does not exist in this image yet", the
+# message named `main.ts` rather than the package actually missing. Found by the
+# Phase 0 security gate; a hand-maintained list of a computed set will rot again,
+# so it is computed.
+RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked \
+    KEEP="$(pnpm list --filter '@app/api...' --depth -1 --prod --json \
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const p of JSON.parse(s))console.log(require("node:path").relative("/app",p.path))})')" && \
+    test -n "$KEEP" && \
+    echo "$KEEP" | grep -qx 'apps/api' && \
+    printf 'keeping workspace projects:\n%s\n' "$KEEP" && \
+    for dir in apps/* packages/* packages/contexts/*; do \
+      [ -d "$dir" ] || continue; \
+      [ "$dir" = packages/contexts ] && continue; \
+      echo "$KEEP" | grep -qx "$dir" || rm -rf "$dir"; \
+    done && \
+    rmdir packages/contexts 2>/dev/null || true
+
+RUN rm -rf scripts docs .github \
            compose.dev.yml eslint.config.js vitest.config.ts \
            tsconfig.json tsconfig.base.json .editorconfig \
            .prettierrc.json .prettierignore .npmrc && \
-    find apps/api packages/kernel packages/config packages/db packages/contracts \
+    find apps packages \
       -type d \( -name test -o -name tests -o -name __tests__ \) -prune -exec rm -rf {} + && \
-    find apps/api packages/kernel packages/config packages/db packages/contracts \
-      -name '*.test.ts' -delete && \
-    find packages/kernel packages/config packages/db packages/contracts \
-      -name 'OWNERSHIP.md' -delete && \
+    find apps packages -name '*.test.ts' -delete && \
+    find packages -name 'OWNERSHIP.md' -delete && \
     rm -f packages/db/drizzle.config.ts
 
 COPY docker/entrypoint.mjs ./entrypoint.mjs

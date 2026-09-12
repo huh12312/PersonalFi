@@ -178,7 +178,23 @@ services:
       start_period: 20s
       retries: 3
     deploy:
-      resources: { limits: { cpus: '2.0', memory: 768M } }
+      # 1.5G, not 768M: deriving the KEK is Argon2id at m = 1 GiB (P0-2's floor,
+      # and `KEK_ARGON2_FLOORS.production` refuses anything lower), so the
+      # process transiently needs the 1 GiB Argon2 block plus the wasm heap and
+      # Node's own footprint. At 768M the kernel OOM-killer took the container
+      # at exit 137 the moment anything triggered `SecurityRuntime.initialise()`
+      # — measured: 768M and 512M both exit 137 with no output, 1200M derives in
+      # 6.7 s. Because `/auth/unlock-state` initialises lazily, that made an
+      # unauthenticated GET a remote kill switch for the API. Found by the
+      # Phase 0 security gate.
+      #
+      # NOTE for the 2 GB whole-stack RAM target (master plan §3.4): this is a
+      # *limit*, not a reservation, and the 1 GiB is a boot-time spike rather
+      # than steady state — but api and worker both derive the KEK, so a
+      # simultaneous cold start peaks around 2.4 GiB. If that target is hard,
+      # the lever is `KEK_ARGON2_MEMORY_KIB` + the production floor, not this
+      # number; staggering the two derivations would also work.
+      resources: { limits: { cpus: '2.0', memory: 1536M } }
 
   worker:
     <<: [*common, *app-image]
@@ -206,7 +222,10 @@ services:
       start_period: 30s
       retries: 3
     deploy:
-      resources: { limits: { cpus: '1.0', memory: 512M } }
+      # Same Argon2id floor as api (this service also mounts `master_key` and
+      # unlocks the keyring to decrypt provider credentials for sync jobs), so
+      # the same 1 GiB transient applies. See the api service above.
+      resources: { limits: { cpus: '1.0', memory: 1536M } }
 
   migrator:
     <<: *app-image
