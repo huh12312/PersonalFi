@@ -160,8 +160,20 @@ function Theme({ label, value }: { label: string; value: 'light' | 'dark' }) {
               <Input id={`${value}-input`} className="mt-1.5" placeholder="Placeholder text" />
             </div>
             <div className="flex items-center gap-2">
-              <Switch id={`${value}-switch`} defaultChecked />
-              <Label htmlFor={`${value}-switch`}>Switch</Label>
+              {/* Base UI's `Switch.Root` renders `role="switch"` on a visible
+                  `<span>` and redirects a plain `id` prop to its paired hidden
+                  `<input type="checkbox">` instead — a `<label htmlFor>`
+                  pointing at that id still gets click-to-toggle for free, but
+                  the accessible name axe checks lives on the visible switch,
+                  which needs its own `aria-labelledby` (aria-toggle-field-name). */}
+              <Switch
+                id={`${value}-switch`}
+                aria-labelledby={`${value}-switch-label`}
+                defaultChecked
+              />
+              <Label id={`${value}-switch-label`} htmlFor={`${value}-switch`}>
+                Switch
+              </Label>
             </div>
           </div>
         </Section>

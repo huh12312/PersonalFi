@@ -34,6 +34,12 @@ const distDir = join(here, '..', 'dist');
 const INLINE_SCRIPT_PATTERN = /<script\b(?![^>]*\bsrc\s*=)[^>]*>/gi;
 // A bare `style="..."` / `style='...'` attribute anywhere in the markup.
 const STYLE_ATTRIBUTE_PATTERN = /\sstyle\s*=\s*["'][^"']*["']/gi;
+// HTML comments — stripped before scanning. `index.html`'s own source
+// comments document *why* there's no inline `<script>`, and the prose
+// necessarily contains the literal string `<script>` to say so; scanning
+// comment text for that pattern is a false positive, not a CSP violation
+// (browsers never execute markup inside `<!-- -->`).
+const HTML_COMMENT_PATTERN = /<!--[\s\S]*?-->/g;
 
 async function findHtmlFiles(root: string): Promise<string[]> {
   const out: string[] = [];
@@ -67,7 +73,8 @@ async function main(): Promise<void> {
   let violations = 0;
 
   for (const file of htmlFiles) {
-    const html = await readFile(file, 'utf8');
+    const rawHtml = await readFile(file, 'utf8');
+    const html = rawHtml.replace(HTML_COMMENT_PATTERN, '');
     const rel = relative(process.cwd(), file);
 
     for (const match of html.matchAll(INLINE_SCRIPT_PATTERN)) {

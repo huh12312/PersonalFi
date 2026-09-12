@@ -42,7 +42,6 @@ export function Sidebar() {
         'hidden shrink-0 flex-col border-r border-border-hairline bg-bg-surface transition-[width] duration-base ease-standard lg:flex',
         collapsed ? 'w-16' : 'w-[248px]',
       )}
-      aria-label="Primary"
     >
       <div className="flex h-14 items-center px-4">
         <span className={cn('text-h3 font-semibold text-text-primary', collapsed && 'sr-only')}>
@@ -50,7 +49,11 @@ export function Sidebar() {
         </span>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 py-2">
+      {/* `aria-label` belongs on the element with the implicit `navigation`
+          role (this `<nav>`), not the wrapping `<aside>` (`complementary`) —
+          `getByRole('navigation', { name: 'Primary' })` needs the accessible
+          name on the actual landmark. */}
+      <nav aria-label="Primary" className="flex-1 overflow-y-auto px-2 py-2">
         {NAV_GROUPS.map((group) => (
           <div key={group.label} className="mb-4">
             {!collapsed && (

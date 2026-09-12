@@ -4,29 +4,42 @@
  *
  * `apps/api/src/routes/auth.ts` exists and is schema-first (every route's zod
  * schema *is* its OpenAPI document contribution — see that file's header
- * comment), but at the time this package was built it had not yet been
- * registered against the running Fastify app, so `packages/contracts/openapi/
- * openapi.json` did not yet carry `/auth/*` and `pnpm --filter @app/web gen`
- * had nothing to generate for it.
+ * comment). `/auth/*` is now live in `packages/contracts/openapi/openapi.json`
+ * (paths, operationIds, and request bodies all generate correctly), but this
+ * file is **not yet dead code**: `openapi.json`'s `components.schemas` is
+ * empty — every named response schema (`AuthOk`, `Problem`, `Credential`,
+ * `SessionState`, `UnlockState`, `SecurityEvent`, ...) is a `$ref` to a
+ * definition that was never registered, so `pnpm --filter @app/web gen`
+ * silently degrades every one of those response bodies to `unknown`
+ * (confirmed in `src/api/generated/types.gen.ts`, e.g. `FinishLoginResponses`
+ * — a real `AuthOk` in the route's zod schema — types its `200` as bare
+ * `unknown`). Swapping this file's callers over today would trade a
+ * hand-maintained but *accurate* type for a generated but *empty* one.
  *
- * TODO(auth-wiring): once `/auth/*` is live in the generated OpenAPI document,
- * this file becomes dead code. The swap is a **one-file change**:
+ * TODO(auth-wiring): this is now a **two-step change**, not one:
  *
- *   1. `pnpm --filter @app/web gen` (regenerates `src/api/generated` from the
- *      now-complete contract; the `@tanstack/react-query` plugin already
- *      configured in `openapi-ts.shared.mjs` emits one query/mutation hook per
- *      `operationId` — the same `operationId`s this file's function and hook
- *      names below mirror on purpose: `getUnlockState` -> `useGetUnlockState`,
- *      etc.).
- *   2. Delete this file.
- *   3. In every file under `src/features/auth/` that imports from
- *      `../../api/pending-contracts.ts`, swap the import for
- *      `../../api/generated/@tanstack/react-query.gen.ts` (or wherever the
- *      plugin emits them) and rename each hook call to the generated name.
+ *   0. (apps/api, outside this package) Register the shared response schemas
+ *      with `@fastify/swagger` — e.g. via `fastify.addSchema()`/a JSON Schema
+ *      transform keyed by each zod schema's `.meta({ id })` — so `emit-
+ *      openapi.ts` (`apps/api/src/cli/emit-openapi.ts`) writes a populated
+ *      `components.schemas` instead of dangling `$ref`s. `Problem`'s `.meta({
+ *      id: 'Problem' })` in `apps/api/src/problem.ts` is already there; it's
+ *      just never surfaced into the emitted document.
+ *   1. Once that lands and `components.schemas` resolves, the original plan
+ *      still holds: `pnpm --filter @app/web gen` (the `@tanstack/react-query`
+ *      plugin already configured in `openapi-ts.shared.mjs` emits one query/
+ *      mutation hook per `operationId` — the same `operationId`s this file's
+ *      function and hook names below mirror on purpose: `getUnlockState` ->
+ *      `useGetUnlockState`, etc.), delete this file, and in every file under
+ *      `src/features/auth/` that imports from `../../api/pending-contracts.ts`,
+ *      swap the import for `../../api/generated/@tanstack/react-query.gen.ts`
+ *      (or wherever the plugin emits them) and rename each hook call to the
+ *      generated name.
  *
- * No component logic changes: the shapes below are hand-copied from
- * `apps/api/src/routes/auth.ts`'s zod schemas field-for-field, so the
- * generated types will be structurally identical.
+ * No component logic changes expected at that point: the shapes below are
+ * hand-copied from `apps/api/src/routes/auth.ts`'s zod schemas field-for-
+ * field, so the generated types will be structurally identical once step 0
+ * lands.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
