@@ -80,6 +80,13 @@ export interface HarnessOptions {
   readonly rpId?: string;
   /** Overrides {@link ORIGIN}. Paired with `rpId`; the two must agree. */
   readonly allowedOrigins?: readonly string[];
+  /**
+   * Overrides the identity pool's `max`. Default (6) is plenty for ordinary
+   * integration tests; a concurrency test that wants N genuinely simultaneous
+   * backends (gate-security-review-2.md R-2) must ask for `max >= N` or `pg`'s
+   * lazy backend creation will queue the excess callers instead of racing them.
+   */
+  readonly poolMax?: number;
 }
 
 type IdentityContextOptionsTtls = {
@@ -109,7 +116,11 @@ export async function createIdentityHarness(
   const databaseUrl = url.toString();
   await runMigrations({ databaseUrl, logger: silent });
 
-  const pool = createPool({ databaseUrl, applicationName: `wp02-${name}`, max: 6 });
+  const pool = createPool({
+    databaseUrl,
+    applicationName: `wp02-${name}`,
+    max: options.poolMax ?? 6,
+  });
   const clock = mutableClock(EPOCH);
 
   const userId = newId();

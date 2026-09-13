@@ -26,9 +26,8 @@
  *   risk in 03 §1.4 is a malicious dependency running in this process, the smaller,
  *   readable tree wins.
  * - **`hash-wasm` (MIT, zero dependencies)** for Argon2id. `@node-rs/argon2` is a
- *   native addon and is forbidden (D13 notwithstanding: WP 0.2 rules it out because
- *   a native addon breaks the musl/glibc story and cannot be audited from the
- *   lockfile). `@noble/hashes` also implements Argon2id in pure JS but is roughly
+ *   native addon and is forbidden (D13 notwithstanding): a native addon breaks the
+ *   musl/glibc story and cannot be audited from the lockfile. `@noble/hashes` also implements Argon2id in pure JS but is roughly
  *   an order of magnitude slower at 1 GiB, which turns a 6 s boot into a minute.
  * - **`@noble/hashes` (MIT)** for SHA-256 of session and refresh tokens.
  *

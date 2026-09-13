@@ -61,11 +61,7 @@ export function useThemePreference(): [ThemePreference, (next: ThemePreference) 
 
 /** React hook: the *resolved* light/dark value, tracking OS changes while on 'system'. */
 export function useResolvedTheme(): ResolvedTheme {
-  const preference = useSyncExternalStore<ThemePreference>(
-    store.subscribe,
-    store.get,
-    () => 'system',
-  );
+  const [preference] = useThemePreference();
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   return useSyncExternalStore(
     (listener) => {

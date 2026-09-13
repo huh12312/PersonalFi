@@ -22,6 +22,8 @@
 import { ConfigError, describeConfig, loadConfig } from '@core/config';
 import { createPool } from '@core/db';
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
+import { systemClock } from '@core/kernel';
+import { UserService } from '@ctx/identity';
 import {
   createConsumerPump,
   createJobRunner,
@@ -40,9 +42,9 @@ import { buildPlatform, resolveModules, type ModuleRegistration } from './platfo
 /**
  * Every module the worker knows about.
  *
- * Empty in Phase 0 because there are no contexts yet. Phase 1 appends
- * `{ flagKey: 'module.ledger', events: [...], consumers: [...], jobs: [...] }`
- * and nothing else in this file changes.
+ * Empty in Phase 0: no context yet publishes an event, a consumer, or a job.
+ * Phase 1 appends `{ flagKey: 'module.ledger', events: [...], consumers: [...],
+ * jobs: [...] }` and nothing else in this file changes.
  */
 const MODULES: readonly ModuleRegistration[] = [];
 
@@ -72,14 +74,9 @@ async function main(): Promise<void> {
   // Single user today (decision D6): the worker serves whoever is in `users`.
   // Multi-user is additive — this becomes a loop, and nothing below changes.
   //
-  // Read through the pool rather than through a context reader because
-  // `@ctx/identity` does not exist yet (WP 0.2). This is the composition root,
-  // the one layer allowed to reach across a seam, and it is three lines that WP
-  // 0.2 replaces with `identity.currentUser()`.
-  const owner = await pool.query<{ id: string }>(
-    'SELECT id FROM users ORDER BY created_at LIMIT 1',
-  );
-  const userId = owner.rows[0]?.id;
+  // `UserService` needs no KEK, so the worker can read the account holder without
+  // the six seconds of Argon2id the API pays at boot.
+  const userId = (await new UserService({ db: pool, clock: systemClock }).findPrimary())?.id;
 
   let pump: ConsumerPump | null = null;
   let runner: JobRunner | null = null;

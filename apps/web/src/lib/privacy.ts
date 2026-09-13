@@ -25,7 +25,7 @@ export function setHideAmounts(hidden: boolean): void {
   applyPrivacy(hidden);
 }
 
-export function toggleHideAmounts(): void {
+function toggleHideAmounts(): void {
   setHideAmounts(!store.get());
 }
 
@@ -36,9 +36,8 @@ export function useHideAmounts(): [boolean, (hidden: boolean) => void] {
 }
 
 /**
- * Installs the global `⌘⇧H` / `Ctrl⇧H` privacy shortcut once. Mount at the
- * app root (`src/app/providers.tsx`) — individual screens must not each
- * re-bind it.
+ * Installs the global `⌘⇧H` / `Ctrl⇧H` privacy shortcut once. Called from the
+ * app root (`src/app/App.tsx`) — individual screens must not each re-bind it.
  */
 export function usePrivacyShortcut(): void {
   useEffect(() => {

@@ -12,7 +12,6 @@
  */
 export type { Brand } from './brand.ts';
 export { KernelError, CurrencyMismatchError, InvalidValueError } from './errors.ts';
-export { ok, err, isOk, isErr, unwrap, type Result, type Ok, type Err } from './result.ts';
 export { currency, isCurrencyCode, minorUnitScale, USD, type CurrencyCode } from './currency.ts';
 export { Money, money, type MoneyJson, type RoundingMode } from './money.ts';
 export {

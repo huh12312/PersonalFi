@@ -32,8 +32,3 @@ export function installTypeParsers(): void {
   types.setTypeParser(OID_DATE, (value: string) => value);
   installed = true;
 }
-
-/** Test seam: forget that parsers were installed. */
-export function resetTypeParsersForTest(): void {
-  installed = false;
-}

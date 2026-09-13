@@ -15,7 +15,12 @@
  *   token in the browser's memory, in a devtools tab, and eventually in a bug
  *   report.
  */
-import { isAuthError, type IssuedSession, type SessionRecord } from '@ctx/identity';
+import {
+  isAuthError,
+  type CredentialSummary,
+  type IssuedSession,
+  type SessionRecord,
+} from '@ctx/identity';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -229,7 +234,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           operationId: 'getSession',
           summary: 'The current session',
           tags: ['auth'],
-          response: { 200: sessionResponse, 401: problemSchema, 503: problemSchema },
+          response: { 200: sessionResponse, ...problems(401, 503) },
         },
       },
       async (request) => {
@@ -273,8 +278,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           body: z.object({ registrationToken: z.string().min(16).optional() }),
           response: {
             200: z.object({ userId: z.string(), options: webauthnPayload }),
-            403: problemSchema,
-            503: problemSchema,
+            ...problems(403, 503),
           },
         },
       },
@@ -355,7 +359,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
             'usernameless login, and an empty list tells an unauthenticated caller nothing about ' +
             'which authenticators exist.',
           tags: ['auth'],
-          response: { 200: z.object({ options: webauthnPayload }), 503: problemSchema },
+          response: { 200: z.object({ options: webauthnPayload }), ...problems(503) },
         },
       },
       async () => {
@@ -377,7 +381,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
             /** D21's convenience toggle: extends the refresh window to 14 days. */
             trustedDevice: z.boolean().default(false),
           }),
-          response: { 200: okResponse, 401: problemSchema, 429: problemSchema, 503: problemSchema },
+          response: { 200: okResponse, ...problems(401, 429, 503) },
         },
       },
       async (request, reply) => {
@@ -408,7 +412,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
             token: z.string().regex(/^[0-9]{6,8}$/),
             trustedDevice: z.boolean().default(false),
           }),
-          response: { 200: okResponse, 401: problemSchema, 429: problemSchema, 503: problemSchema },
+          response: { 200: okResponse, ...problems(401, 429, 503) },
         },
       },
       async (request, reply) => {
@@ -435,9 +439,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           body: z.object({ code: z.string().min(8).max(32) }),
           response: {
             200: z.object({ ok: z.literal(true), remainingCodes: z.number().int() }),
-            401: problemSchema,
-            429: problemSchema,
-            503: problemSchema,
+            ...problems(401, 429, 503),
           },
         },
       },
@@ -463,7 +465,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           operationId: 'startStepUp',
           summary: 'Begin a step-up assertion',
           tags: ['auth'],
-          response: { 200: z.object({ options: webauthnPayload }), 401: problemSchema },
+          response: { 200: z.object({ options: webauthnPayload }), ...problems(401) },
         },
       },
       async (request) => {
@@ -516,7 +518,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
             'Single-use. Presenting a refresh token that has already been rotated revokes the ' +
             'entire session family: that is the cookie-theft signal.',
           tags: ['auth'],
-          response: { 200: okResponse, 401: problemSchema, 429: problemSchema },
+          response: { 200: okResponse, ...problems(401, 429) },
         },
       },
       async (request, reply) => {
@@ -595,7 +597,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           description: 'Needs a step-up assertion. The last remaining passkey cannot be removed.',
           tags: ['auth'],
           params: z.object({ credentialId: z.string().uuid() }),
-          response: { 200: okResponse, 403: problemSchema, 409: problemSchema },
+          response: { 200: okResponse, ...problems(403, 409) },
         },
       },
       async (request) => {
@@ -654,7 +656,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
             enrolmentId: z.string().uuid(),
             token: z.string().regex(/^[0-9]{6,8}$/),
           }),
-          response: { 200: okResponse, 400: problemSchema, 403: problemSchema },
+          response: { 200: okResponse, ...problems(400, 403) },
         },
       },
       async (request) => {
@@ -705,7 +707,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           summary: 'The security event log',
           tags: ['auth'],
           querystring: z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }),
-          response: { 200: z.object({ events: z.array(securityEventSchema) }), 401: problemSchema },
+          response: { 200: z.object({ events: z.array(securityEventSchema) }), ...problems(401) },
         },
       },
       async (request) => {
@@ -734,17 +736,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
   };
 };
 
-function serialiseCredential(credential: {
-  id: string;
-  credentialId: string;
-  friendlyName: string;
-  transports: readonly string[];
-  aaguid: string | null;
-  backedUp: boolean;
-  deviceType: string;
-  createdAt: Date;
-  lastUsedAt: Date | null;
-}): z.infer<typeof credentialSchema> {
+function serialiseCredential(credential: CredentialSummary): z.infer<typeof credentialSchema> {
   return {
     id: credential.id,
     credentialId: credential.credentialId,

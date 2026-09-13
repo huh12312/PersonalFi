@@ -174,12 +174,12 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   }
   problems.push(...webAuthnProblems(env.AUTH_RP_ID, allowedOrigins, isProduction));
 
-  // gate-remediation-2.md finding 8: `SESSION_COOKIE_SECURE=false` exists only
-  // for a plain-HTTP local/integration harness (apps/api/test/cookies.test.ts)
-  // — a session cookie without `Secure` in production would ride along on
-  // plain HTTP the instant Caddy's TLS termination is ever bypassed or
-  // misconfigured, and nothing else in this repo would notice. `true` is the
-  // default, so this only ever fires on a deliberate override left in place.
+  // `SESSION_COOKIE_SECURE=false` exists only for a plain-HTTP local/integration
+  // harness (apps/api/test/cookies.test.ts) — a session cookie without `Secure`
+  // in production would ride along on plain HTTP the instant Caddy's TLS
+  // termination is ever bypassed or misconfigured, and nothing else in this repo
+  // would notice. `true` is the default, so this only ever fires on a deliberate
+  // override left in place.
   if (isProduction && !env.SESSION_COOKIE_SECURE) {
     problems.push({
       key: 'SESSION_COOKIE_SECURE',
@@ -210,13 +210,13 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 /**
- * gate-remediation-2.md finding 8. Not the IANA Public Suffix List — a
- * dependency this package will not take on for a single-user app's boot
- * check — but the handful of bare labels an operator could plausibly type in
- * place of a real registrable domain: this repo's own LAN convention, a few
- * common TLDs, and the loopback name (already handled above by
- * `LOOPBACK_HOSTS`; listed here too so `BARE_SUFFIX_RP_IDS` reads complete on
- * its own).
+ * Bare labels that are not registrable domains, and so are never a valid
+ * WebAuthn RP ID. Not the IANA Public Suffix List — a dependency this package
+ * will not take on for a single-user app's boot check — but the handful an
+ * operator could plausibly type in place of a real registrable domain: this
+ * repo's own LAN convention, a few common TLDs, and the loopback name (already
+ * handled above by `LOOPBACK_HOSTS`; listed here too so `BARE_SUFFIX_RP_IDS`
+ * reads complete on its own).
  */
 const BARE_SUFFIX_RP_IDS = new Set([
   'lan',

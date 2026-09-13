@@ -7,12 +7,11 @@ import { waitFor } from './wait.ts';
 /**
  * Spawn a real child process and read line-buffered JSON off its stdout.
  *
- * Lifted from `packages/platform/test/worker-restart.test.ts`'s `startWorker()`
- * (WP 0.3), which exists for a reason worth repeating: the Phase 0 exit
- * criterion is that a worker killed mid-job resumes cleanly, and that claim can
- * only be tested with a real second OS process and a real `SIGKILL` — nothing in
- * the victim gets to run on the way out, no `finally`, no graceful `stop()`. A
- * `vi.fn()` standing in for a process cannot demonstrate that.
+ * A real process, not a test double: the Phase 0 exit criterion is that a worker
+ * killed mid-job resumes cleanly, and that claim can only be tested with a real
+ * second OS process and a real `SIGKILL` — nothing in the victim gets to run on
+ * the way out, no `finally`, no graceful `stop()`. A `vi.fn()` standing in for a
+ * process cannot demonstrate that.
  *
  * Every line the child writes to stdout is parsed as JSON when it can be (a
  * `console.log`-shaped drill/fixture writes one JSON object per line) and kept

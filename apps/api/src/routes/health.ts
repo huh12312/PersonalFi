@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 import { checkConnection, pendingMigrations } from '@core/db';
 import { outboxHealth, queueHealth, type TransactionalExecutor } from '@core/platform';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type pg from 'pg';
 import { z } from 'zod';
-import { PROBLEM_CONTENT_TYPE, problemSchema } from '../problem.ts';
+import { PROBLEM_CONTENT_TYPE, problemSchema, serviceUnavailable, toProblem } from '../problem.ts';
 
 const healthResponse = z
   .object({
@@ -46,10 +47,60 @@ const readyResponse = z
   })
   .meta({ id: 'ReadyResponse' });
 
+/**
+ * A 503 problem body, built by the same `toProblem` the global error handler
+ * uses rather than assembled by hand.
+ *
+ * `/ready` answers in-handler instead of throwing, because throwing would route
+ * through `setErrorHandler`, which logs an `internal` family failure at `error`.
+ * An unreachable database during a rollout is a `warn` the operator is already
+ * watching for, and the log line above each call site says which one it is.
+ */
+function unavailable(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  code: string,
+  detail: string,
+): FastifyReply {
+  const { problem } = toProblem(serviceUnavailable(code, detail), String(request.id), request.url);
+  return reply.code(503).type(PROBLEM_CONTENT_TYPE).send(problem);
+}
+
+/**
+ * The four conditions that make the platform `degraded`, as operator-readable
+ * sentences. Pure, so the thresholds can be exercised without a database.
+ */
+function collectDegradedReasons(
+  outbox: Awaited<ReturnType<typeof outboxHealth>>,
+  queue: Awaited<ReturnType<typeof queueHealth>>,
+  limits: { readonly maxLag: number; readonly maxWait: number },
+): string[] {
+  const reasons: string[] = [];
+  if (outbox.failedConsumers.length > 0) {
+    reasons.push(
+      `consumer(s) stopped at an event they cannot handle: ${outbox.failedConsumers.join(', ')}`,
+    );
+  }
+  if (outbox.maxLagEvents > limits.maxLag) {
+    reasons.push(
+      `outbox lag is ${String(outbox.maxLagEvents)} events (limit ${String(limits.maxLag)})`,
+    );
+  }
+  if (queue.stalled > 0) {
+    reasons.push(`${String(queue.stalled)} job(s) have a stale heartbeat; is a worker running?`);
+  }
+  if (queue.oldestPendingAgeSeconds !== null && queue.oldestPendingAgeSeconds > limits.maxWait) {
+    reasons.push(
+      `oldest runnable job has waited ${String(Math.round(queue.oldestPendingAgeSeconds))}s (limit ${String(limits.maxWait)}s)`,
+    );
+  }
+  return reasons;
+}
+
 export interface HealthRouteOptions {
   readonly pool: pg.Pool;
   readonly version: string;
-  /** Omit to keep `/ready` to database and migrations only (WP 0.1 behaviour). */
+  /** Omit to keep `/ready` to database and migrations only. */
   readonly platformDb?: TransactionalExecutor;
   readonly maxOutboxLagEvents?: number;
   readonly maxQueueWaitSeconds?: number;
@@ -68,8 +119,8 @@ export interface HealthRouteOptions {
  * and must also confirm the schema matches the code. Serving requests against a
  * half-migrated database is how a nightly sync corrupts a ledger.
  *
- * WP 0.3 adds outbox lag and queue health to the body, but deliberately keeps
- * them out of the 503 decision by default. A stuck consumer or a dead job is a
+ * Outbox lag and queue health are reported in the body but deliberately kept out
+ * of the 503 decision by default. A stuck consumer or a dead job is a
  * *worker* problem, and the API is how the operator finds out about it — an API
  * that takes itself out of rotation because the pump is behind hides the
  * maintenance page behind the very failure it exists to report. The hard 503
@@ -116,32 +167,23 @@ export const healthRoutes = (options: HealthRouteOptions): FastifyPluginAsyncZod
           await checkConnection(options.pool);
         } catch (cause) {
           request.log.warn({ err: cause }, 'readiness: database unreachable');
-          return reply.code(503).type(PROBLEM_CONTENT_TYPE).send({
-            type: 'https://personalfi.local/problems/database_unavailable',
-            title: 'Service Unavailable',
-            status: 503,
-            detail: 'The database is not reachable.',
-            instance: request.url,
-            code: 'database_unavailable',
-            correlationId: request.id,
-          });
+          return unavailable(
+            request,
+            reply,
+            'database_unavailable',
+            'The database is not reachable.',
+          );
         }
 
         const pending = await pendingMigrations(options.pool);
         if (pending.length > 0) {
           request.log.warn({ pending }, 'readiness: migrations pending');
-          return reply
-            .code(503)
-            .type(PROBLEM_CONTENT_TYPE)
-            .send({
-              type: 'https://personalfi.local/problems/migrations_pending',
-              title: 'Service Unavailable',
-              status: 503,
-              detail: `${pending.length} migration(s) have not been applied: ${pending.join(', ')}.`,
-              instance: request.url,
-              code: 'migrations_pending',
-              correlationId: request.id,
-            });
+          return unavailable(
+            request,
+            reply,
+            'migrations_pending',
+            `${pending.length} migration(s) have not been applied: ${pending.join(', ')}.`,
+          );
         }
 
         if (options.platformDb === undefined) {
@@ -157,27 +199,7 @@ export const healthRoutes = (options: HealthRouteOptions): FastifyPluginAsyncZod
           queueHealth(options.platformDb),
         ]);
 
-        const degradedReasons: string[] = [];
-        if (outbox.failedConsumers.length > 0) {
-          degradedReasons.push(
-            `consumer(s) stopped at an event they cannot handle: ${outbox.failedConsumers.join(', ')}`,
-          );
-        }
-        if (outbox.maxLagEvents > maxLag) {
-          degradedReasons.push(
-            `outbox lag is ${String(outbox.maxLagEvents)} events (limit ${String(maxLag)})`,
-          );
-        }
-        if (queue.stalled > 0) {
-          degradedReasons.push(
-            `${String(queue.stalled)} job(s) have a stale heartbeat; is a worker running?`,
-          );
-        }
-        if (queue.oldestPendingAgeSeconds !== null && queue.oldestPendingAgeSeconds > maxWait) {
-          degradedReasons.push(
-            `oldest runnable job has waited ${String(Math.round(queue.oldestPendingAgeSeconds))}s (limit ${String(maxWait)}s)`,
-          );
-        }
+        const degradedReasons = collectDegradedReasons(outbox, queue, { maxLag, maxWait });
 
         const body = {
           status: degradedReasons.length === 0 ? ('ready' as const) : ('degraded' as const),
@@ -202,18 +224,7 @@ export const healthRoutes = (options: HealthRouteOptions): FastifyPluginAsyncZod
         if (degradedReasons.length > 0) {
           request.log.warn({ degradedReasons }, 'readiness: platform degraded');
           if (options.failOnDegraded === true) {
-            return reply
-              .code(503)
-              .type(PROBLEM_CONTENT_TYPE)
-              .send({
-                type: 'https://personalfi.local/problems/platform_degraded',
-                title: 'Service Unavailable',
-                status: 503,
-                detail: degradedReasons.join('; '),
-                instance: request.url,
-                code: 'platform_degraded',
-                correlationId: request.id,
-              });
+            return unavailable(request, reply, 'platform_degraded', degradedReasons.join('; '));
           }
         }
 

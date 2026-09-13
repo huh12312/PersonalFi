@@ -27,7 +27,19 @@ check: typecheck lint test
 # Runs the same pinned container digests CI runs — gitleaks, trivy — so this
 # needs docker and a network on first use, and takes minutes rather than
 # seconds. That is the price of the claim.
+#
+# gate-security-review-2.md R-4: this recipe used to stop at `check`, which
+# never covered the `web` CI job (apps/web's own vitest project, `pnpm
+# --filter @app/web build`, and both Playwright projects) — a green `just
+# verify` predicted a pipeline that could still fail in CI on exactly those.
+# `just check`'s `test` step already runs the web vitest project (root
+# package.json's `test` script chains `pnpm --filter @app/web test`), so it
+# is not repeated here; the build and Playwright projects were the actual gap.
 verify: check
+    @echo "=== verify: web build (strip-sourcemaps, sw-precache check, csp static check) ==="
+    pnpm --filter @app/web build
+    @echo "=== verify: playwright (smoke + csp) ==="
+    just playwright-check
     @echo "=== verify: gitleaks (full history, CI's pinned digest) ==="
     docker run --rm -v "{{justfile_directory()}}:/repo" -w /repo \
       {{GITLEAKS_IMAGE}} detect --source . --redact --exit-code 1 -i .gitleaksignore
@@ -48,6 +60,27 @@ verify: check
 
 # Same digest CI's `gitleaks` job pins.
 GITLEAKS_IMAGE := "zricethezav/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9"
+
+# Both Playwright projects (`chromium` = smoke.spec.ts, `csp` = csp.spec.ts).
+# gate-security-review-2.md R-4: `just verify` did not run these at all, so it
+# could go green while CI's `web` job failed on either one. CI's job installs
+# chromium itself (`playwright install --with-deps chromium`); this recipe
+# deliberately does NOT — a `just verify` that silently installed a browser on
+# your behalf on first run would be quietly slower the first time and quietly
+# hide a real gap the rest of the time (someone whose local Playwright install
+# broke would never find out from a green `verify`). If chromium is missing,
+# fail with an explicit next step instead of either skipping or auto-fixing.
+playwright-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    output="$(mktemp)"
+    trap 'rm -f "$output"' EXIT
+    if ! pnpm --filter @app/web exec playwright test 2>&1 | tee "$output"; then
+      if grep -q "Executable doesn't exist" "$output"; then
+        echo "::error::Playwright's chromium browser is not installed. Run: pnpm --filter @app/web exec playwright install --with-deps chromium — then re-run 'just verify'." >&2
+      fi
+      exit 1
+    fi
 
 # The same expiry sweep CI's `trivy-fs` job runs before scanning: a suppression
 # is a snooze, and a snooze that never rings is a decision nobody made.

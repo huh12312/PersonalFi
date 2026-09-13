@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
- * Migration entry point. `just migrate` and the compose `migrator` service both
- * run this; WP 0.4 wires it into the one-shot container.
+ * Migration entry point. `just migrate` and the compose `migrator` one-shot
+ * service both run this, so there is one code path that applies a migration.
  */
 import { loadConfig, ConfigError } from '@core/config';
 import { runMigrations, MigrationError } from '../migrate.ts';

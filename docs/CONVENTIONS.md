@@ -21,19 +21,24 @@ just db-down        # stop the database (volume survives)
 just db-reset       # stop it and destroy the volume
 ```
 
-There is **no build step** in development or CI. Node 26 strips types at runtime
-and every package's `exports` points at `src/*.ts`, so `node apps/api/src/main.ts`
-just runs. Bundling for the container image is WP 0.4's problem, not a daily one.
+There is **no build step** for the backend in development or CI. Node 26 strips
+types at runtime and every package's `exports` points at `src/*.ts`, so
+`node apps/api/src/main.ts` just runs, and the container image ships the same
+sources. Only `apps/web` builds, because a browser needs a bundle.
 
 ## Package layout
 
 ```
-apps/api               Fastify shell: health/ready, OpenAPI, problem details, logging
-apps/web               placeholder (WP 0.5)
-packages/kernel        @core/kernel    Money, Quantity, DateOnly, Clock, ids, Result
+apps/api               Fastify shell: health/ready, auth routes, OpenAPI, problem details, logging
+apps/web               @app/web        React SPA: router, app shell, generated API client
+packages/kernel        @core/kernel    Money, Quantity, DateOnly, Clock, ids
 packages/config        @core/config    zod-validated config, Redacted<T>
-packages/db            @core/db        Drizzle columns, pool, migration runner, platform tables
+packages/db            @core/db        Drizzle columns, pool, migration runner
+packages/platform      @core/platform  outbox, job queue/runner/scheduler, locks, feature flags
+packages/secretbox     @core/secretbox envelope encryption, KEK derivation, secret store
 packages/contracts     @core/contracts openapi.json + advisor.schema.json
+packages/testkit       @core/testkit   scratch databases, golden fixtures, process helpers
+packages/seed          @core/seed      deterministic demo-data generator
 packages/contexts/*    @ctx/<name>     the eleven bounded contexts
 scripts/               boundary rule, schema-ownership check
 ```

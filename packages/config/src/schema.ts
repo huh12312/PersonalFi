@@ -80,7 +80,7 @@ export const environmentSchema = z.object({
   /** Refuse to start if a real provider credential is present (08 §6.8). */
   DEMO_MODE: z.stringbool().default(false),
 
-  // --- Worker (WP 0.3) ---------------------------------------------------
+  // --- Worker ------------------------------------------------------------
   //
   // Every one of these has a defensible default; they exist so an operator can
   // slow the worker down on a small box without editing code, and so a test can

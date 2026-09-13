@@ -26,22 +26,19 @@ type ClientRuntimeConfig = Record<string, unknown> | undefined;
  * says; this file is hand-written and gitignore-exempt, so it is the one
  * place the override survives regeneration.
  *
- * gate-remediation-web.md M-2: the emitted client previously defaulted to
- * `baseUrl: 'http://127.0.0.1:8080'` (the contract's dev `servers` entry)
- * with no `credentials`, so a request made from the deployed SPA would have
- * gone to the wrong origin entirely, and even pointed at the right origin it
- * would never have carried the session cookie. Both are wrong for a
+ * Both overrides exist because the generated defaults are wrong for a
  * same-origin deployment behind Caddy:
  *
  *   - `baseUrl: ''` — every request is relative to wherever the SPA itself
  *     was served from, which is exactly where Caddy proxies `/auth`,
- *     `/health`, and `/ready` too. No environment-specific origin to get
- *     wrong, no CORS.
- *   - `credentials: 'same-origin'` — the `__Host-` session cookie rides
- *     along on same-origin requests without ever being attached to a
- *     cross-origin one, matching `apps/web/src/api/pending-contracts.ts`'s
- *     hand-written client (M-2's other half) and the cookie's own `__Host-`
- *     prefix contract.
+ *     `/health`, and `/ready` too. Taking the contract's `servers` entry
+ *     instead would bake the generating machine's origin into the bundle:
+ *     an environment-specific origin to get wrong, and CORS on every call.
+ *   - `credentials: 'same-origin'` — without it the generated client sends
+ *     no cookies at all, so every authenticated request would be anonymous.
+ *     `'same-origin'` rather than `'include'` because the session cookie
+ *     carries the `__Host-` prefix and must never ride a cross-origin
+ *     request; there is no deployment where it should.
  */
 export function createClientConfig(config: ClientRuntimeConfig): ClientRuntimeConfig {
   return {

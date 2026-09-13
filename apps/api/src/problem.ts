@@ -30,6 +30,23 @@ export const problemSchema = z
 export type Problem = z.infer<typeof problemSchema>;
 
 /**
+ * The `response` entries for a route's error statuses.
+ *
+ * `{ 200: body, ...problems(401, 429, 503) }` instead of three identical
+ * `problemSchema` lines: every failure in this application serialises to the
+ * same RFC 9457 body, so the only thing a route actually decides is *which*
+ * statuses it can produce. Spelling that as a list makes a missing status
+ * visible and a copy-pasted one impossible.
+ */
+export function problems<const TStatuses extends readonly number[]>(
+  ...statuses: TStatuses
+): { [K in TStatuses[number]]: typeof problemSchema } {
+  return Object.fromEntries(statuses.map((status) => [status, problemSchema])) as {
+    [K in TStatuses[number]]: typeof problemSchema;
+  };
+}
+
+/**
  * The four error families (08 §6.4). An unrecognised exception is `internal`:
  * fail closed, never leak internals.
  */

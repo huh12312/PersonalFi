@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * `@core/seed` — the deterministic demo-seed generator (WP 0.6).
+ * `@core/seed` — the deterministic demo-seed generator.
  *
  * `generateDemoData(seed)` produces 24 months of realistic, in-memory history
  * for one household: accounts, merchants with statement-descriptor noise,

@@ -72,3 +72,53 @@ test('the toast, warning, and update-prompt code paths all render under CSP', as
 
   expect(await page.evaluate(() => window.__cspViolations)).toEqual([]);
 });
+
+/** `directive-name value tokens...` -> `{ 'directive-name': 'value tokens...' }`. */
+function parseDirectives(header: string): Record<string, string> {
+  const directives: Record<string, string> = {};
+  for (const part of header.split(';')) {
+    const trimmed = part.trim();
+    if (trimmed === '') continue;
+    const [name, ...valueTokens] = trimmed.split(/\s+/);
+    if (name === undefined) continue;
+    directives[name] = valueTokens.join(' ');
+  }
+  return directives;
+}
+
+/**
+ * gate-security-review-2.md R-1. The two tests above (and `check-csp.ts`'s
+ * static scan) only prove *this app* survives whatever policy the Caddyfile
+ * happens to send today — deriving the served header from `docker/Caddyfile`
+ * closed the drift between test and production, but nothing then asserted
+ * the Caddyfile's policy is actually strict. A weakened Caddyfile (adding
+ * `'unsafe-inline'` to `script-src`, or dropping `object-src 'none'` /
+ * `frame-ancestors 'none'` / `base-uri 'none'`) would make the two tests
+ * above pass *more easily*, not fail. This test reads the actual response
+ * header this server sent — the same derived-from-Caddyfile value the tests
+ * above ran under — and pins the directives that matter for XSS containment
+ * and clickjacking/injection defence-in-depth, independent of whether the
+ * app itself happens to violate them.
+ */
+test('the served Content-Security-Policy pins the directives this repo depends on', async ({
+  page,
+}) => {
+  const response = await page.goto('/dev/kitchen-sink');
+  const header = response?.headers()['content-security-policy'];
+  if (header === undefined) {
+    throw new Error('no Content-Security-Policy header on the response — is csp-static-server.mjs running?');
+  }
+  const directives = parseDirectives(header);
+
+  expect(directives['default-src']).toBe("'self'");
+  // Exact match, not "contains": 'self' plus anything else (a host, a
+  // scheme, 'unsafe-inline', 'unsafe-eval') would already be a weakening.
+  expect(directives['script-src']).toBe("'self'");
+  expect(directives['script-src']).not.toMatch(/unsafe-inline|unsafe-eval/);
+  expect(header).not.toMatch(/script-src[^;]*unsafe-inline/);
+  expect(header).not.toMatch(/script-src[^;]*unsafe-eval/);
+  expect(directives['object-src']).toBe("'none'");
+  expect(directives['frame-ancestors']).toBe("'none'");
+  expect(directives['base-uri']).toBe("'none'");
+  expect(directives['form-action']).toBe("'self'");
+});

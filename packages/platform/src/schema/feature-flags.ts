@@ -10,9 +10,9 @@ import { pgTable, primaryKey, text } from 'drizzle-orm/pg-core';
  * is what lets a half-finished phase merge to `main` instead of living on a branch
  * for six weeks.
  *
- * Moved here from `@core/db` in WP 0.3, where `packages/db/OWNERSHIP.md` said it
- * should go: the flag *service* lives next to the consumers and schedules it
- * gates, so the table follows it. The DDL in `0001_initial.sql` is unchanged.
+ * The table is defined here rather than in `@core/db` because the flag *service*
+ * lives next to the consumers and schedules it gates, and a table belongs to the
+ * package that owns its behaviour (`packages/platform/OWNERSHIP.md`).
  */
 export const featureFlags = pgTable(
   'feature_flags',

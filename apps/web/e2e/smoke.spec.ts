@@ -46,11 +46,29 @@ test('the login screen switches to the recovery-code fallback', async ({ page })
  * toggle's usual home, never mounts on `/login`. Restored here against
  * `LoginScreen`'s own minimal toggle (src/features/auth/LoginScreen.tsx's
  * `ThemeToggle`), which this dev server can actually reach without an API.
+ *
+ * gate-security-review-2.md R-8: the restored version of this test only
+ * asserted the post-click attribute matched `/light|dark/`, which is true
+ * whether or not the click did anything — a no-op click, a throwing
+ * handler, or `ThemeToggle` being deleted entirely (leaving whatever
+ * `data-theme` boot sets) would all still pass. Capturing the value before
+ * the click and asserting the post-click value *differs* is the only
+ * version of this assertion that a broken toggle can fail.
  */
 test('the theme toggle on the login screen flips data-theme on <html>', async ({ page }) => {
   await page.goto('/login');
   const html = page.locator('html');
+  // The default preference is 'system' (src/lib/theme.ts), which *removes*
+  // `data-theme` rather than setting it — so `before` may legitimately be
+  // `null`, not `/light|dark/`. The click always resolves to an explicit
+  // 'light' or 'dark' (LoginScreen.tsx's `ThemeToggle` flips the *resolved*
+  // theme), so the meaningful assertion is "the attribute is now light/dark
+  // AND it changed", not "the attribute was already light/dark before".
+  const before = await html.getAttribute('data-theme');
 
   await page.getByRole('button', { name: /theme/i }).click();
+
   await expect(html).toHaveAttribute('data-theme', /light|dark/);
+  const after = await html.getAttribute('data-theme');
+  expect(after).not.toBe(before);
 });

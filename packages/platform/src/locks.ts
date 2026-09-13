@@ -63,21 +63,7 @@ export async function tryAcquireAdvisoryLease(
   pool: pg.Pool,
   key: bigint,
 ): Promise<AdvisoryLease | null> {
-  const client = await pool.connect();
-  try {
-    const result = await client.query<{ locked: boolean }>(
-      'SELECT pg_try_advisory_lock($1::bigint) AS locked',
-      [key.toString()],
-    );
-    if (result.rows[0]?.locked !== true) {
-      client.release();
-      return null;
-    }
-  } catch (cause) {
-    client.release();
-    throw cause;
-  }
-  return makeLease(client, 'SELECT pg_advisory_unlock($1::bigint)', [key.toString()]);
+  return tryAcquire(pool, '$1::bigint', [key.toString()]);
 }
 
 /** The two-int form, for locks keyed by a name rather than by a constant. */
@@ -86,12 +72,27 @@ export async function tryAcquireNamedAdvisoryLease(
   classId: number,
   name: string,
 ): Promise<AdvisoryLease | null> {
-  const objectId = lockIdForName(name);
+  return tryAcquire(pool, '$1::int, $2::int', [classId, lockIdForName(name)]);
+}
+
+/**
+ * The shared body of both forms: take a connection, try the lock on it, and hand
+ * back a lease that unlocks with the same argument list it locked with.
+ *
+ * The `args` string is a fixed placeholder list chosen by the two callers above,
+ * never anything derived from input — the lock arguments themselves travel as
+ * bound parameters.
+ */
+async function tryAcquire(
+  pool: pg.Pool,
+  args: string,
+  params: readonly unknown[],
+): Promise<AdvisoryLease | null> {
   const client = await pool.connect();
   try {
     const result = await client.query<{ locked: boolean }>(
-      'SELECT pg_try_advisory_lock($1::int, $2::int) AS locked',
-      [classId, objectId],
+      `SELECT pg_try_advisory_lock(${args}) AS locked`,
+      [...params],
     );
     if (result.rows[0]?.locked !== true) {
       client.release();
@@ -101,7 +102,7 @@ export async function tryAcquireNamedAdvisoryLease(
     client.release();
     throw cause;
   }
-  return makeLease(client, 'SELECT pg_advisory_unlock($1::int, $2::int)', [classId, objectId]);
+  return makeLease(client, `SELECT pg_advisory_unlock(${args})`, params);
 }
 
 function makeLease(

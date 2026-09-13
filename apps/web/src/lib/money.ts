@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: MIT
-import { Money as MoneyKernel, currency, minorUnitScale, type CurrencyCode } from '@core/kernel';
+import {
+  Money as MoneyKernel,
+  minorUnitScale,
+  type CurrencyCode,
+  type MoneyJson,
+} from '@core/kernel';
 
 /**
  * The wire shape (docs/CONVENTIONS.md "Money"): minor units as a *string*,
@@ -7,19 +12,16 @@ import { Money as MoneyKernel, currency, minorUnitScale, type CurrencyCode } fro
  * liability. Every API response carries this shape; parse it with
  * {@link parseWireMoney} immediately at the query boundary and never touch
  * `.minor` as a string again.
+ *
+ * An alias of the kernel's `MoneyJson` rather than a second declaration of the
+ * same two fields: the server serialises through `Money.toJSON`, so a drift
+ * between the two would be a compile error here rather than a runtime surprise.
  */
-export interface WireMoney {
-  readonly minor: string;
-  readonly currency: string;
-}
+export type WireMoney = MoneyJson;
 
 /** Parse the wire shape into the kernel's exact-arithmetic `Money`. Throws on malformed input. */
 export function parseWireMoney(value: WireMoney): MoneyKernel {
   return MoneyKernel.fromJSON(value);
-}
-
-export function toWireMoney(value: MoneyKernel): WireMoney {
-  return MoneyKernel.toJSON(value);
 }
 
 export type MoneySign = 'positive' | 'negative' | 'zero';
@@ -149,9 +151,3 @@ export function formatPercent(
   }
   return withProperMinusSign(formatter.format(ratio));
 }
-
-export function currencyCode(code: string): CurrencyCode {
-  return currency(code);
-}
-
-export { MoneyKernel as Money };

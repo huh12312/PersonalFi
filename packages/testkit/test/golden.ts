@@ -48,19 +48,21 @@ export function goldenUpdateRequested(env: NodeJS.ProcessEnv): boolean {
   return env['UPDATE_GOLDEN'] === '1';
 }
 
-/** Read a golden fixture. Throws with a `UPDATE_GOLDEN=1` hint if it is missing. */
-export function loadGolden<T = unknown>(name: string, location: GoldenLocation): T {
-  const path = goldenPath(name, location.dir);
-  let raw: string;
+/** Read a fixture's raw text, or explain how to create it. */
+function readGolden(path: string): string {
   try {
-    raw = readFileSync(path, 'utf8');
+    return readFileSync(path, 'utf8');
   } catch (cause) {
     throw new Error(
       `no golden fixture at ${path}. Run the suite once with UPDATE_GOLDEN=1 to create it.`,
       { cause },
     );
   }
-  return JSON.parse(raw) as T;
+}
+
+/** Read a golden fixture. Throws with a `UPDATE_GOLDEN=1` hint if it is missing. */
+export function loadGolden<T = unknown>(name: string, location: GoldenLocation): T {
+  return JSON.parse(readGolden(goldenPath(name, location.dir))) as T;
 }
 
 /**
@@ -82,17 +84,7 @@ export function expectGolden(name: string, value: unknown, options: ExpectGolden
     return;
   }
 
-  let existing: string;
-  try {
-    existing = readFileSync(path, 'utf8');
-  } catch (cause) {
-    throw new Error(
-      `no golden fixture at ${path}. Run the suite once with UPDATE_GOLDEN=1 to create it.`,
-      { cause },
-    );
-  }
-
-  if (existing !== serialized) {
+  if (readGolden(path) !== serialized) {
     throw new Error(
       `golden fixture "${name}" at ${path} does not match.\n` +
         'Re-run with UPDATE_GOLDEN=1 if this change is intentional, and review the diff before committing it.',

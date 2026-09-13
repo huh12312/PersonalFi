@@ -1,43 +1,29 @@
 // SPDX-License-Identifier: MIT
 /**
- * Stand-in for the generated OpenAPI client, scoped to `/auth/*`.
+ * Hand-written client for `/auth/*`, standing in for the generated one.
  *
- * `apps/api/src/routes/auth.ts` exists and is schema-first (every route's zod
- * schema *is* its OpenAPI document contribution — see that file's header
- * comment). `/auth/*` is now live in `packages/contracts/openapi/openapi.json`
- * (paths, operationIds, and request bodies all generate correctly).
+ * The generated client is complete and correct — `src/api/generated` covers
+ * all eighteen `/auth/*` operations with real `components.schemas` types
+ * behind them — so the *shapes* below are redundant. What the generated
+ * client does not have is the three request-level behaviours `apiFetch`
+ * implements, all of which are load-bearing:
  *
- * Update (gate-remediation-web.md, following the security-gate remediation
- * wave): `openapi.json`'s `components.schemas` is no longer empty — every
- * named response schema this file hand-copies (`AuthOk`, `Problem`,
- * `Credential`, `SessionState`, `UnlockState`, `SecurityEvent`) now resolves
- * to a real definition instead of a dangling `$ref`, and
- * `src/api/generated/types.gen.ts` types every one of them correctly. That
- * closes step 0 of the TODO below; this file is still not dead code, because
- * step 1 — moving every call site over — hasn't happened yet. Every existing
- * `/auth/*` call site in this codebase (`LoginScreen`, `IdleLockOverlay`,
- * `LockScreen`, `KekUnlockScreen`, `TopBar`'s sign-out, and the `/_app` auth
- * guard added by this remediation, `src/routes/_app.tsx`) still imports from
- * here — deliberately deferred rather than folded into this remediation,
- * since it's a distinct, larger refactor (rename every hook call, re-verify
- * every WebAuthn flow against the generated shapes) than the security
- * findings this pass was scoped to fix.
+ *   - `ensureCsrfCookie()` plus the `x-csrf-token` header, without which every
+ *     mutation is rejected `403 csrf_failed` on a cold browser session;
+ *   - the `body ??= '{}'` default, without which the three payload-free POSTs
+ *     hit Fastify's `fst_err_ctp_empty_json_body`;
+ *   - `credentials: 'include'` on every call rather than only the ones the
+ *     generated `Client` happens to be configured for.
  *
- * TODO(auth-wiring):
- *
- *   1. `pnpm --filter @app/web gen` (the `@tanstack/react-query` plugin
- *      already configured in `openapi-ts.shared.mjs` emits one query/
- *      mutation hook per `operationId` — the same `operationId`s this file's
- *      function and hook names below mirror on purpose: `getUnlockState` ->
- *      `useGetUnlockState`, etc.), delete this file, and in every file under
- *      `src/features/auth/` and `src/routes/` that imports from
- *      `../../api/pending-contracts.ts`, swap the import for
- *      `../../api/generated/@tanstack/react-query.gen.ts` (or wherever the
- *      plugin emits them) and rename each hook call to the generated name.
- *
- * No component logic changes expected at that point: the shapes below are
- * hand-copied from `apps/api/src/routes/auth.ts`'s zod schemas field-for-
- * field, so the generated types are already structurally identical.
+ * TODO(auth-wiring): port those three into a `@hey-api` request interceptor
+ * alongside `client-runtime-config.ts`, then move the seven call sites
+ * (`LoginScreen`, `PasskeyRegisterFlow`, `LockScreen`, `IdleLockOverlay`,
+ * `KekUnlockScreen`, `TopBar`, and the `/_app` guard in `routes/_app.tsx`) to
+ * the generated `…Options()` / `…Mutation()` factories in
+ * `generated/@tanstack/react-query.gen.ts`, and delete this file. Note that
+ * those are option *factories*, not hooks: each call site becomes
+ * `useQuery(getSessionOptions())`, so it is a call-shape change rather than
+ * the rename this comment used to promise.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';

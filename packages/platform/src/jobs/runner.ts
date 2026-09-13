@@ -4,12 +4,7 @@ import { sql } from 'drizzle-orm';
 import type pg from 'pg';
 import { DEFAULT_JOB_BACKOFF, backoffDelayMs, type BackoffOptions } from '../backoff.ts';
 import { PlatformError, describeError, serializeError } from '../errors.ts';
-import {
-  silentLogger,
-  type Executor,
-  type PlatformLogger,
-  type TransactionalExecutor,
-} from '../executor.ts';
+import { silentLogger, type PlatformLogger, type TransactionalExecutor } from '../executor.ts';
 import {
   JOB_REAPER_ADVISORY_LOCK_KEY,
   tryAcquireAdvisoryLease,
@@ -495,13 +490,4 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     reclaimStalled,
     inFlight: () => inFlight.size,
   };
-}
-
-/** Read one job. For tests, the maintenance page, and the job detail view. */
-export async function readJob(
-  executor: Executor,
-  id: string,
-): Promise<Record<string, unknown> | undefined> {
-  const result = await executor.execute(sql`SELECT * FROM jobs WHERE id = ${id}::uuid`);
-  return result.rows[0];
 }

@@ -7,8 +7,7 @@ import pg from 'pg';
 /**
  * A real Postgres for integration tests, shared by every package's test suite.
  *
- * Generalised from `packages/platform/test/harness.ts` (WP 0.3), which put it
- * best: there is no fake here on purpose. `FOR UPDATE SKIP LOCKED`, an advisory
+ * There is no fake here on purpose. `FOR UPDATE SKIP LOCKED`, an advisory
  * lock surviving a dropped connection, `ON CONFLICT` deduplicating a concurrent
  * insert, a single-use `UPDATE ... WHERE used_at IS NULL` — every property a
  * `*-db` test suite in this repo asserts is a property of Postgres, not of our

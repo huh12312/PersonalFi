@@ -170,6 +170,15 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
      * breakage lands one layer away, where `openapi-ts` generates the frontend
      * client and every dangling ref becomes `unknown`. A typed client that types
      * its payloads as `unknown` is worse than no client: it compiles.
+     *
+     * It emits two entries per schema — `Problem` and `ProblemInput` — because a
+     * Zod schema's input and output types can differ (a `.default()` or a
+     * `.transform()` makes them differ), so the library registers both halves
+     * unconditionally. Every schema here is response-only, so the `*Input` half is
+     * referenced by nothing in `paths` and reaches the frontend as ten unused
+     * generated types. That is the library default and it stays: suppressing it
+     * would mean post-processing the emitted document, and a hand-edited generated
+     * artefact is a worse thing to own than ten dead type aliases.
      */
     transformObject: jsonSchemaTransformObject,
   });

@@ -27,7 +27,21 @@
  * occupy distinct backends rather than queueing on one connection — a
  * single-connection pool would serialise the race away and turn this file green
  * against the very code it exists to reject.
+ *
+ * **gate-security-review-2.md R-2.** Sabotaging `refresh()` back to the
+ * pre-M-4 select-then-update shape used to fail only the 8-racer test —
+ * every other race here still passed, for the wrong reason: with a lazily-
+ * created `max: 6` pool, the *first* race a test file ran only had as many
+ * backends as `pg` had gotten around to opening, so a 2-way race was
+ * effectively serialised and racer B always observed an already-superseded
+ * row (the *correct* row shape either way) rather than genuinely racing the
+ * claim. Fixed by (1) warming the pool to its full `max` in `beforeEach` so
+ * every test — not just whichever happens to run first — starts with `max`
+ * live backends, and (2) raising every race in this file to `RACERS`
+ * concurrent callers instead of 2, since 2 concurrent callers against an
+ * N-backend pool is not the wide-race guarantee the test names claim.
  */
+import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   ADMIN_URL,
@@ -38,14 +52,27 @@ import {
 
 const describeWithDb = ADMIN_URL === undefined ? describe.skip : describe;
 
-/** Concurrent presentations per race. Enough that a lost update would show. */
+/**
+ * Concurrent presentations per race. Enough that a lost update would show,
+ * and the pool below is warmed to exactly this many backends so `pg`'s lazy
+ * backend creation cannot partially serialise the first race in the file.
+ */
 const RACERS = 8;
+
+/**
+ * `createIdentityHarness` DROPs this name before creating it (harness.ts).
+ * A fixed name is fine when this suite runs alone, but this repo runs
+ * multiple agents against the same dev Postgres concurrently — a second
+ * concurrent run of this file (or a stale one) would DROP the first run's
+ * database out from under it mid-race. Unique per process and per file load.
+ */
+const SCRATCH_DB = `personalfi_gateb_${process.pid}_${randomBytes(4).toString('hex')}`;
 
 describeWithDb('refresh rotation is atomic under concurrency (M-4)', () => {
   let harness: IdentityHarness;
 
   beforeAll(async () => {
-    harness = await createIdentityHarness('personalfi_gateb');
+    harness = await createIdentityHarness(SCRATCH_DB, { poolMax: RACERS });
   }, 120_000);
 
   afterAll(async () => {
@@ -54,6 +81,11 @@ describeWithDb('refresh rotation is atomic under concurrency (M-4)', () => {
 
   beforeEach(async () => {
     await harness.reset();
+    // Warm the pool to its full `max` (R-2): without this, the first race
+    // this describe block runs would only engage as many backends as `pg`
+    // had lazily opened so far, understating the real parallelism and
+    // letting a non-atomic `refresh()` pass by accident.
+    await Promise.all(Array.from({ length: RACERS }, () => harness.db.query('SELECT 1')));
   });
 
   const sessions = () => harness.identity.sessions;
@@ -84,35 +116,41 @@ describeWithDb('refresh rotation is atomic under concurrency (M-4)', () => {
     return Number(result.rows[0]?.['n'] ?? 0);
   }
 
-  it('yields exactly one success when two refreshes race the same token', async () => {
+  it('yields exactly one success when refreshes race the same token', async () => {
     const issued = await issue();
 
-    // Promise.all, not sequential: both calls are in flight before either
+    // Promise.all, not sequential: every call is in flight before any
     // commits, which is the whole point. Sequentially this always passed.
-    const outcomes = await Promise.allSettled([
-      sessions().refresh(issued.refreshToken, requestContext()),
-      sessions().refresh(issued.refreshToken, requestContext()),
-    ]);
+    // RACERS calls, not 2 (R-2): with a warmed `max: RACERS` pool this is
+    // the smallest race that cannot be won by accident of connection timing.
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: RACERS }, () => sessions().refresh(issued.refreshToken, requestContext())),
+    );
 
     const fulfilled = outcomes.filter((outcome) => outcome.status === 'fulfilled');
     const rejected = outcomes.filter((outcome) => outcome.status === 'rejected');
 
     expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(1);
-    expect(rejected[0]?.reason).toMatchObject({ code: 'session_reuse_detected' });
+    expect(rejected).toHaveLength(RACERS - 1);
+    for (const outcome of rejected) {
+      expect(outcome.reason).toMatchObject({ code: 'session_reuse_detected' });
+    }
   });
 
   it('records the reuse rather than silently issuing two generations', async () => {
     const issued = await issue();
 
-    await Promise.allSettled([
-      sessions().refresh(issued.refreshToken, requestContext()),
-      sessions().refresh(issued.refreshToken, requestContext()),
-    ]);
+    await Promise.allSettled(
+      Array.from({ length: RACERS }, () => sessions().refresh(issued.refreshToken, requestContext())),
+    );
 
-    // The detection fired. Under the old implementation this was 0 — the
-    // failure was entirely silent, which is what made it worth a finding.
-    expect(await countEvents('session.reuse_detected')).toBe(1);
+    // Every loser is an independent presentation of the same stolen token, and
+    // #rejectUnclaimableRefresh records one event per presentation — so RACERS
+    // - 1 events, not 1 (that was an artifact of the old 2-racer version of
+    // this test, which had exactly one loser). Under the pre-M-4 implementation
+    // this was 0 regardless of racer count — the failure was entirely silent,
+    // which is what made it worth a finding.
+    expect(await countEvents('session.reuse_detected')).toBe(RACERS - 1);
 
     // And the family was burned down, so the winner's brand-new generation does
     // not survive either: a race is indistinguishable from theft, and the safe
@@ -145,12 +183,12 @@ describeWithDb('refresh rotation is atomic under concurrency (M-4)', () => {
   it('never leaves two usable access tokens behind', async () => {
     // The bare consequence, stated without reference to events or columns: after
     // a race, at most one of the returned access tokens may authenticate.
+    // RACERS calls, not 2 (R-2) — see the top-of-file comment.
     const issued = await issue();
 
-    const outcomes = await Promise.allSettled([
-      sessions().refresh(issued.refreshToken, requestContext()),
-      sessions().refresh(issued.refreshToken, requestContext()),
-    ]);
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: RACERS }, () => sessions().refresh(issued.refreshToken, requestContext())),
+    );
 
     const tokens = outcomes.flatMap((outcome) =>
       outcome.status === 'fulfilled' ? [outcome.value.accessToken] : [],

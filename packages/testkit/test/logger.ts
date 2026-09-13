@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT
+import type { PlatformLogger } from '@core/platform';
 
-/** A logger that records what it was told, for asserting on warn/error paths. */
-export interface RecordingLogger {
-  debug(obj: Record<string, unknown>, msg?: string): void;
-  info(obj: Record<string, unknown>, msg?: string): void;
-  warn(obj: Record<string, unknown>, msg?: string): void;
-  error(obj: Record<string, unknown>, msg?: string): void;
+/**
+ * A logger that records what it was told, for asserting on warn/error paths.
+ *
+ * `extends PlatformLogger` rather than re-declaring the four methods: the whole
+ * point of the recorder is to be passed wherever a real logger goes, so a
+ * signature drift should be a compile error here rather than at every call site.
+ */
+export interface RecordingLogger extends PlatformLogger {
   readonly lines: Array<{ level: string; obj: Record<string, unknown>; msg: string | undefined }>;
 }
 

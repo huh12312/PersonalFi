@@ -15,19 +15,32 @@
 # is how four broken gates went unnoticed. A green `just verify` is the claim;
 # `just check` is not.
 #
-# VITEST PROJECT -> CI JOB MAP (gate-remediation-2.md finding 1). `vitest.config.ts`
-# defines every project below; before this fix only kernel/config/api ever ran
-# in CI (`migration-test` ran `db` alone) and platform/testkit/seed/secretbox/
+# VITEST PROJECT -> CI JOB MAP (gate-remediation-2.md finding 1, updated for
+# gate-security-review-2.md R-3). `vitest.config.ts` defines every project
+# below; before gate-remediation-2 only kernel/config/api ever ran in CI
+# (`migration-test` ran `db` alone) and platform/testkit/seed/secretbox/
 # identity/platform-db/secretbox-db/identity-db/api-db, the `web` project, and
 # both Playwright projects never ran at all. Every project vitest knows about
-# now appears in exactly one job below:
+# now appears in at least one job below, and `testkit` deliberately appears in
+# *two*:
 #
 #   `test` (no Postgres, no DATABASE_URL):
 #     kernel, config, api, platform, testkit, seed, secretbox, identity
 #   `migration-test` (Postgres 18 service, DATABASE_URL set):
-#     db, platform-db, secretbox-db, identity-db, api-db
+#     db, platform-db, secretbox-db, identity-db, api-db, testkit
 #   `web` (apps/web has its own vitest config, not part of the root one):
 #     web (vitest), plus Playwright projects `chromium` (smoke) and `csp`
+#
+# R-3: `testkit`'s own `describe.skipIf(ADMIN_URL === undefined)` suites
+# (packages/testkit/test/database.test.ts — the harness `platform-db`,
+# `secretbox-db`, `identity-db` and `api-db` are all built on) ran in neither
+# job: `test` sets no DATABASE_URL, so they skipped there, and `testkit` was
+# absent from `migration-test`'s project list entirely. Re-running the whole
+# `testkit` project in `migration-test` (where DATABASE_URL is set) is
+# deliberately redundant with the plain-unit share of it already covered by
+# `test` — a project split by database-dependence, like the `*-db` projects,
+# would avoid the overlap, but duplicating a few seconds of unit tests is
+# cheaper than a second migration to get there.
 #
 # Re-verify this map with, per project: `pnpm exec vitest list --project
 # <name> --filesOnly` (root config) or `pnpm --filter @app/web exec vitest
@@ -168,11 +181,20 @@ jobs:
       # `DATABASE_URL` (packages/testkit/test/database.ts), which is already
       # set above, so no extra secret is needed for the scratch databases
       # these create.
+      #
+      # `--project testkit` (gate-security-review-2.md R-3): with no
+      # DATABASE_URL, the `test` job's run of this same project skips
+      # `packages/testkit/test/database.test.ts`'s `describe.skipIf(ADMIN_URL
+      # === undefined)` suites — the harness every `*-db` project depends on —
+      # so those tests ran in neither job until now. Re-running here, where
+      # DATABASE_URL is set, is what actually exercises them; re-running the
+      # rest of `testkit`'s (already-covered) unit tests alongside them is
+      # harmless duplication, not a gap.
       - name: migration and db-dependent integration tests
         run: |
           pnpm exec vitest run \
             --project db --project platform-db --project secretbox-db \
-            --project identity-db --project api-db
+            --project identity-db --project api-db --project testkit
 
   web:
     name: web (unit, build, playwright)

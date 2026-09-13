@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-const REDACTED_MARKER = '[redacted]';
+export const REDACTED_MARKER = '[redacted]';
 declare const redactedTag: unique symbol;
 
 /**
@@ -38,5 +38,3 @@ export function isRedacted(value: unknown): value is Redacted<unknown> {
     String(value) === REDACTED_MARKER
   );
 }
-
-export { REDACTED_MARKER };
