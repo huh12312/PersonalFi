@@ -3,7 +3,6 @@ import { loadConfig, type AppConfig } from '@core/config';
 import type pg from 'pg';
 import { afterAll, describe, expect, it } from 'vitest';
 import { CORRELATION_ID_HEADER, buildApp } from '../src/app.ts';
-import { REDACTED_PATHS } from '../src/logging.ts';
 import { createTempSecrets } from './helpers/secrets.ts';
 
 /**
@@ -185,18 +184,137 @@ describe('API shell', () => {
     await app.close();
   });
 
-  it('redacts every credential-shaped field name', () => {
-    // This list is a P0 control: no token and no account number may reach a log.
-    for (const path of [
-      '*.access_token',
-      '*.client_secret',
-      '*.account_number',
-      '*.routing_number',
-      '*.password',
-      'req.headers.authorization',
-      'req.headers.cookie',
-    ]) {
-      expect(REDACTED_PATHS).toContain(path);
+  it('serves the OpenAPI document with a relative server URL', async () => {
+    // `openapi-ts` bakes `servers[0].url` into the frontend client as its base
+    // URL. An absolute one freezes the *generator's* host into the browser
+    // bundle — the committed spec carried `http://127.0.0.1:8080`, so every call
+    // from `https://personalfi.lan` would have been cross-origin to a loopback
+    // address: mixed content, CORS, and a request that never arrives.
+    const { app } = await buildApp({ config: testConfig(), pool: unreachablePool });
+    await app.ready();
+
+    const spec = app.swagger() as { servers?: { url: string }[] };
+    expect(spec.servers).toEqual([{ url: '/' }]);
+
+    await app.close();
+  });
+});
+
+/**
+ * A request over a **real socket**, not `app.inject()`.
+ *
+ * Every other case in this file injects, which builds a fake request object with
+ * no `raw`, no socket and no libuv handle. That gap hid a real defect: the H-3
+ * redaction fix added a `formatters.log` hook, `formatters.log` runs *before*
+ * pino's serializers, and so the hook received the whole live Fastify request
+ * and walked it — socket, handle, getters that throw on a half-closed
+ * connection. Every genuine HTTP request died mid-flight while the injected
+ * suite stayed green; only `test/db/log-hygiene.test.ts`, which spawns the real
+ * process, caught it.
+ *
+ * One real listen-and-fetch closes that gap cheaply, at the level where the
+ * logging hooks actually run.
+ */
+describe('the shell serves a real socket, with logging enabled', () => {
+  it('answers a request over TCP with request logging on', async () => {
+    // `silent` would switch off the very hooks under test.
+    const config = loadConfig({
+      env: {
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'info',
+        DATABASE_URL: 'postgres://test:test@127.0.0.1:1/test',
+        SECRETS_DIR: secrets.dir,
+      },
+    });
+    const { app } = await buildApp({ config, pool: unreachablePool });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+
+    try {
+      const address = app.server.address();
+      if (address === null || typeof address === 'string') throw new Error('no TCP address');
+
+      const response = await fetch(`http://127.0.0.1:${String(address.port)}/health`);
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get(CORRELATION_ID_HEADER)).not.toBeNull();
+    } finally {
+      await app.close();
     }
+  });
+});
+
+/**
+ * **M-1: `request.ip` must not be client-controlled.**
+ *
+ * `auth-flows.ts` keys the persisted rate limiter and the lockout on
+ * `ip:${context.ip}`, and `context.ip` is `request.ip`. Under the previous
+ * `trustProxy: true` the API would have taken the leftmost entry of a header the
+ * client wrote, handing the attacker a fresh limiter subject per request. The
+ * gate could not reproduce it — Caddy 2.11.4's empty `trusted_proxies` default
+ * *replaces* `X-Forwarded-For` rather than appending to it — which is exactly the
+ * problem: the control lived in a version-dependent default of another process,
+ * with no test anywhere pinning it.
+ *
+ * These cases pin it here, where this application can be held to it.
+ */
+describe('trustProxy is a hop count, not a blanket trust (M-1)', () => {
+  /** Echoes what the auth flows would key their limiter and lockout on. */
+  async function ipSeenBy(trustProxy: string, forwardedFor: string): Promise<string> {
+    const config = loadConfig({
+      env: {
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'silent',
+        DATABASE_URL: 'postgres://test:test@127.0.0.1:1/test',
+        SECRETS_DIR: secrets.dir,
+        TRUST_PROXY: trustProxy,
+      },
+    });
+    const { app } = await buildApp({ config, pool: unreachablePool });
+    app.get('/__ip', async (request) => ({ ip: request.ip }));
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/__ip',
+      headers: { 'x-forwarded-for': forwardedFor },
+    });
+    await app.close();
+    return (response.json() as { ip: string }).ip;
+  }
+
+  it('does not let a client-supplied chain reach past one hop', async () => {
+    // The attack: the client writes two entries, hoping the leftmost — which it
+    // fully controls and can vary per request — becomes the limiter subject.
+    // With one hop trusted, only the rightmost entry (the one a real proxy
+    // appended) is taken, and the spoofed value is discarded.
+    const ip = await ipSeenBy('1', '203.0.113.77, 198.51.100.9');
+
+    expect(ip).not.toBe('203.0.113.77');
+    expect(ip).toBe('198.51.100.9');
+  });
+
+  it('discards a long spoofed chain entirely, however many entries it has', async () => {
+    // Padding the chain is the obvious escalation: if the hop count were applied
+    // from the left, or if trust were total, more entries would win.
+    const ip = await ipSeenBy('1', '10.0.0.1, 10.0.0.2, 10.0.0.3, 10.0.0.4, 203.0.113.77');
+
+    expect(ip).toBe('203.0.113.77');
+    for (const spoofed of ['10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4']) {
+      expect(ip).not.toBe(spoofed);
+    }
+  });
+
+  it('ignores forwarded headers altogether at TRUST_PROXY=0', async () => {
+    const ip = await ipSeenBy('0', '203.0.113.77, 198.51.100.9');
+
+    expect(ip).not.toBe('203.0.113.77');
+    expect(ip).not.toBe('198.51.100.9');
+  });
+
+  it('takes two hops only when two are configured', async () => {
+    // The setting must actually mean something, or "default 1" is decoration.
+    const ip = await ipSeenBy('2', '203.0.113.77, 198.51.100.9, 192.0.2.44');
+
+    expect(ip).toBe('198.51.100.9');
   });
 });

@@ -71,6 +71,15 @@ export interface HarnessOptions {
   readonly sessionTtls?: IdentityContextOptionsTtls;
   /** 0 by default: the production 250 ms floor would add minutes across a suite. */
   readonly failureDelayMs?: number;
+  /**
+   * Overrides {@link RP_ID}. Exists so P0-4's remediation can be proved against a
+   * *deployment-shaped* relying party (`personalfi.lan`) rather than against
+   * `localhost`, which is the one hostname whose special-casing in browsers hides
+   * the bug the gate found.
+   */
+  readonly rpId?: string;
+  /** Overrides {@link ORIGIN}. Paired with `rpId`; the two must agree. */
+  readonly allowedOrigins?: readonly string[];
 }
 
 type IdentityContextOptionsTtls = {
@@ -126,9 +135,9 @@ export async function createIdentityHarness(
     db: pool,
     clock,
     secretBox,
-    rpId: RP_ID,
+    rpId: options.rpId ?? RP_ID,
     rpName: RP_NAME,
-    allowedOrigins: [ORIGIN],
+    allowedOrigins: options.allowedOrigins === undefined ? [ORIGIN] : [...options.allowedOrigins],
     ...(options.sessionTtls === undefined ? {} : { sessionTtls: options.sessionTtls }),
     failureDelayMs: options.failureDelayMs ?? 0,
   });

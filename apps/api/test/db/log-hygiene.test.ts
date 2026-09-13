@@ -66,6 +66,11 @@ describeWithDb('log hygiene (P0-12)', () => {
       DATABASE_URL: databaseUrl,
       BASE_URL: ALLOWED_ORIGIN,
       AUTH_ALLOWED_ORIGINS: ALLOWED_ORIGIN,
+      // `loadConfig` now refuses a pairing in which no allowed origin could
+      // enrol a passkey (P0-4), and `localhost` — the default — is not the host
+      // of `http://127.0.0.1:8080`: to WebAuthn they are two different effective
+      // domains, however interchangeable they look in a shell.
+      AUTH_RP_ID: '127.0.0.1',
       // The development floor: this suite is about what reaches the log, and
       // 5.9 s of Argon2id would tell us nothing extra about that.
       KEK_ARGON2_MEMORY_KIB: '8192',

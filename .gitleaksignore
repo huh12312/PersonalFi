@@ -11,3 +11,41 @@
 # reading docs/plan/00-master-implementation-plan.md at this commit — no
 # credential of any kind appears on that line.
 9069911469d73fe6b5e8a8c889f11c6a2a0e97ed:docs/plan/00-master-implementation-plan.md:generic-api-key:9
+
+# False positive: a test fixture constant in the CSRF suite. Verified by reading
+# apps/api/test/csrf.test.ts at this commit — the value is a literal in a test
+# that exercises the `Origin` allow-list and is not a credential to anything.
+0812909c22f76893bda25811c0326e42d4d3d113:apps/api/test/csrf.test.ts:generic-api-key:45
+
+# False positive: a synthetic Plaid-shaped fixture. Verified by reading
+# packages/secretbox/test/secret-box.test.ts at this commit — it is a
+# deliberately Plaid-looking string used to prove that P0-1's ciphertext column
+# contains no plaintext, and it authenticates nothing. Keeping it Plaid-shaped is
+# the point of the test, so the fingerprint is the correct resolution.
+0812909c22f76893bda25811c0326e42d4d3d113:packages/secretbox/test/secret-box.test.ts:plaid-api-token:25
+
+# ---------------------------------------------------------------------------
+# TRUE POSITIVE, remediated in the working tree and neutralised at the source.
+# These two are NOT false positives and must not be read as such.
+#
+# Commit c7846dc committed a live single-use bootstrap enrolment token into
+# docs/evidence/phase-0/wp0.2-summary.md (P0-10, gate §2.8). It is redacted at
+# HEAD. These entries exist only because the value is still reachable in history.
+#
+# Why a fingerprint rather than a rewrite: `git filter-repo` is not installed on
+# this machine, and rewriting 31 commits with `filter-branch` to scrub a token
+# that is already dead is a worse trade than recording why it is dead. There is
+# no remote — nothing has ever been pushed — so the history is local and can
+# still be rewritten cheaply if `filter-repo` is installed before first push.
+# That is the preferred endgame and is tracked in
+# docs/evidence/phase-0/gate-remediation-api.md.
+#
+# Why the token is dead, not merely expired: it was single-use, minted against
+# the scratch database `personalfi_wp02` on the dev Postgres, and it was never
+# redeemed (`registration_tokens.used_at IS NULL`, one row, expiring
+# 2026-09-12T18:42:07Z). That database was dropped WITH (FORCE) and recreated
+# empty during this remediation, so the row the token would have been validated
+# against no longer exists in any database anywhere. It never reached a
+# deployment, and it authenticated nothing beyond a throwaway local enrolment.
+c7846dc6282f6ae7156e56b36f47a8de14d969aa:docs/evidence/phase-0/wp0.2-summary.md:generic-api-key:96
+c7846dc6282f6ae7156e56b36f47a8de14d969aa:docs/evidence/phase-0/wp0.2-summary.md:generic-api-key:98

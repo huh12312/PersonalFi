@@ -184,7 +184,7 @@ with one obvious answer.
 On the wire, unauthenticated:
 
 ```
-set-cookie: __Host-pfi_csrf=nbahRznecIfximKWX5k-TZTdGnZqf2hJgtpc2kUnns8; Path=/; Secure; SameSite=Strict
+set-cookie: __Host-pfi_csrf=EXAMPLE-CSRF-COOKIE-REDACTED-NOT-A-REAL-VALUE; Path=/; Secure; SameSite=Strict
 ```
 
 `Secure`, `Path=/`, no `Domain` — the three things `__Host-` requires. `httpOnly` is
@@ -253,7 +253,7 @@ The four:
 | `docs/evidence/phase-0/wp0.2-summary.md:96`     | `generic-api-key` | **Real.** A live bootstrap enrolment token, committed |
 | `docs/evidence/phase-0/wp0.2-summary.md:98`     | `generic-api-key` | **Real.** The same token, `token only:` line          |
 
-The committed token is `[REDACTED-BOOTSTRAP-TOKEN]`, expiring `2026-09-12T18:42:07Z`,
+The committed token is redacted here as `EXAMPLE-ENROLMENT-TOKEN-REDACTED`, expiring `2026-09-12T18:42:07Z`,
 from a throwaway local database — so the practical risk is nil. The hygiene failure is not nil:
 this is exactly the class of artifact P0-10 exists to keep out of the repository, and it is sitting
 in the evidence directory that is supposed to demonstrate the control working.

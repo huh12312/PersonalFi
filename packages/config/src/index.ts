@@ -14,6 +14,13 @@ export {
   type LoadConfigOptions,
   type PublicEnvironmentConfig,
 } from './load.ts';
+export {
+  assessKekMemory,
+  describeKekMemory,
+  readCgroupMemoryLimitBytes,
+  KEK_MEMORY_WARN_RATIO,
+  type KekMemoryBudget,
+} from './memory.ts';
 export { ConfigError, type ConfigProblem } from './errors.ts';
 export { redact, isRedacted, REDACTED_MARKER, type Redacted } from './redacted.ts';
 export {

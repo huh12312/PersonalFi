@@ -83,8 +83,28 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     // Every request log line keys the id as `correlationId`, matching the field
     // name a job or an event carries, so one grep spans HTTP and background work.
     logController: new LogController({ requestIdLogLabel: 'correlationId' }),
-    // Behind Caddy. Without this every request logs the proxy's address.
-    trustProxy: true,
+    /**
+     * Behind Caddy. Without this every request logs the proxy's address — and
+     * every rate-limit and lockout subject becomes the proxy, which is worse.
+     *
+     * A **hop count**, never `true` (M-1). `true` means "trust any peer's
+     * `X-Forwarded-For` in full", so `request.ip` becomes the leftmost entry of a
+     * header the client wrote, and `auth-flows.ts` keys the persisted limiter and
+     * the lockout on `ip:${context.ip}`. That did not reproduce as an exploit,
+     * but only because Caddy 2.11.4's empty `trusted_proxies` default *replaces*
+     * the header with the peer address instead of appending to it. The control
+     * was inherited from a default in a file this process does not own, in a
+     * version this process cannot see. With a count, exactly `TRUST_PROXY` entries
+     * are taken off the right of the chain — the hops we actually deployed — and
+     * anything a client prepended is ignored whatever the proxy decides to do.
+     *
+     * Written as a predicate rather than the bare number because Fastify's types
+     * do not admit `number` even though `proxy-addr` beneath it does. This is
+     * `proxy-addr`'s own numeric rule stated literally: trust hop `i` iff
+     * `i < TRUST_PROXY`, counting from the socket peer inwards. `TRUST_PROXY=0`
+     * makes it constantly false, which is "parse no forwarded headers at all".
+     */
+    trustProxy: (_address: string, hop: number) => hop < config.env.TRUST_PROXY,
     bodyLimit: 1_048_576,
   }).withTypeProvider<ZodTypeProvider>();
 
@@ -110,7 +130,25 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
         version: OPENAPI_CONTRACT_VERSION,
         license: { name: 'MIT', identifier: 'MIT' },
       },
-      servers: [{ url: config.env.BASE_URL }],
+      /**
+       * Relative, deliberately.
+       *
+       * This document is generated at build time and `openapi-ts` bakes
+       * `servers[0].url` into the frontend client as its base URL. An absolute
+       * one freezes whatever host the *generator* ran on into the bundle: the
+       * committed spec carried `http://127.0.0.1:8080` (the `BASE_URL` default
+       * used by `emit-openapi`), so every browser call from `https://personalfi.lan`
+       * would have been cross-origin to a loopback address — a mixed-content
+       * block, a CORS failure, and a request that never reaches the API, all from
+       * a value nobody set on purpose.
+       *
+       * `/` makes the client same-origin by construction, which is also the only
+       * deployment this application supports: the SPA is served from the same
+       * Caddy site as the API. The externally visible URL is still in
+       * `BASE_URL`, where operator-facing output (the `just bootstrap-user`
+       * enrolment link) reads it.
+       */
+      servers: [{ url: '/' }],
       tags: [
         { name: 'system', description: 'Liveness, readiness, and operational endpoints.' },
         {

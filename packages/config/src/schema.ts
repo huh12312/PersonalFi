@@ -39,8 +39,27 @@ export const environmentSchema = z.object({
 
   HTTP_HOST: z.string().min(1).default('127.0.0.1'),
   HTTP_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
-  /** Absolute, externally visible base URL. Used for OpenAPI servers and links. */
+  /** Absolute, externally visible base URL. Used for links and operator output. */
   BASE_URL: z.url().default('http://127.0.0.1:8080'),
+
+  /**
+   * How many reverse-proxy hops sit in front of this process (M-1).
+   *
+   * Fastify's `trustProxy` was `true` — trust *any* peer's `X-Forwarded-For` —
+   * which made the rate limiter's and the lockout's subject client-controlled on
+   * paper. It did not reproduce, because Caddy 2.11.4's empty `trusted_proxies`
+   * default *replaces* the header with the peer address rather than appending to
+   * it. That is the whole protection, and it is an undocumented, version-
+   * dependent default in a file this process does not own. A hop count states the
+   * topology instead of inheriting it: with `1`, exactly one entry is taken off
+   * the right of the chain (Caddy's own append), and anything a client prepended
+   * is ignored no matter what the proxy does with the header.
+   *
+   * `0` disables forwarded-header parsing entirely, for a process reached
+   * directly. Raise it only when a second proxy is genuinely in the path — every
+   * increment hands one more hop of the chain to whoever can reach the one below.
+   */
+  TRUST_PROXY: z.coerce.number().int().min(0).max(8).default(1),
 
   /**
    * Postgres connection string. May instead be supplied as a secret file, which

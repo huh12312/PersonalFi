@@ -172,6 +172,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       hint: 'set it to the exact scheme+host+port the UI is served from, e.g. https://fi.example.ts.net',
     });
   }
+  problems.push(...webAuthnProblems(env.AUTH_RP_ID, allowedOrigins, isProduction));
 
   if (problems.length > 0) throw new ConfigError(problems);
   if (databaseUrl === undefined) throw new ConfigError(problems); // unreachable; narrows the type
@@ -187,6 +188,115 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     isProduction,
     isTest: env.NODE_ENV === 'test',
   });
+}
+
+/** Hosts a browser treats as a secure context without TLS. Never a deployment. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * The passkey configuration must describe the host actually served (P0-4).
+ *
+ * `AUTH_RP_ID` and `AUTH_ALLOWED_ORIGINS` both defaulted, and `compose.yml` set
+ * neither, so the deployed stack booted with `localhost` / `http://localhost:8080`
+ * while serving `https://personalfi.lan`. Two independent breakages fell out of
+ * that one omission and *neither announced itself*: the CSRF `Origin` allow-list
+ * rejected every mutation from the real origin with a 403, and `localhost` is not
+ * a registrable suffix of `personalfi.lan`, so the browser refused the WebAuthn
+ * ceremony before the server was consulted. No passkey had ever been enrolled
+ * through the stack and nothing in the system said so.
+ *
+ * Silent-and-wrong is the failure mode worth spending a boot check on, so:
+ *
+ * - **Every environment** requires that *at least one* allowed origin can
+ *   actually enrol a passkey — its host must be the RP id or a subdomain of it
+ *   (WebAuthn §7.1). This is the deployed failure stated exactly: not "every
+ *   origin matches", which would be wrong, but "none of them does", which is the
+ *   condition under which the passkey system is decoration.
+ *
+ *   Deliberately **not** an error on the individual non-matching origins. The
+ *   list serves double duty, and a LAN name plus a Tailscale MagicDNS name is a
+ *   legitimate deployment: both must pass the CSRF `Origin` check, while only
+ *   one can ever be the WebAuthn RP. Rejecting the extras would forbid a working
+ *   configuration to catch a mistake the quorum rule already catches.
+ *
+ * - **Production** additionally refuses the shipped defaults and plain HTTP. A
+ *   box holding financial data that still says `localhost` is a box whose
+ *   operator believes passkeys work.
+ */
+function webAuthnProblems(
+  rpId: string,
+  origins: readonly string[],
+  isProduction: boolean,
+): ConfigProblem[] {
+  const problems: ConfigProblem[] = [];
+
+  if (isProduction && LOOPBACK_HOSTS.has(rpId)) {
+    problems.push({
+      key: 'AUTH_RP_ID',
+      problem: `is still the development default (${rpId}); no passkey can be enrolled against a production host with this set`,
+      hint:
+        'set AUTH_RP_ID to the exact hostname the UI is served from, with no scheme and no port ' +
+        '(e.g. personalfi.lan). Changing it later invalidates every enrolled passkey, so pick the ' +
+        'final hostname now — see 03 §3.2 and P0-4.',
+    });
+  }
+
+  let enrollable = 0;
+
+  for (const origin of origins) {
+    let url: URL;
+    try {
+      url = new URL(origin);
+    } catch {
+      problems.push({
+        key: 'AUTH_ALLOWED_ORIGINS',
+        problem: `contains "${origin}", which is not a parseable origin`,
+        hint: 'each entry must be scheme://host[:port] with no path, e.g. https://personalfi.lan',
+      });
+      continue;
+    }
+
+    if (url.pathname !== '/' || url.search !== '' || url.hash !== '') {
+      problems.push({
+        key: 'AUTH_ALLOWED_ORIGINS',
+        problem: `contains "${origin}", which carries a path, query or fragment; an origin is scheme+host+port only`,
+        hint: `use ${url.origin} instead`,
+      });
+    }
+
+    // WebAuthn §7.1: the RP id must equal the origin's effective domain or be a
+    // registrable suffix of it. Counted rather than enforced per-origin — see
+    // the note above on the CSRF list's double duty.
+    const host = url.hostname;
+    if (host === rpId || host.endsWith(`.${rpId}`)) enrollable += 1;
+
+    if (isProduction && url.protocol !== 'https:' && !LOOPBACK_HOSTS.has(host)) {
+      problems.push({
+        key: 'AUTH_ALLOWED_ORIGINS',
+        problem: `contains "${origin}", which is not HTTPS; WebAuthn requires a secure context and the session cookie is \`Secure\``,
+        hint: `use https://${url.host} — Caddy terminates TLS in front of this process`,
+      });
+    }
+  }
+
+  // The deployed failure, stated exactly. `AUTH_RP_ID=localhost` against
+  // `https://personalfi.lan` lands here: the stack boots, logs "configuration
+  // loaded", serves the UI, and can never enrol a passkey — the browser refuses
+  // the ceremony before the server is consulted, so nothing server-side ever
+  // reports a problem. Zero enrollable origins is not a preference; it is a
+  // passkey system that exists only in the configuration file.
+  if (origins.length > 0 && enrollable === 0) {
+    problems.push({
+      key: 'AUTH_RP_ID',
+      problem: `is "${rpId}", which is not the host of any allowed origin (${origins.join(', ')}); no passkey can ever be enrolled or asserted with this pairing`,
+      hint:
+        'AUTH_RP_ID must be the registrable host of at least one AUTH_ALLOWED_ORIGINS entry — ' +
+        'the exact hostname, no scheme and no port. For https://personalfi.lan set ' +
+        'AUTH_RP_ID=personalfi.lan. See 03 §3.2 and P0-4.',
+    });
+  }
+
+  return problems;
 }
 
 function kekFloorProblems(

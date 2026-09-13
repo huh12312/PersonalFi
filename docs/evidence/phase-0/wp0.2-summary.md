@@ -93,11 +93,19 @@ It creates the `users` row, **then derives the KEK** — so a missing or wrong
 ```
 Enrol your first passkey within 60 minutes:
 
-  http://127.0.0.1:8080/enrol#token=[REDACTED-BOOTSTRAP-TOKEN]
+  http://127.0.0.1:8080/enrol#token=EXAMPLE-ENROLMENT-TOKEN-REDACTED-NOT-A-REAL-VALUE
 
-  token only: [REDACTED-BOOTSTRAP-TOKEN]
+  token only: EXAMPLE-ENROLMENT-TOKEN-REDACTED-NOT-A-REAL-VALUE
   expires:    2026-09-12T18:42:07.181Z
 ```
+
+> The token above is a placeholder. The original transcript pasted the **live**
+> 43-character enrolment token into this file, and it stayed there through review
+> — the exact class of artefact P0-10 exists to keep out of the repository, sitting
+> in the directory meant to demonstrate that control working. Found by the Phase 0
+> security gate (§2.8); remediation and the guarding test are recorded in
+> `gate-remediation-api.md`. Never paste a real token into evidence: transcribe the
+> _shape_, or redact at capture time.
 
 Verified against `personalfi_wp02` during this close:
 

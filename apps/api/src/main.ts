@@ -6,7 +6,14 @@
  * socket is opened or a connection pool is created, so a misconfigured container
  * fails immediately and loudly instead of at 03:15 during a sync.
  */
-import { ConfigError, describeConfig, loadConfig } from '@core/config';
+import {
+  ConfigError,
+  assessKekMemory,
+  describeConfig,
+  describeKekMemory,
+  loadConfig,
+  readCgroupMemoryLimitBytes,
+} from '@core/config';
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { createPool } from '@core/db';
 import { recordConfigSnapshot } from '@core/platform';
@@ -53,6 +60,22 @@ async function main(): Promise<void> {
   // match, and in both states the right behaviour is an API that serves /health
   // and /auth/unlock-state and says what is wrong — not a crash loop that tells
   // the operator nothing.
+  // Say what the derivation is about to cost, and against what, *before* it is
+  // attempted. `hash-wasm` allocates the full Argon2id buffer in one call, so a
+  // container whose limit is at or below the cost does not degrade: the OOM
+  // killer takes the process mid-boot and the only artefact is exit code 137,
+  // with nothing in the log mentioning Argon2 or memory. Advisory, never fatal —
+  // a reading from /sys describes where we are running, not whether the
+  // configuration is valid, and a parent cgroup's limit is a common false alarm.
+  const kekMemory = describeKekMemory(
+    assessKekMemory(config.kek.params.memoryKiB, readCgroupMemoryLimitBytes()),
+  );
+  if (kekMemory['warning'] === undefined) {
+    app.log.info({ kekMemory }, 'KEK derivation memory budget');
+  } else {
+    app.log.warn({ kekMemory }, 'KEK derivation may not fit this container');
+  }
+
   await security.initialise();
 
   const shutdown = async (signal: string): Promise<void> => {

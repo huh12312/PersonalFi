@@ -32,6 +32,11 @@ function testConfig(): AppConfig {
       SECRETS_DIR: secrets.dir,
       BASE_URL: ORIGIN,
       AUTH_ALLOWED_ORIGINS: `${ORIGIN},https://fi.local`,
+      // The allow-list serves WebAuthn as well as CSRF, and `loadConfig` now
+      // refuses a pairing in which no origin could enrol a passkey (P0-4). The
+      // second origin is deliberately *not* a subdomain of the RP id: it is the
+      // CSRF-only entry, which is the case this suite is about.
+      AUTH_RP_ID: 'fi.example.ts.net',
     },
   });
 }

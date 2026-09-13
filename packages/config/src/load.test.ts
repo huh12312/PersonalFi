@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
-import { ConfigError } from './errors.ts';
+import { ConfigError, type ConfigProblem } from './errors.ts';
 import { describeConfig, loadConfig } from './load.ts';
 import { REDACTED_MARKER, isRedacted, redact } from './redacted.ts';
 
@@ -12,6 +12,19 @@ const MASTER_KEY = 'pfi-config-test-kek-4b7e1c93-do-not-use';
 function env(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { NODE_ENV: 'test', DATABASE_URL: VALID_URL, SECRETS_DIR: '/nonexistent', ...overrides };
 }
+
+/**
+ * Passkey settings a production box would actually be deployed with.
+ *
+ * Spread into the production cases below that are *about* something else (the
+ * Argon2id floor, a missing secret), so the P0-4 boot check does not add
+ * problems to an assertion that pins an exact problem list. The check itself is
+ * exercised in its own describe block.
+ */
+const PROD_AUTH = {
+  AUTH_RP_ID: 'personalfi.lan',
+  AUTH_ALLOWED_ORIGINS: 'https://personalfi.lan',
+} as const;
 
 /**
  * A secrets directory that exists and contains exactly the named files — plus a
@@ -251,7 +264,7 @@ describe('the KEK Argon2id floor (P0-2)', () => {
 
   it('holds the production floor at m = 1 GiB, t = 4, p = 4', () => {
     const floor = loadConfig({
-      env: { NODE_ENV: 'production', DATABASE_URL: VALID_URL },
+      env: { NODE_ENV: 'production', DATABASE_URL: VALID_URL, ...PROD_AUTH },
       readSecret: secretsFrom({}),
     }).kek.floor;
     expect(floor).toEqual({ memoryKiB: 1_048_576, timeCost: 4, parallelism: 4 });
@@ -264,6 +277,7 @@ describe('the KEK Argon2id floor (P0-2)', () => {
         env: {
           NODE_ENV: 'production',
           DATABASE_URL: VALID_URL,
+          ...PROD_AUTH,
           // The plausible mistake: someone copies the dev numbers into the
           // production compose file to make `docker compose up` feel faster.
           KEK_ARGON2_MEMORY_KIB: '8192',
@@ -297,7 +311,7 @@ describe('the KEK Argon2id floor (P0-2)', () => {
     for (const [key, value] of Object.entries(below)) {
       expect(() =>
         loadConfig({
-          env: { NODE_ENV: 'production', DATABASE_URL: VALID_URL, [key]: value },
+          env: { NODE_ENV: 'production', DATABASE_URL: VALID_URL, ...PROD_AUTH, [key]: value },
           readSecret: secretsFrom({}),
         }),
       ).toThrowError(new RegExp(key));
@@ -356,6 +370,180 @@ describe('the KEK Argon2id floor (P0-2)', () => {
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).message).not.toContain(MASTER_KEY);
     expect(JSON.stringify((error as ConfigError).problems)).not.toContain(MASTER_KEY);
+  });
+});
+
+/**
+ * **P0-4 evidence: the passkey configuration must describe the host served.**
+ *
+ * The gate found `AUTH_RP_ID=localhost` and
+ * `AUTH_ALLOWED_ORIGINS=http://localhost:8080` live on a stack serving
+ * `https://personalfi.lan`, because both settings defaulted and `compose.yml`
+ * set neither. The damage was doubled and silent: the CSRF `Origin` allow-list
+ * 403'd every mutation from the real origin, and `localhost` is not a
+ * registrable suffix of `personalfi.lan`, so the browser refused the WebAuthn
+ * ceremony before the server saw it. No passkey had ever been enrolled and the
+ * boot log looked fine.
+ *
+ * These cases are the "loudly" in "fail loudly": every one asserts a `ConfigError`
+ * naming the setting, thrown before a socket is opened.
+ */
+describe('the passkey configuration boot check (P0-4)', () => {
+  const load = (overrides: Record<string, string>) =>
+    loadConfig({
+      env: { NODE_ENV: 'production', DATABASE_URL: VALID_URL, ...overrides },
+      readSecret: secretsFrom({}),
+    });
+
+  function problemsFrom(overrides: Record<string, string>): readonly ConfigProblem[] {
+    try {
+      load(overrides);
+    } catch (caught) {
+      if (caught instanceof ConfigError) return caught.problems;
+      throw caught;
+    }
+    return [];
+  }
+
+  it('refuses to boot a production box still on the shipped defaults', () => {
+    // Exactly the deployed configuration the gate found. Before this check it
+    // booted, logged "configuration loaded", and enrolled nothing.
+    const problems = problemsFrom({});
+
+    expect(problems.map((problem) => problem.key)).toContain('AUTH_RP_ID');
+    expect(problems.find((problem) => problem.key === 'AUTH_RP_ID')?.problem).toContain(
+      'development default',
+    );
+    expect(problems.find((problem) => problem.key === 'AUTH_RP_ID')?.hint).toContain('P0-4');
+  });
+
+  it('refuses a pairing where no allowed origin could ever enrol a passkey', () => {
+    // The precise shape of the outage: a real hostname served, but an RP id that
+    // is not a registrable suffix of it. The browser refuses the ceremony before
+    // the server is consulted, so nothing server-side would ever have noticed.
+    const problems = problemsFrom({
+      AUTH_RP_ID: 'localhost',
+      AUTH_ALLOWED_ORIGINS: 'https://personalfi.lan',
+    });
+
+    // Two distinct AUTH_RP_ID problems fire here and both are true: it is still
+    // the shipped default, *and* it matches no origin. Assert across the set
+    // rather than on the first, so neither can silently stop being reported.
+    const rpProblems = problems.filter((candidate) => candidate.key === 'AUTH_RP_ID');
+    expect(rpProblems.map((problem) => problem.problem).join('\n')).toContain(
+      'not the host of any allowed origin',
+    );
+    expect(rpProblems.map((problem) => problem.hint).join('\n')).toContain(
+      'AUTH_RP_ID=personalfi.lan',
+    );
+  });
+
+  it('applies the rule outside production too', () => {
+    // It is a property of WebAuthn, not of a deployment: a mismatched pair can
+    // never produce a credential this server will verify, in any environment.
+    expect(() =>
+      loadConfig({
+        env: env({ AUTH_RP_ID: 'example.test', AUTH_ALLOWED_ORIGINS: 'http://localhost:8080' }),
+        readSecret: secretsFrom({}),
+      }),
+    ).toThrowError(/AUTH_RP_ID/);
+  });
+
+  it('accepts a subdomain of the RP id, which is what a Tailscale name looks like', () => {
+    const config = load({
+      AUTH_RP_ID: 'example.ts.net',
+      AUTH_ALLOWED_ORIGINS: 'https://fi.example.ts.net,https://example.ts.net',
+    });
+
+    expect(config.allowedOrigins).toEqual(['https://fi.example.ts.net', 'https://example.ts.net']);
+    expect(config.env.AUTH_RP_ID).toBe('example.ts.net');
+  });
+
+  it('allows a CSRF-only origin alongside the enrollable one', () => {
+    // The list serves double duty (WebAuthn *and* the CSRF `Origin` check), and a
+    // LAN name beside a Tailscale name is a real deployment: both must pass CSRF,
+    // only one can be the WebAuthn RP. Rejecting the extra would forbid a working
+    // configuration in order to catch a mistake the quorum rule already catches.
+    const config = load({
+      AUTH_RP_ID: 'personalfi.lan',
+      AUTH_ALLOWED_ORIGINS: 'https://personalfi.lan,https://fi.example.ts.net',
+    });
+
+    expect(config.allowedOrigins).toHaveLength(2);
+  });
+
+  it('rejects a plain-HTTP origin in production', () => {
+    const problems = problemsFrom({
+      AUTH_RP_ID: 'personalfi.lan',
+      AUTH_ALLOWED_ORIGINS: 'http://personalfi.lan',
+    });
+
+    expect(problems.find((problem) => problem.key === 'AUTH_ALLOWED_ORIGINS')?.problem).toContain(
+      'not HTTPS',
+    );
+  });
+
+  it('rejects an origin carrying a path, which is a URL rather than an origin', () => {
+    // `https://personalfi.lan/` is fine; `https://personalfi.lan/app` never
+    // matches a browser `Origin` header, so it would allow-list nothing.
+    const problems = problemsFrom({
+      AUTH_RP_ID: 'personalfi.lan',
+      AUTH_ALLOWED_ORIGINS: 'https://personalfi.lan/app',
+    });
+
+    expect(problems.find((problem) => problem.key === 'AUTH_ALLOWED_ORIGINS')?.problem).toContain(
+      'path, query or fragment',
+    );
+  });
+
+  it('names every bad origin at once rather than one per restart', () => {
+    const problems = problemsFrom({
+      AUTH_RP_ID: 'personalfi.lan',
+      AUTH_ALLOWED_ORIGINS: 'http://personalfi.lan,https://elsewhere.test/app,not-a-url',
+    });
+
+    // Not HTTPS; carries a path; unparseable. An operator should fix the
+    // configuration in one pass rather than discover a new problem per restart.
+    expect(problems.filter((problem) => problem.key === 'AUTH_ALLOWED_ORIGINS').length).toBe(3);
+  });
+
+  it('leaves the development defaults working, so the check costs nothing until it fires', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+
+    expect(config.env.AUTH_RP_ID).toBe('localhost');
+    expect(config.allowedOrigins).toEqual(['http://localhost:8080']);
+  });
+});
+
+/**
+ * **M-1: `trustProxy` is a stated topology, not `true`.**
+ *
+ * `app.ts` trusted any peer's `X-Forwarded-For`. That did not reproduce as an
+ * exploit only because Caddy 2.11.4's empty `trusted_proxies` default *replaces*
+ * the header rather than appending to it — an undocumented, version-dependent
+ * default in a file this process does not own. The hop count makes the
+ * assumption explicit and testable; `app.test.ts` pins the resulting `request.ip`.
+ */
+describe('TRUST_PROXY (M-1)', () => {
+  it('defaults to one hop — Caddy, and nothing behind it', () => {
+    expect(loadConfig({ env: env(), readSecret: secretsFrom({}) }).env.TRUST_PROXY).toBe(1);
+  });
+
+  it('accepts 0 for a process reached directly, with no forwarded headers parsed', () => {
+    expect(
+      loadConfig({ env: env({ TRUST_PROXY: '0' }), readSecret: secretsFrom({}) }).env.TRUST_PROXY,
+    ).toBe(0);
+  });
+
+  it('refuses a non-numeric or negative hop count rather than silently trusting everything', () => {
+    // The dangerous typo is `TRUST_PROXY=true`: under the old `trustProxy: true`
+    // that *was* the configuration, so it must not coerce to something plausible.
+    expect(() =>
+      loadConfig({ env: env({ TRUST_PROXY: 'true' }), readSecret: secretsFrom({}) }),
+    ).toThrowError(ConfigError);
+    expect(() =>
+      loadConfig({ env: env({ TRUST_PROXY: '-1' }), readSecret: secretsFrom({}) }),
+    ).toThrowError(ConfigError);
   });
 });
 

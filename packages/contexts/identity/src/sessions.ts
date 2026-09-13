@@ -195,43 +195,56 @@ export class SessionService {
    * Throws `session_reuse_detected` rather than returning null, because the caller
    * must not treat it as an ordinary expiry: the correct response is to clear every
    * cookie, log loudly, and make the user re-authenticate.
+   *
+   * **The claim is one conditional statement, and that is the whole design
+   * (M-4).** This was `SELECT`, then check `superseded_by IS NULL AND revoked_at IS NULL` in
+   * TypeScript, then `INSERT` and `UPDATE` — four round trips, no transaction, no
+   * conditional update. Two concurrent presentations of the same token both
+   * passed the check before either wrote, so both got a live generation in one
+   * family and *neither* raised `session.reuse_detected`. That is precisely the
+   * race an attacker holding a stolen refresh cookie runs: present it alongside
+   * the legitimate client and the one detection this system calls its
+   * highest-value control never fires.
+   *
+   * So the claim is the `UPDATE`'s `WHERE` clause, where the database — not this
+   * process — decides who wins.
+   *
+   * **Order: insert the successor, then claim.** `superseded_by` is
+   * `REFERENCES sessions (id)` (`0002_identity.sql:234`), so the claim cannot
+   * name a row that does not exist yet and the obvious one-statement version
+   * fails on the foreign key. Inserting first is safe because the successor's
+   * tokens were minted in this process and have not been returned to anyone: a
+   * generation nobody holds a token for is unreachable, and the loser deletes it
+   * before it can become anything else. The alternative — `SELECT ... FOR UPDATE`
+   * in a transaction — needs a dedicated connection, and `IdentityQueryable` is
+   * deliberately just `query()` so a pool, a client and the bootstrap path's
+   * transaction all satisfy it.
+   *
+   * A crash between the insert and the claim leaves an unreferenced generation
+   * whose tokens exist nowhere, which expires on its own schedule. That is the
+   * safe direction to fail in.
    */
   async refresh(refreshToken: string, context?: RequestContext): Promise<IssuedSession> {
-    const result = await this.#db.query(
-      `SELECT ${COLUMNS} FROM sessions WHERE refresh_token_hash = $1`,
-      [toParam(hashToken(refreshToken))],
-    );
-    const row = result.rows[0];
-    if (row === undefined) throw new AuthError('session_expired', 'no such session');
-    const session = mapRow(row);
+    const tokenHash = toParam(hashToken(refreshToken));
     const now = this.#clock.now();
 
-    if (session.supersededBy !== null || session.revokedAt !== null) {
-      // Two parties hold this token. Burn the family down.
-      await this.revokeFamily(session.familyId, 'refresh_token_reuse');
-      await recordSecurityEvent(this.#db, this.#clock, {
-        kind: 'session.reuse_detected',
-        outcome: 'blocked',
-        userId: session.userId,
-        detail: { familyId: session.familyId, generationId: session.id },
-        context,
-      });
-      throw new AuthError(
-        'session_reuse_detected',
-        'this session has been terminated; sign in again',
-      );
-    }
-
-    if (session.familyExpiresAt <= now) {
-      throw new AuthError('session_expired', 'the session has expired');
-    }
+    // Read the presented row for the family metadata the successor inherits. This
+    // read decides *nothing*: every check that matters is re-evaluated inside the
+    // claim below, against the committed row, under its lock.
+    const presented = await this.#db.query(
+      `SELECT ${COLUMNS} FROM sessions WHERE refresh_token_hash = $1`,
+      [tokenHash],
+    );
+    const presentedRow = presented.rows[0];
+    if (presentedRow === undefined) throw new AuthError('session_expired', 'no such session');
+    const presentedSession = mapRow(presentedRow);
 
     const issued = await this.#insertGeneration({
-      familyId: session.familyId,
-      userId: session.userId,
-      authMethod: session.authMethod,
-      trustedDevice: session.trustedDevice,
-      familyExpiresAt: session.familyExpiresAt,
+      familyId: presentedSession.familyId,
+      userId: presentedSession.userId,
+      authMethod: presentedSession.authMethod,
+      trustedDevice: presentedSession.trustedDevice,
+      familyExpiresAt: presentedSession.familyExpiresAt,
       // Step-up freshness deliberately does *not* survive a rotation: a stolen
       // refresh token must not inherit the right to read a Plaid credential.
       fresh: false,
@@ -239,10 +252,28 @@ export class SessionService {
       ...(context === undefined ? {} : { context }),
     });
 
-    await this.#db.query(`UPDATE sessions SET superseded_by = $2 WHERE id = $1`, [
-      session.id,
-      issued.session.id,
-    ]);
+    // The atomic claim. Exactly one concurrent caller can observe the row
+    // unsuperseded, unrevoked and unexpired: Postgres locks the row for the
+    // duration of the UPDATE and re-evaluates the predicate against the version
+    // committed by whoever got there first. Everyone else gets zero rows.
+    const claimed = await this.#db.query(
+      `UPDATE sessions SET superseded_by = $2
+         WHERE refresh_token_hash = $1
+           AND superseded_by IS NULL
+           AND revoked_at IS NULL
+           AND family_expires_at > $3
+       RETURNING ${COLUMNS}`,
+      [tokenHash, issued.session.id, now],
+    );
+
+    if (claimed.rows[0] === undefined) {
+      // We lost, or the token was already spent, or the family has expired. Take
+      // the successor back out before anything can observe it, then work out
+      // which of those it was.
+      await this.#db.query(`DELETE FROM sessions WHERE id = $1`, [issued.session.id]);
+      return await this.#rejectUnclaimableRefresh(tokenHash, now, context);
+    }
+    const session = mapRow(claimed.rows[0]);
 
     await recordSecurityEvent(this.#db, this.#clock, {
       kind: 'session.refreshed',
@@ -253,6 +284,53 @@ export class SessionService {
     });
 
     return issued;
+  }
+
+  /**
+   * Why the claim failed. Always throws.
+   *
+   * Split out because losing the race and presenting a token that never existed
+   * are indistinguishable from the `UPDATE`'s zero-row result, and they demand
+   * opposite responses: one burns the family down, the other is an ordinary
+   * expiry. Read the row back to tell them apart — by this point the winner has
+   * committed, so the row we see is the one that was written.
+   */
+  async #rejectUnclaimableRefresh(
+    tokenHash: ReturnType<typeof toParam>,
+    now: Date,
+    context: RequestContext | undefined,
+  ): Promise<never> {
+    const existing = await this.#db.query(
+      `SELECT ${COLUMNS} FROM sessions WHERE refresh_token_hash = $1`,
+      [tokenHash],
+    );
+    const row = existing.rows[0];
+    if (row === undefined) throw new AuthError('session_expired', 'no such session');
+    const session = mapRow(row);
+
+    // Expiry is not reuse. A family that simply timed out must not produce a
+    // `session.reuse_detected` event, or the one alert worth waking up for
+    // becomes the one that fires every fortnight on its own.
+    if (session.supersededBy === null && session.revokedAt === null) {
+      throw new AuthError('session_expired', 'the session has expired');
+    }
+    if (session.familyExpiresAt <= now && session.supersededBy === null) {
+      throw new AuthError('session_expired', 'the session has expired');
+    }
+
+    // Two parties hold this token. Burn the family down.
+    await this.revokeFamily(session.familyId, 'refresh_token_reuse');
+    await recordSecurityEvent(this.#db, this.#clock, {
+      kind: 'session.reuse_detected',
+      outcome: 'blocked',
+      userId: session.userId,
+      detail: { familyId: session.familyId, generationId: session.id },
+      context,
+    });
+    throw new AuthError(
+      'session_reuse_detected',
+      'this session has been terminated; sign in again',
+    );
   }
 
   /** Mark the session step-up fresh. Called only after a verified WebAuthn assertion. */
