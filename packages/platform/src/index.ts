@@ -30,9 +30,7 @@
 // ---------------------------------------------------------------------------
 export {
   eventTypeSchema,
-  redactionSchema,
   newEventSchema,
-  eventEnvelopeSchema,
   type EventEnvelope,
   type NewEvent,
   type RecordedEvent,

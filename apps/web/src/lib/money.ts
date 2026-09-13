@@ -7,24 +7,21 @@ import {
 } from '@core/kernel';
 
 /**
- * The wire shape (docs/CONVENTIONS.md "Money"): minor units as a *string*,
- * never a JSON number — `bigint` and IEEE-754 both make a JSON number a
- * liability. Every API response carries this shape; parse it with
- * {@link parseWireMoney} immediately at the query boundary and never touch
- * `.minor` as a string again.
+ * Parse the wire shape into the kernel's exact-arithmetic `Money`. Throws on
+ * malformed input.
  *
- * An alias of the kernel's `MoneyJson` rather than a second declaration of the
- * same two fields: the server serialises through `Money.toJSON`, so a drift
- * between the two would be a compile error here rather than a runtime surprise.
+ * The wire shape is the kernel's `MoneyJson` itself (docs/CONVENTIONS.md
+ * "Money"): minor units as a *string*, never a JSON number, because `bigint`
+ * and IEEE-754 both make a JSON number a liability. The server serialises
+ * through `Money.toJSON`, so naming the kernel type here rather than
+ * redeclaring the same two fields makes a drift a compile error. Call this at
+ * the query boundary and never touch `.minor` as a string again.
  */
-export type WireMoney = MoneyJson;
-
-/** Parse the wire shape into the kernel's exact-arithmetic `Money`. Throws on malformed input. */
-export function parseWireMoney(value: WireMoney): MoneyKernel {
+export function parseWireMoney(value: MoneyJson): MoneyKernel {
   return MoneyKernel.fromJSON(value);
 }
 
-export type MoneySign = 'positive' | 'negative' | 'zero';
+type MoneySign = 'positive' | 'negative' | 'zero';
 
 export function signOf(value: MoneyKernel): MoneySign {
   if (MoneyKernel.isZero(value)) return 'zero';

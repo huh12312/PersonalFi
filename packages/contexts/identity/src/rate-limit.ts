@@ -180,7 +180,7 @@ export class RateLimiter {
     ]);
   }
 
-  /** Housekeeping. Old windows are noise; WP 0.3's job runner will call this. */
+  /** Housekeeping. Windows older than the longest lockout can never be consulted again. */
   async purgeExpired(): Promise<void> {
     const cutoff = new Date(this.#clock.nowMs() - 7 * 24 * 3_600 * 1_000);
     await this.#db.query(`DELETE FROM auth_attempts WHERE window_start < $1`, [cutoff]);

@@ -10,10 +10,8 @@ export interface PlaceholderRouteProps {
 }
 
 /**
- * WP 0.5 ships the app frame and routing, not the features behind it — every
- * screen except the dashboard (which proves the chart pipeline instead) is
- * this: a real route, in the real shell, with a first-class empty state
- * rather than a "TODO" string (§4.4).
+ * Every screen whose feature does not exist yet renders this: a real route, in
+ * the real shell, with a first-class empty state rather than a "TODO" string.
  */
 export function PlaceholderRoute({ icon, headline, description }: PlaceholderRouteProps) {
   return (

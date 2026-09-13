@@ -50,20 +50,20 @@ export interface TotpServiceOptions {
   readonly db: IdentityQueryable;
   readonly clock: Clock;
   readonly secretBox: SecretBox;
-  readonly issuer?: string;
 }
+
+/** The `issuer` an authenticator app shows above the code. */
+const TOTP_ISSUER = 'PersonalFi';
 
 export class TotpService {
   readonly #db: IdentityQueryable;
   readonly #clock: Clock;
   readonly #secretBox: SecretBox;
-  readonly #issuer: string;
 
   constructor(options: TotpServiceOptions) {
     this.#db = options.db;
     this.#clock = options.clock;
     this.#secretBox = options.secretBox;
-    this.#issuer = options.issuer ?? 'PersonalFi';
   }
 
   /**
@@ -95,7 +95,7 @@ export class TotpService {
     );
 
     const totp = new TOTP({
-      issuer: this.#issuer,
+      issuer: TOTP_ISSUER,
       label,
       secret,
       algorithm: TOTP_ALGORITHM,

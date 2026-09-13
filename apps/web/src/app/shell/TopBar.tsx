@@ -4,7 +4,7 @@ import { Eye, EyeOff, LogOut, Moon, Search, Sun } from 'lucide-react';
 
 import { useLogoutMutation } from '../../api/pending-contracts.ts';
 import { useHideAmounts } from '../../lib/privacy.ts';
-import { useResolvedTheme, useThemePreference } from '../../lib/theme.ts';
+import { useThemeToggle } from '../../lib/theme.ts';
 import { SyncStatusPill } from '../../components/patterns/SyncStatusPill.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip.tsx';
 
@@ -17,28 +17,22 @@ const ICON_BUTTON =
   'flex h-9 w-9 items-center justify-center rounded-md text-text-secondary hover:bg-bg-subtle focus-visible:outline-none';
 
 /**
- * Page title, sync status, privacy toggle, theme toggle, and the command
- * palette's visible entry point (§4.2). Mobile collapse-on-scroll is left to
- * a future pass — this is the shell scaffold WP 0.5 asked for.
+ * Page title, sync status, privacy toggle, theme toggle, sign-out, and the
+ * command palette's visible entry point. Mobile collapse-on-scroll is left to
+ * a future pass.
  */
 export function TopBar({ title, onOpenSearch }: TopBarProps) {
   const navigate = useNavigate();
-  const [, setPreference] = useThemePreference();
-  const resolved = useResolvedTheme();
+  const theme = useThemeToggle();
   const [hideAmounts, setHideAmounts] = useHideAmounts();
   const logout = useLogoutMutation();
 
-  function toggleTheme(): void {
-    setPreference(resolved === 'dark' ? 'light' : 'dark');
-  }
-
   /**
-   * gate-remediation-web.md M-4: there was no way to end a session short of
-   * clearing cookies by hand. `useLogoutMutation`'s own `onSuccess` clears
-   * the query cache (packages/api/pending-contracts.ts) — this handler's job
-   * is only to call it and then leave the authenticated shell, in that
-   * order, so nothing under `/_app` can render a stale query result between
-   * "the server forgot this session" and "the client left the page."
+   * `useLogoutMutation`'s own `onSuccess` clears the query cache
+   * (`src/api/pending-contracts.ts`); this handler's job is only to call it
+   * and *then* leave the authenticated shell, in that order, so nothing under
+   * `/_app` can render a stale query result between "the server forgot this
+   * session" and "the client left the page."
    */
   async function handleSignOut(): Promise<void> {
     await logout.mutateAsync();
@@ -84,18 +78,14 @@ export function TopBar({ title, onOpenSearch }: TopBarProps) {
       </Tooltip>
 
       <Tooltip>
-        <TooltipTrigger
-          onClick={toggleTheme}
-          aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-          className={ICON_BUTTON}
-        >
-          {resolved === 'dark' ? (
+        <TooltipTrigger onClick={theme.toggle} aria-label={theme.label} className={ICON_BUTTON}>
+          {theme.resolved === 'dark' ? (
             <Sun size={18} aria-hidden="true" />
           ) : (
             <Moon size={18} aria-hidden="true" />
           )}
         </TooltipTrigger>
-        <TooltipContent>{resolved === 'dark' ? 'Light theme' : 'Dark theme'}</TooltipContent>
+        <TooltipContent>{theme.resolved === 'dark' ? 'Light theme' : 'Dark theme'}</TooltipContent>
       </Tooltip>
 
       <Tooltip>

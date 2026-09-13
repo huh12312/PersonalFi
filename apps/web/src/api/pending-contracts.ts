@@ -1,29 +1,17 @@
 // SPDX-License-Identifier: MIT
 /**
- * Hand-written client for `/auth/*`, standing in for the generated one.
+ * Hand-written client for `/auth/*`, mirroring 11 of the 18 operations.
  *
- * The generated client is complete and correct — `src/api/generated` covers
- * all eighteen `/auth/*` operations with real `components.schemas` types
- * behind them — so the *shapes* below are redundant. What the generated
- * client does not have is the three request-level behaviours `apiFetch`
- * implements, all of which are load-bearing:
+ * It exists for three request-level behaviours the generated client does not
+ * have: `ensureCsrfCookie()` plus the `x-csrf-token` header (without which
+ * every mutation is `403 csrf_failed` on a cold session), the `body ??= '{}'`
+ * default (without which the payload-free POSTs hit Fastify's
+ * `fst_err_ctp_empty_json_body`), and `credentials: 'include'` on every call.
  *
- *   - `ensureCsrfCookie()` plus the `x-csrf-token` header, without which every
- *     mutation is rejected `403 csrf_failed` on a cold browser session;
- *   - the `body ??= '{}'` default, without which the three payload-free POSTs
- *     hit Fastify's `fst_err_ctp_empty_json_body`;
- *   - `credentials: 'include'` on every call rather than only the ones the
- *     generated `Client` happens to be configured for.
- *
- * TODO(auth-wiring): port those three into a `@hey-api` request interceptor
- * alongside `client-runtime-config.ts`, then move the seven call sites
- * (`LoginScreen`, `PasskeyRegisterFlow`, `LockScreen`, `IdleLockOverlay`,
- * `KekUnlockScreen`, `TopBar`, and the `/_app` guard in `routes/_app.tsx`) to
- * the generated `…Options()` / `…Mutation()` factories in
- * `generated/@tanstack/react-query.gen.ts`, and delete this file. Note that
- * those are option *factories*, not hooks: each call site becomes
- * `useQuery(getSessionOptions())`, so it is a call-shape change rather than
- * the rename this comment used to promise.
+ * TODO(auth-wiring): move those three into a `@hey-api` request interceptor
+ * beside `client-runtime-config.ts` and delete this file. The call sites change
+ * shape rather than name — `…Options()` and `…Mutation()` are option factories,
+ * so `useSessionQuery()` becomes `useQuery(getSessionOptions())`.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -85,10 +73,8 @@ const problemSchema = z.object({
 });
 
 /**
- * Exported (not just an internal helper) so `pending-contracts.test.ts` can
- * exercise the credentials/header-merging contract directly — gate-
- * remediation-web.md L-1 is specifically about this function's behaviour,
- * not about any one route wrapper below.
+ * Exported so `pending-contracts.test.ts` can exercise the credentials and
+ * header-merging contract directly, rather than through a route wrapper.
  */
 export async function apiFetch<T>(
   path: string,
@@ -96,14 +82,9 @@ export async function apiFetch<T>(
   init: RequestInit = {},
 ): Promise<T> {
   const method = init.method ?? 'GET';
-  // gate-remediation-web.md L-1: this used to be `{ credentials: 'include',
-  // ...init, headers }` — `...init` was spread *after* `credentials`, so a
-  // caller passing its own `credentials` would silently weaken the request
-  // (e.g. to `'omit'`), and the outer `headers` object was assigned *after*
-  // `...init` too, which discarded any headers a caller supplied instead of
-  // merging them. Both are fixed by merging caller headers into the base set
-  // first, then spreading `init` before the two auth-relevant fields
-  // (`credentials`, `headers`) so neither can be overridden by a caller.
+  // Caller headers are merged into the base set here, and `init` is spread
+  // *before* `credentials` and `headers` further down, so a caller can add a
+  // header but cannot drop `credentials: 'include'` or the CSRF token.
   const headers: Record<string, string> = {
     ...JSON_HEADERS,
     ...(init.headers as Record<string, string> | undefined),
@@ -126,7 +107,17 @@ export async function apiFetch<T>(
     body ??= '{}';
   }
 
-  const response = await fetch(path, { ...init, method, body, credentials: 'include', headers });
+  // `body` is spread conditionally rather than named outright: under
+  // `exactOptionalPropertyTypes` an explicit `body: undefined` is not a legal
+  // `RequestInit`, and a safe method must reach `fetch` with no body at all
+  // rather than a synthesised one.
+  const response = await fetch(path, {
+    ...init,
+    method,
+    ...(body === undefined ? {} : { body }),
+    credentials: 'include',
+    headers,
+  });
 
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
@@ -149,10 +140,10 @@ export async function apiFetch<T>(
 /* ------------------------------------------------------------------------ */
 
 /** Opaque WebAuthn JSON, passed through unvalidated on this side too — see auth.ts's rationale. */
-export const webauthnPayloadSchema = z.record(z.string(), z.unknown());
+const webauthnPayloadSchema = z.record(z.string(), z.unknown());
 export type WebauthnPayload = z.infer<typeof webauthnPayloadSchema>;
 
-export const unlockStateSchema = z.object({
+const unlockStateSchema = z.object({
   state: z.enum(['unlocked', 'locked']),
   reason: z.enum(['no_passphrase', 'passphrase_mismatch', 'not_started']).optional(),
   bootstrapped: z.boolean(),
@@ -161,7 +152,7 @@ export const unlockStateSchema = z.object({
 });
 export type UnlockState = z.infer<typeof unlockStateSchema>;
 
-export const sessionStateSchema = z.object({
+const sessionStateSchema = z.object({
   userId: z.string(),
   displayName: z.string(),
   displayTimezone: z.string(),
@@ -176,7 +167,7 @@ export const sessionStateSchema = z.object({
 });
 export type SessionState = z.infer<typeof sessionStateSchema>;
 
-export const credentialSchema = z.object({
+const credentialSchema = z.object({
   id: z.string(),
   credentialId: z.string(),
   friendlyName: z.string(),
@@ -284,9 +275,8 @@ export function logout(): Promise<{ ok: true }> {
 
 /**
  * Shared by `useSessionQuery` below, the `/_app` auth guard
- * (`src/routes/_app.tsx`, gate-remediation-web.md M-3/M-8), and
- * `IdleLockOverlay`/`LockScreen`'s unlock refetch, so all four ever name the
- * key once between them.
+ * (`src/routes/_app.tsx`), and `IdleLockOverlay`/`LockScreen`'s unlock
+ * refetch, so all four name the key once between them.
  */
 export const sessionQueryKey = ['auth', 'session'] as const;
 
@@ -362,12 +352,11 @@ export function useFinishStepUpMutation() {
 }
 
 /**
- * gate-remediation-web.md M-4: logout must not just forget who's signed in —
- * it must forget everything that session's queries ever cached (account
- * balances, transactions, anything wired up after this WP). `clear()`
- * removes every cache entry outright rather than `invalidateQueries`, which
- * would only mark them stale and leave the last-fetched data readable until
- * a refetch completes.
+ * Logout must forget not just who is signed in but everything that session's
+ * queries ever cached — balances, transactions, anything added later.
+ * `clear()` removes every cache entry outright; `invalidateQueries` would only
+ * mark them stale and leave the last-fetched data readable until a refetch
+ * completes.
  */
 export function useLogoutMutation() {
   const queryClient = useQueryClient();

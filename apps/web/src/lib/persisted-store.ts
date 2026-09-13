@@ -10,7 +10,7 @@
  * write, and stay in sync across tabs via the `storage` event. That is a
  * dozen lines, not a package.
  */
-export interface PersistedStore<T> {
+interface PersistedStore<T> {
   get(): T;
   set(next: T): void;
   subscribe(listener: () => void): () => void;

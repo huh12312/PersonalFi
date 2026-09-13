@@ -19,12 +19,13 @@ import {
   isAuthError,
   type CredentialSummary,
   type IssuedSession,
+  type RequestContext,
   type SessionRecord,
 } from '@ctx/identity';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { AppError, problemSchema } from '../problem.ts';
+import { AppError, problems } from '../problem.ts';
 import {
   clearSessionCookies,
   REFRESH_COOKIE,
@@ -82,12 +83,36 @@ function asWebAuthnResponse<T>(value: Record<string, unknown>): T {
 
 const okResponse = z.object({ ok: z.literal(true) }).meta({ id: 'AuthOk' });
 
+/**
+ * Wire scalars, named once.
+ *
+ * Every instant crosses the wire as an ISO 8601 string and every count as an
+ * integer. Naming them keeps a `z.string()` that happens to hold a timestamp
+ * from being confused with one that holds a display name, and means a change of
+ * mind about the encoding is one edit rather than nine.
+ */
+const isoInstant = z.string();
+const count = z.number().int();
+
+/** Six or eight digits, per RFC 6238 §5.3 and what `otpauth` will accept. */
+const totpToken = z.string().regex(/^[0-9]{6,8}$/);
+
+/** D21's convenience toggle: extends the refresh window to 14 days. */
+const trustedDevice = z.boolean().default(false);
+
+/**
+ * 03 §3.2: one passkey on one device is a self-inflicted denial of service, so
+ * the UI nags until a second authenticator exists. Both the register-verify and
+ * the credential-list replies compute the same flag; they must agree.
+ */
+const SECOND_AUTHENTICATOR_TARGET = 2;
+
 const unlockStateResponse = z
   .object({
     state: z.enum(['unlocked', 'locked']),
     reason: z.enum(['no_passphrase', 'passphrase_mismatch', 'not_started']).optional(),
     bootstrapped: z.boolean().describe('Whether a user account exists yet.'),
-    kekVersion: z.number().int().optional(),
+    kekVersion: count.optional(),
     rotationRecommended: z.boolean().optional(),
   })
   .meta({ id: 'UnlockState' });
@@ -100,11 +125,11 @@ const sessionResponse = z
     authMethod: z.enum(['webauthn', 'totp', 'recovery_code', 'bootstrap']),
     trustedDevice: z.boolean(),
     fresh: z.boolean().describe('Whether a step-up assertion is still within its window.'),
-    idleExpiresAt: z.string(),
-    absoluteExpiresAt: z.string(),
-    credentialCount: z.number().int(),
+    idleExpiresAt: isoInstant,
+    absoluteExpiresAt: isoInstant,
+    credentialCount: count,
     totpEnrolled: z.boolean(),
-    recoveryCodesRemaining: z.number().int(),
+    recoveryCodesRemaining: count,
   })
   .meta({ id: 'SessionState' });
 
@@ -117,15 +142,15 @@ const credentialSchema = z
     aaguid: z.string().nullable(),
     backedUp: z.boolean(),
     deviceType: z.string(),
-    createdAt: z.string(),
-    lastUsedAt: z.string().nullable(),
+    createdAt: isoInstant,
+    lastUsedAt: isoInstant.nullable(),
   })
   .meta({ id: 'Credential' });
 
 const securityEventSchema = z
   .object({
     id: z.string(),
-    occurredAt: z.string(),
+    occurredAt: isoInstant,
     kind: z.string(),
     outcome: z.string(),
     detail: z.record(z.string(), z.unknown()),
@@ -170,7 +195,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
     return session;
   }
 
-  function contextOf(request: FastifyRequest) {
+  function contextOf(request: FastifyRequest): RequestContext {
     return {
       ip: request.ip,
       userAgent: request.headers['user-agent'],
@@ -314,13 +339,11 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           response: {
             200: z.object({
               credential: credentialSchema,
-              credentialCount: z.number().int(),
+              credentialCount: count,
               signedIn: z.boolean(),
-              /** 03 §3.2: one passkey on one device is a self-inflicted denial of service. */
               enrolSecondAuthenticator: z.boolean(),
             }),
-            400: problemSchema,
-            503: problemSchema,
+            ...problems(400, 503),
           },
         },
       },
@@ -341,7 +364,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           credential: serialiseCredential(result.credential),
           credentialCount: result.credentialCount,
           signedIn: result.session !== null,
-          enrolSecondAuthenticator: result.credentialCount < 2,
+          enrolSecondAuthenticator: result.credentialCount < SECOND_AUTHENTICATOR_TARGET,
         };
       },
     );
@@ -378,8 +401,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           tags: ['auth'],
           body: z.object({
             response: webauthnPayload,
-            /** D21's convenience toggle: extends the refresh window to 14 days. */
-            trustedDevice: z.boolean().default(false),
+            trustedDevice,
           }),
           response: { 200: okResponse, ...problems(401, 429, 503) },
         },
@@ -409,8 +431,8 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
             'cannot read a provider credential without a passkey assertion first.',
           tags: ['auth'],
           body: z.object({
-            token: z.string().regex(/^[0-9]{6,8}$/),
-            trustedDevice: z.boolean().default(false),
+            token: totpToken,
+            trustedDevice,
           }),
           response: { 200: okResponse, ...problems(401, 429, 503) },
         },
@@ -438,7 +460,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           tags: ['auth'],
           body: z.object({ code: z.string().min(8).max(32) }),
           response: {
-            200: z.object({ ok: z.literal(true), remainingCodes: z.number().int() }),
+            200: z.object({ ok: z.literal(true), remainingCodes: count }),
             ...problems(401, 429, 503),
           },
         },
@@ -486,9 +508,8 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           tags: ['auth'],
           body: z.object({ response: webauthnPayload }),
           response: {
-            200: z.object({ freshUntil: z.string() }),
-            401: problemSchema,
-            429: problemSchema,
+            200: z.object({ freshUntil: isoInstant }),
+            ...problems(401, 429),
           },
         },
       },
@@ -573,7 +594,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
               credentials: z.array(credentialSchema),
               enrolSecondAuthenticator: z.boolean(),
             }),
-            401: problemSchema,
+            ...problems(401),
           },
         },
       },
@@ -583,7 +604,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
         const credentials = await identity.webauthn.listCredentials(session.userId);
         return {
           credentials: credentials.map(serialiseCredential),
-          enrolSecondAuthenticator: credentials.length < 2,
+          enrolSecondAuthenticator: credentials.length < SECOND_AUTHENTICATOR_TARGET,
         };
       },
     );
@@ -629,7 +650,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           tags: ['auth'],
           response: {
             200: z.object({ enrolmentId: z.string(), secret: z.string(), uri: z.string() }),
-            403: problemSchema,
+            ...problems(403),
           },
         },
       },
@@ -654,7 +675,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           tags: ['auth'],
           body: z.object({
             enrolmentId: z.string().uuid(),
-            token: z.string().regex(/^[0-9]{6,8}$/),
+            token: totpToken,
           }),
           response: { 200: okResponse, ...problems(400, 403) },
         },
@@ -684,7 +705,7 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
           tags: ['auth'],
           response: {
             200: z.object({ codes: z.array(z.string()).length(10) }),
-            403: problemSchema,
+            ...problems(403),
           },
         },
       },

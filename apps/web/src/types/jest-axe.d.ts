@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 /**
  * `jest-axe` ships no types and there is no `@types/jest-axe` in the
- * workspace lockfile (WP 0.5 may not add dependencies) — a minimal ambient
- * declaration covering the one entry point the kitchen-sink a11y test uses
- * (`src/routes/dev.kitchen-sink.test.tsx`).
+ * workspace lockfile — a minimal ambient declaration covering the one entry
+ * point the kitchen-sink a11y test uses
+ * (`src/routes/-dev.kitchen-sink.test.tsx`).
  *
  * This file must stay a *global script* (no top-level `import`/`export`):
  * `declare module 'jest-axe'` here is the module's only type declaration

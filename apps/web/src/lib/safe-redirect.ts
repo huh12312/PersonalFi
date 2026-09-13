@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 /**
- * The `/_app` auth guard (gate-remediation-web.md M-3/M-8) sends an
+ * The `/_app` auth guard sends an
  * unauthenticated visitor to `/login?redirect=<intended path>` so a
  * successful sign-in can return them where they meant to go. That value
  * round-trips through the URL bar, so `/login` must never trust it blindly:

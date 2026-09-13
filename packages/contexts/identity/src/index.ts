@@ -109,13 +109,7 @@ export {
   type SessionRecord,
   type SessionTtls,
 } from './sessions.ts';
-export {
-  WebAuthnService,
-  base64UrlToBytes,
-  bytesToBase64Url,
-  type CredentialSummary,
-  type VerifiedAssertion,
-} from './webauthn.ts';
+export { WebAuthnService, type CredentialSummary, type VerifiedAssertion } from './webauthn.ts';
 export {
   TotpService,
   TOTP_DIGITS,
@@ -127,7 +121,6 @@ export {
 export {
   RecoveryCodeService,
   RECOVERY_CODE_COUNT,
-  RECOVERY_CODE_HASH_PARAMS,
   type GeneratedRecoveryCodes,
 } from './recovery.ts';
 export {

@@ -16,7 +16,10 @@ import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Label } from '../../components/ui/label.tsx';
 import { isSafeRedirectPath } from '../../lib/safe-redirect.ts';
-import { useResolvedTheme, useThemePreference } from '../../lib/theme.ts';
+import { useThemeToggle } from '../../lib/theme.ts';
+import { describeWebauthnError } from '../../lib/webauthn-error.ts';
+import { IconCircle } from '../../components/patterns/IconCircle.tsx';
+import { AuthCard } from './AuthCard.tsx';
 
 type Mode = 'passkey' | 'totp' | 'recovery';
 
@@ -35,9 +38,9 @@ export function LoginScreen() {
   const [mode, setMode] = useState<Mode>('passkey');
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  // Populated by the `/_app` auth guard (gate-remediation-web.md M-3/M-8)
-  // when it bounces an unauthenticated visitor here; falls back to `/` for a
-  // direct visit to `/login` and for any value that isn't a safe in-app path.
+  // Populated by the `/_app` auth guard when it bounces an unauthenticated
+  // visitor here; falls back to `/` for a direct visit to `/login` and for any
+  // value that isn't a safe in-app path.
   const { redirect } = LoginRoute.useSearch();
   const destination = redirect !== undefined && isSafeRedirectPath(redirect) ? redirect : '/';
 
@@ -60,7 +63,7 @@ export function LoginScreen() {
       await navigate({ href: destination });
     } catch (cause) {
       if (useBrowserAutofill) return; // a cancelled/expired conditional request is silent, not an error banner
-      setError(describeWebauthnError(cause));
+      setError(describeWebauthnError(cause, SIGN_IN_ERROR_COPY));
     }
   }
 
@@ -79,9 +82,9 @@ export function LoginScreen() {
 
   return (
     <AuthScreenFrame>
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-bg-subtle text-accent-text">
+      <IconCircle tone="accent">
         <Fingerprint size={22} aria-hidden="true" />
-      </div>
+      </IconCircle>
       <h1 className="mt-3 text-h2 text-text-primary">Sign in to PersonalFi</h1>
 
       {mode === 'passkey' && (
@@ -292,22 +295,20 @@ function RecoveryCodeForm({
  * light/dark is a whole-app preference, so an unauthenticated visitor still
  * needs a way to set it before signing in rather than being stuck with
  * whatever `prefers-color-scheme` guessed. This is the minimal version of
- * `TopBar`'s toggle: no tooltip chrome, same `useThemePreference`/
- * `useResolvedTheme` hooks and `data-theme` effect, so flipping it here and
- * on the dashboard later stay perfectly in sync (same persisted store).
+ * `TopBar`'s toggle — no tooltip chrome — over the same `useThemeToggle`
+ * hook, so flipping it here and on the dashboard later stay in sync.
  */
 function ThemeToggle() {
-  const [, setPreference] = useThemePreference();
-  const resolved = useResolvedTheme();
+  const theme = useThemeToggle();
 
   return (
     <button
       type="button"
-      onClick={() => setPreference(resolved === 'dark' ? 'light' : 'dark')}
-      aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+      onClick={theme.toggle}
+      aria-label={theme.label}
       className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-md text-text-secondary hover:bg-bg-subtle focus-visible:outline-none"
     >
-      {resolved === 'dark' ? (
+      {theme.resolved === 'dark' ? (
         <Sun size={18} aria-hidden="true" />
       ) : (
         <Moon size={18} aria-hidden="true" />
@@ -317,20 +318,10 @@ function ThemeToggle() {
 }
 
 function AuthScreenFrame({ children }: { children: ReactNode }) {
-  return (
-    <div className="relative flex min-h-dvh items-center justify-center bg-bg-page px-4">
-      <ThemeToggle />
-      <div className="w-full max-w-sm rounded-2xl border border-border-hairline bg-bg-surface p-6 text-center">
-        {children}
-      </div>
-    </div>
-  );
+  return <AuthCard corner={<ThemeToggle />}>{children}</AuthCard>;
 }
 
-/** §7.1: `NotAllowedError` means "cancelled or timed out," never "wrong credential." */
-function describeWebauthnError(cause: unknown): string {
-  if (cause instanceof Error && cause.name === 'NotAllowedError') {
-    return 'That was cancelled. Try again, or use a recovery code.';
-  }
-  return 'Something went wrong signing in. Try again, or use a recovery code.';
-}
+const SIGN_IN_ERROR_COPY = {
+  cancelled: 'That was cancelled. Try again, or use a recovery code.',
+  failed: 'Something went wrong signing in. Try again, or use a recovery code.',
+} as const;

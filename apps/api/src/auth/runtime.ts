@@ -46,6 +46,7 @@ export class SecurityRuntime {
   readonly #options: SecurityRuntimeOptions;
   #secretBox: SecretBox | null = null;
   #identity: IdentityContext | null = null;
+  #users: UserService | null = null;
   #state: UnlockState = { state: 'locked', reason: 'not_started' };
   #initialising: Promise<void> | null = null;
 
@@ -70,10 +71,6 @@ export class SecurityRuntime {
     return this.#state;
   }
 
-  unlockState(): UnlockState {
-    return this.#state;
-  }
-
   get isUnlocked(): boolean {
     return this.#state.state === 'unlocked';
   }
@@ -89,9 +86,15 @@ export class SecurityRuntime {
     return this.#secretBox;
   }
 
-  /** A `UserService` that works before the KEK is available, for bootstrap checks. */
+  /**
+   * A `UserService` that works before the KEK is available, for bootstrap checks.
+   *
+   * Built once: it is stateless over `db` and `clock`, both of which are fixed
+   * for the life of the runtime, and `/auth/unlock-state` is polled.
+   */
   users(): UserService {
-    return new UserService({ db: this.#options.db, clock: this.#options.clock });
+    this.#users ??= new UserService({ db: this.#options.db, clock: this.#options.clock });
+    return this.#users;
   }
 
   /** Wipe the KEK and every cached DEK. Wired to `SIGTERM` in `main.ts`. */

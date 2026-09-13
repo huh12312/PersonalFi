@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 import { useNavigate } from '@tanstack/react-router';
 import { AlertTriangle, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
-import type { ReactNode } from 'react';
 
 import { useUnlockStateQuery } from '../../api/pending-contracts.ts';
+import { IconCircle } from '../../components/patterns/IconCircle.tsx';
 import { Button } from '../../components/ui/button.tsx';
+import { AuthCard } from './AuthCard.tsx';
 
 const REASON_COPY: Record<string, string> = {
   no_passphrase:
@@ -28,17 +29,19 @@ export function KekUnlockScreen() {
 
   if (isPending) {
     return (
-      <CenteredCard>
+      <AuthCard>
         <Loader2 size={22} className="animate-spin text-text-muted" aria-hidden="true" />
         <p className="mt-3 text-small text-text-muted">Checking key custody state…</p>
-      </CenteredCard>
+      </AuthCard>
     );
   }
 
   if (isError || data === undefined) {
     return (
-      <CenteredCard>
-        <Icon tone="critical" icon={AlertTriangle} />
+      <AuthCard>
+        <IconCircle tone="critical">
+          <AlertTriangle size={22} aria-hidden="true" />
+        </IconCircle>
         <h1 className="mt-3 text-h3 text-text-primary">Can’t reach PersonalFi</h1>
         <p className="mt-1 text-small text-text-muted">
           The API didn’t respond. Confirm the server is running and try again.
@@ -46,14 +49,16 @@ export function KekUnlockScreen() {
         <Button className="mt-4" onClick={() => void refetch()} disabled={isFetching}>
           Retry
         </Button>
-      </CenteredCard>
+      </AuthCard>
     );
   }
 
   if (data.state === 'locked') {
     return (
-      <CenteredCard>
-        <Icon tone="warning" icon={KeyRound} />
+      <AuthCard>
+        <IconCircle tone="warning">
+          <KeyRound size={22} aria-hidden="true" />
+        </IconCircle>
         <h1 className="mt-3 text-h3 text-text-primary">PersonalFi is locked</h1>
         <p className="mt-1 text-small text-text-muted">
           {(data.reason !== undefined ? REASON_COPY[data.reason] : undefined) ??
@@ -62,13 +67,15 @@ export function KekUnlockScreen() {
         <Button className="mt-4" onClick={() => void refetch()} disabled={isFetching}>
           {isFetching ? 'Checking…' : 'Check again'}
         </Button>
-      </CenteredCard>
+      </AuthCard>
     );
   }
 
   return (
-    <CenteredCard>
-      <Icon tone="good" icon={ShieldCheck} />
+    <AuthCard>
+      <IconCircle tone="good">
+        <ShieldCheck size={22} aria-hidden="true" />
+      </IconCircle>
       <h1 className="mt-3 text-h3 text-text-primary">Unlocked</h1>
       <p className="mt-1 text-small text-text-muted">
         {data.bootstrapped
@@ -78,39 +85,6 @@ export function KekUnlockScreen() {
       <Button className="mt-4" onClick={() => void navigate({ to: '/login' })}>
         Continue to sign in
       </Button>
-    </CenteredCard>
-  );
-}
-
-function Icon({
-  icon: LucideIconComponent,
-  tone,
-}: {
-  icon: typeof KeyRound;
-  tone: 'warning' | 'critical' | 'good';
-}) {
-  return (
-    <div
-      className={
-        'mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-bg-subtle ' +
-        (tone === 'critical'
-          ? 'text-status-critical'
-          : tone === 'warning'
-            ? 'text-status-warning'
-            : 'text-status-good')
-      }
-    >
-      <LucideIconComponent size={22} aria-hidden="true" />
-    </div>
-  );
-}
-
-function CenteredCard({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex min-h-dvh items-center justify-center bg-bg-page px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-border-hairline bg-bg-surface p-6 text-center">
-        {children}
-      </div>
-    </div>
+    </AuthCard>
   );
 }

@@ -33,7 +33,7 @@ const ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
  * interactively while someone waits, and a ten-character random code is not a
  * human-chosen password.
  */
-export const RECOVERY_CODE_HASH_PARAMS: Argon2Params = {
+const RECOVERY_CODE_HASH_PARAMS: Argon2Params = {
   memoryKiB: 19_456,
   timeCost: 2,
   parallelism: 1,
@@ -42,7 +42,6 @@ export const RECOVERY_CODE_HASH_PARAMS: Argon2Params = {
 export interface RecoveryCodeServiceOptions {
   readonly db: IdentityQueryable;
   readonly clock: Clock;
-  readonly hashParams?: Argon2Params;
 }
 
 export interface GeneratedRecoveryCodes {
@@ -54,12 +53,11 @@ export interface GeneratedRecoveryCodes {
 export class RecoveryCodeService {
   readonly #db: IdentityQueryable;
   readonly #clock: Clock;
-  readonly #params: Argon2Params;
+  readonly #params: Argon2Params = RECOVERY_CODE_HASH_PARAMS;
 
   constructor(options: RecoveryCodeServiceOptions) {
     this.#db = options.db;
     this.#clock = options.clock;
-    this.#params = options.hashParams ?? RECOVERY_CODE_HASH_PARAMS;
   }
 
   /** Mint a fresh batch of ten, discarding any previous batch. */

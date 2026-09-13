@@ -26,6 +26,6 @@ import { z } from 'zod';
  * See `zod/v4/core/util.js`'s own comment on `allowsEval`: "strict CSPs
  * report the caught `new Function` as a `securitypolicyviolation` even
  * though the throw is swallowed" — `jitless: true` skips the probe (and the
- * compiled fast-path validators) entirely, gate-remediation-web.md H-3.
+ * compiled fast-path validators) entirely.
  */
 z.config({ jitless: true });

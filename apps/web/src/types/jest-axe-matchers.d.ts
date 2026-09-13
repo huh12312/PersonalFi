@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * Registers `toHaveNoViolations` (from `jest-axe`, `expect.extend`-ed in
- * `src/routes/dev.kitchen-sink.test.tsx`) onto Vitest's `Assertion` type.
+ * `src/routes/-dev.kitchen-sink.test.tsx`) onto Vitest's `Assertion` type.
  *
  * Kept in its own module file (top-level `export {}`) so `declare module
  * 'vitest'` *augments* vitest's real, already-typed module instead of

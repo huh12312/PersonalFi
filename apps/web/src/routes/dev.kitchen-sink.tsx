@@ -50,7 +50,7 @@ import { NetWorthAreaChart } from '../charts/NetWorthAreaChart.tsx';
  * it unless someone navigates here directly — and this redirect stops that.
  * (The chunk itself is additionally excluded from the service worker's
  * precache manifest — vite.config.ts's `injectManifest.globIgnores`,
- * gate-remediation-web.md L-3 — so it's neither reachable nor prefetched to
+ * so it's neither reachable nor prefetched to
  * disk in a real deployment.)
  *
  * `import.meta.env.MODE === 'e2e-csp'` is the one deliberate exception: it's

@@ -5,7 +5,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type pg from 'pg';
 import { z } from 'zod';
-import { PROBLEM_CONTENT_TYPE, problemSchema, serviceUnavailable, toProblem } from '../problem.ts';
+import { PROBLEM_CONTENT_TYPE, problems, serviceUnavailable, toProblem } from '../problem.ts';
 
 const healthResponse = z
   .object({
@@ -97,6 +97,37 @@ function collectDegradedReasons(
   return reasons;
 }
 
+/**
+ * The `/ready` 200 body. `maxSeq` is a bigint and is carried as a string so it
+ * survives JSON; `degradedReasons` is omitted rather than empty so a healthy
+ * body has nothing in it to misread.
+ */
+function toReadyBody(
+  outbox: Awaited<ReturnType<typeof outboxHealth>>,
+  queue: Awaited<ReturnType<typeof queueHealth>>,
+  degradedReasons: readonly string[],
+): z.infer<typeof readyResponse> {
+  return {
+    status: degradedReasons.length === 0 ? 'ready' : 'degraded',
+    database: 'reachable',
+    migrations: 'current',
+    outbox: {
+      maxSeq: outbox.maxSeq.toString(),
+      maxLagEvents: outbox.maxLagEvents,
+      oldestUnprocessedAgeSeconds: outbox.oldestUnprocessedAgeSeconds,
+      failedConsumers: [...outbox.failedConsumers],
+    },
+    queue: {
+      pending: queue.pending,
+      running: queue.running,
+      dead: queue.dead,
+      stalled: queue.stalled,
+      oldestPendingAgeSeconds: queue.oldestPendingAgeSeconds,
+    },
+    ...(degradedReasons.length === 0 ? {} : { degradedReasons: [...degradedReasons] }),
+  };
+}
+
 export interface HealthRouteOptions {
   readonly pool: pg.Pool;
   readonly version: string;
@@ -159,7 +190,7 @@ export const healthRoutes = (options: HealthRouteOptions): FastifyPluginAsyncZod
             'Outbox lag and queue health are reported in the body and mark the service ' +
             '`degraded` without, by default, failing the probe.',
           tags: ['system'],
-          response: { 200: readyResponse, 503: problemSchema },
+          response: { 200: readyResponse, ...problems(503) },
         },
       },
       async (request, reply) => {
@@ -201,26 +232,6 @@ export const healthRoutes = (options: HealthRouteOptions): FastifyPluginAsyncZod
 
         const degradedReasons = collectDegradedReasons(outbox, queue, { maxLag, maxWait });
 
-        const body = {
-          status: degradedReasons.length === 0 ? ('ready' as const) : ('degraded' as const),
-          database: 'reachable' as const,
-          migrations: 'current' as const,
-          outbox: {
-            maxSeq: outbox.maxSeq.toString(),
-            maxLagEvents: outbox.maxLagEvents,
-            oldestUnprocessedAgeSeconds: outbox.oldestUnprocessedAgeSeconds,
-            failedConsumers: [...outbox.failedConsumers],
-          },
-          queue: {
-            pending: queue.pending,
-            running: queue.running,
-            dead: queue.dead,
-            stalled: queue.stalled,
-            oldestPendingAgeSeconds: queue.oldestPendingAgeSeconds,
-          },
-          ...(degradedReasons.length === 0 ? {} : { degradedReasons }),
-        };
-
         if (degradedReasons.length > 0) {
           request.log.warn({ degradedReasons }, 'readiness: platform degraded');
           if (options.failOnDegraded === true) {
@@ -228,7 +239,7 @@ export const healthRoutes = (options: HealthRouteOptions): FastifyPluginAsyncZod
           }
         }
 
-        return reply.code(200).send(body);
+        return reply.code(200).send(toReadyBody(outbox, queue, degradedReasons));
       },
     );
   };

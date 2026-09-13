@@ -14,9 +14,10 @@
  * leaked database dump does not contain a working enrolment link.
  */
 import { newId, type Clock } from '@core/kernel';
-import { constantTimeEqual, randomBytes, sha256 } from '@core/secretbox';
+import { constantTimeEqual, randomBytes } from '@core/secretbox';
 import { asDate, toParam, type IdentityQueryable } from './db.ts';
 import { AuthError } from './errors.ts';
+import { hashToken } from './sessions.ts';
 
 export const REGISTRATION_TOKEN_TTL_SECONDS = 3_600;
 
@@ -109,7 +110,7 @@ export class UserService {
     await this.#db.query(
       `INSERT INTO registration_tokens (id, user_id, token_hash, created_at, expires_at)
        VALUES ($1, $2, $3, $4, $5)`,
-      [newId(), userId, toParam(sha256(new TextEncoder().encode(token))), now, expiresAt],
+      [newId(), userId, toParam(hashToken(token)), now, expiresAt],
     );
     return { token, expiresAt };
   }
@@ -124,7 +125,7 @@ export class UserService {
    * introduce one.
    */
   async redeemRegistrationToken(token: string): Promise<UserRecord> {
-    const digest = sha256(new TextEncoder().encode(token));
+    const digest = hashToken(token);
     const now = this.#clock.now();
     const result = await this.#db.query(
       `UPDATE registration_tokens SET used_at = $2

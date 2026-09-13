@@ -3,7 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
 import { Toaster } from 'sonner';
-// gate-remediation-web.md H-3: sonner injects its own CSS via a runtime
+// Sonner injects its own CSS via a runtime
 // `document.createElement('style')` call the moment `sonner` is imported,
 // which `style-src-elem 'self'` blocks outright (no nonce, no hash, not a
 // `<link>`). Importing the stylesheet sonner ships for exactly this case

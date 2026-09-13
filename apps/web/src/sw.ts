@@ -12,11 +12,11 @@
  *     non-sensitive; `self.__WB_MANIFEST` is injected at build time by
  *     `vite-plugin-pwa`'s `injectManifest.globPatterns`/`globIgnores` in
  *     vite.config.ts, which also excludes the dev-only kitchen-sink route's
- *     chunk — gate-remediation-web.md L-3 — since it is dead code in
- *     production and has no business being fetched onto disk at all);
+ *     chunk, since it is dead code in production and has no business being
+ *     fetched onto disk at all);
  *   - `NetworkOnly` for every data endpoint (`isNetworkOnlyPath`,
- *     src/lib/sw-network-only.ts — gate-remediation-web.md M-5) — no
- *     financial data, and no auth state, ever touches the Cache API. That
+ *     src/lib/sw-network-only.ts) — no financial data, and no auth state,
+ *     ever touches the Cache API. That
  *     predicate is unit-tested on its own, independent of this file, since
  *     this module has build-time (`self.__WB_MANIFEST`) and
  *     service-worker-global-scope side effects a plain test environment

@@ -9,7 +9,6 @@ import {
   platformExecutor,
   type EventDefinition,
   type EventRegistry,
-  type FlagDefinition,
   type FlagService,
   type JobHandlerRegistration,
   type Metrics,
@@ -43,7 +42,6 @@ export interface ModuleRegistration {
 }
 
 export interface Platform {
-  readonly pool: pg.Pool;
   readonly db: TransactionalExecutor;
   readonly metrics: Metrics;
   readonly flags: FlagService;
@@ -53,20 +51,14 @@ export interface Platform {
 export interface BuildPlatformOptions {
   readonly config: AppConfig;
   readonly pool: pg.Pool;
-  readonly flagDefaults?: readonly FlagDefinition[];
-  readonly metrics?: Metrics;
 }
 
 export function buildPlatform(options: BuildPlatformOptions): Platform {
   const db = platformExecutor(createDatabase(options.pool));
   return {
-    pool: options.pool,
     db,
-    metrics: options.metrics ?? createMetrics(),
-    flags: createFlagService({
-      db,
-      defaults: options.flagDefaults ?? PLATFORM_FLAGS,
-    }),
+    metrics: createMetrics(),
+    flags: createFlagService({ db, defaults: PLATFORM_FLAGS }),
     registry: createEventRegistry(),
   };
 }

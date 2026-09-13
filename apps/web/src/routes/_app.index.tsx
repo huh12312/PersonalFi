@@ -12,10 +12,10 @@ export const Route = createFileRoute('/_app/')({
 });
 
 /**
- * `/` — Dashboard. WP 0.5 ships the hero net-worth stat and the 90-day area
- * chart (proving the visx pipeline end to end, §3.3); the cash-flow card,
- * needs-attention strip, and upcoming bills belong to the features that read
- * real data (§4.3) and are out of scope here.
+ * `/` — Dashboard. The hero net-worth stat and the 90-day area chart, which
+ * together prove the visx pipeline end to end. The cash-flow card,
+ * needs-attention strip and upcoming bills wait on features that read real
+ * data.
  */
 function DashboardRoute() {
   return (

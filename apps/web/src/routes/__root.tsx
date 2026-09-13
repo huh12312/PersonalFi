@@ -8,7 +8,7 @@ import { Button } from '../components/ui/button.tsx';
 /**
  * Router context, typed once here and threaded through every route's
  * `beforeLoad`/`loader`. Currently holds only the shared `QueryClient` — the
- * `/_app` auth guard (gate-remediation-web.md M-3/M-8) uses it to call
+ * `/_app` auth guard uses it to call
  * `fetchQuery` instead of a bare `fetch`, so a guard check and a component's
  * `useSessionQuery` share one cache entry instead of racing two requests.
  */

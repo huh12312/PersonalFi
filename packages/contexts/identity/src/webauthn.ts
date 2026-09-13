@@ -373,7 +373,7 @@ export class WebAuthnService {
     return String(challenge);
   }
 
-  /** Housekeeping for WP 0.3's job runner. */
+  /** Housekeeping. A challenge an hour past its expiry can no longer be redeemed. */
   async purgeExpiredChallenges(): Promise<void> {
     await this.#db.query(`DELETE FROM webauthn_challenges WHERE expires_at < $1`, [
       new Date(this.#clock.nowMs() - 3_600_000),
@@ -395,10 +395,10 @@ function mapCredential(row: Record<string, unknown>): CredentialSummary {
   };
 }
 
-export function base64UrlToBytes(value: string): Uint8Array {
+function base64UrlToBytes(value: string): Uint8Array {
   return new Uint8Array(Buffer.from(value, 'base64url'));
 }
 
-export function bytesToBase64Url(value: Uint8Array): string {
+function bytesToBase64Url(value: Uint8Array): string {
   return Buffer.from(value).toString('base64url');
 }

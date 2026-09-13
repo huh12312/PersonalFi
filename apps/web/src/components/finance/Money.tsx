@@ -2,6 +2,8 @@
 import { useState } from 'react';
 import type { HTMLAttributes } from 'react';
 
+import type { MoneyJson } from '@core/kernel';
+
 import { cn } from '../../lib/cn.ts';
 import {
   formatMoney,
@@ -9,12 +11,11 @@ import {
   parseWireMoney,
   signOf,
 } from '../../lib/money.ts';
-import type { WireMoney } from '../../lib/money.ts';
 import { useHideAmounts } from '../../lib/privacy.ts';
 
 export interface MoneyProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'children'> {
   /** The wire shape — `{ minor: "1234", currency: "USD" }` (docs/CONVENTIONS.md "Money"). */
-  value: WireMoney;
+  value: MoneyJson;
   /** `'exceptZero'` (default, always shows `+`/`−`) or `'auto'` (negative only, e.g. a total row). */
   signDisplay?: 'exceptZero' | 'auto' | 'never';
   /** Axis ticks / hero-adjacent labels only ($12.4K) — never a table cell or transaction row (§2.7). */

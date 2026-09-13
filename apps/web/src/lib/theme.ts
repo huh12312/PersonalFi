@@ -59,6 +59,33 @@ export function useThemePreference(): [ThemePreference, (next: ThemePreference) 
   return [preference, setThemePreference];
 }
 
+export interface ThemeToggle {
+  /** The current light/dark value, for choosing an icon. */
+  readonly resolved: ResolvedTheme;
+  readonly toggle: () => void;
+  /** Names the destination, not the current state: what the control will do. */
+  readonly label: string;
+}
+
+/**
+ * The three theme toggles — top bar, command palette, login screen — in one
+ * hook.
+ *
+ * The login screen needs its own control because `TopBar` never mounts for an
+ * unauthenticated visitor, and the palette needs one because it is a keyboard
+ * surface. Sharing the hook is what keeps all three flipping the same
+ * persisted store and agreeing on which direction the label points.
+ */
+export function useThemeToggle(): ThemeToggle {
+  const [, setPreference] = useThemePreference();
+  const resolved = useResolvedTheme();
+  return {
+    resolved,
+    toggle: () => setPreference(resolved === 'dark' ? 'light' : 'dark'),
+    label: resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
+  };
+}
+
 /** React hook: the *resolved* light/dark value, tracking OS changes while on 'system'. */
 export function useResolvedTheme(): ResolvedTheme {
   const [preference] = useThemePreference();

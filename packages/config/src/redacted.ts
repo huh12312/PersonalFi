@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 
+/**
+ * What a boxed secret prints as, everywhere.
+ *
+ * Exported because the log redactor in `apps/api` censors with the same string:
+ * an operator reading a log line should not have to work out whether
+ * `[redacted]` came from the `Redacted` box or from pino's `redact` paths.
+ */
 export const REDACTED_MARKER = '[redacted]';
+
 declare const redactedTag: unique symbol;
 
 /**

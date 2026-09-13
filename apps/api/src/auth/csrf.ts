@@ -24,7 +24,7 @@ import { CSRF_COOKIE, CSRF_HEADER, setCsrfCookie, type CookiePolicy } from './co
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-export function newCsrfToken(): string {
+function newCsrfToken(): string {
   return Buffer.from(randomBytes(32)).toString('base64url');
 }
 

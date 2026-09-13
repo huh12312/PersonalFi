@@ -3,12 +3,14 @@ import { useNavigate } from '@tanstack/react-router';
 import { startRegistration } from '@simplewebauthn/browser';
 import { CheckCircle2, Loader2, ShieldPlus } from 'lucide-react';
 import { useState } from 'react';
-import type { ReactNode } from 'react';
 
 import {
   useFinishRegistrationMutation,
   useStartRegistrationMutation,
 } from '../../api/pending-contracts.ts';
+import { describeWebauthnError } from '../../lib/webauthn-error.ts';
+import { IconCircle } from '../../components/patterns/IconCircle.tsx';
+import { AuthCard } from './AuthCard.tsx';
 import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Label } from '../../components/ui/label.tsx';
@@ -51,16 +53,17 @@ export function PasskeyRegisterFlow({ registrationToken }: PasskeyRegisterFlowPr
       setStep(result.enrolSecondAuthenticator && step === 'first' ? 'second' : 'done');
     } catch (cause) {
       setError(
-        cause instanceof Error && cause.name === 'NotAllowedError'
-          ? 'That was cancelled. Try again when you’re ready.'
-          : 'Could not create that passkey. Try again.',
+        describeWebauthnError(cause, {
+          cancelled: 'That was cancelled. Try again when you’re ready.',
+          failed: 'Could not create that passkey. Try again.',
+        }),
       );
     }
   }
 
   if (step === 'done') {
     return (
-      <Frame>
+      <AuthCard>
         <IconCircle tone="good">
           <CheckCircle2 size={22} aria-hidden="true" />
         </IconCircle>
@@ -69,12 +72,12 @@ export function PasskeyRegisterFlow({ registrationToken }: PasskeyRegisterFlowPr
         <Button className="mt-5 w-full" onClick={() => void navigate({ to: '/' })}>
           Continue to PersonalFi
         </Button>
-      </Frame>
+      </AuthCard>
     );
   }
 
   return (
-    <Frame>
+    <AuthCard>
       <IconCircle tone="accent">
         <ShieldPlus size={22} aria-hidden="true" />
       </IconCircle>
@@ -122,29 +125,6 @@ export function PasskeyRegisterFlow({ registrationToken }: PasskeyRegisterFlowPr
           </button>
         )}
       </form>
-    </Frame>
-  );
-}
-
-function Frame({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex min-h-dvh items-center justify-center bg-bg-page px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-border-hairline bg-bg-surface p-6 text-center">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function IconCircle({ tone, children }: { tone: 'good' | 'accent'; children: ReactNode }) {
-  return (
-    <div
-      className={
-        'mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-bg-subtle ' +
-        (tone === 'good' ? 'text-status-good' : 'text-accent-text')
-      }
-    >
-      {children}
-    </div>
+    </AuthCard>
   );
 }

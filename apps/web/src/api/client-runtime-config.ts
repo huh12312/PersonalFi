@@ -17,14 +17,13 @@
 type ClientRuntimeConfig = Record<string, unknown> | undefined;
 
 /**
- * Wired into codegen via `runtimeConfigPath` in `openapi-ts.shared.mjs`
- * (`@hey-api/client-fetch`'s documented escape hatch for exactly this case —
- * see the comment `openapi-ts` itself writes at the top of
- * `generated/client.gen.ts`). `pnpm --filter @app/web gen` regenerates
- * `src/api/generated` from `packages/contracts/openapi/openapi.json` on every
- * run and would silently re-bake whatever that document's `servers` entry
- * says; this file is hand-written and gitignore-exempt, so it is the one
- * place the override survives regeneration.
+ * Wired into codegen via `runtimeConfigPath` in `openapi-ts.shared.mjs`,
+ * `@hey-api/client-fetch`'s escape hatch for exactly this case. `pnpm
+ * --filter @app/web gen` regenerates `src/api/generated` from
+ * `packages/contracts/openapi/openapi.json` on every run and would re-bake
+ * whatever that document's `servers` entry says; this file is hand-written
+ * and gitignore-exempt, so it is the one place the override survives
+ * regeneration.
  *
  * Both overrides exist because the generated defaults are wrong for a
  * same-origin deployment behind Caddy:

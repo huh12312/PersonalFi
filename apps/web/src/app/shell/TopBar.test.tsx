@@ -15,12 +15,10 @@ import { TooltipProvider } from '../../components/ui/tooltip.tsx';
 import { TopBar } from './TopBar.tsx';
 
 /**
- * gate-remediation-web.md M-4: there was no sign-out control at all, and
- * nothing cleared TanStack Query's cache on logout. This mounts `TopBar` on
- * a minimal one-route router (not the full app tree — the guard on `/_app`
- * is exercised separately in `src/app/router.test.tsx`) so the "Sign out"
- * button can be driven end to end: the mutation fires, the cache empties,
- * and the app leaves for `/login`.
+ * Mounts `TopBar` on a minimal one-route router — not the full app tree; the
+ * guard on `/_app` is exercised separately in `src/app/router.test.tsx` — so
+ * the "Sign out" button can be driven end to end: the mutation fires, the
+ * cache empties, and the app leaves for `/login`.
  */
 function renderTopBar(queryClient: QueryClient) {
   const rootRoute = createRootRoute();

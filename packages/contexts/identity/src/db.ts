@@ -24,10 +24,6 @@ export function asBytes(value: unknown): Uint8Array<ArrayBuffer> {
   throw new TypeError('expected a bytea column to arrive as a buffer');
 }
 
-export function asOptionalBytes(value: unknown): Uint8Array<ArrayBuffer> | null {
-  return value === null || value === undefined ? null : asBytes(value);
-}
-
 export function asDate(value: unknown): Date {
   if (value instanceof Date) return value;
   throw new TypeError('expected a timestamptz column to arrive as a Date');

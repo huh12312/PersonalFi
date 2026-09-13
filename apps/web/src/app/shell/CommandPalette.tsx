@@ -5,7 +5,7 @@ import { Eye, EyeOff, Moon, Sun } from 'lucide-react';
 
 import { Dialog, DialogContent } from '../../components/ui/dialog.tsx';
 import { useHideAmounts } from '../../lib/privacy.ts';
-import { useResolvedTheme, useThemePreference } from '../../lib/theme.ts';
+import { useThemeToggle } from '../../lib/theme.ts';
 import { ALL_NAV_ITEMS } from './nav-items.ts';
 
 export interface CommandPaletteProps {
@@ -21,22 +21,21 @@ export interface CommandPaletteProps {
  * match the token system, not a wrapper library.
  *
  * Composed on top of this file's own `Dialog`/`DialogContent` (Base UI)
- * rather than `cmdk`'s `Command.Dialog` — gate-remediation-web.md H-3.
- * `Command.Dialog` wraps `@radix-ui/react-dialog`, whose default `modal`
- * scroll lock renders `react-remove-scroll` → `react-remove-scroll-bar`,
- * which injects a `<style>` tag into `<head>` the instant the palette opens.
- * `style-src-elem 'self'` blocks that outright. Base UI's dialog does its
- * own scroll lock without touching the Cache^H^H^H^H^Hstyle API (verified:
- * `@base-ui-components/react` has no dependency on `react-remove-scroll` at
- * all), so swapping the dialog primitive removes the violation instead of
- * working around it. `<Command>` (the plain root, not `.Dialog`) still
- * supplies every bit of cmdk's actual behaviour — filtering, keyboard nav,
- * the input/list/group/item wiring below are unchanged.
+ * rather than `cmdk`'s `Command.Dialog`. `Command.Dialog` wraps
+ * `@radix-ui/react-dialog`, whose default `modal` scroll lock renders
+ * `react-remove-scroll` → `react-remove-scroll-bar`, which injects a
+ * `<style>` tag into `<head>` the instant the palette opens, and
+ * `style-src-elem 'self'` blocks that outright. Base UI's dialog does its own
+ * scroll lock without touching the style API — `@base-ui-components/react`
+ * has no dependency on `react-remove-scroll` at all — so swapping the dialog
+ * primitive removes the CSP violation instead of working around it.
+ * `<Command>` (the plain root, not `.Dialog`) still supplies every bit of
+ * cmdk's actual behaviour: filtering, keyboard nav, and the
+ * input/list/group/item wiring below are unchanged.
  */
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const navigate = useNavigate();
-  const [, setPreference] = useThemePreference();
-  const resolved = useResolvedTheme();
+  const theme = useThemeToggle();
   const [hideAmounts, setHideAmounts] = useHideAmounts();
 
   function runAndClose(action: () => void): void {
@@ -99,17 +98,15 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               </Command.Item>
               <Command.Item
                 value="toggle-theme"
-                onSelect={() =>
-                  runAndClose(() => setPreference(resolved === 'dark' ? 'light' : 'dark'))
-                }
+                onSelect={() => runAndClose(theme.toggle)}
                 className="flex h-10 cursor-pointer items-center gap-3 rounded-md px-2.5 text-small text-text-primary data-[selected=true]:bg-bg-subtle"
               >
-                {resolved === 'dark' ? (
+                {theme.resolved === 'dark' ? (
                   <Sun size={16} aria-hidden="true" />
                 ) : (
                   <Moon size={16} aria-hidden="true" />
                 )}
-                {resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                {theme.label}
               </Command.Item>
             </Command.Group>
           </Command.List>

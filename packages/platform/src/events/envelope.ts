@@ -19,7 +19,7 @@ export const eventTypeSchema = z
     'event type must be <context>.<EventName>, e.g. ledger.TransactionsUpserted',
   );
 
-export const redactionSchema = z.enum(['none', 'pii', 'purged']);
+const redactionSchema = z.enum(['none', 'pii', 'purged']);
 export type Redaction = z.infer<typeof redactionSchema>;
 
 const uuidSchema = z.uuid();
@@ -43,16 +43,17 @@ export type NewEvent<TPayload = unknown> = Omit<z.infer<typeof newEventSchema>, 
   readonly payload: TPayload;
 };
 
-/** A row of the log, as the pump hands it to a handler. */
-export const eventEnvelopeSchema = newEventSchema.extend({
-  seq: z.bigint(),
-  recordedAt: z.date(),
-});
-
-export type EventEnvelope<TPayload = unknown> = Omit<
-  z.infer<typeof eventEnvelopeSchema>,
-  'payload'
-> & {
+/**
+ * A row of the log, as the pump hands it to a handler.
+ *
+ * A type rather than a schema: `seq` and `recordedAt` are assigned by Postgres,
+ * so nothing ever arrives from outside in this shape and there is nothing to
+ * validate. `newEventSchema` stays a schema because a publisher's input does
+ * cross a trust boundary.
+ */
+export type EventEnvelope<TPayload = unknown> = Omit<z.infer<typeof newEventSchema>, 'payload'> & {
+  readonly seq: bigint;
+  readonly recordedAt: Date;
   readonly payload: TPayload;
 };
 
