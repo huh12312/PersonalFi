@@ -5,41 +5,39 @@
  * `apps/api/src/routes/auth.ts` exists and is schema-first (every route's zod
  * schema *is* its OpenAPI document contribution — see that file's header
  * comment). `/auth/*` is now live in `packages/contracts/openapi/openapi.json`
- * (paths, operationIds, and request bodies all generate correctly), but this
- * file is **not yet dead code**: `openapi.json`'s `components.schemas` is
- * empty — every named response schema (`AuthOk`, `Problem`, `Credential`,
- * `SessionState`, `UnlockState`, `SecurityEvent`, ...) is a `$ref` to a
- * definition that was never registered, so `pnpm --filter @app/web gen`
- * silently degrades every one of those response bodies to `unknown`
- * (confirmed in `src/api/generated/types.gen.ts`, e.g. `FinishLoginResponses`
- * — a real `AuthOk` in the route's zod schema — types its `200` as bare
- * `unknown`). Swapping this file's callers over today would trade a
- * hand-maintained but *accurate* type for a generated but *empty* one.
+ * (paths, operationIds, and request bodies all generate correctly).
  *
- * TODO(auth-wiring): this is now a **two-step change**, not one:
+ * Update (gate-remediation-web.md, following the security-gate remediation
+ * wave): `openapi.json`'s `components.schemas` is no longer empty — every
+ * named response schema this file hand-copies (`AuthOk`, `Problem`,
+ * `Credential`, `SessionState`, `UnlockState`, `SecurityEvent`) now resolves
+ * to a real definition instead of a dangling `$ref`, and
+ * `src/api/generated/types.gen.ts` types every one of them correctly. That
+ * closes step 0 of the TODO below; this file is still not dead code, because
+ * step 1 — moving every call site over — hasn't happened yet. Every existing
+ * `/auth/*` call site in this codebase (`LoginScreen`, `IdleLockOverlay`,
+ * `LockScreen`, `KekUnlockScreen`, `TopBar`'s sign-out, and the `/_app` auth
+ * guard added by this remediation, `src/routes/_app.tsx`) still imports from
+ * here — deliberately deferred rather than folded into this remediation,
+ * since it's a distinct, larger refactor (rename every hook call, re-verify
+ * every WebAuthn flow against the generated shapes) than the security
+ * findings this pass was scoped to fix.
  *
- *   0. (apps/api, outside this package) Register the shared response schemas
- *      with `@fastify/swagger` — e.g. via `fastify.addSchema()`/a JSON Schema
- *      transform keyed by each zod schema's `.meta({ id })` — so `emit-
- *      openapi.ts` (`apps/api/src/cli/emit-openapi.ts`) writes a populated
- *      `components.schemas` instead of dangling `$ref`s. `Problem`'s `.meta({
- *      id: 'Problem' })` in `apps/api/src/problem.ts` is already there; it's
- *      just never surfaced into the emitted document.
- *   1. Once that lands and `components.schemas` resolves, the original plan
- *      still holds: `pnpm --filter @app/web gen` (the `@tanstack/react-query`
- *      plugin already configured in `openapi-ts.shared.mjs` emits one query/
+ * TODO(auth-wiring):
+ *
+ *   1. `pnpm --filter @app/web gen` (the `@tanstack/react-query` plugin
+ *      already configured in `openapi-ts.shared.mjs` emits one query/
  *      mutation hook per `operationId` — the same `operationId`s this file's
  *      function and hook names below mirror on purpose: `getUnlockState` ->
  *      `useGetUnlockState`, etc.), delete this file, and in every file under
- *      `src/features/auth/` that imports from `../../api/pending-contracts.ts`,
- *      swap the import for `../../api/generated/@tanstack/react-query.gen.ts`
- *      (or wherever the plugin emits them) and rename each hook call to the
- *      generated name.
+ *      `src/features/auth/` and `src/routes/` that imports from
+ *      `../../api/pending-contracts.ts`, swap the import for
+ *      `../../api/generated/@tanstack/react-query.gen.ts` (or wherever the
+ *      plugin emits them) and rename each hook call to the generated name.
  *
  * No component logic changes expected at that point: the shapes below are
  * hand-copied from `apps/api/src/routes/auth.ts`'s zod schemas field-for-
- * field, so the generated types will be structurally identical once step 0
- * lands.
+ * field, so the generated types are already structurally identical.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -80,15 +78,36 @@ const problemSchema = z.object({
   detail: z.string().optional(),
 });
 
-async function apiFetch<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}): Promise<T> {
+/**
+ * Exported (not just an internal helper) so `pending-contracts.test.ts` can
+ * exercise the credentials/header-merging contract directly — gate-
+ * remediation-web.md L-1 is specifically about this function's behaviour,
+ * not about any one route wrapper below.
+ */
+export async function apiFetch<T>(
+  path: string,
+  schema: z.ZodType<T>,
+  init: RequestInit = {},
+): Promise<T> {
   const method = init.method ?? 'GET';
-  const headers: Record<string, string> = { ...JSON_HEADERS };
+  // gate-remediation-web.md L-1: this used to be `{ credentials: 'include',
+  // ...init, headers }` — `...init` was spread *after* `credentials`, so a
+  // caller passing its own `credentials` would silently weaken the request
+  // (e.g. to `'omit'`), and the outer `headers` object was assigned *after*
+  // `...init` too, which discarded any headers a caller supplied instead of
+  // merging them. Both are fixed by merging caller headers into the base set
+  // first, then spreading `init` before the two auth-relevant fields
+  // (`credentials`, `headers`) so neither can be overridden by a caller.
+  const headers: Record<string, string> = {
+    ...JSON_HEADERS,
+    ...(init.headers as Record<string, string> | undefined),
+  };
   if (MUTATING_METHODS.has(method)) {
     const csrf = readCsrfToken();
     if (csrf !== undefined) headers[CSRF_HEADER_NAME] = csrf;
   }
 
-  const response = await fetch(path, { credentials: 'include', ...init, headers });
+  const response = await fetch(path, { ...init, credentials: 'include', headers });
 
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
@@ -244,6 +263,14 @@ export function logout(): Promise<{ ok: true }> {
   return apiFetch('/auth/logout', okSchema, { method: 'POST' });
 }
 
+/**
+ * Shared by `useSessionQuery` below, the `/_app` auth guard
+ * (`src/routes/_app.tsx`, gate-remediation-web.md M-3/M-8), and
+ * `IdleLockOverlay`/`LockScreen`'s unlock refetch, so all four ever name the
+ * key once between them.
+ */
+export const sessionQueryKey = ['auth', 'session'] as const;
+
 /* ------------------------------------------------------------------------ */
 /* React Query hooks — named as the generated client's plugin would name     */
 /* them (one hook per operationId), so the eventual rename in the "one-file  */
@@ -256,7 +283,7 @@ export function useUnlockStateQuery() {
 
 export function useSessionQuery(enabled = true) {
   return useQuery({
-    queryKey: ['auth', 'session'],
+    queryKey: sessionQueryKey,
     queryFn: getSession,
     enabled,
     retry: false,
@@ -271,7 +298,7 @@ export function useFinishRegistrationMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: finishRegistration,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['auth', 'session'] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: sessionQueryKey }),
   });
 }
 
@@ -283,7 +310,7 @@ export function useFinishLoginMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: finishLogin,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['auth', 'session'] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: sessionQueryKey }),
   });
 }
 
@@ -291,7 +318,7 @@ export function useTotpLoginMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: loginWithTotp,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['auth', 'session'] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: sessionQueryKey }),
   });
 }
 
@@ -299,7 +326,7 @@ export function useRecoveryCodeLoginMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: loginWithRecoveryCode,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['auth', 'session'] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: sessionQueryKey }),
   });
 }
 
@@ -311,14 +338,22 @@ export function useFinishStepUpMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: finishStepUp,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['auth', 'session'] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: sessionQueryKey }),
   });
 }
 
+/**
+ * gate-remediation-web.md M-4: logout must not just forget who's signed in —
+ * it must forget everything that session's queries ever cached (account
+ * balances, transactions, anything wired up after this WP). `clear()`
+ * removes every cache entry outright rather than `invalidateQueries`, which
+ * would only mark them stale and leave the last-fetched data readable until
+ * a refetch completes.
+ */
 export function useLogoutMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: logout,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['auth', 'session'] }),
+    onSuccess: () => queryClient.clear(),
   });
 }

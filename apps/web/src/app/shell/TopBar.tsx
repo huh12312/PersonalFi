@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
-import { Eye, EyeOff, Moon, Search, Sun } from 'lucide-react';
+import { useNavigate } from '@tanstack/react-router';
+import { Eye, EyeOff, LogOut, Moon, Search, Sun } from 'lucide-react';
 
+import { useLogoutMutation } from '../../api/pending-contracts.ts';
 import { useHideAmounts } from '../../lib/privacy.ts';
 import { useResolvedTheme, useThemePreference } from '../../lib/theme.ts';
 import { SyncStatusPill } from '../../components/patterns/SyncStatusPill.tsx';
@@ -20,12 +22,27 @@ const ICON_BUTTON =
  * a future pass — this is the shell scaffold WP 0.5 asked for.
  */
 export function TopBar({ title, onOpenSearch }: TopBarProps) {
+  const navigate = useNavigate();
   const [, setPreference] = useThemePreference();
   const resolved = useResolvedTheme();
   const [hideAmounts, setHideAmounts] = useHideAmounts();
+  const logout = useLogoutMutation();
 
   function toggleTheme(): void {
     setPreference(resolved === 'dark' ? 'light' : 'dark');
+  }
+
+  /**
+   * gate-remediation-web.md M-4: there was no way to end a session short of
+   * clearing cookies by hand. `useLogoutMutation`'s own `onSuccess` clears
+   * the query cache (packages/api/pending-contracts.ts) — this handler's job
+   * is only to call it and then leave the authenticated shell, in that
+   * order, so nothing under `/_app` can render a stale query result between
+   * "the server forgot this session" and "the client left the page."
+   */
+  async function handleSignOut(): Promise<void> {
+    await logout.mutateAsync();
+    await navigate({ to: '/login' });
   }
 
   return (
@@ -79,6 +96,18 @@ export function TopBar({ title, onOpenSearch }: TopBarProps) {
           )}
         </TooltipTrigger>
         <TooltipContent>{resolved === 'dark' ? 'Light theme' : 'Dark theme'}</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger
+          onClick={() => void handleSignOut()}
+          disabled={logout.isPending}
+          aria-label="Sign out"
+          className={ICON_BUTTON}
+        >
+          <LogOut size={18} aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipContent>Sign out</TooltipContent>
       </Tooltip>
     </header>
   );

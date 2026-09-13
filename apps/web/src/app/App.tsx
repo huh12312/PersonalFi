@@ -3,6 +3,16 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
 import { Toaster } from 'sonner';
+// gate-remediation-web.md H-3: sonner injects its own CSS via a runtime
+// `document.createElement('style')` call the moment `sonner` is imported,
+// which `style-src-elem 'self'` blocks outright (no nonce, no hash, not a
+// `<link>`). Importing the stylesheet sonner ships for exactly this case
+// turns it into a real, content-hashed, `<link>`-served asset instead; the
+// Vite plugin in vite.config.ts (`stripSonnerRuntimeCss`) removes the
+// now-redundant runtime injection from sonner's own bundled module so it
+// never fires the blocked `<style>` insertion (and the
+// `securitypolicyviolation` event that comes with it) in the first place.
+import 'sonner/dist/styles.css';
 
 import { TooltipProvider } from '../components/ui/tooltip.tsx';
 import { usePrivacyShortcut } from '../lib/privacy.ts';

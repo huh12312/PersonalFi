@@ -2,6 +2,7 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { AlertTriangle, Sparkles, Wallet } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { toast } from 'sonner';
 
 import { DateOnlyText } from '../components/finance/DateOnlyText.tsx';
 import { InlineInsight } from '../components/finance/InlineInsight.tsx';
@@ -47,10 +48,26 @@ import { NetWorthAreaChart } from '../charts/NetWorthAreaChart.tsx';
  * Guarded rather than route-excluded: `autoCodeSplitting` already puts this
  * route's component in its own chunk, so a production build never *fetches*
  * it unless someone navigates here directly — and this redirect stops that.
+ * (The chunk itself is additionally excluded from the service worker's
+ * precache manifest — vite.config.ts's `injectManifest.globIgnores`,
+ * gate-remediation-web.md L-3 — so it's neither reachable nor prefetched to
+ * disk in a real deployment.)
+ *
+ * `import.meta.env.MODE === 'e2e-csp'` is the one deliberate exception: it's
+ * a `vite build --mode e2e-csp` output, never `vite build`'s default
+ * (real, shipped) production mode, built only so
+ * `e2e/csp.spec.ts` can serve this route from a real `dist/`-shaped artifact
+ * behind the exact production `Content-Security-Policy` header and exercise
+ * this page's toast and dialog under it — every other primitive on this page
+ * is already reachable pre-auth on `/login`'s screen or not at all, and a
+ * CSP regression in, say, `Toaster` or `Dialog` would otherwise go
+ * completely untested until a real financial screen exists to catch it.
+ * `pnpm run build` (the artifact that actually ships) never sets this mode,
+ * so the real production guard is unchanged.
  */
 export const Route = createFileRoute('/dev/kitchen-sink')({
   beforeLoad: () => {
-    if (!import.meta.env.DEV) {
+    if (!import.meta.env.DEV && import.meta.env.MODE !== 'e2e-csp') {
       throw redirect({ to: '/' });
     }
   },
@@ -189,6 +206,21 @@ function Theme({ label, value }: { label: string; value: 'light' | 'dark' }) {
             <TabsPanel value="two">Panel two content.</TabsPanel>
             <TabsPanel value="three">Panel three content.</TabsPanel>
           </Tabs>
+        </Section>
+
+        <Section title="Toasts">
+          {/* sonner's `<Toaster>` is mounted once at the app root
+              (src/app/App.tsx), not here — this button only calls `toast()`
+              so this page can exercise it, the same way every other
+              primitive above is exercised in place rather than described. */}
+          <Button
+            variant="secondary"
+            onClick={() =>
+              toast('This is a toast.', { description: 'Triggered from the kitchen sink.' })
+            }
+          >
+            Show toast
+          </Button>
         </Section>
 
         <Section title="Tooltip, avatar, separator, dialog">

@@ -9,5 +9,5 @@
     "noEmit": true,
     "composite": true
   },
-  "include": ["src/sw.ts"]
+  "include": ["src/sw.ts", "src/lib/sw-network-only.ts"]
 }

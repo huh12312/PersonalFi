@@ -7,7 +7,8 @@
   "description": "React 19 + Vite 7 + TanStack Router/Query SPA. Tailwind v4, shadcn/ui on Base UI (vendored), visx charts, self-hosted fonts and icons, no CDNs, no analytics.",
   "scripts": {
     "dev": "vite",
-    "build": "pnpm run gen && tsc -b --noEmit && vite build && node scripts/check-csp.ts",
+    "build": "pnpm run gen && tsc -b --noEmit && vite build && node scripts/strip-sourcemaps.ts && node scripts/check-sw-precache.ts && node scripts/check-csp.ts",
+    "build:e2e-csp": "vite build --mode e2e-csp --outDir dist-e2e-csp",
     "preview": "vite preview",
     "typecheck": "pnpm run gen && tsc -b --noEmit",
     "test": "vitest run",

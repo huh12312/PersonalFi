@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: MIT
+// Must be the first import — see that module's header for why "first
+// statement of this file" (which the previous version of this fix tried)
+// isn't early enough.
+import './lib/zod-jitless.ts';
+
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 

@@ -2,9 +2,11 @@
 import { createRouter } from '@tanstack/react-router';
 
 import { routeTree } from '../routeTree.gen.ts';
+import { queryClient } from './query-client.ts';
 
 export const router = createRouter({
   routeTree,
+  context: { queryClient },
   defaultPreload: 'intent',
   scrollRestoration: true,
   defaultPreloadStaleTime: 0, // let TanStack Query's own staleTime govern caching (05 §1.5)

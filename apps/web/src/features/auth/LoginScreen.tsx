@@ -5,6 +5,7 @@ import { Fingerprint, Loader2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { Route as LoginRoute } from '../../routes/login.tsx';
 import {
   useFinishLoginMutation,
   useRecoveryCodeLoginMutation,
@@ -14,6 +15,7 @@ import {
 import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Label } from '../../components/ui/label.tsx';
+import { isSafeRedirectPath } from '../../lib/safe-redirect.ts';
 
 type Mode = 'passkey' | 'totp' | 'recovery';
 
@@ -32,6 +34,11 @@ export function LoginScreen() {
   const [mode, setMode] = useState<Mode>('passkey');
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  // Populated by the `/_app` auth guard (gate-remediation-web.md M-3/M-8)
+  // when it bounces an unauthenticated visitor here; falls back to `/` for a
+  // direct visit to `/login` and for any value that isn't a safe in-app path.
+  const { redirect } = LoginRoute.useSearch();
+  const destination = redirect !== undefined && isSafeRedirectPath(redirect) ? redirect : '/';
 
   const startLogin = useStartLoginMutation();
   const finishLogin = useFinishLoginMutation();
@@ -49,7 +56,7 @@ export function LoginScreen() {
         useBrowserAutofill,
       });
       await finishLogin.mutateAsync({ response: response as never });
-      await navigate({ to: '/' });
+      await navigate({ href: destination });
     } catch (cause) {
       if (useBrowserAutofill) return; // a cancelled/expired conditional request is silent, not an error banner
       setError(describeWebauthnError(cause));
@@ -131,7 +138,10 @@ export function LoginScreen() {
           onSubmit={(token) =>
             totpLogin.mutate(
               { token },
-              { onSuccess: () => void navigate({ to: '/' }), onError: (e) => setError(e.message) },
+              {
+                onSuccess: () => void navigate({ href: destination }),
+                onError: (e) => setError(e.message),
+              },
             )
           }
           error={error}
@@ -148,7 +158,10 @@ export function LoginScreen() {
           onSubmit={(code) =>
             recoveryLogin.mutate(
               { code },
-              { onSuccess: () => void navigate({ to: '/' }), onError: (e) => setError(e.message) },
+              {
+                onSuccess: () => void navigate({ href: destination }),
+                onError: (e) => setError(e.message),
+              },
             )
           }
           error={error}
@@ -232,11 +245,19 @@ function RecoveryCodeForm({
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit(code);
+        // A recovery code is single-use and, unlike a passkey assertion,
+        // it's a bearer secret the user typed into the DOM — clear it the
+        // moment it's submitted (whether the request turns out to succeed or
+        // fail) rather than leaving it sitting in component state and in a
+        // form field that could be read over a shoulder or left in a
+        // password manager's "reveal" history.
+        setCode('');
       }}
     >
       <Label htmlFor="recovery-code">Recovery code</Label>
       <Input
         id="recovery-code"
+        type="password"
         className="mt-1.5 font-mono"
         autoComplete="off"
         value={code}

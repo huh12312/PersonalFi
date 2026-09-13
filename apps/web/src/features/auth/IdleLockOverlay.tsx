@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+import { useQueryClient } from '@tanstack/react-query';
 import { KeyRound, Loader2 } from 'lucide-react';
 import { startAuthentication } from '@simplewebauthn/browser';
 import { useEffect, useRef, useState } from 'react';
@@ -20,6 +21,7 @@ const WARN_AFTER_MS = LOCK_AFTER_MS - 60_000;
  * (`AppShell`) — never per-screen.
  */
 export function IdleLockOverlay() {
+  const queryClient = useQueryClient();
   const nearIdle = useIdleTimer(WARN_AFTER_MS);
   const idle = useIdleTimer(LOCK_AFTER_MS);
   const [locked, setLocked] = useState(false);
@@ -38,8 +40,16 @@ export function IdleLockOverlay() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocked(true);
       toast.dismiss(WARN_TOAST_ID);
+      // gate-remediation-web.md M-4/M-8: with `query-client.ts` set to
+      // `refetchOnWindowFocus: true` and nothing here touching the cache, a
+      // locked session kept refetching balances behind the scrim — the exact
+      // thing a "lock" is supposed to stop. Cancel first, so an in-flight
+      // fetch that resolves *after* the lock fires can't repopulate the
+      // cache it's racing to clear; only then wipe it. `handleUnlock` below
+      // is the other half — it refetches once the user is back.
+      void queryClient.cancelQueries().then(() => queryClient.clear());
     }
-  }, [idle]);
+  }, [idle, queryClient]);
 
   useEffect(() => {
     if (nearIdle && !idle && !wasNearIdle.current) {
@@ -64,6 +74,11 @@ export function IdleLockOverlay() {
       const response = await startAuthentication({ optionsJSON: options as never });
       await finishStepUp.mutateAsync({ response: response as never });
       setLocked(false);
+      // Cache was wiped at lock time; repopulate whatever's still mounted
+      // now that the user is verified again instead of leaving every screen
+      // behind the (just-removed) overlay showing empty states until its own
+      // next natural refetch.
+      void queryClient.refetchQueries();
     } catch (cause) {
       // §7.1: `NotAllowedError` means cancelled/timed out, never "wrong credential".
       const cancelled = cause instanceof Error && cause.name === 'NotAllowedError';

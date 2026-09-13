@@ -3,26 +3,36 @@ import { expect, test } from '@playwright/test';
 
 /**
  * Boots the real dev server (no API — see playwright.config.ts) and asserts
- * the app frame renders: the shell chrome, the sidebar nav, and the
- * dashboard's hero stat and chart region. Not a feature test — a proof that
- * routing, the shell, Tailwind, and the self-hosted font/icons all come
- * together in an actual browser, which happy-dom's Vitest suite can't prove.
+ * the app frame renders. Not a feature test — a proof that routing, the
+ * shell, Tailwind, and the self-hosted font/icons all come together in an
+ * actual browser, which happy-dom's Vitest suite can't prove.
+ *
+ * This used to assert the dashboard rendered at `/`. Since gate-remediation-
+ * web.md M-3/M-8 added `/_app`'s `beforeLoad` auth guard, and this dev
+ * server has no API behind it to authenticate against, `/` now — correctly
+ * — bounces to `/login` before anything under `/_app` (including the
+ * dashboard) ever mounts. That redirect, and the login screen it lands on,
+ * is what this suite can actually prove in this environment; the real
+ * dashboard render is `src/app/router.test.tsx`'s job (happy-dom, with a
+ * mocked authenticated session).
  */
-test('the app frame renders at the root route', async ({ page }) => {
+test('an unauthenticated visitor is redirected to /login', async ({ page }) => {
   await page.goto('/');
 
+  await expect(page).toHaveURL(/\/login/);
   await expect(page).toHaveTitle('PersonalFi');
-  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Transactions' })).toBeVisible();
-  await expect(page.getByText('Net worth')).toBeVisible();
-  await expect(page.getByRole('img', { name: 'Net worth over the last 90 days' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sign in to PersonalFi' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in with a passkey' })).toBeVisible();
 });
 
-test('the theme toggle flips data-theme on <html>', async ({ page }) => {
-  await page.goto('/');
-  const html = page.locator('html');
+test('the login screen switches to the recovery-code fallback', async ({ page }) => {
+  await page.goto('/login');
 
-  await page.getByRole('button', { name: /theme/i }).click();
-  await expect(html).toHaveAttribute('data-theme', /light|dark/);
+  await page.getByRole('button', { name: 'Use a recovery code instead' }).click();
+
+  const recoveryInput = page.getByLabel('Recovery code');
+  await expect(recoveryInput).toBeVisible();
+  // gate-remediation-web.md's recovery-code fix: masked like a password, not
+  // plain text, since it's a bearer secret typed into the DOM.
+  await expect(recoveryInput).toHaveAttribute('type', 'password');
 });

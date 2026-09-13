@@ -1,8 +1,20 @@
 // SPDX-License-Identifier: MIT
-import { createRootRoute, Link, Outlet } from '@tanstack/react-router';
+import { createRootRouteWithContext, Link, Outlet } from '@tanstack/react-router';
+import type { QueryClient } from '@tanstack/react-query';
 import { AlertTriangle } from 'lucide-react';
 
 import { Button } from '../components/ui/button.tsx';
+
+/**
+ * Router context, typed once here and threaded through every route's
+ * `beforeLoad`/`loader`. Currently holds only the shared `QueryClient` — the
+ * `/_app` auth guard (gate-remediation-web.md M-3/M-8) uses it to call
+ * `fetchQuery` instead of a bare `fetch`, so a guard check and a component's
+ * `useSessionQuery` share one cache entry instead of racing two requests.
+ */
+export interface RouterContext {
+  queryClient: QueryClient;
+}
 
 /**
  * Root route: no chrome of its own (the authenticated shell lives in
@@ -10,7 +22,7 @@ import { Button } from '../components/ui/button.tsx';
  * only the two states every route tree needs regardless of what matched:
  * "this route threw" and "nothing matched" (§4.4 tier 3, route-level errors).
  */
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<RouterContext>()({
   component: () => <Outlet />,
   errorComponent: ({ error, reset }) => (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg-page px-4 text-center">

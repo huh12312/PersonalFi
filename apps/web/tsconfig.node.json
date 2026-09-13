@@ -4,7 +4,15 @@
   "compilerOptions": {
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2024"],
+    // `DOM` is here only for `e2e/**/*.ts` (Playwright browser-context
+    // callbacks — `page.evaluate`/`addInitScript` bodies reference `window`
+    // and `document`, and TypeScript checks their source text against
+    // *this* project's `lib`, even though they actually run in Chromium,
+    // not Node). Everything else in this project runs under Node and never
+    // uses a DOM global; if `@types/node` and `lib.dom.d.ts` ever disagree
+    // on a shared name (`fetch`, `Response`, `AbortSignal`, ...), Node's
+    // definition wins per `tsconfig.base.json`'s `skipLibCheck`.
+    "lib": ["ES2024", "DOM"],
     "types": ["node"],
     "noEmit": true,
     "composite": true,

@@ -21,6 +21,30 @@
  * `dist/*.html` is exactly the check the deliverable asks for: the *shell*
  * Vite emits must be clean.
  *
+ * gate-remediation-web.md M-1 — what this script cannot see, on purpose:
+ * it is a static regex over the HTML shell `vite build` writes once, at
+ * build time. It cannot and does not:
+ *
+ *   - execute any JavaScript, so it never observes what the *running* app
+ *     does after hydration — a library injecting a `<style>` tag at runtime
+ *     (H-3: sonner, `react-remove-scroll-bar`) produces zero bytes in
+ *     `dist/*.html` and is invisible here;
+ *   - see a real `Content-Security-Policy` header at all — Caddy emits that,
+ *     not this build, so a policy drifting out of sync with what the app
+ *     actually needs (the inverse of H-3) is also outside this script's
+ *     reach;
+ *   - catch a `connect-src`, `img-src`, or any other directive violation —
+ *     it only ever looked at `script-src`-shaped inline `<script>`s and
+ *     `style`-attribute-shaped markup.
+ *
+ * The only check in this repo that closes that gap is
+ * `apps/web/e2e/csp.spec.ts`: a real Chromium instance, served the built
+ * `dist/` behind the exact production `Content-Security-Policy` header, that
+ * fails on any `securitypolicyviolation` event while exercising a toast and
+ * a dialog. Keep both — this one is cheap, fast, and part of every `vite
+ * build`; that one is the only one that can actually observe a runtime
+ * violation, and needs a browser to do it.
+ *
  * Run directly (Node 26 strips types): node scripts/check-csp.ts
  */
 import { readdir, readFile, stat } from 'node:fs/promises';
