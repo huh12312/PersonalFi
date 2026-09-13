@@ -364,11 +364,18 @@ if [ "${#FILES[@]}" -eq 0 ]; then
   # rather than `git ls-files`: this must also catch a compose file that has
   # not been `git add`ed yet. scripts/fixtures is pruned because the hostile
   # fixture is *supposed* to fail (see --self-test).
+  #
+  # The `(docker-)?` prefix is load-bearing: `docker-compose.yml` and
+  # `docker-compose.yaml` are still in Compose v2's default filename search
+  # order, so a file by that name is one `docker compose up` away from running.
+  # Without the prefix the sweep never visited it and the gate reported PASS
+  # over a repo containing a hostile, deployable compose file.
   mapfile -t FILES < <(
     find . -regextype posix-extended \
       \( -path './node_modules' -o -path './.git' -o -path './.claude' \
          -o -path './scripts/fixtures' -o -name 'dist' -o -name 'coverage' \) -prune -o \
-      \( -iregex '.*/compose[.-][^/]*\.ya?ml' -o -iregex '.*/compose\.ya?ml' \) -print \
+      \( -iregex '.*/(docker-)?compose[.-][^/]*\.ya?ml' \
+         -o -iregex '.*/(docker-)?compose\.ya?ml' \) -print \
       | sed 's#^\./##' | sort -u
   )
 fi
