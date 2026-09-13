@@ -14,6 +14,11 @@ compose.override.yml
 *.age
 *.pem
 *.key
+# `just trust-ca` copies Caddy's internal-CA root here for import into an OS or
+# browser trust store (RUNBOOK.md step 5). Public certificate, not a key — but
+# it is a per-install generated artifact, and an un-ignored file in the repo
+# root is one `git add -A` away from being committed.
+personalfi-ca.crt
 .DS_Store
 .idea/
 .vscode/

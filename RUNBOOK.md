@@ -225,9 +225,22 @@ is what makes Tailscale-only sufficient (D12, verified 2026-09-10).
 just bootstrap-user name="Chris" timezone="America/New_York"
 ```
 
-This prints a one-time passkey-enrolment link. Open it, enrol at least two
-authenticators (D21), and save the ten recovery codes somewhere that is not
-this host.
+This prints a one-time passkey-enrolment link of the form
+`https://<PUBLIC_HOST>/register#token=...`. Open it in a browser that trusts
+the internal CA (step 5), enrol at least two authenticators (D21), and save the
+ten recovery codes somewhere that is not this host.
+
+The token travels in the URL **fragment**, which is never sent to a server — so
+it cannot land in an access log, a `Referer` header, or a proxy cache the way a
+query parameter would. Copy the whole line, including the `#`.
+
+Because the stack is up at this point, the recipe runs the bootstrap script
+**inside the `api` container** and says so. It has to: `secrets/database_url`
+points at `db:5432`, a compose-internal name, and only the proxy publishes a
+port (P0-3), so the host has no route to Postgres by design. Running it on the
+host would fail with `getaddrinfo ENOTFOUND db`. With the stack down, the same
+recipe falls back to the host and the local dev database, which is what
+`just dev` wants.
 
 ---
 

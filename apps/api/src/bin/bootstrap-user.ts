@@ -172,7 +172,13 @@ try {
   // The token travels in the URL *fragment*: a fragment is never sent to a server,
   // so it cannot land in Caddy's access log, in a `Referer` header, or in a proxy
   // cache the way a query parameter would.
-  const link = `${config.env.BASE_URL.replace(/\/+$/, '')}/enrol#token=${issued.token}`;
+  // The path is `/register` because that is the route the SPA actually serves
+  // (`apps/web/src/routes/register.tsx`). It said `/enrol` until the second
+  // security gate walked the flow end to end and landed on "Page not found":
+  // the one-time link printed by the only bootstrap path on a fresh box led
+  // nowhere, so no passkey could ever be enrolled (gate-security-review-2.md,
+  // P0-4). Nothing tested the link, because nothing resolved it.
+  const link = `${config.env.BASE_URL.replace(/\/+$/, '')}/register#token=${issued.token}`;
 
   out('');
   out(`Enrol your first passkey within ${String(REGISTRATION_TOKEN_TTL_SECONDS / 60)} minutes:`);

@@ -312,6 +312,29 @@ restore-drill:
     # owned by uid 70, which the operator deliberately cannot read.
     PG_PASSWORD="$(docker run --rm --user 0:0 -v "$ROOT/secrets/pg_password:/s:ro" "$ALPINE_DIGEST" cat /s)"
 
+    # Same problem, same solution, for the age identity — and this one bit
+    # during a real drill (gate-security-review-2.md, §2.7). The backup image
+    # runs as uid 10002, so bind-mounting the operator's private key straight
+    # into the container fails on a *correctly* permissioned key:
+    #
+    #   age: error: reading "/run/age_identity": failed to open file:
+    #   open /run/age_identity: permission denied
+    #
+    # An age identity kept at 0600 and owned by the operator is the RUNBOOK's
+    # own instruction ("keep the private half OUTSIDE this repo and this
+    # host"), so the drill rejected exactly the key custody it asks for, and
+    # the only way to run it was to `chmod 0644` a private key — during a
+    # disaster, on a box you are already unsure about. Copy it through a root
+    # container into the scratch dir instead, world-readable only inside a
+    # `mktemp -d` that the EXIT trap deletes.
+    docker run --rm --user 0:0 -v "$AGE_IDENTITY_FILE:/s:ro" "$ALPINE_DIGEST" cat /s \
+      > "$SCRATCH_SECRETS/age_identity"
+    chmod 0444 "$SCRATCH_SECRETS/age_identity"
+    if [ ! -s "$SCRATCH_SECRETS/age_identity" ]; then
+      echo "restore-drill: AGE_IDENTITY_FILE ($AGE_IDENTITY_FILE) is empty or unreadable" >&2
+      exit 1
+    fi
+
     echo "restore-drill: starting scratch db ($DRILL_DB on $BACKEND_NETWORK) ..."
     docker run -d --name "$DRILL_DB" --network "$BACKEND_NETWORK" --network-alias restore-drill-db \
       -e POSTGRES_USER=personalfi -e POSTGRES_DB=personalfi_restore_drill \
@@ -342,7 +365,7 @@ restore-drill:
     RESTORE_OK=1
     docker run --rm --network "$BACKEND_NETWORK" \
       -v "$BACKUPS_VOLUME:/backups:ro" \
-      -v "$AGE_IDENTITY_FILE:/run/age_identity:ro" \
+      -v "$SCRATCH_SECRETS/age_identity:/run/age_identity:ro" \
       -v "$SCRATCH_SECRETS/pg_password:/run/secrets/pg_password:ro" \
       -e PGHOST=restore-drill-db -e PGUSER=personalfi -e PGDATABASE=personalfi_restore_drill \
       -e PGPASSWORD_FILE=/run/secrets/pg_password -e AGE_IDENTITY_FILE=/run/age_identity \
@@ -437,7 +460,12 @@ restore-drill:
         echo "All assertions held: restored tables > 0, restored == live, schema_migrations agree,"
         echo "and the API served /ready from the restored database. \`just restore-drill\` exited 0."
       else
+        # The blank line before the list is load-bearing: without it prettier
+        # reformats this file, and `just lint` (so `just check`, so `just
+        # verify`) goes red — on the *failure* path, i.e. exactly when the
+        # drill has something to tell you. Found by the second security gate.
         echo "Assertions that failed:"
+        echo
         for f in "${FAILURES[@]}"; do echo "- $f"; done
         echo
         echo "\`just restore-drill\` exited non-zero."
@@ -545,7 +573,29 @@ bootstrap-user name="" timezone="UTC" reissue="false":
     args=(--timezone="$timezone")
     if [[ -n "$name" ]]; then args+=(--name="$name"); fi
     if [[ "$reissue" == "true" ]]; then args+=(--reissue); fi
-    pnpm exec node apps/api/src/bin/bootstrap-user.ts "${args[@]}"
+
+    # WHERE this runs is the whole point (gate-security-review-2.md, P0-4).
+    #
+    # RUNBOOK.md step 7 says to run this after `just up`, and it used to run on
+    # the HOST unconditionally. On a production box that cannot work: the
+    # `database_url` secret is `postgres://...@db:5432/...`, `db` is a
+    # compose-internal DNS name, and P0-3 requires that no service except the
+    # proxy publish a port — so the host has no route to Postgres by design.
+    # The documented first-install path died with `getaddrinfo ENOTFOUND db`,
+    # which meant no account holder, no enrolment token, and no way into a
+    # fresh install at all.
+    #
+    # So: if the stack is up, run it *inside* the api container, which already
+    # has the network, the secrets and this exact script baked in. Otherwise
+    # fall back to the host, which is what `just dev` against `just db-up`
+    # needs. The fallback is the dev path, not the production one.
+    if docker compose ps --status running --services 2>/dev/null | grep -qx api; then
+      echo "bootstrap-user: running inside the api container (the stack is up)" >&2
+      docker compose exec -T api node /app/apps/api/src/bin/bootstrap-user.ts "${args[@]}"
+    else
+      echo "bootstrap-user: the stack is not running; using the local dev database" >&2
+      pnpm exec node apps/api/src/bin/bootstrap-user.ts "${args[@]}"
+    fi
 
 # Generate a high-entropy KEK passphrase into secrets/master_key (mode 0400).
 # Never an env var: env leaks into `docker inspect` and /proc/<pid>/environ (P0-2).

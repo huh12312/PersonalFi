@@ -25,6 +25,17 @@ export default tseslint.config(
       '.claude/**',
       '**/node_modules/**',
       '**/dist/**',
+      // Build outputs that are gitignored but were NOT eslint-ignored, so
+      // linting a workspace that had ever run Playwright or a PWA dev build
+      // meant eslint parsing minified bundles: 5124 errors, `just lint` red,
+      // and therefore `just check` and `just verify` red (gate-security-
+      // review-2.md, R-14). CI survived only because each job gets a fresh
+      // checkout — which is exactly the "verify predicts CI" contract that
+      // justfile's header says a green `just verify` is supposed to be.
+      '**/dist-e2e-csp/**',
+      '**/dev-dist/**',
+      'apps/web/test-results/**',
+      'apps/web/playwright-report/**',
       '**/coverage/**',
       '**/.drizzle/**',
       'packages/contracts/openapi/**',

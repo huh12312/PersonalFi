@@ -55,6 +55,26 @@ function readCsrfToken(): string | undefined {
 }
 
 /**
+ * Guarantee a `__Host-pfi_csrf` cookie exists before the first mutation of a
+ * cold browser session (gate-security-review-2.md, P0-4).
+ *
+ * The API mints that cookie from an `onRequest` hook on the `/auth/*` plugin,
+ * so *any* reply from that prefix carries one — but only a reply. A browser
+ * that lands directly on `/register?token=...` or `/login` has never made an
+ * `/auth/*` request, so its first request is the mutation itself, which is
+ * rejected `403 csrf_failed` before the freshly-minted cookie is of any use.
+ * That made first-run passkey enrolment and every cold-start login impossible:
+ * the failure was structural, not racy.
+ *
+ * `/auth/unlock-state` is the right primer: it is a GET (so the CSRF check
+ * skips it), it requires no session, and it answers while the app is locked.
+ */
+async function ensureCsrfCookie(): Promise<void> {
+  if (readCsrfToken() !== undefined) return;
+  await fetch('/auth/unlock-state', { credentials: 'include' }).catch(() => undefined);
+}
+
+/**
  * A generic RFC 9457 problem, close enough for a shell to render *something*
  * useful. The generated client will have the real per-route problem unions;
  * this file only needs "did it fail, and what should the user read."
@@ -102,12 +122,25 @@ export async function apiFetch<T>(
     ...JSON_HEADERS,
     ...(init.headers as Record<string, string> | undefined),
   };
+  // `body` is normalised for mutations below, so `init.body` must not win the
+  // spread further down — pull it out here and pass the resolved value.
+  let body = init.body;
   if (MUTATING_METHODS.has(method)) {
+    await ensureCsrfCookie();
     const csrf = readCsrfToken();
     if (csrf !== undefined) headers[CSRF_HEADER_NAME] = csrf;
+    // Fastify's JSON content-type parser rejects an *empty* body with
+    // `400 fst_err_ctp_empty_json_body` whenever `Content-Type:
+    // application/json` is set — which `JSON_HEADERS` sets unconditionally.
+    // `startLogin`, `startStepUp` and `logout` legitimately send no payload,
+    // so all three 400'd on every call: passkey login, step-up and sign-out
+    // were dead in the shipped bundle (gate-security-review-2.md, P0-4).
+    // An empty JSON object satisfies the parser and every one of those routes,
+    // none of which declares a required body field.
+    body ??= '{}';
   }
 
-  const response = await fetch(path, { ...init, credentials: 'include', headers });
+  const response = await fetch(path, { ...init, method, body, credentials: 'include', headers });
 
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
