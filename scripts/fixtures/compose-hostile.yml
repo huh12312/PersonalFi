@@ -44,6 +44,14 @@ services:
       - /:/host:rw
       - /run/podman/podman.sock:/podman.sock:ro
       - /proc:/host-proc:ro # sensitive host path, read-only: still lets it walk host procfs
+      # gate-security-review-3.md R-7: read-only binds of the newly-added
+      # sensitive prefixes must still trip sensitive-host-path-bind-mount,
+      # not just the original five.
+      - /etc:/host-etc:ro
+      - /root:/host-root:ro
+      - /home:/host-home:ro
+      - /boot:/host-boot:ro
+      - /var/lib/docker:/host-docker:ro
 
   # published ports with no explicit host address, plus every positive control
   # missing: no read_only, no cap_drop, no no-new-privileges, root user.

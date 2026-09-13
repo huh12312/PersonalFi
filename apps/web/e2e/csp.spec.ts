@@ -106,7 +106,9 @@ test('the served Content-Security-Policy pins the directives this repo depends o
   const response = await page.goto('/dev/kitchen-sink');
   const header = response?.headers()['content-security-policy'];
   if (header === undefined) {
-    throw new Error('no Content-Security-Policy header on the response — is csp-static-server.mjs running?');
+    throw new Error(
+      'no Content-Security-Policy header on the response — is csp-static-server.mjs running?',
+    );
   }
   const directives = parseDirectives(header);
 

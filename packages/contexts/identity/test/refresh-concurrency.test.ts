@@ -41,7 +41,7 @@
  * concurrent callers instead of 2, since 2 concurrent callers against an
  * N-backend pool is not the wide-race guarantee the test names claim.
  */
-import { randomBytes } from 'node:crypto';
+import { randomBytes } from '@core/secretbox';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   ADMIN_URL,
@@ -66,7 +66,7 @@ const RACERS = 8;
  * concurrent run of this file (or a stale one) would DROP the first run's
  * database out from under it mid-race. Unique per process and per file load.
  */
-const SCRATCH_DB = `personalfi_gateb_${process.pid}_${randomBytes(4).toString('hex')}`;
+const SCRATCH_DB = `personalfi_gateb_${process.pid}_${Buffer.from(randomBytes(4)).toString('hex')}`;
 
 describeWithDb('refresh rotation is atomic under concurrency (M-4)', () => {
   let harness: IdentityHarness;
@@ -124,7 +124,9 @@ describeWithDb('refresh rotation is atomic under concurrency (M-4)', () => {
     // RACERS calls, not 2 (R-2): with a warmed `max: RACERS` pool this is
     // the smallest race that cannot be won by accident of connection timing.
     const outcomes = await Promise.allSettled(
-      Array.from({ length: RACERS }, () => sessions().refresh(issued.refreshToken, requestContext())),
+      Array.from({ length: RACERS }, () =>
+        sessions().refresh(issued.refreshToken, requestContext()),
+      ),
     );
 
     const fulfilled = outcomes.filter((outcome) => outcome.status === 'fulfilled');
@@ -141,7 +143,9 @@ describeWithDb('refresh rotation is atomic under concurrency (M-4)', () => {
     const issued = await issue();
 
     await Promise.allSettled(
-      Array.from({ length: RACERS }, () => sessions().refresh(issued.refreshToken, requestContext())),
+      Array.from({ length: RACERS }, () =>
+        sessions().refresh(issued.refreshToken, requestContext()),
+      ),
     );
 
     // Every loser is an independent presentation of the same stolen token, and
@@ -187,7 +191,9 @@ describeWithDb('refresh rotation is atomic under concurrency (M-4)', () => {
     const issued = await issue();
 
     const outcomes = await Promise.allSettled(
-      Array.from({ length: RACERS }, () => sessions().refresh(issued.refreshToken, requestContext())),
+      Array.from({ length: RACERS }, () =>
+        sessions().refresh(issued.refreshToken, requestContext()),
+      ),
     );
 
     const tokens = outcomes.flatMap((outcome) =>

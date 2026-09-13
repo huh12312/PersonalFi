@@ -43,6 +43,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+# Exported so the node evaluator below can tell "resolved from a relative
+# bind mount inside this repo" apart from "an absolute host path outside it"
+# — see the R-7 note on isSensitiveHostPath.
+export REPO_ROOT
 
 FIXTURE="scripts/fixtures/compose-hostile.yml"
 
@@ -146,9 +150,45 @@ const SOCKET_RE = /(docker\.sock|podman\.sock|containerd\.sock|crio\.sock)$/;
 // interface, not what the file itself lets you do once opened. So these are
 // flagged regardless of the mount's read_only flag, unlike ordinary bind
 // mounts (`writable-bind-mount`, below).
-const SENSITIVE_BIND_PREFIXES = ['/run', '/var/run', '/proc', '/sys', '/dev'];
+// gate-security-review-3.md R-7: /run, /var/run, /proc, /sys and /dev cover
+// sockets/procfs/devices, but a read-only bind of /etc, /root, /home, /boot
+// or /var/lib/docker is just as much a host-escape primitive — /etc leaks
+// every credential-bearing config and (on most distros) /etc/shadow's hash
+// file, /root and /home leak SSH private keys and shell history, /boot
+// exposes the kernel/initramfs an attacker would want to trojan, and
+// /var/lib/docker is the daemon's own image/container/volume storage (a
+// read-only view of it still discloses every layer of every image on the
+// host, including secrets baked into other images' layers).
+const SENSITIVE_BIND_PREFIXES = [
+  '/run',
+  '/var/run',
+  '/proc',
+  '/sys',
+  '/dev',
+  '/etc',
+  '/root',
+  '/home',
+  '/boot',
+  '/var/lib/docker',
+];
+
+// `/home` (and, in principle, `/etc`) is also where this repo's own checkout
+// lives on a real machine — a dev box has it at /home/<user>/..., and
+// GitHub Actions runners check out under /home/runner/work/... — so a
+// relative bind mount this repo declares on purpose, like compose.yml's
+// `./docker/Caddyfile:/etc/caddy/Caddyfile:ro`, resolves (via `docker
+// compose config`) to an absolute path *under* one of the new prefixes even
+// though it is a reviewed, repo-owned file, not a host escape. Excluding
+// anything `docker compose config` resolved to somewhere inside this
+// checkout keeps that distinction: the fixture's sensitive-path violations
+// below are all *literal* absolute paths (`/etc:/host-etc:ro` etc.), never
+// resolved from something relative under REPO_ROOT, so they are unaffected.
+const REPO_ROOT = process.env.REPO_ROOT ?? '';
 
 function isSensitiveHostPath(source) {
+  if (REPO_ROOT !== '' && (source === REPO_ROOT || source.startsWith(`${REPO_ROOT}/`))) {
+    return false;
+  }
   return SENSITIVE_BIND_PREFIXES.some((prefix) => source === prefix || source.startsWith(`${prefix}/`));
 }
 const HOST_NAMESPACE_KEYS = [
@@ -241,8 +281,9 @@ for (const [service, spec] of Object.entries(services)) {
           service,
           'sensitive-host-path-bind-mount',
           `bind mount source is under a sensitive host path: ${source} -> ${mount.target} ` +
-            `(read_only=${String(readOnly)}; a read-only bind under /run, /var/run, /proc, /sys or ` +
-            `/dev still allows connecting to a socket or operating on a device/procfs entry through it)`,
+            `(read_only=${String(readOnly)}; a read-only bind under ${SENSITIVE_BIND_PREFIXES.join(', ')} ` +
+            `still allows connecting to a socket, operating on a device/procfs entry, or reading ` +
+            `host credentials/keys/images through it)`,
         );
         continue; // :ro does not fix this class either — same reasoning as the socket check above
       }
