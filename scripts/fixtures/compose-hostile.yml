@@ -43,6 +43,7 @@ services:
     volumes:
       - /:/host:rw
       - /run/podman/podman.sock:/podman.sock:ro
+      - /proc:/host-proc:ro # sensitive host path, read-only: still lets it walk host procfs
 
   # published ports with no explicit host address, plus every positive control
   # missing: no read_only, no cap_drop, no no-new-privileges, root user.
@@ -56,6 +57,8 @@ services:
       - '[::]:8081:8081' # the IPv6 spelling of the same mistake
     volumes:
       - scratch:/scratch # writable named volume outside the documented set
+      - pgdata:/stolen-pgdata # documented volume, wrong (non-owning) service
 
 volumes:
   scratch: {}
+  pgdata: {}

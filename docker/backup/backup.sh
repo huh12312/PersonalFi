@@ -22,13 +22,31 @@
 #     "successful" backups, a green healthcheck throughout, and the last real
 #     copy gone on night 31.
 #   * So: `pipefail`, the dump's exit status captured explicitly, the
-#     *plaintext* dump proven restorable with `pg_restore --list` and a
-#     minimum size BEFORE it is encrypted, and the retention prune reached
-#     only after all of that succeeded. Nothing old is deleted unless
-#     something new is verified.
+#     *plaintext* dump proven restorable with `pg_restore --list` BEFORE it is
+#     encrypted, and the retention prune reached only after all of that
+#     succeeded. Nothing old is deleted unless something new is verified.
 #   * The status file this writes is what the container healthcheck reads, so
 #     a failed or stale backup shows as `unhealthy` instead of "the loop
 #     process is still running" (see backup-loop.sh).
+#
+# WHAT THE PHASE 0 RE-GATE FOUND (finding 9), and what changed:
+#
+#   * The original verification led with a raw byte floor (`MIN_DUMP_BYTES`,
+#     1024) before ever looking at the archive's contents. On a fresh install
+#     — migrations applied, one user, no other data yet — a real `pg_dump -Fc`
+#     of that database landed under the floor, so the very first night's
+#     backup was rejected and the container went `unhealthy` for a database
+#     that was in fact perfectly backed up. Dump size tracks how much *data*
+#     exists; it says nothing about whether the archive is valid, so it was
+#     the wrong thing to gate on.
+#   * The gate now leads with the structural check that was already here:
+#     `pg_restore --list` must parse the archive, it must enumerate the
+#     `schema_migrations` table specifically (proof this is a dump of *our*
+#     schema, not an empty or unrelated database), and it must list at least
+#     `MIN_TOC_ENTRIES` objects (proof it isn't a near-empty stub — the real
+#     schema plus its indexes, constraints and triggers is well over a
+#     hundred). Byte count is still logged for operators but no longer gates
+#     promotion.
 set -euo pipefail
 
 : "${PGHOST:?PGHOST is required}"
@@ -40,10 +58,12 @@ set -euo pipefail
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 STATUS_FILE="${BACKUP_STATUS_FILE:-/tmp/backup-status}"
-# A pg_dump of an empty-but-migrated database is a few KB; a dump of a *failed*
-# dump is 0-few hundred bytes. 1024 is comfortably between the two and is only
-# the floor — `pg_restore --list` below is the real check.
-MIN_DUMP_BYTES="${MIN_DUMP_BYTES:-1024}"
+# The structural check below (`pg_restore --list`) is the real gate. This is
+# only a sanity floor on the *number of restorable objects*, not raw bytes —
+# see the header note on finding 9. Our schema has ~150 TOC entries once every
+# migration is applied; 10 is comfortably below that and comfortably above
+# "the archive is nearly empty", regardless of how much row data exists yet.
+MIN_TOC_ENTRIES="${MIN_TOC_ENTRIES:-10}"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT="${BACKUP_DIR}/personalfi-${TIMESTAMP}.dump.age"
 TMP_OUT="${OUT}.partial"
@@ -81,25 +101,28 @@ if ! pg_dump -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}" -Fc --file="${PLAI
 fi
 
 DUMP_BYTES="$(wc -c <"${PLAIN}")"
-if [ "${DUMP_BYTES}" -lt "${MIN_DUMP_BYTES}" ]; then
-  echo "backup: dump is ${DUMP_BYTES} bytes, below the ${MIN_DUMP_BYTES}-byte floor — refusing to promote it" >&2
-  exit 1
-fi
 
 # The structural check: `pg_restore --list` parses the custom-format archive's
-# table of contents. It fails on a truncated or non-archive file, and an
-# archive with zero entries is not a backup of a migrated database.
+# table of contents. It fails outright on a truncated or non-archive file.
 if ! TOC="$(pg_restore --list "${PLAIN}" 2>&1)"; then
   echo "backup: pg_restore --list rejected the dump — refusing to promote it:" >&2
   echo "${TOC}" | sed 's/^/    /' >&2
   exit 1
 fi
 TOC_ENTRIES="$(printf '%s\n' "${TOC}" | grep -cv '^;' || true)"
-if [ "${TOC_ENTRIES}" -lt 1 ]; then
-  echo "backup: dump verified as a valid archive but contains no restorable objects — refusing to promote it" >&2
+if [ "${TOC_ENTRIES}" -lt "${MIN_TOC_ENTRIES}" ]; then
+  echo "backup: dump verified as a valid archive but only has ${TOC_ENTRIES} object(s) (need >= ${MIN_TOC_ENTRIES}) — refusing to promote it" >&2
   exit 1
 fi
-echo "backup: verified ${DUMP_BYTES} bytes, ${TOC_ENTRIES} restorable object(s)"
+# Proof this is a dump of *our* schema and not, say, an empty database someone
+# pointed PGDATABASE at by mistake: schema_migrations is created by the very
+# first migration and every subsequent one records itself there.
+if ! printf '%s\n' "${TOC}" | grep -qE 'TABLE[[:space:]]+public[[:space:]]+schema_migrations([[:space:]]|$)'; then
+  echo "backup: pg_restore --list did not find the schema_migrations table — refusing to promote it:" >&2
+  echo "${TOC}" | sed 's/^/    /' >&2
+  exit 1
+fi
+echo "backup: verified ${DUMP_BYTES} bytes, ${TOC_ENTRIES} restorable object(s), schema_migrations present"
 
 age --encrypt --recipients-file "${AGE_RECIPIENTS_FILE}" --output "${TMP_OUT}" "${PLAIN}"
 # `mv` within the same filesystem is atomic, so a reader (the restore drill)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { useNavigate } from '@tanstack/react-router';
 import { browserSupportsWebAuthnAutofill, startAuthentication } from '@simplewebauthn/browser';
-import { Fingerprint, Loader2 } from 'lucide-react';
+import { Fingerprint, Loader2, Moon, Sun } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
@@ -16,6 +16,7 @@ import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Label } from '../../components/ui/label.tsx';
 import { isSafeRedirectPath } from '../../lib/safe-redirect.ts';
+import { useResolvedTheme, useThemePreference } from '../../lib/theme.ts';
 
 type Mode = 'passkey' | 'totp' | 'recovery';
 
@@ -285,9 +286,40 @@ function RecoveryCodeForm({
   );
 }
 
+/**
+ * `/login` renders before any authenticated shell — `TopBar` (the theme
+ * toggle's usual home, src/app/shell/TopBar.tsx) never mounts here — but
+ * light/dark is a whole-app preference, so an unauthenticated visitor still
+ * needs a way to set it before signing in rather than being stuck with
+ * whatever `prefers-color-scheme` guessed. This is the minimal version of
+ * `TopBar`'s toggle: no tooltip chrome, same `useThemePreference`/
+ * `useResolvedTheme` hooks and `data-theme` effect, so flipping it here and
+ * on the dashboard later stay perfectly in sync (same persisted store).
+ */
+function ThemeToggle() {
+  const [, setPreference] = useThemePreference();
+  const resolved = useResolvedTheme();
+
+  return (
+    <button
+      type="button"
+      onClick={() => setPreference(resolved === 'dark' ? 'light' : 'dark')}
+      aria-label={resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+      className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-md text-text-secondary hover:bg-bg-subtle focus-visible:outline-none"
+    >
+      {resolved === 'dark' ? (
+        <Sun size={18} aria-hidden="true" />
+      ) : (
+        <Moon size={18} aria-hidden="true" />
+      )}
+    </button>
+  );
+}
+
 function AuthScreenFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-bg-page px-4">
+    <div className="relative flex min-h-dvh items-center justify-center bg-bg-page px-4">
+      <ThemeToggle />
       <div className="w-full max-w-sm rounded-2xl border border-border-hairline bg-bg-surface p-6 text-center">
         {children}
       </div>

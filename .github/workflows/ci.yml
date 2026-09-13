@@ -14,6 +14,25 @@
 # read as "CI will pass" through all of Phase 0 while CI was red at HEAD, which
 # is how four broken gates went unnoticed. A green `just verify` is the claim;
 # `just check` is not.
+#
+# VITEST PROJECT -> CI JOB MAP (gate-remediation-2.md finding 1). `vitest.config.ts`
+# defines every project below; before this fix only kernel/config/api ever ran
+# in CI (`migration-test` ran `db` alone) and platform/testkit/seed/secretbox/
+# identity/platform-db/secretbox-db/identity-db/api-db, the `web` project, and
+# both Playwright projects never ran at all. Every project vitest knows about
+# now appears in exactly one job below:
+#
+#   `test` (no Postgres, no DATABASE_URL):
+#     kernel, config, api, platform, testkit, seed, secretbox, identity
+#   `migration-test` (Postgres 18 service, DATABASE_URL set):
+#     db, platform-db, secretbox-db, identity-db, api-db
+#   `web` (apps/web has its own vitest config, not part of the root one):
+#     web (vitest), plus Playwright projects `chromium` (smoke) and `csp`
+#
+# Re-verify this map with, per project: `pnpm exec vitest list --project
+# <name> --filesOnly` (root config) or `pnpm --filter @app/web exec vitest
+# list --filesOnly` (web); Playwright projects via `pnpm --filter @app/web
+# exec playwright test --list`.
 name: CI
 
 on:
@@ -91,15 +110,22 @@ jobs:
       - run: npm install --global pnpm@12.4.1
       - run: pnpm install --frozen-lockfile
 
-      # No DATABASE_URL: the db project skips itself, proving the unit suite
-      # genuinely needs no Postgres.
+      # No DATABASE_URL: every project here skips or has no database-dependent
+      # tests, proving the unit suite genuinely needs no Postgres. This must
+      # list every root-config vitest project EXCEPT the five `*-db`/`db`
+      # projects (those run in `migration-test`, which has Postgres) — see the
+      # project -> job map at the top of this file.
       - name: unit tests
-        run: pnpm exec vitest run --project kernel --project config --project api
+        run: |
+          pnpm exec vitest run \
+            --project kernel --project config --project api \
+            --project platform --project testkit --project seed \
+            --project secretbox --project identity
 
   migration-test:
     name: migration test (postgres 18)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:18.6-alpine3.24
@@ -135,8 +161,54 @@ jobs:
 
       # Covers the advisory lock, transactional rollback, checksum drift, and the
       # node-postgres type parsers that money and quantity correctness rest on.
-      - name: migration integration tests
-        run: pnpm exec vitest run --project db
+      #
+      # Every other `*-db` project needs the same real Postgres and none of
+      # them is otherwise exercised in CI (see the project -> job map at the
+      # top of this file) — `TEST_ADMIN_DATABASE_URL` falls back to
+      # `DATABASE_URL` (packages/testkit/test/database.ts), which is already
+      # set above, so no extra secret is needed for the scratch databases
+      # these create.
+      - name: migration and db-dependent integration tests
+        run: |
+          pnpm exec vitest run \
+            --project db --project platform-db --project secretbox-db \
+            --project identity-db --project api-db
+
+  web:
+    name: web (unit, build, playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: npm install --global pnpm@12.4.1
+      - run: pnpm install --frozen-lockfile
+
+      # The `web` vitest project: apps/web has its own vitest config (happy-dom
+      # environment), separate from the root one, so it is never covered by
+      # the `test` job above.
+      - name: unit tests
+        run: pnpm --filter @app/web test
+
+      # Runs strip-sourcemaps, check-sw-precache (the dev kitchen-sink precache
+      # exclusion, verified against the shipped artifact — gate-remediation-2.md
+      # finding 2) and check-csp against the production build.
+      - name: build
+        run: pnpm --filter @app/web build
+
+      # Both Playwright projects: `chromium` (smoke.spec.ts, a real browser
+      # boot of the app shell) and `csp` (csp.spec.ts, the only check in this
+      # repo that observes a *runtime* CSP violation rather than statically
+      # reading the built HTML). Both webServers are started and torn down by
+      # Playwright itself; see apps/web/playwright.config.ts.
+      - name: install chromium
+        run: pnpm --filter @app/web exec playwright install --with-deps chromium
+      - name: playwright (smoke + csp)
+        run: pnpm --filter @app/web exec playwright test
 
   openapi-current:
     name: openapi spec is current

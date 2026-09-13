@@ -174,6 +174,22 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   }
   problems.push(...webAuthnProblems(env.AUTH_RP_ID, allowedOrigins, isProduction));
 
+  // gate-remediation-2.md finding 8: `SESSION_COOKIE_SECURE=false` exists only
+  // for a plain-HTTP local/integration harness (apps/api/test/cookies.test.ts)
+  // — a session cookie without `Secure` in production would ride along on
+  // plain HTTP the instant Caddy's TLS termination is ever bypassed or
+  // misconfigured, and nothing else in this repo would notice. `true` is the
+  // default, so this only ever fires on a deliberate override left in place.
+  if (isProduction && !env.SESSION_COOKIE_SECURE) {
+    problems.push({
+      key: 'SESSION_COOKIE_SECURE',
+      problem: 'is false in production; the session cookie would be sent over plain HTTP',
+      hint:
+        'leave SESSION_COOKIE_SECURE at its default (true) in production — it exists only for a ' +
+        'plain-HTTP test harness. Caddy terminates TLS in front of this process (docker/Caddyfile).',
+    });
+  }
+
   if (problems.length > 0) throw new ConfigError(problems);
   if (databaseUrl === undefined) throw new ConfigError(problems); // unreachable; narrows the type
 
@@ -192,6 +208,33 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
 
 /** Hosts a browser treats as a secure context without TLS. Never a deployment. */
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * gate-remediation-2.md finding 8. Not the IANA Public Suffix List — a
+ * dependency this package will not take on for a single-user app's boot
+ * check — but the handful of bare labels an operator could plausibly type in
+ * place of a real registrable domain: this repo's own LAN convention, a few
+ * common TLDs, and the loopback name (already handled above by
+ * `LOOPBACK_HOSTS`; listed here too so `BARE_SUFFIX_RP_IDS` reads complete on
+ * its own).
+ */
+const BARE_SUFFIX_RP_IDS = new Set([
+  'lan',
+  'local',
+  'localdomain',
+  'localhost',
+  'internal',
+  'home',
+  'test',
+  'invalid',
+  'com',
+  'net',
+  'org',
+  'io',
+  'dev',
+  'app',
+  'co',
+]);
 
 /**
  * The passkey configuration must describe the host actually served (P0-4).
@@ -237,6 +280,17 @@ function webAuthnProblems(
       hint:
         'set AUTH_RP_ID to the exact hostname the UI is served from, with no scheme and no port ' +
         '(e.g. personalfi.lan). Changing it later invalidates every enrolled passkey, so pick the ' +
+        'final hostname now — see 03 §3.2 and P0-4.',
+    });
+  } else if (isProduction && (!rpId.includes('.') || BARE_SUFFIX_RP_IDS.has(rpId))) {
+    // A registrable domain has at least one dot; a bare TLD or LAN suffix
+    // is not one, whether or not it happens to also be the shipped default.
+    problems.push({
+      key: 'AUTH_RP_ID',
+      problem: `is "${rpId}", a bare label rather than a registrable domain — a WebAuthn RP id must be the exact hostname the UI is served from, not a TLD or a LAN suffix on its own`,
+      hint:
+        'set AUTH_RP_ID to a real hostname with at least one dot, e.g. personalfi.lan or ' +
+        'personalfi.example.com. Changing it later invalidates every enrolled passkey, so pick the ' +
         'final hostname now — see 03 §3.2 and P0-4.',
     });
   }

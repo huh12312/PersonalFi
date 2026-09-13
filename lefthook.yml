@@ -51,3 +51,15 @@ pre-commit:
     compose-hardening:
       glob: 'compose*.{yml,yaml}'
       run: bash scripts/compose-hardening-check.sh
+
+pre-push:
+  parallel: true
+  commands:
+    # gate-remediation-2.md finding 7: .gitleaksignore carries two TRUE-
+    # POSITIVE fingerprints for a live token that reached history before it
+    # was redeemed (see that file's header) — tolerable only because nothing
+    # has ever been pushed, so history is still local and cheap to rewrite.
+    # This is the check that a first push cannot happen with both still true:
+    # a remote configured *and* the pinned fingerprints still allowlisted.
+    history-rewrite-before-push:
+      run: bash scripts/check-history-rewrite-before-push.sh

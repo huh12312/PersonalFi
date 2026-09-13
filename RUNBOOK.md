@@ -283,8 +283,14 @@ never touches a disk and is deleted before the script exits.
 Every run must clear four bars before it counts (`docker/backup/backup.sh`):
 
 1. `pg_dump` exits 0 — captured explicitly, not through a pipeline;
-2. the dump is at least `MIN_DUMP_BYTES` (1024) bytes;
-3. `pg_restore --list` parses it and finds at least one restorable object;
+2. `pg_restore --list` parses the archive (rejects a truncated or non-archive
+   file outright);
+3. that listing has at least `MIN_TOC_ENTRIES` (10) restorable objects _and_
+   includes the `schema_migrations` table by name — proof this is a real dump
+   of our schema, not an empty database or a near-empty stub. (An earlier
+   version gated on raw dump size instead; that rejected a genuinely valid
+   backup on a fresh install's first night, before any user data existed —
+   see `docker/backup/backup.sh`'s header for finding 9.)
 4. only then is it encrypted, `mv`d into place, and only then is anything old
    pruned. **A failed backup never deletes a good one.**
 

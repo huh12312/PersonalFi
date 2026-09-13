@@ -67,11 +67,16 @@ COPY . .
 # keeps the API's own dependency closure out of this stage.
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked \
     pnpm install --frozen-lockfile --filter '@app/web...'
-# The three steps of `@app/web`'s `build` script that produce the artifact —
-# `gen` (the OpenAPI client, gitignored so it must be generated here), `vite
-# build`, and `check-csp.ts`, which fails the build on an inline
-# `<script>`/`style="..."` in the emitted HTML and is therefore what makes the
-# `script-src 'self'` in docker/Caddyfile honest rather than hopeful.
+# The steps of `@app/web`'s `build` script that produce the artifact — `gen`
+# (the OpenAPI client, gitignored so it must be generated here), `vite build`,
+# `check-sw-precache.ts` (gate-remediation-2.md finding 2: asserts the dev
+# kitchen-sink route's chunk is excluded from the service worker's precache
+# manifest — the exclusion lives in vite.config.ts's injectManifest, this is
+# the check that it stayed effective on the artifact actually shipped by this
+# image, not just in local `pnpm run build`), and `check-csp.ts`, which fails
+# the build on an inline `<script>`/`style="..."` in the emitted HTML and is
+# therefore what makes the `script-src 'self'` in docker/Caddyfile honest
+# rather than hopeful.
 #
 # Deliberately NOT the `tsc -b --noEmit` step that `pnpm run build` also runs:
 # typechecking is CI's `typecheck` job and `just check`, over the whole
@@ -85,6 +90,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store,sharin
 # not chase a 404 on every file.
 RUN pnpm --filter '@app/web' run gen && \
     pnpm --filter '@app/web' exec vite build && \
+    pnpm --filter '@app/web' exec node scripts/check-sw-precache.ts && \
     pnpm --filter '@app/web' exec node scripts/check-csp.ts && \
     find apps/web/dist -name '*.map' -delete && \
     find apps/web/dist -type f \( -name '*.js' -o -name '*.css' \) \

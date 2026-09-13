@@ -14,6 +14,17 @@
  * header would be a dependency and a docker dependency this repo doesn't
  * otherwise need for its test suite. `node:http` plus `node:fs` is enough.
  *
+ * gate-remediation-2.md finding 3: this used to hard-code a 4-directive
+ * policy (`script-src`/`style-src-elem`/`style-src-attr`/`connect-src`) that
+ * had already drifted from the full policy Caddy actually sends (it is
+ * missing `default-src`, `img-src`, `font-src`, `worker-src`,
+ * `manifest-src`, `object-src`, `frame-ancestors`, `base-uri`,
+ * `form-action`) — a passing `csp` Playwright project was proving the app
+ * survives a *weaker* policy than production ships, which is not proof of
+ * anything. The policy is now read from `docker/Caddyfile` itself at
+ * runtime, so the two cannot drift again: change the Caddyfile and this test
+ * server picks it up on its next run with no separate edit.
+ *
  * Launched by Playwright's `webServer` (playwright.config.ts) — Playwright
  * owns the process lifecycle (start before tests, kill after), so nothing
  * here needs to handle its own shutdown beyond what SIGTERM/SIGINT already
@@ -29,18 +40,28 @@ const here = dirname(fileURLToPath(import.meta.url));
 const distDir = join(here, '..', 'dist-e2e-csp');
 const port = 5184;
 
+// apps/web/e2e -> apps/web -> apps -> repo root -> docker/Caddyfile.
+const caddyfilePath = join(here, '..', '..', '..', 'docker', 'Caddyfile');
+
 /**
- * The exact policy the security-gate remediation brief specifies and Caddy
- * ships in production: `script-src 'self'` (no inline scripts — verified
- * separately by `scripts/check-csp.ts`), `style-src-elem 'self'` split from
- * `style-src-attr 'unsafe-inline'` (docs/security/csp-nonce-strategy.md —
- * React's `style` prop and visx's inline SVG fills need the attribute
- * carve-out; no library gets to inject a `<style>` *element* at runtime),
- * and `connect-src 'self'` (the generated client and pending-contracts.ts
- * both talk same-origin only — gate-remediation-web.md M-2).
+ * Parses the `Content-Security-Policy "..."` line out of the
+ * `(security_headers)` snippet in `docker/Caddyfile` — the exact string
+ * Caddy sends on both listeners (`import security_headers` in that file) —
+ * rather than keeping a second, hand-maintained copy of it here.
  */
-const CONTENT_SECURITY_POLICY =
-  "script-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; connect-src 'self'";
+async function readContentSecurityPolicy() {
+  const caddyfile = await readFile(caddyfilePath, 'utf8');
+  const match = /^\s*Content-Security-Policy\s+"([^"]*)"\s*$/m.exec(caddyfile);
+  if (!match) {
+    throw new Error(
+      `csp-static-server: could not find a Content-Security-Policy directive in ${caddyfilePath} — ` +
+        'has the (security_headers) snippet in docker/Caddyfile changed shape?',
+    );
+  }
+  return match[1];
+}
+
+const CONTENT_SECURITY_POLICY = await readContentSecurityPolicy();
 
 const CONTENT_TYPES = {
   '.css': 'text/css; charset=utf-8',

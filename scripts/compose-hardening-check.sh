@@ -75,8 +75,10 @@ EXPECTED_RULES=(
   security-opt-unconfined
   devices
   container-runtime-socket
+  sensitive-host-path-bind-mount
   writable-bind-mount
   writable-named-volume
+  writable-volume-wrong-service
   port-bind-address
   missing-read-only
   missing-cap-drop-all
@@ -112,16 +114,43 @@ const EXCEPTIONS = new Map([
   ],
 ]);
 
-// Named volumes that are allowed to be writable, with the service that owns
-// them. A writable volume anywhere else is a finding.
+// Named volumes that are allowed to be writable, keyed "<volume>:<service>" so
+// only the documented *owning* service may mount one writable (gate-
+// remediation-2.md finding 6) — a second service mounting `pgdata` writable
+// is a finding even though `pgdata` itself is a legitimate writable volume,
+// because nothing about "this name is on the allow-list" implies "and any
+// service may write it."
 const WRITABLE_NAMED_VOLUMES = new Map([
-  ['pgdata', 'postgres data directory (db)'],
-  ['backups', 'encrypted nightly dumps (backup)'],
-  ['caddy_data', "Caddy's internal-CA key material and issued certificates (proxy)"],
-  ['caddy_config', "Caddy's autosaved config snapshot (proxy)"],
+  ['pgdata:db', 'postgres data directory'],
+  ['backups:backup', 'encrypted nightly dumps'],
+  ['caddy_data:proxy', "Caddy's internal-CA key material and issued certificates"],
+  ['caddy_config:proxy', "Caddy's autosaved config snapshot"],
 ]);
 
+function writableVolumeOwners(volumeName) {
+  return [...WRITABLE_NAMED_VOLUMES.keys()]
+    .filter((key) => key.split(':')[0] === volumeName)
+    .map((key) => key.split(':')[1]);
+}
+
+const WRITABLE_VOLUME_NAMES = [
+  ...new Set([...WRITABLE_NAMED_VOLUMES.keys()].map((key) => key.split(':')[0])),
+];
+
 const SOCKET_RE = /(docker\.sock|podman\.sock|containerd\.sock|crio\.sock)$/;
+
+// gate-remediation-2.md finding 6: a *read-only* bind of a socket, device
+// node, or procfs/sysfs entry under one of these host paths still lets the
+// container connect to it, open the device, or read host process/kernel
+// state through it — `:ro` only blocks writes through the filesystem
+// interface, not what the file itself lets you do once opened. So these are
+// flagged regardless of the mount's read_only flag, unlike ordinary bind
+// mounts (`writable-bind-mount`, below).
+const SENSITIVE_BIND_PREFIXES = ['/run', '/var/run', '/proc', '/sys', '/dev'];
+
+function isSensitiveHostPath(source) {
+  return SENSITIVE_BIND_PREFIXES.some((prefix) => source === prefix || source.startsWith(`${prefix}/`));
+}
 const HOST_NAMESPACE_KEYS = [
   ['network_mode', 'host-network'],
   ['pid', 'host-pid'],
@@ -207,6 +236,16 @@ for (const [service, spec] of Object.entries(services)) {
         );
         continue; // a socket mount is never "fixed" by adding :ro
       }
+      if (isSensitiveHostPath(source)) {
+        report(
+          service,
+          'sensitive-host-path-bind-mount',
+          `bind mount source is under a sensitive host path: ${source} -> ${mount.target} ` +
+            `(read_only=${String(readOnly)}; a read-only bind under /run, /var/run, /proc, /sys or ` +
+            `/dev still allows connecting to a socket or operating on a device/procfs entry through it)`,
+        );
+        continue; // :ro does not fix this class either — same reasoning as the socket check above
+      }
       if (!readOnly) {
         report(
           service,
@@ -215,13 +254,24 @@ for (const [service, spec] of Object.entries(services)) {
         );
       }
     } else if (mount.type === 'volume') {
-      if (!readOnly && !WRITABLE_NAMED_VOLUMES.has(source)) {
-        report(
-          service,
-          'writable-named-volume',
-          `writable named volume "${source}" -> ${mount.target} is not in the documented set ` +
-            `(${[...WRITABLE_NAMED_VOLUMES.keys()].join(', ')})`,
-        );
+      if (!readOnly) {
+        const owners = writableVolumeOwners(source);
+        if (owners.length === 0) {
+          report(
+            service,
+            'writable-named-volume',
+            `writable named volume "${source}" -> ${mount.target} is not in the documented set ` +
+              `(${WRITABLE_VOLUME_NAMES.join(', ')})`,
+          );
+        } else if (!owners.includes(service)) {
+          report(
+            service,
+            'writable-volume-wrong-service',
+            `writable named volume "${source}" -> ${mount.target} is documented as owned by ` +
+              `${owners.join(', ')}, not "${service}" — a second writer defeats the point of scoping ` +
+              `the write surface to one service`,
+          );
+        }
       }
     }
   }

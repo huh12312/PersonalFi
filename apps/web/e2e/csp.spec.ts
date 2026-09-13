@@ -10,9 +10,14 @@ declare global {
 /**
  * Runtime CSP compliance (gate-remediation-web.md H-3, M-1). Served by
  * `e2e/csp-static-server.mjs` (via `playwright.config.ts`'s `csp` project)
- * behind the exact production `Content-Security-Policy` Caddy sends:
- * `script-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline';
- * connect-src 'self'`.
+ * behind the exact production `Content-Security-Policy` Caddy sends — that
+ * server parses the directive straight out of `docker/Caddyfile`'s
+ * `(security_headers)` snippet at runtime (gate-remediation-2.md finding 3),
+ * so the full policy (`default-src`, `img-src`, `font-src`, `worker-src`,
+ * `manifest-src`, `object-src 'none'`, `frame-ancestors 'none'`, `base-uri
+ * 'none'`, `form-action 'self'`, and the `script-src`/`style-src-elem`/
+ * `style-src-attr`/`connect-src` directives below) is asserted here, not a
+ * hand-copied subset that can quietly drift weaker than production.
  *
  * `scripts/check-csp.ts` is a static regex over the built HTML shell — it
  * cannot see a `<style>` tag a library injects at runtime, which is exactly

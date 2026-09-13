@@ -513,6 +513,48 @@ describe('the passkey configuration boot check (P0-4)', () => {
     expect(config.env.AUTH_RP_ID).toBe('localhost');
     expect(config.allowedOrigins).toEqual(['http://localhost:8080']);
   });
+
+  // gate-remediation-2.md finding 8: a bare label is not a registrable
+  // domain, whether or not it happens to also be the shipped default.
+  it.each(['lan', 'com', 'localhost'])(
+    'rejects AUTH_RP_ID=%s in production as a bare label, not a real hostname',
+    (rpId) => {
+      const problems = problemsFrom({
+        AUTH_RP_ID: rpId,
+        AUTH_ALLOWED_ORIGINS: `https://${rpId}`,
+      });
+
+      expect(problems.map((problem) => problem.key)).toContain('AUTH_RP_ID');
+      const messages = problems
+        .filter((problem) => problem.key === 'AUTH_RP_ID')
+        .map((problem) => problem.problem)
+        .join('\n');
+      expect(messages).toMatch(/development default|bare label/);
+    },
+  );
+
+  it('rejects any other single-label AUTH_RP_ID in production, not just the denylisted ones', () => {
+    const problems = problemsFrom({
+      AUTH_RP_ID: 'nas',
+      AUTH_ALLOWED_ORIGINS: 'https://nas',
+    });
+
+    expect(problems.find((problem) => problem.key === 'AUTH_RP_ID')?.problem).toContain(
+      'bare label',
+    );
+  });
+
+  it('accepts a bare-suffix-looking label outside production', () => {
+    // The rule targets a production deployment mistake, not development —
+    // `localhost` is the working dev default (asserted above) and stays that
+    // way; this pins that `lan`/`com` are equally fine in non-production.
+    const config = loadConfig({
+      env: env({ AUTH_RP_ID: 'lan', AUTH_ALLOWED_ORIGINS: 'http://lan' }),
+      readSecret: secretsFrom({}),
+    });
+
+    expect(config.env.AUTH_RP_ID).toBe('lan');
+  });
 });
 
 /**
@@ -544,6 +586,47 @@ describe('TRUST_PROXY (M-1)', () => {
     expect(() =>
       loadConfig({ env: env({ TRUST_PROXY: '-1' }), readSecret: secretsFrom({}) }),
     ).toThrowError(ConfigError);
+  });
+});
+
+/**
+ * gate-remediation-2.md finding 8: `SESSION_COOKIE_SECURE=false` exists only
+ * for a plain-HTTP local/integration harness (apps/api/test/cookies.test.ts).
+ * Left set in production, the session cookie would ride along on plain HTTP —
+ * this is the boot-time check that turns that into a startup error instead of
+ * a silent downgrade.
+ */
+describe('SESSION_COOKIE_SECURE gated to non-production', () => {
+  it('defaults to true and boots in production unchanged', () => {
+    const config = loadConfig({
+      env: { NODE_ENV: 'production', DATABASE_URL: VALID_URL, ...PROD_AUTH },
+      readSecret: secretsFrom({}),
+    });
+
+    expect(config.env.SESSION_COOKIE_SECURE).toBe(true);
+  });
+
+  it('refuses to boot in production with SESSION_COOKIE_SECURE=false', () => {
+    expect(() =>
+      loadConfig({
+        env: {
+          NODE_ENV: 'production',
+          DATABASE_URL: VALID_URL,
+          SESSION_COOKIE_SECURE: 'false',
+          ...PROD_AUTH,
+        },
+        readSecret: secretsFrom({}),
+      }),
+    ).toThrowError(/SESSION_COOKIE_SECURE/);
+  });
+
+  it('allows SESSION_COOKIE_SECURE=false outside production, for the plain-HTTP test harness', () => {
+    const config = loadConfig({
+      env: env({ SESSION_COOKIE_SECURE: 'false' }),
+      readSecret: secretsFrom({}),
+    });
+
+    expect(config.env.SESSION_COOKIE_SECURE).toBe(false);
   });
 });
 

@@ -31,6 +31,8 @@ verify: check
     @echo "=== verify: gitleaks (full history, CI's pinned digest) ==="
     docker run --rm -v "{{justfile_directory()}}:/repo" -w /repo \
       {{GITLEAKS_IMAGE}} detect --source . --redact --exit-code 1 -i .gitleaksignore
+    @echo "=== verify: no remote may exist while .gitleaksignore still allowlists the c7846dc true positive ==="
+    bash scripts/check-history-rewrite-before-push.sh
     @echo "=== verify: license gate + THIRD_PARTY.md drift ==="
     node scripts/check-licenses.ts
     git diff --exit-code -- THIRD_PARTY.md
@@ -77,9 +79,12 @@ format:
 test:
     pnpm run test
 
-# Unit tests only; needs no database.
+# Unit tests only; needs no database. Every root-config vitest project except
+# the `*-db`/`db` ones — see the project -> job map in .github/workflows/ci.yml.
 test-unit:
-    pnpm exec vitest run --project kernel --project config --project api --project platform
+    pnpm exec vitest run --project kernel --project config --project api \
+      --project platform --project testkit --project seed --project secretbox \
+      --project identity
 
 # Start the dev database and wait for it to accept connections.
 db-up:
