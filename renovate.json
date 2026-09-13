@@ -8,13 +8,11 @@
   "minimumReleaseAge": "7 days",
   "packageRules": [
     {
-      "description": "Non-major, non-0.x dependencies: grouped and auto-merged. Safe only because typecheck/lint/test/migration-test/gitleaks/license-gate/trivy/compose-hardening are all blocking on the same PR (D14).",
+      "description": "Non-major, non-0.x dependencies: grouped, and NOT auto-merged. Automerge here was only ever safe because typecheck/lint/test/migration-test/gitleaks/license-gate/trivy/compose-hardening all block on the same PR (D14) — and the Phase 0 security gate found three of those gates broken at once: compose-hardening passed a maximally hostile service (H-1), the license gate failed on a wall-clock date diff rather than a real change (M-6), and gitleaks was red at HEAD. A merge queue is exactly as trustworthy as the checks in front of it, so automerge stays false until a green run of `just verify` is the norm rather than the exception. Re-enable in the same PR that can point at a sustained green pipeline.",
       "matchUpdateTypes": ["minor", "patch"],
       "matchCurrentVersion": "!/^0/",
       "groupName": "all non-major dependencies",
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true
+      "automerge": false
     },
     {
       "description": "Major bumps and anything still at 0.x always need a human.",

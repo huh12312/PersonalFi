@@ -44,7 +44,9 @@ jobs:
             context: docker
           - image: proxy
             dockerfile: docker/caddy.Dockerfile
-            context: docker
+            # Repo root: this image builds apps/web and serves dist/ (see
+            # docker/caddy.Dockerfile's web-build stage).
+            context: .
     outputs:
       version: ${{ steps.version.outputs.value }}
     steps:

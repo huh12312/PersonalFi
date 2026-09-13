@@ -13,7 +13,7 @@
 #      a real Let's Encrypt certificate from the tailnet's MagicDNS name, and
 #      reverse-proxies to Caddy's plain-HTTP internal listener:
 #
-#        tailscale serve --bg --https=443 http://127.0.0.1:${PROXY_HTTP_PORT:-8080}
+#        tailscale serve --bg --https=443 http://127.0.0.1:${PROXY_HTTP_PORT:-80}
 #
 #      Serve (never Funnel) keeps this on the tailnet only, authenticated by
 #      WireGuard device identity — see RUNBOOK.md "Enabling remote access".
@@ -24,7 +24,13 @@
 # to whatever host ports are configured — never 0.0.0.0, only the configured
 # bind address — so the proxy container needs no NET_BIND_SERVICE capability
 # and keeps `cap_drop: [ALL]` with zero exceptions.
-
+#
+# BOTH listeners are the same application, so both get the same headers and the
+# same routes, from the same two snippets. The Phase 0 security gate (H-4) found
+# the :8080 listener — the *remote-access* path — shipping three headers where
+# the LAN listener shipped eleven: no CSP, no HSTS, no framing protection on
+# every Tailscale session. Two hand-maintained copies of one policy is how that
+# happens, so there is now exactly one copy of each.
 {
 	admin off
 	email {$CADDY_ACME_EMAIL:chris@thebrutus.org}
@@ -32,46 +38,123 @@
 	# actually used while LAN mode is the only mode in play.
 }
 
-# ---------- LAN mode: personalfi.lan over Caddy's internal CA ----------
-{$PERSONALFI_HOSTNAME:personalfi.lan}:8443 {
-	tls internal
-
-	encode zstd gzip
-
-	# CSP nonce: apps/api sets a per-request nonce and interpolates it into
-	# the response before this header is added downstream by the app itself
-	# for HTML responses; the placeholder here covers everything Caddy serves
-	# directly (errors, non-HTML). Replace {nonce-placeholder} tooling lives
-	# in apps/api once the SPA ships (WP 0.5) — tracked, not yet wired.
+# ---------- one security-header policy, imported by every listener ----------
+(security_headers) {
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options    "nosniff"
-		X-Frame-Options           "DENY"
-		Referrer-Policy           "no-referrer"
-		Cross-Origin-Opener-Policy   "same-origin"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Cross-Origin-Opener-Policy "same-origin"
 		Cross-Origin-Embedder-Policy "require-corp"
 		Cross-Origin-Resource-Policy "same-origin"
 		Permissions-Policy "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'nonce-{nonce-placeholder}'; style-src 'self' 'nonce-{nonce-placeholder}'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+
+		# No nonce. The previous policy emitted `'nonce-{nonce-placeholder}'`,
+		# which nothing substituted: `{` and `}` are outside CSP's base64
+		# grammar, so browsers discarded the source expression and the
+		# *effective* policy was `script-src 'self'` — fail-safe by luck (H-4,
+		# M-7). The tempting fix (bake a constant into the image) is strictly
+		# weaker than `'self'`, because a public constant nonce whitelists any
+		# injected script that copies it. So this states what is actually
+		# enforced today, and docs/security/csp-nonce-strategy.md keeps the
+		# per-request-nonce target on file for when the serving layer can mint
+		# one per response.
+		#
+		# `style-src-elem` / `style-src-attr` are split per that document:
+		# React writes `style="..."` attributes for dynamic values (chart
+		# geometry, progress arcs) that cannot carry a nonce, while injected
+		# `<style>` elements — sonner and react-remove-scroll-bar both do this
+		# at runtime — are served from 'self'. Collapsing both into a single
+		# `style-src 'self'` is what would have broken the idle-lock warning
+		# toast and the service-worker update prompt.
+		#
+		# `worker-src blob:` is required by the vite-plugin-pwa service worker
+		# registration; `img-src blob:` by canvas/chart exports.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 		-Server
 	}
+}
 
-	# Never let the internal-CA cert or a probe reach the API's real routes
-	# from outside the LAN by accident — Caddy's own bind address does that
-	# job (compose.yml), this is defense in depth only.
-	handle /api/* {
+# ---------- one routing policy, imported by every listener ----------
+#
+# The API mounts exactly three prefixes (packages/contracts/openapi/openapi.json:
+# `/auth/*`, `/health`, `/ready`). Everything else is the SPA, served straight
+# off disk by this container from the `apps/web` bundle baked into the image by
+# docker/caddy.Dockerfile.
+#
+# The old file had a `handle /api/*` block that proxied to `api:8080` *without*
+# stripping the prefix, against an API that mounts nothing under `/api` — every
+# request through it 404'd (M-3), and because the block looked load-bearing,
+# the catch-all that actually served traffic was the one place missing
+# `X-Forwarded-Proto`. It is gone; the three real prefixes are listed by name.
+#
+# Trusted-proxy posture, stated rather than inherited (C-1/M-1):
+#   * No `trusted_proxies` directive appears anywhere in this file, on either
+#     listener, so Caddy's default — trust *no* peer's forwarding headers —
+#     applies. Since Caddy 2.7 that default means an inbound `X-Forwarded-For`
+#     from a client is REPLACED, not appended to.
+#   * `header_up X-Forwarded-For {remote_host}` overwrites it unconditionally
+#     anyway, so the API's rate limiter and lockout key on the real peer
+#     address whatever a future Caddy changes its default to. The security
+#     gate found the protection was real but rested entirely on a
+#     version-dependent default with nothing pinning it.
+#   * Loopback is deliberately NOT trusted on the Tailscale listener. Under
+#     the default bridge network the immediate peer for a `tailscale serve`
+#     request is the docker-proxy gateway (172.x.0.1), never 127.0.0.1, so a
+#     `trusted_proxies static 127.0.0.1/32` there would match nothing and read
+#     as a guarantee that is not one. If per-device attribution over the
+#     tailnet is ever wanted, the honest way is to trust the gateway address
+#     explicitly and consume `Tailscale-User-Login`, not to trust loopback.
+#
+# `X-Forwarded-Proto https` on every live path: both listeners are reached over
+# TLS by the client (Caddy terminates on :8443, Tailscale terminates in front
+# of :8080), so `request.protocol` in the API is `https` for every request it
+# actually serves.
+(app_routes) {
+	handle /auth/* {
 		reverse_proxy api:8080 {
+			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto https
 		}
 	}
+
 	handle /health {
-		reverse_proxy api:8080
+		reverse_proxy api:8080 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto https
+		}
 	}
+
+	handle /ready {
+		reverse_proxy api:8080 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	# The SPA. `try_files {path} /index.html` is the client-side-routing
+	# fallback: a deep link like /accounts/123 has no file behind it, and the
+	# router resolves it in the browser. Hashed asset filenames are immutable,
+	# so they get a long max-age; index.html and the service worker must not be
+	# cached or a stale shell outlives a deploy.
 	handle {
-		# apps/web is WP 0.5's SPA; until it ships, everything else also goes
-		# to the API so the stack is testable end-to-end today.
-		reverse_proxy api:8080
+		root * /srv/web
+		@immutable path /assets/* /fonts/* /icons/*
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+		@nocache path / /index.html /sw.js /manifest.webmanifest
+		header @nocache Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
 	}
+}
+
+# ---------- LAN mode: personalfi.lan over Caddy's internal CA ----------
+{$PUBLIC_HOST:personalfi.lan}:8443 {
+	tls internal
+	encode zstd gzip
+	import security_headers
+	import app_routes
 }
 
 # ---------- plain HTTP listener for Tailscale Serve to reverse-proxy into ----------
@@ -79,21 +162,9 @@
 # this is ever reached (see header comment). Only bound to the configured
 # LAN/loopback address in compose.yml, same as the HTTPS listener — this is
 # not a second public surface, it is the target `tailscale serve` proxies to.
+# Identical headers and identical routes to the listener above, by import.
 :8080 {
 	encode zstd gzip
-
-	header {
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy        "no-referrer"
-		-Server
-	}
-
-	handle /api/* {
-		reverse_proxy api:8080 {
-			header_up X-Forwarded-Proto https
-		}
-	}
-	handle {
-		reverse_proxy api:8080
-	}
+	import security_headers
+	import app_routes
 }

@@ -20,6 +20,15 @@ services:
     # proposes the bump; nothing floats on its own.
     image: postgres:18.6-alpine3.24
     restart: unless-stopped
+    # Held to the same P0-6/P0-7 baseline as the production db, and checked by
+    # the same gate (scripts/compose-hardening-check.sh runs over *every*
+    # compose file). `read_only` is the one documented exception — postgres
+    # writes its own data directory — and the exception lives in the gate's
+    # exception table with a reason, not in a file the gate skips. uid 70 is
+    # the image's own `postgres` user, so this pins what already happened.
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    user: '70:70'
     environment:
       POSTGRES_USER: personalfi
       POSTGRES_PASSWORD: personalfi

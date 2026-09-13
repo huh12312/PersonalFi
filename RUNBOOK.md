@@ -96,18 +96,47 @@ echo "placeholder" > secrets/b2_application_key
 # with object lock enabled, put the key id/secret in the two files above,
 # and set RCLONE_REMOTE=b2:<your-bucket-name> in .env.
 
-# 0444, not 0400: Docker Compose's file-secret provider preserves the host
-# file's own uid/mode verbatim inside the container rather than remapping it
-# to the consuming service's runtime user (verified empirically — `docker
-# compose secrets` has no per-service uid/gid/mode override outside Swarm
-# mode). db (uid 70), api/worker/migrator (uid 10001), and backup (uid 10002)
-# all read secrets from this same directory, so a mode that only the file's
-# *owner* (you, on the host) can read fails inside every one of them. The
-# actual confidentiality boundary is the 0700 directory above, which only you
-# and root can even traverse into — 0444 on the files inside it does not
-# weaken that.
 chmod 444 secrets/b2_key_id secrets/b2_application_key
 ```
+
+#### Secret file modes: 0444 by default, 0400 via `just harden-secrets`
+
+`packages/config/src/schema.ts` and `.env.example` both say mode 0400, and the
+files this writes are 0444. That gap is real, was raised by the Phase 0
+security gate (M-2), and here is exactly what it is.
+
+Docker Compose's file-secret provider **bind-mounts the host file and preserves
+its uid, gid and mode verbatim**. The `uid`/`gid`/`mode` keys in compose's
+secret long syntax are Swarm-only and `docker compose up` ignores them
+silently. Measured on Compose v5.5.1:
+
+```
+host file: -rw-r--r-- 1 1000 1000 s.txt      declared: mode: 0400, uid/gid 10001
+container (running as 10001): -rw-r--r-- 1 1000 1000 /run/secrets/s   -> READABLE
+```
+
+Nothing was applied. So with a 0400 file owned by you, every consumer fails:
+`db` runs as uid 70, `api`/`worker`/`migrator` as 10001, `backup` as 10002, and
+none of them is the uid that ran `just`. 0444 inside a **0700 directory** is
+the working default: only you and root can traverse into `./secrets` at all.
+
+The way to actually get 0400 inside the container is to make the host file
+0400 _owned by the consuming uid_, which needs root once:
+
+```bash
+just harden-secrets     # sudo chown/chmod per consuming service
+ls -l secrets/
+# -r-------- 1 10001 10001 database_url      api / worker / migrator
+# -r-------- 1 10001 10001 master_key        api / worker
+# -r--r----- 1     70  10002 pg_password     postgres (owner) + backup (group)
+# -r-------- 1 10002 10002 age_recipient     backup
+```
+
+After that you can no longer `cat secrets/master_key` without `sudo` either —
+which is the point — and `just gen-*` will need `sudo` to rewrite them.
+`just restore-drill` already reads `pg_password` through a root container, so
+it keeps working. Run it before handing the box real credentials; it is the
+one remaining hand action in this section.
 
 ### 3. Configure `.env`
 
@@ -122,8 +151,23 @@ The two settings that matter for a fresh box:
   reach it via an SSH port-forward, or `just trust-ca` and a browser on the
   box itself). Set it to the host's actual LAN IP if you want other devices
   on the same LAN to reach it directly over the internal CA.
-- `PERSONALFI_HOSTNAME` — defaults to `personalfi.lan`. Caddy issues an
-  internal-CA certificate for whatever this is set to (`docker/Caddyfile`).
+- `PUBLIC_HOST` — defaults to `personalfi.lan`; **renamed from
+  `PERSONALFI_HOSTNAME`** because it is one fact used in four places and they
+  were allowed to disagree once (P0-4). Setting it sets, together: Caddy's site
+  address and internal-CA certificate (`docker/Caddyfile`), the API's
+  `BASE_URL`, `AUTH_RP_ID` (the WebAuthn relying-party id), and the single
+  entry in `AUTH_ALLOWED_ORIGINS` (the CSRF origin allow-list). Changing it
+  after passkeys are enrolled **invalidates every passkey** — the RP id is
+  bound into the credential — so pick the final hostname before step 7.
+- `EXTRA_ALLOWED_ORIGINS` — optional, comma-separated, appended to
+  `AUTH_ALLOWED_ORIGINS`. Only for a second origin on the **same registrable
+  name** (a different port, or a subdomain of `PUBLIC_HOST`). It is _not_ a way
+  to add the Tailscale MagicDNS name: WebAuthn §7.1 requires every allowed
+  origin's host to equal `AUTH_RP_ID` or be a subdomain of it, and
+  `@core/config` enforces that at boot — `<node>.<tailnet>.ts.net` alongside
+  `personalfi.lan` refuses to start, by design, rather than failing later in
+  the browser. If you want passkeys over Tailscale, set `PUBLIC_HOST` to the
+  tailnet name and reach the box by that name on the LAN too.
 
 ### 4. Bring the stack up
 
@@ -148,7 +192,7 @@ just trust-ca
 Then import `personalfi-ca.crt` into your OS/browser trust store (exact
 steps vary by OS — Arch: `trust anchor personalfi-ca.crt` as root, or import
 via your browser's certificate settings). Add `personalfi.lan` (or whatever
-`PERSONALFI_HOSTNAME` is) to `/etc/hosts` pointing at the bind address.
+`PUBLIC_HOST` is) to `/etc/hosts` pointing at the bind address.
 
 ### 6. Enabling remote access (Tailscale Serve + MagicDNS)
 
@@ -227,12 +271,38 @@ On demand:
 just backup
 ```
 
-Backups never touch disk unencrypted at rest: `pg_dump`'s output is piped
-directly into `age --encrypt` before it is written (`docker/backup/backup.sh`).
 The backup container holds only the age **public** key (`secrets/age_recipient`)
 — it can produce backups it cannot itself decrypt, which is the point (a
-ransomware actor who compromises this container gets nothing from the
-backups it already made).
+ransomware actor who compromises this container gets nothing from the backups
+it already made). The plaintext dump exists only inside the container's `/tmp`,
+which is a 256 MB **tmpfs** (`compose.yml`), long enough to be verified; it
+never touches a disk and is deleted before the script exits.
+
+### What "successful" means, and how you find out when it isn't
+
+Every run must clear four bars before it counts (`docker/backup/backup.sh`):
+
+1. `pg_dump` exits 0 — captured explicitly, not through a pipeline;
+2. the dump is at least `MIN_DUMP_BYTES` (1024) bytes;
+3. `pg_restore --list` parses it and finds at least one restorable object;
+4. only then is it encrypted, `mv`d into place, and only then is anything old
+   pruned. **A failed backup never deletes a good one.**
+
+The run writes its outcome to a status file that the container healthcheck
+reads, so `docker compose ps` tells the truth:
+
+```bash
+docker compose ps                         # backup: "unhealthy" if the last run failed
+docker compose exec backup /usr/local/bin/healthcheck.sh
+# healthy: last backup 4s ago: /backups/personalfi-...dump.age (66131 plaintext bytes, 154 objects)
+# unhealthy: last backup attempt reported 'fail' 0s ago: backup.sh exited 1 (see container logs)
+```
+
+It also goes unhealthy when the last _successful_ backup is older than
+`BACKUP_MAX_AGE_SECONDS` (default 26 h — the nightly cadence plus slack), so a
+loop that is alive but no longer backing up is visible too. Before the Phase 0
+gate (H-2) the healthcheck only asked whether the loop process existed, which
+stays true through thirty consecutive silent failures.
 
 ---
 
@@ -242,6 +312,22 @@ backups it already made).
 destructive; `restore.sh` runs `pg_restore --clean --if-exists`, which drops
 and recreates everything in the target database.
 
+Because of that, `restore.sh` **refuses** to run when `PGDATABASE` equals the
+production database name (`personalfi`, overridable via `PRODUCTION_DATABASE`)
+unless you pass `FORCE_RESTORE=1`. With the flag it prints the full list of
+tables it is about to drop, waits five seconds, and then proceeds:
+
+```
+restore: target personalfi@db; --clean --if-exists will DROP and recreate these:
+    BASE TABLE  public.users
+    BASE TABLE  public.sessions
+    ... (20 tables)
+restore: archive contains 154 restorable object(s)
+restore: FORCE_RESTORE=1 given; proceeding against the production database in 5s (Ctrl-C to abort)
+```
+
+Without the flag it exits 1 and points you at `just restore-drill`.
+
 ```bash
 docker compose stop api worker           # stop anything writing to the db
 docker cp /path/to/your/age-identity.txt /tmp/age-identity.txt   # onto the host, not into the repo
@@ -249,6 +335,7 @@ chmod 644 /tmp/age-identity.txt          # see note below — the container read
 docker compose run --rm \
   -v /tmp/age-identity.txt:/run/age_identity:ro \
   -e AGE_IDENTITY_FILE=/run/age_identity \
+  -e FORCE_RESTORE=1 \
   backup /usr/local/bin/restore.sh /backups/personalfi-<timestamp>.dump.age
 shred -u /tmp/age-identity.txt
 docker compose up -d
@@ -283,10 +370,29 @@ just restore-drill
 
 This decrypts and `pg_restore`s the newest backup into a **throwaway**
 Postgres container (never the live `db` service), boots a throwaway `api`
-container against it, hits `/ready`, and compares table counts and the
-latest applied migration against the live database. It tears down everything
-it created on exit, pass or fail, and writes
-`docs/evidence/ops/restore-drill-<date>.md`. It needs `docker compose up` (or
+container against it, hits `/ready`, and compares table counts and the latest
+applied migration against the live database. It tears down everything it
+created on exit, pass or fail, and writes
+`docs/evidence/ops/restore-drill-<date>.md` with a **PASS/FAIL verdict**.
+
+It asserts, and exits non-zero if any of these fails (H-5 — it used to collect
+these numbers and never compare them, so the committed evidence read
+"Restored db table count: 0 ... /ready: fail" and the recipe exited 0):
+
+- restored table count > 0,
+- restored table count == live table count,
+- restored `schema_migrations` max version == live,
+- `/ready` returns 200 from an api container pointed at the restored database.
+
+A green run looks like this:
+
+````
+- Backup restored: `/backups/personalfi-20260913T024827Z.dump.age` (66346 encrypted bytes)
+- Restored db table count: 20        - Live db table count: 20
+- Restored db schema_migrations: 0003 - Live db schema_migrations: 0003
+- API /ready against restored db: pass (200 from /ready)
+**Verdict: PASS**
+``` It needs `docker compose up` (or
 at least `create`) to have run at least once, so the `backend` network and
 `backups` volume already exist.
 
@@ -333,6 +439,69 @@ differs enormously between "a Plaid token leaked" and "someone has a shell
 on this box," and a single `just panic` button that always does the same
 four things regardless of which is actually true is worse than a checklist a
 human reads under pressure.
+
+---
+
+## Before you push: `just verify`
+
+`just check` is typecheck + lint + tests. It does **not** run gitleaks, trivy,
+the license gate, or the compose-hardening gate — those were CI-only, a green
+`just check` was read as "CI will pass" for all of Phase 0, and CI was red at
+HEAD the whole time while three of those gates were themselves broken. So:
+
+```bash
+just verify     # = just check, plus every gate CI runs, same pinned digests
+````
+
+In order, `just verify` runs:
+
+| Step                                   | Matches CI job              |
+| -------------------------------------- | --------------------------- |
+| `just check` (typecheck, lint, test)   | `typecheck`, `lint`, `test` |
+| gitleaks, full history, pinned digest  | `gitleaks`                  |
+| license gate + `THIRD_PARTY.md` drift  | `license-gate`              |
+| compose hardening self-test + sweep    | `compose-hardening`         |
+| `.trivyignore` expiry sweep            | `trivy-fs` (first step)     |
+| `trivy fs` (vuln + secret + misconfig) | `trivy-fs`                  |
+
+It needs Docker and, on a cold cache, a network. What it does not cover is the
+per-image `trivy image` scan and SBOM generation — `just scan` and `just sbom`
+do those, and they rebuild the images first, which is minutes rather than
+seconds. Run those before a release, not before every push.
+
+The compose-hardening step deliberately runs twice: once with `--self-test`,
+which feeds a deliberately hostile compose file
+(`scripts/fixtures/compose-hostile.yml`) through the gate and asserts that all
+seventeen rules fire, and once over the real files. The gate this replaced
+passed a privileged, host-networked, Docker-socket-mounting service for a
+month, so "the check ran and said PASS" is not evidence unless the check has
+been seen failing something.
+
+---
+
+## Resource envelope
+
+Limits are set per service in `compose.yml` (`deploy.resources.limits`). They
+are _limits_, not reservations — steady-state usage is far below these — but
+the sum is what the host must be able to give up at once.
+
+| Service      | CPU | Memory    | Why that number                                                                                                                                                                                                                                                                     |
+| ------------ | --- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api`        | 2.0 | **1536M** | Argon2id KEK derivation allocates 1 GiB in one buffer at boot (P0-2 floor). At 768M the kernel OOM-killed it at exit 137 with no output, and because `/auth/unlock-state` derives lazily, an unauthenticated GET was a remote kill switch.                                          |
+| `worker`     | 1.0 | **512M**  | Does **not** derive the KEK today — `apps/api/src/worker.ts` constructs no `SecurityRuntime`. **Raise to 1536M in the same PR that makes the worker unlock the keyring** (first sync job that decrypts a provider credential), or it will OOM at exit 137 exactly like the api did. |
+| `db`         | 2.0 | 1G        | `shared_buffers=256MB`, `max_connections=40`, plus 256M `shm_size`.                                                                                                                                                                                                                 |
+| `proxy`      | 0.5 | 128M      | Caddy plus a static bundle.                                                                                                                                                                                                                                                         |
+| `backup`     | 0.5 | 256M      | `pg_dump` + `age`; the plaintext dump lives in a 256M tmpfs.                                                                                                                                                                                                                        |
+| `migrator`   | —   | —         | Runs to completion before api/worker start; no limit set.                                                                                                                                                                                                                           |
+| placeholders | 0.1 | 32M       | `sleep infinity`, profile-gated, off by default.                                                                                                                                                                                                                                    |
+
+Worst case with everything running and api cold-starting: ~3.4 GiB of limits,
+of which the real simultaneous peak is api's 1 GiB Argon2 spike plus Postgres's
+~1 GiB — comfortably inside the 2 GB whole-stack target in master plan §3.4
+_while the worker stays at 512M_. When the worker starts deriving the KEK, two
+simultaneous 1 GiB spikes exceed that target: the levers are staggering the
+derivations or `KEK_ARGON2_MEMORY_KIB` (a security parameter with a production
+floor — do not lower it casually), not the container limits.
 
 ---
 

@@ -19,6 +19,7 @@
  * tightening the dependency surface.
  */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -219,6 +220,27 @@ function analyze(
   return { violations, reviews };
 }
 
+/**
+ * Provenance stamp for the generated artifact.
+ *
+ * Deliberately NOT a wall-clock date. It used to be
+ * `new Date().toISOString().slice(0, 10)`, and CI regenerates this file and
+ * runs `git diff --exit-code` on it — so from the day after it was committed,
+ * every PR failed the license gate on a one-line date diff whether or not a
+ * single dependency had changed (M-6). The fastest way out of that is deleting
+ * the drift check, which is the control; the right way is to stamp the input
+ * instead of the moment.
+ *
+ * The lockfile hash is exactly the right input: it changes if and only if the
+ * dependency tree changed, which is the only thing that can change this file's
+ * contents. A drift now means real drift.
+ */
+function lockfileStamp(): string {
+  const lockfile = readFileSync(join(REPO_ROOT, 'pnpm-lock.yaml'));
+  const digest = createHash('sha256').update(lockfile).digest('hex');
+  return `pnpm-lock.yaml sha256:${digest.slice(0, 16)}`;
+}
+
 function renderThirdParty(prodReport: LicenseReport, generatedAt: string): string {
   const lines: string[] = [
     '<!-- SPDX-License-Identifier: MIT -->',
@@ -228,7 +250,7 @@ function renderThirdParty(prodReport: LicenseReport, generatedAt: string): strin
     '# Third-Party Notices',
     '',
     'PersonalFi is MIT-licensed. This file lists the runtime (production) dependency tree —',
-    `\`pnpm licenses list --prod\` across the whole workspace — as of ${generatedAt}.`,
+    `\`pnpm licenses list --prod\` across the whole workspace — generated from ${generatedAt}.`,
     'devDependencies (build tooling, test frameworks) are not distributed and are not listed',
     'here; see `licenses.policy.yaml` for the policy that governs both.',
     '',
@@ -262,7 +284,7 @@ function main(): number {
   const prodResult = analyze(prodReport, policy, 'prod');
   const devResult = analyze(devReport, policy, 'dev');
 
-  const thirdParty = renderThirdParty(prodReport, new Date().toISOString().slice(0, 10));
+  const thirdParty = renderThirdParty(prodReport, lockfileStamp());
   writeFileSync(THIRD_PARTY_PATH, thirdParty);
 
   const prodCount = Object.values(prodReport).reduce((sum, pkgs) => sum + pkgs.length, 0);

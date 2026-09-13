@@ -15,8 +15,54 @@ _default:
 install:
     pnpm install --frozen-lockfile
 
-# Everything CI runs, in CI's order.
+# Typecheck, lint, unit+integration tests. Fast, and NOT the full pipeline —
+# `just verify` is. A green `just check` was being read as a green CI run all
+# through Phase 0 while CI was red at HEAD (the gate review's process finding),
+# so the two names now mean different things on purpose.
 check: typecheck lint test
+
+# Everything CI will run, locally, in CI's order. A green `just verify` is the
+# claim "the pipeline will be green"; nothing else in this file is.
+#
+# Runs the same pinned container digests CI runs — gitleaks, trivy — so this
+# needs docker and a network on first use, and takes minutes rather than
+# seconds. That is the price of the claim.
+verify: check
+    @echo "=== verify: gitleaks (full history, CI's pinned digest) ==="
+    docker run --rm -v "{{justfile_directory()}}:/repo" -w /repo \
+      {{GITLEAKS_IMAGE}} detect --source . --redact --exit-code 1 -i .gitleaksignore
+    @echo "=== verify: license gate + THIRD_PARTY.md drift ==="
+    node scripts/check-licenses.ts
+    git diff --exit-code -- THIRD_PARTY.md
+    @echo "=== verify: compose hardening (self-test, then the real files) ==="
+    just hardening-check
+    @echo "=== verify: .trivyignore has no expired suppressions ==="
+    just trivyignore-check
+    @echo "=== verify: trivy filesystem scan ==="
+    docker run --rm -v "{{justfile_directory()}}:/repo" {{TRIVY_IMAGE}} \
+      fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
+        --ignorefile /repo/.trivyignore --exit-code 1 /repo
+    @echo "=== verify: PASS (this is the run that predicts CI) ==="
+
+# Same digest CI's `gitleaks` job pins.
+GITLEAKS_IMAGE := "zricethezav/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9"
+
+# The same expiry sweep CI's `trivy-fs` job runs before scanning: a suppression
+# is a snooze, and a snooze that never rings is a decision nobody made.
+trivyignore-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    today="$(date -u +%Y-%m-%d)"
+    expired=0
+    while IFS= read -r line; do
+      [[ "$line" =~ \#\#[[:space:]]*expires:[[:space:]]*([0-9]{4}-[0-9]{2}-[0-9]{2}) ]] || continue
+      expiry="${BASH_REMATCH[1]}"
+      if [[ "$expiry" < "$today" ]]; then
+        echo "::error::.trivyignore entry expired on $expiry: $line" >&2
+        expired=1
+      fi
+    done < .trivyignore
+    exit "$expired"
 
 typecheck:
     pnpm run typecheck
@@ -113,10 +159,19 @@ drill-worker-restart:
 # above are the *dev* database only — these target the hardened stack.
 # ---------------------------------------------------------------------------
 
-# Grep every compose file for privileged/network_mode:host/pid:host/a mounted
-# Docker socket (P0-6). Wired into CI as the `compose-hardening` job.
-compose-lint:
+# The P0-6/P0-7 compose gate: it checks ITSELF against a deliberately hostile
+# fixture first, then checks every real compose file. Both halves, in that
+# order, because the gate this replaced passed a privileged, host-networked,
+# Docker-socket-mounting service and nobody found out for a month.
+#
+# Wired into CI as the `compose-hardening` job, into `just verify`, and into
+# the lefthook pre-commit hook.
+hardening-check:
+    bash scripts/compose-hardening-check.sh --self-test
     bash scripts/compose-hardening-check.sh
+
+# Old name, kept so existing hooks/docs/muscle memory keep working.
+compose-lint: hardening-check
 
 # Generate Postgres's bootstrap password and the matching database_url secret
 # (RUNBOOK.md "Create secrets" step 1-2). Hex, not base64: `postgres://` is a
@@ -136,6 +191,11 @@ gen-pg-secrets:
       exit 1
     fi
     umask 077
+    # The confidentiality boundary is this directory, not the file modes
+    # inside it (see the mode note below and compose.yml's `secrets:` header):
+    # 0700 means only you and root can traverse into it at all. Enforced, not
+    # assumed — `mkdir -p` leaves a pre-existing directory's mode alone.
+    chmod 0700 "${SECRETS_DIR}"
     openssl rand -hex 32 > "${SECRETS_DIR}/pg_password"
     printf 'postgres://personalfi:%s@db:5432/personalfi\n' \
       "$(cat "${SECRETS_DIR}/pg_password")" > "${SECRETS_DIR}/database_url"
@@ -145,8 +205,20 @@ gen-pg-secrets:
     # prevent, so it checks its own output rather than assuming.
     node -e "new URL(require('node:fs').readFileSync(process.argv[1], 'utf8').trim())" \
       "${SECRETS_DIR}/database_url"
+    # 0444 by default, 0400 via `just harden-secrets`. Measured, not assumed:
+    # compose's file-secret provider bind-mounts the host file and preserves
+    # its uid/gid/mode verbatim — `uid`/`gid`/`mode` in the compose long syntax
+    # are Swarm-only and `docker compose up` ignores them (verified on Compose
+    # v5.5.1: a 0644 host file declared `mode: 0400, uid: 10001` appeared
+    # inside a container running as 10001 as `-rw-r--r-- 1 1000 1000`). db runs
+    # as uid 70, api/worker/migrator as 10001, backup as 10002, and none of
+    # them is the uid that ran `just`, so 0400-owned-by-you means every one of
+    # them fails to read its own secret. `just harden-secrets` does the one
+    # thing that actually produces 0400 *inside* the container: chown to the
+    # consuming uid on the host, which does pass through.
     chmod 0444 "${SECRETS_DIR}/pg_password" "${SECRETS_DIR}/database_url"
     echo "wrote ${SECRETS_DIR}/pg_password and ${SECRETS_DIR}/database_url"
+    echo "run 'just harden-secrets' (needs sudo) to take them to 0400 owned by the consuming uid"
 
 # Build the api/worker/migrator, backup, and proxy images.
 build:
@@ -177,12 +249,25 @@ backup:
     docker compose exec backup /usr/local/bin/backup.sh
 
 # Prove the newest backup actually restores (D24, 06 §4.2; master plan P0-11).
+#
 # Spins up a throwaway Postgres container on the *existing* backend network,
-# decrypts and pg_restores the newest backup into it via the backup image's
-# own restore.sh, boots a throwaway api container against it, hits /ready,
-# and compares row counts against the live `db` service. Everything it
-# creates is torn down on exit (`trap ... EXIT`), pass or fail. Writes
-# docs/evidence/ops/restore-drill-<date>.md.
+# decrypts and pg_restores the newest backup into it via the backup image's own
+# restore.sh, boots a throwaway api container against it, hits /ready, compares
+# the restored table count against the live `db` service — and then ASSERTS on
+# all of it. Everything it creates is torn down on exit (`trap ... EXIT`), pass
+# or fail. Writes docs/evidence/ops/restore-drill-<date>.md with a verdict.
+#
+# H-5: this recipe used to gather exactly these numbers and never compare them.
+# The committed evidence artifact read "Restored db table count: 0 / Live db
+# table count: 0 / /ready: fail" and the recipe exited 0 — the only control
+# capable of catching a silently-empty backup (H-2) was structurally incapable
+# of failing. Every number below is now an assertion:
+#
+#   * the restored table count is > 0 (a restore of nothing is not a restore),
+#   * it equals the live table count,
+#   * schema_migrations agrees on both sides,
+#   * /ready returns 200 against the restored database,
+#   * any failure writes FAIL into the evidence file and exits non-zero.
 #
 # Preconditions: `docker compose up` (or at least `create`) has run at least
 # once, so the `backend` network and `backups` volume exist and are
@@ -197,6 +282,7 @@ restore-drill:
     DATE="$(date -u +%Y%m%dT%H%M%SZ)"
     EVIDENCE="$ROOT/docs/evidence/ops/restore-drill-${DATE%%T*}.md"
     PG_DIGEST="postgres:18.6-alpine3.24@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2"
+    ALPINE_DIGEST="alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"
     DRILL_DB="restore-drill-db-$$"
     DRILL_API="restore-drill-api-$$"
 
@@ -208,95 +294,152 @@ restore-drill:
     fi
 
     SCRATCH_SECRETS="$(mktemp -d)"
+    FAILURES=()
     cleanup() {
       docker rm -f "$DRILL_DB" "$DRILL_API" >/dev/null 2>&1 || true
       rm -rf "$SCRATCH_SECRETS"
     }
     trap cleanup EXIT
+    fail() { FAILURES+=("$1"); echo "restore-drill: ASSERTION FAILED: $1" >&2; }
+
+    # Read the password through a container running as root rather than with
+    # `cat` on the host: after `just harden-secrets` the host file is 0440
+    # owned by uid 70, which the operator deliberately cannot read.
+    PG_PASSWORD="$(docker run --rm --user 0:0 -v "$ROOT/secrets/pg_password:/s:ro" "$ALPINE_DIGEST" cat /s)"
 
     echo "restore-drill: starting scratch db ($DRILL_DB on $BACKEND_NETWORK) ..."
     docker run -d --name "$DRILL_DB" --network "$BACKEND_NETWORK" --network-alias restore-drill-db \
       -e POSTGRES_USER=personalfi -e POSTGRES_DB=personalfi_restore_drill \
-      -e POSTGRES_PASSWORD_FILE=/run/secrets/pg_password \
-      -v "$ROOT/secrets/pg_password:/run/secrets/pg_password:ro" \
+      -e POSTGRES_PASSWORD="$PG_PASSWORD" \
       "$PG_DIGEST" >/dev/null
 
     echo -n "restore-drill: waiting for scratch db to accept connections "
-    for _ in $(seq 1 30); do
+    DB_UP=0
+    for _ in $(seq 1 60); do
       if docker exec "$DRILL_DB" pg_isready -U personalfi -d personalfi_restore_drill >/dev/null 2>&1; then
-        echo "ok"; break
+        echo "ok"; DB_UP=1; break
       fi
       echo -n "."; sleep 1
     done
+    [ "$DB_UP" -eq 1 ] || { echo; fail "scratch database never accepted connections"; }
 
-    LATEST_BACKUP="$(docker run --rm -v "$BACKUPS_VOLUME:/backups:ro" alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b \
+    LATEST_BACKUP="$(docker run --rm -v "$BACKUPS_VOLUME:/backups:ro" "$ALPINE_DIGEST" \
       sh -c "ls -1t /backups/personalfi-*.dump.age 2>/dev/null | head -1")"
     if [ -z "$LATEST_BACKUP" ]; then
       echo "restore-drill: no backup found in the backups volume — run 'just backup' first" >&2
       exit 1
     fi
-    echo "restore-drill: restoring $LATEST_BACKUP"
+    BACKUP_BYTES="$(docker run --rm -v "$BACKUPS_VOLUME:/backups:ro" "$ALPINE_DIGEST" \
+      sh -c "wc -c < '$LATEST_BACKUP'" | tr -d ' ')"
+    echo "restore-drill: restoring $LATEST_BACKUP ($BACKUP_BYTES bytes)"
 
+    printf '%s' "$PG_PASSWORD" > "$SCRATCH_SECRETS/pg_password"
+    RESTORE_OK=1
     docker run --rm --network "$BACKEND_NETWORK" \
       -v "$BACKUPS_VOLUME:/backups:ro" \
       -v "$AGE_IDENTITY_FILE:/run/age_identity:ro" \
-      -v "$ROOT/secrets/pg_password:/run/secrets/pg_password:ro" \
+      -v "$SCRATCH_SECRETS/pg_password:/run/secrets/pg_password:ro" \
       -e PGHOST=restore-drill-db -e PGUSER=personalfi -e PGDATABASE=personalfi_restore_drill \
       -e PGPASSWORD_FILE=/run/secrets/pg_password -e AGE_IDENTITY_FILE=/run/age_identity \
-      "${REGISTRY:-personalfi}/backup:${PERSONALFI_VERSION:-dev}" /usr/local/bin/restore.sh "$LATEST_BACKUP"
+      "${REGISTRY:-personalfi}/backup:${PERSONALFI_VERSION:-dev}" /usr/local/bin/restore.sh "$LATEST_BACKUP" \
+      || { RESTORE_OK=0; fail "restore.sh exited non-zero"; }
 
-    RESTORED_TABLES="$(docker exec "$DRILL_DB" psql -U personalfi -d personalfi_restore_drill -tAc \
-      "select count(*) from information_schema.tables where table_schema = 'public'")"
-    RESTORED_MIGRATIONS="$(docker exec "$DRILL_DB" psql -U personalfi -d personalfi_restore_drill -tAc \
-      "select coalesce(max(id), '(none)') from schema_migrations" 2>/dev/null || echo '(schema_migrations not present)')"
+    q() { docker exec "$1" psql -U personalfi -d "$2" -tAc "$3" 2>/dev/null | tr -d '[:space:]'; }
+
+    RESTORED_TABLES="$(q "$DRILL_DB" personalfi_restore_drill "select count(*) from information_schema.tables where table_schema = 'public'" || echo 0)"
+    RESTORED_TABLES="${RESTORED_TABLES:-0}"
+    RESTORED_MIGRATIONS="$(q "$DRILL_DB" personalfi_restore_drill "select coalesce(max(version), '(none)') from schema_migrations" || echo '(schema_migrations not present)')"
+    RESTORED_MIGRATIONS="${RESTORED_MIGRATIONS:-(schema_migrations not present)}"
 
     LIVE_DB_CONTAINER="$(docker ps --filter label=com.docker.compose.service=db --format '{{{{.Names}}' | head -1)"
     if [ -n "$LIVE_DB_CONTAINER" ]; then
-      LIVE_TABLES="$(docker exec "$LIVE_DB_CONTAINER" psql -U personalfi -d personalfi -tAc \
-        "select count(*) from information_schema.tables where table_schema = 'public'")"
-      LIVE_MIGRATIONS="$(docker exec "$LIVE_DB_CONTAINER" psql -U personalfi -d personalfi -tAc \
-        "select coalesce(max(id), '(none)') from schema_migrations" 2>/dev/null || echo '(schema_migrations not present)')"
+      LIVE_TABLES="$(q "$LIVE_DB_CONTAINER" personalfi "select count(*) from information_schema.tables where table_schema = 'public'" || echo 0)"
+      LIVE_TABLES="${LIVE_TABLES:-0}"
+      LIVE_MIGRATIONS="$(q "$LIVE_DB_CONTAINER" personalfi "select coalesce(max(version), '(none)') from schema_migrations" || echo '(schema_migrations not present)')"
+      LIVE_MIGRATIONS="${LIVE_MIGRATIONS:-(schema_migrations not present)}"
     else
-      LIVE_TABLES="(live db service not running — could not compare)"
-      LIVE_MIGRATIONS="(live db service not running — could not compare)"
+      LIVE_TABLES="n/a"
+      LIVE_MIGRATIONS="n/a"
+      fail "the live db service is not running, so the restore could not be compared against it"
     fi
 
+    # Assertion 1: a restore of nothing is not a restore. This is the one that
+    # catches an empty/failed backup, which is exactly what H-2 produced.
+    if ! [[ "$RESTORED_TABLES" =~ ^[0-9]+$ ]] || [ "$RESTORED_TABLES" -lt 1 ]; then
+      fail "restored table count is '$RESTORED_TABLES'; expected a positive integer"
+    fi
+    # Assertion 2: same schema on both sides.
+    if [[ "$LIVE_TABLES" =~ ^[0-9]+$ ]] && [ "$RESTORED_TABLES" != "$LIVE_TABLES" ]; then
+      fail "restored table count ($RESTORED_TABLES) != live table count ($LIVE_TABLES)"
+    fi
+    if [ "$LIVE_MIGRATIONS" != "n/a" ] && [ "$RESTORED_MIGRATIONS" != "$LIVE_MIGRATIONS" ]; then
+      fail "restored schema_migrations max id ($RESTORED_MIGRATIONS) != live ($LIVE_MIGRATIONS)"
+    fi
+
+    # Assertion 3: the application can actually serve the restored database.
     API_READY="skipped"
     if [ -n "${SKIP_API_BOOT:-}" ]; then
       API_READY="skipped (SKIP_API_BOOT set)"
+      fail "SKIP_API_BOOT was set, so /ready was never proven against the restored database"
     else
       echo "restore-drill: booting a throwaway api container against the restored db ..."
       # A scratch database_url pointed at the drill db, not the real one —
       # generated here rather than read from ./secrets, which never has (and
       # must never have) a URL for a database this script just created.
       printf 'postgres://personalfi:%s@restore-drill-db:5432/personalfi_restore_drill\n' \
-        "$(cat "$ROOT/secrets/pg_password")" > "$SCRATCH_SECRETS/database_url"
+        "$PG_PASSWORD" > "$SCRATCH_SECRETS/database_url"
       docker run -d --name "$DRILL_API" --network "$BACKEND_NETWORK" --user 10001:10001 \
+        --memory 1536m \
         -e ROLE=api -e NODE_ENV=production -e HTTP_HOST=0.0.0.0 -e HTTP_PORT=8080 \
         -e SECRETS_DIR=/run/secrets \
+        -e LOG_LEVEL="${LOG_LEVEL:-info}" \
+        -e BASE_URL="https://${PUBLIC_HOST:-personalfi.lan}" \
+        -e AUTH_RP_ID="${PUBLIC_HOST:-personalfi.lan}" \
+        -e AUTH_ALLOWED_ORIGINS="https://${PUBLIC_HOST:-personalfi.lan}" \
         -v "$SCRATCH_SECRETS/database_url:/run/secrets/database_url:ro" \
         -v "$ROOT/secrets/master_key:/run/secrets/master_key:ro" \
-        "${REGISTRY:-personalfi}/api:${PERSONALFI_VERSION:-dev}" >/dev/null 2>&1 || true
-      sleep 5
-      if docker exec "$DRILL_API" node -e "fetch('http://127.0.0.1:8080/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
-        API_READY="pass (200 from /ready)"
-      else
-        API_READY="fail or skipped — see docker logs $DRILL_API; not necessarily an infra defect, see evidence notes"
+        "${REGISTRY:-personalfi}/api:${PERSONALFI_VERSION:-dev}" >/dev/null
+      API_READY="fail"
+      for _ in $(seq 1 30); do
+        if docker exec "$DRILL_API" node -e "fetch('http://127.0.0.1:8080/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
+          API_READY="pass (200 from /ready)"; break
+        fi
+        sleep 2
+      done
+      if [ "$API_READY" = "fail" ]; then
+        API_READY="fail (no 200 from /ready within 60s)"
+        fail "/ready never returned 200 against the restored database"
+        docker logs "$DRILL_API" 2>&1 | tail -20 | sed 's/^/    api: /' >&2 || true
       fi
     fi
+
+    if [ "${#FAILURES[@]}" -eq 0 ]; then VERDICT="PASS"; else VERDICT="FAIL"; fi
 
     mkdir -p "$ROOT/docs/evidence/ops"
     {
       echo "# Restore drill — $DATE"
       echo
-      echo "- Backup restored: \`$LATEST_BACKUP\`"
+      echo "**Verdict: $VERDICT**"
+      echo
+      echo "- Backup restored: \`$LATEST_BACKUP\` ($BACKUP_BYTES encrypted bytes)"
       echo "- Restored db table count: $RESTORED_TABLES"
       echo "- Restored db schema_migrations max id: $RESTORED_MIGRATIONS"
       echo "- Live db table count: $LIVE_TABLES"
       echo "- Live db schema_migrations max id: $LIVE_MIGRATIONS"
       echo "- API /ready against restored db: $API_READY"
+      echo
+      if [ "$VERDICT" = "PASS" ]; then
+        echo "All assertions held: restored tables > 0, restored == live, schema_migrations agree,"
+        echo "and the API served /ready from the restored database. \`just restore-drill\` exited 0."
+      else
+        echo "Assertions that failed:"
+        for f in "${FAILURES[@]}"; do echo "- $f"; done
+        echo
+        echo "\`just restore-drill\` exited non-zero."
+      fi
     } | tee "$EVIDENCE"
     echo "restore-drill: wrote $EVIDENCE"
+    [ "$VERDICT" = "PASS" ] || exit 1
 
 # ---------------------------------------------------------------------------
 # Supply chain (WP 0.4; D14/D15). Each of these runs a pinned tool via its own
@@ -424,6 +567,43 @@ gen-master-key:
     # (compose.yml's secrets header has the same note).
     chmod 0444 "${SECRETS_DIR}/master_key"
     echo "wrote ${SECRETS_DIR}/master_key — back it up somewhere that is not this host"
+    echo "run 'just harden-secrets' (needs sudo) to take it to 0400 owned by uid 10001"
+
+# The 0400 posture packages/config/src/schema.ts and .env.example document
+# (M-2), done the only way that actually reaches the container.
+#
+# Compose ignores `mode:`/`uid:` on file secrets outside Swarm — it bind-mounts
+# the host file and the container sees the host's own uid/gid/mode. So the way
+# to get `-r-------- 1 10001 10001 /run/secrets/master_key` is to make the HOST
+# file exactly that. Which needs root, once, and is therefore a deliberate
+# operator action rather than something `gen-*` does behind your back: after
+# this runs you can no longer `cat ./secrets/master_key` without sudo either,
+# which is the point.
+#
+# uid map (must match compose.yml): db 70, api/worker/migrator 10001, backup 10002.
+harden-secrets:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "${SECRETS_DIR}"
+    sudo chmod 0700 .
+    # database_url and master_key are read by api/worker/migrator (10001).
+    for f in database_url master_key; do
+      [[ -e "$f" ]] || continue
+      sudo chown 10001:10001 "$f" && sudo chmod 0400 "$f"
+    done
+    # pg_password is read by postgres itself (70) AND by the backup container
+    # (10002), so it is the one file that genuinely needs a group: owner 70,
+    # group 10002, 0440. Not 0400 — postgres refuses a secret it cannot read.
+    if [[ -e pg_password ]]; then
+      sudo chown 70:10002 pg_password && sudo chmod 0440 pg_password
+    fi
+    # age_recipient is a PUBLIC key and the b2 files are read by backup (10002).
+    for f in age_recipient b2_key_id b2_application_key; do
+      [[ -e "$f" ]] || continue
+      sudo chown 10002:10002 "$f" && sudo chmod 0400 "$f"
+    done
+    ls -l
+    echo "secrets hardened; 'just gen-*' after this needs sudo too (that is the trade)"
 
 # Install git hooks (lefthook). Not run at install time: install scripts are off.
 hooks:

@@ -29,17 +29,20 @@ RUN apk add --no-cache \
     adduser -u 10002 -S -G backup -H -D -s /sbin/nologin backup && \
     mkdir -p /backups && chown 10002:10002 /backups
 
-COPY --chmod=755 backup/backup.sh backup/restore.sh backup/backup-loop.sh /usr/local/bin/
+COPY --chmod=755 backup/backup.sh backup/restore.sh backup/backup-loop.sh \
+     backup/healthcheck.sh /usr/local/bin/
 
 USER 10002:10002
 WORKDIR /backups
 VOLUME ["/backups"]
 
-# Liveness only: this container has no server to poll, so "the loop process is
-# still running" is the whole story. Compose's healthcheck for this service
-# checks the same thing; see compose.yml.
-HEALTHCHECK --interval=5m --timeout=5s --start-period=10s --retries=1 \
-  CMD ["pgrep", "-f", "backup-loop.sh"]
+# Not liveness only. "The loop process is still running" was the whole check
+# until the Phase 0 gate (H-2) pointed out that it stays true through thirty
+# consecutive failed backups. healthcheck.sh additionally reads the status file
+# backup.sh writes on every attempt and fails on a failed or stale one.
+# Compose's healthcheck for this service runs the same script; see compose.yml.
+HEALTHCHECK --interval=5m --timeout=10s --start-period=30s --retries=1 \
+  CMD ["/usr/local/bin/healthcheck.sh"]
 
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["/usr/local/bin/backup-loop.sh"]

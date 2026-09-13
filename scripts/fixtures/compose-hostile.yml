@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: MIT
+#
+# Adversarial fixture for scripts/compose-hardening-check.sh. NEVER deployed,
+# never discovered by the gate's normal file sweep (scripts/fixtures is pruned),
+# and never referenced by any `docker compose` invocation outside `--self-test`.
+#
+# Every service below violates a specific rule the gate must catch. The gate's
+# `--self-test` mode asserts that *each* rule id in EXPECTED_RULES fires against
+# this file — so deleting or weakening a check makes the self-test fail, which
+# is the property H-1 found missing: the old grep passed a maximally hostile
+# service and nobody noticed.
+#
+# Keep one violation class per service where compose's own schema allows it
+# (`network_mode: host` cannot coexist with `ports:` or `networks:`, so the
+# host-namespace service and the port-binding service have to be separate).
+
+name: personalfi-hostile-fixture
+
+services:
+  # host namespaces + privileged + the Docker socket, all at once.
+  hostile-namespaces:
+    image: alpine:3.24
+    privileged: 'true' # quoted: the spelling the old regex missed
+    network_mode: host
+    pid: host
+    ipc: host
+    userns_mode: host
+    command: ['sleep', 'infinity']
+    volumes:
+      - /run/docker.sock:/var/run/docker.sock:ro # ro, and still never allowed
+
+  # capabilities, seccomp/apparmor, devices, and a writable host bind.
+  hostile-capabilities:
+    image: alpine:3.24
+    cgroup: host
+    cap_add: [SYS_ADMIN, NET_ADMIN]
+    security_opt:
+      - 'seccomp:unconfined'
+      - 'apparmor:unconfined'
+    devices:
+      - '/dev/kmsg:/dev/kmsg'
+    command: ['sleep', 'infinity']
+    volumes:
+      - /:/host:rw
+      - /run/podman/podman.sock:/podman.sock:ro
+
+  # published ports with no explicit host address, plus every positive control
+  # missing: no read_only, no cap_drop, no no-new-privileges, root user.
+  hostile-ports:
+    image: alpine:3.24
+    user: '0:0'
+    command: ['sleep', 'infinity']
+    ports:
+      - '443:8443' # bare mapping: binds every interface
+      - '0.0.0.0:80:8080' # explicit wildcard
+      - '[::]:8081:8081' # the IPv6 spelling of the same mistake
+    volumes:
+      - scratch:/scratch # writable named volume outside the documented set
+
+volumes:
+  scratch: {}

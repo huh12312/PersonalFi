@@ -6,6 +6,14 @@
 # SBOMs. Cosign signing and the multi-arch GHCR publish live in release.yml,
 # tags only — nothing here pushes anywhere. Job names are stable; add jobs
 # rather than renaming these.
+#
+# RUN THIS LOCALLY BEFORE PUSHING: `just verify` runs the same gates in the
+# same order with the same pinned tool digests (gitleaks, license gate +
+# THIRD_PARTY drift, compose hardening incl. its self-test, .trivyignore
+# expiry, trivy fs). `just check` is typecheck/lint/test only — it was being
+# read as "CI will pass" through all of Phase 0 while CI was red at HEAD, which
+# is how four broken gates went unnoticed. A green `just verify` is the claim;
+# `just check` is not.
 name: CI
 
 on:
@@ -196,14 +204,22 @@ jobs:
         run: git diff --exit-code -- THIRD_PARTY.md
 
   compose-hardening:
-    name: compose hardening (no privileged/host-net/host-pid/docker.sock)
+    name: compose hardening (P0-6/P0-7, parsed not grepped)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: grep every compose file (P0-6)
+      # Two steps, and the order matters. The gate checks itself against a
+      # deliberately hostile fixture first: the grep this replaced passed a
+      # privileged, host-networked, Docker-socket-mounting service with
+      # EXIT=0 for a month (H-1), so "the check ran and said PASS" is not
+      # evidence unless the check has been observed failing something.
+      - name: the gate catches a hostile compose file
+        run: bash scripts/compose-hardening-check.sh --self-test
+
+      - name: every compose file meets the P0-6/P0-7 baseline
         run: bash scripts/compose-hardening-check.sh
 
   trivy-fs:
@@ -252,7 +268,9 @@ jobs:
             context: docker
           - image: proxy
             dockerfile: docker/caddy.Dockerfile
-            context: docker
+            # Repo root: this image builds apps/web and serves dist/ (see
+            # docker/caddy.Dockerfile's web-build stage).
+            context: .
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

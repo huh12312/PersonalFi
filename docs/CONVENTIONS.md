@@ -185,3 +185,7 @@ Pinned to exact versions (`save-exact=true`), install scripts disabled
 (`ignore-scripts=true`), and a seven-day `minimumReleaseAge` before any package
 may be installed. Licences: MIT, BSD, ISC, Apache-2.0 only. Check the npm
 registry `license` field before adding anything, and prefer not adding it.
+
+## Before you push: `just verify`
+
+`just verify`, not `just check`, is what predicts CI. It runs typecheck/lint/test plus gitleaks, the license gate and `THIRD_PARTY.md` drift, the compose-hardening gate (which self-tests against `scripts/fixtures/compose-hostile.yml` before it checks anything real), the `.trivyignore` expiry sweep and `trivy fs`, using CI's pinned tool digests. A gate that has never been observed failing something is not evidence.

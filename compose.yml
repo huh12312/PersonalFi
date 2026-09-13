@@ -10,9 +10,7 @@
 # `compose.dev.yml` is the *other* file (dev-only Postgres). This file is never
 # layered on top of it and never the other way around — see that file's header.
 #
-# Network topology (3 networks, not the 4 in memo 06 §2.1's sketch — see the
-# `backend` network comment below for why that's a deliberate simplification,
-# not an oversight):
+# Network topology (4 networks, as in memo 06 §2.1's sketch):
 #   frontend  bridge            proxy <-> api only.
 #   backend   bridge            api, worker, db, migrator, backup. Carries both
 #                                internal DB traffic and each service's own
@@ -21,12 +19,18 @@
 #                                joins it, so P0-8 ("sidecar cannot resolve or
 #                                reach db") holds structurally, by construction,
 #                                regardless of what `backend` allows.
+#   ingress   bridge            the future webhook listener, alone. It was on
+#                                `backend` until the Phase 0 gate (M-5) pointed
+#                                out that the one placeholder destined to face
+#                                the internet had a direct route to Postgres.
 #
 # Only `proxy` publishes a port, and only to `${BIND_ADDRESS}` (default
-# 127.0.0.1 — see .env.example). CI greps this file for `privileged`,
-# `network_mode: host`, `pid: host`, and a docker.sock mount and fails the
-# build if it finds any (P0-6 evidence, .github/workflows/ci.yml
-# `no-dangerous-compose-settings` job).
+# 127.0.0.1 — see .env.example). `scripts/compose-hardening-check.sh` asserts
+# that — and the rest of P0-6/P0-7 — against `docker compose config --format
+# json` rather than against the raw text, on every compose file in the repo, in
+# CI (`compose-hardening`), in `just verify`, and in the pre-commit hook. It
+# checks itself against a deliberately hostile fixture first
+# (`--self-test`), because the grep it replaced passed one.
 
 x-common: &common
   restart: unless-stopped
@@ -49,6 +53,11 @@ networks:
   frontend: {}
   backend: {}
   sidecar: { internal: true }
+  # Phase 6/D12's future webhook listener and nothing else. Separate from
+  # `backend` (no route to db, api, worker) and from `frontend` (no route to
+  # the proxy), and NOT `internal: true` because the one service that will
+  # ever live here is by definition reachable from outside.
+  ingress: {}
 
 volumes:
   pgdata: {}
@@ -57,6 +66,25 @@ volumes:
   backups: {}
 
 secrets:
+  # FILE MODE (M-2). There is deliberately no `mode: 0400` here. Compose's
+  # file-secret provider bind-mounts the host file and preserves its uid/gid
+  # and mode verbatim; `uid`/`gid`/`mode` in the long syntax are Swarm-only and
+  # are silently ignored by `docker compose up`. Measured on Compose v5.5.1
+  # with a 0644 host file, `mode: 0400`, `uid/gid: 10001` and a container
+  # running as 10001: `-rw-r--r-- 1 1000 1000 /run/secrets/s`, i.e. nothing
+  # applied. Declaring 0400 here would therefore be a comforting lie, not a
+  # control. The enforced posture instead is:
+  #   * `${SECRETS_DIR}` itself is 0700 (only the operator and root can
+  #     traverse into it) — `just gen-pg-secrets`/`gen-master-key` set and
+  #     verify that;
+  #   * the files inside it are 0444 by default, because db (uid 70),
+  #     api/worker/migrator (10001) and backup (10002) all read from the same
+  #     host directory and a 0400 file owned by the operator is unreadable in
+  #     every one of them;
+  #   * `just harden-secrets` is the real 0400: it chowns each file to the
+  #     consuming service's uid and chmods 0400, which *does* pass through, at
+  #     the cost of one `sudo`. RUNBOOK.md "Create secrets" documents both.
+  #
   # No `.txt` extensions: Docker mounts each of these at `/run/secrets/<name
   # declared here>` regardless of the source filename on the host, but the
   # *host-side* filename is not free to pick independently — it has to match
@@ -101,8 +129,11 @@ services:
     <<: *common
     image: ${REGISTRY:-personalfi}/proxy:${PERSONALFI_VERSION:-dev}
     build:
-      context: docker
-      dockerfile: caddy.Dockerfile
+      # Repo root, not `docker/`: this image builds and serves apps/web (see
+      # docker/caddy.Dockerfile's `web-build` stage). .dockerignore keeps
+      # node_modules, secrets, and any host-built dist out of the context.
+      context: .
+      dockerfile: docker/caddy.Dockerfile
     networks: [frontend]
     ports:
       # LAN/Tailscale bind address only, never 0.0.0.0 (see .env.example).
@@ -115,7 +146,11 @@ services:
       - '${BIND_ADDRESS:-127.0.0.1}:${PROXY_HTTP_PORT:-80}:8080'
     environment:
       TZ: UTC
-      PERSONALFI_HOSTNAME: ${PERSONALFI_HOSTNAME:-personalfi.lan}
+      # One name for one fact (was PERSONALFI_HOSTNAME): this is the hostname
+      # the browser uses, and therefore simultaneously Caddy's site address,
+      # the API's BASE_URL, the WebAuthn RP id, and the CSRF origin allow-list.
+      # They were allowed to disagree once (P0-4) and nothing announced it.
+      PUBLIC_HOST: ${PUBLIC_HOST:-personalfi.lan}
       CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:-chris@thebrutus.org}
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -152,7 +187,28 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_HOST: 0.0.0.0
       HTTP_PORT: '8080'
-      BASE_URL: https://${PERSONALFI_HOSTNAME:-personalfi.lan}
+      BASE_URL: https://${PUBLIC_HOST:-personalfi.lan}
+      # P0-4. These were unset, so the container booted with the shipped
+      # development defaults (`localhost` / `http://localhost:8080`) while
+      # serving `https://personalfi.lan`: every mutation was rejected as
+      # cross-site with `403 csrf_failed`, and `localhost` is not a registrable
+      # suffix of `personalfi.lan`, so the browser refused the WebAuthn
+      # ceremony before the server was ever consulted. Nobody had ever logged
+      # in and nothing said so.
+      #
+      # AUTH_RP_ID is the hostname with no scheme and no port. Changing it
+      # later invalidates every enrolled passkey, so it is the same
+      # `PUBLIC_HOST` the proxy serves and BASE_URL above states.
+      AUTH_RP_ID: ${PUBLIC_HOST:-personalfi.lan}
+      # EXTRA_ALLOWED_ORIGINS (optional, comma-separated) is appended for a
+      # second origin on the SAME registrable name — a different port, or a
+      # subdomain. It is NOT a way to add a Tailscale MagicDNS name: WebAuthn
+      # §7.1 requires every allowed origin's host to equal AUTH_RP_ID or be a
+      # subdomain of it, and `@core/config` enforces exactly that at boot, so
+      # `<node>.<tailnet>.ts.net` alongside `personalfi.lan` fails to start by
+      # design. Pick one hostname for passkeys; see RUNBOOK.md "Enabling
+      # remote access".
+      AUTH_ALLOWED_ORIGINS: https://${PUBLIC_HOST:-personalfi.lan}${EXTRA_ALLOWED_ORIGINS:+,${EXTRA_ALLOWED_ORIGINS}}
       SECRETS_DIR: /run/secrets
       ROLE: api
     secrets: [database_url, master_key]
@@ -202,6 +258,11 @@ services:
       TZ: UTC
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Same values as api: `loadConfig()` validates them for every role, and a
+      # worker that disagreed with the API about the RP id would mint step-up
+      # challenges no browser would honour.
+      AUTH_RP_ID: ${PUBLIC_HOST:-personalfi.lan}
+      AUTH_ALLOWED_ORIGINS: https://${PUBLIC_HOST:-personalfi.lan}${EXTRA_ALLOWED_ORIGINS:+,${EXTRA_ALLOWED_ORIGINS}}
       SECRETS_DIR: /run/secrets
       ROLE: worker
     secrets: [database_url, master_key]
@@ -222,10 +283,23 @@ services:
       start_period: 30s
       retries: 3
     deploy:
-      # Same Argon2id floor as api (this service also mounts `master_key` and
-      # unlocks the keyring to decrypt provider credentials for sync jobs), so
-      # the same 1 GiB transient applies. See the api service above.
-      resources: { limits: { cpus: '1.0', memory: 1536M } }
+      # 512M, not 1536M. The Phase 0 gate raised both api and worker to 1536M
+      # on the assumption that both derive the KEK; only the api does.
+      # `apps/api/src/worker.ts` constructs no `SecurityRuntime` — the only
+      # place one is built is `apps/api/src/app.ts:203` — so nothing in this
+      # process runs Argon2id at m = 1 GiB today. It mounts `master_key`
+      # because `@core/config` requires the secret for role `worker`
+      # (packages/config/src/schema.ts:229), which is a file read, not a
+      # derivation.
+      #
+      # That matters for the "whole stack under 2 GB" target (master plan
+      # §3.4): with the worker at 512M a simultaneous cold start peaks near
+      # 1.4 GiB rather than 2.4 GiB. **Phase 1 must raise this back to 1536M in
+      # the same PR that makes the worker unlock the keyring** (the first sync
+      # job that decrypts a provider credential) — at 512M the KEK derivation
+      # is OOM-killed at exit 137 with no output, which is precisely how the
+      # api failure presented.
+      resources: { limits: { cpus: '1.0', memory: 512M } }
 
   migrator:
     <<: *app-image
@@ -240,6 +314,15 @@ services:
       TZ: UTC
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # The migrator applies DDL and never mints a WebAuthn challenge, but
+      # `loadConfig()` validates the whole configuration for every role — and
+      # in production it refuses the `localhost` default outright. Without
+      # these two the migrator exits 1 before the first migration, and because
+      # api and worker both `depends_on: migrator: service_completed_successfully`,
+      # the entire stack fails to start. Observed exactly that while verifying
+      # this change. Same values as api/worker, for the same reason they exist.
+      AUTH_RP_ID: ${PUBLIC_HOST:-personalfi.lan}
+      AUTH_ALLOWED_ORIGINS: https://${PUBLIC_HOST:-personalfi.lan}${EXTRA_ALLOWED_ORIGINS:+,${EXTRA_ALLOWED_ORIGINS}}
       SECRETS_DIR: /run/secrets
       ROLE: migrator
     secrets: [database_url]
@@ -321,10 +404,13 @@ services:
     depends_on:
       db: { condition: service_healthy }
     healthcheck:
-      test: ['CMD', 'pgrep', '-f', 'backup-loop.sh']
+      # Reads the status file backup.sh writes on every attempt: a failed or
+      # stale backup is `unhealthy`, not just a missing process (H-2). See
+      # docker/backup/healthcheck.sh.
+      test: ['CMD', '/usr/local/bin/healthcheck.sh']
       interval: 5m
-      timeout: 5s
-      start_period: 10s
+      timeout: 10s
+      start_period: 30s
       retries: 1
     deploy:
       resources: { limits: { cpus: '0.50', memory: 256M } }
@@ -362,11 +448,23 @@ services:
   # Placeholder for the future minimal-exposure webhook listener. Off by
   # default: the default deployment has no public listener at all (polling
   # is the primary Plaid sync path — D12).
+  #
+  # On `ingress`, not `backend` (M-5): this is the one placeholder destined to
+  # become an internet-reachable service, and on `backend` an RCE in it would
+  # have reached Postgres directly with no pivot — contradicting the comment at
+  # the top of this section, which the other two placeholders honour.
+  #
+  # When a real listener replaces `sleep infinity`, it talks to the API over an
+  # internal HTTP route and nothing else: the API joins `ingress` with a
+  # listener-facing route (signature-verified, no session cookie, enqueue-only),
+  # and this service gets no database credential, no `master_key`, and no
+  # membership of `backend`. A webhook is an untrusted POST from the public
+  # internet; it earns exactly one narrow door.
   webhooks-placeholder:
     <<: *common
     profiles: ['webhooks']
     image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
-    networks: [backend]
+    networks: [ingress]
     user: '65534:65534'
     command: ['sleep', 'infinity']
     tmpfs: ['/tmp:size=8m']
