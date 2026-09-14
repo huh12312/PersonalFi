@@ -19,14 +19,43 @@ Tables listed here are _claimed_; most do not exist yet. Claiming early is the p
 
 ## Tables
 
-- `institutions`
+Everything migration `0004_ledger.sql` creates is claimed here, in the order the
+migration creates it, followed by the tables this context still expects to own and
+has not built yet.
+
+### Built (migration 0004)
+
+- `merchants`
 - `accounts`
 - `account_balances`
-- `account_balance_history`
+- `transactions_provider`
 - `transactions`
-- `transaction_facts`
-- `transaction_overlays`
 - `transaction_splits`
-- `merchants`
 - `transfer_links`
+- `rejected_transfer_pairs`
+- `ledger_dedup_keys`
+
+### Claimed, not yet built
+
+- `institutions`
+- `account_balance_history`
 - `attachments`
+
+## Notes on the names
+
+Two claims from the original sketch are gone because the built schema answers the
+same need with fewer tables, and leaving a stale claim in this file would reserve a
+name nobody intends to use:
+
+- `transaction_facts` → **`transactions_provider`**. Same idea (immutable provider
+  truth), named for what writes it. See migration 0004's header.
+- `transaction_overlays` → **columns on `transactions`**. The overlay is four
+  sparse `user_*` columns on the row it belongs to, not a second table: every read
+  path needs the overlay, so a separate table would put a join on the app's
+  hottest query to save a few NULLs. `resolveEffective()` is the seam that a real
+  overlay table would have provided, and it is a function rather than a join.
+
+`rejected_transfer_pairs` and `ledger_dedup_keys` are new since the sketch. Both
+exist because a _negative_ decision is data: "these two are not a transfer" and
+"this row duplicates that one" have to survive the next sync, or the heuristics
+re-propose what the user already dismissed.

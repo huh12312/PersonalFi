@@ -25,11 +25,7 @@ export {
   type AccountBalanceRow,
   type NewAccountBalanceRow,
 } from './accounts.ts';
-export {
-  merchants,
-  type MerchantRow,
-  type NewMerchantRow,
-} from './merchants.ts';
+export { merchants, type MerchantRow, type NewMerchantRow } from './merchants.ts';
 export {
   transactionsProvider,
   transactions,

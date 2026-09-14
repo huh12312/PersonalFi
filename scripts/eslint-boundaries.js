@@ -181,6 +181,42 @@ const LAYERS = [
       '@core/secretbox — a direct cipher import here would defeat the chokepoint.',
   },
   {
+    name: 'ledger',
+    prefix: 'packages/contexts/ledger/',
+    // The production set is the generic context set. The two additions are
+    // dev-only and are declared as `devDependencies` in this package's
+    // package.json, which is where that distinction is actually recorded — the
+    // layer rule cannot express "test files only" for a `test/` directory, and
+    // the alternative was an `eslint-disable` in the test harness, which buys
+    // the same looseness while hiding it from anyone reading this file:
+    //
+    //   * `@core/testkit` — the scratch database every `*-db` suite runs on;
+    //   * `@core/seed` — the demo dataset `loadSeedDataset` is graded against.
+    //     Note that `src/seed-loader.ts` does **not** import it: the loader
+    //     declares the dataset shape structurally (`SeedDatasetLike`) precisely
+    //     so the shipped context does not depend on a fixture generator. Only
+    //     `test/harness.ts` imports it, and if that ever changes, this comment
+    //     is the thing a reviewer should object to.
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      '@core/contracts',
+      '@core/platform',
+      '@core/secretbox',
+      '@core/testkit',
+      '@core/seed',
+      'drizzle-orm',
+      'pg',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'Ledger is the system of record: it depends on the kernel and on infrastructure, ' +
+      'and on no other context. Everything it needs from one arrives as a domain event, ' +
+      'and everything another context needs from it leaves as one.',
+  },
+  {
     name: 'context',
     prefix: 'packages/contexts/',
     allow: [

@@ -8,7 +8,8 @@ import {
   instantColumn,
   userIdColumn,
 } from '@core/db';
-import { doublePrecision, index, integer, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { index, integer, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { confidenceColumn } from './confidence.ts';
 import { accounts } from './accounts.ts';
 import { transactions } from './transactions.ts';
 
@@ -47,7 +48,7 @@ export const transferLinks = pgTable(
     amountMinor: amountMinorColumn('amount_minor').notNull(),
     currency: currencyColumn().notNull(),
     dayGap: integer('day_gap').notNull(),
-    confidence: doublePrecision('confidence').notNull(),
+    confidence: confidenceColumn('confidence').notNull(),
     howMatched: text('how_matched').$type<TransferMatchKind>().notNull(),
     createdAt: createdAtColumn(),
   },

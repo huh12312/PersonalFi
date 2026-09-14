@@ -10,7 +10,8 @@ import {
   updatedAtColumn,
   userIdColumn,
 } from '@core/db';
-import { doublePrecision, index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { confidenceColumn } from './confidence.ts';
 import { accounts } from './accounts.ts';
 import { merchants } from './merchants.ts';
 
@@ -160,7 +161,7 @@ export const transactions = pgTable(
      * trust the first time it guesses wrong.
      */
     refundOfId: uuid('refund_of_id'),
-    refundConfidence: doublePrecision('refund_confidence'),
+    refundConfidence: confidenceColumn('refund_confidence'),
     /** Cross-provider duplicate: this row duplicates that one. Marked, never deleted. */
     supersededById: uuid('superseded_by_id'),
     supersededReason: text('superseded_reason').$type<'duplicate' | 'merged'>(),

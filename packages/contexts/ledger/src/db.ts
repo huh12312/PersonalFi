@@ -1,7 +1,20 @@
 // SPDX-License-Identifier: MIT
 import type { Database } from '@core/db';
-import { DateOnly, money, type Clock, type DateOnly as DateOnlyType, type Money } from '@core/kernel';
-import type { EffectiveTransaction, LedgerTransaction, TransactionFact } from './types.ts';
+import {
+  DateOnly,
+  money,
+  type Clock,
+  type DateOnly as DateOnlyType,
+  type Money,
+} from '@core/kernel';
+import type { Executor } from '@core/platform';
+import type { SQL } from 'drizzle-orm';
+import type {
+  EffectiveTransaction,
+  LedgerTransaction,
+  TransactionFact,
+  TransactionOverlay,
+} from './types.ts';
 import type { TransactionProviderRow, TransactionRow } from '../schema/index.ts';
 
 /**
@@ -21,6 +34,25 @@ export type LedgerExecutor = Pick<
 
 /** The pool-backed database, which can also open transactions. */
 export type LedgerDatabase = Database;
+
+/**
+ * Adapt a Drizzle handle to the platform's narrow `Executor`, for `appendEvent`.
+ *
+ * One cast, in one place, for one reason: Drizzle's `execute()` returns `PgRaw`,
+ * a lazily-executed thenable, where the platform's `Executor` declares a
+ * `Promise`. The two are interchangeable at runtime (`PgRaw` awaits to exactly
+ * the `{ rows }` shape) but not assignable at compile time, which is why
+ * `@core/platform` makes the identical cast in `platformExecutor()`. Doing it
+ * here rather than at each call site keeps `appendEvent(tx, …)` honest: the
+ * handle that writes the rows is the handle that appends the event, so the event
+ * cannot outlive a rolled-back write.
+ */
+export function outboxOf(executor: LedgerExecutor): Executor {
+  return {
+    execute: <TRow extends Record<string, unknown>>(query: SQL) =>
+      executor.execute(query) as unknown as Promise<{ rows: TRow[] }>,
+  };
+}
 
 /** Everything a write path needs that is not data. */
 export interface LedgerContext {
@@ -49,6 +81,23 @@ export function factOf(row: TransactionProviderRow): TransactionFact {
     name: row.name,
     merchantName: row.merchantName,
     pending: row.pending,
+  };
+}
+
+/**
+ * The user's overlay, as stored.
+ *
+ * The other half of `resolveEffective`'s input. Sparse by construction: `null`
+ * means "the user has not spoken", which the resolver treats as "defer to the
+ * provider" — so a provider revision that renames a payee is visible immediately
+ * to everyone who never renamed it, and invisible to everyone who did.
+ */
+export function overlayOf(row: TransactionRow): TransactionOverlay {
+  return {
+    userNote: row.userNote,
+    userExcluded: row.userExcluded,
+    userCategoryId: row.userCategoryId,
+    userMerchantName: row.userMerchantName,
   };
 }
 

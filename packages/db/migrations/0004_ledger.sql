@@ -292,7 +292,13 @@ CREATE TABLE transactions (
   -- it are different products; the second one loses a user's trust the first time
   -- it guesses wrong (01 §5.2, "prefer showing a duplicate over silently merging").
   refund_of_id          UUID        REFERENCES transactions (id) ON DELETE SET NULL,
-  refund_confidence     DOUBLE PRECISION
+  -- NUMERIC(5,4), not DOUBLE PRECISION. A confidence score is not money and a
+  -- float would be numerically fine here, but the migration gate bans REAL /
+  -- DOUBLE PRECISION / FLOAT outright across the schema rather than adjudicating
+  -- "is this column allowed to be a float?" per column — and a ban with an
+  -- exception list is a ban that erodes. 0.0000-1.0000 is four decimals of
+  -- confidence, which is three more than anyone can justify.
+  refund_confidence     NUMERIC(5,4)
                           CHECK (refund_confidence IS NULL
                                  OR (refund_confidence >= 0 AND refund_confidence <= 1)),
   -- Cross-provider duplicate: this row is a duplicate of that one. Set by
@@ -412,7 +418,8 @@ CREATE TABLE transfer_links (
   currency               CHAR(3)     NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
   -- Days between the two legs, kept so the confidence score is explicable.
   day_gap                INTEGER     NOT NULL CHECK (day_gap >= 0),
-  confidence             DOUBLE PRECISION NOT NULL CHECK (confidence > 0 AND confidence <= 1),
+  -- NUMERIC(5,4), same reasoning as transactions.refund_confidence.
+  confidence             NUMERIC(5,4) NOT NULL CHECK (confidence > 0 AND confidence <= 1),
   how_matched            TEXT        NOT NULL CHECK (
                            how_matched IN ('exact_amount_same_day', 'exact_amount_near_date',
                                            'amount_within_tolerance', 'user_confirmed')),

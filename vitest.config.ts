@@ -120,6 +120,32 @@ export default defineConfig({
         },
       },
       {
+        root: './packages/contexts/ledger',
+        test: { name: 'ledger', include: ['src/**/*.test.ts'], environment: 'node' },
+      },
+      {
+        // Every claim in these suites is a claim about Postgres: a unique index
+        // arbitrating a replayed sync page, a keyset scan that stays stable while
+        // rows are inserted above it, a partial index making "what is pending?"
+        // cheap, a `LEFT JOIN LATERAL` finding the latest balance per account. A
+        // fake would only assert that the fake works. Skips itself when
+        // DATABASE_URL is unset.
+        //
+        // Serial, and with a long timeout: the suites share one server, each owns
+        // a scratch database, and two of them are deliberately heavy — the seed
+        // loader pushes ~1,000 transactions through the real write path and
+        // `perf.test.ts` loads 50,000 rows to measure the list page.
+        root: './packages/contexts/ledger',
+        test: {
+          name: 'ledger-db',
+          include: ['test/**/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 120_000,
+          hookTimeout: 300_000,
+        },
+      },
+      {
         root: './apps/api',
         test: { name: 'api', include: ['test/*.test.ts'], environment: 'node' },
       },

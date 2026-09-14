@@ -2,11 +2,147 @@
 /**
  * `@ctx/ledger` — Ledger.
  *
- * The system of record and the gravitational centre of the app. Deliberately dumb: it stores facts and their provenance, and does not categorise, budget, or interpret. Provider-sourced rows are immutable; user intent lives in an overlay resolved on read.
+ * The system of record and the gravitational centre of the app. Deliberately
+ * dumb: it stores facts and their provenance, and does not categorise, budget, or
+ * interpret. Provider-sourced rows are immutable; user intent lives in an overlay
+ * resolved by one pure function.
  *
- * This file is the context's *only* public surface. Everything else under `src/`
- * is internal, and no other context may import from it.
+ * This file is the context's **only** public surface. Everything else under
+ * `src/` is internal, and no other context may import from it — a consumer that
+ * needs ledger data re-reads it through the read models below, or reacts to one
+ * of the five events in `LEDGER_EVENTS`.
+ *
+ * ```text
+ *  sync adapter ─▶ applyProviderTransactions ─┬─▶ transactions_provider (facts)
+ *                                             ├─▶ transactions          (identity + overlay + projection)
+ *                                             └─▶ outbox                (TransactionsUpserted, …)
+ *  user edit    ─▶ setTransactionOverlay ─────┘
+ *  heuristics   ─▶ pairTransfers / detectRefundHints
+ *  reads        ─▶ listTransactions / getTransaction / listAccounts / netWorthNow
+ * ```
  */
 
 /** Stable identifier used by feature flags (`module.ledger`) and event metadata. */
 export const CONTEXT_ID = 'ledger' as const;
+
+// --- the resolver, and the shapes it speaks --------------------------------
+export { resolveEffective, withinDays } from './effective.ts';
+export { normaliseMerchantName, dedupKeyOf, type NormalisedMerchant } from './normalise.ts';
+export {
+  EMPTY_OVERLAY,
+  type EffectiveTransaction,
+  type LedgerTransaction,
+  type ProviderCounterparty,
+  type ProviderTransactionInput,
+  type TransactionFact,
+  type TransactionOverlay,
+  type TransactionSplit,
+} from './types.ts';
+
+// --- errors ----------------------------------------------------------------
+export { LedgerError, isLedgerError, type LedgerErrorCode } from './errors.ts';
+
+// --- the executor shapes a caller needs ------------------------------------
+export type { LedgerDatabase, LedgerExecutor, LedgerContext } from './db.ts';
+export { factOf, overlayOf, effectiveOf, transactionOf } from './db.ts';
+
+// --- events ----------------------------------------------------------------
+export {
+  LEDGER_EVENTS,
+  AccountUpserted,
+  BalanceRecorded,
+  TransactionsUpserted,
+  TransferPaired,
+  TransactionSupersededByPosted,
+} from './events.ts';
+
+// --- write paths -----------------------------------------------------------
+export {
+  applyProviderTransactions,
+  contentHashOf,
+  projectEffective,
+  type ApplyOptions,
+  type ApplyProviderTransactionsInput,
+  type ApplyResult,
+  type SupersededPending,
+} from './apply.ts';
+export {
+  classificationOf,
+  listAccounts,
+  netWorthNow,
+  recordBalance,
+  setAccountClosed,
+  setIncludeInNetWorth,
+  upsertAccount,
+  type AccountBalanceSummary,
+  type AccountSummary,
+  type LedgerWriteContext,
+  type NetWorthInput,
+  type NetWorthNow,
+  type NetWorthTotal,
+  type RecordBalanceInput,
+  type UpsertAccountInput,
+  type UpsertAccountResult,
+} from './accounts.ts';
+export { setTransactionOverlay, type OverlayPatch } from './overlay.ts';
+
+// --- heuristics ------------------------------------------------------------
+export {
+  confirmTransferPair,
+  listTransferLinks,
+  pairTransfers,
+  proposeTransferPairs,
+  rejectTransferPair,
+  rejectionKey,
+  type PairTransfersInput,
+  type PairTransfersResult,
+  type TransferLeg,
+  type TransferLinkSummary,
+  type TransferPairingOptions,
+  type TransferProposal,
+} from './transfers.ts';
+export {
+  DEFAULT_REFUND_WINDOW_DAYS,
+  detectRefundHints,
+  proposeRefundHints,
+  refundHintOf,
+  type DetectRefundsInput,
+  type RefundHint,
+  type RefundLeg,
+  type RefundOptions,
+} from './refunds.ts';
+
+// --- read models -----------------------------------------------------------
+export {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+  countTransactions,
+  decodeCursor,
+  encodeCursor,
+  getTransaction,
+  listMerchants,
+  listRemovedTransactions,
+  listTransactions,
+  scanForProjectionCheck,
+  sumTransactions,
+  type ListTransactionsInput,
+  type TransactionDetail,
+  type TransactionFilters,
+  type TransactionPage,
+  type TransactionProvenance,
+  type TransferLinkView,
+} from './read.ts';
+
+// --- demo data -------------------------------------------------------------
+export {
+  SEED_PROVIDER,
+  grade,
+  loadSeedDataset,
+  type Grading,
+  type LoadSeedOptions,
+  type LoadSeedResult,
+  type SeedAccountLike,
+  type SeedDatasetLike,
+  type SeedMerchantLike,
+  type SeedTransactionLike,
+} from './seed-loader.ts';
