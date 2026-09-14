@@ -30,10 +30,34 @@ const USER_ID = '00000000-0000-7000-8000-00000000f001';
 
 const dataset = buildGoldenDataset({ seed: 1, withProviderCategory: true });
 
+/**
+ * The four configurations the work package asks for, plus two diagnostics.
+ *
+ * `merchant-memory-off` and `provider-only` are not decoration: they are the only
+ * configurations here whose number means what it appears to mean. See
+ * "the merchant-memory tautology" below.
+ */
 const CONFIGS = [
   { name: 'classifier-only', useClassifier: true },
   { name: 'provider-only', useProvider: true },
-  { name: 'rules-off-provider-off', useClassifier: true, useMerchantDefaults: true },
+  {
+    name: 'rules-off',
+    useClassifier: true,
+    useMerchantDefaults: true,
+    useProvider: true,
+  },
+  {
+    name: 'provider-off',
+    rules: sampleRules(USER_ID),
+    useClassifier: true,
+    useMerchantDefaults: true,
+  },
+  {
+    name: 'merchant-memory-off',
+    rules: sampleRules(USER_ID),
+    useClassifier: true,
+    useProvider: true,
+  },
   {
     name: 'full',
     rules: sampleRules(USER_ID),
@@ -42,6 +66,14 @@ const CONFIGS = [
     useProvider: true,
   },
 ] as const;
+
+/**
+ * Configurations whose score is *not* circular, and which therefore carry the gate.
+ *
+ * Every configuration with `useMerchantDefaults` is excluded, for the reason set
+ * out in "the merchant-memory tautology" test below.
+ */
+const HONEST_CONFIGS = ['classifier-only', 'provider-only', 'merchant-memory-off'] as const;
 
 const results = new Map<string, EvaluationResult>(
   CONFIGS.map((config) => [config.name, evaluate(dataset, config)]),
@@ -114,6 +146,63 @@ describe('accuracy', () => {
   it('meets the Phase 1 gate of >= 85% with the full stack', () => {
     const full = results.get('full') as EvaluationResult;
     expect(full.recall).toBeGreaterThanOrEqual(0.85);
+  });
+
+  it('the merchant-memory tautology: `full` is saturated and cannot carry the gate', () => {
+    // READ THIS BEFORE QUOTING THE HEADLINE NUMBER.
+    //
+    // `evaluate` builds each merchant default out of `entry.expectedKey` — the
+    // answer key — and keys it on a fingerprint of the descriptor. Ground truth
+    // in this harness is a pure function of the merchant, and the seed's
+    // descriptor families converge to one fingerprint per merchant. So for any
+    // merchant present in `train`, the merchant-default tier returns the label
+    // *by construction*. It is a dictionary lookup of the answers, and it decides
+    // roughly nine rows in ten.
+    //
+    // That is not a bug in the engine — in production a merchant default is
+    // learned from the user's own confirmations and is *supposed* to be right.
+    // It is a limit on what this dataset can prove: `full` scoring 100% is
+    // evidence that the plumbing works, and evidence of nothing else.
+    //
+    // This test pins the tautology in place so nobody later reads 1.0000 as an
+    // accuracy claim. If the harness is ever changed to stop deriving merchant
+    // defaults from the labels, this test fails and the comment above comes down.
+    const full = results.get('full') as EvaluationResult;
+    expect(full.recall).toBe(1);
+
+    const decidedByMerchant = full.bySource['merchant_default'];
+    expect(decidedByMerchant).toBeDefined();
+    // Never wrong, because it cannot be.
+    expect(decidedByMerchant?.correct).toBe(decidedByMerchant?.decided);
+    expect(decidedByMerchant?.decided ?? 0).toBeGreaterThan(full.total * 0.8);
+  });
+
+  it('clears the 85% gate on configurations that cannot leak the labels', () => {
+    // The gate that actually means something. None of these three lets the
+    // merchant-default tier see a label, so each number is earned: the
+    // classifier generalising from its own training split, the PFC map, and the
+    // two of them plus rules with merchant memory switched off entirely.
+    for (const name of HONEST_CONFIGS) {
+      const result = results.get(name) as EvaluationResult;
+      expect(
+        result.recall,
+        `${name} recall ${result.recall.toFixed(4)} is below the 0.85 gate`,
+      ).toBeGreaterThanOrEqual(0.85);
+    }
+  });
+
+  it('still clears the gate on a merchant it has never seen', () => {
+    // Leave-one-merchant-out with the full stack. Merchant memory is empty for
+    // the merchant being graded, so this is the honest full-stack figure and the
+    // strongest evidence in this file.
+    const cold = evaluateColdMerchants(dataset, {
+      name: 'full',
+      rules: sampleRules(USER_ID),
+      useClassifier: true,
+      useMerchantDefaults: true,
+      useProvider: true,
+    });
+    expect(cold.recall).toBeGreaterThanOrEqual(0.85);
   });
 
   it('is at least as precise as it is complete, with the full stack', () => {
