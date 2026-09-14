@@ -50,7 +50,13 @@
  */
 import type { Capability } from './capabilities.ts';
 import { supports } from './capabilities.ts';
-import type { ConnectionHandle, Connector, Cursor, SyncOptions, TransactionPage } from './connector.ts';
+import type {
+  ConnectionHandle,
+  Connector,
+  Cursor,
+  SyncOptions,
+  TransactionPage,
+} from './connector.ts';
 import { isConnectorError } from './errors.ts';
 import type { ProviderTransactionFact } from './facts.ts';
 
@@ -122,7 +128,10 @@ function idsOf(pages: readonly TransactionPage[]): string[] {
 function shapeOf(page: TransactionPage): string {
   return JSON.stringify({
     added: page.added.map((fact) => [fact.providerTransactionId, fact.amount.minor.toString()]),
-    modified: page.modified.map((fact) => [fact.providerTransactionId, fact.amount.minor.toString()]),
+    modified: page.modified.map((fact) => [
+      fact.providerTransactionId,
+      fact.amount.minor.toString(),
+    ]),
     removed: page.removed.map((ref) => ref.providerTransactionId),
     nextCursor: page.nextCursor,
     hasMore: page.hasMore,
@@ -147,7 +156,10 @@ export function connectorConformanceChecks(subject: ConformanceSubject): Conform
     {
       name: 'capabilities/declared datasets work and undeclared ones throw',
       run: async () => {
-        assert(capabilitiesOf().supports.length > 0, 'an adapter that supports nothing is not an adapter');
+        assert(
+          capabilitiesOf().supports.length > 0,
+          'an adapter that supports nothing is not an adapter',
+        );
         assert(
           supports(capabilitiesOf(), 'transactions'),
           'every adapter in Phase 1 must support transactions',
@@ -172,10 +184,9 @@ export function connectorConformanceChecks(subject: ConformanceSubject): Conform
           // Implemented but undeclared: it must refuse, not return nothing.
           let refused = false;
           try {
-            await (connector()[method] as (h: ConnectionHandle, o: SyncOptions) => Promise<unknown>)(
-              subject.handle,
-              subject.options,
-            );
+            await (
+              connector()[method] as (h: ConnectionHandle, o: SyncOptions) => Promise<unknown>
+            )(subject.handle, subject.options);
           } catch (error) {
             refused = isConnectorError(error);
           }
@@ -456,7 +467,10 @@ export function connectorConformanceChecks(subject: ConformanceSubject): Conform
           thrown !== undefined,
           'a disconnected connection still returned data; revocation must be observable',
         );
-        assert(isConnectorError(thrown), 'syncing a disconnected connection threw an untyped error');
+        assert(
+          isConnectorError(thrown),
+          'syncing a disconnected connection threw an untyped error',
+        );
       },
     },
   ];

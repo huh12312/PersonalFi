@@ -29,28 +29,33 @@
  * port. That check lives at the composition root and is WP 1.5's; it is written
  * up as deferred in the evidence note.
  */
+import { CSV_MANIFEST, CsvImportConnector, type CsvFileInput } from '@connector/csv';
 import {
-  CsvImportConnector,
-  type CsvFileInput,
-} from '@connector/csv';
-import {
+  MANUAL_MANIFEST,
   ManualConnector,
   ManualStore,
+  SEED_MANIFEST,
   SeedConnector,
   manualTransaction,
   type ManualTransactionInput,
 } from '@connector/manual';
 import type {
   ConnectionHandle,
+  Connector,
+  ConnectorManifest,
   ProviderAccountFact,
   ProviderTransactionFact,
   SyncOptions,
 } from '@connector/port';
 import { DateOnly, money, mutableClock, newId, type MutableClock } from '@core/kernel';
+import type { Sleeper } from '@core/platform';
 import { generateDemoData } from '@core/seed';
 import { SecretBox } from '@core/secretbox';
 import { ADMIN_URL, createTestDatabase, type TestDatabase } from '@core/testkit';
 import { sql } from 'drizzle-orm';
+import { createConnection } from '../src/connections.ts';
+import { ConnectorRegistry } from '../src/registry.ts';
+import { SyncOrchestrator, type SyncOrchestratorOptions } from '../src/orchestrator.ts';
 import type { ConnectionsExecutor } from '../src/db.ts';
 import type {
   LedgerApplyInput,
@@ -64,6 +69,7 @@ import type {
 
 export { ADMIN_URL, generateDemoData, manualTransaction, type TestDatabase };
 export { CsvImportConnector, ManualConnector, ManualStore, SeedConnector };
+export { CSV_MANIFEST, MANUAL_MANIFEST, SEED_MANIFEST };
 export type { CsvFileInput, ManualTransactionInput };
 
 /** `describe.skipIf(NO_DATABASE)` — the guard every `*-db` suite uses. */
@@ -208,7 +214,9 @@ export function recordingLedgerWriter(): RecordingLedgerWriter {
           // no-op otherwise. This mirrors the ledger's content-hash layer
           // closely enough for "replaying a page changes nothing" to mean
           // something here.
-          incoming.some((candidate) => candidate.providerTransactionId === fact.providerTransactionId)
+          incoming.some(
+            (candidate) => candidate.providerTransactionId === fact.providerTransactionId,
+          )
         ) {
           updated.push(fact.providerTransactionId);
           unchanged += 1;
@@ -315,16 +323,204 @@ export function bareHandle(providerConnectionId: string, provider: string): Conn
   };
 }
 
-/** A batch of manual transactions, `count` of them, one per day from `from`. */
+// ---------------------------------------------------------------------------
+// Orchestrator fixtures
+// ---------------------------------------------------------------------------
+
+/**
+ * A sleeper that records what it was asked to wait and never actually waits.
+ *
+ * The recording is the assertion: "RATE_LIMITED honours `retryAfterMs`" is a
+ * claim about a number this function was called with, and a test that really
+ * slept thirty seconds to prove it would be a test nobody runs.
+ */
+export interface RecordingSleeper extends Sleeper {
+  readonly slept: number[];
+}
+
+export function recordingSleeper(): RecordingSleeper {
+  const slept: number[] = [];
+  return {
+    slept,
+    sleep(ms) {
+      slept.push(ms);
+      return Promise.resolve();
+    },
+    wake() {
+      /* nothing is ever pending */
+    },
+  };
+}
+
+/** A manifest for a connector the tests built. The registry insists on one. */
+export function manifestFor(connector: Connector): ConnectorManifest {
+  return {
+    provider: connector.provider,
+    displayName: connector.displayName,
+    description: 'A connector that exists only inside this suite.',
+    iconKey: 'beaker',
+    linkKind: 'manual_entry',
+    docsUrl: null,
+  };
+}
+
+/**
+ * Wrap an adapter so a test can break it in one specific way.
+ *
+ * A forwarding `Proxy`, not `Object.assign` onto a fresh prototype-sharing
+ * object. The difference matters and it is not stylistic: `ManualConnector`
+ * keeps its store in a `#private` field, and a private field belongs to the
+ * instance it was installed on. A copy therefore inherits the *methods* and
+ * none of the state, and every un-patched call dies with "cannot read private
+ * member #store from an object whose class did not declare it" — a failure
+ * about the double rather than about the orchestrator. Binding each forwarded
+ * method back to the real instance keeps the double a real adapter with one
+ * thing wrong with it, which is the only kind of sabotage worth asserting on.
+ */
+export function connectorWith<TConnector extends Connector>(
+  honest: TConnector,
+  patch: Partial<Connector>,
+): TConnector {
+  return new Proxy(honest, {
+    get(target, property, _receiver) {
+      if (Object.hasOwn(patch, property)) {
+        return (patch as Record<string | symbol, unknown>)[property];
+      }
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === 'function'
+        ? (value as (...args: never[]) => unknown).bind(target)
+        : value;
+    },
+  });
+}
+
+/** The cursors an adapter was asked for, in order. The restart tests read this. */
+export interface CursorLog {
+  readonly asked: (string | null)[];
+}
+
+/**
+ * An adapter that fails on the `failOnPage`-th call of each attempt.
+ *
+ * `plan` is consumed one failure per call, so `[error, error, null]` means "fail
+ * the first two attempts and then behave". Every call is recorded, which is what
+ * makes "the loop restarted from the page-one cursor" an assertion about the
+ * argument the adapter received rather than about a counter we incremented.
+ */
+export function failingAtPage<TConnector extends Connector>(
+  honest: TConnector,
+  options: { readonly failOnCall: (call: number, cursor: string | null) => unknown | null },
+): { connector: TConnector; log: CursorLog } {
+  const asked: (string | null)[] = [];
+  let call = 0;
+  const connector = connectorWith(honest, {
+    syncTransactions: async (handle, cursor, syncOptions) => {
+      call += 1;
+      asked.push(cursor);
+      const failure = options.failOnCall(call, cursor);
+      if (failure !== null) throw failure;
+      return honest.syncTransactions(handle, cursor, syncOptions);
+    },
+  });
+  return { connector, log: { asked } };
+}
+
+/** Everything `syncConnection` needs, wired against the scratch database. */
+export interface OrchestratorFixture {
+  readonly orchestrator: SyncOrchestrator;
+  readonly ledger: RecordingLedgerWriter;
+  readonly sleeper: RecordingSleeper;
+  readonly clock: MutableClock;
+  readonly registry: ConnectorRegistry;
+  readonly secretBox: SecretBox;
+}
+
+export async function orchestratorFor(
+  database: TestDatabase,
+  connector: Connector,
+  overrides: Partial<SyncOrchestratorOptions> = {},
+): Promise<OrchestratorFixture> {
+  const clock = testClock();
+  const ledger = recordingLedgerWriter();
+  const sleeper = recordingSleeper();
+  const secretBox = await unlockedSecretBox(database);
+  const registry = new ConnectorRegistry([{ connector, manifest: manifestFor(connector) }]);
+
+  const orchestrator = new SyncOrchestrator({
+    database: database.db,
+    registry,
+    secretBox,
+    ledgerWriter: ledger,
+    clock,
+    sleeper,
+    // Backoff is `@core/platform`'s and already property-tested there. Pinning
+    // the draw to zero here keeps an unrelated regression in the jitter from
+    // failing an orchestrator test.
+    random: () => 0,
+    ...overrides,
+  });
+
+  return { orchestrator, ledger, sleeper, clock, registry, secretBox };
+}
+
+/**
+ * Link `connector` and return the connection the orchestrator will sync.
+ *
+ * The real `createConnection`, not an `INSERT`: the tests that matter here are
+ * about what a *linked* connection does, and a row assembled by hand would not
+ * have the sealed credential, the account mapping or the `ConnectionCreated`
+ * event that the reconnect test asserts on.
+ */
+export async function linkFor(
+  database: TestDatabase,
+  fixture: OrchestratorFixture,
+  connector: Connector,
+  input: unknown,
+): Promise<{ connectionId: string; relinked: boolean; accountIds: readonly string[] }> {
+  return database.db.transaction((tx) =>
+    createConnection(
+      tx,
+      { connector, secretBox: fixture.secretBox, ledgerWriter: fixture.ledger, input },
+      { userId: database.userId, clock: fixture.clock, correlationId: CORRELATION_ID },
+    ),
+  );
+}
+
+/** Rows the ledger double holds, live and retracted. */
+export async function ledgerRowCounts(
+  database: TestDatabase,
+): Promise<{ total: number; live: number; retracted: number; accounts: number }> {
+  const applied = await database.db.execute<{ total: string; live: string }>(sql`
+    SELECT count(*) AS total,
+           count(*) FILTER (WHERE removed_at IS NULL) AS live
+      FROM ledger_double_applied
+  `);
+  const accounts = await database.db.execute<{ count: string }>(
+    sql`SELECT count(*) AS count FROM ledger_double_accounts`,
+  );
+  const total = Number(applied.rows[0]?.total ?? 0);
+  const live = Number(applied.rows[0]?.live ?? 0);
+  return { total, live, retracted: total - live, accounts: Number(accounts.rows[0]?.count ?? 0) };
+}
+
+/**
+ * A batch of manual transactions, `count` of them, one per day from `from`.
+ *
+ * `idPrefix` exists because a test that appends a *second* batch is testing
+ * resumption, and reusing `txn-0000` would make those rows upserts of the first
+ * batch rather than new ones — which is a silently passing test for the wrong
+ * reason, not a failure.
+ */
 export function manualBatch(
   count: number,
   from = '2026-05-01',
   providerAccountId = TEST_ACCOUNT.providerAccountId,
+  idPrefix = 'txn',
 ): ProviderTransactionFact[] {
   return Array.from({ length: count }, (_unused, index) =>
     manualTransaction({
       providerAccountId,
-      providerTransactionId: `txn-${String(index).padStart(4, '0')}`,
+      providerTransactionId: `${idPrefix}-${String(index).padStart(4, '0')}`,
       amount: money(BigInt(-100 * (index + 1)), 'USD'),
       postedDate: DateOnly.addDays(DateOnly.parse(from), index),
       name: `MERCHANT ${index}`,

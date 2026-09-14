@@ -11,7 +11,7 @@ import {
 } from './errors.ts';
 
 describe('the error taxonomy', () => {
-  it('maps every one of 08 §2.4\'s conditions to exactly one kind', () => {
+  it("maps every one of 08 §2.4's conditions to exactly one kind", () => {
     for (const condition of CONNECTOR_CONDITIONS) {
       const kind = KIND_OF_CONDITION[condition];
       expect(CONNECTOR_ERROR_KINDS, `${condition} maps to an unknown kind`).toContain(kind);

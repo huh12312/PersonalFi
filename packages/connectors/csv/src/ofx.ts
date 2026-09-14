@@ -104,7 +104,9 @@ export function parseOfx(text: string): OfxNode {
     }
 
     const nextTag = text.indexOf('<', close + 1);
-    const body = decodeEntities(text.slice(close + 1, nextTag === -1 ? text.length : nextTag)).trim();
+    const body = decodeEntities(
+      text.slice(close + 1, nextTag === -1 ? text.length : nextTag),
+    ).trim();
     if (body !== '' && stack.length > 1) {
       const node = top();
       node.value = node.value === null ? body : `${node.value} ${body}`;
@@ -182,7 +184,8 @@ export interface OfxStatement {
  */
 export function ofxDate(raw: string): string {
   const digits = raw.trim().slice(0, 8);
-  if (!/^\d{8}$/.test(digits)) throw new ImportError(`OFX date ${JSON.stringify(raw)} is malformed`);
+  if (!/^\d{8}$/.test(digits))
+    throw new ImportError(`OFX date ${JSON.stringify(raw)} is malformed`);
   return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
 }
 

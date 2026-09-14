@@ -28,6 +28,15 @@ export {
   type TargetAccount,
 } from './import.ts';
 export { CSV_PRESETS, presetById, type CsvProfile } from './presets.ts';
+export {
+  csvColumnMappingSchema,
+  csvConnectionConfigSchema,
+  csvProfileSchema,
+  parseCsvConnectionConfig,
+  parseCsvProfile,
+  resolveCsvProfile,
+  type CsvConnectionConfig,
+} from './config.ts';
 export { cell, readCsv, resolveColumns, type ColumnRef, type CsvColumnMapping } from './csv.ts';
 export {
   child,

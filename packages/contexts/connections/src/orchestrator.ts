@@ -12,36 +12,51 @@
  * and it takes the transaction handle, so there is no signature that could
  * write it anywhere else.
  *
- * ## 2. Commit per page, not per run
+ * ## 2. Commit granularity follows the cursor, not the page
  *
- * 08 §2.3 rule 2 and master plan §3.3 say per page. 01 §5.1 and 04 §4.2 say
- * accumulate every page and commit once, because that is Plaid's documented
- * instruction. They cannot both be followed and this implementation follows the
- * first, deliberately:
+ * 08 §2.3 rule 2 reads "per page"; 01 §5.1 and 04 §4.2 read "accumulate every
+ * page and commit once", because that is Plaid's documented instruction. They
+ * are not in conflict once you notice that they are talking about two different
+ * kinds of provider, and this implementation branches on exactly that — the
+ * `incremental_sync` capability, which is the adapter's own declaration that it
+ * has a cursor:
  *
- *   * Plaid's reason for "commit once" is that a mutation mid-pagination
- *     invalidates the whole page sequence. That reason is answered by invariant
- *     3 below — we restart the loop from the page-one cursor, and re-applying
- *     pages we already committed is a no-op because ledger writes are idempotent
- *     on three layers (04 §4.4). 04 §4.2's own comment says as much: "the old
- *     cursor survives and the next run replays the same data — which is safe
- *     precisely because writes are idempotent".
- *   * The cost of "commit once" is not theoretical. A 730-day backfill (D16) is
- *     thousands of rows; holding one transaction open across sixty round trips
- *     to a provider means a lock on `transactions` for the whole of it, against
- *     a perf budget of five minutes for the nightly sync (plan §3.4), and a
- *     crash at page 59 discards everything.
- *   * 04 §4.7 already concedes the point for backfill: "chunk the writes
- *     (~500/transaction) to avoid long-running locks."
+ *   * **Cursor providers accumulate.** `/transactions/sync` is a *delta stream*:
+ *     page 3 may retract a row page 1 added, so no prefix of the stream is a
+ *     consistent statement of anything. Committing page 1 alone publishes a
+ *     transaction the provider has already withdrawn. So the run holds every
+ *     page, and one transaction writes the whole delta **and** the final cursor.
+ *     That is Plaid's rule and it is also the only granularity at which
+ *     "mutation during pagination" (invariant 3) is recoverable without having
+ *     published rows from a stream we then decide to discard.
+ *   * **Window providers commit per page.** A file import, a manual log, a
+ *     90-day window pull: every page is independently true, `nextCursor` is a
+ *     position rather than a delta token, and a 730-day backfill (D16) is
+ *     thousands of rows. Holding one transaction open across sixty round trips
+ *     to a provider locks `transactions` for the whole of it, against a
+ *     five-minute budget for the nightly sync (plan §3.4). 04 §4.7 says as much:
+ *     "chunk the writes (~500/transaction) to avoid long-running locks."
+ *
+ * Neither ever advances a cursor outside the write transaction. `#commitPages`
+ * below is the only place `transactions_cursor` is written, and it takes the
+ * pages and the cursor together, so there is no signature that could commit one
+ * without the other.
  *
  * ## 3. A mutation during pagination restarts the whole loop
  *
  * Not the failed call — the loop, from the cursor the run started with
  * (01 §5.1: "the entire pagination request loop must be restarted beginning with
- * the cursor for the first page"). The connection's stored cursor is rewound to
- * that value **in its own transaction** before the retry, so a crash during the
- * restart resumes from page one rather than from the middle of a stream we have
- * already decided to discard.
+ * the cursor for the first page"). For a cursor provider nothing has been
+ * committed yet, so the restart is free: the accumulated pages are dropped and
+ * the loop begins again. For a window provider the connection's stored cursor is
+ * rewound to that value **in its own transaction** before the retry, so a crash
+ * during the restart resumes from page one rather than from the middle of a
+ * stream we have already decided to discard.
+ *
+ * Bounded by `MAX_RESTARTS` (04 §4.2). An institution posting a transaction
+ * every few seconds can invalidate a page sequence indefinitely; three attempts
+ * and then a `partial`/`failed` run in the history is an answer, and an
+ * unbounded loop is not.
  *
  * ## 4. `auth_required` stops, it does not retry
  *
@@ -95,9 +110,9 @@ import {
   ConnectorError,
   asConnectorError,
   cursorOf,
+  supports,
   type ConnectionHandle,
   type Connector,
-  type Cursor,
   type ProviderTransactionFact,
   type SyncOptions,
   type TransactionPage,
@@ -115,8 +130,23 @@ export const NIGHTLY_CRON = '15 3 * * *';
 export const DEFAULT_HISTORY_DAYS = 730;
 /** Plaid's ceiling, adopted so every adapter sees one shape. */
 export const DEFAULT_PAGE_SIZE = 500;
-/** 04 §4.2's `MAX_RESTARTS`. */
-export const DEFAULT_MAX_ATTEMPTS = 4;
+/**
+ * 08 §6.2's `max_attempts: 5` for the sync job, applied inside the run too.
+ *
+ * The job queue's own `max_attempts` governs whole re-runs; this governs
+ * in-process retries of the page loop. Both are five so a provider that is down
+ * is given the same patience wherever the retry happens to be counted.
+ */
+export const DEFAULT_MAX_ATTEMPTS = 5;
+/**
+ * 04 §4.2's `MAX_RESTARTS`. Counted separately from `maxAttempts`.
+ *
+ * A rate limit is worth five waits; a stream that keeps mutating under us is
+ * worth three restarts and then an honest `partial` in the history. Sharing one
+ * counter would let a busy institution consume the budget a genuinely transient
+ * failure needs.
+ */
+export const MAX_RESTARTS = 3;
 /** 08 §3.7's per-connection budget. */
 export const DEFAULT_DEADLINE_MS = 10 * 60 * 1_000;
 /**
@@ -429,9 +459,13 @@ export class SyncOrchestrator {
    * Page until `hasMore` is false, restarting as the error's policy directs.
    *
    * The two cursors are the point. `startCursor` is where the *run* began and is
-   * what a `page_one` restart returns to; `cursor` is where the last *committed*
-   * page left off. Confusing them is how "restart the loop" becomes "retry the
-   * failed call", which 01 §5.1 says corrupts the stream.
+   * what a `page_one` restart returns to; `lastCommitted` is where the last
+   * *committed* transaction left off. Confusing them is how "restart the loop"
+   * becomes "retry the failed call", which 01 §5.1 says corrupts the stream.
+   *
+   * `accumulate` is invariant 2: a cursor provider's pages are held until the
+   * stream ends and then committed as one delta, a window provider's are
+   * committed as they arrive.
    */
   async #runPages(
     handle: ConnectionHandle,
@@ -447,6 +481,10 @@ export class SyncOrchestrator {
   ): Promise<string | null> {
     const maxAttempts = this.#options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
     const capabilities = connector.capabilities();
+    // The adapter's own declaration that it hands out a delta stream rather than
+    // a window. Not a provider name, and not an inference from "did it return a
+    // cursor" — a window adapter may well return a position token.
+    const accumulate = supports(capabilities, 'incremental_sync');
     let startCursor = run.startCursor;
     let lastCommitted = run.startCursor;
     let lastFailure: ConnectorError | null = null;
@@ -471,6 +509,9 @@ export class SyncOrchestrator {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       let cursor = startCursor;
+      // Held only while `accumulate` is true. Dropped wholesale on a restart,
+      // which is the reason nothing has been published that would need undoing.
+      const pending: TransactionPage[] = [];
       try {
         for (let page = 0; page < MAX_PAGES; page += 1) {
           run.signal?.throwIfAborted();
@@ -480,7 +521,24 @@ export class SyncOrchestrator {
             cursor === null ? null : cursorOf(cursor),
             options,
           );
-          cursor = await this.#applyPage(fetched, {
+
+          if (accumulate) {
+            pending.push(fetched);
+            cursor = fetched.nextCursor;
+            if (fetched.hasMore) continue;
+            // The stream ended. Everything it said, and the cursor that says we
+            // have it, in one transaction.
+            lastCommitted = await this.#commitPages(pending, cursor, {
+              connectionId: run.connectionId,
+              syncRunId: run.syncRunId,
+              provider: connector.provider,
+              counters: run.counters,
+              context: run.context,
+            });
+            return lastCommitted;
+          }
+
+          cursor = await this.#commitPages([fetched], fetched.nextCursor, {
             connectionId: run.connectionId,
             syncRunId: run.syncRunId,
             provider: connector.provider,
@@ -502,17 +560,23 @@ export class SyncOrchestrator {
         if (!policy.retryable || attempt === maxAttempts) throw error;
 
         if (policy.restart === 'page_one' || policy.restart === 'from_null') {
+          // 04 §4.2's MAX_RESTARTS. A stream that keeps mutating under us is a
+          // real condition with a real end: report it rather than loop.
+          if (run.counters.restarts >= MAX_RESTARTS) throw error;
           // Rewind the *stored* cursor too, not just the loop variable: a crash
           // between here and the first re-applied page must resume from where
           // the restart decided to resume, not from a page in a stream we have
-          // already thrown away.
+          // already thrown away. A no-op for an accumulating run, which has not
+          // moved the stored cursor at all — and cheap enough to do
+          // unconditionally rather than to branch on and get wrong.
           startCursor = policy.restart === 'from_null' ? null : run.startCursor;
           lastCommitted = startCursor;
           run.counters.restarts += 1;
           await this.#rewind(run.connectionId, startCursor, run.context.clock);
         } else {
           // A retryable failure that is not a restart: resume where the last
-          // committed page left off.
+          // committed transaction left off. For an accumulating run that is the
+          // cursor the run began with, because nothing has committed yet.
           startCursor = lastCommitted;
         }
         await this.#sleep(attempt, error);
@@ -524,15 +588,30 @@ export class SyncOrchestrator {
   }
 
   /**
-   * One page, one transaction. The correctness core.
+   * One delta, one transaction. The correctness core.
    *
-   * Inside a single `BEGIN`/`COMMIT`: the page's accounts are mapped, its
+   * Inside a single `BEGIN`/`COMMIT`: every page's accounts are mapped, its
    * transactions are applied to the ledger per account, the running counts are
-   * updated, and the cursor advances. Nothing between those is a place where a
-   * crash can separate the data from the cursor that says we have it.
+   * updated, and the cursor advances to `cursor`. Nothing between those is a
+   * place where a crash can separate the data from the cursor that says we have
+   * it, which is what makes "inject a failure mid-pagination" observable as
+   * *nothing changed* rather than as a partial delta.
+   *
+   * The pages are applied **in order** rather than merged first. A page that
+   * retracts a row an earlier page added has to be applied after it, and a
+   * merged `{added, removed}` would leave the outcome to whatever order the
+   * ledger happens to process the two lists in.
+   *
+   * The counters are mutated only after the callback's last `await`, so a
+   * rollback cannot leave the in-memory count claiming rows that no longer
+   * exist.
    */
-  async #applyPage(
-    page: TransactionPage,
+  async #commitPages(
+    pages: readonly TransactionPage[],
+    // A `string`, not a `Cursor`: this is the value that goes into the column,
+    // and the brand exists to stop a `providerTransactionId` being passed to an
+    // *adapter* where a cursor belongs. Re-branding it here would be ceremony.
+    cursor: string | null,
     run: {
       connectionId: string;
       syncRunId: string;
@@ -544,70 +623,71 @@ export class SyncOrchestrator {
     const { ledgerWriter, clock } = this.#options;
     const { context } = run;
 
-    return this.#options.database.transaction(async (tx) => {
-      if (page.accounts.length > 0) {
-        await linkAccounts(tx, {
-          connectionId: run.connectionId,
-          provider: run.provider,
-          accounts: page.accounts,
-          ledgerWriter,
-          context,
-        });
-      }
-
-      const accounts = await accountMap(tx, run.connectionId);
-      const byAccount = groupByAccount(page, accounts, run.provider);
-
+    const committed = await this.#options.database.transaction(async (tx) => {
       let added = 0;
       let modified = 0;
       let removed = 0;
-      for (const [accountId, slice] of byAccount) {
-        const result = await ledgerWriter.applyProviderTransactions(tx, {
-          userId: context.userId,
-          accountId,
-          provider: run.provider,
-          added: slice.added,
-          modified: slice.modified,
-          removed: slice.removed,
-          clock,
-          correlationId: context.correlationId,
-          causationId: context.causationId ?? null,
-        });
-        added += result.addedTransactionIds.length;
-        modified += result.updatedTransactionIds.length;
-        removed += result.removedTransactionIds.length;
+
+      for (const page of pages) {
+        if (page.accounts.length > 0) {
+          await linkAccounts(tx, {
+            connectionId: run.connectionId,
+            provider: run.provider,
+            accounts: page.accounts,
+            ledgerWriter,
+            context,
+          });
+        }
+
+        // Re-read per page: a later page may have introduced an account the
+        // earlier map did not have.
+        const accounts = await accountMap(tx, run.connectionId);
+        for (const [accountId, slice] of groupByAccount(page, accounts, run.provider)) {
+          const result = await ledgerWriter.applyProviderTransactions(tx, {
+            userId: context.userId,
+            accountId,
+            provider: run.provider,
+            added: slice.added,
+            modified: slice.modified,
+            removed: slice.removed,
+            clock,
+            correlationId: context.correlationId,
+            causationId: context.causationId ?? null,
+          });
+          added += result.addedTransactionIds.length;
+          modified += result.updatedTransactionIds.length;
+          removed += result.removedTransactionIds.length;
+        }
       }
 
       const now = clock.now();
       await tx
         .update(connections)
-        .set({
-          transactionsCursor: page.nextCursor,
-          lastSyncedAt: now,
-          updatedAt: now,
-        })
+        .set({ transactionsCursor: cursor, lastSyncedAt: now, updatedAt: now })
         .where(eq(connections.id, run.connectionId));
 
-      // Counts advance with the page, so a run that dies mid-backfill still
-      // says how far it got. `sql` increments rather than a read-modify-write:
-      // the row is ours, but an increment is honest about what it means.
+      // `sql` increments rather than a read-modify-write: the row is ours, but
+      // an increment is honest about what it means, and it keeps a window
+      // provider's per-page commits additive.
       await tx
         .update(syncRuns)
         .set({
-          pageCount: sql`${syncRuns.pageCount} + 1`,
+          pageCount: sql`${syncRuns.pageCount} + ${pages.length}`,
           addedCount: sql`${syncRuns.addedCount} + ${added}`,
           modifiedCount: sql`${syncRuns.modifiedCount} + ${modified}`,
           removedCount: sql`${syncRuns.removedCount} + ${removed}`,
-          cursorAfter: page.nextCursor,
+          cursorAfter: cursor,
         })
         .where(eq(syncRuns.id, run.syncRunId));
 
-      run.counters.pages += 1;
-      run.counters.added += added;
-      run.counters.modified += modified;
-      run.counters.removed += removed;
-      return page.nextCursor;
+      return { added, modified, removed };
     });
+
+    run.counters.pages += pages.length;
+    run.counters.added += committed.added;
+    run.counters.modified += committed.modified;
+    run.counters.removed += committed.removed;
+    return cursor;
   }
 
   // -------------------------------------------------------------------------
@@ -798,7 +878,8 @@ function groupByAccount(
 
   for (const fact of page.added) slice(fact.providerAccountId)?.added.push(fact);
   for (const fact of page.modified) slice(fact.providerAccountId)?.modified.push(fact);
-  for (const ref of page.removed) slice(ref.providerAccountId)?.removed.push(ref.providerTransactionId);
+  for (const ref of page.removed)
+    slice(ref.providerAccountId)?.removed.push(ref.providerTransactionId);
 
   if (unknown.size > 0) {
     throw ConnectorError.fromCondition(

@@ -51,7 +51,7 @@ describe('parseAmount', () => {
     expect(parseAmount('-12.34', 'USD', { sign: 'inverted' }).minor).toBe(1_234n);
   });
 
-  it('uses the currency\'s own scale, not two decimals for everything', () => {
+  it("uses the currency's own scale, not two decimals for everything", () => {
     // KWD has three. Read as two, every Kuwaiti amount would be ten times wrong.
     expect(parseAmount('1.234', 'KWD').minor).toBe(1_234n);
     expect(parseAmount('1.23', 'JPY').minor).toBe(1n);

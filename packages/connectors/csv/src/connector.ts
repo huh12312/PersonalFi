@@ -31,6 +31,7 @@ import {
   type TransactionPage,
 } from '@connector/port';
 import { newId } from '@core/kernel';
+import { parseCsvProfile } from './config.ts';
 import { asInvalidInput } from './errors.ts';
 import { IMPORT_PROVIDER, importFile, type ImportFileInput } from './import.ts';
 import { presetById, type CsvProfile } from './presets.ts';
@@ -60,6 +61,7 @@ export const CSV_MANIFEST: ConnectorManifest = Object.freeze({
   description:
     'CSV with a column mapping, OFX/QFX from a bank download, or QIF from Quicken. Re-importing ' +
     'the same file changes nothing: every row is identified by a hash of its own content.',
+  iconKey: 'file_arrow_up',
   linkKind: 'file_upload',
   docsUrl: null,
 });
@@ -261,7 +263,11 @@ export class CsvImportConnector implements Connector {
 
 function resolveProfile(file: CsvFileInput): CsvProfile | null {
   if (file.profile === undefined) return null;
-  if (typeof file.profile !== 'string') return file.profile;
+  // Validated rather than trusted, even though the type says `CsvProfile`: the
+  // profile that reaches here is user data read back out of `connections.config`
+  // (JSONB), where it was `unknown` until someone asserted otherwise. See
+  // `config.ts` for what a profile that drifted does if nobody checks it.
+  if (typeof file.profile !== 'string') return parseCsvProfile(file.profile);
   const preset = presetById(file.profile);
   if (preset === null) {
     throw new ConnectorError(`no import preset named ${JSON.stringify(file.profile)}`, {
@@ -279,7 +285,10 @@ function parseCursor(cursor: Cursor | null, staged: number): number {
     // A cursor past the end means the staged rows are gone — the process
     // restarted, and this connector's staging is in memory. A full re-pull is
     // the honest recovery and it is safe: every id is a content hash.
-    throw ConnectorError.fromCondition('CURSOR_EXPIRED', 'the staged import no longer has this page');
+    throw ConnectorError.fromCondition(
+      'CURSOR_EXPIRED',
+      'the staged import no longer has this page',
+    );
   }
   return value;
 }

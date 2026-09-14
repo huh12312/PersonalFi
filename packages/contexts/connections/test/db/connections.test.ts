@@ -35,10 +35,39 @@ import {
   type TestDatabase,
 } from '../harness.ts';
 
-const ACCOUNTS = [
-  { providerAccountId: 'acct-1', name: 'Everyday Checking', type: 'depository', currency: 'USD' },
-  { providerAccountId: 'acct-2', name: 'Rainy Day', type: 'depository', currency: 'USD' },
-];
+/**
+ * Two accounts, namespaced by the connection they belong to.
+ *
+ * Not a constant, because `connection_accounts_account_idx` is
+ * `UNIQUE (user_id, account_id)`: one ledger account is claimed by at most one
+ * connection, deliberately, so that re-linking an institution through a second
+ * provider cannot end with two connections syncing one account (migration
+ * 0005). Two *different* connections sharing a `providerAccountId` therefore
+ * resolve to one ledger account through the writer's own natural key
+ * `(user_id, provider, provider_account_id)` and the second link is rejected —
+ * which is the schema being right, not the test being unlucky.
+ */
+function accountsFor(providerConnectionId: string): {
+  providerAccountId: string;
+  name: string;
+  type: string;
+  currency: string;
+}[] {
+  return [
+    {
+      providerAccountId: `${providerConnectionId}-checking`,
+      name: 'Everyday Checking',
+      type: 'depository',
+      currency: 'USD',
+    },
+    {
+      providerAccountId: `${providerConnectionId}-savings`,
+      name: 'Rainy Day',
+      type: 'depository',
+      currency: 'USD',
+    },
+  ];
+}
 
 /**
  * An adapter that reports a credential, so the sealing path is exercised.
@@ -71,11 +100,12 @@ describe.skipIf(NO_DATABASE)('connection lifecycle', () => {
 
   async function link(
     options: { connector?: ManualConnector; providerConnectionId?: string } = {},
-  ): Promise<{ connectionId: string; accountIds: readonly string[] }> {
+  ): Promise<{ connectionId: string; relinked: boolean; accountIds: readonly string[] }> {
     const clock = testClock();
     const connector = options.connector ?? new TokenConnector({ store: new ManualStore() });
     const secretBox = await unlockedSecretBox(database);
     const ledgerWriter = recordingLedgerWriter();
+    const providerConnectionId = options.providerConnectionId ?? 'item-1';
 
     return database.db.transaction((tx) =>
       createConnection(
@@ -86,8 +116,8 @@ describe.skipIf(NO_DATABASE)('connection lifecycle', () => {
           ledgerWriter,
           input: {
             displayName: 'Big Bank',
-            providerConnectionId: options.providerConnectionId ?? 'item-1',
-            accounts: ACCOUNTS,
+            providerConnectionId,
+            accounts: accountsFor(providerConnectionId),
           },
         },
         { userId: database.userId, clock, correlationId: CORRELATION_ID },
@@ -149,6 +179,42 @@ describe.skipIf(NO_DATABASE)('connection lifecycle', () => {
     expect(Number(rows.rows[0]?.count)).toBe(2);
   });
 
+  it('refuses to let a second connection claim an account the first one owns', async () => {
+    await link({ providerConnectionId: 'item-1' });
+
+    // Same provider, same provider account id, different connection: the ledger
+    // writer's natural key resolves both to one account, and
+    // `connection_accounts_account_idx` then refuses the second claim. Without
+    // it, two connections would sync one account and every transaction would
+    // arrive twice. The failure is a constraint violation on purpose — this is
+    // a "cannot happen", not a user-facing condition with a nice message.
+    const store = new ManualStore();
+    const connector = new TokenConnector({ store });
+    const secretBox = await unlockedSecretBox(database);
+
+    await expect(
+      database.db.transaction((tx) =>
+        createConnection(
+          tx,
+          {
+            connector,
+            secretBox,
+            ledgerWriter: recordingLedgerWriter(),
+            input: {
+              displayName: 'Same Bank Again',
+              providerConnectionId: 'item-2',
+              accounts: accountsFor('item-1'),
+            },
+          },
+          { userId: database.userId, clock: testClock(), correlationId: CORRELATION_ID },
+        ),
+      ),
+    ).rejects.toThrow();
+
+    // And the first connection is untouched: the whole link was one transaction.
+    expect(await listConnections(database.db, database.userId)).toHaveLength(1);
+  });
+
   it('re-links in place, preserving the cursor and the account mapping', async () => {
     const first = await link();
     await database.db.execute(sql`
@@ -176,7 +242,9 @@ describe.skipIf(NO_DATABASE)('connection lifecycle', () => {
     await link();
     await link();
 
-    const events = await database.db.execute<{ payload: { relinked: boolean; accountCount: number } }>(
+    const events = await database.db.execute<{
+      payload: { relinked: boolean; accountCount: number };
+    }>(
       sql`SELECT payload FROM domain_events WHERE event_type = 'connections.ConnectionCreated' ORDER BY seq`,
     );
     expect(events.rows.map((row) => row.payload.relinked)).toEqual([false, true]);
@@ -216,13 +284,21 @@ describe.skipIf(NO_DATABASE)('connection lifecycle', () => {
     const context = { userId: database.userId, clock, correlationId: CORRELATION_ID };
 
     await database.db.transaction((tx) =>
-      setConnectionStatus(tx, { connectionId, to: 'error', reason: 'provider_unavailable' }, context),
+      setConnectionStatus(
+        tx,
+        { connectionId, to: 'error', reason: 'provider_unavailable' },
+        context,
+      ),
     );
     const first = await requireConnection(database.db, database.userId, connectionId);
 
-    clock.advance(6 * 60 * 60 * 1_000);
+    clock.advanceMs(6 * 60 * 60 * 1_000);
     await database.db.transaction((tx) =>
-      setConnectionStatus(tx, { connectionId, to: 'error', reason: 'provider_unavailable' }, context),
+      setConnectionStatus(
+        tx,
+        { connectionId, to: 'error', reason: 'provider_unavailable' },
+        context,
+      ),
     );
     const later = await requireConnection(database.db, database.userId, connectionId);
 
@@ -277,9 +353,13 @@ describe.skipIf(NO_DATABASE)('connection lifecycle', () => {
     const secretBox = await unlockedSecretBox(database);
 
     // A provider that is down must not be able to stop a user disconnecting.
-    const failing = Object.assign(Object.create(Object.getPrototypeOf(connector) as object), connector, {
-      disconnect: () => Promise.reject(ConnectorError.fromCondition('PROVIDER_DOWN', '503')),
-    }) as ManualConnector;
+    const failing = Object.assign(
+      Object.create(Object.getPrototypeOf(connector) as object),
+      connector,
+      {
+        disconnect: () => Promise.reject(ConnectorError.fromCondition('PROVIDER_DOWN', '503')),
+      },
+    ) as ManualConnector;
 
     const result = await disconnectConnection(
       database.db,
@@ -324,7 +404,7 @@ describe.skipIf(NO_DATABASE)('connection lifecycle', () => {
     expect(syncable.map((row) => row.id)).toEqual([first.connectionId]);
   });
 
-  it('hides another user\'s connections', async () => {
+  it("hides another user's connections", async () => {
     const { connectionId } = await link();
     const otherUser = await database.createUser('Someone else');
 

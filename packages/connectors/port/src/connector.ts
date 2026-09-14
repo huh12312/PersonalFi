@@ -202,10 +202,16 @@ export interface Connector {
     options: SyncOptions,
   ): Promise<TransactionPage>;
 
-  syncBalances(handle: ConnectionHandle, options: SyncOptions): Promise<readonly ProviderBalanceFact[]>;
+  syncBalances(
+    handle: ConnectionHandle,
+    options: SyncOptions,
+  ): Promise<readonly ProviderBalanceFact[]>;
 
   /** Only when `holdings` is declared; otherwise raise `unsupported`. */
-  syncHoldings?(handle: ConnectionHandle, options: SyncOptions): Promise<readonly ProviderHoldingFact[]>;
+  syncHoldings?(
+    handle: ConnectionHandle,
+    options: SyncOptions,
+  ): Promise<readonly ProviderHoldingFact[]>;
 
   /** Only when `liabilities` is declared; otherwise raise `unsupported`. */
   syncLiabilities?(
@@ -223,13 +229,38 @@ export interface Connector {
   health?(handle: ConnectionHandle): Promise<ConnectorHealth>;
 }
 
-/** What the UI renders a provider from, so adding one needs no UI change (08 §2.7). */
+/** How linking starts, for the "Add a connection" screen. */
+export const LINK_KINDS = [
+  /** The provider runs the flow: Plaid Link, an OAuth redirect. */
+  'provider_hosted',
+  /** We collect an API key or a token ourselves. */
+  'credential_form',
+  /** The user hands us a file. */
+  'file_upload',
+  /** The user types the accounts. */
+  'manual_entry',
+] as const;
+
+export type LinkKind = (typeof LINK_KINDS)[number];
+
+/**
+ * What the UI renders a provider from, so adding one needs no UI change (08 §2.7).
+ *
+ * Data, not components. `iconKey` names an asset the web app already ships
+ * rather than carrying a URL or an SVG: a manifest is served from the API, and a
+ * field the server controls that the browser renders as markup or fetches as a
+ * resource is a hole. The UI maps an unknown key to a generic bank glyph, so a
+ * Phase 2 adapter is renderable the day it registers and pretty the day someone
+ * draws it.
+ */
 export interface ConnectorManifest {
   readonly provider: string;
   readonly displayName: string;
   readonly description: string;
-  /** How linking starts, for the "Add a connection" screen. */
-  readonly linkKind: 'provider_hosted' | 'credential_form' | 'file_upload' | 'manual_entry';
+  /** Asset key, lower-snake, from the web app's own icon set. Never a URL. */
+  readonly iconKey: string;
+  readonly linkKind: LinkKind;
+  /** Where to read more. `null` when there is nothing to read. */
   readonly docsUrl: string | null;
 }
 

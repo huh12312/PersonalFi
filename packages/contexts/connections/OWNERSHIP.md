@@ -43,7 +43,7 @@ to use:
 - `connection_secrets` → **`connections.sealed_credentials`**. A separate table
   buys nothing: there is exactly one credential envelope per connection, its
   lifetime is the connection's, and `SecretBox`'s AAD already binds the
-  ciphertext to `(table, column, row id)` — so a column *is* the binding, while a
+  ciphertext to `(table, column, row id)` — so a column _is_ the binding, while a
   side table would need its own row id in the AAD and a join on every sync.
   Destroying the secret on disconnect is then one `UPDATE`, inside the same
   transaction as the status change, rather than a `DELETE` that can be half-done.

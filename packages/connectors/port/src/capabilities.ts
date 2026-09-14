@@ -70,9 +70,6 @@ export interface ConnectorCapabilities {
   readonly currencies: 'multi' | readonly string[];
 }
 
-export function supports(
-  capabilities: ConnectorCapabilities,
-  capability: Capability,
-): boolean {
+export function supports(capabilities: ConnectorCapabilities, capability: Capability): boolean {
   return capabilities.supports.includes(capability);
 }

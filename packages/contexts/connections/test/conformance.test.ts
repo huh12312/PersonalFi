@@ -22,7 +22,7 @@ import {
 } from '@connector/port';
 import { DateOnly, money } from '@core/kernel';
 import { describe, expect, it } from 'vitest';
-import { describeConformance } from './conformance.ts';
+import { describeConnectorConformance } from './conformance.ts';
 import {
   CsvImportConnector,
   ManualConnector,
@@ -37,7 +37,12 @@ import {
 } from './harness.ts';
 
 const ACCOUNTS = [
-  { providerAccountId: TEST_ACCOUNT.providerAccountId, name: 'Everyday Checking', type: 'depository', currency: 'USD' },
+  {
+    providerAccountId: TEST_ACCOUNT.providerAccountId,
+    name: 'Everyday Checking',
+    type: 'depository',
+    currency: 'USD',
+  },
 ];
 
 function manualFacts(count: number, from = '2026-05-01'): ReturnType<typeof manualTransaction>[] {
@@ -56,7 +61,7 @@ function manualFacts(count: number, from = '2026-05-01'): ReturnType<typeof manu
 // ManualConnector
 // ---------------------------------------------------------------------------
 
-describeConformance('ManualConnector', async () => {
+describeConnectorConformance('ManualConnector', async () => {
   const store = new ManualStore();
   const connector = new ManualConnector({ store, pageSize: 3 });
   const { providerConnectionId } = await connector.connect({
@@ -112,27 +117,25 @@ const CSV = [
   'Date,Description,Amount',
   ...Array.from(
     { length: 9 },
-    (_unused, index) => `2026-05-${String(index + 1).padStart(2, '0')},MERCHANT ${index},-${index + 1}.00`,
+    (_unused, index) =>
+      `2026-05-${String(index + 1).padStart(2, '0')},MERCHANT ${index},-${index + 1}.00`,
   ),
   // A deliberate duplicate of row 1: two identical purchases on one day are real,
   // and `occurrence` is what keeps them distinct without breaking re-import.
   '2026-05-01,MERCHANT 0,-1.00',
 ].join('\n');
 
-describeConformance('CsvImportConnector', async () => {
+const CSV_TARGET = {
+  providerAccountId: TEST_ACCOUNT.providerAccountId,
+  name: 'Everyday Checking',
+  type: 'depository' as const,
+  currency: 'USD',
+};
+
+describeConnectorConformance('CsvImportConnector', async () => {
   const connector = new CsvImportConnector({ pageSize: 4 });
   const files = [
-    {
-      name: 'statement.csv',
-      content: CSV,
-      profile: 'iso_signed',
-      account: {
-        providerAccountId: TEST_ACCOUNT.providerAccountId,
-        name: 'Everyday Checking',
-        type: 'depository' as const,
-        currency: 'USD',
-      },
-    },
+    { name: 'statement.csv', content: CSV, profile: 'iso_signed', account: CSV_TARGET },
   ];
   const { providerConnectionId } = await connector.connect({ displayName: 'Bank export', files });
 
@@ -150,7 +153,7 @@ describeConformance('CsvImportConnector', async () => {
           name: 'garbage.csv',
           content: 'Date,Description,Amount\nnot-a-date,X,1.00\n',
           profile: 'iso_signed',
-          account: files[0]?.account,
+          account: CSV_TARGET,
         }),
       ),
   };
@@ -160,7 +163,7 @@ describeConformance('CsvImportConnector', async () => {
 // SeedConnector
 // ---------------------------------------------------------------------------
 
-describeConformance('SeedConnector', () => {
+describeConnectorConformance('SeedConnector', () => {
   const connector = new SeedConnector({ pageSize: 250 });
   const dataset = generateDemoData(1);
   const providerConnectionId = connector.load('seed-conformance', dataset, {
@@ -307,7 +310,10 @@ describe('the conformance suite, sabotaged', () => {
     const subject = await subjectWith(() => ({}));
     const leaky: ConformanceSubject = {
       ...subject,
-      handle: { ...subject.handle, secret: () => 'access-sandbox-1234' } as ConformanceSubject['handle'],
+      handle: {
+        ...subject.handle,
+        secret: () => 'access-sandbox-1234',
+      } as ConformanceSubject['handle'],
       secrets: ['access-sandbox-1234'],
     };
     // The honest handle passes, because `secret` is a closure.

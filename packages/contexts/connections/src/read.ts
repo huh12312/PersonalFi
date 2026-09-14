@@ -14,12 +14,7 @@
  */
 import { toInstant, toInstantOrNull } from '@core/platform';
 import { and, desc, eq } from 'drizzle-orm';
-import {
-  connectionAccounts,
-  connections,
-  syncRuns,
-  type ConnectionRow,
-} from '../schema/index.ts';
+import { connectionAccounts, connections, syncRuns, type ConnectionRow } from '../schema/index.ts';
 import { requireConnection } from './connections.ts';
 import type { ConnectionsExecutor } from './db.ts';
 import {
@@ -44,7 +39,10 @@ export async function listConnectionSummaries(
     .orderBy(desc(connections.createdAt));
 
   const counts = await executor
-    .select({ connectionId: connectionAccounts.connectionId, accountId: connectionAccounts.accountId })
+    .select({
+      connectionId: connectionAccounts.connectionId,
+      accountId: connectionAccounts.accountId,
+    })
     .from(connectionAccounts)
     .where(eq(connectionAccounts.userId, userId));
 
@@ -73,17 +71,15 @@ export async function getConnectionDetail(
 
   return {
     ...summaryOf(row, accounts.length),
-    accounts: accounts.map(
-      (account): ConnectionAccountView => ({
-        id: account.id,
-        accountId: account.accountId,
-        providerName: account.providerName,
-        currency: account.currency,
-        capabilities: capabilityList(account.capabilities),
-        enabled: account.enabled,
-        linkedAt: toInstant(account.linkedAt).toISOString(),
-      }),
-    ),
+    accounts: accounts.map((account): ConnectionAccountView => ({
+      id: account.id,
+      accountId: account.accountId,
+      providerName: account.providerName,
+      currency: account.currency,
+      capabilities: capabilityList(account.capabilities),
+      enabled: account.enabled,
+      linkedAt: toInstant(account.linkedAt).toISOString(),
+    })),
     recentRuns: runs,
   };
 }

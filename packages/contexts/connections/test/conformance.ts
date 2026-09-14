@@ -15,13 +15,23 @@ import { describe, it } from 'vitest';
 export type { ConformanceSubject };
 
 /**
+ * The old name, kept as an alias.
+ *
+ * Two call sites use it and renaming them is free; the alias exists because
+ * WP 1.3's Plaid adapter will be written against whichever name is in the
+ * evidence note, and a wrapper that silently disappeared between work packages
+ * is a merge conflict nobody needs.
+ */
+export { describeConnectorConformance as describeConformance };
+
+/**
  * Run every conformance check against one adapter.
  *
  * `subject` is a factory rather than a value so each check gets a clean
  * adapter: `disconnect/revokes` deliberately destroys what it is given, and
  * several checks page a stream to exhaustion.
  */
-export function describeConformance(
+export function describeConnectorConformance(
   label: string,
   subject: () => Promise<ConformanceSubject> | ConformanceSubject,
 ): void {
@@ -32,7 +42,9 @@ export function describeConformance(
     for (const { name } of connectorConformanceChecks({} as ConformanceSubject)) {
       it(name, async () => {
         const built = await subject();
-        const check = connectorConformanceChecks(built).find((candidate) => candidate.name === name);
+        const check = connectorConformanceChecks(built).find(
+          (candidate) => candidate.name === name,
+        );
         if (check === undefined) throw new Error(`conformance check ${name} disappeared`);
         await check.run();
       });

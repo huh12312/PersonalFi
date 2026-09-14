@@ -13,13 +13,18 @@
  *                                       │                 └─▶ connection_accounts
  *                                       └─▶ ConnectionCreated ──▶ enqueue sync
  *
- *   sync ─┬─ page ─▶ ┌ BEGIN ─────────────────────────────────┐
+ *   sync ─┬─ delta ▶ ┌ BEGIN ─────────────────────────────────┐
  *         │          │ LedgerWriter.applyProviderTransactions │
  *         │          │ UPDATE connections.transactions_cursor │
  *         │          │ UPDATE sync_runs (counts)              │
  *         │          └ COMMIT ────────────────────────────────┘
  *         └─ done ─▶ sync_runs.status, connection.status, SyncRunCompleted
  * ```
+ *
+ * One "delta" is the whole accumulated page sequence for a cursor provider
+ * (`incremental_sync`) and one page for a window provider — see
+ * `src/orchestrator.ts`, invariant 2. Either way the rows and the cursor that
+ * describes them commit together or not at all.
  *
  * Depends on the Ledger and does not import it: see `src/ledger-writer.ts`. The
  * asymmetry — Connections knows about Ledger, Ledger has no idea Plaid exists —
@@ -88,6 +93,7 @@ export {
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_PAGE_SIZE,
   MAX_PAGES,
+  MAX_RESTARTS,
   NIGHTLY_CRON,
   NIGHTLY_SCHEDULE_NAME,
   SYNC_FANOUT_JOB_KIND,
@@ -113,6 +119,7 @@ export {
   connectionAccountSchema,
   connectionDetailSchema,
   connectionSummarySchema,
+  connectorManifestSchema,
   createConnectionRequestSchema,
   createConnectionResponseSchema,
   syncNowResponseSchema,
@@ -120,6 +127,7 @@ export {
   type ConnectionAccountView,
   type ConnectionDetail,
   type ConnectionSummary,
+  type ConnectorManifestView,
   type CreateConnectionRequest,
   type SyncRunView,
 } from './schemas.ts';

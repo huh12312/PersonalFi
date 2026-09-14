@@ -173,7 +173,11 @@ export class ConnectorError extends Error {
     message: string,
     options: Omit<ConnectorErrorOptions, 'kind' | 'condition'> = {},
   ): ConnectorError {
-    return new ConnectorError(message, { ...options, kind: KIND_OF_CONDITION[condition], condition });
+    return new ConnectorError(message, {
+      ...options,
+      kind: KIND_OF_CONDITION[condition],
+      condition,
+    });
   }
 
   /** The policy the orchestrator applies. Pure, and therefore unit-testable. */

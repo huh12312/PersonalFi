@@ -45,6 +45,7 @@ export {
 } from './errors.ts';
 
 export {
+  LINK_KINDS,
   SYNC_REASONS,
   cursorOf,
   windowStart,
@@ -54,6 +55,7 @@ export {
   type ConnectorHealth,
   type ConnectorManifest,
   type Cursor,
+  type LinkKind,
   type ProviderTransactionRef,
   type SyncOptions,
   type SyncReason,

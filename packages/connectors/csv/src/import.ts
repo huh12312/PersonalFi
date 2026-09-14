@@ -82,7 +82,8 @@ interface Row {
 }
 
 export function importFile(input: ImportFileInput): ImportResult {
-  const format = input.format === undefined || input.format === 'auto' ? sniff(input) : input.format;
+  const format =
+    input.format === undefined || input.format === 'auto' ? sniff(input) : input.format;
   switch (format) {
     case 'ofx':
       return finish(readOfx(input));
@@ -131,7 +132,11 @@ function readOfx(input: ImportFileInput): { rows: Row[]; result: ImportResult } 
       currency: statement.currency,
       mask: statement.accountId.slice(-4),
       closed: false,
-      capabilities: ['accounts', 'transactions', ...(statement.ledgerBalance === null ? [] : (['balances'] as const))],
+      capabilities: [
+        'accounts',
+        'transactions',
+        ...(statement.ledgerBalance === null ? [] : (['balances'] as const)),
+      ],
     });
 
     for (const transaction of statement.transactions) {
@@ -157,7 +162,9 @@ function readOfx(input: ImportFileInput): { rows: Row[]; result: ImportResult } 
     if (statement.ledgerBalance !== null) {
       balances.push({
         providerAccountId: statement.accountId,
-        current: parseAmount(statement.ledgerBalance.amount, statement.currency, { separator: '.' }),
+        current: parseAmount(statement.ledgerBalance.amount, statement.currency, {
+          separator: '.',
+        }),
         available: null,
         limit: null,
         // A calendar date with no time, promoted to the instant the column needs.

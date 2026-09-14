@@ -28,6 +28,20 @@ The *idea* — that OFX 1.x SGML can be read by repairing implicit end tags rath
 than by writing an SGML parser — is Actual Budget's, and this note is the
 acknowledgement. No code, comments, structure or test fixtures were copied.
 
+If that ever changes
+--------------------
+
+Rule, for whoever vendors first: **if any ISC-licensed Actual Budget parser code
+is vendored into this package, its ISC copyright notice must appear in two
+places** — in this file, and as a header comment at the top of every vendored
+file, above the SPDX line.
+
+Both, not either. `just verify`'s licence gate reads `pnpm licenses list --prod`,
+which sees dependency manifests, and `trivy fs` runs `--scanners
+vuln,secret,misconfig`. Neither reads a source header, so nothing in CI can catch
+a vendored file that lost its attribution — the per-file notice is the only copy
+that travels with the code, and this file is the only copy a reader looks for.
+
 Deliberately not used
 ---------------------
 

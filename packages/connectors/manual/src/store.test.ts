@@ -26,7 +26,9 @@ describe('ManualStore', () => {
     const store = new ManualStore();
     store.open('conn');
     store.append('conn', { added: [transaction('a'), transaction('b')] });
-    store.append('conn', { removed: [{ providerAccountId: 'acct-1', providerTransactionId: 'a' }] });
+    store.append('conn', {
+      removed: [{ providerAccountId: 'acct-1', providerTransactionId: 'a' }],
+    });
 
     expect(store.entriesAfter('conn', 0, 10).map((entry) => entry.seq)).toEqual([1, 2, 3]);
     expect(store.highestSeq('conn')).toBe(3);
@@ -48,7 +50,9 @@ describe('ManualStore', () => {
     const store = new ManualStore();
     store.open('conn');
     store.append('conn', { added: [transaction('a')] });
-    store.append('conn', { removed: [{ providerAccountId: 'acct-1', providerTransactionId: 'a' }] });
+    store.append('conn', {
+      removed: [{ providerAccountId: 'acct-1', providerTransactionId: 'a' }],
+    });
 
     const entries = store.entriesAfter('conn', 0, 10);
     expect(entries.map((entry) => entry.kind)).toEqual(['added', 'removed']);
@@ -141,9 +145,7 @@ describe('ManualConnector', () => {
     await connector.connect({
       displayName: 'Cash',
       providerConnectionId: 'conn',
-      accounts: [
-        { providerAccountId: 'acct-1', name: 'Wallet', type: 'manual', currency: 'USD' },
-      ],
+      accounts: [{ providerAccountId: 'acct-1', name: 'Wallet', type: 'manual', currency: 'USD' }],
     });
     store.append('conn', { added: [transaction('a'), transaction('b')] });
 

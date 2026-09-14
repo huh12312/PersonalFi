@@ -351,7 +351,11 @@ export async function disconnectConnection(
   }
 
   await database.transaction(async (tx) => {
-    await setConnectionStatus(tx, { connectionId: input.connectionId, to: 'disconnected' }, context);
+    await setConnectionStatus(
+      tx,
+      { connectionId: input.connectionId, to: 'disconnected' },
+      context,
+    );
   });
   return { revokedAtProvider };
 }

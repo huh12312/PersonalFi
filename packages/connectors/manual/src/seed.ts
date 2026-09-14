@@ -30,13 +30,40 @@
  * untested through the orchestrator, which is the single highest-value
  * invariant in the schema.
  */
-import type { ProviderAccountFact, ProviderBalanceFact, ProviderTransactionFact } from '@connector/port';
+import type {
+  ConnectorManifest,
+  ProviderAccountFact,
+  ProviderBalanceFact,
+  ProviderTransactionFact,
+} from '@connector/port';
 import { fingerprintOf } from '@connector/port';
 import { Money, type DateOnly, type MoneyJson } from '@core/kernel';
 import { ManualStore, type ManualBatch } from './store.ts';
 import { ManualConnector, type ManualConnectorOptions } from './connector.ts';
 
 export const SEED_PROVIDER = 'seed';
+
+/**
+ * The demo dataset, as the "add a connection" screen sees it.
+ *
+ * A manifest rather than a hidden developer path: loading demo data is a thing a
+ * user does on day one to see what the app looks like with history in it, and an
+ * adapter the UI renders from data is one the UI needs no branch for. It is
+ * still gated at the composition root — `apps/api` registers it only when the
+ * `module.demo_data` flag is on — because a registry entry is what makes it
+ * appear, and a flag is what decides whether it is registered.
+ */
+export const SEED_MANIFEST: ConnectorManifest = Object.freeze({
+  provider: SEED_PROVIDER,
+  displayName: 'Demo data',
+  description:
+    'Twenty-four months of generated history for a fictional household, delivered through the ' +
+    'same sync path as a real bank. Deterministic from a seed integer, so what you see is what ' +
+    'the tests see.',
+  iconKey: 'beaker',
+  linkKind: 'manual_entry',
+  docsUrl: null,
+});
 
 /** The slice of `@core/seed`'s `SeedDataset` this loader reads. */
 export interface SeedAccountLike {
@@ -204,7 +231,10 @@ export function seedBatches(dataset: SeedDatasetLike, options: SeedBatchOptions)
         // same batch here but not in the same *page* once the connector chunks
         // them, which is exactly the ordering `applyProviderTransactions` has to
         // survive — and does, in either order.
-        removed.push({ providerAccountId: transaction.accountId, providerTransactionId: pendingId });
+        removed.push({
+          providerAccountId: transaction.accountId,
+          providerTransactionId: pendingId,
+        });
         added.push(
           factOf(transaction, merchantNames, {
             providerTransactionId: transaction.id,

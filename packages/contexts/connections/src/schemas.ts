@@ -27,7 +27,30 @@ import {
   SYNC_RUN_STATUSES,
   SYNC_TRIGGERS,
 } from '../schema/index.ts';
-import { CAPABILITIES, CONNECTOR_ERROR_KINDS, RECONNECT_FLOWS } from './port.ts';
+import { CAPABILITIES, CONNECTOR_ERROR_KINDS, LINK_KINDS, RECONNECT_FLOWS } from './port.ts';
+
+/**
+ * What `GET /connectors` returns: the "Add a connection" screen, as data.
+ *
+ * 08 §2.7's test of the abstraction is that adding a provider needs no UI
+ * change. That is only true if the screen renders from a list the server sends,
+ * so this schema is the contract that makes WP 1.3's Plaid adapter appear in the
+ * UI by being registered rather than by anyone editing a component.
+ *
+ * `iconKey` is an asset key, never a URL and never markup: this payload is
+ * server-controlled and the browser must not be able to be told to fetch or
+ * render something arbitrary from it. An unknown key renders a generic glyph.
+ */
+export const connectorManifestSchema = z.object({
+  provider: z.string().min(1),
+  displayName: z.string().min(1),
+  description: z.string().min(1),
+  iconKey: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/, 'an icon key is lower_snake and names a bundled asset'),
+  linkKind: z.enum(LINK_KINDS),
+  docsUrl: z.url().nullable(),
+});
 
 export const capabilitiesSchema = z.object({
   supports: z.array(z.enum(CAPABILITIES)),
@@ -120,6 +143,7 @@ export const connectionDetailSchema = connectionSummarySchema.extend({
   recentRuns: z.array(syncRunSchema),
 });
 
+export type ConnectorManifestView = z.infer<typeof connectorManifestSchema>;
 export type ConnectionSummary = z.infer<typeof connectionSummarySchema>;
 export type ConnectionAccountView = z.infer<typeof connectionAccountSchema>;
 export type ConnectionDetail = z.infer<typeof connectionDetailSchema>;

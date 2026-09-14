@@ -11,13 +11,9 @@ export {
   type ManualConnectorOptions,
   type ManualTransactionInput,
 } from './connector.ts';
+export { ManualStore, type ManualBatch, type ManualEntry, type ManualEntryKind } from './store.ts';
 export {
-  ManualStore,
-  type ManualBatch,
-  type ManualEntry,
-  type ManualEntryKind,
-} from './store.ts';
-export {
+  SEED_MANIFEST,
   SEED_PROVIDER,
   SeedConnector,
   seedBatches,

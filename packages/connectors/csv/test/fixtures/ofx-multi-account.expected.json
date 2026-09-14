@@ -1,0 +1,62 @@
+[
+  {
+    "accountId": "000999001111",
+    "accountType": "CHECKING",
+    "currency": "USD",
+    "transactions": [
+      {
+        "type": "CHECK",
+        "fitId": "nw-chk-0001",
+        "postedOn": "2026-05-03",
+        "amount": "-250.00",
+        "name": "ROOFLINE & GUTTER CO",
+        "memo": "Café awning, deposit",
+        "checkNumber": "1042"
+      },
+      {
+        "type": "CREDIT",
+        "fitId": "nw-chk-0002",
+        "postedOn": "2026-05-15",
+        "amount": "2100.00",
+        "name": "PAYROLL NORTHWIND MUTUAL",
+        "memo": null,
+        "checkNumber": null
+      }
+    ],
+    "ledgerBalance": { "amount": "3150.75", "asOf": "2026-05-31" }
+  },
+  {
+    "accountId": "000999002222",
+    "accountType": "SAVINGS",
+    "currency": "USD",
+    "transactions": [
+      {
+        "type": "INT",
+        "fitId": "nw-sav-0001",
+        "postedOn": "2026-05-31",
+        "amount": "1.08",
+        "name": "INTEREST PAID",
+        "memo": null,
+        "checkNumber": null
+      }
+    ],
+    "ledgerBalance": { "amount": "8000.00", "asOf": "2026-05-31" }
+  },
+  {
+    "accountId": "400000XXXXXX7788",
+    "accountType": "CREDITCARD",
+    "currency": "USD",
+    "transactions": [
+      {
+        "type": "DEBIT",
+        "fitId": "nw-cc-0001",
+        "postedOn": "2026-05-19",
+        "amount": "-18.90",
+        "name": "HARBOURSIDE NEWS — MAGAZINE",
+        "memo": "HARBOURSIDE NEWS — MAGAZINE",
+        "checkNumber": null
+      }
+    ],
+    "ledgerBalance": null
+  }
+]

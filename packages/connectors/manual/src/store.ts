@@ -28,7 +28,11 @@
  * it is refilled from the pending queue on each sync. Nothing in it needs to
  * survive a restart, which is also why this package owns no table.
  */
-import type { ProviderAccountFact, ProviderBalanceFact, ProviderTransactionFact } from '@connector/port';
+import type {
+  ProviderAccountFact,
+  ProviderBalanceFact,
+  ProviderTransactionFact,
+} from '@connector/port';
 
 export type ManualEntryKind = 'added' | 'modified' | 'removed';
 
@@ -53,7 +57,10 @@ export interface ManualBatch {
   readonly balances?: readonly ProviderBalanceFact[];
   readonly added?: readonly ProviderTransactionFact[];
   readonly modified?: readonly ProviderTransactionFact[];
-  readonly removed?: readonly { readonly providerAccountId: string; readonly providerTransactionId: string }[];
+  readonly removed?: readonly {
+    readonly providerAccountId: string;
+    readonly providerTransactionId: string;
+  }[];
 }
 
 export class ManualStore {
@@ -84,11 +91,13 @@ export class ManualStore {
    */
   append(providerConnectionId: string, batch: ManualBatch): void {
     const state = this.#state(providerConnectionId);
-    for (const account of batch.accounts ?? []) state.accounts.set(account.providerAccountId, account);
+    for (const account of batch.accounts ?? [])
+      state.accounts.set(account.providerAccountId, account);
     for (const balance of batch.balances ?? []) {
       state.balances.set(balance.providerAccountId, balance);
     }
-    for (const fact of batch.added ?? []) this.#push(state, 'added', fact.providerAccountId, fact.providerTransactionId, fact);
+    for (const fact of batch.added ?? [])
+      this.#push(state, 'added', fact.providerAccountId, fact.providerTransactionId, fact);
     for (const fact of batch.modified ?? []) {
       this.#push(state, 'modified', fact.providerAccountId, fact.providerTransactionId, fact);
     }

@@ -110,7 +110,7 @@ describe('windowStart', () => {
     currencies: 'multi',
   });
 
-  it('clamps a 730-day request to SimpleFIN\'s 90-day window (01 §2.2)', () => {
+  it("clamps a 730-day request to SimpleFIN's 90-day window (01 §2.2)", () => {
     const start = windowStart(capabilities(90), 730, DateOnly.parse('2026-06-01'));
     expect(start).toBe('2026-03-03');
   });

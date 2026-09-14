@@ -33,7 +33,7 @@ import {
 } from '@connector/port';
 import { newId, type DateOnly, type Money } from '@core/kernel';
 import { z } from 'zod';
-import { ManualStore, type ManualEntry } from './store.ts';
+import { type ManualStore, type ManualEntry } from './store.ts';
 
 export const MANUAL_PROVIDER = 'manual';
 
@@ -72,6 +72,7 @@ export const MANUAL_MANIFEST: ConnectorManifest = Object.freeze({
   description:
     'An account you maintain yourself: a car, a property, a private loan, cash. Balances and ' +
     'transactions are whatever you enter, and nothing ever leaves this machine.',
+  iconKey: 'pencil',
   linkKind: 'manual_entry',
   docsUrl: null,
 });
@@ -200,7 +201,10 @@ export class ManualConnector implements Connector {
     };
   }
 
-  async syncBalances(handle: ConnectionHandle, _options: SyncOptions): Promise<readonly ProviderBalanceFact[]> {
+  async syncBalances(
+    handle: ConnectionHandle,
+    _options: SyncOptions,
+  ): Promise<readonly ProviderBalanceFact[]> {
     this.#assertOpen(handle);
     assertSupports(this.provider, this.capabilities(), 'balances');
     return this.#store.balances(handle.providerConnectionId);
@@ -218,9 +222,13 @@ export class ManualConnector implements Connector {
     if (this.#store.has(handle.providerConnectionId)) return;
     // A disconnected connection is gone, and asking it for data is not a
     // transient failure that a retry will fix.
-    throw ConnectorError.fromCondition('AUTH_REQUIRED', 'this manual connection has been disconnected', {
-      redactedContext: { providerConnectionId: handle.providerConnectionId },
-    });
+    throw ConnectorError.fromCondition(
+      'AUTH_REQUIRED',
+      'this manual connection has been disconnected',
+      {
+        redactedContext: { providerConnectionId: handle.providerConnectionId },
+      },
+    );
   }
 }
 

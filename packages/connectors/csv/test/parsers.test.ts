@@ -186,7 +186,11 @@ describe('OFX', () => {
     const statements = readOfxStatements(parseOfx(fixture('sample.ofx')));
     expect(statements).toHaveLength(1);
     const statement = statements[0];
-    expect(statement).toMatchObject({ accountId: '000123454471', accountType: 'CHECKING', currency: 'USD' });
+    expect(statement).toMatchObject({
+      accountId: '000123454471',
+      accountType: 'CHECKING',
+      currency: 'USD',
+    });
     expect(statement?.transactions).toHaveLength(2);
     expect(statement?.transactions[0]).toMatchObject({
       fitId: '2026052000012',
@@ -206,7 +210,7 @@ describe('OFX', () => {
     expect(statements[0]?.transactions[0]?.fitId).toBe('cc-2026-05-20-001');
   });
 
-  it('keeps the institution\'s calendar date and discards its clock and zone', () => {
+  it("keeps the institution's calendar date and discards its clock and zone", () => {
     // Converting 20260520120000[-5:EST] through a Date is how a 2026-03-01
     // transaction becomes 2026-02-28 for a user west of UTC.
     expect(ofxDate('20260520120000[-5:EST]')).toBe('2026-05-20');
@@ -217,7 +221,7 @@ describe('OFX', () => {
     expect(() => ofxDate('202605')).toThrow(ImportError);
   });
 
-  it('maps a statement to canonical facts, with the file\'s own FITID as the id', () => {
+  it("maps a statement to canonical facts, with the file's own FITID as the id", () => {
     const result = importFile({ name: 'sample.ofx', content: fixture('sample.ofx') });
     expect(result.accounts[0]).toMatchObject({ type: 'depository', mask: '4471' });
     expect(result.transactions[0]?.providerTransactionId).toBe('2026052000012');
@@ -233,9 +237,9 @@ describe('OFX', () => {
   });
 
   it('refuses a document with no statement in it', () => {
-    expect(() => readOfxStatements(parseOfx('<OFX><SIGNONMSGSRSV1></SIGNONMSGSRSV1></OFX>'))).toThrow(
-      /no bank or credit-card statement/,
-    );
+    expect(() =>
+      readOfxStatements(parseOfx('<OFX><SIGNONMSGSRSV1></SIGNONMSGSRSV1></OFX>')),
+    ).toThrow(/no bank or credit-card statement/);
   });
 
   it('refuses something that is not OFX at all', () => {
@@ -301,11 +305,17 @@ describe('QIF', () => {
 
 describe('format sniffing', () => {
   it('reads content, not the extension: a .qfx is OFX', () => {
-    expect(importFile({ name: 'anything', content: fixture('sample-v2.qfx') }).transactions).toHaveLength(1);
+    expect(
+      importFile({ name: 'anything', content: fixture('sample-v2.qfx') }).transactions,
+    ).toHaveLength(1);
   });
 
   it('recognises QIF by its type header', () => {
-    const result = importFile({ name: 'download', content: fixture('sample.qif'), account: CHECKING });
+    const result = importFile({
+      name: 'download',
+      content: fixture('sample.qif'),
+      account: CHECKING,
+    });
     expect(result.transactions).toHaveLength(4);
   });
 
