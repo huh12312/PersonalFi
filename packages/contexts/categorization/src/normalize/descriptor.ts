@@ -51,10 +51,60 @@ import { foldUpper } from './fold.ts';
 
 /** US state codes. Two letters, so the check is exact rather than fuzzy. */
 const STATE_CODES: ReadonlySet<string> = new Set([
-  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
-  'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
-  'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT',
-  'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU',
+  'AL',
+  'AK',
+  'AZ',
+  'AR',
+  'CA',
+  'CO',
+  'CT',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'ID',
+  'IL',
+  'IN',
+  'IA',
+  'KS',
+  'KY',
+  'LA',
+  'ME',
+  'MD',
+  'MA',
+  'MI',
+  'MN',
+  'MS',
+  'MO',
+  'MT',
+  'NE',
+  'NV',
+  'NH',
+  'NJ',
+  'NM',
+  'NY',
+  'NC',
+  'ND',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VT',
+  'VA',
+  'WA',
+  'WV',
+  'WI',
+  'WY',
+  'DC',
+  'PR',
+  'VI',
+  'GU',
 ]);
 
 /**
@@ -64,14 +114,58 @@ const STATE_CODES: ReadonlySet<string> = new Set([
  * city called `NEW` in a state called `YORK`.
  */
 const STATE_NAMES: readonly string[] = [
-  'NEW HAMPSHIRE', 'NEW JERSEY', 'NEW MEXICO', 'NEW YORK', 'NORTH CAROLINA', 'NORTH DAKOTA',
-  'RHODE ISLAND', 'SOUTH CAROLINA', 'SOUTH DAKOTA', 'WEST VIRGINIA', 'DISTRICT OF COLUMBIA',
-  'PUERTO RICO', 'ALABAMA', 'ALASKA', 'ARIZONA', 'ARKANSAS', 'CALIFORNIA', 'COLORADO',
-  'CONNECTICUT', 'DELAWARE', 'FLORIDA', 'GEORGIA', 'HAWAII', 'IDAHO', 'ILLINOIS', 'INDIANA',
-  'IOWA', 'KANSAS', 'KENTUCKY', 'LOUISIANA', 'MAINE', 'MARYLAND', 'MASSACHUSETTS', 'MICHIGAN',
-  'MINNESOTA', 'MISSISSIPPI', 'MISSOURI', 'MONTANA', 'NEBRASKA', 'NEVADA', 'OHIO', 'OKLAHOMA',
-  'OREGON', 'PENNSYLVANIA', 'TENNESSEE', 'TEXAS', 'UTAH', 'VERMONT', 'VIRGINIA', 'WASHINGTON',
-  'WISCONSIN', 'WYOMING',
+  'NEW HAMPSHIRE',
+  'NEW JERSEY',
+  'NEW MEXICO',
+  'NEW YORK',
+  'NORTH CAROLINA',
+  'NORTH DAKOTA',
+  'RHODE ISLAND',
+  'SOUTH CAROLINA',
+  'SOUTH DAKOTA',
+  'WEST VIRGINIA',
+  'DISTRICT OF COLUMBIA',
+  'PUERTO RICO',
+  'ALABAMA',
+  'ALASKA',
+  'ARIZONA',
+  'ARKANSAS',
+  'CALIFORNIA',
+  'COLORADO',
+  'CONNECTICUT',
+  'DELAWARE',
+  'FLORIDA',
+  'GEORGIA',
+  'HAWAII',
+  'IDAHO',
+  'ILLINOIS',
+  'INDIANA',
+  'IOWA',
+  'KANSAS',
+  'KENTUCKY',
+  'LOUISIANA',
+  'MAINE',
+  'MARYLAND',
+  'MASSACHUSETTS',
+  'MICHIGAN',
+  'MINNESOTA',
+  'MISSISSIPPI',
+  'MISSOURI',
+  'MONTANA',
+  'NEBRASKA',
+  'NEVADA',
+  'OHIO',
+  'OKLAHOMA',
+  'OREGON',
+  'PENNSYLVANIA',
+  'TENNESSEE',
+  'TEXAS',
+  'UTAH',
+  'VERMONT',
+  'VIRGINIA',
+  'WASHINGTON',
+  'WISCONSIN',
+  'WYOMING',
 ];
 
 /**
@@ -83,10 +177,33 @@ const STATE_NAMES: readonly string[] = [
  * `EB *` (Eventbrite), `DD *` (DoorDash), `CKE*` (Clover), `PP*`/`PAYPAL *`.
  */
 const FACILITATOR_PREFIXES: readonly string[] = [
-  'AMZN MKTP US*', 'AMZN MKTP CA*', 'AMZN MKTP', 'AMAZON MKTPLACE', 'AMAZON.COM*',
-  'PAYPAL *', 'PAYPAL*', 'SQUARE *', 'SQUARE*', 'GOOGLE *', 'GOOGLE*', 'APPLE.COM/BILL',
-  'APLPAY ', 'MSFT *', 'TST* ', 'TST*', 'SQ *', 'SQ*', 'WPY*', 'CKE*', 'EB *', 'DD *',
-  'PY *', 'IN *', 'PP*', 'SP ', 'LS ',
+  'AMZN MKTP US*',
+  'AMZN MKTP CA*',
+  'AMZN MKTP',
+  'AMAZON MKTPLACE',
+  'AMAZON.COM*',
+  'PAYPAL *',
+  'PAYPAL*',
+  'SQUARE *',
+  'SQUARE*',
+  'GOOGLE *',
+  'GOOGLE*',
+  'APPLE.COM/BILL',
+  'APLPAY ',
+  'MSFT *',
+  'TST* ',
+  'TST*',
+  'SQ *',
+  'SQ*',
+  'WPY*',
+  'CKE*',
+  'EB *',
+  'DD *',
+  'PY *',
+  'IN *',
+  'PP*',
+  'SP ',
+  'LS ',
 ];
 
 /**
@@ -105,8 +222,27 @@ const PREFIX_IS_THE_MERCHANT: ReadonlyMap<string, string> = new Map([
 
 /** Corporate boilerplate, stripped only when it is the final token. */
 const LEGAL_SUFFIXES: ReadonlySet<string> = new Set([
-  'INC', 'INCORPORATED', 'LLC', 'L.L.C', 'LLP', 'LTD', 'LIMITED', 'CORP', 'CORPORATION',
-  'CO', 'COMPANY', 'PLC', 'GMBH', 'SA', 'NV', 'BV', 'AG', 'PTY', 'PTE', 'SRL', 'SPA',
+  'INC',
+  'INCORPORATED',
+  'LLC',
+  'L.L.C',
+  'LLP',
+  'LTD',
+  'LIMITED',
+  'CORP',
+  'CORPORATION',
+  'CO',
+  'COMPANY',
+  'PLC',
+  'GMBH',
+  'SA',
+  'NV',
+  'BV',
+  'AG',
+  'PTY',
+  'PTE',
+  'SRL',
+  'SPA',
 ]);
 
 /** One named transformation. Pure, and never returns an empty string. */
@@ -151,7 +287,10 @@ function stripFacilitator(value: string): string {
     if (!value.startsWith(prefix)) continue;
     const replacement = PREFIX_IS_THE_MERCHANT.get(prefix);
     if (replacement !== undefined) return replacement;
-    const rest = value.slice(prefix.length).replace(/^[\s*#:-]+/u, '').trim();
+    const rest = value
+      .slice(prefix.length)
+      .replace(/^[\s*#:-]+/u, '')
+      .trim();
     // `SQ *` with nothing usable after it is still better described by the
     // original than by an empty string.
     return rest === '' ? value : rest;
@@ -207,7 +346,10 @@ function stripDatesAndAuth(value: string): string {
   let out = value;
   out = out.replace(/\b(?:ON\s+)?\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/gu, ' ');
   out = out.replace(/\b\d{4}-\d{2}-\d{2}\b/gu, ' ');
-  out = out.replace(/\b(?:AUTH|REF|TRACE|ARN|SEQ|CONF|INV|ORDER|TXN|TRN|ID)\s*#?\s*[A-Z0-9]{4,}\b/gu, ' ');
+  out = out.replace(
+    /\b(?:AUTH|REF|TRACE|ARN|SEQ|CONF|INV|ORDER|TXN|TRN|ID)\s*#?\s*[A-Z0-9]{4,}\b/gu,
+    ' ',
+  );
   out = out.replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/gu, ' ');
   return out.replace(/\s+/gu, ' ').trim();
 }
@@ -215,7 +357,10 @@ function stripDatesAndAuth(value: string): string {
 function stripStoreAndPos(value: string): string {
   let out = value;
   out = out.replace(/\s*#\s*\d+[A-Z]?\b/gu, ' ');
-  out = out.replace(/\b(?:STORE|STR|SHOP|UNIT|LOC|LOCATION|TERM|TERMINAL|LANE|REG|POS)\s*#?\s*\d+\b/gu, ' ');
+  out = out.replace(
+    /\b(?:STORE|STR|SHOP|UNIT|LOC|LOCATION|TERM|TERMINAL|LANE|REG|POS)\s*#?\s*\d+\b/gu,
+    ' ',
+  );
   // `T-1234`, `Q39`, `F4471` — terminal identifiers glued to a letter.
   out = out.replace(/\b[A-Z]-\d{2,}\b/gu, ' ');
   return out.replace(/\s+/gu, ' ').trim();

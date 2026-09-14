@@ -23,13 +23,7 @@ export {
   type MerchantProfileRow,
   type NewMerchantProfileRow,
 } from './merchants.ts';
-export {
-  ruleRuns,
-  rules,
-  type NewRuleRow,
-  type RuleRow,
-  type RuleRunRow,
-} from './rules.ts';
+export { ruleRuns, rules, type NewRuleRow, type RuleRow, type RuleRunRow } from './rules.ts';
 export {
   categoryAssignments,
   classifierExamples,

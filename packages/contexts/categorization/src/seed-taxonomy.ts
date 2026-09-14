@@ -127,31 +127,33 @@ export async function seedSystemTaxonomy(
 
   // --- mcc_codes -----------------------------------------------------------
   //
-  // 981 rows, so this is the one place a per-row round trip would actually hurt.
-  // Built as a single multi-row INSERT via `unnest`, which keeps it to one
-  // statement and one plan whatever the row count.
-  const mccCodes: string[] = [];
-  const mccDescriptions: string[] = [];
-  const mccCategoryIds: string[] = [];
-  const mccIds: string[] = [];
-  for (const row of MCC_CODES) {
+  // 981 rows, so this is the one place a per-row round trip would actually hurt:
+  // one statement, one plan, whatever the row count.
+  //
+  // The rows travel as **one JSON parameter**, not as five parallel arrays. The
+  // first draft of this function used `unnest($1::uuid[], $2::uuid[], ...)` and
+  // it never worked, because Drizzle's `sql` template expands an interpolated
+  // JavaScript array into a comma-separated *parameter list* — `($1, $2, $3,
+  // …)`, a row constructor — rather than binding one array-typed parameter. The
+  // resulting `cannot cast type record to uuid[]` was invisible until a test put
+  // a real Postgres behind it, which is the argument for `test/seeding.test.ts`
+  // existing at all. `jsonb_array_elements` needs no array binding, keeps the
+  // column names visible at the call site, and is one parameter rather than five.
+  const mccRows = MCC_CODES.flatMap((row) => {
     const categoryId = idByKey.get(row.categoryKey);
-    if (categoryId === undefined) continue;
-    mccIds.push(newId());
-    mccCodes.push(row.mcc);
-    mccDescriptions.push(row.description);
-    mccCategoryIds.push(categoryId);
-  }
+    return categoryId === undefined
+      ? []
+      : [{ id: newId(), mcc: row.mcc, description: row.description, categoryId }];
+  });
 
   const mccResult = await executor.execute<{ inserted: boolean }>(sql`
     INSERT INTO mcc_codes (id, user_id, mcc, description, category_id)
-    SELECT * FROM unnest(
-      ${mccIds}::uuid[],
-      ${mccIds.map(() => userId)}::uuid[],
-      ${mccCodes}::text[],
-      ${mccDescriptions}::text[],
-      ${mccCategoryIds}::uuid[]
-    )
+    SELECT (entry.value->>'id')::uuid,
+           ${userId}::uuid,
+           entry.value->>'mcc',
+           entry.value->>'description',
+           (entry.value->>'categoryId')::uuid
+      FROM jsonb_array_elements(${JSON.stringify(mccRows)}::jsonb) AS entry(value)
     ON CONFLICT (user_id, mcc) DO UPDATE SET category_id = EXCLUDED.category_id
     RETURNING (xmax = 0) AS inserted
   `);

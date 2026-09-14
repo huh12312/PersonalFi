@@ -49,12 +49,7 @@ import { UNCATEGORISED_KEY, isAssignableKey } from './taxonomy.ts';
 
 /** Where a decision came from. Mirrors the `category_assignments.source` enum. */
 export type AssignmentSource =
-  | 'user'
-  | 'rule'
-  | 'merchant_default'
-  | 'provider'
-  | 'classifier'
-  | 'none';
+  'user' | 'rule' | 'merchant_default' | 'provider' | 'classifier' | 'none';
 
 /**
  * Tier precedence as a number, so "is the new decision at least as authoritative
@@ -264,14 +259,26 @@ export function decide(input: DecisionInput, context: DecisionContext): Decision
         categoryKey: merchant.categoryKey,
         confidence: 1,
       });
-      return finish(input, merchant.categoryKey, 'merchant_default', 1, null, chain, actions, deferredActions);
+      return finish(
+        input,
+        merchant.categoryKey,
+        'merchant_default',
+        1,
+        null,
+        chain,
+        actions,
+        deferredActions,
+      );
     }
     if (merchant.supportCount >= context.merchantSupportThreshold) {
       // Confidence grows with support and saturates below certainty: nine
       // agreeing transactions are better evidence than three, and neither is
       // proof. Capped at 0.95 so a learned default never presents itself as a
       // fact the user stated.
-      const confidence = Math.min(0.95, 0.7 + 0.05 * (merchant.supportCount - context.merchantSupportThreshold));
+      const confidence = Math.min(
+        0.95,
+        0.7 + 0.05 * (merchant.supportCount - context.merchantSupportThreshold),
+      );
       chain.push({
         source: 'merchant_default',
         won: true,
@@ -279,7 +286,16 @@ export function decide(input: DecisionInput, context: DecisionContext): Decision
         categoryKey: merchant.categoryKey,
         confidence,
       });
-      return finish(input, merchant.categoryKey, 'merchant_default', confidence, null, chain, actions, deferredActions);
+      return finish(
+        input,
+        merchant.categoryKey,
+        'merchant_default',
+        confidence,
+        null,
+        chain,
+        actions,
+        deferredActions,
+      );
     }
     chain.push({
       source: 'merchant_default',
@@ -359,7 +375,8 @@ export function decide(input: DecisionInput, context: DecisionContext): Decision
   chain.push({
     source: 'classifier',
     won: false,
-    detail: outcome.kind === 'abstained' ? outcome.reason : 'predicted a category we do not recognise',
+    detail:
+      outcome.kind === 'abstained' ? outcome.reason : 'predicted a category we do not recognise',
   });
 
   // --- tier 6: say so ------------------------------------------------------

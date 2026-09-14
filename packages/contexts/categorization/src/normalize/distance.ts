@@ -81,7 +81,11 @@ export function boundedLevenshtein(a: string, b: string, maxDistance: number): n
  * merchant name cannot swallow a long one during a fuzzy merge. Two empty
  * strings are defined as identical rather than as a division by zero.
  */
-export function similarity(a: string, b: string, maxDistance = Math.max(a.length, b.length)): number {
+export function similarity(
+  a: string,
+  b: string,
+  maxDistance = Math.max(a.length, b.length),
+): number {
   const longest = Math.max(a.length, b.length);
   if (longest === 0) return 1;
   const distance = boundedLevenshtein(a, b, Math.min(maxDistance, longest));

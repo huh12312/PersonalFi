@@ -74,7 +74,11 @@ function rule(overrides: Partial<Rule> = {}): Rule {
 function biasedClassifier(): ClassifierModel {
   const examples = [
     ...Array.from({ length: 8 }, () => ({
-      features: featuresOf({ cleanedPayee: 'BLUE BOTTLE COFFEE', amountMinor: -650n, accountType: 'credit' }),
+      features: featuresOf({
+        cleanedPayee: 'BLUE BOTTLE COFFEE',
+        amountMinor: -650n,
+        accountType: 'credit',
+      }),
       categoryKey: 'shopping.other_shopping',
     })),
     ...Array.from({ length: 8 }, () => ({
@@ -118,7 +122,9 @@ describe('the decision order', () => {
   it('3 beats 4: a merchant default wins against the provider', () => {
     const decision = decide(
       input({ providerCategory: PROVIDER_COFFEE }),
-      context({ merchantDefault: { categoryKey: 'dining.coffee', locked: false, supportCount: 5 } }),
+      context({
+        merchantDefault: { categoryKey: 'dining.coffee', locked: false, supportCount: 5 },
+      }),
     );
     expect(decision.source).toBe('merchant_default');
     expect(decision.categoryKey).toBe('dining.coffee');
@@ -134,7 +140,10 @@ describe('the decision order', () => {
   });
 
   it('5 beats 6: the classifier wins against giving up', () => {
-    const decision = decide(input(), context({ classifier: biasedClassifier(), confidenceFloor: 0 }));
+    const decision = decide(
+      input(),
+      context({ classifier: biasedClassifier(), confidenceFloor: 0 }),
+    );
     expect(decision.source).toBe('classifier');
     expect(decision.categoryKey).toBe('shopping.other_shopping');
   });
@@ -151,13 +160,17 @@ describe('the merchant tier', () => {
   it('needs three agreeing transactions before a learned default applies', () => {
     const below = decide(
       input(),
-      context({ merchantDefault: { categoryKey: 'dining.coffee', locked: false, supportCount: 2 } }),
+      context({
+        merchantDefault: { categoryKey: 'dining.coffee', locked: false, supportCount: 2 },
+      }),
     );
     expect(below.source).toBe('none');
 
     const at = decide(
       input(),
-      context({ merchantDefault: { categoryKey: 'dining.coffee', locked: false, supportCount: 3 } }),
+      context({
+        merchantDefault: { categoryKey: 'dining.coffee', locked: false, supportCount: 3 },
+      }),
     );
     expect(at.source).toBe('merchant_default');
   });
@@ -172,8 +185,18 @@ describe('the merchant tier', () => {
   });
 
   it('is more confident with more support, but never certain', () => {
-    const three = decide(input(), context({ merchantDefault: { categoryKey: 'dining.coffee', locked: false, supportCount: 3 } }));
-    const twenty = decide(input(), context({ merchantDefault: { categoryKey: 'dining.coffee', locked: false, supportCount: 20 } }));
+    const three = decide(
+      input(),
+      context({
+        merchantDefault: { categoryKey: 'dining.coffee', locked: false, supportCount: 3 },
+      }),
+    );
+    const twenty = decide(
+      input(),
+      context({
+        merchantDefault: { categoryKey: 'dining.coffee', locked: false, supportCount: 20 },
+      }),
+    );
     expect(twenty.confidence).toBeGreaterThan(three.confidence);
     expect(twenty.confidence).toBeLessThan(1);
   });
@@ -181,7 +204,13 @@ describe('the merchant tier', () => {
   it('ignores a default naming a category that no longer exists', () => {
     const decision = decide(
       input(),
-      context({ merchantDefault: { categoryKey: 'dining.deleted_by_a_migration', locked: true, supportCount: 9 } }),
+      context({
+        merchantDefault: {
+          categoryKey: 'dining.deleted_by_a_migration',
+          locked: true,
+          supportCount: 9,
+        },
+      }),
     );
     expect(decision.source).toBe('none');
   });
@@ -193,8 +222,16 @@ describe('rules', () => {
       input(),
       context({
         rules: [
-          rule({ id: '00000000-0000-7000-8000-0000000000b2', priority: 200, actions: [{ type: 'set_category', categoryKey: 'dining.restaurants' }] }),
-          rule({ id: '00000000-0000-7000-8000-0000000000b1', priority: 10, actions: [{ type: 'set_category', categoryKey: 'dining.coffee' }] }),
+          rule({
+            id: '00000000-0000-7000-8000-0000000000b2',
+            priority: 200,
+            actions: [{ type: 'set_category', categoryKey: 'dining.restaurants' }],
+          }),
+          rule({
+            id: '00000000-0000-7000-8000-0000000000b1',
+            priority: 10,
+            actions: [{ type: 'set_category', categoryKey: 'dining.coffee' }],
+          }),
         ],
       }),
     );
@@ -206,11 +243,21 @@ describe('rules', () => {
     // is both deterministic and the answer a user would predict. Without it the
     // same transaction categorises differently on a re-run.
     const rules = [
-      rule({ id: '00000000-0000-7000-8000-0000000000b2', priority: 50, actions: [{ type: 'set_category', categoryKey: 'dining.restaurants' }] }),
-      rule({ id: '00000000-0000-7000-8000-0000000000b1', priority: 50, actions: [{ type: 'set_category', categoryKey: 'dining.coffee' }] }),
+      rule({
+        id: '00000000-0000-7000-8000-0000000000b2',
+        priority: 50,
+        actions: [{ type: 'set_category', categoryKey: 'dining.restaurants' }],
+      }),
+      rule({
+        id: '00000000-0000-7000-8000-0000000000b1',
+        priority: 50,
+        actions: [{ type: 'set_category', categoryKey: 'dining.coffee' }],
+      }),
     ];
     expect(decide(input(), context({ rules })).categoryKey).toBe('dining.coffee');
-    expect(decide(input(), context({ rules: [...rules].reverse() })).categoryKey).toBe('dining.coffee');
+    expect(decide(input(), context({ rules: [...rules].reverse() })).categoryKey).toBe(
+      'dining.coffee',
+    );
   });
 
   it('ignores a disabled rule', () => {
@@ -241,7 +288,12 @@ describe('rules', () => {
       input(),
       context({
         rules: [
-          rule({ id: '00000000-0000-7000-8000-0000000000b1', priority: 10, stopProcessing: true, actions: [{ type: 'set_note', note: 'seen' }] }),
+          rule({
+            id: '00000000-0000-7000-8000-0000000000b1',
+            priority: 10,
+            stopProcessing: true,
+            actions: [{ type: 'set_note', note: 'seen' }],
+          }),
           rule({ id: '00000000-0000-7000-8000-0000000000b2', priority: 20 }),
         ],
       }),
@@ -259,10 +311,13 @@ describe('rules', () => {
           rule({
             actions: [
               { type: 'set_category', categoryKey: 'dining.coffee' },
-              { type: 'split', parts: [
-                { categoryKey: 'dining.coffee', shareBasisPoints: 5000 },
-                { categoryKey: 'dining.restaurants', shareBasisPoints: 5000 },
-              ] },
+              {
+                type: 'split',
+                parts: [
+                  { categoryKey: 'dining.coffee', shareBasisPoints: 5000 },
+                  { categoryKey: 'dining.restaurants', shareBasisPoints: 5000 },
+                ],
+              },
             ],
           }),
         ],
@@ -298,7 +353,10 @@ describe('the explanation', () => {
   });
 
   it('says why the classifier abstained', () => {
-    const decision = decide(input(), context({ classifier: biasedClassifier(), confidenceFloor: 0.999 }));
+    const decision = decide(
+      input(),
+      context({ classifier: biasedClassifier(), confidenceFloor: 0.999 }),
+    );
     const classifier = decision.chain.find((entry) => entry.source === 'classifier');
     expect(classifier?.won).toBe(false);
     expect(classifier?.detail).toMatch(/below the floor/u);
@@ -318,13 +376,26 @@ describe('precedence and replacement', () => {
   });
 
   it('lets nothing but a user override a user', () => {
-    const sources: AssignmentSource[] = ['rule', 'merchant_default', 'provider', 'classifier', 'none'];
+    const sources: AssignmentSource[] = [
+      'rule',
+      'merchant_default',
+      'provider',
+      'classifier',
+      'none',
+    ];
     for (const source of sources) expect(shouldReplace('user', source)).toBe(false);
     expect(shouldReplace('user', 'user')).toBe(true);
   });
 
   it('orders the tiers the way the waterfall does', () => {
-    const order: AssignmentSource[] = ['none', 'classifier', 'provider', 'merchant_default', 'rule', 'user'];
+    const order: AssignmentSource[] = [
+      'none',
+      'classifier',
+      'provider',
+      'merchant_default',
+      'rule',
+      'user',
+    ];
     for (let index = 1; index < order.length; index += 1) {
       expect(precedenceOf(order[index] as AssignmentSource)).toBeGreaterThan(
         precedenceOf(order[index - 1] as AssignmentSource),

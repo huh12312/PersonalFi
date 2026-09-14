@@ -57,7 +57,7 @@ export const MerchantDefaultLearned = defineEvent({
   aggregateType: 'merchant',
   description:
     'Enough confirmations accumulated for a merchant that its category is now applied automatically ' +
-    '(04 §5.2\'s merchant memory). Emitted at the moment the threshold is crossed, not on every ' +
+    "(04 §5.2's merchant memory). Emitted at the moment the threshold is crossed, not on every " +
     'confirmation, because the fact worth reacting to is "this merchant became automatic" — that is ' +
     'what the UI tells the user about, and telling them once is the difference between the app ' +
     'feeling like it learned and the app feeling like it nags.',

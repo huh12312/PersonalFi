@@ -16,8 +16,19 @@
  * more thorough, and feeds the merchant profile and the classifier. They agree on
  * the easy cases by construction — both start from the same descriptor — and
  * where they differ, Ledger's answer is what the user sees in the list and this
- * one's is what the engine reasons about. `merchant-agreement.test.ts` pins the
- * cases where they must not diverge.
+ * one's is what the engine reasons about.
+ *
+ * An earlier draft of this header promised a `merchant-agreement.test.ts` in
+ * this package pinning the cases where the two must not diverge. **It cannot
+ * live here**: asserting agreement means calling `@ctx/ledger`'s normaliser, and
+ * `personalfi/layer-imports` denies one context importing another — correctly,
+ * and not a rule worth an exception for a test. The cases the two *must* agree
+ * on are the ones `descriptor.test.ts` pins on this side (the seed generator's
+ * six descriptor styles, which `@ctx/ledger`'s `normalise.test.ts` pins on its
+ * own), and a genuine cross-context comparison belongs in `apps/api`, the one
+ * layer allowed to see both. Deferred, and recorded in
+ * `docs/evidence/phase-1/wp1.4-categorization.md` rather than left as a promise
+ * in a comment.
  */
 
 export { fold, foldUpper } from './fold.ts';
@@ -66,8 +77,7 @@ export function normaliseDescriptor(
 ): NormalisedDescriptor {
   const cleaned = cleanDescriptor(raw);
   const provider = providerName?.trim();
-  const displaySource =
-    provider !== undefined && provider !== '' ? provider : cleaned.cleaned;
+  const displaySource = provider !== undefined && provider !== '' ? provider : cleaned.cleaned;
 
   return {
     cleaned: cleaned.cleaned,

@@ -32,22 +32,22 @@ import {
 } from './engine.ts';
 import { AssignmentsChanged, MerchantDefaultLearned, RuleApplied } from './events.ts';
 import { CategorizationError } from './errors.ts';
-import { streamTransactions, type CategorizableTransaction, type LedgerPort } from './ledger-port.ts';
+import {
+  streamTransactions,
+  type CategorizableTransaction,
+  type LedgerPort,
+} from './ledger-port.ts';
 import { cleanDescriptor } from './normalize/descriptor.ts';
 import { fingerprint } from './normalize/fingerprint.ts';
 import { titleCase } from './normalize/cluster.ts';
-import { matchRule, orderRules } from './rules/match.ts';
+import { matchRule } from './rules/match.ts';
 import { ruleSchema, type Rule } from './rules/schema.ts';
 import { categoryIdsByKey, categoryKeysById } from './seed-taxonomy.ts';
 import { UNCATEGORISED_KEY, isAssignableKey } from './taxonomy.ts';
 
 /** What triggered a batch. Carried on `AssignmentsChanged` for replay clarity. */
 export type CategorizationTrigger =
-  | 'sync'
-  | 'rule_apply'
-  | 'confirm'
-  | 'backfill'
-  | 'model_retrain';
+  'sync' | 'rule_apply' | 'confirm' | 'backfill' | 'model_retrain';
 
 export interface CategorizeResult {
   readonly considered: number;
@@ -96,7 +96,11 @@ export async function loadRules(
       createdFromTransactionId: row['created_from_transaction_id'] ?? null,
     });
     if (parsed.success) rules.push(parsed.data);
-    else rejected.push({ id: String(row['id']), reason: parsed.error.issues[0]?.message ?? 'invalid' });
+    else
+      rejected.push({
+        id: String(row['id']),
+        reason: parsed.error.issues[0]?.message ?? 'invalid',
+      });
   }
   return { rules, rejected };
 }
@@ -200,12 +204,14 @@ export async function categorizeTransactions(
 
   return database.transaction(async (tx) => {
     const executor = tx as unknown as CategorizationExecutor;
-    const [{ rules }, classifier, merchantDefaults, idByKey] = await Promise.all([
-      loadRules(executor, context.userId),
-      loadClassifier(executor, context.userId),
-      loadMerchantDefaults(executor, context.userId),
-      categoryIdsByKey(executor, context.userId),
-    ]);
+    // Sequential, not `Promise.all`. A Drizzle transaction handle is one pooled
+    // client, and node-postgres serialises concurrent queries on a single client
+    // behind a deprecation warning today and an error in pg 9. Four round trips
+    // once per batch is not the cost worth taking that risk for.
+    const { rules } = await loadRules(executor, context.userId);
+    const classifier = await loadClassifier(executor, context.userId);
+    const merchantDefaults = await loadMerchantDefaults(executor, context.userId);
+    const idByKey = await categoryIdsByKey(executor, context.userId);
 
     if (idByKey.size === 0) {
       throw new CategorizationError(
@@ -238,7 +244,9 @@ export async function categorizeTransactions(
       const decision = decide(decisionInputOf(transaction), {
         ...decisionContext,
         merchantDefault:
-          transaction.merchantId === null ? null : merchantDefaults.get(transaction.merchantId) ?? null,
+          transaction.merchantId === null
+            ? null
+            : (merchantDefaults.get(transaction.merchantId) ?? null),
       });
 
       // Tier 1 won: the user already said so through the ledger's overlay, and
@@ -250,9 +258,10 @@ export async function categorizeTransactions(
         continue;
       }
 
-      const wrote = options.dryRun === true
-        ? await wouldWrite(executor, transaction.id, decision, idByKey)
-        : await writeAssignment(executor, transaction.id, decision, idByKey, context);
+      const wrote =
+        options.dryRun === true
+          ? await wouldWrite(executor, transaction.id, decision, idByKey)
+          : await writeAssignment(executor, transaction.id, decision, idByKey, context);
 
       if (!wrote) {
         skipped += 1;
@@ -266,8 +275,18 @@ export async function categorizeTransactions(
       await appendEvent(
         outboxOf(executor),
         AssignmentsChanged.create(
-          { transactionIds: changed, count: changed.length, bySource, trigger, ruleId: options.ruleId ?? null },
-          { userId: context.userId, correlationId: context.correlationId, causationId: context.causationId ?? null },
+          {
+            transactionIds: changed,
+            count: changed.length,
+            bySource,
+            trigger,
+            ruleId: options.ruleId ?? null,
+          },
+          {
+            userId: context.userId,
+            correlationId: context.correlationId,
+            causationId: context.causationId ?? null,
+          },
         ),
       );
     }
@@ -561,7 +580,8 @@ export async function confirmAssignment(
 
     // --- 2. the classifier's corpus ---------------------------------------
     const features = featuresOf({
-      cleanedPayee: cleanDescriptor(input.transaction.rawDescriptor || input.transaction.payee).cleaned,
+      cleanedPayee: cleanDescriptor(input.transaction.rawDescriptor || input.transaction.payee)
+        .cleaned,
       amountMinor: input.transaction.amountMinor,
       accountType: input.transaction.accountType,
       mcc: input.transaction.mcc,
@@ -585,7 +605,9 @@ export async function confirmAssignment(
       // does the arithmetic in one statement. The counter is a cache of "how
       // many confirmed assignments agree", and the confirmed assignments are
       // still the source of truth if it ever needs rebuilding.
-      const cleaned = cleanDescriptor(input.transaction.rawDescriptor || input.transaction.payee).cleaned;
+      const cleaned = cleanDescriptor(
+        input.transaction.rawDescriptor || input.transaction.payee,
+      ).cleaned;
       const profile = await executor.execute<{
         id: string;
         default_category_id: string | null;
@@ -689,7 +711,11 @@ export async function retrainClassifier(
     const executor = tx as unknown as CategorizationExecutor;
     const keyById = await categoryKeysById(executor, context.userId);
 
-    const counts = await executor.execute<{ feature: string; category_id: string; count: number }>(sql`
+    const counts = await executor.execute<{
+      feature: string;
+      category_id: string;
+      count: number;
+    }>(sql`
       SELECT feature, category_id, count
         FROM classifier_examples
        WHERE user_id = ${context.userId} AND count > 0
@@ -721,7 +747,10 @@ export async function retrainClassifier(
       const exampleCount = Number(row.count);
       const perExample = Math.max(1, Math.ceil(features.length / Math.max(1, exampleCount)));
       for (let index = 0; index < exampleCount; index += 1) {
-        examples.push({ features: features.slice(index * perExample, (index + 1) * perExample), categoryKey: key });
+        examples.push({
+          features: features.slice(index * perExample, (index + 1) * perExample),
+          categoryKey: key,
+        });
       }
     }
 
@@ -759,7 +788,8 @@ async function nextClassifierVersion(
 
 export interface ApplyRuleResult {
   readonly ruleId: string;
-  readonly runId: string | null;
+  /** The `rule_runs` row this produced. Present for a preview too — see below. */
+  readonly runId: string;
   readonly preview: boolean;
   readonly matchedCount: number;
   /** How many assignments would change (preview) or did change (apply). */
@@ -827,10 +857,31 @@ export async function applyRule(
     { ...options, trigger: 'rule_apply', ruleId: rule.id, dryRun: preview },
   );
 
+  const runId = newId();
+
   if (preview) {
+    // A preview is recorded too, and the reason is in this package's
+    // OWNERSHIP.md: a preview count and the later apply count disagreeing is
+    // exactly the signal that something moved in between, and it is invisible
+    // after the fact unless both were written down. No `RuleApplied` event,
+    // though — nothing happened, and a notification saying otherwise would be a
+    // lie.
+    await database.transaction(async (tx) => {
+      const executor = tx as unknown as CategorizationExecutor;
+      await executor.execute(sql`
+        INSERT INTO rule_runs
+          (id, user_id, rule_id, mode, retroactive, matched_count, changed_count, started_at, finished_at)
+        VALUES (
+          ${runId}, ${context.userId}, ${rule.id}, 'preview', ${input.retroactive === true},
+          ${matched.length}, ${result.written},
+          ${startedAt.toISOString()}::timestamptz, ${context.clock.now().toISOString()}::timestamptz
+        )
+      `);
+    });
+
     return {
       ruleId: rule.id,
-      runId: null,
+      runId,
       preview: true,
       matchedCount: matched.length,
       changedCount: result.written,
@@ -838,7 +889,6 @@ export async function applyRule(
     };
   }
 
-  const runId = newId();
   await database.transaction(async (tx) => {
     const executor = tx as unknown as CategorizationExecutor;
     await executor.execute(sql`
@@ -911,14 +961,19 @@ export async function createRuleFromTransaction(
     );
   }
 
-  const cleaned = cleanDescriptor(input.transaction.rawDescriptor || input.transaction.payee).cleaned;
+  const cleaned = cleanDescriptor(
+    input.transaction.rawDescriptor || input.transaction.payee,
+  ).cleaned;
   const candidate = {
     id: newId(),
     userId: context.userId,
     name: input.name ?? `Always categorise ${titleCase(cleaned)}`,
     priority: input.priority ?? 100,
     enabled: true,
-    conditions: { all: [{ type: 'payee' as const, match: 'contains' as const, value: cleaned }], any: [] },
+    conditions: {
+      all: [{ type: 'payee' as const, match: 'contains' as const, value: cleaned }],
+      any: [],
+    },
     actions: [{ type: 'set_category' as const, categoryKey: input.categoryKey }],
     runOnSync: input.runOnSync ?? true,
     stopProcessing: false,

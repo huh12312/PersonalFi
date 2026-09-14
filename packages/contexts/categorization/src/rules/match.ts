@@ -9,7 +9,7 @@
  * dead-letter the consumer — the user's punishment for a bad rule should be that
  * it does nothing, visibly, not that their sync stops.
  */
-import { DateOnly } from '@core/kernel';
+import type { DateOnly } from '@core/kernel';
 import { foldUpper } from '../normalize/fold.ts';
 import { MAX_SUBJECT_LENGTH, type Rule, type RuleCondition } from './schema.ts';
 
@@ -66,7 +66,10 @@ function compile(pattern: string): RegExp | null {
   return compiled;
 }
 
-function matchesPayee(condition: Extract<RuleCondition, { type: 'payee' }>, subject: MatchSubject): boolean {
+function matchesPayee(
+  condition: Extract<RuleCondition, { type: 'payee' }>,
+  subject: MatchSubject,
+): boolean {
   const needle = foldUpper(condition.value);
   // Both forms are searched: a user who typed "wholefds" is thinking of the raw
   // descriptor, and a user who typed "Whole Foods" is thinking of the clean name.
@@ -88,7 +91,10 @@ function matchesPayee(condition: Extract<RuleCondition, { type: 'payee' }>, subj
   }
 }
 
-export function evaluateCondition(condition: RuleCondition, subject: MatchSubject): ConditionOutcome {
+export function evaluateCondition(
+  condition: RuleCondition,
+  subject: MatchSubject,
+): ConditionOutcome {
   switch (condition.type) {
     case 'payee':
       return { condition, matched: matchesPayee(condition, subject) };
@@ -106,7 +112,9 @@ export function evaluateCondition(condition: RuleCondition, subject: MatchSubjec
 
     case 'amount': {
       const value = condition.absolute
-        ? (subject.amountMinor < 0n ? -subject.amountMinor : subject.amountMinor)
+        ? subject.amountMinor < 0n
+          ? -subject.amountMinor
+          : subject.amountMinor
         : subject.amountMinor;
       if (condition.minMinor !== null && value < BigInt(condition.minMinor)) {
         return { condition, matched: false };
@@ -141,11 +149,17 @@ export function evaluateCondition(condition: RuleCondition, subject: MatchSubjec
 
     case 'provider_category': {
       const wanted = new Set(condition.codes.map((code) => code.toUpperCase()));
-      return { condition, matched: subject.providerCodes.some((code) => wanted.has(code.toUpperCase())) };
+      return {
+        condition,
+        matched: subject.providerCodes.some((code) => wanted.has(code.toUpperCase())),
+      };
     }
 
     case 'currency':
-      return { condition, matched: subject.currency.trim().toUpperCase() === condition.currency.toUpperCase() };
+      return {
+        condition,
+        matched: subject.currency.trim().toUpperCase() === condition.currency.toUpperCase(),
+      };
 
     case 'is_transfer':
       return { condition, matched: subject.isTransfer === condition.value };

@@ -1,14 +1,41 @@
 // SPDX-License-Identifier: MIT
+import { createdAtColumn, flagColumn, idColumn, instantColumn, userIdColumn } from '@core/db';
 import {
-  createdAtColumn,
-  flagColumn,
-  idColumn,
-  instantColumn,
-  userIdColumn,
-} from '@core/db';
-import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgTable,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { categories } from './categories.ts';
 import { rules } from './rules.ts';
+
+/**
+ * A tier's confidence in itself: `0.0000` to `1.0000`.
+ *
+ * `NUMERIC(5,4)`, not `DOUBLE PRECISION`, for the reason `@ctx/ledger`'s
+ * `confidenceColumn()` gives: docs/CONVENTIONS.md permits floats for confidence
+ * scores and arithmetically one would be fine, but the migration gate
+ * (`packages/db/test/migrate.test.ts`) bans `REAL`/`DOUBLE PRECISION`/`FLOAT`
+ * across the whole schema rather than adjudicating column by column, and a ban
+ * with a growing exception list stops catching the case it was written for.
+ *
+ * Declared here rather than imported from `@ctx/ledger`: that would be a context
+ * importing another context, which `personalfi/layer-imports` denies. Twenty-six
+ * lines of identical reasoning in two places is the honest price of the boundary;
+ * promoting the helper into `@core/db` alongside `amountMinorColumn()` is the
+ * right fix and is proposed in this WP's evidence document.
+ *
+ * `mode: 'number'` because a confidence really is a number in the application —
+ * it is thresholded, sorted on by the review queue, and compared against
+ * `confidenceFloor`.
+ */
+function confidenceColumn(name: string) {
+  return numeric(name, { precision: 5, scale: 4, mode: 'number' });
+}
 
 /** Mirrors `AssignmentSource` in `src/engine.ts`. Kept in step by a test. */
 export const ASSIGNMENT_SOURCES = [
@@ -65,8 +92,7 @@ export const categoryAssignments = pgTable(
       .notNull()
       .references(() => categories.id, { onDelete: 'restrict' }),
     source: text('source').$type<AssignmentSourceValue>().notNull(),
-    /** `NUMERIC(5,4)`, per the ban on floats anywhere in the schema. */
-    confidence: text('confidence').notNull().default('0'),
+    confidence: confidenceColumn('confidence').notNull().default(0),
     ruleId: uuid('rule_id').references(() => rules.id, { onDelete: 'set null' }),
     /** The full decision chain from `decide()`. See the note above. */
     evidence: jsonb('evidence').notNull(),
@@ -115,7 +141,11 @@ export const classifierExamples = pgTable(
     updatedAt: instantColumn('updated_at').notNull(),
   },
   (table) => [
-    uniqueIndex('classifier_examples_feature_idx').on(table.userId, table.feature, table.categoryId),
+    uniqueIndex('classifier_examples_feature_idx').on(
+      table.userId,
+      table.feature,
+      table.categoryId,
+    ),
     index('classifier_examples_category_idx').on(table.userId, table.categoryId),
   ],
 );

@@ -85,7 +85,6 @@ describe('accuracy', () => {
         abstain: result.abstainRate.toFixed(4),
       };
     });
-    // eslint-disable-next-line no-console -- this suite's output is the evidence.
     console.table(table);
     expect(table).toHaveLength(CONFIGS.length);
   });
@@ -108,7 +107,6 @@ describe('accuracy', () => {
       recall: result.recall.toFixed(4),
       abstain: result.abstainRate.toFixed(4),
     }));
-    // eslint-disable-next-line no-console -- this suite's output is the evidence.
     console.table(cold);
     expect(cold).toHaveLength(2);
   });

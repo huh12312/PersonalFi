@@ -203,7 +203,11 @@ export function predict(
   confidenceFloor: number,
 ): ClassifierOutcome {
   if (model.totalExamples === 0) {
-    return { kind: 'abstained', reason: 'model is cold: no confirmed examples yet', categoryKey: null };
+    return {
+      kind: 'abstained',
+      reason: 'model is cold: no confirmed examples yet',
+      categoryKey: null,
+    };
   }
   if (features.length === 0) {
     return { kind: 'abstained', reason: 'no usable features', categoryKey: null };
@@ -291,14 +295,16 @@ export function predict(
   // if its absolute weight is large.
   const winnerContributions = perCategoryContributions.get(winner) ?? [];
   const runnerContributions = new Map(
-    (runnerUp === undefined ? [] : perCategoryContributions.get(runnerUp[0]) ?? []).map(
+    (runnerUp === undefined ? [] : (perCategoryContributions.get(runnerUp[0]) ?? [])).map(
       (contribution) => [contribution.feature, contribution.weight],
     ),
   );
   const topFeatures = [...winnerContributions]
     .map((contribution) => ({
       feature: contribution.feature,
-      weight: contribution.weight - (runnerContributions.get(contribution.feature) ?? contribution.weight),
+      weight:
+        contribution.weight -
+        (runnerContributions.get(contribution.feature) ?? contribution.weight),
     }))
     .sort((a, b) => b.weight - a.weight || a.feature.localeCompare(b.feature))
     .slice(0, 3);

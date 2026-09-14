@@ -27,7 +27,12 @@
  * does not return simply is not categorised. A genuine database failure still
  * throws, and should.
  */
-import { registerConsumer, type ConsumerContext, type EventEnvelope, type RegisteredConsumer } from '@core/platform';
+import {
+  registerConsumer,
+  type ConsumerContext,
+  type EventEnvelope,
+  type RegisteredConsumer,
+} from '@core/platform';
 import type { CategorizationDatabase } from './db.ts';
 import type { LedgerPort } from './ledger-port.ts';
 import { categorizeTransactions, type CategorizeOptions } from './service.ts';

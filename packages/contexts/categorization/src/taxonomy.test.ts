@@ -36,7 +36,8 @@ describe('the taxonomy', () => {
   it('is exactly two levels deep', () => {
     for (const node of TAXONOMY) {
       expect(node.key).not.toContain('.');
-      for (const child of node.children) expect(child.key).toBe(`${node.key}.${child.key.split('.')[1]}`);
+      for (const child of node.children)
+        expect(child.key).toBe(`${node.key}.${child.key.split('.')[1]}`);
     }
   });
 
@@ -134,13 +135,21 @@ describe('the PFC v2 map', () => {
 
   it('prefers the detailed code and falls back to the primary', () => {
     const detailed = matchProviderCategory(
-      readProviderCategory({ primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_COFFEE', confidence_level: 'HIGH' }),
+      readProviderCategory({
+        primary: 'FOOD_AND_DRINK',
+        detailed: 'FOOD_AND_DRINK_COFFEE',
+        confidence_level: 'HIGH',
+      }),
     );
     expect(detailed?.categoryKey).toBe('dining.coffee');
     expect(detailed?.matchedOn).toBe('detailed');
 
     const primaryOnly = matchProviderCategory(
-      readProviderCategory({ primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_SOMETHING_NEW', confidence_level: 'HIGH' }),
+      readProviderCategory({
+        primary: 'FOOD_AND_DRINK',
+        detailed: 'FOOD_AND_DRINK_SOMETHING_NEW',
+        confidence_level: 'HIGH',
+      }),
     );
     expect(primaryOnly?.matchedOn).toBe('primary');
     // Capped: "this is food and drink" is a weaker claim than "this is a coffee shop".
@@ -149,7 +158,9 @@ describe('the PFC v2 map', () => {
   });
 
   it('returns null rather than guessing when it recognises nothing', () => {
-    expect(matchProviderCategory(readProviderCategory({ primary: 'NOPE', detailed: 'NOPE_NOPE' }))).toBeNull();
+    expect(
+      matchProviderCategory(readProviderCategory({ primary: 'NOPE', detailed: 'NOPE_NOPE' })),
+    ).toBeNull();
     expect(readProviderCategory(null)).toBeNull();
     expect(readProviderCategory('a string')).toBeNull();
     expect(readProviderCategory([])).toBeNull();

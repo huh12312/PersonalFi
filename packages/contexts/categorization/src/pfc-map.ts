@@ -13,7 +13,7 @@
  *
  * The code list was checked against the primary source
  * (`plaid.com/documents/pfc-taxonomy-all.csv`) on 2026-09-13 and matches what
- * 01 §5.4 verified on 2026-09-10: **18 primary, 127 detailed**. `pfc-map.test.ts`
+ * 01 §5.4 verified on 2026-09-10: **18 primary, 127 detailed**. `taxonomy.test.ts`
  * asserts those two counts and asserts every value resolves to an assignable
  * leaf, so a hand edit that drops a code fails the suite rather than silently
  * routing a category to `uncategorised`.
@@ -185,7 +185,10 @@ export const PFC_DETAILED_TO_KEY: ReadonlyMap<string, string> = new Map([
   ['GENERAL_SERVICES_OTHER_GENERAL_SERVICES', 'fees_and_services.other_fees'],
   // GOVERNMENT_AND_NON_PROFIT
   ['GOVERNMENT_AND_NON_PROFIT_DONATIONS', 'giving_and_taxes.donations'],
-  ['GOVERNMENT_AND_NON_PROFIT_GOVERNMENT_DEPARTMENTS_AND_AGENCIES', 'giving_and_taxes.government_fees'],
+  [
+    'GOVERNMENT_AND_NON_PROFIT_GOVERNMENT_DEPARTMENTS_AND_AGENCIES',
+    'giving_and_taxes.government_fees',
+  ],
   ['GOVERNMENT_AND_NON_PROFIT_TAX_PAYMENT', 'giving_and_taxes.taxes'],
   ['GOVERNMENT_AND_NON_PROFIT_OTHER_GOVERNMENT_AND_NON_PROFIT', 'giving_and_taxes.other_giving'],
   // TRANSPORTATION
@@ -246,8 +249,7 @@ export function readProviderCategory(raw: unknown): ProviderCategoryHint | null 
   const detailed = typeof record['detailed'] === 'string' ? record['detailed'] : null;
   const snake = record['confidence_level'];
   const camel = record['confidenceLevel'];
-  const level =
-    typeof snake === 'string' ? snake : typeof camel === 'string' ? camel : null;
+  const level = typeof snake === 'string' ? snake : typeof camel === 'string' ? camel : null;
   if (primary === null && detailed === null) return null;
   return { primary, detailed, confidenceLevel: level };
 }

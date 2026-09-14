@@ -62,9 +62,7 @@ export function fingerprint(raw: string): string {
  * loss where under-merging is a UI annoyance (01 §5.2's rule, applied here).
  */
 export function ngramFingerprint(raw: string, size = 2): string {
-  const folded = fold(raw)
-    .toLowerCase()
-    .replaceAll(NON_TOKEN, '');
+  const folded = fold(raw).toLowerCase().replaceAll(NON_TOKEN, '');
   if (folded.length === 0) return '';
   if (folded.length <= size) return folded;
 

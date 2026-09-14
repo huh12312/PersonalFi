@@ -66,7 +66,7 @@ const INVISIBLE = /[\p{Cc}\p{Cf}\u200B-\u200D\uFEFF]/gu;
 /**
  * NFKC, strip the invisible, fold the punctuation, strip the diacritics,
  * collapse the whitespace. Idempotent: `fold(fold(x)) === fold(x)`, which
- * `fold.test.ts` asserts as a property, because every later stage may be run
+ * `descriptor.test.ts` asserts as a property, because every later stage may be run
  * against input that has already been through here.
  */
 export function fold(raw: string): string {
@@ -74,19 +74,12 @@ export function fold(raw: string): string {
   // and a newline are both `\p{Cc}`, so stripping the class first would turn
   // `BLUE\tBOTTLE` into `BLUEBOTTLE` — a different merchant, produced by a rule
   // that was only meant to remove things nobody can see.
-  const composed = raw
-    .normalize('NFKC')
-    .replaceAll(/\s/gu, ' ')
-    .replaceAll(INVISIBLE, '');
+  const composed = raw.normalize('NFKC').replaceAll(/\s/gu, ' ').replaceAll(INVISIBLE, '');
 
   let mapped = '';
   for (const character of composed) mapped += PUNCTUATION_FOLD.get(character) ?? character;
 
-  return mapped
-    .normalize('NFD')
-    .replaceAll(COMBINING_MARKS, '')
-    .replaceAll(/\s+/gu, ' ')
-    .trim();
+  return mapped.normalize('NFD').replaceAll(COMBINING_MARKS, '').replaceAll(/\s+/gu, ' ').trim();
 }
 
 /** `fold`, then upper case. The form every descriptor rule is written against. */

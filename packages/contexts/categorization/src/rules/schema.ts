@@ -55,7 +55,8 @@ const safePattern = z
   .refine(
     (pattern) => {
       try {
-        // eslint-disable-next-line no-new -- compiling is the validation.
+        // Compiling *is* the validation: the constructor throws on a bad pattern
+        // and the result is deliberately discarded.
         new RegExp(pattern, 'iu');
         return true;
       } catch {
@@ -70,14 +71,42 @@ const payeeMatch = z.enum(['contains', 'not_contains', 'starts_with', 'ends_with
 export const conditionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('payee'), match: payeeMatch, value: z.string().min(1).max(200) }),
   z.object({ type: z.literal('payee_regex'), pattern: safePattern }),
-  z.object({
-    type: z.literal('amount'),
-    /** Signed minor units, house convention: negative is an outflow. */
-    minMinor: z.string().regex(/^-?\d+$/u).nullable(),
-    maxMinor: z.string().regex(/^-?\d+$/u).nullable(),
-    /** Compare |amount| instead, for "anything over $100 either way". */
-    absolute: z.boolean().default(false),
-  }),
+  z
+    .object({
+      type: z.literal('amount'),
+      /**
+       * Signed minor units, house convention: negative is an outflow. A
+       * **string**, not a number, for the same reason money crosses the wire as
+       * one — `bigint` does not survive `JSON.stringify` and IEEE-754 loses the
+       * cents of a large amount.
+       */
+      minMinor: z
+        .string()
+        .regex(/^-?\d+$/u)
+        .nullable(),
+      maxMinor: z
+        .string()
+        .regex(/^-?\d+$/u)
+        .nullable(),
+      /** Compare |amount| instead, for "anything over $100 either way". */
+      absolute: z.boolean().default(false),
+    })
+    /**
+     * An inverted range matches nothing, ever, and looks like a working rule in
+     * the list. This is the specific check `rules.ts`, `OWNERSHIP.md` and
+     * migration 0006 all cite as the reason `conditions` is validated jsonb
+     * rather than two child tables — no `CHECK` spread across `rule_conditions`
+     * rows could see both bounds at once — so it had better actually exist.
+     * Compared as `BigInt`, because these are minor units and `-9007199254740993`
+     * is a legal one.
+     */
+    .refine(
+      (condition) =>
+        condition.minMinor === null ||
+        condition.maxMinor === null ||
+        BigInt(condition.minMinor) <= BigInt(condition.maxMinor),
+      { message: 'the minimum amount is above the maximum, so this condition can never match' },
+    ),
   z.object({ type: z.literal('direction'), direction: z.enum(['inflow', 'outflow']) }),
   z.object({ type: z.literal('account'), accountIds: z.array(z.uuid()).min(1).max(64) }),
   z.object({
@@ -126,7 +155,12 @@ export const actionSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('split'),
     parts: z
-      .array(z.object({ categoryKey: z.string().min(1).max(64), shareBasisPoints: z.int().min(1).max(10_000) }))
+      .array(
+        z.object({
+          categoryKey: z.string().min(1).max(64),
+          shareBasisPoints: z.int().min(1).max(10_000),
+        }),
+      )
       .min(2)
       .max(20),
   }),

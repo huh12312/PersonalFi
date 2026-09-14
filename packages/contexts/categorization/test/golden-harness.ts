@@ -40,9 +40,20 @@
  * the past.
  */
 import { DateOnly, Money } from '@core/kernel';
-import { generateDemoData } from '@core/seed';
-import type { CategorizableTransaction, LedgerPort } from '../src/index.ts';
-import { COLD_MODEL, cleanDescriptor, decide, featuresOf, fingerprint, train } from '../src/index.ts';
+// `@core/seed` is reached through `harness.ts` rather than imported here: that
+// file is the one place in this package that carries the boundary-lint directive
+// for it, so landing the policy entry proposed in the evidence document is a
+// deletion in one file rather than a hunt through the suite.
+import { generateDemoData } from './harness.ts';
+import type { CategorizableTransaction } from '../src/index.ts';
+import {
+  COLD_MODEL,
+  cleanDescriptor,
+  decide,
+  featuresOf,
+  fingerprint,
+  train,
+} from '../src/index.ts';
 import type { ClassifierModel, Decision, MerchantDefault, Rule } from '../src/index.ts';
 import { UNCATEGORISED_KEY, isAssignableKey } from '../src/taxonomy.ts';
 
@@ -180,8 +191,10 @@ export function buildGoldenDataset(options: BuildOptions = {}): GoldenDataset {
   let excluded = 0;
 
   for (const transaction of dataset.transactions) {
-    const merchant = transaction.merchantId === null ? undefined : merchantsById.get(transaction.merchantId);
-    const expectedKey = merchant === undefined ? undefined : GROUND_TRUTH.get(merchant.canonicalName);
+    const merchant =
+      transaction.merchantId === null ? undefined : merchantsById.get(transaction.merchantId);
+    const expectedKey =
+      merchant === undefined ? undefined : GROUND_TRUTH.get(merchant.canonicalName);
     if (merchant === undefined || expectedKey === undefined) {
       excluded += 1;
       continue;
@@ -251,9 +264,17 @@ function primaryOf(detailed: string): string {
   // above, the known primaries are enumerated here rather than parsed, because
   // every primary contains underscores and splitting on one gets it wrong.
   const primaries = [
-    'FOOD_AND_DRINK', 'GENERAL_MERCHANDISE', 'GENERAL_SERVICES', 'TRANSPORTATION',
-    'ENTERTAINMENT', 'PERSONAL_CARE', 'MEDICAL', 'RENT_AND_UTILITIES', 'LOAN_PAYMENTS',
-    'TRAVEL', 'INCOME',
+    'FOOD_AND_DRINK',
+    'GENERAL_MERCHANDISE',
+    'GENERAL_SERVICES',
+    'TRANSPORTATION',
+    'ENTERTAINMENT',
+    'PERSONAL_CARE',
+    'MEDICAL',
+    'RENT_AND_UTILITIES',
+    'LOAN_PAYMENTS',
+    'TRAVEL',
+    'INCOME',
   ];
   return primaries.find((primary) => detailed.startsWith(`${primary}_`)) ?? detailed;
 }
@@ -313,19 +334,20 @@ export interface EvaluationResult {
 }
 
 export function evaluate(dataset: GoldenDataset, config: EvaluationConfig): EvaluationResult {
-  const classifier: ClassifierModel = config.useClassifier === true
-    ? train(
-        dataset.train.map((entry) => ({
-          features: featuresOf({
-            cleanedPayee: cleanDescriptor(entry.rawDescriptor).cleaned,
-            amountMinor: entry.amountMinor,
-            accountType: entry.accountType,
-            mcc: entry.mcc,
-          }),
-          categoryKey: entry.expectedKey,
-        })),
-      )
-    : COLD_MODEL;
+  const classifier: ClassifierModel =
+    config.useClassifier === true
+      ? train(
+          dataset.train.map((entry) => ({
+            features: featuresOf({
+              cleanedPayee: cleanDescriptor(entry.rawDescriptor).cleaned,
+              amountMinor: entry.amountMinor,
+              accountType: entry.accountType,
+              mcc: entry.mcc,
+            }),
+            categoryKey: entry.expectedKey,
+          })),
+        )
+      : COLD_MODEL;
 
   const merchantDefaults = new Map<string, MerchantDefault>();
   if (config.useMerchantDefaults === true) {
@@ -351,7 +373,10 @@ export function evaluate(dataset: GoldenDataset, config: EvaluationConfig): Eval
   let correct = 0;
   let abstained = 0;
   const bySource: Record<string, { decided: number; correct: number }> = {};
-  const errors = new Map<string, { merchant: string; expected: string; got: string; count: number }>();
+  const errors = new Map<
+    string,
+    { merchant: string; expected: string; got: string; count: number }
+  >();
 
   for (const entry of dataset.test) {
     const decision: Decision = decide(
@@ -372,7 +397,7 @@ export function evaluate(dataset: GoldenDataset, config: EvaluationConfig): Eval
       {
         rules: config.rules ?? [],
         merchantDefault:
-          entry.merchantId === null ? null : merchantDefaults.get(entry.merchantId) ?? null,
+          entry.merchantId === null ? null : (merchantDefaults.get(entry.merchantId) ?? null),
         classifier,
         confidenceFloor: config.confidenceFloor ?? 0.6,
         merchantSupportThreshold: 3,
@@ -453,9 +478,24 @@ export function sampleRules(userId: string): readonly Rule[] {
   });
 
   const rules = [
-    rule(1, 'Amazon is shopping', { all: [{ type: 'payee', match: 'contains', value: 'AMAZON' }], any: [] }, 'shopping.online_marketplaces'),
-    rule(2, 'Philz is coffee', { all: [{ type: 'payee', match: 'contains', value: 'PHILZ' }], any: [] }, 'dining.coffee'),
-    rule(3, 'iCloud is cloud storage', { all: [{ type: 'payee', match: 'contains', value: 'ICLOUD' }], any: [] }, 'subscriptions.cloud_storage'),
+    rule(
+      1,
+      'Amazon is shopping',
+      { all: [{ type: 'payee', match: 'contains', value: 'AMAZON' }], any: [] },
+      'shopping.online_marketplaces',
+    ),
+    rule(
+      2,
+      'Philz is coffee',
+      { all: [{ type: 'payee', match: 'contains', value: 'PHILZ' }], any: [] },
+      'dining.coffee',
+    ),
+    rule(
+      3,
+      'iCloud is cloud storage',
+      { all: [{ type: 'payee', match: 'contains', value: 'ICLOUD' }], any: [] },
+      'subscriptions.cloud_storage',
+    ),
     rule(
       4,
       'Big Costco runs are still groceries',
@@ -537,18 +577,5 @@ export function evaluateColdMerchants(
       .flatMap((result) => result.topErrors)
       .sort((a, b) => b.count - a.count)
       .slice(0, 8),
-  };
-}
-
-/** An in-memory `LedgerPort` over a labelled dataset, for the database suites. */
-export function inMemoryPort(transactions: readonly CategorizableTransaction[]): LedgerPort {
-  return {
-    listForCategorization: (input) => {
-      const wanted = input.transactionIds;
-      const items = transactions.filter(
-        (transaction) => wanted === undefined || wanted.includes(transaction.id),
-      );
-      return Promise.resolve({ items, nextCursor: null });
-    },
   };
 }

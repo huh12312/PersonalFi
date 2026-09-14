@@ -60,7 +60,9 @@ export const rules = pgTable(
     createdAt: createdAtColumn(),
     updatedAt: updatedAtColumn(),
   },
-  (table) => [index('rules_user_priority_idx').on(table.userId, table.enabled, table.priority, table.id)],
+  (table) => [
+    index('rules_user_priority_idx').on(table.userId, table.enabled, table.priority, table.id),
+  ],
 );
 
 /**

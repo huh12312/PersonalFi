@@ -288,7 +288,7 @@ CREATE TABLE rule_runs (
 CREATE INDEX rule_runs_rule_idx ON rule_runs (rule_id, started_at DESC);
 
 COMMENT ON TABLE rule_runs IS
-  'One row per applyRule invocation, preview or real. Owner: @ctx/categorization.';
+  'One row per applyRule invocation, whether previewed or applied. Owner: @ctx/categorization.';
 
 -- ---------------------------------------------------------------------------
 -- category_assignments: the decision, and everything that lost.
