@@ -133,18 +133,45 @@
 		}
 	}
 
-	# The SPA. `try_files {path} /index.html` is the client-side-routing
-	# fallback: a deep link like /accounts/123 has no file behind it, and the
-	# router resolves it in the browser. Hashed asset filenames are immutable,
-	# so they get a long max-age; index.html and the service worker must not be
-	# cached or a stale shell outlives a deploy.
-	handle {
+	# The app's well-known static prefixes/files. Plain `file_server`, no SPA
+	# fallback: a miss here (a stale or mistyped hashed asset name, e.g. after
+	# `/assets/index-BWySMGlh.js` rolled off in a prior deploy) is a real 404,
+	# not a 200 copy of `index.html` (R-9, Low). Before this split, the
+	# catch-all's `try_files {path} /index.html` applied to the *whole* site,
+	# so every one of these paths answered 200 `text/html` whether the file
+	# existed or not — harmless in this app (no source maps ship, see
+	# docker/caddy.Dockerfile) but it meant a scanner or a broken deploy could
+	# never tell "missing asset" from "app is up" by status code alone. `handle`
+	# blocks are sorted by matcher specificity, so this fires before the
+	# catch-all below regardless of file order (same pattern as
+	# `handle /auth/*` etc. above).
+	@staticPaths path /assets/* /fonts/* /icons/* /sw.js /manifest.webmanifest
+	handle @staticPaths {
 		root * /srv/web
 		@immutable path /assets/* /fonts/* /icons/*
 		header @immutable Cache-Control "public, max-age=31536000, immutable"
-		@nocache path / /index.html /sw.js /manifest.webmanifest
+		@nocache path /sw.js /manifest.webmanifest
 		header @nocache Cache-Control "no-cache"
-		try_files {path} /index.html
+		file_server
+	}
+
+	# Everything else: the SPA shell plus client-side routes. A deep link like
+	# /transactions has no file behind it, and the router resolves it in the
+	# browser — but only for *navigation-shaped* requests (no file extension on
+	# the final path segment). Anything with an extension that reaches this
+	# block (the static prefixes above already caught the app's real assets)
+	# is treated as a miss, not a route, and gets file_server's ordinary 404
+	# instead of the app shell (R-9). `not file` is Caddy's documented
+	# "does this path exist under root?" idiom for SPA serving.
+	handle {
+		root * /srv/web
+		@nocache path / /index.html
+		header @nocache Cache-Control "no-cache"
+		@spaRoute {
+			not file
+			not path_regexp \.[a-zA-Z0-9]+$
+		}
+		rewrite @spaRoute /index.html
 		file_server
 	}
 }

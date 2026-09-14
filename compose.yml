@@ -403,6 +403,17 @@ services:
     tmpfs: ['/tmp:size=256m,mode=1777,noexec,nosuid,nodev']
     depends_on:
       db: { condition: service_healthy }
+      # R-13 (gate-security-review-2.md): without this, a cold `docker
+      # compose up` started `backup` as soon as `db` reported healthy, which
+      # is before `migrator` has created a single table. `backup-loop.sh`'s
+      # startup attempt then dumped an empty schema, `backup.sh`'s structural
+      # guard correctly refused to promote it (0 TOC entries < MIN_TOC_ENTRIES
+      # 10), and the container went `unhealthy` — a real control firing on a
+      # startup-ordering bug, not a backup problem. Waiting for the migrator's
+      # exit here removes the race outright; `backup-loop.sh`'s own
+      # `wait_for_schema` is the second, defense-in-depth layer for anyone who
+      # starts `backup` with `--no-deps` or restarts it alone.
+      migrator: { condition: service_completed_successfully }
     healthcheck:
       # Reads the status file backup.sh writes on every attempt: a failed or
       # stale backup is `unhealthy`, not just a missing process (H-2). See

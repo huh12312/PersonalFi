@@ -323,6 +323,33 @@ loop that is alive but no longer backing up is visible too. Before the Phase 0
 gate (H-2) the healthcheck only asked whether the loop process existed, which
 stays true through thirty consecutive silent failures.
 
+### Fresh install: why `backup` doesn't flap unhealthy on a cold `docker compose up`
+
+`backup`'s startup run used to race `migrator`: on a truly empty database, the
+first dump had no tables, `backup.sh`'s structural guard correctly refused to
+promote it (`0 object(s)` below `MIN_TOC_ENTRIES`), and `docker compose ps`
+showed `backup (unhealthy)` until the next nightly window — a real control
+firing on a startup-ordering bug, not a backup problem (R-13,
+`gate-security-review-2.md`). Two independent fixes close this:
+
+1. `compose.yml`: `backup` now `depends_on: migrator: service_completed_successfully`,
+   so on a normal `docker compose up` the `backup` container is not even
+   created until migrations have run.
+2. `docker/backup/backup-loop.sh`: before its startup attempt, the loop
+   additionally polls `information_schema.tables` for `schema_migrations`
+   (up to `BACKUP_SCHEMA_WAIT_SECONDS`, default 600s) — defense in depth for
+   anyone who starts or restarts `backup` on its own (`--no-deps`, or after
+   wiping just the `pgdata` volume) and bypasses the compose-level ordering.
+
+Until the first backup completes, `docker compose ps` correctly shows
+`backup (health: starting)`, not `unhealthy` — the `starting` status file
+state and `BACKUP_START_GRACE_SECONDS` (default 900s) cover the time spent
+waiting on the migrator plus the dump itself. Only a backup attempt that
+actually fails — as opposed to one that hasn't run yet — reports unhealthy.
+On a fresh `docker compose up -d`, expect `backup` to go `healthy` within a
+few minutes with no operator action; see
+`docs/evidence/phase-0/gate-remediation-4.md` for the timed proof.
+
 ---
 
 ## Restore

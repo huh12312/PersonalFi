@@ -90,13 +90,27 @@ async function resolveExistingFile(pathname) {
   }
 }
 
+// R-9 (gate-security-review-2.md): mirrors the `docker/Caddyfile` rule this
+// server otherwise diverges from. A path with a file extension on its final
+// segment (`/assets/nope.js`) is asset-shaped, not a client-side route, so a
+// miss there is a real 404 — only extensionless, navigation-shaped requests
+// (`/dev/kitchen-sink`, `/login`) fall back to `index.html`. Before this, any
+// unresolved path served `index.html` with a 200 unconditionally, which is
+// the same over-broad fallback the Caddyfile had.
+const HAS_EXTENSION = /\.[a-zA-Z0-9]+$/;
+
 const server = createServer((req, res) => {
   void (async () => {
     const url = new URL(req.url ?? '/', `http://localhost:${String(port)}`);
-    // SPA fallback: any path that isn't a real built file (a client-side
-    // route like `/dev/kitchen-sink`, or `/login`) is served `index.html` so
-    // the router — not this server — decides what renders.
-    const filePath = (await resolveExistingFile(url.pathname)) ?? join(distDir, 'index.html');
+    const existing = await resolveExistingFile(url.pathname);
+    const isNavigationShaped = !HAS_EXTENSION.test(url.pathname);
+    const filePath = existing ?? (isNavigationShaped ? join(distDir, 'index.html') : null);
+
+    if (filePath === null) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
 
     try {
       const body = await readFile(filePath);
