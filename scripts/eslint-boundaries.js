@@ -217,6 +217,72 @@ const LAYERS = [
       'and everything another context needs from it leaves as one.',
   },
   {
+    // WP 1.2. Two additions to the generic context set, both deliberate:
+    //
+    //   * `@connector/*` — the `Connector` port and the adapters that implement
+    //     it. These are **not** contexts: they own no table, hold no database
+    //     handle, and sit below `@ctx/connections` exactly as `@core/db` sits
+    //     below `@ctx/ledger`. The port has to live outside this context because
+    //     the `crossContext` check below denies `packages/connectors/*` ->
+    //     `@ctx/connections`, so a port declared inside the context could not be
+    //     imported by the adapters that implement it (packages/connectors/port/OWNERSHIP.md).
+    //   * `@core/testkit`, `@core/seed` — dev-only, declared as `devDependencies`
+    //     in this package's package.json, same arrangement and same caveat as
+    //     the `ledger` entry above. No file under `src/` imports either one.
+    //
+    // Note what is *absent*: `@ctx/ledger`. Connections depends on the Ledger
+    // (its OWNERSHIP.md says so) but it may not import it — the boundary rule is
+    // unconditional, and its own error message names the alternative: "through a
+    // domain event or its published port". So `LedgerWriter` in
+    // `src/ledger-writer.ts` is an injected port and `apps/api` wires the real
+    // ledger into it (WP 1.5). If that ever becomes a direct import, this
+    // comment is the thing a reviewer should object to.
+    name: 'connections',
+    prefix: 'packages/contexts/connections/',
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      '@core/contracts',
+      '@core/platform',
+      '@core/secretbox',
+      '@core/testkit',
+      '@core/seed',
+      '@connector/port',
+      '@connector/manual',
+      '@connector/csv',
+      'drizzle-orm',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'Connections owns the provider seam. It depends on the port and its adapters, ' +
+      'on infrastructure, and on no other context: the Ledger arrives as an injected ' +
+      'LedgerWriter from the composition root, which is what keeps "swap the aggregator" ' +
+      'a one-context change.',
+  },
+  {
+    // WP 1.2. One package per provider adapter, plus `port` — the interface they
+    // implement and the canonical fact shapes they produce.
+    //
+    // The allow-list is deliberately tiny. An adapter is "provider shape ->
+    // canonical shape", which 08 §2.7 observes "is almost always pure functions";
+    // giving it a database handle or the outbox would let a provider-specific
+    // quirk reach the system of record without passing through the orchestrator,
+    // and the per-page atomic commit is the orchestrator's invariant to hold.
+    // `@core/secretbox` is here for `sha256` only — the `fingerprint` every
+    // adapter must produce (08 §2.5) — and the cipher restriction in
+    // eslint.config.js still applies.
+    name: 'connectors',
+    prefix: 'packages/connectors/',
+    allow: ['@core/kernel', '@core/secretbox', '@connector/port', ...UNIVERSAL],
+    allowNodeBuiltins: true,
+    why:
+      'A provider adapter maps provider shapes to canonical ones and returns them. It ' +
+      'never writes to the database, never persists a credential, and never decides ' +
+      'retry policy — the orchestrator in @ctx/connections owns all three.',
+  },
+  {
     name: 'context',
     prefix: 'packages/contexts/',
     allow: [
@@ -261,7 +327,15 @@ function packageOf(specifier) {
 
 /** The workspace package a file belongs to, e.g. `packages/contexts/ledger`. */
 function packageRootOf(relativePath) {
-  if (relativePath.startsWith('packages/contexts/')) {
+  // The two nested package tiers: bounded contexts, and provider adapters. Both
+  // are `packages/<tier>/<name>`, so the root is three segments, not two. Miss
+  // this and the `escapes` check silently stops working for the whole tier — a
+  // relative import from `connectors/csv/src` into `connectors/manual/src`
+  // would resolve inside `packages/connectors/` and be waved through.
+  if (
+    relativePath.startsWith('packages/contexts/') ||
+    relativePath.startsWith('packages/connectors/')
+  ) {
     return relativePath.split('/').slice(0, 3).join('/');
   }
   if (relativePath.startsWith('packages/') || relativePath.startsWith('apps/')) {
@@ -295,7 +369,14 @@ const rule = {
     const layer = layerFor(relativePath);
     if (layer === undefined || layer.allow === null) return {};
 
-    const isTest = relativePath.endsWith('.test.ts');
+    // A `test/` directory is test tooling as much as a `*.test.ts` file is: a
+    // harness, a fixture builder, a shared conformance suite. `eslint.config.js`
+    // already grants `**/test/**` the same exemption twice — from the
+    // `process.env` ban and from the `new Date()` ban — and the alternative here
+    // was an `eslint-disable` at the top of every harness, which buys the same
+    // looseness while hiding it from anyone reading this file. The exemption is
+    // still narrow: it adds `vitest` and `fast-check`, and nothing else.
+    const isTest = relativePath.endsWith('.test.ts') || /(^|\/)test\//.test(relativePath);
     const allowed = isTest ? [...layer.allow, ...TEST_ONLY] : layer.allow;
     const allowNodeBuiltins = layer.allowNodeBuiltins || isTest;
 
@@ -305,7 +386,9 @@ const rule = {
     // a context's imports of *itself* look like a cross-context violation.
     const contextName = relativePath.startsWith('packages/contexts/')
       ? `@ctx/${relativePath.split('/')[2]}`
-      : `@core/${layer.name}`;
+      : relativePath.startsWith('packages/connectors/')
+        ? `@connector/${relativePath.split('/')[2]}`
+        : `@core/${layer.name}`;
 
     function check(node, specifierNode) {
       if (specifierNode?.type !== 'Literal' || typeof specifierNode.value !== 'string') return;

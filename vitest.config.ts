@@ -146,6 +146,62 @@ export default defineConfig({
         },
       },
       {
+        // WP 1.2. The `Connector` port: the error taxonomy's condition -> kind
+        // table, the mandatory fingerprint, and the history-window clamp. Pure
+        // functions over pure data; no database, no network, no adapter.
+        root: './packages/connectors/port',
+        test: { name: 'connector-port', include: ['src/**/*.test.ts'], environment: 'node' },
+      },
+      {
+        // The manual adapter's own unit tests: the append-only log the cursor is
+        // an index into, and the sequence semantics every cursor property rests
+        // on. The conformance suite runs against it from the `connections`
+        // project, which is where the adapters are wired together.
+        root: './packages/connectors/manual',
+        test: { name: 'connector-manual', include: ['src/**/*.test.ts'], environment: 'node' },
+      },
+      {
+        // CSV/OFX/QIF parsing, including the golden tests against the
+        // hand-written fixtures in `test/fixtures/`. `src/` holds the scalar
+        // parsers' unit tests and `test/` the fixture-driven ones, because a
+        // golden fixture belongs to the package that owns the behaviour it pins
+        // (docs/TESTING.md) and needs the file on disk.
+        root: './packages/connectors/csv',
+        test: {
+          name: 'connector-csv',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        // `@ctx/connections`, minus the database. The conformance suite lives
+        // here — it needs three real adapters and no Postgres, which is exactly
+        // the shape of a unit project.
+        root: './packages/contexts/connections',
+        test: {
+          name: 'connections',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        // The orchestrator's claims are all claims about Postgres: that a page's
+        // ledger rows and its cursor advance commit together, that an injected
+        // failure mid-pagination leaves both consistent, that a restart rewinds
+        // the stored cursor, that `sync_runs` records every attempt. A fake
+        // would only assert that the fake works. Skips itself when DATABASE_URL
+        // is unset.
+        root: './packages/contexts/connections',
+        test: {
+          name: 'connections-db',
+          include: ['test/db/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 60_000,
+          hookTimeout: 180_000,
+        },
+      },
+      {
         root: './apps/api',
         test: { name: 'api', include: ['test/*.test.ts'], environment: 'node' },
       },

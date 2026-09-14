@@ -1,0 +1,14 @@
+{
+  "name": "@connector/port",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@core/kernel": "workspace:*",
+    "@core/secretbox": "workspace:*"
+  }
+}

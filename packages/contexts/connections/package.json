@@ -9,8 +9,18 @@
     "./schema": "./schema/index.ts"
   },
   "dependencies": {
+    "@connector/port": "workspace:*",
     "@core/db": "workspace:*",
     "@core/kernel": "workspace:*",
-    "drizzle-orm": "0.45.2"
+    "@core/platform": "workspace:*",
+    "@core/secretbox": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@connector/csv": "workspace:*",
+    "@connector/manual": "workspace:*",
+    "@core/seed": "workspace:*",
+    "@core/testkit": "workspace:*"
   }
 }

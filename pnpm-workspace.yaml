@@ -3,6 +3,11 @@ packages:
   - apps/*
   - packages/*
   - packages/contexts/*
+  # One package per provider adapter, plus `port` — the `Connector` interface
+  # they implement. Separate packages rather than directories inside
+  # `@ctx/connections` because `personalfi/layer-imports` denies
+  # `packages/connectors/*` -> `@ctx/*`: see packages/connectors/port/OWNERSHIP.md.
+  - packages/connectors/*
 
 # Decision D14: a package must have been public for seven days before we will
 # install it. The May 2026 TanStack worm shipped with valid SLSA attestations;

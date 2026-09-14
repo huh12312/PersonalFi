@@ -1,0 +1,56 @@
+PersonalFi — `@connector/csv` third-party notices
+=================================================
+
+Summary: **no third-party code is vendored in this package.** Every parser here
+is an original implementation. This file exists because the work package that
+created it was scoped as "port Actual Budget's OFX/QIF parsers (ISC, with
+attribution)", and the honest record of why that did not happen is worth more
+than an attribution for code that was never copied.
+
+Why nothing was vendored
+------------------------
+
+Actual Budget's `server/transactions/import/ofx2json.ts`, `qif2json.ts` and
+`xmlcamt2json.ts` are ISC-licensed (`loot-core` is ISC; the repository root is
+MIT) and are therefore safe to vendor under `licenses.policy.yaml`, which allows
+MIT, BSD, ISC and Apache-2.0.
+
+They were not vendored for one blocking reason: **`ofx2json` depends on
+`xml2js`.** Its whole shape is "repair the SGML into well-formed XML, then hand
+it to `xml2js`". This work package is constrained to workspace-internal
+dependencies, so adding `xml2js` was not available; and a port that drops the
+XML library is not a port, it is a rewrite with someone else's copyright header
+on it. The reader in `src/ofx.ts` is instead a single-pass tokenizer that treats
+SGML and XML as the same grammar (an unclosed leaf is closed when the next tag
+opens), which is ~120 lines and needs no XML library at all.
+
+The *idea* — that OFX 1.x SGML can be read by repairing implicit end tags rather
+than by writing an SGML parser — is Actual Budget's, and this note is the
+acknowledgement. No code, comments, structure or test fixtures were copied.
+
+Deliberately not used
+---------------------
+
+- **`ofxtools`** (Python) is GPL-3.0-only, despite being widely described as
+  permissively licensed (`docs/research/02-ecosystem-vibe-trading.md` §4.5). It
+  is on `licenses.policy.yaml`'s `denyPackages` list. It was not consulted.
+- **Firefly III's** `import-configurations` are CC-BY-SA-4.0
+  (02 §3.1). The CSV presets in `src/presets.ts` were written from the column
+  headings of the sample files in `test/fixtures/`, which are also original.
+- **Maybe / Sure / Ghostfolio** are AGPL-3.0 (decision D15). Not consulted.
+
+Test fixtures
+-------------
+
+Every file under `test/fixtures/` was hand-written for this repository. None
+contains real account numbers, real balances, or data from any real institution.
+
+A note on the gate
+------------------
+
+Nothing in `just verify` scans source files for third-party licence headers:
+`scripts/check-licenses.ts` reads `pnpm licenses list --prod`, and `trivy fs`
+runs with `--scanners vuln,secret,misconfig` — `license` is not enabled. So a
+vendored ISC file would pass the gate today with no attribution recorded
+anywhere. That gap is real whether or not this package uses it; it is written up
+in `docs/evidence/phase-1/wp1.2-connections.md` under "Deferred".

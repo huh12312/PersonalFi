@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: MIT
+/**
+ * The rule language: conditions, actions, and the zod schemas that police them.
+ *
+ * 04 §5.2 calls rules "*the* power feature", and the reason they are a typed
+ * schema rather than free-form JSON is that they are stored in a `jsonb` column
+ * and read back months later by code that has changed in the meantime. A rule
+ * that parsed when it was written and throws on the read path takes the whole
+ * categorisation pass down with it, so every rule is validated on the way **in**
+ * and re-validated on the way **out**, and a rule that fails the second check is
+ * disabled and reported rather than allowed to crash a sync.
+ *
+ * ## Conditions
+ *
+ * `all` and `any`, never arbitrary nesting. Two levels covers every rule a user
+ * has ever actually wanted ("payee contains X and amount is over Y", "payee is
+ * any of these three"), and arbitrary nesting buys a rule builder UI that nobody
+ * can use and a matcher nobody can read. An empty `all` with an empty `any` never
+ * matches — a rule that matches everything is a footgun with no legitimate use.
+ *
+ * ## On user-supplied regular expressions
+ *
+ * `payee_regex` is a real ReDoS surface: it is a pattern the user wrote, compiled
+ * in our process, run against strings on the sync path. Node has no regex
+ * timeout, so the mitigations here are structural rather than a stopwatch:
+ *
+ *   * the pattern is capped at `MAX_PATTERN_LENGTH`;
+ *   * the subject is capped at `MAX_SUBJECT_LENGTH` (a payee is short; a 40 KB
+ *     descriptor is not a payee and matching it is not worth the risk);
+ *   * patterns containing a quantified group that itself contains a quantifier —
+ *     the `(a+)+` shape that produces exponential backtracking — are rejected at
+ *     validation time with an error the user sees while they are still editing.
+ *
+ * That is a mitigation, not a proof. It is written down here rather than implied
+ * so that a future reviewer can weigh it, and so nobody mistakes "we thought
+ * about it" for "it cannot happen". The honest remaining answer, if this ever
+ * matters more, is to run the match in a worker with a deadline.
+ */
+import { z } from 'zod';
+
+export const MAX_PATTERN_LENGTH = 200;
+export const MAX_SUBJECT_LENGTH = 512;
+
+/** `(x+)+`, `(x*)*`, `(x+)*` — a quantified group wrapping a quantifier. */
+const NESTED_QUANTIFIER = /\([^)]*[+*][^)]*\)\s*[+*{]/u;
+
+const safePattern = z
+  .string()
+  .min(1)
+  .max(MAX_PATTERN_LENGTH)
+  .refine((pattern) => !NESTED_QUANTIFIER.test(pattern), {
+    message:
+      'pattern contains a nested quantifier such as (a+)+, which can take exponential time to match',
+  })
+  .refine(
+    (pattern) => {
+      try {
+        // eslint-disable-next-line no-new -- compiling is the validation.
+        new RegExp(pattern, 'iu');
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'pattern is not a valid regular expression' },
+  );
+
+const payeeMatch = z.enum(['contains', 'not_contains', 'starts_with', 'ends_with', 'equals']);
+
+export const conditionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('payee'), match: payeeMatch, value: z.string().min(1).max(200) }),
+  z.object({ type: z.literal('payee_regex'), pattern: safePattern }),
+  z.object({
+    type: z.literal('amount'),
+    /** Signed minor units, house convention: negative is an outflow. */
+    minMinor: z.string().regex(/^-?\d+$/u).nullable(),
+    maxMinor: z.string().regex(/^-?\d+$/u).nullable(),
+    /** Compare |amount| instead, for "anything over $100 either way". */
+    absolute: z.boolean().default(false),
+  }),
+  z.object({ type: z.literal('direction'), direction: z.enum(['inflow', 'outflow']) }),
+  z.object({ type: z.literal('account'), accountIds: z.array(z.uuid()).min(1).max(64) }),
+  z.object({
+    type: z.literal('day_of_month'),
+    from: z.int().min(1).max(31),
+    to: z.int().min(1).max(31),
+  }),
+  z.object({
+    type: z.literal('provider_category'),
+    codes: z.array(z.string().min(1).max(96)).min(1).max(64),
+  }),
+  z.object({ type: z.literal('currency'), currency: z.string().length(3) }),
+  z.object({ type: z.literal('is_transfer'), value: z.boolean() }),
+]);
+
+export type RuleCondition = z.infer<typeof conditionSchema>;
+
+export const conditionsSchema = z
+  .object({
+    all: z.array(conditionSchema).max(16).default([]),
+    any: z.array(conditionSchema).max(16).default([]),
+  })
+  .refine((conditions) => conditions.all.length + conditions.any.length > 0, {
+    message: 'a rule with no conditions would match every transaction',
+  });
+
+export type RuleConditions = z.infer<typeof conditionsSchema>;
+
+/**
+ * Actions.
+ *
+ * `split` and `link_recurring` are placeholders on purpose: the shapes are fixed
+ * now so a rule authored in Phase 1 survives into Phase 2, and the engine refuses
+ * to apply them (`applied: false`, with a reason) until WP 2.2 and the splits
+ * write path exist. A schema that has to change to accommodate a feature is a
+ * migration of every stored rule; a schema with an inert branch is a `TODO` the
+ * type system can see.
+ */
+export const actionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('set_category'), categoryKey: z.string().min(1).max(64) }),
+  z.object({ type: z.literal('set_merchant_name'), name: z.string().min(1).max(120) }),
+  z.object({ type: z.literal('set_note'), note: z.string().max(500) }),
+  z.object({ type: z.literal('add_tag'), tag: z.string().min(1).max(48) }),
+  z.object({ type: z.literal('exclude') }),
+  z.object({ type: z.literal('mark_transfer') }),
+  z.object({
+    type: z.literal('split'),
+    parts: z
+      .array(z.object({ categoryKey: z.string().min(1).max(64), shareBasisPoints: z.int().min(1).max(10_000) }))
+      .min(2)
+      .max(20),
+  }),
+  z.object({ type: z.literal('link_recurring'), seriesKey: z.string().min(1).max(120) }),
+]);
+
+export type RuleAction = z.infer<typeof actionSchema>;
+
+export const actionsSchema = z.array(actionSchema).min(1).max(8);
+
+/** Actions the engine can actually carry out today. The rest are recorded, not run. */
+export const IMPLEMENTED_ACTIONS: ReadonlySet<RuleAction['type']> = new Set([
+  'set_category',
+  'set_merchant_name',
+  'set_note',
+  'add_tag',
+  'exclude',
+  'mark_transfer',
+]);
+
+export const ruleSchema = z.object({
+  id: z.uuid(),
+  userId: z.uuid(),
+  name: z.string().min(1).max(120),
+  /** Ascending. Lower number wins, matching 04 §5.2's "by ascending priority". */
+  priority: z.int().min(0).max(10_000),
+  enabled: z.boolean(),
+  conditions: conditionsSchema,
+  actions: actionsSchema,
+  /** Evaluate during the sync consumer, as opposed to only on an explicit apply. */
+  runOnSync: z.boolean(),
+  /** Stop evaluating further rules once this one matches (04 §5.2). */
+  stopProcessing: z.boolean(),
+  /** The transaction a "always categorise X as Y" rule was created from, if any. */
+  createdFromTransactionId: z.uuid().nullable(),
+});
+
+export type Rule = z.infer<typeof ruleSchema>;
