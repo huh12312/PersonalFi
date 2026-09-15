@@ -42,6 +42,7 @@ import type {
   Item,
   ItemGetRequest,
   ItemGetResponse,
+  ItemWithConsentFields,
   ItemPublicTokenExchangeRequest,
   ItemPublicTokenExchangeResponse,
   ItemRemoveRequest,
@@ -68,7 +69,11 @@ export interface FakeFailure {
 export interface FakeItemSpec {
   readonly accessToken: string;
   readonly publicToken?: string;
-  readonly item: Item;
+  /**
+   * `/item/get`'s richer shape, which is the one the fixture is recorded in.
+   * `/accounts/get` returns the plain `Item`; `plainItemOf` narrows to it.
+   */
+  readonly item: ItemWithConsentFields;
   readonly accounts: readonly AccountBase[];
   /** The scripted cursor chain. `pages[0]` answers a request with no cursor. */
   readonly pages: readonly TransactionsSyncResponse[];
@@ -77,6 +82,19 @@ export interface FakeItemSpec {
   readonly liabilities?: LiabilitiesGetResponse;
   /** Thrown by every data call on this Item. The broken-Item scenarios. */
   readonly failWith?: FakeFailure;
+  /**
+   * Thrown by `/item/remove` only.
+   *
+   * Separate from `failWith` because the two have different causes. `failWith`
+   * is an *Item*-level fault — a login that needs refreshing, an institution
+   * that is down — and `/item/remove` succeeds perfectly well through all of
+   * those: it revokes a token at Plaid and never touches the bank. What can
+   * actually fail a removal is a Plaid-side fault (`INTERNAL_SERVER_ERROR`,
+   * `RATE_LIMIT_EXCEEDED`, bad keys), and the adapter has to raise on those so
+   * that `disconnectConnection` can record `revokedAtProvider: false` honestly
+   * rather than tell the user we revoked something we did not.
+   */
+  readonly failRemoveWith?: FakeFailure;
   /** Throw `MUTATION_DURING_PAGINATION` the first time this page is asked for. */
   readonly mutateAtPage?: number;
 }
@@ -212,6 +230,14 @@ export const PLAID_ERRORS = Object.freeze({
     request_id: 'req-invalid-public-token',
     status: 400,
   },
+  /** Plaid itself, not the institution. The one thing that fails /item/remove. */
+  PLAID_INTERNAL: {
+    error_type: 'API_ERROR',
+    error_code: 'INTERNAL_SERVER_ERROR',
+    error_message: 'an unexpected error occurred. please try again later.',
+    request_id: 'req-internal-server-error',
+    status: 500,
+  },
 }) satisfies Readonly<Record<string, PlaidErrorShape>>;
 
 export class FakePlaidApi implements PlaidApiLike {
@@ -291,15 +317,25 @@ export class FakePlaidApi implements PlaidApiLike {
     const state = this.#live(request.access_token, 'item/get', request);
     return {
       data: {
-        item: { ...state.spec.item, error: (state.spec.failWith?.error ?? null) as Item['error'] },
+        item: {
+          ...state.spec.item,
+          error: (state.spec.failWith?.error ?? null) as ItemWithConsentFields['error'],
+        },
         request_id: 'req-item-get',
-      } as ItemGetResponse,
+      },
     };
   }
 
   async itemRemove(request: ItemRemoveRequest): Promise<PlaidResponse<ItemRemoveResponse>> {
     this.#record('item/remove', request);
     const state = this.#live(request.access_token, 'item/remove', request);
+    const failure = state.spec.failRemoveWith;
+    if (failure !== undefined) {
+      throw plaidAxiosError('item/remove', failure.error, request, {
+        ...(failure.status === undefined ? {} : { status: failure.status }),
+        ...(failure.headers === undefined ? {} : { headers: failure.headers }),
+      });
+    }
     state.removed = true;
     return { data: { request_id: 'req-item-remove' } };
   }
@@ -310,7 +346,7 @@ export class FakePlaidApi implements PlaidApiLike {
     return {
       data: {
         accounts: [...state.spec.accounts],
-        item: state.spec.item,
+        item: plainItemOf(state.spec.item),
         request_id: 'req-accounts-get',
       },
     };
@@ -324,7 +360,7 @@ export class FakePlaidApi implements PlaidApiLike {
     return {
       data: {
         accounts: [...state.spec.accounts],
-        item: state.spec.item,
+        item: plainItemOf(state.spec.item),
         request_id: 'req-accounts-balance-get',
       },
     };
@@ -375,7 +411,11 @@ export class FakePlaidApi implements PlaidApiLike {
     const state = this.#dataItem(request.access_token, 'investments/holdings/get', request);
     const holdings = state.spec.holdings;
     if (holdings === undefined) {
-      throw plaidAxiosError('investments/holdings/get', PLAID_ERRORS.PRODUCTS_NOT_SUPPORTED, request);
+      throw plaidAxiosError(
+        'investments/holdings/get',
+        PLAID_ERRORS.PRODUCTS_NOT_SUPPORTED,
+        request,
+      );
     }
     return { data: holdings };
   }
@@ -447,6 +487,22 @@ export class FakePlaidApi implements PlaidApiLike {
     }
     return state;
   }
+}
+
+/**
+ * `/item/get`'s `Item` shape, from `/item/get`'s `ItemWithConsentFields`.
+ *
+ * The two interfaces carry the same fields bar three consent-scope additions,
+ * and their `update_type` enums declare exactly the same two members —
+ * `'background'` and `'user_present_required'`. TypeScript still refuses to
+ * convert one string enum to the other, and importing either enum *as a value*
+ * would pull `plaid`'s runtime (and therefore axios) into a test file that is
+ * otherwise type-only. So the widening is spelled out here, once, instead of
+ * being an `as unknown as ItemGetResponse` on the response object — which would
+ * have silently swallowed the next real shape mismatch too.
+ */
+export function plainItemOf(item: ItemWithConsentFields): Item {
+  return { ...item, update_type: item.update_type as unknown as Item['update_type'] };
 }
 
 /**

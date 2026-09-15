@@ -202,7 +202,9 @@ export function transactionFactOf(
         ? null
         : dateOnlyOf(transaction.authorized_date, 'transaction.authorized_date'),
     postedAt:
-      transaction.datetime === null ? null : instantOf(transaction.datetime, 'transaction.datetime'),
+      transaction.datetime === null
+        ? null
+        : instantOf(transaction.datetime, 'transaction.datetime'),
     authorizedAt:
       transaction.authorized_datetime === null
         ? null
@@ -495,12 +497,36 @@ function instantOf(value: string, field: string): Date {
   return parsed;
 }
 
+/** Decimal places in a plain (non-exponential) decimal string. */
+function decimalPlacesOf(plain: string): number {
+  const point = plain.indexOf('.');
+  return point === -1 ? 0 : plain.length - point - 1;
+}
+
 /**
  * A JSON number as a plain decimal string, never exponential notation.
  *
- * `String(1e-7)` is `'1e-7'`, which is not a `NUMERIC(38,18)` literal and not a
- * `Quantity`. A holding of 0.0000001 BTC is a real thing, so this is a
- * correctness requirement rather than a formatting preference.
+ * Two failure modes, pulling in opposite directions, which is why this is eight
+ * lines rather than a `toFixed`:
+ *
+ *  1. **Exponential notation.** `String(1e-7)` is `'1e-7'`, which is not a
+ *     `NUMERIC(38,18)` literal and not a `Quantity`. A holding of 0.0000001 BTC
+ *     is a real thing, so this is a correctness requirement, not formatting.
+ *  2. **Float noise.** `(268.4).toFixed(18)` is `'268.399999999999977263'` — the
+ *     exact value of the double, faithfully printed to eighteen places. Padding
+ *     every quantity out to the column's full scale therefore *manufactures*
+ *     seventeen digits of garbage from a price the institution stated as 268.4,
+ *     and those digits then survive into the ledger and into every derived
+ *     cost-basis figure. `String(value)` gives the shortest decimal that
+ *     round-trips to the same double — `'268.4'` — which is the closest thing to
+ *     "what the provider actually said" that a JSON number can offer.
+ *
+ * So: prefer the shortest round-trip form, and fall back to `toFixed(scale)`
+ * only in the two cases it is genuinely needed — exponential notation, and a
+ * value whose shortest form has more decimal places than the column can hold.
+ * `toFixed` is specified ("let n be an integer for which n / 10^f - x is as
+ * close to zero as possible"), so that fallback is deterministic across engines,
+ * which is the property that matters for a value that ends up in a fingerprint.
  */
 export function decimalStringOf(value: number, field: string, scale = QUANTITY_SCALE): string {
   if (!Number.isFinite(value)) {
@@ -509,8 +535,12 @@ export function decimalStringOf(value: number, field: string, scale = QUANTITY_S
   if (Math.abs(value) >= 1e15) {
     throw malformed(`plaid sent an implausible ${field}`, { field });
   }
-  const fixed = value.toFixed(scale);
-  const trimmed = fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed;
+  const shortest = String(value);
+  const plain =
+    shortest.includes('e') || shortest.includes('E') || decimalPlacesOf(shortest) > scale
+      ? value.toFixed(scale)
+      : shortest;
+  const trimmed = plain.includes('.') ? plain.replace(/0+$/, '').replace(/\.$/, '') : plain;
   // Validated through the kernel so a value the ledger's NUMERIC(38,18) column
   // would reject fails here, at the boundary, and not four layers down.
   return scale === QUANTITY_SCALE ? quantity(trimmed) : trimmed;

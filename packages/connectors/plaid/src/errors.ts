@@ -231,7 +231,8 @@ export function retryAfterMsOf(value: unknown): number | null {
   const headers = response['headers'];
   if (!isRecord(headers)) return null;
   const raw = headers['retry-after'] ?? headers['Retry-After'];
-  const seconds = typeof raw === 'string' ? Number(raw) : typeof raw === 'number' ? raw : Number.NaN;
+  const seconds =
+    typeof raw === 'string' ? Number(raw) : typeof raw === 'number' ? raw : Number.NaN;
   if (!Number.isFinite(seconds) || seconds < 0) return null;
   return Math.round(seconds * 1_000);
 }

@@ -1,0 +1,130 @@
+{
+  "credit": [
+    {
+      "account_id": "acct-card-002",
+      "aprs": [
+        {
+          "apr_percentage": 0,
+          "apr_type": "balance_transfer_apr",
+          "balance_subject_to_apr": 0,
+          "interest_charge_amount": 0
+        },
+        {
+          "apr_percentage": 19.99,
+          "apr_type": "purchase_apr",
+          "balance_subject_to_apr": 742.18,
+          "interest_charge_amount": 12.36
+        },
+        {
+          "apr_percentage": 25.24,
+          "apr_type": "cash_apr",
+          "balance_subject_to_apr": 0,
+          "interest_charge_amount": 0
+        }
+      ],
+      "is_overdue": false,
+      "last_payment_amount": 250.0,
+      "last_payment_date": "2026-05-22",
+      "last_statement_issue_date": "2026-05-25",
+      "last_statement_balance": 742.18,
+      "minimum_payment_amount": 35.0,
+      "next_payment_due_date": "2026-06-22"
+    },
+    {
+      "account_id": null,
+      "aprs": [
+        {
+          "apr_percentage": 21.49,
+          "apr_type": "purchase_apr",
+          "balance_subject_to_apr": null,
+          "interest_charge_amount": null
+        }
+      ],
+      "is_overdue": null,
+      "last_payment_amount": null,
+      "last_payment_date": null,
+      "last_statement_issue_date": null,
+      "last_statement_balance": null,
+      "minimum_payment_amount": null,
+      "next_payment_due_date": null
+    }
+  ],
+  "mortgage": [
+    {
+      "account_id": "acct-mortgage-004",
+      "account_number": "9001",
+      "current_late_fee": null,
+      "escrow_balance": 3204.11,
+      "has_pmi": false,
+      "has_prepayment_penalty": false,
+      "interest_rate": {
+        "percentage": 3.125,
+        "type": "fixed"
+      },
+      "last_payment_amount": 1850.0,
+      "last_payment_date": "2026-06-03",
+      "loan_type_description": "conventional",
+      "loan_term": "30 year",
+      "maturity_date": "2051-09-01",
+      "next_monthly_payment": 1850.0,
+      "next_payment_due_date": "2026-07-01",
+      "origination_date": "2021-09-01",
+      "origination_principal_amount": 310000.0,
+      "past_due_amount": 0,
+      "property_address": {
+        "city": "Oakland",
+        "country": "US",
+        "postal_code": "94607",
+        "region": "CA",
+        "street": "1 Harbour Way"
+      },
+      "ytd_interest_paid": 3812.44,
+      "ytd_principal_paid": 5287.56
+    }
+  ],
+  "student": [
+    {
+      "account_id": "acct-student-005",
+      "account_number": "3310",
+      "disbursement_dates": ["2018-08-15"],
+      "expected_payoff_date": "2032-08-15",
+      "guarantor": "DEPT OF ED",
+      "interest_rate_percentage": 4.53,
+      "is_overdue": false,
+      "last_payment_amount": 210.0,
+      "last_payment_date": "2026-05-15",
+      "last_statement_balance": 12640.0,
+      "last_statement_issue_date": "2026-05-20",
+      "loan_name": "Consolidation",
+      "loan_status": {
+        "end_date": null,
+        "type": "repayment"
+      },
+      "minimum_payment_amount": 210.0,
+      "next_payment_due_date": "2026-06-15",
+      "origination_date": "2018-08-15",
+      "origination_principal_amount": 24000.0,
+      "outstanding_interest_amount": 48.12,
+      "payment_reference_number": "PR-3310",
+      "pslf_status": {
+        "estimated_eligibility_date": null,
+        "payments_made": null,
+        "payments_remaining": null
+      },
+      "repayment_plan": {
+        "description": "Standard Repayment",
+        "type": "standard"
+      },
+      "sequence_number": "1",
+      "servicer_address": {
+        "city": "Wilkes-Barre",
+        "country": "US",
+        "postal_code": "18773",
+        "region": "PA",
+        "street": "PO Box 7860"
+      },
+      "ytd_interest_paid": 243.61,
+      "ytd_principal_paid": 806.39
+    }
+  ]
+}

@@ -63,5 +63,21 @@
     "official_name": "Northwind Mutual 30-Year Fixed",
     "type": "loan",
     "subtype": "mortgage"
+  },
+  {
+    "account_id": "acct-student-005",
+    "balances": {
+      "available": null,
+      "current": 12640.0,
+      "limit": null,
+      "iso_currency_code": "USD",
+      "unofficial_currency_code": null,
+      "last_updated_datetime": null
+    },
+    "mask": "3310",
+    "name": "Student Loan",
+    "official_name": "Harbour Educational Services Consolidated",
+    "type": "loan",
+    "subtype": "student"
   }
 ]

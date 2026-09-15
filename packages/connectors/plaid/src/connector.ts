@@ -265,7 +265,9 @@ export class PlaidConnector implements Connector {
     );
     const accessToken = exchanged.data.access_token;
 
-    const item = await this.#call('item/get', () => this.#api.itemGet({ access_token: accessToken }));
+    const item = await this.#call('item/get', () =>
+      this.#api.itemGet({ access_token: accessToken }),
+    );
     const accounts = await this.#call('accounts/get', () =>
       this.#api.accountsGet({ access_token: accessToken }),
     );
@@ -430,7 +432,7 @@ export class PlaidConnector implements Connector {
     const start = windowStart(this.capabilities(), options.historyDays, today) ?? today;
     const facts: PlaidInvestmentTransactionFact[] = [];
 
-    for (let offset = 0; ; ) {
+    for (let offset = 0; ;) {
       this.#assertBudget(options, 'investments/transactions/get');
       const { data } = await this.#call('investments/transactions/get', () =>
         this.#api.investmentsTransactionsGet({
@@ -445,7 +447,10 @@ export class PlaidConnector implements Connector {
         facts.push(investmentTransactionFactOf(transaction, securities));
       }
       offset += data.investment_transactions.length;
-      if (data.investment_transactions.length === 0 || offset >= data.total_investment_transactions) {
+      if (
+        data.investment_transactions.length === 0 ||
+        offset >= data.total_investment_transactions
+      ) {
         return facts;
       }
     }

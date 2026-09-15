@@ -55,7 +55,11 @@ export const PLAID_PFC_VERSION = 'v2';
  * money; Identity verifies the account owner, and in a single-user app the user
  * *is* the owner. Both add Link friction and a per-Item fee for zero benefit.
  */
-export const PLAID_PRODUCTS = Object.freeze(['transactions', 'investments', 'liabilities'] as const);
+export const PLAID_PRODUCTS = Object.freeze([
+  'transactions',
+  'investments',
+  'liabilities',
+] as const);
 
 export interface PlaidCapabilityOptions {
   /**

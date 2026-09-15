@@ -262,6 +262,31 @@ const LAYERS = [
       'a one-context change.',
   },
   {
+    // WP 1.3. The Plaid adapter, and the *only* place `plaid` may be imported.
+    //
+    // This sits before the generic `connectors` entry because `layerFor` takes
+    // the first matching prefix, and it exists as its own layer rather than as
+    // one more name on the shared allow-list for a reason worth stating: the
+    // layer policy is keyed by path prefix, not by package, so listing `plaid`
+    // against `packages/connectors/` would let *every* adapter import it. A
+    // SimpleFIN or Akahu adapter reaching for Plaid's client is not a hypothetical
+    // tidiness concern — it is how "swap the aggregator" (D16's whole reason for
+    // the port) quietly stops being a config change, because the replacement
+    // adapter grows a dependency on the thing it was meant to replace.
+    //
+    // Everything else here is exactly the generic connector set. The rule of the
+    // layer is unchanged: an adapter may reach its own provider's client and
+    // nothing else — not the database, not the platform, not another context.
+    name: 'connector-plaid',
+    prefix: 'packages/connectors/plaid/',
+    allow: ['@core/kernel', '@core/secretbox', '@connector/port', 'plaid', ...UNIVERSAL],
+    allowNodeBuiltins: true,
+    why:
+      'The Plaid adapter maps Plaid shapes to canonical ones and returns them. `plaid` is ' +
+      'allow-listed here and nowhere else, so no other adapter can take a dependency on the ' +
+      'provider the port exists to make replaceable.',
+  },
+  {
     // WP 1.2. One package per provider adapter, plus `port` — the interface they
     // implement and the canonical fact shapes they produce.
     //
@@ -275,12 +300,10 @@ const LAYERS = [
     // eslint.config.js still applies.
     name: 'connectors',
     prefix: 'packages/connectors/',
-    // `plaid` is the only provider SDK in the tree and it is listed here rather
-    // than against `packages/connectors/plaid/` specifically because the layer
-    // policy is keyed by path prefix, not by package. The allow-list is still
-    // doing its job: an adapter may reach its own provider's client and nothing
-    // else — not the database, not the platform, not another context.
-    allow: ['@core/kernel', '@core/secretbox', '@connector/port', 'plaid', ...UNIVERSAL],
+    // No provider SDK here. Each one is allow-listed against its own package —
+    // see the `connector-plaid` entry above — so that an adapter can reach its
+    // own provider's client and no other adapter can reach it at all.
+    allow: ['@core/kernel', '@core/secretbox', '@connector/port', ...UNIVERSAL],
     allowNodeBuiltins: true,
     why:
       'A provider adapter maps provider shapes to canonical ones and returns them. It ' +
