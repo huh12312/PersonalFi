@@ -53,9 +53,13 @@ verify: check
     @echo "=== verify: .trivyignore has no expired suppressions ==="
     just trivyignore-check
     @echo "=== verify: trivy filesystem scan ==="
+    # --skip-dirs node_modules: vuln detection reads pnpm-lock.yaml at the root,
+    # so this drops nothing from the dependency scan; it stops misconfig from
+    # grading Dockerfiles that ship *inside* third-party packages (the `plaid`
+    # SDK carries one) which we never build. Our own docker/*.Dockerfile stay in.
     docker run --rm -v "{{justfile_directory()}}:/repo" {{TRIVY_IMAGE}} \
       fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
-        --ignorefile /repo/.trivyignore --exit-code 1 /repo
+        --skip-dirs node_modules --ignorefile /repo/.trivyignore --exit-code 1 /repo
     @echo "=== verify: PASS (this is the run that predicts CI) ==="
 
 # Same digest CI's `gitleaks` job pins.

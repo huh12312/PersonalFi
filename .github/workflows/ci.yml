@@ -363,7 +363,7 @@ jobs:
           docker run --rm -v "${{ github.workspace }}:/repo" \
             aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
             fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
-              --ignorefile /repo/.trivyignore --exit-code 1 /repo
+              --skip-dirs node_modules --ignorefile /repo/.trivyignore --exit-code 1 /repo
 
   docker-build-scan:
     name: docker build + trivy image scan (${{ matrix.image }})
