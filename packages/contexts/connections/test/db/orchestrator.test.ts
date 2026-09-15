@@ -682,4 +682,143 @@ describe.skipIf(NO_DATABASE)('sync orchestration', () => {
     expect(again.addedCount).toBe(0);
     expect(await ledgerRowCounts(database)).toMatchObject({ live: counts.live });
   }, 120_000);
+
+  // -------------------------------------------------------------------------
+  // Invariant 6: balances follow the transactions delta, and never unwind it
+  // -------------------------------------------------------------------------
+
+  it('records a balance for a cursor provider (Manual) after a successful transactions sync', async () => {
+    const { fixture, connectionId, store } = await linkedManual();
+    store.append('item-1', {
+      balances: [
+        {
+          providerAccountId: 'acct-checking',
+          current: money(543_21n, 'USD'),
+          available: money(543_21n, 'USD'),
+          limit: null,
+          asOf: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const summary = await syncOnce(fixture, connectionId, 'initial');
+
+    expect(summary.status).toBe('success');
+    // The transactions delta still committed in full; balances is additional,
+    // not instead of.
+    expect(summary.addedCount).toBe(ROW_COUNT);
+    expect(await ledgerBalanceCount(database)).toBe(1);
+    expect(fixture.ledger.calls.balances).toHaveLength(1);
+    expect(fixture.ledger.calls.balances[0]).toMatchObject({
+      current: { minor: 543_21n, currency: 'USD' },
+      source: 'provider',
+    });
+
+    // Two rows, one per operation — never one row claiming both.
+    const runs = await listSyncRuns(database.db, database.userId, connectionId);
+    expect(runs).toHaveLength(2);
+    const transactionsRun = runs.find((run) => run.operation === 'transactions');
+    const balancesRun = runs.find((run) => run.operation === 'balances');
+    expect(transactionsRun).toMatchObject({ status: 'success', addedCount: ROW_COUNT });
+    expect(balancesRun).toMatchObject({
+      status: 'success',
+      addedCount: 1,
+      pageCount: 1,
+      errorKind: null,
+      errorCode: null,
+    });
+    expect(balancesRun?.finishedAt).not.toBeNull();
+  });
+
+  it('records a balance for every account the seed dataset describes, through the same port', async () => {
+    const dataset = generateDemoData(1);
+    const connector = new SeedConnector({ pageSize: 250 });
+
+    const fixture = await orchestratorFor(database, connector);
+    const { connectionId } = await linkFor(database, fixture, connector, {
+      displayName: 'Demo data',
+      providerConnectionId: 'seed-balances',
+      accounts: dataset.accounts.map((account) => ({
+        providerAccountId: account.id,
+        name: account.name,
+        type: 'depository',
+        currency: account.currency,
+      })),
+    });
+    connector.load('seed-balances', dataset, { asOf: new Date('2026-06-01T12:00:00.000Z') });
+
+    const summary = await fixture.orchestrator.syncConnection({
+      connectionId,
+      userId: database.userId,
+      trigger: 'initial',
+      correlationId: CORRELATION_ID,
+    });
+
+    expect(summary.status).toBe('success');
+    expect(await ledgerBalanceCount(database)).toBe(dataset.accounts.length);
+    expect(fixture.ledger.calls.balances).toHaveLength(dataset.accounts.length);
+
+    const runs = await listSyncRuns(database.db, database.userId, connectionId);
+    const balancesRun = runs.find((run) => run.operation === 'balances');
+    expect(balancesRun).toMatchObject({
+      status: 'success',
+      addedCount: dataset.accounts.length,
+    });
+  }, 120_000);
+
+  it('records a balances failure without losing a transactions delta that already committed', async () => {
+    const failure = ConnectorError.fromCondition('PROVIDER_DOWN', 'balances endpoint is down');
+    const { fixture, connectionId } = await linkedManual({
+      patch: () => ({ syncBalances: () => Promise.reject(failure) }),
+    });
+
+    const summary = await syncOnce(fixture, connectionId, 'initial');
+
+    // The transactions half neither knows nor cares that balances failed: it
+    // already committed before `#syncBalancesIfDue` ran.
+    expect(summary.status).toBe('success');
+    expect(summary.addedCount).toBe(ROW_COUNT);
+    expect(await ledgerRowCounts(database)).toMatchObject({ live: ROW_COUNT });
+    expect(await ledgerBalanceCount(database)).toBe(0);
+
+    const runs = await listSyncRuns(database.db, database.userId, connectionId);
+    expect(runs).toHaveLength(2);
+    const transactionsRun = runs.find((run) => run.operation === 'transactions');
+    const balancesRun = runs.find((run) => run.operation === 'balances');
+    expect(transactionsRun).toMatchObject({ status: 'success', addedCount: ROW_COUNT });
+    expect(balancesRun).toMatchObject({
+      status: 'failed',
+      addedCount: 0,
+      errorKind: 'provider_unavailable',
+      errorCode: 'PROVIDER_DOWN',
+    });
+  });
+
+  it('does not ask for balances behind a transactions failure that committed nothing', async () => {
+    let balancesCalls = 0;
+    const { fixture, connectionId } = await linkedManual({
+      patch: () => ({
+        syncTransactions: () =>
+          Promise.reject(ConnectorError.fromCondition('AUTH_REQUIRED', 'needs reauth')),
+        syncBalances: () => {
+          balancesCalls += 1;
+          return Promise.resolve([]);
+        },
+      }),
+    });
+
+    const summary = await syncOnce(fixture, connectionId, 'initial');
+
+    expect(summary.status).toBe('failed');
+    expect(summary.error?.kind).toBe('auth_required');
+    // Invariant 4's reasoning applies here too: a connector that cannot
+    // authenticate cannot answer a balances question either, and asking would
+    // spend the same rate limit the reconnect needs.
+    expect(balancesCalls).toBe(0);
+    expect(await ledgerBalanceCount(database)).toBe(0);
+
+    const runs = await listSyncRuns(database.db, database.userId, connectionId);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.operation).toBe('transactions');
+  });
 });

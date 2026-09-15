@@ -51,6 +51,7 @@ import type {
   Products,
   Transaction,
   TransactionsSyncRequest,
+  TransactionsUpdateStatus,
 } from 'plaid';
 import { z } from 'zod';
 import {
@@ -73,6 +74,7 @@ import {
 } from './map.ts';
 import {
   PLAID_ACCESS_TOKEN,
+  PLAID_HISTORICAL_UPDATE_COMPLETE,
   PLAID_MANIFEST,
   PLAID_MAX_HISTORY_DAYS,
   PLAID_MAX_PAGE_SIZE,
@@ -341,6 +343,30 @@ export class PlaidConnector implements Connector {
     const { data } = await this.#call('transactions/sync', () =>
       this.#api.transactionsSync(request),
     );
+
+    // 01 §5.1's PRODUCT_NOT_READY row assumed the not-ready case *throws*. Real
+    // Sandbox (found by the live smoke, WP 1.3 §7) instead answers 200 with an
+    // empty, non-`has_more` page and `transactions_update_status: 'NOT_READY'`
+    // or `'INITIAL_UPDATE_COMPLETE'` while the extract is still running. Folding
+    // that into the same `PRODUCT_NOT_READY`/`transient` classification the error
+    // map already carries means every existing caller's retry loop — including
+    // this file's own callers and the orchestrator — needs no new code path.
+    // `HISTORICAL_UPDATE_COMPLETE` is excluded so a genuinely empty, finished
+    // account (the steady state after backfill) returns normally instead of
+    // retrying forever.
+    if (
+      data.added.length === 0 &&
+      data.modified.length === 0 &&
+      data.removed.length === 0 &&
+      !data.has_more &&
+      data.transactions_update_status !==
+        (PLAID_HISTORICAL_UPDATE_COMPLETE as TransactionsUpdateStatus)
+    ) {
+      throw mapPlaidError(
+        { error_type: 'ITEM_ERROR', error_code: 'PRODUCT_NOT_READY' },
+        { endpoint: 'transactions/sync', retryAfterMs: null },
+      );
+    }
 
     const currencyByAccount = currencyByAccountOf(data.accounts);
     const factOf = (transaction: Transaction): ProviderTransactionFact =>

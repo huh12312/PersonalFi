@@ -11,7 +11,7 @@ import { Money } from '@core/kernel';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { InvestmentTransaction } from 'plaid';
+import type { InvestmentTransaction, TransactionsSyncResponse } from 'plaid';
 import { describe, expect, it } from 'vitest';
 import { PLAID_ACCESS_TOKEN, plaidCapabilities } from '../src/provider.ts';
 import { PLAID_ERRORS } from './fake.ts';
@@ -215,6 +215,73 @@ describe('multi-page /transactions/sync', () => {
       if (!page.hasMore) break;
     }
     expect(pages).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The historical extract has not finished — found live, not in a fixture
+// ---------------------------------------------------------------------------
+
+describe('a page that arrives before the historical extract has finished', () => {
+  // Live Sandbox smoke (WP 1.3 §7, 2026-09-14) found real Plaid behaviour no
+  // fixture had recorded: a freshly-linked Item's /transactions/sync does not
+  // throw PRODUCT_NOT_READY while the extract is running. It answers 200 with
+  // an empty page (has_more: false) and transactions_update_status: 'NOT_READY',
+  // then 'INITIAL_UPDATE_COMPLETE', before 'HISTORICAL_UPDATE_COMPLETE' once real
+  // rows exist. Both not-finished statuses must classify exactly like the
+  // PRODUCT_NOT_READY row every caller's retry loop already knows how to handle.
+
+  function emptyPage(
+    status: 'NOT_READY' | 'INITIAL_UPDATE_COMPLETE' | 'HISTORICAL_UPDATE_COMPLETE',
+  ): TransactionsSyncResponse {
+    return {
+      accounts: [],
+      added: [],
+      modified: [],
+      removed: [],
+      next_cursor: '',
+      has_more: false,
+      transactions_update_status: status as never,
+      request_id: `req-sync-${status.toLowerCase()}`,
+    };
+  }
+
+  it.each(['NOT_READY', 'INITIAL_UPDATE_COMPLETE'] as const)(
+    'classifies an empty, not-has_more page as PRODUCT_NOT_READY when the status is %s',
+    async (status) => {
+      const { connector, handle, options } = harness({ pages: [emptyPage(status)] });
+      const failure = await connector
+        .syncTransactions(handle, null, options)
+        .catch((error: unknown) => error);
+      expect(failure).toMatchObject({
+        name: 'ConnectorError',
+        kind: 'transient',
+        providerCode: 'PRODUCT_NOT_READY',
+      });
+    },
+  );
+
+  it('returns normally for an empty page once the status is HISTORICAL_UPDATE_COMPLETE', async () => {
+    // The steady state after backfill: a genuinely empty, finished account must
+    // not retry forever just because its page is empty.
+    const { connector, handle, options } = harness({
+      pages: [emptyPage('HISTORICAL_UPDATE_COMPLETE')],
+    });
+    const page = await connector.syncTransactions(handle, null, options);
+    expect(page.added).toHaveLength(0);
+    expect(page.hasMore).toBe(false);
+  });
+
+  it('returns real rows without retrying even while the status is still INITIAL_UPDATE_COMPLETE', async () => {
+    // A page with actual content is real data, not a not-ready signal — the
+    // check only fires on an empty, non-has_more page.
+    const withData: TransactionsSyncResponse = {
+      ...SYNC_PAGES[0]!,
+      transactions_update_status: 'INITIAL_UPDATE_COMPLETE' as never,
+    };
+    const { connector, handle, options } = harness({ pages: [withData] });
+    const page = await connector.syncTransactions(handle, null, options);
+    expect(page.added.length).toBeGreaterThan(0);
   });
 });
 

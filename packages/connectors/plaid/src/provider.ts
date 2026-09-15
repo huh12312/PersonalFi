@@ -49,6 +49,24 @@ export const PLAID_MAX_HISTORY_DAYS = 730;
 export const PLAID_PFC_VERSION = 'v2';
 
 /**
+ * The one `transactions_update_status` value that means "the historical
+ * extract behind this Item has actually finished."
+ *
+ * Live Sandbox smoke (2026-09-14, WP 1.3 §7) found real Plaid behaviour that no
+ * fixture had recorded: a freshly-linked Item's `/transactions/sync` does
+ * **not** throw `PRODUCT_NOT_READY` while the extract is still running — it
+ * answers `200` with an empty page (`added`/`modified`/`removed: []`,
+ * `has_more: false`) and `transactions_update_status: 'NOT_READY'`, then
+ * `'INITIAL_UPDATE_COMPLETE'` (still possibly empty), before finally
+ * `'HISTORICAL_UPDATE_COMPLETE'` once real rows exist. `connector.ts` treats an
+ * empty, non-`has_more` page as `PRODUCT_NOT_READY` (the classification the
+ * error map and every caller already knows how to retry) unless this value is
+ * present, so a genuinely empty *and finished* account still returns instead of
+ * retrying forever.
+ */
+export const PLAID_HISTORICAL_UPDATE_COMPLETE = 'HISTORICAL_UPDATE_COMPLETE';
+
+/**
  * D16: Trial requests exactly these three. **Not** Auth, **not** Identity.
  *
  * 01 §1.5: Auth exists "to initiate credits or debits via ACH" and we never move

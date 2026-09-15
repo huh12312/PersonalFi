@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { Eye, EyeOff, LogOut, Moon, Search, Sun } from 'lucide-react';
 
 import { useLogoutMutation } from '../../api/pending-contracts.ts';
+import { useSyncStatus } from '../../features/sync/useSyncStatus.ts';
 import { useHideAmounts } from '../../lib/privacy.ts';
 import { useThemeToggle } from '../../lib/theme.ts';
 import { SyncStatusPill } from '../../components/patterns/SyncStatusPill.tsx';
@@ -26,6 +27,7 @@ export function TopBar({ title, onOpenSearch }: TopBarProps) {
   const theme = useThemeToggle();
   const [hideAmounts, setHideAmounts] = useHideAmounts();
   const logout = useLogoutMutation();
+  const syncStatus = useSyncStatus();
 
   /**
    * `useLogoutMutation`'s own `onSuccess` clears the query cache
@@ -44,7 +46,11 @@ export function TopBar({ title, onOpenSearch }: TopBarProps) {
       <h1 className="flex-1 truncate text-h3 text-text-primary">{title}</h1>
 
       <SyncStatusPill
-        status={{ kind: 'synced', label: 'Synced 4m ago' }}
+        status={
+          syncStatus.kind === 'error'
+            ? { ...syncStatus, onClick: () => void navigate({ to: '/accounts/connections' }) }
+            : syncStatus
+        }
         className="hidden sm:inline-flex"
       />
 

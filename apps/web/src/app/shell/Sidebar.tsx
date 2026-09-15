@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
-import { Link, useRouterState } from '@tanstack/react-router';
+import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { useState } from 'react';
 
 import { cn } from '../../lib/cn.ts';
+import { useSyncStatus } from '../../features/sync/useSyncStatus.ts';
 import { SyncStatusPill } from '../../components/patterns/SyncStatusPill.tsx';
 import { NAV_GROUPS } from './nav-items.ts';
 
@@ -23,6 +24,8 @@ export function Sidebar() {
     }
   });
   const currentPath = useRouterState({ select: (s) => s.location.pathname });
+  const syncStatus = useSyncStatus();
+  const navigate = useNavigate();
 
   function toggleCollapsed(): void {
     setCollapsed((prev) => {
@@ -88,7 +91,15 @@ export function Sidebar() {
       </nav>
 
       <div className="flex flex-col gap-2 border-t border-border-hairline p-3">
-        {!collapsed && <SyncStatusPill status={{ kind: 'synced', label: 'Synced 4m ago' }} />}
+        {!collapsed && (
+          <SyncStatusPill
+            status={
+              syncStatus.kind === 'error'
+                ? { ...syncStatus, onClick: () => void navigate({ to: '/accounts/connections' }) }
+                : syncStatus
+            }
+          />
+        )}
         <button
           type="button"
           onClick={toggleCollapsed}
