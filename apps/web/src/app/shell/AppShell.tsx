@@ -13,7 +13,10 @@ import { TopBar } from './TopBar.tsx';
 function titleForPath(pathname: string): string {
   if (pathname === '/') return 'Dashboard';
   const match = ALL_NAV_ITEMS.find((item) => item.to === pathname);
-  return match?.label ?? 'PersonalFi';
+  if (match !== undefined) return match.label;
+  if (pathname === '/accounts/connections') return 'Connections';
+  if (pathname.startsWith('/accounts/')) return 'Account';
+  return 'PersonalFi';
 }
 
 /**

@@ -45,10 +45,17 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <RouterProvider router={router} />
-        {/* role="status" toasts only — errors that must stop work use a route
-            errorComponent or a field-level message, never a toast alone (05 §4.4). */}
-        <Toaster richColors closeButton position="bottom-right" />
+        {/* `id="app-content"` is this app's own tree, excluding the dev-only
+            TanStack Query/Router devtool panels below — the anchor
+            `e2e/support/axe.ts` scopes every axe run to, so a devtools
+            panel's own (real, upstream) accessibility issues never fail a
+            check about *this* app's accessibility. */}
+        <div id="app-content">
+          <RouterProvider router={router} />
+          {/* role="status" toasts only — errors that must stop work use a route
+              errorComponent or a field-level message, never a toast alone (05 §4.4). */}
+          <Toaster richColors closeButton position="bottom-right" />
+        </div>
         {DevTools !== null && (
           <Suspense fallback={null}>
             <DevTools />

@@ -24,6 +24,9 @@ import { Route as AppRecurringRouteImport } from './routes/_app.recurring'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppTransactionsRouteImport } from './routes/_app.transactions'
 import { Route as DevKitchenSinkRouteImport } from './routes/dev.kitchen-sink'
+import { Route as AppAccountsIndexRouteImport } from './routes/_app.accounts.index'
+import { Route as AppAccountsAccountIdRouteImport } from './routes/_app.accounts.$accountId'
+import { Route as AppAccountsConnectionsRouteImport } from './routes/_app.accounts.connections'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -99,6 +102,21 @@ const DevKitchenSinkRoute = DevKitchenSinkRouteImport.update({
   path: '/dev/kitchen-sink',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppAccountsIndexRoute = AppAccountsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppAccountsRoute,
+} as any)
+const AppAccountsAccountIdRoute = AppAccountsAccountIdRouteImport.update({
+  id: '/$accountId',
+  path: '/$accountId',
+  getParentRoute: () => AppAccountsRoute,
+} as any)
+const AppAccountsConnectionsRoute = AppAccountsConnectionsRouteImport.update({
+  id: '/connections',
+  path: '/connections',
+  getParentRoute: () => AppAccountsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -106,7 +124,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/unlock': typeof UnlockRoute
-  '/accounts': typeof AppAccountsRoute
+  '/accounts': typeof AppAccountsRouteWithChildren
   '/budget': typeof AppBudgetRoute
   '/insights': typeof AppInsightsRoute
   '/investments': typeof AppInvestmentsRoute
@@ -115,13 +133,15 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRoute
   '/transactions': typeof AppTransactionsRoute
   '/dev/kitchen-sink': typeof DevKitchenSinkRoute
+  '/accounts/$accountId': typeof AppAccountsAccountIdRoute
+  '/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/accounts/': typeof AppAccountsIndexRoute
 }
 export interface FileRoutesByTo {
   '/lock': typeof LockRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/unlock': typeof UnlockRoute
-  '/accounts': typeof AppAccountsRoute
   '/budget': typeof AppBudgetRoute
   '/insights': typeof AppInsightsRoute
   '/investments': typeof AppInvestmentsRoute
@@ -131,6 +151,9 @@ export interface FileRoutesByTo {
   '/transactions': typeof AppTransactionsRoute
   '/dev/kitchen-sink': typeof DevKitchenSinkRoute
   '/': typeof AppIndexRoute
+  '/accounts/$accountId': typeof AppAccountsAccountIdRoute
+  '/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/accounts': typeof AppAccountsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -139,7 +162,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/unlock': typeof UnlockRoute
-  '/_app/accounts': typeof AppAccountsRoute
+  '/_app/accounts': typeof AppAccountsRouteWithChildren
   '/_app/budget': typeof AppBudgetRoute
   '/_app/insights': typeof AppInsightsRoute
   '/_app/investments': typeof AppInvestmentsRoute
@@ -149,6 +172,9 @@ export interface FileRoutesById {
   '/_app/transactions': typeof AppTransactionsRoute
   '/dev/kitchen-sink': typeof DevKitchenSinkRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/accounts/$accountId': typeof AppAccountsAccountIdRoute
+  '/_app/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/_app/accounts/': typeof AppAccountsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -167,13 +193,15 @@ export interface FileRouteTypes {
     | '/settings'
     | '/transactions'
     | '/dev/kitchen-sink'
+    | '/accounts/$accountId'
+    | '/accounts/connections'
+    | '/accounts/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/lock'
     | '/login'
     | '/register'
     | '/unlock'
-    | '/accounts'
     | '/budget'
     | '/insights'
     | '/investments'
@@ -183,6 +211,9 @@ export interface FileRouteTypes {
     | '/transactions'
     | '/dev/kitchen-sink'
     | '/'
+    | '/accounts/$accountId'
+    | '/accounts/connections'
+    | '/accounts'
   id:
     | '__root__'
     | '/_app'
@@ -200,6 +231,9 @@ export interface FileRouteTypes {
     | '/_app/transactions'
     | '/dev/kitchen-sink'
     | '/_app/'
+    | '/_app/accounts/$accountId'
+    | '/_app/accounts/connections'
+    | '/_app/accounts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -318,11 +352,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DevKitchenSinkRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/accounts/': {
+      id: '/_app/accounts/'
+      path: '/'
+      fullPath: '/accounts/'
+      preLoaderRoute: typeof AppAccountsIndexRouteImport
+      parentRoute: typeof AppAccountsRoute
+    }
+    '/_app/accounts/$accountId': {
+      id: '/_app/accounts/$accountId'
+      path: '/$accountId'
+      fullPath: '/accounts/$accountId'
+      preLoaderRoute: typeof AppAccountsAccountIdRouteImport
+      parentRoute: typeof AppAccountsRoute
+    }
+    '/_app/accounts/connections': {
+      id: '/_app/accounts/connections'
+      path: '/connections'
+      fullPath: '/accounts/connections'
+      preLoaderRoute: typeof AppAccountsConnectionsRouteImport
+      parentRoute: typeof AppAccountsRoute
+    }
   }
 }
 
+interface AppAccountsRouteChildren {
+  AppAccountsAccountIdRoute: typeof AppAccountsAccountIdRoute
+  AppAccountsConnectionsRoute: typeof AppAccountsConnectionsRoute
+  AppAccountsIndexRoute: typeof AppAccountsIndexRoute
+}
+
+const AppAccountsRouteChildren: AppAccountsRouteChildren = {
+  AppAccountsAccountIdRoute: AppAccountsAccountIdRoute,
+  AppAccountsConnectionsRoute: AppAccountsConnectionsRoute,
+  AppAccountsIndexRoute: AppAccountsIndexRoute,
+}
+
+const AppAccountsRouteWithChildren = AppAccountsRoute._addFileChildren(
+  AppAccountsRouteChildren,
+)
+
 interface AppRouteChildren {
-  AppAccountsRoute: typeof AppAccountsRoute
+  AppAccountsRoute: typeof AppAccountsRouteWithChildren
   AppBudgetRoute: typeof AppBudgetRoute
   AppInsightsRoute: typeof AppInsightsRoute
   AppInvestmentsRoute: typeof AppInvestmentsRoute
@@ -334,7 +405,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppAccountsRoute: AppAccountsRoute,
+  AppAccountsRoute: AppAccountsRouteWithChildren,
   AppBudgetRoute: AppBudgetRoute,
   AppInsightsRoute: AppInsightsRoute,
   AppInvestmentsRoute: AppInvestmentsRoute,

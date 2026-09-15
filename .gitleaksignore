@@ -49,3 +49,11 @@
 # deployment, and it authenticated nothing beyond a throwaway local enrolment.
 c7846dc6282f6ae7156e56b36f47a8de14d969aa:docs/evidence/phase-0/wp0.2-summary.md:generic-api-key:96
 c7846dc6282f6ae7156e56b36f47a8de14d969aa:docs/evidence/phase-0/wp0.2-summary.md:generic-api-key:98
+
+# False positive: the hermetic FakePlaidApi passes the endpoint name
+# 'investments/holdings/get' as the second argument right after
+# `request.access_token`, and the generic-api-key heuristic reads the endpoint
+# string as the key. Verified by reading packages/connectors/plaid/test/fake.ts
+# at this commit — the value is a URL path, not a token; the fake never holds a
+# real access token (it mints synthetic `access-sandbox-…` strings).
+e6b654adacec494072b5ba03f77452458f738662:packages/connectors/plaid/test/fake.ts:generic-api-key:375

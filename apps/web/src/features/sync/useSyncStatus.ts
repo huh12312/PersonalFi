@@ -40,6 +40,10 @@ export function useSyncStatus(): SyncStatus {
     lastHandledSeq.current = key;
 
     if (lastEvent.type === 'connection.status' || lastEvent.type === 'account.upserted') {
+      // Reacting to a new SSE frame (an external event, not a derived prop) —
+      // the canonical effect use case react-hooks/set-state-in-effect can't
+      // tell apart from "should have been computed during render" here.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSyncingSince((prev) => prev ?? Date.now());
     }
     if (lastEvent.type === 'sync.completed') {
@@ -81,6 +85,10 @@ export function useSyncStatus(): SyncStatus {
     }
 
     const mostRecent = Math.max(...lastSyncedTimes);
+    // "Stale" is inherently wall-clock-relative; re-evaluated whenever
+    // `connectionsQuery.data`/`syncingSince` change (a sync, a poll, an SSE
+    // event), which is an accepted approximation rather than a live countdown.
+    // eslint-disable-next-line react-hooks/purity
     if (Date.now() - mostRecent > STALE_AFTER_MS) {
       return {
         kind: 'stale',

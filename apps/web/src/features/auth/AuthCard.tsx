@@ -21,9 +21,13 @@ export function AuthCard({ children, corner }: { children: ReactNode; corner?: R
   return (
     <div className="relative flex min-h-dvh items-center justify-center bg-bg-page px-4">
       {corner}
-      <div className="w-full max-w-sm rounded-2xl border border-border-hairline bg-bg-surface p-6 text-center">
+      {/* This card *is* the page's main content on every one of these
+          screens — axe's `landmark-one-main` flagged its absence, and there
+          is never a sidebar/top-bar competing for the role here (`AppShell`
+          isn't mounted before a session exists). */}
+      <main className="w-full max-w-sm rounded-2xl border border-border-hairline bg-bg-surface p-6 text-center">
         {children}
-      </div>
+      </main>
     </div>
   );
 }

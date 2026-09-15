@@ -1,0 +1,175 @@
+// SPDX-License-Identifier: MIT
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { AlertTriangle, Receipt } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
+
+import { EmptyState } from '../../components/patterns/EmptyState.tsx';
+import { Skeleton } from '../../components/patterns/Skeleton.tsx';
+import type { Transaction } from '../../api/generated/types.gen.ts';
+import { TransactionRow } from './TransactionRow.tsx';
+import { hasActiveFilters, type TransactionsSearch } from './filters.ts';
+import { useTransactionsList } from './useTransactionsList.ts';
+
+const ROW_HEIGHT = 60;
+
+export interface TransactionsListProps {
+  search: TransactionsSearch;
+  accountName: (accountId: string) => string;
+  selected: ReadonlySet<string>;
+  onToggleSelect: (id: string) => void;
+  onOpen: (id: string) => void;
+  onClearFilters: () => void;
+}
+
+/**
+ * The virtualized, keyset-paginated feed (deliverable 1). `@tanstack/react-virtual`
+ * over `useTransactionsList`'s flattened pages; scrolling within
+ * `overscan` rows of the bottom triggers `fetchNextPage`, same trigger a
+ * "load more" button would use but without the extra click (05 §5.1).
+ *
+ * Arrow-key row focus: `role="grid"`/`role="row"` (already on `TransactionRow`)
+ * plus a roving `tabIndex` driven by `focusedIndex` — the row itself owns
+ * `aria-selected`/checkbox wiring, this component only owns which row is
+ * the current stop and moves it on ArrowUp/ArrowDown/Enter.
+ */
+export function TransactionsList({
+  search,
+  accountName,
+  selected,
+  onToggleSelect,
+  onOpen,
+  onClearFilters,
+}: TransactionsListProps) {
+  const {
+    items,
+    isLoading,
+    isError,
+    error,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+    refetch,
+  } = useTransactionsList(search);
+  const parentRef = useRef<HTMLDivElement>(null);
+  const [focusedIndex, setFocusedIndex] = useState(0);
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 8,
+  });
+
+  const virtualItems = virtualizer.getVirtualItems();
+
+  useEffect(() => {
+    const last = virtualItems.at(-1);
+    if (last === undefined) return;
+    if (last.index >= items.length - 5 && hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage();
+    }
+  }, [virtualItems, items.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setFocusedIndex((prev) => Math.min(prev + 1, items.length - 1));
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setFocusedIndex((prev) => Math.max(prev - 1, 0));
+      } else if (event.key === 'Enter') {
+        const row = items[focusedIndex];
+        if (row !== undefined) onOpen(row.id);
+      }
+    },
+    [items, focusedIndex, onOpen],
+  );
+
+  useEffect(() => {
+    if (focusedIndex < items.length) virtualizer.scrollToIndex(focusedIndex, { align: 'auto' });
+  }, [focusedIndex, items.length, virtualizer]);
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-2">
+        {Array.from({ length: 8 }, (_, index) => (
+          <Skeleton key={index} height={ROW_HEIGHT - 8} variant="block" />
+        ))}
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <EmptyState
+        icon={AlertTriangle}
+        headline="Couldn't load transactions"
+        description={error instanceof Error ? error.message : 'Something went wrong. Try again.'}
+        action={{ label: 'Retry', onClick: () => void refetch() }}
+      />
+    );
+  }
+
+  if (items.length === 0) {
+    const filtered = hasActiveFilters(search);
+    return (
+      <EmptyState
+        icon={Receipt}
+        headline={filtered ? 'No transactions match these filters' : 'No transactions yet'}
+        description={
+          filtered
+            ? 'Try widening the date range or clearing a filter.'
+            : 'Connect an account to start seeing transactions here, or import a CSV.'
+        }
+        {...(filtered ? { action: { label: 'Clear filters', onClick: onClearFilters } } : {})}
+      />
+    );
+  }
+
+  return (
+    <div
+      ref={parentRef}
+      role="grid"
+      aria-label="Transactions"
+      aria-rowcount={items.length}
+      // Composite-widget roving tabindex: the container itself is only
+      // programmatically focusable (`-1`), and TransactionRow's own
+      // `tabIndex={isFocused ? 0 : -1}` is the real tab stop — but
+      // jsx-a11y/interactive-supports-focus requires the `grid` role itself
+      // to carry a `tabIndex` regardless.
+      tabIndex={-1}
+      className="h-[70vh] min-h-[320px] overflow-y-auto rounded-xl border border-border-hairline bg-bg-surface"
+      onKeyDown={onKeyDown}
+    >
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualItems.map((virtualRow) => {
+          const transaction = items[virtualRow.index] as Transaction;
+          return (
+            <TransactionRow
+              key={transaction.id}
+              transaction={transaction}
+              accountName={accountName(transaction.accountId)}
+              index={virtualRow.index}
+              selected={selected.has(transaction.id)}
+              isFocused={focusedIndex === virtualRow.index}
+              measureRef={virtualizer.measureElement}
+              onToggleSelect={onToggleSelect}
+              onOpen={onOpen}
+              onFocusRow={setFocusedIndex}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: `${ROW_HEIGHT}px`,
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}

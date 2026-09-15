@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: MIT
-import { createFileRoute } from '@tanstack/react-router';
-import { Landmark } from 'lucide-react';
+import { createFileRoute, Outlet } from '@tanstack/react-router';
 
-import { PlaceholderRoute } from '../components/patterns/PlaceholderRoute.tsx';
-
+/**
+ * Layout route for `/accounts`, `/accounts/{id}`, and `/accounts/connections`
+ * — a pathless-in-spirit parent (it does render `/accounts` itself, via the
+ * sibling `_app.accounts.index.tsx`) so the three screens share no chrome
+ * beyond what `_app.tsx`'s `AppShell` already provides; each child owns its
+ * own heading and empty/loading states.
+ */
 export const Route = createFileRoute('/_app/accounts')({
-  component: () => (
-    <PlaceholderRoute
-      icon={Landmark}
-      headline="Connect your first account"
-      description="Link a bank via Plaid, connect Coinbase, or add a manual account."
-    />
-  ),
+  component: () => <Outlet />,
 });

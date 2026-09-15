@@ -60,6 +60,9 @@ function TransactionRowImpl({
       data-selected={selected}
       onFocus={() => onFocusRow(index)}
       onClick={() => onOpen(transaction.id)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') onOpen(transaction.id);
+      }}
     >
       <div role="gridcell" className="flex items-center">
         <input
@@ -85,7 +88,11 @@ function TransactionRowImpl({
             </Badge>
           )}
           {transaction.excluded && (
-            <Badge variant="warning" icon={<EyeOff size={11} aria-hidden="true" />} className="shrink-0">
+            <Badge
+              variant="warning"
+              icon={<EyeOff size={11} aria-hidden="true" />}
+              className="shrink-0"
+            >
               Excluded
             </Badge>
           )}

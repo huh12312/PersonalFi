@@ -45,9 +45,7 @@ function toOptimisticFields(patch: TransactionOverlayPatchInput): Partial<Transa
     // cannot know without the row's `provenance` (only present on the detail
     // shape, not the list row) — left alone in that case and reconciled by
     // the invalidation below rather than guessed at.
-    ...(patch.payeeName !== undefined && patch.payeeName !== null
-      ? { name: patch.payeeName }
-      : {}),
+    ...(patch.payeeName !== undefined && patch.payeeName !== null ? { name: patch.payeeName } : {}),
   };
 }
 

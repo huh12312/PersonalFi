@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
+import { Money } from '@core/kernel';
+
 import type { Account } from '../../api/generated/types.gen.ts';
+import { parseWireMoney } from '../../lib/money.ts';
 
 export const ACCOUNT_TYPE_ORDER = [
   'depository',
@@ -47,4 +50,31 @@ export function groupAccounts(accounts: readonly Account[]): {
   })).filter((group) => group.accounts.length > 0);
 
   return { groups, closedAccounts };
+}
+
+/**
+ * The net figure for one group of accounts (deliverable: "a net figure per
+ * group"), one entry per currency actually present. `balance` is `null`
+ * until a sync has recorded one (wp1.5-api.md §7.1's "known gap" — a linked
+ * account with no balance yet), and a `null` balance contributes nothing
+ * rather than being treated as zero, which would understate the group by
+ * omission and *also* silently claim a stated fact ("this account has $0").
+ * `AccountBalance.current` is already signed as a net-worth contribution
+ * (docs/CONVENTIONS.md "Money" — a card you owe on is negative), so groups
+ * are summed, never subtracted.
+ */
+export interface GroupNetWorthEntry {
+  readonly currency: string;
+  readonly net: Money;
+}
+
+export function groupNetWorth(accounts: readonly Account[]): readonly GroupNetWorthEntry[] {
+  const byCurrency = new Map<string, Money>();
+  for (const account of accounts) {
+    if (account.balance === null) continue;
+    const current = parseWireMoney(account.balance.current);
+    const running = byCurrency.get(current.currency);
+    byCurrency.set(current.currency, running === undefined ? current : Money.add(running, current));
+  }
+  return [...byCurrency.entries()].map(([currency, net]) => ({ currency, net }));
 }

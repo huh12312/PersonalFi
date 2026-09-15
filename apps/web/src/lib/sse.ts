@@ -76,6 +76,11 @@ export function useEventStream(
 
     const controller = new AbortController();
     let cancelled = false;
+    // Resets the connection-state flag every time this effect (re)subscribes
+    // — an unavoidable `setState` in an effect since "starting a new
+    // subscription to an external system" has no other lifecycle hook to run
+    // in; react-hooks/set-state-in-effect flags every direct call regardless.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setState('connecting');
 
     async function run(): Promise<void> {

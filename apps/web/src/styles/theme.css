@@ -40,8 +40,14 @@
   --text-muted: #6b6a64;
   --focus-ring: #1f5fb0;
 
-  /* Accent (exactly one) */
-  --accent: #2a78d6;
+  /* Accent (exactly one). `--accent` was `#2a78d6` — 4.41:1 against
+     `--accent-contrast` white, just under WCAG AA's 4.5:1 for normal text
+     (found by axe against the primary "Sign in with a passkey" button,
+     apps/web/e2e/app-walkthrough.spec.ts). Darkened to `#2563eb`
+     (5.17:1) — same hue, same dark-theme pairing (already 5.4:1, untouched)
+     — rather than lightening `--accent-contrast`, which every dark-mode
+     surface using `--accent-wash`/`--accent-text` also reads against. */
+  --accent: #2563eb;
   --accent-text: #1f5fb0;
   --accent-contrast: #ffffff;
   --accent-wash: #eaf2fd;
@@ -53,8 +59,15 @@
   --money-neg-text: #b8391f;
   --money-neutral: #6b6a64;
 
-  /* Status (fixed, never themed) */
-  --status-good: #0ca30c;
+  /* Status (fixed, never themed) — except `--status-good` immediately below:
+     axe (apps/web/e2e/app-walkthrough.spec.ts) found `#0ca30c` on
+     `--bg-subtle` (a "Connected" badge, `Badge` variant `good`) at 2.96:1,
+     against WCAG AA's 4.5:1 — `--bg-subtle` is `#f1f1ee` in light mode but
+     `#202326` in dark mode, and the original green already cleared 4.5:1
+     against *that* (4.71:1), so a single fixed value can't satisfy both.
+     Darkened here for light mode only; the original value is restored for
+     dark mode below and under `prefers-color-scheme: dark`. */
+  --status-good: #0c7a0c;
   --status-warning: #fab219;
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
@@ -118,6 +131,11 @@
   --accent-contrast: #0b0b0b;
   --accent-wash: #132537;
 
+  /* The light-mode-only darkening above (`:root`'s `--status-good`) would
+     fail contrast against this theme's much darker `--bg-subtle` — restored
+     to the original, dark-mode-passing value. */
+  --status-good: #0ca30c;
+
   --money-pos: #1ba277;
   --money-pos-text: #3ec49a;
   --money-neg: #e8604a;
@@ -163,6 +181,7 @@
     --accent-text: #3987e5;
     --accent-contrast: #0b0b0b;
     --accent-wash: #132537;
+    --status-good: #0ca30c;
     --money-pos: #1ba277;
     --money-pos-text: #3ec49a;
     --money-neg: #e8604a;

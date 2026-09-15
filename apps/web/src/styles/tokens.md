@@ -32,7 +32,7 @@ colour pairs with a non-colour signal (`+`/`−`, a glyph, a label).
 
 | Token               | Light     | Dark      |
 | ------------------- | --------- | --------- |
-| `--accent`          | `#2a78d6` | `#3987e5` |
+| `--accent`          | `#2563eb` | `#3987e5` |
 | `--accent-text`     | `#1f5fb0` | `#3987e5` |
 | `--accent-contrast` | `#ffffff` | `#0b0b0b` |
 | `--accent-wash`     | `#eaf2fd` | `#132537` |
@@ -48,14 +48,23 @@ colour pairs with a non-colour signal (`+`/`−`, a glyph, a label).
 Every `<Money>`/`<Percent>` render also carries an explicit `+`/`−` sign
 (`signDisplay`) — colour is a reinforcement, never the only signal (WCAG 1.4.1).
 
-## Status (fixed, never themed)
+## Status (fixed, never themed — except `--status-good`, see below)
 
-| Token               | Value     | Meaning                                   |
-| ------------------- | --------- | ----------------------------------------- |
-| `--status-good`     | `#0ca30c` | On track                                  |
-| `--status-warning`  | `#fab219` | Approaching a limit, needs attention soon |
-| `--status-serious`  | `#ec835a` | Needs action (reconnect, over budget)     |
-| `--status-critical` | `#d03b3b` | Failure, destructive confirmation         |
+| Token               | Value                            | Meaning                                   |
+| ------------------- | -------------------------------- | ----------------------------------------- |
+| `--status-good`     | `#0c7a0c` light / `#0ca30c` dark | On track                                  |
+| `--status-warning`  | `#fab219`                        | Approaching a limit, needs attention soon |
+| `--status-serious`  | `#ec835a`                        | Needs action (reconnect, over budget)     |
+| `--status-critical` | `#d03b3b`                        | Failure, destructive confirmation         |
+
+`--status-good` is the one status colour with a light/dark split: axe
+(`apps/web/e2e/app-walkthrough.spec.ts`) found the original `#0ca30c` at
+2.96:1 against light mode's `--bg-subtle` (`#f1f1ee`) — under WCAG AA's
+4.5:1 — while it clears 4.71:1 against dark mode's `--bg-subtle`
+(`#202326`), so one fixed value can't serve both. `--status-warning` and
+`--status-serious` are visibly light colours that likely have the same
+problem against `--bg-subtle`/`--bg-page` and have not been audited or
+fixed here — left for a broader contrast pass (docs/evidence/phase-1/wp1.6-ui.md).
 
 Every status carries a glyph (Lucide icon) alongside the colour — see `Badge`
 and `SyncStatusPill`.

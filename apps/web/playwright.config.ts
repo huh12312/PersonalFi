@@ -2,15 +2,19 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright config, scoped to `e2e/`. Two independent suites, two
+ * Playwright config, scoped to `e2e/`. Three independent suites, two
  * `webServer`s:
  *
  *   - `smoke.spec.ts` (project `chromium`) boots the Vite dev server and
  *     asserts the app frame renders — no API, no database, no
  *     docker-compose stack (05-frontend-architecture.md §9 reserves the
- *     full demo-seeded-backend E2E suite, MSW-mocked network, and CDP
- *     virtual authenticator passkey flows for a later work package; this is
+ *     full demo-seeded-backend E2E suite for a later work package; this is
  *     WP 0.5's proof that the shell itself boots in a real browser).
+ *   - `app-walkthrough.spec.ts` (project `chromium`, same dev server, WP 1.6)
+ *     walks login → transactions → edit a category → accounts → connections
+ *     → add a manual account, with an axe pass per screen. The network is
+ *     mocked (`e2e/support/mock-api.ts`) rather than backed by a live
+ *     `apps/api` + Postgres — see that file's header for why.
  *   - `csp.spec.ts` (project `csp`, gate-remediation-web.md H-3/M-1) builds
  *     the app in `e2e-csp` mode and serves the result behind the *exact*
  *     production `Content-Security-Policy` header via
@@ -38,7 +42,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testMatch: /smoke\.spec\.ts/,
+      testMatch: /(smoke|app-walkthrough)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:5183' },
     },
     {
