@@ -34,6 +34,7 @@ import { connectionRoutes } from './routes/connections.ts';
 import type { RouteDeps } from './routes/deps.ts';
 import { eventRoutes } from './routes/events.ts';
 import { healthRoutes } from './routes/health.ts';
+import { plaidRoutes } from './routes/plaid.ts';
 import { transactionRoutes } from './routes/transactions.ts';
 
 export const CORRELATION_ID_HEADER = 'x-correlation-id';
@@ -299,7 +300,9 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
    * give — not a null dereference.
    */
   const database = createDatabase(pool);
-  const registry = options.connectorRegistry ?? createConnectorRegistry();
+  const registry =
+    options.connectorRegistry ??
+    createConnectorRegistry({ plaid: config.plaid, clock, logger: app.log });
   let domain: DomainRuntime | null = null;
 
   const deps: RouteDeps = {
@@ -328,6 +331,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(accountRoutes(deps));
   await app.register(transactionRoutes(deps));
   await app.register(connectionRoutes(deps));
+  await app.register(plaidRoutes(deps));
   await app.register(eventRoutes(deps));
 
   return { app, security };

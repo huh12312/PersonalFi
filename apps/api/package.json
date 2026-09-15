@@ -15,6 +15,7 @@
   "dependencies": {
     "@connector/csv": "workspace:*",
     "@connector/manual": "workspace:*",
+    "@connector/plaid": "workspace:*",
     "@core/config": "workspace:*",
     "@core/contracts": "workspace:*",
     "@core/db": "workspace:*",

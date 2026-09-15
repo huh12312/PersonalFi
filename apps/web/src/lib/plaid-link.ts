@@ -9,13 +9,13 @@
  * `window.Plaid.create(...)`, versioned via the `v2/stable` CDN alias so a
  * pin lives in Plaid's own hosting rather than this repo's lockfile.
  *
- * **Not wired to a live link token.** `apps/api` has no route that returns
- * one yet (`PlaidConnector.createLinkToken` in
- * `packages/connectors/plaid/src/connector.ts` exists, but nothing in
- * `apps/api/src/routes/connections.ts` calls it, and the Plaid connector
- * itself is not registered in `apps/api/src/domain.ts`). This module is the
- * client-side half, ready to consume a token the moment that route exists —
- * see `PlaidConnectCard.tsx` for exactly where the missing call would go.
+ * **Wired to a live link token as of WP 1.3b.** `apps/api` now registers
+ * `PlaidConnector` when Plaid secrets are configured and exposes
+ * `POST /connections/plaid/link-token` / `POST /connections/{id}/plaid/update-link-token`
+ * (`docs/evidence/phase-1/wp1.3b-plaid-api.md`). `PlaidConnectCard.tsx` and
+ * `ReconnectDialog.tsx` call those through the generated client; this module
+ * stays the client-side half — loading Plaid's script and driving
+ * `window.Plaid` — and knows nothing about how a token was obtained.
  *
  * **CSP note**: loading `cdn.plaid.com` needs `script-src`/`connect-src`
  * `https://cdn.plaid.com` and `https://production.plaid.com`/
@@ -78,15 +78,4 @@ export async function openPlaidLink(config: PlaidLinkConfig): Promise<PlaidLinkH
   const handler = window.Plaid.create(config);
   handler.open();
   return handler;
-}
-
-/** Raised by `PlaidConnectCard` until `apps/api` exposes a link-token route — see this module's header. */
-export class PlaidLinkTokenUnavailableError extends Error {
-  constructor() {
-    super(
-      'This server has no Plaid link-token endpoint yet. Add one to apps/api and regenerate the ' +
-        'OpenAPI client (see docs/evidence/phase-1/wp1.6-ui.md).',
-    );
-    this.name = 'PlaidLinkTokenUnavailableError';
-  }
 }

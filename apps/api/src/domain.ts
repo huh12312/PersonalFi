@@ -36,8 +36,16 @@ import {
   ManualStore,
   SEED_PROVIDER,
 } from '@connector/manual';
+import {
+  createPlaidApi,
+  PLAID_MANIFEST,
+  PLAID_PROVIDER,
+  PlaidConnector,
+  type PlaidLinkSettings,
+} from '@connector/plaid';
+import type { PlaidConfig } from '@core/config';
 import type { Database } from '@core/db';
-import type { Clock } from '@core/kernel';
+import { systemClock, type Clock } from '@core/kernel';
 import type { PlatformLogger } from '@core/platform';
 import type { SecretBox } from '@core/secretbox';
 import {
@@ -156,6 +164,19 @@ export const PROCESS_LOCAL_PROVIDERS: ReadonlySet<string> = new Set([
 export interface ConnectorRegistryOptions {
   /** Extra adapters. The seed connector is injected here by the test harness. */
   readonly extra?: readonly RegisteredConnector[];
+  /**
+   * `config.plaid` from `@core/config` — `null` when Plaid is not configured
+   * (no `plaid_client_id`/`plaid_secret` file present). This is the *only*
+   * gate: no `NODE_ENV` check, no feature flag. Feature-detection means a
+   * deployment with no Plaid credentials boots exactly as it did before this
+   * work package, and one that adds a `secrets/plaid_client_id` file gets the
+   * connector on the next restart with no other change.
+   */
+  readonly plaid?: PlaidConfig | null;
+  /** Threaded to `PlaidConnector` for `ConnectorHealth.checkedAt` (wp1.3-plaid.md §8 item 2). */
+  readonly clock?: Clock;
+  /** One info line at registration, naming the environment and nothing secret. */
+  readonly logger?: PlatformLogger;
 }
 
 /**
@@ -171,8 +192,40 @@ export function createConnectorRegistry(options: ConnectorRegistryOptions = {}):
     { connector: new CsvImportConnector(), manifest: CSV_MANIFEST },
   ]);
 
-  // WP 1.3 hook — one line, and the Plaid adapter is live:
-  // registry.register({ connector: new PlaidConnector(plaidOptions), manifest: PLAID_MANIFEST });
+  const plaid = options.plaid ?? null;
+  const logger = options.logger;
+  if (plaid === null) {
+    // Feature-detect, one info line, no secret ever touches a log line — there
+    // is nothing here to redact because there is nothing here but the fact of
+    // absence.
+    logger?.info({ provider: PLAID_PROVIDER }, 'plaid not configured; connector not registered');
+  } else {
+    const settings: PlaidLinkSettings = {
+      clientName: plaid.clientName,
+      countryCodes: plaid.countryCodes,
+      language: plaid.language,
+      redirectUri: plaid.redirectUri,
+      webhookUrl: plaid.webhookUrl,
+    };
+    const connector = new PlaidConnector({
+      // `.reveal()` at the one call site that actually needs the bytes, same
+      // pattern as `master_key` reaching `SecretBox.unlock` — never stored,
+      // never logged, dropped the moment `createPlaidApi` has used it to build
+      // the axios default headers (`client.ts`).
+      api: createPlaidApi({
+        clientId: plaid.clientId.reveal(),
+        secret: plaid.secret.reveal(),
+        environment: plaid.environment,
+      }),
+      settings,
+      clock: options.clock ?? systemClock,
+    });
+    registry.register({ connector, manifest: PLAID_MANIFEST });
+    logger?.info(
+      { provider: PLAID_PROVIDER, environment: plaid.environment },
+      'plaid configured; connector registered',
+    );
+  }
 
   for (const entry of options.extra ?? []) registry.register(entry);
   return registry;

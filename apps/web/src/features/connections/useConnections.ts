@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createConnectionMutation,
   disconnectConnectionMutation,
+  exchangePlaidPublicTokenMutation,
   getConnectionOptions,
   getNetWorthOptions,
   listAccountsOptions,
@@ -59,6 +60,12 @@ export function useCreateConnectionMutation() {
 export function useReconnectConnectionMutation() {
   const invalidate = useInvalidateConnections();
   return useMutation({ ...reconnectConnectionMutation(), onSuccess: invalidate });
+}
+
+/** `POST /connections/plaid/exchange` — step-up gated (wp1.3b-plaid-api.md). The second half of a Plaid Link flow: exchanges the public token, creates the connection, and schedules the first sync. */
+export function useExchangePlaidTokenMutation() {
+  const invalidate = useInvalidateConnections();
+  return useMutation({ ...exchangePlaidPublicTokenMutation(), onSuccess: invalidate });
 }
 
 /** `POST /connections/{id}/sync` — session + CSRF only (not step-up: it moves no credential). 202 either way; `mode` says queued vs inline. */

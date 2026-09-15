@@ -36,16 +36,19 @@ import {
   SEED_MANIFEST,
   SeedConnector,
 } from '@connector/manual';
+import { PLAID_MANIFEST, type PlaidConnector } from '@connector/plaid';
 import { loadConfig, type AppConfig } from '@core/config';
-import { newId, type Clock } from '@core/kernel';
+import { newId, systemClock, type Clock } from '@core/kernel';
+import { silentLogger } from '@core/platform';
 import { ADMIN_URL, createTestDatabase, type TestDatabase } from '@core/testkit';
-import { ConnectorRegistry } from '@ctx/connections';
+import { ConnectorRegistry, SyncOrchestrator } from '@ctx/connections';
 // `InjectOptions`/`LightMyRequestResponse` are re-exported by Fastify itself, so
 // the harness does not add `light-my-request` as a direct dependency of the app
 // just to name the type of something `app.inject` already returns.
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../../src/app.ts';
 import type { SecurityRuntime } from '../../src/auth/runtime.ts';
+import { ledgerWriter } from '../../src/domain.ts';
 import { createTempSecrets, type TempSecrets } from './secrets.ts';
 
 /** `describe.skipIf(NO_DATABASE)` — the guard every `*-db` suite uses. */
@@ -97,6 +100,18 @@ export interface ApiHarness {
   readonly manualStore: ManualStore;
   /** Registered under `seed`, for the SSE suite's thousand-row backfill. */
   readonly seedConnector: SeedConnector;
+  /**
+   * The same shape `domain.ts#createDomainRuntime` builds, over this
+   * harness's own registry and secret box. Exposed so a suite can run a sync
+   * to completion directly — `POST /connections/{id}/sync` only *enqueues*
+   * work for a non-process-local provider (Plaid included; see `domain.ts`'s
+   * module comment), and nothing in this harness runs the worker that would
+   * pick a queued job up. The live Sandbox smoke (wp1.3b-plaid-api.md §5)
+   * is the motivating caller: it links through the real HTTP route, then
+   * calls `orchestrator.syncConnection(...)` directly to observe a real,
+   * completed sync against Plaid Sandbox.
+   */
+  readonly orchestrator: SyncOrchestrator;
   /** A session with a step-up assertion. Everything works with this one. */
   readonly fresh: TestSession;
   /** A session without one: reads work, `create`/`delete`/`export` do not. */
@@ -115,6 +130,14 @@ export interface HarnessOptions {
   readonly clock?: Clock;
   /** Rows per page from the manual adapter. Small values exercise pagination. */
   readonly manualPageSize?: number;
+  /**
+   * A `PlaidConnector` wired to `FakePlaidApi` (`@connector/plaid/test`), for
+   * the `wp1.3b-plaid-api` route suites. Not built via `createConnectorRegistry`
+   * (`domain.ts`) — that constructs a real, network-bound client from
+   * `AppConfig.plaid`, and a route test must never dial out. Passing one in
+   * here is the same seam `seedConnector` already uses.
+   */
+  readonly plaidConnector?: PlaidConnector;
 }
 
 /**
@@ -167,6 +190,9 @@ export async function createApiHarness(options: HarnessOptions): Promise<ApiHarn
     { connector: new ManualConnector({ store: manualStore }), manifest: MANUAL_MANIFEST },
     { connector: new CsvImportConnector(), manifest: CSV_MANIFEST },
     { connector: seedConnector, manifest: SEED_MANIFEST },
+    ...(options.plaidConnector === undefined
+      ? []
+      : [{ connector: options.plaidConnector, manifest: PLAID_MANIFEST }]),
   ]);
 
   const built = await buildApp({
@@ -186,6 +212,15 @@ export async function createApiHarness(options: HarnessOptions): Promise<ApiHarn
   }
 
   await app.ready();
+
+  const orchestrator = new SyncOrchestrator({
+    database: database.db,
+    registry,
+    secretBox: security.requireSecretBox(),
+    ledgerWriter,
+    clock: options.clock ?? systemClock,
+    logger: silentLogger,
+  });
 
   async function issueSession(
     sessionOptions: { fresh?: boolean; userId?: string } = {},
@@ -217,6 +252,7 @@ export async function createApiHarness(options: HarnessOptions): Promise<ApiHarn
     userId: database.userId,
     manualStore,
     seedConnector,
+    orchestrator,
     fresh,
     stale,
     issueSession,

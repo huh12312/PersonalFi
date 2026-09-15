@@ -106,7 +106,14 @@ const connectionDetail = connectionSummary
   .extend({ accounts: z.array(connectionAccount), recentRuns: z.array(syncRun) })
   .meta({ id: 'ConnectionDetail' });
 
-const linkResultSchema = z
+/**
+ * Exported so `routes/plaid.ts` can return exactly this shape from
+ * `POST /connections/plaid/exchange` — the same "link a provider" result every
+ * other link-shaped route returns, rather than a second, structurally
+ * identical schema that `jsonSchemaTransformObject` would have to hoist under
+ * a different `.meta({ id })` or collide on this one.
+ */
+export const linkResultSchema = z
   .object({
     connectionId: z.uuid(),
     relinked: z.boolean().describe('True when this replaced the credential on an existing row.'),
@@ -128,89 +135,105 @@ const syncStartedSchema = z
   })
   .meta({ id: 'SyncStarted' });
 
-export const connectionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
-  const { guards, database, clock } = deps;
+/** `{ userId, clock, correlationId }` — every context call needs exactly this. */
+export function contextOf(deps: RouteDeps, userId: string, requestId: string): ConnectionsContext {
+  return { userId, clock: deps.clock, correlationId: requestId };
+}
 
-  function contextOf(userId: string, requestId: string): ConnectionsContext {
-    return { userId, clock, correlationId: requestId };
-  }
+/**
+ * Link or re-link, then start the backfill.
+ *
+ * Exported (not a closure inside `connectionRoutes`) so `routes/plaid.ts` can
+ * drive the exact same path — `createConnection` inside a transaction,
+ * `orchestrator.syncNow` in the same transaction, the process-local inline sync
+ * after commit — for `POST /connections/plaid/exchange`, rather than a second,
+ * drifting copy of "what does linking a provider actually do".
+ *
+ * `createConnection` and `syncNow` share one transaction on purpose: a link
+ * that committed without its backfill enqueued is a connection that looks
+ * linked and never syncs. The inline branch is the exception documented at the
+ * top of this file, and it runs *after* the commit — an adapter's page loop
+ * must not hold the connection that created the row.
+ */
+export async function linkConnection(
+  deps: RouteDeps,
+  userId: string,
+  requestId: string,
+  body: { provider: string; input: unknown; config?: Record<string, unknown> },
+  expectConnectionId: string | null,
+): Promise<z.infer<typeof linkResultSchema>> {
+  const { database } = deps;
+  const { registry, orchestrator, secretBox } = deps.connections();
+  const context = contextOf(deps, userId, requestId);
+  const queued = !PROCESS_LOCAL_PROVIDERS.has(body.provider);
 
-  /**
-   * Link or re-link, then start the backfill.
-   *
-   * `createConnection` and `syncNow` share one transaction on purpose: a link
-   * that committed without its backfill enqueued is a connection that looks
-   * linked and never syncs. The inline branch is the exception documented at the
-   * top of this file, and it runs *after* the commit — an adapter's page loop
-   * must not hold the connection that created the row.
-   */
-  async function link(
-    userId: string,
-    requestId: string,
-    body: { provider: string; input: unknown; config?: Record<string, unknown> },
-    expectConnectionId: string | null,
-  ): Promise<z.infer<typeof linkResultSchema>> {
-    const { registry, orchestrator, secretBox } = deps.connections();
-    const context = contextOf(userId, requestId);
-    const queued = !PROCESS_LOCAL_PROVIDERS.has(body.provider);
-
-    const result = await mapDomainErrors(() =>
-      database.transaction(async (tx) => {
-        const connector = registry.get(body.provider);
-        const created = await createConnection(
-          tx,
-          {
-            input: body.input,
-            connector,
-            secretBox,
-            ledgerWriter,
-            ...(body.config === undefined ? {} : { config: body.config }),
-          },
-          context,
-        );
-        if (expectConnectionId !== null && created.connectionId !== expectConnectionId) {
-          // The artifact linked a *different* provider connection than the row
-          // in the path. Refusing is the only safe answer: silently creating a
-          // second connection under a URL that names the first is how a user
-          // ends up with two of an institution and a doubled net worth.
-          throw new AppError({
-            status: 409,
-            code: 'connections.link_mismatch',
-            title: 'Conflict',
-            detail: 'That link artifact belongs to a different connection.',
-            family: 'domain',
-          });
-        }
-        if (!queued) return { ...created, syncJobId: null };
-        const job = await orchestrator.syncNow(tx, {
-          connectionId: created.connectionId,
-          userId,
-          trigger: 'initial',
-          correlationId: requestId,
+  const result = await mapDomainErrors(() =>
+    database.transaction(async (tx) => {
+      const connector = registry.get(body.provider);
+      const created = await createConnection(
+        tx,
+        {
+          input: body.input,
+          connector,
+          secretBox,
+          ledgerWriter,
+          ...(body.config === undefined ? {} : { config: body.config }),
+        },
+        context,
+      );
+      if (expectConnectionId !== null && created.connectionId !== expectConnectionId) {
+        // The artifact linked a *different* provider connection than the row
+        // in the path. Refusing is the only safe answer: silently creating a
+        // second connection under a URL that names the first is how a user
+        // ends up with two of an institution and a doubled net worth.
+        throw new AppError({
+          status: 409,
+          code: 'connections.link_mismatch',
+          title: 'Conflict',
+          detail: 'That link artifact belongs to a different connection.',
+          family: 'domain',
         });
-        return { ...created, syncJobId: job.jobId };
-      }),
-    );
-
-    let syncRunId: string | null = null;
-    if (!queued) {
-      const summary = await orchestrator.syncConnection({
-        connectionId: result.connectionId,
+      }
+      if (!queued) return { ...created, syncJobId: null };
+      const job = await orchestrator.syncNow(tx, {
+        connectionId: created.connectionId,
         userId,
         trigger: 'initial',
         correlationId: requestId,
       });
-      syncRunId = summary.syncRunId;
-    }
+      return { ...created, syncJobId: job.jobId };
+    }),
+  );
 
-    return {
+  let syncRunId: string | null = null;
+  if (!queued) {
+    const summary = await orchestrator.syncConnection({
       connectionId: result.connectionId,
-      relinked: result.relinked,
-      accountIds: [...result.accountIds],
-      syncJobId: result.syncJobId,
-      syncRunId,
-    };
+      userId,
+      trigger: 'initial',
+      correlationId: requestId,
+    });
+    syncRunId = summary.syncRunId;
   }
+
+  return {
+    connectionId: result.connectionId,
+    relinked: result.relinked,
+    accountIds: [...result.accountIds],
+    syncJobId: result.syncJobId,
+    syncRunId,
+  };
+}
+
+export const connectionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
+  const { guards, database } = deps;
+  const link = (
+    userId: string,
+    requestId: string,
+    body: { provider: string; input: unknown; config?: Record<string, unknown> },
+    expectConnectionId: string | null,
+  ): Promise<z.infer<typeof linkResultSchema>> =>
+    linkConnection(deps, userId, requestId, body, expectConnectionId);
 
   return async (app) => {
     app.get(
@@ -560,7 +583,7 @@ export const connectionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               connector: registry.get(row.provider),
               secretBox,
             },
-            contextOf(session.userId, String(request.id)),
+            contextOf(deps, session.userId, String(request.id)),
           );
         });
         return {

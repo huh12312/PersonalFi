@@ -36,6 +36,31 @@ export interface KekConfig {
   readonly floor: Argon2Params;
 }
 
+/** The two Plaid API environments this application will actually call. */
+export const PLAID_CALLABLE_ENVIRONMENTS = ['sandbox', 'production'] as const;
+export type PlaidCallableEnvironment = (typeof PLAID_CALLABLE_ENVIRONMENTS)[number];
+
+/**
+ * Plaid, resolved and validated at boot — or absent.
+ *
+ * `AppConfig.plaid` is `null` whenever `plaid_client_id` or `plaid_secret` is
+ * missing: the deployment simply has not configured a Plaid connector, which is
+ * not a configuration *error* (`docs/evidence/phase-1/wp1.3b-plaid-api.md`
+ * "feature-detect"). `apps/api/src/domain.ts` reads this field to decide
+ * whether to register `PlaidConnector`, and logs exactly one info line either
+ * way — never the values.
+ */
+export interface PlaidConfig {
+  readonly clientId: Redacted<string>;
+  readonly secret: Redacted<string>;
+  readonly environment: PlaidCallableEnvironment;
+  readonly clientName: string;
+  readonly countryCodes: readonly string[];
+  readonly language: string;
+  readonly redirectUri: string | null;
+  readonly webhookUrl: string | null;
+}
+
 export interface AppConfig {
   readonly env: PublicEnvironmentConfig;
   /** Every declared secret, boxed. `config.secrets.database_url?.reveal()`. */
@@ -46,6 +71,8 @@ export interface AppConfig {
   readonly kek: KekConfig;
   /** Origins allowed by WebAuthn verification and the CSRF `Origin` check. */
   readonly allowedOrigins: readonly string[];
+  /** `null` when Plaid is not configured (§ `resolvePlaid`). Never partially set. */
+  readonly plaid: PlaidConfig | null;
   readonly isProduction: boolean;
   readonly isTest: boolean;
 }
@@ -190,6 +217,12 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     });
   }
 
+  // Resolved before the final `problems.length` check so a Plaid misconfiguration
+  // (e.g. `plaid_env=production` with no opt-in) is reported *with* every other
+  // boot problem in one shot, matching "boot fails fast and prints every problem
+  // at once" — not as a second exception a moment later.
+  const plaid = resolvePlaid(secrets, env, problems);
+
   if (problems.length > 0) throw new ConfigError(problems);
   if (databaseUrl === undefined) throw new ConfigError(problems); // unreachable; narrows the type
 
@@ -201,6 +234,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     databaseUrl,
     kek: Object.freeze({ params: Object.freeze(kekParams), floor: kekFloor }),
     allowedOrigins: Object.freeze(allowedOrigins),
+    plaid,
     isProduction,
     isTest: env.NODE_ENV === 'test',
   });
@@ -351,6 +385,114 @@ function webAuthnProblems(
   }
 
   return problems;
+}
+
+/**
+ * The three raw strings Plaid's `plaid_env` secret file may hold, per D16 and
+ * the literal spec this rule was written against. Only the first two are
+ * actually callable (`PLAID_CALLABLE_ENVIRONMENTS`) — 01 §1.2: "'Development'
+ * no longer exists" as a Plaid API base path, and
+ * `docs/evidence/phase-1/wp1.3-plaid.md` §1 pins `PLAID_ENVIRONMENTS` to
+ * exactly `sandbox`/`production` and asserts "a third value throws". Accepting
+ * `development` as *shaped* input and then refusing it by name — rather than
+ * letting an unrecognised string fall through to `plaidBasePath`'s generic
+ * "unknown plaid environment" at first API call — gives an operator who typed
+ * the wrong word a boot-time problem with a fix, not a 502 during a sync.
+ */
+const PLAID_ENV_VALUES = ['sandbox', 'development', 'production'] as const;
+
+/**
+ * Validate and resolve `plaid_client_id` / `plaid_secret` / `plaid_env` into a
+ * `PlaidConfig`, or `null` when Plaid is not configured.
+ *
+ * Feature-detection, not a requirement: `client_id`/`secret` absent is the
+ * ordinary "this deployment has no Plaid connector" case and produces no
+ * problem at all. Present-but-partial (one file with no matching other) *is* a
+ * problem — a client id with no secret can never make a call, and catching that
+ * at boot beats discovering it the first time a user clicks "Connect a bank".
+ */
+function resolvePlaid(
+  secrets: Partial<Record<SecretName, Redacted<string>>>,
+  env: EnvironmentConfig,
+  problems: ConfigProblem[],
+): PlaidConfig | null {
+  const clientId = secrets.plaid_client_id;
+  const secret = secrets.plaid_secret;
+  const rawEnv = secrets.plaid_env;
+
+  if (clientId === undefined && secret === undefined) {
+    // Neither present: Plaid is simply not configured. A `plaid_env` file with
+    // no credentials is unusual but harmless — nothing reads it — so it is not
+    // flagged.
+    return null;
+  }
+  if (clientId === undefined || secret === undefined) {
+    const missing = clientId === undefined ? 'plaid_client_id' : 'plaid_secret';
+    const present = clientId === undefined ? 'plaid_secret' : 'plaid_client_id';
+    problems.push({
+      key: `secret:${missing}`,
+      problem: `is missing, but secret:${present} is present — Plaid cannot make a call with only one`,
+      hint: `write the other half to \${SECRETS_DIR}/${missing} (mode 0400), or remove both to leave Plaid unconfigured`,
+    });
+    return null;
+  }
+
+  const rawEnvValue = rawEnv?.reveal() ?? 'sandbox';
+  if (!(PLAID_ENV_VALUES as readonly string[]).includes(rawEnvValue)) {
+    problems.push({
+      key: 'secret:plaid_env',
+      problem: `is not one of ${PLAID_ENV_VALUES.join(', ')}`,
+      hint: 'write exactly `sandbox` or `production` to ${SECRETS_DIR}/plaid_env',
+    });
+    return null;
+  }
+  if (rawEnvValue === 'development') {
+    problems.push({
+      key: 'secret:plaid_env',
+      problem:
+        "is 'development', which Plaid retired as an API base path (01 §1.2 — 'Development no " +
+        "longer exists'); PlaidEnvironments only defines sandbox and production",
+      hint: 'use `sandbox` for testing; there is no development environment to fall back to',
+    });
+    return null;
+  }
+  const resolvedEnv = rawEnvValue as PlaidCallableEnvironment;
+
+  if (resolvedEnv === 'production' && !env.PLAID_ALLOW_PRODUCTION) {
+    problems.push({
+      key: 'secret:plaid_env',
+      problem:
+        'is `production`, which calls Plaid for real money-adjacent data and a hard ten-Item ' +
+        'cap that /item/remove does not free (D16) — refusing to boot without an explicit opt-in',
+      hint:
+        'set PLAID_ALLOW_PRODUCTION=true if this deployment really means to call Plaid ' +
+        'Production, or write `sandbox` to ${SECRETS_DIR}/plaid_env if it does not',
+    });
+    return null;
+  }
+
+  const countryCodes = env.PLAID_COUNTRY_CODES.split(',')
+    .map((code) => code.trim())
+    .filter((code) => code.length > 0);
+  if (countryCodes.length === 0) {
+    problems.push({
+      key: 'PLAID_COUNTRY_CODES',
+      problem: 'is empty; Link needs at least one ISO-3166-1 alpha-2 country code',
+      hint: 'set PLAID_COUNTRY_CODES to a comma-separated list, e.g. US or US,CA',
+    });
+    return null;
+  }
+
+  return {
+    clientId,
+    secret,
+    environment: resolvedEnv,
+    clientName: env.PLAID_CLIENT_NAME,
+    countryCodes: Object.freeze(countryCodes),
+    language: env.PLAID_LANGUAGE,
+    redirectUri: env.PLAID_REDIRECT_URI,
+    webhookUrl: env.PLAID_WEBHOOK_URL,
+  };
 }
 
 function kekFloorProblems(

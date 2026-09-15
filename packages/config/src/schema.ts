@@ -158,6 +158,44 @@ export const environmentSchema = z.object({
   SESSION_COOKIE_SECURE: z.stringbool().default(true),
   /** Fixed latency floor on auth failures, so TOTP-vs-unknown cannot be timed apart. */
   AUTH_FAILURE_DELAY_MS: z.coerce.number().int().min(0).max(5_000).default(250),
+
+  // -------------------------------------------------------------------- plaid
+  //
+  // `plaid_client_id`, `plaid_secret` and `plaid_env` are file secrets (see
+  // `SECRET_SPECS` below), not env vars: 01 §1.10 — "you must never publish,
+  // distribute, or share your … Client ID or Plaid API secret" — and D16 makes
+  // an accidental Production call expensive (a hard ten-Item cap that
+  // `/item/remove` does not free). Everything here is non-secret deployment
+  // shape: which products Link offers to and where it redirects, never a
+  // credential.
+  //
+  // Feature-detected, not required: with no `plaid_client_id`/`plaid_secret`
+  // file present the API boots normally and the Plaid connector simply is not
+  // registered (`load.ts`'s `resolvePlaid`, `AppConfig.plaid === null`).
+
+  /** Shown in Plaid Link's header. */
+  PLAID_CLIENT_NAME: z.string().min(1).default('PersonalFi'),
+  /** ISO-3166-1 alpha-2, comma-separated. Drives which institutions Link offers. */
+  PLAID_COUNTRY_CODES: z.string().min(1).default('US'),
+  /** ISO-639-1. */
+  PLAID_LANGUAGE: z.string().length(2).default('en'),
+  /**
+   * Derived from `PUBLIC_HOST` (D12), e.g.
+   * `https://<node>.<tailnet>.ts.net/link/oauth`. `null` disables OAuth
+   * institutions rather than sending Plaid an empty string, which is a hard
+   * `INVALID_FIELD` (wp1.3-plaid.md §1).
+   */
+  PLAID_REDIRECT_URI: z.url().nullable().default(null),
+  /** D12: null by default. Polling is the ingestion path; webhooks are optional. */
+  PLAID_WEBHOOK_URL: z.url().nullable().default(null),
+  /**
+   * The one flag standing between a misconfigured `plaid_env` file and a real
+   * charge against the Production Plaid account (D16: Trial plan, sandbox-first).
+   * `loadConfig` refuses to boot with `plaid_env=production` unless this is also
+   * `true` — two independent files/vars have to agree, so a single typo cannot
+   * flip the deployment into Production.
+   */
+  PLAID_ALLOW_PRODUCTION: z.stringbool().default(false),
 });
 
 export type EnvironmentConfig = z.infer<typeof environmentSchema>;
@@ -250,6 +288,55 @@ export const SECRET_SPECS = [
     hint:
       'write a high-entropy passphrase to ${SECRETS_DIR}/master_key (mode 0400). ' +
       'Generate one with `just gen-master-key`. It is never read from the environment.',
+  },
+  {
+    /**
+     * Plaid's Client ID. Not, by itself, enough to call the API — but 01 §1.10
+     * is explicit that it must never be published or shared, so it gets the
+     * same file-only treatment as the secret. **No `envFallback`, deliberately**
+     * (unlike `database_url`): `docs/evidence/phase-1/wp1.3-plaid.md` §7's
+     * Sandbox runbook already shows the file-secret path working end to end,
+     * and an env-var escape hatch here is exactly the leak surface 01 §1.10
+     * warns about (`docker inspect`, crash dumps, child processes).
+     */
+    name: 'plaid_client_id',
+    file: 'plaid_client_id',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write the Plaid Client ID to ${SECRETS_DIR}/plaid_client_id (mode 0400). ' +
+      'Optional: with no client id (or no secret) present, the API boots without the Plaid ' +
+      'connector registered. Dashboard → Developers → Keys.',
+  },
+  {
+    /** The Plaid API secret proper. Same file-only posture as `plaid_client_id`. */
+    name: 'plaid_secret',
+    file: 'plaid_secret',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write the Plaid secret (Sandbox or Production, matching plaid_env) to ' +
+      '${SECRETS_DIR}/plaid_secret (mode 0400). Optional, same posture as plaid_client_id.',
+  },
+  {
+    /**
+     * `sandbox` | `development` | `production`, as text — validated in
+     * `load.ts`'s `resolvePlaid`, not by zod, because a secret file's contents
+     * are a plain string here (`SECRET_SPECS` has no per-secret schema) and the
+     * production-gate check (`PLAID_ALLOW_PRODUCTION`) needs the raw value
+     * regardless of which of the three it turns out to be. Defaults to
+     * `sandbox` when the file is absent but credentials are present — D16:
+     * sandbox-first, and a deployment that wrote a client id and secret but no
+     * environment almost certainly means Sandbox.
+     */
+    name: 'plaid_env',
+    file: 'plaid_env',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write one of `sandbox` or `production` to ${SECRETS_DIR}/plaid_env (mode 0400). ' +
+      'Defaults to `sandbox` when absent. `production` additionally needs ' +
+      'PLAID_ALLOW_PRODUCTION=true (D16).',
   },
 ] as const;
 

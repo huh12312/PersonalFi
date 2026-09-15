@@ -1678,6 +1678,21 @@
           "migrations"
         ]
       },
+      "PlaidLinkTokenInput": {
+        "type": "object",
+        "properties": {
+          "linkToken": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "linkToken",
+          "expiresAt"
+        ]
+      },
       "TransactionSplitInput": {
         "type": "object",
         "properties": {
@@ -3977,6 +3992,22 @@
           "status",
           "database",
           "migrations"
+        ],
+        "additionalProperties": false
+      },
+      "PlaidLinkToken": {
+        "type": "object",
+        "properties": {
+          "linkToken": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "linkToken",
+          "expiresAt"
         ],
         "additionalProperties": false
       },
@@ -8149,6 +8180,272 @@
             }
           },
           "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/connections/plaid/link-token": {
+      "post": {
+        "operationId": "createPlaidLinkToken",
+        "summary": "A Plaid Link token for a new connection",
+        "tags": [
+          "connections"
+        ],
+        "description": "Step one of a provider-hosted link (08 §3.6): the pins are `PlaidConnector`'s own (products transactions+investments+liabilities, 730 days, PFC v2, the configured redirect_uri) — see wp1.3-plaid.md §1. Read-only: nothing in this application changes as a result of calling it.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaidLinkToken"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/connections/plaid/exchange": {
+      "post": {
+        "operationId": "exchangePlaidPublicToken",
+        "summary": "Finish a Plaid Link flow and create the connection",
+        "tags": [
+          "connections"
+        ],
+        "description": "Needs a step-up assertion (D21) — this is the moment a real credential is stored, exactly like `POST /connections`. Exchanges the public token, creates (or re-links) the connection, and schedules the first sync through the orchestrator. Refuses an eleventh Plaid connection (D16: Trial's 10-Item cap; `/item/remove` does not free a slot, so this counts every Plaid row ever created, including a disconnected one).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "publicToken": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Plaid Link's onSuccess callback argument."
+                  },
+                  "institutionName": {
+                    "description": "From Link's own metadata; falls back to /item/get when omitted.",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "publicToken"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/connections/{connectionId}/plaid/update-link-token": {
+      "post": {
+        "operationId": "createPlaidUpdateLinkToken",
+        "summary": "A Plaid Link token in update mode, for reconnect",
+        "tags": [
+          "connections"
+        ],
+        "description": "Needs a step-up assertion: it opens the connection's sealed credential to build the request. 01 §1.7: \"the access_token does not change when using Link in update mode\" — no `products` on the wire (a `products` array in update mode re-initialises the Item's product set and can re-bill it — wp1.3-plaid.md §1), and nothing here needs re-sealing. Completing the reauth still goes through the existing `POST /connections/{id}/reconnect`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "accountSelectionEnabled": {
+                    "description": "01 §1.7: any de-selected account stops being shared. Off by default so a routine reauth cannot silently drop an account.",
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "connectionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaidLinkToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
             "description": "Default Response",
             "content": {
               "application/json": {

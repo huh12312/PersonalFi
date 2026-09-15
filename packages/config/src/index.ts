@@ -9,9 +9,12 @@ export {
   loadConfig,
   describeConfig,
   describeKek,
+  PLAID_CALLABLE_ENVIRONMENTS,
   type AppConfig,
   type KekConfig,
   type LoadConfigOptions,
+  type PlaidCallableEnvironment,
+  type PlaidConfig,
   type PublicEnvironmentConfig,
 } from './load.ts';
 export {

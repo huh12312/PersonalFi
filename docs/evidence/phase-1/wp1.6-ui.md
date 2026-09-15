@@ -222,13 +222,17 @@ runs `axe.run('#app-content')`.
 
 ---
 
-## 4. Plaid: what's real, what's scaffolded, and the one missing endpoint
+## 4. Plaid: what's real (updated by WP 1.3b — the route now exists)
 
-Plaid is **not registered** in the connector registry today —
-`apps/api/src/domain.ts` line 96 is still the commented-out
-`// registry.register({ connector: new PlaidConnector(...) ... })` from
-WP 1.5. `GET /connectors` therefore returns only Manual and File import;
-nothing in this pass could exercise a live Plaid flow, registered or not.
+**Status as of WP 1.3b (`docs/evidence/phase-1/wp1.3b-plaid-api.md`): the gap
+this section originally described is closed.** `apps/api/src/domain.ts` now
+registers `PlaidConnector` whenever `plaid_client_id`/`plaid_secret` secret
+files are present (feature-detected; absent is not an error), and three
+routes exist: `POST /connections/plaid/link-token`,
+`POST /connections/plaid/exchange`, and
+`POST /connections/{id}/plaid/update-link-token`. `GET /connectors` now
+returns Plaid alongside Manual and File import on a deployment that has
+configured it.
 
 **No new dependency was needed or added.** `react-plaid-link` is not
 installed and this pass didn't add it — Plaid documents a dependency-free
@@ -243,30 +247,32 @@ convention at install time).
 **What's real:** `PlaidConnectCard.tsx` renders from any `GET /connectors`
 manifest whose `linkKind === 'provider_hosted'` — generic, not
 Plaid-specific by name — and on click, loads the script and opens Link with
-whatever token `getLinkToken()` returns. `ReconnectDialog.tsx`'s
-`provider_hosted` branch is the same shape for the update-mode reconnect
-token. Both wrap the resulting `POST /connections`
-`/POST /connections/{id}/reconnect` call in `useStepUpRetry`, matching the
-route table's step-up requirement.
+whatever token `getLinkToken()` returns. `getLinkToken()` now calls
+`POST /connections/plaid/link-token` through the generated client, and the
+resulting `onSuccess` public token is exchanged via the new
+`useExchangePlaidTokenMutation()` (`POST /connections/plaid/exchange`) rather
+than the generic `POST /connections` — a Plaid-shaped body
+(`{ publicToken, institutionName? }`) instead of the generic
+`{ provider, input }` envelope, and the route that already carries the D16
+ten-Item ratchet. `ReconnectDialog.tsx`'s `provider_hosted` branch calls the
+new `getUpdateLinkToken(connectionId)`
+(`POST /connections/{id}/plaid/update-link-token`) and still completes the
+reauth through the existing `POST /connections/{id}/reconnect` — 01 §1.7:
+update mode's access token does not change, so nothing needs re-exchanging,
+and that route already existed. Both flows wrap their mutating call in
+`useStepUpRetry`, matching the route table's step-up requirement; the two
+link-token GETs-in-spirit (`link-token`, `update-link-token`) need only a
+session, per wp1.3b-plaid-api.md's step-up rationale.
 
-**The one missing piece:** `getLinkToken()`/`getUpdateLinkToken()` both
-throw `PlaidLinkTokenUnavailableError` unconditionally, because **no route
-in the OpenAPI contract returns a Plaid link token.**
-`packages/connectors/plaid/src/connector.ts`'s `createLinkToken`/
-`createUpdateLinkToken` exist and are tested (WP 1.3), but nothing in
-`apps/api/src/routes/connections.ts` calls them — `POST /connections`'s
-`input` for Plaid, per `PlaidConnector#connect`'s own schema, is
-`{ publicToken, institutionName? }`, i.e. the _second_ half of a
-provider-hosted link; there is no first-half route to get the token Link
-itself needs to open. This is a backend gap (`apps/api`), not a dependency
-gap, and not something this pass's rules allow fixing (`apps/api` is
-off-limits). **What's needed:** a route — e.g.
-`POST /connections/plaid/link-token` returning `{ linkToken: string }` (and
-an update-mode variant, or a query param) — added to
-`packages/contracts/openapi/openapi.json` and `apps/api`, after which
-`pnpm --filter web gen` produces the typed client call and the only edit
-`apps/web` needs is replacing `getLinkToken`'s body with that call; nothing
-else in `PlaidConnectCard.tsx`/`ReconnectDialog.tsx`/`plaid-link.ts` changes.
+**What changed in `apps/web` to wire this up:** `src/lib/plaid-link.ts` lost
+`PlaidLinkTokenUnavailableError` (nothing throws it any more) and its header
+comment now points at wp1.3b-plaid-api.md instead of describing a gap;
+`PlaidConnectCard.tsx`'s `getLinkToken()` and `ReconnectDialog.tsx`'s
+`getUpdateLinkToken()` each became a three-line call into the generated
+`Sdk`; `useConnections.ts` gained `useExchangePlaidTokenMutation()`. Nothing
+else in either component changed — `openPlaidLink`, the script loader, and
+the step-up wrapping were already real, exactly as this section originally
+predicted.
 
 ---
 
@@ -425,8 +431,7 @@ concerns.
   account (`ManualAccountForm.tsx`) creates the account; there is no
   endpoint to set a starting balance or enter a manual transaction, so a
   manual account reads "No balance yet" until the API grows one.
-- **Plaid's link-token route** — the one missing backend piece, detailed in
-  §4.
+- ~~Plaid's link-token route~~ — **closed by WP 1.3b**, §4.
 - **A live-backend, CDP-virtual-authenticator e2e walkthrough** was
   deliberately not attempted this pass. What it would need beyond what's
   here: a dev proxy from `vite dev` to a running `apps/api`

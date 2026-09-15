@@ -217,6 +217,9 @@ importers:
       '@connector/manual':
         specifier: workspace:*
         version: link:../../packages/connectors/manual
+      '@connector/plaid':
+        specifier: workspace:*
+        version: link:../../packages/connectors/plaid
       '@core/config':
         specifier: workspace:*
         version: link:../../packages/config

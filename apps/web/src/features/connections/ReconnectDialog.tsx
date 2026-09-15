@@ -8,15 +8,21 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog.tsx';
 import { Button } from '../../components/ui/button.tsx';
-import { openPlaidLink, PlaidLinkTokenUnavailableError } from '../../lib/plaid-link.ts'; // gitleaks:allow — an identifier, not a key
+import { Sdk } from '../../api/generated/sdk.gen.ts';
+import { openPlaidLink } from '../../lib/plaid-link.ts'; // gitleaks:allow — an identifier, not a key
 import { useStepUpRetry } from '../../lib/step-up.ts';
 import { CsvImportForm } from './CsvImportForm.tsx';
 import { useReconnectConnectionMutation } from './useConnections.ts';
 import type { ConnectionSummary } from '../../api/generated/types.gen.ts';
 
-/** Same missing piece as `PlaidConnectCard`'s `getLinkToken` — an *update-mode* token this time (wp1.5-api.md's `reconnectFlow: 'provider_hosted'`), which needs `PlaidConnector.createUpdateLinkToken`, also unrouted. */
-async function getUpdateLinkToken(): Promise<string> {
-  throw new PlaidLinkTokenUnavailableError();
+/** `POST /connections/{id}/plaid/update-link-token` (wp1.3b-plaid-api.md) — an *update-mode* token: no `products` on the wire, and the access token does not change (01 §1.7). */
+async function getUpdateLinkToken(connectionId: string): Promise<string> {
+  const { data } = await Sdk.__registry.get().createPlaidUpdateLinkToken({
+    path: { connectionId },
+    body: {},
+    throwOnError: true,
+  });
+  return data.linkToken;
 }
 
 export interface ReconnectDialogProps {
@@ -38,7 +44,7 @@ export function ReconnectDialog({ connection, onOpenChange }: ReconnectDialogPro
     setBusy(true);
     setError(null);
     try {
-      const linkToken = await getUpdateLinkToken();
+      const linkToken = await getUpdateLinkToken(connection.id);
       await openPlaidLink({
         token: linkToken,
         onSuccess: (publicToken) => {

@@ -630,6 +630,188 @@ describe('SESSION_COOKIE_SECURE gated to non-production', () => {
   });
 });
 
+describe('Plaid (WP 1.3b — config)', () => {
+  const CLIENT_ID = 'pfi-config-test-plaid-client-id-do-not-use';
+  const SECRET = 'pfi-config-test-plaid-secret-b4f2-do-not-use';
+
+  it('boots with Plaid unconfigured when neither secret file is present', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+    expect(config.plaid).toBeNull();
+  });
+
+  it('refuses to boot with only a client id and no secret', () => {
+    expect(() =>
+      loadConfig({
+        env: env(),
+        readSecret: secretsFrom({ plaid_client_id: CLIENT_ID }),
+      }),
+    ).toThrowError(/plaid_secret/);
+  });
+
+  it('refuses to boot with only a secret and no client id', () => {
+    let error: unknown;
+    try {
+      loadConfig({ env: env(), readSecret: secretsFrom({ plaid_secret: SECRET }) });
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(ConfigError);
+    expect((error as ConfigError).problems.some((p) => p.key === 'secret:plaid_client_id')).toBe(
+      true,
+    );
+  });
+
+  it('defaults plaid_env to sandbox when the file is absent', () => {
+    const config = loadConfig({
+      env: env(),
+      readSecret: secretsFrom({ plaid_client_id: CLIENT_ID, plaid_secret: SECRET }),
+    });
+    expect(config.plaid).not.toBeNull();
+    expect(config.plaid?.environment).toBe('sandbox');
+    expect(config.plaid?.clientId.reveal()).toBe(CLIENT_ID);
+    expect(config.plaid?.secret.reveal()).toBe(SECRET);
+  });
+
+  it('accepts an explicit sandbox plaid_env', () => {
+    const config = loadConfig({
+      env: env(),
+      readSecret: secretsFrom({
+        plaid_client_id: CLIENT_ID,
+        plaid_secret: SECRET,
+        plaid_env: 'sandbox',
+      }),
+    });
+    expect(config.plaid?.environment).toBe('sandbox');
+  });
+
+  it('rejects an unrecognised plaid_env value', () => {
+    expect(() =>
+      loadConfig({
+        env: env(),
+        readSecret: secretsFrom({
+          plaid_client_id: CLIENT_ID,
+          plaid_secret: SECRET,
+          plaid_env: 'bogus',
+        }),
+      }),
+    ).toThrowError(/plaid_env/);
+  });
+
+  it("rejects 'development' by name — Plaid retired it as an API base path (01 §1.2)", () => {
+    let error: unknown;
+    try {
+      loadConfig({
+        env: env(),
+        readSecret: secretsFrom({
+          plaid_client_id: CLIENT_ID,
+          plaid_secret: SECRET,
+          plaid_env: 'development',
+        }),
+      });
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(ConfigError);
+    const problem = (error as ConfigError).problems.find((p) => p.key === 'secret:plaid_env');
+    expect(problem?.problem).toMatch(/retired/);
+  });
+
+  it('refuses to boot with plaid_env=production and no PLAID_ALLOW_PRODUCTION opt-in (D16)', () => {
+    let error: unknown;
+    try {
+      loadConfig({
+        env: env(),
+        readSecret: secretsFrom({
+          plaid_client_id: CLIENT_ID,
+          plaid_secret: SECRET,
+          plaid_env: 'production',
+        }),
+      });
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(ConfigError);
+    const problem = (error as ConfigError).problems.find((p) => p.key === 'secret:plaid_env');
+    expect(problem?.problem).toMatch(/ten-Item cap|production/);
+  });
+
+  it('boots against Production once PLAID_ALLOW_PRODUCTION=true is also set', () => {
+    const config = loadConfig({
+      env: env({ PLAID_ALLOW_PRODUCTION: 'true' }),
+      readSecret: secretsFrom({
+        plaid_client_id: CLIENT_ID,
+        plaid_secret: SECRET,
+        plaid_env: 'production',
+      }),
+    });
+    expect(config.plaid?.environment).toBe('production');
+  });
+
+  it('parses PLAID_COUNTRY_CODES as a comma-separated list, trimmed', () => {
+    const config = loadConfig({
+      env: env({ PLAID_COUNTRY_CODES: 'US, CA' }),
+      readSecret: secretsFrom({ plaid_client_id: CLIENT_ID, plaid_secret: SECRET }),
+    });
+    expect(config.plaid?.countryCodes).toEqual(['US', 'CA']);
+  });
+
+  it('carries the redirect and webhook URLs through when set, null by default', () => {
+    const unset = loadConfig({
+      env: env(),
+      readSecret: secretsFrom({ plaid_client_id: CLIENT_ID, plaid_secret: SECRET }),
+    });
+    expect(unset.plaid?.redirectUri).toBeNull();
+    expect(unset.plaid?.webhookUrl).toBeNull();
+
+    const set = loadConfig({
+      env: env({
+        PLAID_REDIRECT_URI: 'https://nuc.tailnet-fake.ts.net/link/oauth',
+        PLAID_WEBHOOK_URL: 'https://nuc.tailnet-fake.ts.net/webhooks/plaid',
+      }),
+      readSecret: secretsFrom({ plaid_client_id: CLIENT_ID, plaid_secret: SECRET }),
+    });
+    expect(set.plaid?.redirectUri).toBe('https://nuc.tailnet-fake.ts.net/link/oauth');
+    expect(set.plaid?.webhookUrl).toBe('https://nuc.tailnet-fake.ts.net/webhooks/plaid');
+  });
+
+  it('never puts the client id or secret in an error message', () => {
+    let error: unknown;
+    try {
+      loadConfig({
+        env: env(),
+        readSecret: secretsFrom({
+          plaid_client_id: CLIENT_ID,
+          plaid_secret: SECRET,
+          plaid_env: 'bogus',
+        }),
+      });
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain(CLIENT_ID);
+    expect((error as Error).message).not.toContain(SECRET);
+  });
+
+  it('keeps the client id and secret out of anything serialisable, by name only', () => {
+    const config = loadConfig({
+      env: env(),
+      readSecret: secretsFrom({ plaid_client_id: CLIENT_ID, plaid_secret: SECRET }),
+    });
+    const serialised = JSON.stringify(config);
+    expect(serialised).not.toContain(CLIENT_ID);
+    expect(serialised).not.toContain(SECRET);
+    expect(JSON.stringify(describeConfig(config))).not.toContain(CLIENT_ID);
+    expect(JSON.stringify(describeConfig(config))).not.toContain(SECRET);
+    expect(describeConfig(config)['secretsPresent']).toEqual([
+      'database_url',
+      'master_key',
+      'plaid_client_id',
+      'plaid_secret',
+    ]);
+  });
+});
+
 describe('Redacted', () => {
   const secret = redact('super-secret-token');
 

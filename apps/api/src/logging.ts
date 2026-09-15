@@ -220,6 +220,7 @@ export const REDACTED_PATHS: readonly string[] = [
   '*.public_token',
   '*.publicToken',
   '*.link_token',
+  '*.linkToken',
   '*.id_token',
   '*.client_secret',
   '*.clientSecret',
