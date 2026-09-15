@@ -16,20 +16,33 @@
 # `just check` is not.
 #
 # VITEST PROJECT -> CI JOB MAP (gate-remediation-2.md finding 1, updated for
-# gate-security-review-2.md R-3). `vitest.config.ts` defines every project
-# below; before gate-remediation-2 only kernel/config/api ever ran in CI
-# (`migration-test` ran `db` alone) and platform/testkit/seed/secretbox/
-# identity/platform-db/secretbox-db/identity-db/api-db, the `web` project, and
-# both Playwright projects never ran at all. Every project vitest knows about
-# now appears in at least one job below, and `testkit` deliberately appears in
-# *two*:
+# gate-security-review-2.md R-3, updated again by wp1.7-quality.md: Phase 1
+# added seven new projects — ledger, ledger-db, categorization,
+# categorization-db, connector-port, connector-manual, connector-csv,
+# connector-plaid, connections, connections-db — none of which had been added
+# to either job, so the entire ledger, categorization, connector and
+# connections suites ran only when a developer happened to run `just test`
+# locally. Same failure mode as gate-remediation-2.md finding 1 (4 of 13
+# projects), recurring on the projects Phase 1 itself introduced. `vitest.config.ts`
+# defines every project below. Every project vitest knows about now appears in
+# at least one job below, and `testkit` deliberately appears in *two*:
 #
 #   `test` (no Postgres, no DATABASE_URL):
-#     kernel, config, api, platform, testkit, seed, secretbox, identity
+#     kernel, config, api, platform, testkit, seed, secretbox, identity,
+#     ledger, categorization, connector-port, connector-manual, connector-csv,
+#     connector-plaid, connections
 #   `migration-test` (Postgres 18 service, DATABASE_URL set):
-#     db, platform-db, secretbox-db, identity-db, api-db, testkit
+#     db, platform-db, secretbox-db, identity-db, api-db, testkit, ledger-db,
+#     categorization-db, connections-db
 #   `web` (apps/web has its own vitest config, not part of the root one):
 #     web (vitest), plus Playwright projects `chromium` (smoke) and `csp`
+#
+# connector-plaid needs neither: it is driven end to end by a hermetic
+# FakePlaidApi over recorded-shape fixtures (see vitest.config.ts's own
+# comment on that project). Its one live-network file, test/sandbox.test.ts,
+# skips itself when PLAID_CLIENT_ID/PLAID_SECRET are unset, which they are in
+# CI, so it is safe in the no-Postgres `test` job alongside the rest of the
+# connector-plaid project.
 #
 # R-3: `testkit`'s own `describe.skipIf(ADMIN_URL === undefined)` suites
 # (packages/testkit/test/database.test.ts — the harness `platform-db`,
@@ -125,7 +138,7 @@ jobs:
 
       # No DATABASE_URL: every project here skips or has no database-dependent
       # tests, proving the unit suite genuinely needs no Postgres. This must
-      # list every root-config vitest project EXCEPT the five `*-db`/`db`
+      # list every root-config vitest project EXCEPT the `*-db`/`db`
       # projects (those run in `migration-test`, which has Postgres) — see the
       # project -> job map at the top of this file.
       - name: unit tests
@@ -133,7 +146,11 @@ jobs:
           pnpm exec vitest run \
             --project kernel --project config --project api \
             --project platform --project testkit --project seed \
-            --project secretbox --project identity
+            --project secretbox --project identity \
+            --project ledger --project categorization \
+            --project connector-port --project connector-manual \
+            --project connector-csv --project connector-plaid \
+            --project connections
 
   migration-test:
     name: migration test (postgres 18)
@@ -194,7 +211,9 @@ jobs:
         run: |
           pnpm exec vitest run \
             --project db --project platform-db --project secretbox-db \
-            --project identity-db --project api-db --project testkit
+            --project identity-db --project api-db --project testkit \
+            --project ledger-db --project categorization-db \
+            --project connections-db
 
   web:
     name: web (unit, build, playwright)

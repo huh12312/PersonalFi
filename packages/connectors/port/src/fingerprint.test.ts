@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { DateOnly, money } from '@core/kernel';
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   fingerprintOf,
@@ -9,6 +10,27 @@ import {
 } from './fingerprint.ts';
 import { windowStart } from './connector.ts';
 import type { ConnectorCapabilities } from './capabilities.ts';
+
+// A word made of letters/digits, joined with runs of whitespace and/or
+// punctuation noise — the shape of a real bank descriptor's variation between
+// two sightings of one purchase ("SQ *Blue Bottle 4471" vs "SQ  *BLUE  BOTTLE
+// 4471"), not arbitrary Unicode.
+const wordArb = fc.stringMatching(/^[a-zA-Z0-9]{1,10}$/);
+const noiseArb = fc.stringMatching(/^[ \t*#.,-]{1,4}$/);
+
+/** Interleave a fixed word list with one noise array: `n0 w0 n1 w1 n2 ...`. */
+function assemble(words: readonly string[], noise: readonly string[]): string {
+  let out = '';
+  for (let i = 0; i < words.length; i += 1) out += (noise[i] ?? '') + words[i];
+  out += noise[words.length] ?? '';
+  return out;
+}
+
+function applyCase(value: string, upperBits: readonly boolean[]): string {
+  return [...value]
+    .map((ch, i) => (upperBits[i] === true ? ch.toUpperCase() : ch.toLowerCase()))
+    .join('');
+}
 
 const base = {
   providerAccountId: 'acct-1',
@@ -56,6 +78,54 @@ describe('fingerprintOf', () => {
     // There is no provider input at all — asserted by construction: the same
     // four fields from two different adapters must fingerprint identically.
     expect(fingerprintOf({ ...base })).toBe(fingerprintOf({ ...base }));
+  });
+
+  // wp1.7: the four example-based cases above pin one base fixture. These
+  // generalise them across the input space fast-check explores, rather than
+  // the one descriptor and the one set of amounts someone thought to type.
+  it('property: is stable under independent whitespace/punctuation noise and case, for the same words', () => {
+    fc.assert(
+      fc.property(
+        fc.array(wordArb, { minLength: 1, maxLength: 6 }),
+        fc.array(noiseArb, { minLength: 7, maxLength: 7 }),
+        fc.array(noiseArb, { minLength: 7, maxLength: 7 }),
+        fc.array(fc.boolean(), { minLength: 6, maxLength: 6 }),
+        fc.array(fc.boolean(), { minLength: 6, maxLength: 6 }),
+        (words, noiseA, noiseB, caseA, caseB) => {
+          const a = applyCase(assemble(words, noiseA.slice(0, words.length + 1)), caseA);
+          const b = applyCase(assemble(words, noiseB.slice(0, words.length + 1)), caseB);
+          expect(fingerprintOf({ ...base, description: a })).toBe(
+            fingerprintOf({ ...base, description: b }),
+          );
+        },
+      ),
+    );
+  });
+
+  it('property: changes when the amount, the date, the currency or the account changes', () => {
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: -1_000_000n, max: 1_000_000n }),
+        fc.integer({ min: 15_000, max: 25_000 }).map((d) => DateOnly.fromEpochDay(d)),
+        fc.constantFrom('USD', 'EUR', 'GBP'),
+        fc.stringMatching(/^acct-[0-9]{1,4}$/),
+        (minor, postedDate, currency, providerAccountId) => {
+          const varied = {
+            providerAccountId,
+            postedDate,
+            amount: money(minor, currency),
+            description: base.description,
+          };
+          const changedAnyField =
+            varied.providerAccountId !== base.providerAccountId ||
+            varied.postedDate !== base.postedDate ||
+            varied.amount.minor !== base.amount.minor ||
+            varied.amount.currency !== base.amount.currency;
+          fc.pre(changedAnyField);
+          expect(fingerprintOf(varied)).not.toBe(fingerprintOf(base));
+        },
+      ),
+    );
   });
 });
 

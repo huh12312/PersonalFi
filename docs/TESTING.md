@@ -278,3 +278,93 @@ node packages/seed/src/cli.ts --seed=1 --out=DIR
   of the generated shapes; mapping `SeedTransaction` to `@ctx/ledger`'s real
   `transactions` row is explicitly Phase 1's job, once that schema exists. See
   `packages/seed/OWNERSHIP.md`.
+
+## Property tests (fast-check)
+
+`fast-check` (already a repo dependency) is the standard tool for an algebraic
+invariant — a claim that should hold for _every_ input in a space, not just the
+handful of examples someone thought to type. Existing style to follow:
+`packages/kernel/src/money.test.ts` (sign convention, `allocate`'s
+largest-remainder distribution, rounding) and
+`packages/contexts/ledger/src/effective.test.ts` (`resolveEffective`'s purity
+and the category tier order). A property lives beside the function it tests,
+in the same file as the function's example-based tests, not in a separate
+`*.property.test.ts`.
+
+Two gaps a Phase 1 quality pass (WP 1.7a) found and closed, worth knowing as
+the pattern for the next one:
+
+- **`packages/connectors/port/src/fingerprint.test.ts`** had zero property
+  coverage despite `fingerprintOf` being exactly the kind of function
+  properties exist for (a hash over normalised input). Added: stability under
+  independent whitespace/punctuation noise and case for the same underlying
+  words, and "changes when any of amount/date/currency/account changes."
+- **`packages/contexts/ledger/test/read.test.ts`** had only example-based
+  keyset-pagination coverage, and the examples never planted two rows sharing
+  the cursor boundary's `effective_date` — the exact case the id half of the
+  compound `(effective_date, id) < (cursor)` predicate exists for. A property
+  test (`property: keyset pagination is a total order with no dupes or gaps,
+for any calendar and page size`) closed it, and independently reproduced a
+  sabotage failure (see below) with a _smaller_ shrunk counterexample than the
+  hand-written regression test needed. Database-backed property tests
+  (`fc.asyncProperty`) must `await database.truncate()` and reseed their own
+  fixture at the top of the property function itself: fast-check iterates the
+  property many times inside one Vitest `it`, not once per `beforeEach`.
+
+## Sabotage evidence
+
+A control that has never been observed failing is not evidence (the Phase 0
+security gate's founding lesson — every control that had never been exercised
+turned out to be decoration). Every new invariant this repo adds should have,
+somewhere in its work package's evidence doc, a sabotage record: the exact
+production-code mutation, the test that was run, and the failure output —
+not just "this is tested," but "this was watched breaking." Precedents:
+`docs/evidence/phase-1/wp1.2-connections.md` §4 (the conformance suite itself),
+`wp1.3-plaid.md` §4 (the log-hygiene scanner), `wp1.4-categorization.md` §3
+(the golden accuracy gate's merchant-memory tautology). The Phase 1 quality
+pass's own twelve-invariant sabotage log — spanning the ledger (immutable
+overlay, ambiguous-match refusal, cross-provider dedup, rejected-pair
+persistence, the user-beats-rule tier order, keyset total order), connections
+(atomic per-run commit, `MAX_RESTARTS`, balances failure isolation),
+categorization (the golden gate's non-leaky configurations, the user tier's
+absolute precedence) and the connector port (fingerprint stability) — is
+`docs/evidence/phase-1/wp1.7-quality.md` §3. Three route-layer invariants
+(auth/step-up, CSRF, keyset pagination at the HTTP layer) were read-audited
+rather than sabotaged in that pass, because `apps/api/src` was being edited
+concurrently by another agent in the same working tree at the time; §3b of
+that file explains why and names what the next gate should sabotage directly.
+
+## Seed-based end-to-end proof
+
+`apps/api/test/db/phase1-seed-e2e.test.ts` (`api-db` project) is the
+highest-altitude test in the repo: it loads `generateDemoData(1)` through the
+real `ManualConnector`, a real `POST /connections`, the real
+`SyncOrchestrator`, a real consumer pump built from `appModules()` (the exact
+shape `worker.ts` builds), and reads the result back through the real
+`GET /transactions` / `/accounts` / `/net-worth`. What makes it worth its
+~13-second runtime: every number it asserts — transaction count, each
+account's balance, net worth's assets/liabilities/net, categorization
+coverage — is computed **independently from the seed generator's own output**,
+in the test file itself, never by calling the API twice or by importing
+`@ctx/ledger`'s internals. See the file's own header comment for the scope
+decisions (pending→posted is intentionally not re-modelled here; CSV import is
+intentionally a separate concern) and §5 of
+`docs/evidence/phase-1/wp1.7-quality.md` for the three-attempt debugging trail
+that got the categorization-coverage assertion to an exact reconciliation
+rather than a loose threshold — itself evidence the test is not vacuous.
+
+## CI parity
+
+`.github/workflows/ci.yml`'s header comment carries the current vitest
+project → CI job map and must be kept in sync by hand: `vitest.config.ts`
+defines the projects, but nothing mechanically checks that every project
+named there also appears in a CI job. Phase 0's gate found this gap once (4 of
+13 projects covered); Phase 1's own quality pass found it recurring on the ten
+projects Phase 1 itself had added (`ledger`, `ledger-db`, `categorization`,
+`categorization-db`, `connector-port`, `connector-manual`, `connector-csv`,
+`connector-plaid`, `connections`, `connections-db` — all ten were completely
+absent from CI, only ever run locally via `just check`/`just test`, which do
+not filter by project and were never the gap). Re-verify the map any time a
+project is added, with `grep -oP "name: '[a-z0-9-]+'" vitest.config.ts | sort
+-u` against the `--project` flags in `ci.yml`'s `test` and `migration-test`
+jobs.

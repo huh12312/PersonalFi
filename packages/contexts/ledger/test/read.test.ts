@@ -5,6 +5,7 @@
  * inserted above it.
  */
 import { DateOnly, money } from '@core/kernel';
+import fc from 'fast-check';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { applyProviderTransactions } from '../src/apply.ts';
 import { getTransaction, listTransactions, sumTransactions } from '../src/read.ts';
@@ -137,6 +138,100 @@ describe.skipIf(NO_DATABASE)('listTransactions', () => {
     expect(new Set(seen).size).toBe(seen.length);
     // Every row that existed when paging began is still reachable.
     expect(seen).toHaveLength(5);
+  });
+
+  // wp1.7 finding: none of the fixture data above ever shares an
+  // `effective_date`, so the id half of the compound keyset predicate
+  // `(effective_date, id) < (cursor.date, cursor.id)` had no test that could
+  // catch its removal — confirmed by sabotage: dropping the id tiebreaker and
+  // comparing only on `effective_date` left every existing test in this file
+  // green. Same-day transactions are the common case (the demo seed alone
+  // averages more than one a day), so a boundary that only works when dates
+  // are unique is not a boundary that works.
+  it('does not skip or repeat a row when two rows share the cursor boundary date', async () => {
+    await add(checkingId, [
+      item('t-same-a', '2026-05-20', -100n, 'SAME DAY A'),
+      item('t-same-b', '2026-05-20', -200n, 'SAME DAY B'),
+      item('t-same-c', '2026-05-20', -300n, 'SAME DAY C'),
+    ]);
+    // Four rows now share 2026-05-20 (the 3 new plus the original 't-coffee'),
+    // straddling the page-1/page-2 boundary at limit 2.
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (;;) {
+      const page: Awaited<ReturnType<typeof listTransactions>> = await listTransactions(
+        database.db,
+        { userId: database.userId, limit: 2, cursor },
+      );
+      seen.push(...page.items.map((row) => row.id));
+      cursor = page.nextCursor;
+      if (cursor === null) break;
+    }
+
+    expect(new Set(seen).size).toBe(seen.length);
+    // 3 original (checking) + 2 original (card) + 3 new same-date rows = 8.
+    expect(seen).toHaveLength(8);
+  });
+
+  // wp1.7: a property over the whole cursor walk, from a random calendar of
+  // transactions with heavy same-date collisions and a random page size —
+  // rather than the one hand-picked layout above. Each run truncates and
+  // reseeds its own account, because fast-check runs the property function
+  // many times inside one `it`, not once per Vitest `beforeEach`.
+  it('property: keyset pagination is a total order with no dupes or gaps, for any calendar and page size', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        // A handful of distinct dates so several transactions collide on one
+        // day — the exact shape the id tiebreaker exists for.
+        fc.array(fc.integer({ min: 1, max: 5 }), { minLength: 3, maxLength: 30 }),
+        fc.integer({ min: 1, max: 6 }),
+        async (dayOffsets, limit) => {
+          await database.truncate();
+          const account = await seedAccount(database, clock, { providerAccountId: 'pa-property' });
+          const rows = dayOffsets.map((offset, index) =>
+            item(
+              `prop-${index}`,
+              `2026-06-${String(10 + offset).padStart(2, '0')}`,
+              -(BigInt(index) + 1n) * 100n,
+              `MERCHANT ${index}`,
+            ),
+          );
+          await add(account, rows);
+
+          const seen: string[] = [];
+          const pairs: [string, string][] = [];
+          let cursor: string | null = null;
+          for (;;) {
+            const page = await listTransactions(database.db, {
+              userId: database.userId,
+              limit,
+              cursor,
+            });
+            seen.push(...page.items.map((row) => row.id));
+            for (const row of page.items) pairs.push([row.effective.date, row.id]);
+            cursor = page.nextCursor;
+            if (cursor === null) break;
+          }
+
+          // No dupes, no gaps: every inserted row appears exactly once.
+          expect(new Set(seen).size).toBe(seen.length);
+          expect(seen).toHaveLength(rows.length);
+
+          // Total order: (date, id) is non-increasing across the *entire*
+          // walk, not just within a page — the property a page boundary must
+          // not break.
+          for (let i = 1; i < pairs.length; i += 1) {
+            const [prevDate, prevId] = pairs[i - 1] as [string, string];
+            const [curDate, curId] = pairs[i] as [string, string];
+            const cmp =
+              prevDate === curDate ? prevId.localeCompare(curId) : prevDate.localeCompare(curDate);
+            expect(cmp).toBeGreaterThanOrEqual(0);
+          }
+        },
+      ),
+      { numRuns: 15 },
+    );
   });
 
   it('filters by account, date, amount, pending and text', async () => {
