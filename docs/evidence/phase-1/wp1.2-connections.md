@@ -256,7 +256,7 @@ log-hygiene evidence for P0-12 is `apps/api`'s own suite.
 
 ## 5. Orchestrator evidence against a real database
 
-`test/db/orchestrator.test.ts`, 15 tests, all green. The `LedgerWriter` double
+`test/db/orchestrator.test.ts`, 20 tests, all green. The `LedgerWriter` double
 writes **real rows through the executor it is handed**, so it participates in
 the orchestrator's transaction for real and a rollback rolls its rows back too —
 that is the only way "the delta and the cursor commit together" is observable at
@@ -296,6 +296,63 @@ onto the same `providerAccountId`, which the ledger writer's natural key
 second link was rejected. That is the schema being right; the fixture was
 namespaced per connection and the invariant now has a test of its own
 ("refuses to let a second connection claim an account the first one owns").
+
+### Balance sync (closed gap)
+
+`SyncOrchestrator` originally never called `connector.syncBalances` — an
+`apps/api/test/db/connections-routes.test.ts` test pinned the gap under the
+name "records no balance from a sync — the orchestrator never asks for one
+(known gap)". `#syncBalancesIfDue` (`src/orchestrator.ts`, called from
+`syncConnection` after the transactions half is settled; design rationale in
+the header comment's "Invariant 6") closes it. Three things about the fix are
+load-bearing, and each has its own test:
+
+- **Commit granularity: after the transactions write transaction, never
+  inside it.** Balances is a second network call; making it before the
+  transactions delta commits would hold that delta hostage to a request that
+  has nothing to do with it, mirroring the "no remote call inside a
+  transaction" rule `#runPages` already follows for `listAccounts`. Each
+  recorded balance is still its own `INSERT ... ON CONFLICT DO NOTHING`
+  inside a fresh transaction opened only for the balances step — proved by
+  "records a balance for a cursor provider (Manual) after a successful
+  transactions sync" and, for the other commit-granularity branch, "records a
+  balance for a window provider, without disturbing its per-page cursor",
+  which asserts the transactions cursor sits exactly where the last committed
+  page left it once the balances step has also run.
+- **Run-row semantics: two rows, one per operation, never one row claiming
+  both.** A sync that both applies transactions and records a balance leaves
+  a `sync_runs` row with `operation: 'transactions'` and a second with
+  `operation: 'balances'`, each with its own status, counts and error columns
+  — proved by the same two tests above (`runs.find((run) => run.operation ===
+...)` against both) and against the seed dataset's full account set by
+  "records a balance for every account the seed dataset describes, through
+  the same port". A sync that finds nothing to report (CSV/QIF, or a manual
+  connection nobody entered a balance on) writes no `balances` row at all —
+  the existing non-balance orchestrator tests are the negative evidence,
+  since none of them gained a second `sync_runs` row from this change.
+- **Failure isolation: a balances error never fails or rolls back the
+  transactions run.** `#syncBalancesIfDue` runs after the transactions run's
+  own row is already written and its transaction already committed, so
+  nothing it does from there can touch either. Proved by "records a balances
+  failure without losing a transactions delta that already committed": the
+  transactions `sync_runs` row stays `success`, the transactions row count
+  and the connection's cursor are unchanged, and only the `balances` row
+  records `status: 'failed'` with `errorKind: 'provider_unavailable'`. The
+  reverse case — a transactions failure that leaves nothing committed — is
+  proved by "does not ask for balances behind a transactions failure that
+  committed nothing": `AUTH_REQUIRED` on the first call never reaches
+  `syncBalances` at all (invariant 4's reasoning applies here too — asking
+  would spend the same rate limit the reconnect needs), and exactly one
+  `sync_runs` row exists.
+
+The read-model side of the gap is closed the same way: the api-db test
+formerly named "records no balance from a sync — the orchestrator never asks
+for one (known gap)" (`apps/api/test/db/connections-routes.test.ts`) now
+asserts the opposite — that the account the `GET /accounts` route renders
+carries the exact balance staged on the connection's initial batch, recorded
+by the real orchestrator and the real `@ctx/ledger` `recordBalance` through
+`apps/api`'s composition root. That closes the last piece of
+docs/evidence/phase-1/wp1.5-api.md §7's gap write-up from this package's side.
 
 ---
 
@@ -544,8 +601,11 @@ Vitest projects (`vitest.config.ts`, registered under the finer names
 | `connector-manual` | 13    | no             |
 | `connector-csv`    | 112   | no             |
 | `connections`      | 51    | no             |
-| `connections-db`   | 31    | yes            |
-| **total**          | 233   |                |
+| `connections-db`   | 36    | yes            |
+| **total**          | 238   |                |
+
+(`connections-db` was 31 as of the original WP 1.2 write-up; the balance-sync
+fix added five tests — see "Balance sync (closed gap)" in §5.)
 
 `just check` **fails**, and only outside this work package: `typecheck` reports
 three errors in `packages/contexts/categorization/test/consumer.test.ts` (a

@@ -730,6 +730,57 @@ describe.skipIf(NO_DATABASE)('sync orchestration', () => {
     expect(balancesRun?.finishedAt).not.toBeNull();
   });
 
+  it('records a balance for a window provider, without disturbing its per-page cursor', async () => {
+    // A window provider commits per page (invariant 2's other branch) rather
+    // than accumulating a delta. Invariant 6 runs after the whole transactions
+    // half is over regardless of which branch produced it, so the balances
+    // step must behave identically here and — this is the point of the test —
+    // must not touch the cursor invariant 2 already settled per page.
+    const store = new ManualStore();
+    const honest = new ManualConnector({ store, pageSize: PAGE_SIZE });
+    const windowed = connectorWith(honest, {
+      capabilities: () => ({
+        ...honest.capabilities(),
+        supports: honest.capabilities().supports.filter((c) => c !== 'incremental_sync'),
+      }),
+    });
+
+    const fixture = await orchestratorFor(database, windowed);
+    const { connectionId } = await linkFor(database, fixture, windowed, {
+      displayName: 'Windowed Bank',
+      providerConnectionId: 'item-1',
+      accounts: ACCOUNTS,
+    });
+    store.append('item-1', { added: manualBatch(ROW_COUNT) });
+    store.append('item-1', {
+      balances: [
+        {
+          providerAccountId: 'acct-checking',
+          current: money(12_345n, 'USD'),
+          available: money(12_345n, 'USD'),
+          limit: null,
+          asOf: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const summary = await syncOnce(fixture, connectionId, 'initial');
+
+    expect(summary.status).toBe('success');
+    expect(summary.pageCount).toBe(Math.ceil(ROW_COUNT / PAGE_SIZE));
+    // Every page already committed its own slice of the cursor; the balances
+    // step that follows must leave it exactly where the last page left it.
+    expect(await cursorOn(connectionId)).toBe(String(ROW_COUNT));
+    expect(await ledgerBalanceCount(database)).toBe(1);
+
+    const runs = await listSyncRuns(database.db, database.userId, connectionId);
+    expect(runs).toHaveLength(2);
+    const transactionsRun = runs.find((run) => run.operation === 'transactions');
+    const balancesRun = runs.find((run) => run.operation === 'balances');
+    expect(transactionsRun).toMatchObject({ status: 'success', pageCount: summary.pageCount });
+    expect(balancesRun).toMatchObject({ status: 'success', addedCount: 1 });
+  });
+
   it('records a balance for every account the seed dataset describes, through the same port', async () => {
     const dataset = generateDemoData(1);
     const connector = new SeedConnector({ pageSize: 250 });
@@ -780,6 +831,10 @@ describe.skipIf(NO_DATABASE)('sync orchestration', () => {
     expect(summary.addedCount).toBe(ROW_COUNT);
     expect(await ledgerRowCounts(database)).toMatchObject({ live: ROW_COUNT });
     expect(await ledgerBalanceCount(database)).toBe(0);
+    // The claim in the header comment, made concrete: a balances failure must
+    // not relabel or roll back the transactions delta that already committed,
+    // and that includes the cursor it committed together with.
+    expect(await cursorOn(connectionId)).toBe(String(ROW_COUNT));
 
     const runs = await listSyncRuns(database.db, database.userId, connectionId);
     expect(runs).toHaveLength(2);

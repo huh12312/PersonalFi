@@ -310,42 +310,48 @@ describe.skipIf(NO_DATABASE)('connection and account routes', () => {
   // --------------------------------------------------------------- accounts
 
   /**
-   * **A gap in `@ctx/connections`, pinned here so it cannot be forgotten.**
+   * **A gap in `@ctx/connections`, closed.**
    *
-   * `SyncOrchestrator` never calls `connector.syncBalances`, and nothing in the
-   * context ever calls the `LedgerWriter.recordBalance` port it declares — the
-   * only caller of `recordBalance` in the repository is `@ctx/ledger`'s own
-   * `seed-loader`, which bypasses connectors entirely. Every adapter implements
-   * `syncBalances`, the port declares it, `apps/api/src/domain.ts` wires it, and
-   * the sync loop never reaches it.
-   *
-   * The consequence is user-visible and belongs in front of WP 1.6: an account
-   * linked through *any* provider has `balance: null` for ever, so the accounts
-   * page renders no balances and net worth is permanently empty.
-   *
-   * The fix is one call in `SyncOrchestrator`, in a file WP 1.5 does not own. It
-   * is written up in docs/evidence/phase-1/wp1.5-api.md §7. This test asserts
-   * the *current* behaviour deliberately, so that fixing the orchestrator turns
-   * it red and whoever does it comes here and updates it.
+   * `SyncOrchestrator` used to never call `connector.syncBalances`, so nothing
+   * in the context ever called the `LedgerWriter.recordBalance` port it
+   * declares, and every account linked through a provider had `balance: null`
+   * forever. The orchestrator now runs a balances step (invariant 6, see its
+   * header comment) after the transactions half of a sync has committed or
+   * definitively failed, and the initial backfill on `POST /connections` above
+   * ran that step against the balance staged in `beforeAll`'s batch. This test
+   * asserts the account the read model renders carries exactly that
+   * observation — the one `@ctx/connections`'s own `test/db/orchestrator.test.ts`
+   * proves the orchestrator recorded, seen here through the route a user
+   * actually hits.
    */
-  it('records no balance from a sync — the orchestrator never asks for one (known gap)', async () => {
+  it('records a balance from a sync, and the accounts route renders it', async () => {
     const response = await h.request({ method: 'GET', url: '/accounts', session: h.stale });
     expectStatus(response, 200);
     const accounts = (
-      response.json() as { accounts: { classification: string; balance: unknown }[] }
+      response.json() as {
+        accounts: {
+          classification: string;
+          balance: { current: { minor: string }; asOf: string; source: string } | null;
+        }[];
+      }
     ).accounts;
     expect(accounts).toHaveLength(1);
     expect(accounts[0]?.classification).toBe('asset');
-    expect(accounts[0]?.balance).toBeNull();
+    // The exact observation staged on `beforeAll`'s initial batch, carried
+    // through the real orchestrator and the real `recordBalance` — not a
+    // balance this test wrote itself.
+    expect(accounts[0]?.balance?.current.minor).toBe('150000');
+    expect(accounts[0]?.balance?.asOf).toBe('2026-05-03T00:00:00.000Z');
+    expect(accounts[0]?.balance?.source).toBe('provider');
   });
 
-  it('renders a balance that says when, and nets it per currency', async () => {
-    // The orchestrator cannot yet produce a balance (see above), so this writes
-    // one through `@ctx/ledger`'s real `recordBalance` — the exact function the
-    // `LedgerWriter` port hands to `@ctx/connections` — and then asserts what
-    // the *routes* do with it. That keeps the serialisation, the `asOf`
-    // caption and the per-currency netting under test rather than blocked
-    // behind a defect in another context.
+  it('renders a later balance that says when, and nets it per currency', async () => {
+    // A second observation, later than the one the sync above already
+    // recorded, written through `@ctx/ledger`'s real `recordBalance` — the
+    // exact function the `LedgerWriter` port hands to `@ctx/connections` — and
+    // then asserts what the *routes* do with it. That keeps the
+    // serialisation, the "latest observation wins" read and the per-currency
+    // netting under test independently of the sync path above.
     const accountsBefore = await h.request({ method: 'GET', url: '/accounts', session: h.stale });
     const accountId =
       (accountsBefore.json() as { accounts: { id: string }[] }).accounts[0]?.id ?? '';
@@ -358,7 +364,7 @@ describe.skipIf(NO_DATABASE)('connection and account routes', () => {
         current: money(147_500n, 'USD'),
         available: money(147_500n, 'USD'),
         limit: null,
-        asOf: new Date('2026-05-03T00:00:00.000Z'),
+        asOf: new Date('2026-05-05T00:00:00.000Z'),
         source: 'provider',
       },
       { clock: systemClock, correlationId: '01920000-0000-7000-8000-0000000000c5' },
@@ -378,7 +384,7 @@ describe.skipIf(NO_DATABASE)('connection and account routes', () => {
     // Every balance answers "as of when?" — 04 §4.5, 05 §4.4. An account whose
     // institution needs re-authentication shows its last known balance with an
     // "as of" caption rather than being hidden or zeroed.
-    expect(account?.balance?.asOf).toBe('2026-05-03T00:00:00.000Z');
+    expect(account?.balance?.asOf).toBe('2026-05-05T00:00:00.000Z');
     expect(account?.balance?.source).toBe('provider');
 
     const netWorth = await h.request({ method: 'GET', url: '/net-worth', session: h.stale });
@@ -390,7 +396,7 @@ describe.skipIf(NO_DATABASE)('connection and account routes', () => {
     expect(body.totals).toHaveLength(1);
     expect(body.totals[0]?.currency).toBe('USD');
     expect(body.totals[0]?.net.minor).toBe('147500');
-    expect(body.asOf).toBe('2026-05-03T00:00:00.000Z');
+    expect(body.asOf).toBe('2026-05-05T00:00:00.000Z');
   });
 
   it('refuses a PATCH that says nothing', async () => {
