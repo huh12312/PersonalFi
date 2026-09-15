@@ -1,0 +1,414 @@
+[
+  {
+    "accounts": [],
+    "added": [
+      {
+        "account_id": "acct-checking-001",
+        "account_owner": null,
+        "amount": 4.5,
+        "authorized_date": "2026-06-01",
+        "authorized_datetime": "2026-06-01T15:42:11Z",
+        "category": ["Food and Drink", "Restaurants", "Coffee Shop"],
+        "category_id": "13005043",
+        "check_number": null,
+        "counterparties": [
+          {
+            "name": "Blue Bottle Coffee",
+            "type": "merchant",
+            "entity_id": "eyg8o776k0QmNgVpAmaQj4WgzW9Qzo6O51gdd",
+            "website": "bluebottlecoffee.com",
+            "logo_url": null,
+            "confidence_level": "VERY_HIGH",
+            "phone_number": null
+          },
+          {
+            "name": "Square",
+            "type": "payment_processor",
+            "entity_id": "sq-3Jd9k1mQWpZzLb7Vn0Ya",
+            "website": "squareup.com",
+            "logo_url": null,
+            "confidence_level": "HIGH",
+            "phone_number": null
+          }
+        ],
+        "date": "2026-06-01",
+        "datetime": "2026-06-01T15:42:11Z",
+        "iso_currency_code": "USD",
+        "location": {
+          "address": null,
+          "city": "Oakland",
+          "region": "CA",
+          "postal_code": null,
+          "country": "US",
+          "lat": null,
+          "lon": null,
+          "store_number": "4471"
+        },
+        "logo_url": null,
+        "merchant_entity_id": "eyg8o776k0QmNgVpAmaQj4WgzW9Qzo6O51gdd",
+        "merchant_name": "Blue Bottle Coffee",
+        "name": "SQ *BLUE BOTTLE 4471",
+        "original_description": "SQ *BLUE BOTTLE 4471 OAKLAND CA",
+        "payment_channel": "in store",
+        "payment_meta": {
+          "by_order_of": null,
+          "payee": null,
+          "payer": null,
+          "payment_method": null,
+          "payment_processor": null,
+          "ppd_id": null,
+          "reason": null,
+          "reference_number": null
+        },
+        "pending": true,
+        "pending_transaction_id": null,
+        "personal_finance_category": {
+          "primary": "FOOD_AND_DRINK",
+          "detailed": "FOOD_AND_DRINK_COFFEE",
+          "confidence_level": "VERY_HIGH",
+          "version": "v2"
+        },
+        "personal_finance_category_icon_url": "https://plaid-category-icons.plaid.com/PFC_FOOD_AND_DRINK.png",
+        "transaction_code": null,
+        "transaction_id": "txn-0001-pending-coffee",
+        "transaction_type": "place",
+        "unofficial_currency_code": null,
+        "website": "bluebottlecoffee.com"
+      },
+      {
+        "account_id": "acct-checking-001",
+        "account_owner": null,
+        "amount": -2100.0,
+        "authorized_date": null,
+        "authorized_datetime": null,
+        "category": ["Transfer", "Payroll"],
+        "category_id": "21009000",
+        "check_number": null,
+        "counterparties": [
+          {
+            "name": "Northwind Mutual",
+            "type": "income_source",
+            "entity_id": "nw-9Kd2p7RtYuIoPaSdFgHj",
+            "website": null,
+            "logo_url": null,
+            "confidence_level": "HIGH",
+            "phone_number": null
+          }
+        ],
+        "date": "2026-06-01",
+        "datetime": null,
+        "iso_currency_code": "USD",
+        "location": {
+          "address": null,
+          "city": null,
+          "region": null,
+          "postal_code": null,
+          "country": null,
+          "lat": null,
+          "lon": null,
+          "store_number": null
+        },
+        "logo_url": null,
+        "merchant_entity_id": null,
+        "merchant_name": null,
+        "name": "NORTHWIND MUTUAL PAYROLL",
+        "original_description": "DIRECT DEP NORTHWIND MUTUAL PAYROLL PPD ID 9876543210",
+        "payment_channel": "other",
+        "payment_meta": {
+          "by_order_of": null,
+          "payee": null,
+          "payer": null,
+          "payment_method": "ACH",
+          "payment_processor": null,
+          "ppd_id": "9876543210",
+          "reason": null,
+          "reference_number": null
+        },
+        "pending": false,
+        "pending_transaction_id": null,
+        "personal_finance_category": {
+          "primary": "INCOME",
+          "detailed": "INCOME_WAGES",
+          "confidence_level": "VERY_HIGH",
+          "version": "v2"
+        },
+        "personal_finance_category_icon_url": "https://plaid-category-icons.plaid.com/PFC_INCOME.png",
+        "transaction_code": "direct deposit",
+        "transaction_id": "txn-0002-payroll",
+        "transaction_type": "special",
+        "unofficial_currency_code": null,
+        "website": null
+      }
+    ],
+    "modified": [],
+    "removed": [],
+    "next_cursor": "cursor-page-1",
+    "has_more": true,
+    "transactions_update_status": "HISTORICAL_UPDATE_COMPLETE",
+    "request_id": "req-sync-page-1"
+  },
+  {
+    "accounts": [],
+    "added": [
+      {
+        "account_id": "acct-checking-001",
+        "account_owner": null,
+        "amount": 4.87,
+        "authorized_date": "2026-06-01",
+        "authorized_datetime": "2026-06-01T15:42:11Z",
+        "category": ["Food and Drink", "Restaurants", "Coffee Shop"],
+        "category_id": "13005043",
+        "check_number": null,
+        "counterparties": [
+          {
+            "name": "Blue Bottle Coffee",
+            "type": "merchant",
+            "entity_id": "eyg8o776k0QmNgVpAmaQj4WgzW9Qzo6O51gdd",
+            "website": "bluebottlecoffee.com",
+            "logo_url": null,
+            "confidence_level": "VERY_HIGH",
+            "phone_number": null
+          }
+        ],
+        "date": "2026-06-02",
+        "datetime": "2026-06-02T08:03:00Z",
+        "iso_currency_code": "USD",
+        "location": {
+          "address": null,
+          "city": "Oakland",
+          "region": "CA",
+          "postal_code": null,
+          "country": "US",
+          "lat": null,
+          "lon": null,
+          "store_number": "4471"
+        },
+        "logo_url": null,
+        "merchant_entity_id": "eyg8o776k0QmNgVpAmaQj4WgzW9Qzo6O51gdd",
+        "merchant_name": "Blue Bottle Coffee",
+        "name": "SQ *BLUE BOTTLE 4471",
+        "original_description": "SQ *BLUE BOTTLE 4471 OAKLAND CA",
+        "payment_channel": "in store",
+        "payment_meta": {
+          "by_order_of": null,
+          "payee": null,
+          "payer": null,
+          "payment_method": null,
+          "payment_processor": null,
+          "ppd_id": null,
+          "reason": null,
+          "reference_number": null
+        },
+        "pending": false,
+        "pending_transaction_id": "txn-0001-pending-coffee",
+        "personal_finance_category": {
+          "primary": "FOOD_AND_DRINK",
+          "detailed": "FOOD_AND_DRINK_COFFEE",
+          "confidence_level": "VERY_HIGH",
+          "version": "v2"
+        },
+        "personal_finance_category_icon_url": "https://plaid-category-icons.plaid.com/PFC_FOOD_AND_DRINK.png",
+        "transaction_code": null,
+        "transaction_id": "txn-0003-posted-coffee",
+        "transaction_type": "place",
+        "unofficial_currency_code": null,
+        "website": "bluebottlecoffee.com"
+      },
+      {
+        "account_id": "acct-card-002",
+        "account_owner": null,
+        "amount": 64.2,
+        "authorized_date": "2026-06-02",
+        "authorized_datetime": null,
+        "category": ["Service", "Utilities"],
+        "category_id": "18068000",
+        "check_number": null,
+        "counterparties": [],
+        "date": "2026-06-02",
+        "datetime": null,
+        "iso_currency_code": "USD",
+        "location": {
+          "address": null,
+          "city": null,
+          "region": null,
+          "postal_code": null,
+          "country": null,
+          "lat": null,
+          "lon": null,
+          "store_number": null
+        },
+        "logo_url": null,
+        "merchant_entity_id": null,
+        "merchant_name": null,
+        "name": "PORTSIDE WATER CO",
+        "original_description": null,
+        "payment_channel": "online",
+        "payment_meta": {
+          "by_order_of": null,
+          "payee": null,
+          "payer": null,
+          "payment_method": null,
+          "payment_processor": null,
+          "ppd_id": null,
+          "reason": null,
+          "reference_number": null
+        },
+        "pending": false,
+        "pending_transaction_id": null,
+        "personal_finance_category": {
+          "primary": "RENT_AND_UTILITIES",
+          "detailed": "RENT_AND_UTILITIES_WATER",
+          "confidence_level": "MEDIUM",
+          "version": "v2"
+        },
+        "personal_finance_category_icon_url": "https://plaid-category-icons.plaid.com/PFC_RENT_AND_UTILITIES.png",
+        "transaction_code": null,
+        "transaction_id": "txn-0004-water",
+        "transaction_type": "place",
+        "unofficial_currency_code": null,
+        "website": null
+      }
+    ],
+    "modified": [],
+    "removed": [
+      {
+        "transaction_id": "txn-0001-pending-coffee",
+        "account_id": "acct-checking-001"
+      }
+    ],
+    "next_cursor": "cursor-page-2",
+    "has_more": true,
+    "transactions_update_status": "HISTORICAL_UPDATE_COMPLETE",
+    "request_id": "req-sync-page-2"
+  },
+  {
+    "accounts": [],
+    "added": [
+      {
+        "account_id": "acct-checking-001",
+        "account_owner": null,
+        "amount": 1850.0,
+        "authorized_date": null,
+        "authorized_datetime": null,
+        "category": ["Payment", "Loan"],
+        "category_id": "16001000",
+        "check_number": null,
+        "counterparties": [],
+        "date": "2026-06-03",
+        "datetime": null,
+        "iso_currency_code": "USD",
+        "location": {
+          "address": null,
+          "city": null,
+          "region": null,
+          "postal_code": null,
+          "country": null,
+          "lat": null,
+          "lon": null,
+          "store_number": null
+        },
+        "logo_url": null,
+        "merchant_entity_id": null,
+        "merchant_name": null,
+        "name": "NORTHWIND MTG PMT",
+        "original_description": "ACH DEBIT NORTHWIND MUTUAL MTG PMT 0009001",
+        "payment_channel": "other",
+        "payment_meta": {
+          "by_order_of": null,
+          "payee": null,
+          "payer": null,
+          "payment_method": "ACH",
+          "payment_processor": null,
+          "ppd_id": null,
+          "reason": null,
+          "reference_number": "0009001"
+        },
+        "pending": false,
+        "pending_transaction_id": null,
+        "personal_finance_category": {
+          "primary": "LOAN_PAYMENTS",
+          "detailed": "LOAN_PAYMENTS_MORTGAGE_PAYMENT",
+          "confidence_level": "VERY_HIGH",
+          "version": "v2"
+        },
+        "personal_finance_category_icon_url": "https://plaid-category-icons.plaid.com/PFC_LOAN_PAYMENTS.png",
+        "transaction_code": null,
+        "transaction_id": "txn-0005-mortgage",
+        "transaction_type": "special",
+        "unofficial_currency_code": null,
+        "website": null
+      }
+    ],
+    "modified": [
+      {
+        "account_id": "acct-card-002",
+        "account_owner": null,
+        "amount": 64.2,
+        "authorized_date": "2026-06-02",
+        "authorized_datetime": null,
+        "category": ["Service", "Utilities"],
+        "category_id": "18068000",
+        "check_number": null,
+        "counterparties": [
+          {
+            "name": "Portside Water",
+            "type": "merchant",
+            "entity_id": "pw-5Lm8q2WxErTyUiOpAsDf",
+            "website": "portsidewater.example",
+            "logo_url": null,
+            "confidence_level": "HIGH",
+            "phone_number": null
+          }
+        ],
+        "date": "2026-06-02",
+        "datetime": null,
+        "iso_currency_code": "USD",
+        "location": {
+          "address": null,
+          "city": null,
+          "region": null,
+          "postal_code": null,
+          "country": null,
+          "lat": null,
+          "lon": null,
+          "store_number": null
+        },
+        "logo_url": null,
+        "merchant_entity_id": "pw-5Lm8q2WxErTyUiOpAsDf",
+        "merchant_name": "Portside Water",
+        "name": "PORTSIDE WATER CO",
+        "original_description": null,
+        "payment_channel": "online",
+        "payment_meta": {
+          "by_order_of": null,
+          "payee": null,
+          "payer": null,
+          "payment_method": null,
+          "payment_processor": null,
+          "ppd_id": null,
+          "reason": null,
+          "reference_number": null
+        },
+        "pending": false,
+        "pending_transaction_id": null,
+        "personal_finance_category": {
+          "primary": "RENT_AND_UTILITIES",
+          "detailed": "RENT_AND_UTILITIES_WATER",
+          "confidence_level": "VERY_HIGH",
+          "version": "v2"
+        },
+        "personal_finance_category_icon_url": "https://plaid-category-icons.plaid.com/PFC_RENT_AND_UTILITIES.png",
+        "transaction_code": null,
+        "transaction_id": "txn-0004-water",
+        "transaction_type": "place",
+        "unofficial_currency_code": null,
+        "website": "portsidewater.example"
+      }
+    ],
+    "removed": [],
+    "next_cursor": "cursor-page-3",
+    "has_more": false,
+    "transactions_update_status": "HISTORICAL_UPDATE_COMPLETE",
+    "request_id": "req-sync-page-3"
+  }
+]

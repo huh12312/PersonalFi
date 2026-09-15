@@ -174,6 +174,22 @@ export default defineConfig({
         },
       },
       {
+        // WP 1.3. The Plaid adapter, driven end to end by `FakePlaidApi` over
+        // recorded-shape fixtures: the shared conformance suite, the request
+        // pins, every row of the error map, the sign inversion, pending→posted,
+        // and the log-hygiene check. No network and no database — the whole
+        // point of an adapter that returns data instead of writing it. The live
+        // Sandbox smoke lives in the same project and skips itself when
+        // PLAID_CLIENT_ID/PLAID_SECRET are unset.
+        root: './packages/connectors/plaid',
+        test: {
+          name: 'connector-plaid',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+          testTimeout: 30_000,
+        },
+      },
+      {
         // `@ctx/connections`, minus the database. The conformance suite lives
         // here — it needs three real adapters and no Postgres, which is exactly
         // the shape of a unit project.

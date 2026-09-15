@@ -1,0 +1,13 @@
+{
+  "item_id": "item-northwind-0001",
+  "institution_id": "ins_109508",
+  "institution_name": "First Platypus Bank",
+  "webhook": null,
+  "error": null,
+  "available_products": ["investments", "liabilities", "balance"],
+  "billed_products": ["transactions"],
+  "products": ["transactions", "investments", "liabilities"],
+  "consented_products": ["transactions", "investments", "liabilities"],
+  "consent_expiration_time": null,
+  "update_type": "background"
+}

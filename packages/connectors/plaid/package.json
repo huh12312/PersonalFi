@@ -1,0 +1,16 @@
+{
+  "name": "@connector/plaid",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@connector/port": "workspace:*",
+    "@core/kernel": "workspace:*",
+    "plaid": "47.0.0",
+    "zod": "4.5.4"
+  }
+}

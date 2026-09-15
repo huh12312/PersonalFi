@@ -1,0 +1,67 @@
+[
+  {
+    "account_id": "acct-checking-001",
+    "balances": {
+      "available": 4100.55,
+      "current": 4210.55,
+      "limit": null,
+      "iso_currency_code": "USD",
+      "unofficial_currency_code": null,
+      "last_updated_datetime": null
+    },
+    "mask": "6789",
+    "name": "Everyday Checking",
+    "official_name": "Northwind Mutual Everyday Checking",
+    "type": "depository",
+    "subtype": "checking",
+    "persistent_account_id": "persistent-checking-001"
+  },
+  {
+    "account_id": "acct-card-002",
+    "balances": {
+      "available": 4187.6,
+      "current": 812.4,
+      "limit": 5000,
+      "iso_currency_code": "USD",
+      "unofficial_currency_code": null,
+      "last_updated_datetime": null
+    },
+    "mask": "4431",
+    "name": "Harbour Rewards Card",
+    "official_name": "Northwind Mutual Harbour Rewards Visa Signature",
+    "type": "credit",
+    "subtype": "credit card"
+  },
+  {
+    "account_id": "acct-brokerage-003",
+    "balances": {
+      "available": null,
+      "current": 18450.32,
+      "limit": null,
+      "iso_currency_code": "USD",
+      "unofficial_currency_code": null,
+      "last_updated_datetime": "2026-06-01T09:15:00Z"
+    },
+    "mask": "1122",
+    "name": "Individual Brokerage",
+    "official_name": "Northwind Securities Individual Taxable",
+    "type": "investment",
+    "subtype": "brokerage"
+  },
+  {
+    "account_id": "acct-mortgage-004",
+    "balances": {
+      "available": null,
+      "current": 243900.11,
+      "limit": null,
+      "iso_currency_code": "USD",
+      "unofficial_currency_code": null,
+      "last_updated_datetime": null
+    },
+    "mask": "9001",
+    "name": "Home Mortgage",
+    "official_name": "Northwind Mutual 30-Year Fixed",
+    "type": "loan",
+    "subtype": "mortgage"
+  }
+]

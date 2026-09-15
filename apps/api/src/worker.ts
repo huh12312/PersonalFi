@@ -20,9 +20,10 @@
  * their configuration at boot, which is why `config_snapshots` is keyed by role.
  */
 import { ConfigError, describeConfig, loadConfig } from '@core/config';
-import { createPool } from '@core/db';
+import { createDatabase, createPool } from '@core/db';
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { systemClock } from '@core/kernel';
+import { SecretBox } from '@core/secretbox';
 import { UserService } from '@ctx/identity';
 import {
   createConsumerPump,
@@ -36,17 +37,10 @@ import {
   type Scheduler,
 } from '@core/platform';
 import pino from 'pino';
+import { createConnectorRegistry, createDomainRuntime } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
-import { buildPlatform, resolveModules, type ModuleRegistration } from './platform.ts';
-
-/**
- * Every module the worker knows about.
- *
- * Empty in Phase 0: no context yet publishes an event, a consumer, or a job.
- * Phase 1 appends `{ flagKey: 'module.ledger', events: [...], consumers: [...],
- * jobs: [...] }` and nothing else in this file changes.
- */
-const MODULES: readonly ModuleRegistration[] = [];
+import { appModules } from './modules.ts';
+import { buildPlatform, resolveModules } from './platform.ts';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -76,19 +70,71 @@ async function main(): Promise<void> {
   //
   // `UserService` needs no KEK, so the worker can read the account holder without
   // the six seconds of Argon2id the API pays at boot.
-  const userId = (await new UserService({ db: pool, clock: systemClock }).findPrimary())?.id;
+  const user = await new UserService({ db: pool, clock: systemClock }).findPrimary();
 
   let pump: ConsumerPump | null = null;
   let runner: JobRunner | null = null;
   let scheduler: Scheduler | null = null;
+  let secretBox: SecretBox | null = null;
 
-  if (userId === undefined) {
+  if (user === null) {
     // Not an error: a freshly migrated database has no account holder until the
     // first passkey is enrolled. Come back after a restart rather than crash-looping.
     logger.warn({}, 'no account holder yet; the worker will idle until one is enrolled');
   } else {
+    const userId = user.id;
     await platform.flags.watch(pool);
-    const modules = await resolveModules(platform, userId, MODULES);
+
+    /**
+     * The worker derives the KEK too, and it has to.
+     *
+     * A sync opens a sealed provider credential, so the process that runs syncs
+     * needs the key — there is no arrangement in which the API unseals on the
+     * worker's behalf that does not amount to passing a plaintext token between
+     * containers. This is the same six seconds of Argon2id the API pays at boot,
+     * and the same failure mode: with no `master_key` the process stays up, says
+     * so, and runs nothing that needs a credential.
+     */
+    const passphrase = config.secrets.master_key;
+    if (passphrase === undefined) {
+      logger.error({}, 'master_key secret is absent; no connection can be synced');
+    } else {
+      const box = new SecretBox({
+        db: pool,
+        userId,
+        clock: systemClock,
+        kdfParams: config.kek.params,
+        kdfFloor: config.kek.floor,
+      });
+      const state = await box.unlock(passphrase.reveal());
+      if (state.state === 'unlocked') {
+        secretBox = box;
+        logger.info({ kekVersion: state.kekVersion }, 'key custody: unlocked');
+      } else {
+        box.destroy();
+        logger.error({ reason: state.reason }, 'key custody: locked; syncs will not run');
+      }
+    }
+
+    const database = createDatabase(pool);
+    const modules =
+      secretBox === null
+        ? { consumers: [], jobs: [], enabled: [], disabled: ['module.connections'] }
+        : await resolveModules(
+            platform,
+            userId,
+            appModules({
+              database,
+              orchestrator: createDomainRuntime({
+                database,
+                clock: systemClock,
+                logger,
+                registry: createConnectorRegistry(),
+                secretBox,
+              }).orchestrator,
+              timezone: user.displayTimezone,
+            }),
+          );
     logger.info({ enabled: modules.enabled, disabled: modules.disabled }, 'modules resolved');
 
     if (modules.consumers.length > 0) {
@@ -164,6 +210,10 @@ async function main(): Promise<void> {
       await scheduler?.stop();
       await pump?.stop();
       await runner?.stop();
+      // The KEK goes before the pool does: a process that is shutting down has
+      // no further use for it, and the window in which it sits in memory after
+      // the last job finished should be as short as the code can make it (P0-2).
+      secretBox?.destroy();
       await platform.flags.close();
       await pool.end();
       logger.info({}, 'shutdown complete');

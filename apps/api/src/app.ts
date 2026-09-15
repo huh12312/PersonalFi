@@ -7,9 +7,11 @@
 import fastifyCookie from '@fastify/cookie';
 import fastifySwagger from '@fastify/swagger';
 import type { AppConfig } from '@core/config';
+import { createDatabase } from '@core/db';
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { newId, systemClock, type Clock } from '@core/kernel';
 import type { TransactionalExecutor } from '@core/platform';
+import type { ConnectorRegistry } from '@ctx/connections';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import {
   jsonSchemaTransform,
@@ -20,12 +22,19 @@ import {
 } from 'fastify-type-provider-zod';
 import type pg from 'pg';
 import type { CookiePolicy } from './auth/cookies.ts';
-import { assertCsrf } from './auth/csrf.ts';
+import { assertCsrf, ensureCsrfCookie } from './auth/csrf.ts';
+import { createGuards } from './auth/guards.ts';
 import { SecurityRuntime } from './auth/runtime.ts';
+import { createConnectorRegistry, createDomainRuntime, type DomainRuntime } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
+import { accountRoutes } from './routes/accounts.ts';
 import { authRoutes } from './routes/auth.ts';
+import { connectionRoutes } from './routes/connections.ts';
+import type { RouteDeps } from './routes/deps.ts';
+import { eventRoutes } from './routes/events.ts';
 import { healthRoutes } from './routes/health.ts';
+import { transactionRoutes } from './routes/transactions.ts';
 
 export const CORRELATION_ID_HEADER = 'x-correlation-id';
 
@@ -40,6 +49,12 @@ export interface BuildAppOptions {
   readonly platformDb?: TransactionalExecutor;
   /** Injectable so a session-expiry test does not have to wait eight hours. */
   readonly clock?: Clock;
+  /**
+   * Injectable so a test can register a pre-loaded `SeedConnector` alongside the
+   * real adapters. Production builds the registry from `domain.ts` and this is
+   * the only way anything else gets into it.
+   */
+  readonly connectorRegistry?: ConnectorRegistry;
 }
 
 /**
@@ -157,6 +172,22 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
             'Passkeys, TOTP fallback, recovery codes, sessions and step-up. Tokens travel in ' +
             '`__Host-` cookies and never in a response body.',
         },
+        {
+          name: 'accounts',
+          description: 'Accounts, their latest balances, and net worth. Every balance says when.',
+        },
+        {
+          name: 'transactions',
+          description:
+            'The feed, the overlay, splits, transfers and the CSV export. Pagination is keyset: ' +
+            'pass `nextCursor` back verbatim.',
+        },
+        {
+          name: 'connections',
+          description:
+            'Providers, the link and reconnect flows, sync history, and the server-sent event ' +
+            'streams that carry sync progress.',
+        },
       ],
     },
     transform: jsonSchemaTransform,
@@ -198,7 +229,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
    * on a `GET` is one `Set.has`.
    */
   const cookiePolicy: CookiePolicy = { secure: config.env.SESSION_COOKIE_SECURE };
-  app.addHook('onRequest', async (request) => {
+  app.addHook('onRequest', async (request, reply) => {
+    // The double-submit token is minted on *any* safe request, not only on an
+    // `/auth/*` one (which is where WP 0.2 left it). A client whose first call is
+    // `GET /transactions` must already hold a token by the time the user presses
+    // "categorise", and a "fetch me a token" endpoint is one more failure mode
+    // on the path to the first mutation.
+    ensureCsrfCookie(request, reply, cookiePolicy);
     assertCsrf(request, { allowedOrigins: config.allowedOrigins, cookiePolicy });
   });
 
@@ -250,6 +287,48 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   const security = new SecurityRuntime({ config, db: pool, clock, logger: app.log });
 
   await app.register(authRoutes({ runtime: security, cookiePolicy }));
+
+  /**
+   * The domain wiring, built on first use and then held.
+   *
+   * Lazy for the same reason `SecurityRuntime` is constructed rather than
+   * initialised: the `SyncOrchestrator` needs the `SecretBox`, deriving the KEK
+   * is six seconds of Argon2id, and `emit-openapi` builds this app with no
+   * database behind it at all. `requireSecretBox()` throws the 503 problem that
+   * names *why* the application is locked, which is the answer a route should
+   * give — not a null dereference.
+   */
+  const database = createDatabase(pool);
+  const registry = options.connectorRegistry ?? createConnectorRegistry();
+  let domain: DomainRuntime | null = null;
+
+  const deps: RouteDeps = {
+    guards: createGuards(security),
+    database,
+    pool,
+    clock,
+    connections(): DomainRuntime {
+      const secretBox = security.requireSecretBox();
+      // Rebuild if the runtime was destroyed and re-initialised: holding an
+      // orchestrator around a zeroed SecretBox would fail at the first sealed
+      // credential, a long way from the cause.
+      if (domain === null || domain.secretBox !== secretBox) {
+        domain = createDomainRuntime({
+          database,
+          clock,
+          logger: app.log,
+          registry,
+          secretBox,
+        });
+      }
+      return domain;
+    },
+  };
+
+  await app.register(accountRoutes(deps));
+  await app.register(transactionRoutes(deps));
+  await app.register(connectionRoutes(deps));
+  await app.register(eventRoutes(deps));
 
   return { app, security };
 }

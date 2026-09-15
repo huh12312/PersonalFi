@@ -275,7 +275,12 @@ const LAYERS = [
     // eslint.config.js still applies.
     name: 'connectors',
     prefix: 'packages/connectors/',
-    allow: ['@core/kernel', '@core/secretbox', '@connector/port', ...UNIVERSAL],
+    // `plaid` is the only provider SDK in the tree and it is listed here rather
+    // than against `packages/connectors/plaid/` specifically because the layer
+    // policy is keyed by path prefix, not by package. The allow-list is still
+    // doing its job: an adapter may reach its own provider's client and nothing
+    // else — not the database, not the platform, not another context.
+    allow: ['@core/kernel', '@core/secretbox', '@connector/port', 'plaid', ...UNIVERSAL],
     allowNodeBuiltins: true,
     why:
       'A provider adapter maps provider shapes to canonical ones and returns them. It ' +

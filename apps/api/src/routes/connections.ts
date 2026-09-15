@@ -1,0 +1,694 @@
+// SPDX-License-Identifier: MIT
+/**
+ * `/connectors`, `/connections` and `/imports/csv` — the provider seam, as HTTP.
+ *
+ * ## `GET /connectors` is the "Add a connection" screen
+ *
+ * 08 §2.7's test of the abstraction is that adding a provider needs no UI change.
+ * That is only true if the screen renders from a list the server sends, so this
+ * endpoint returns `registry.manifests()` verbatim and the Plaid adapter appears
+ * in the UI by being registered in `domain.ts` rather than by anyone editing a
+ * component. `iconKey` is an asset key and never a URL: this payload is
+ * server-controlled and the browser must not be tellable to fetch something
+ * arbitrary from it.
+ *
+ * ## Step-up (decision D21)
+ *
+ * Adding a connection, completing or re-running its link, and removing it all
+ * need a WebAuthn assertion from the last five minutes. The class of attack is a
+ * stolen session cookie: possession of the cookie must not be enough to attach a
+ * new institution to the account or to detach one and destroy its credential.
+ * Reading a connection, its history and its stream needs only a session.
+ *
+ * ## Why `POST /connections/:id/sync` sometimes does not enqueue
+ *
+ * `ManualConnector`, `CsvImportConnector` and `SeedConnector` stage their rows in
+ * **process memory** (WP 1.2). A job the API enqueues for one of them is picked
+ * up by the worker, which has a different, empty store, and produces a
+ * successful sync of nothing. So `PROCESS_LOCAL_PROVIDERS` runs those inline and
+ * everything else through the queue. The response says which happened; it is 202
+ * either way, because the authoritative answer is in `sync_runs` and not in this
+ * response body. See the WP 1.5 evidence note — a durable staging area is
+ * `@ctx/connections`'s to build, not this file's.
+ */
+import {
+  CSV_PRESETS,
+  type CsvFileInput,
+  CsvImportConnector,
+  IMPORT_PROVIDER,
+} from '@connector/csv';
+import {
+  capabilitiesSchema,
+  connectionAccountSchema,
+  connectionSummarySchema,
+  connectorManifestSchema,
+  createConnection,
+  disconnectConnection,
+  getConnectionDetail,
+  listConnectionSummaries,
+  listSyncRuns,
+  requireConnection,
+  syncRunSchema,
+  type ConnectionsContext,
+} from '@ctx/connections';
+import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
+import { z } from 'zod';
+import { ledgerWriter, PROCESS_LOCAL_PROVIDERS } from '../domain.ts';
+import { AppError, problems } from '../problem.ts';
+import { mapDomainErrors } from './domain-errors.ts';
+import type { RouteDeps } from './deps.ts';
+
+/**
+ * A file upload as JSON, not `multipart/form-data`.
+ *
+ * Deliberate: the whole payload is a bank statement that has to be parsed in one
+ * go anyway, the app's `bodyLimit` is 1 MiB and a year of CSV is a few hundred
+ * kilobytes, and `@fastify/multipart` would be a dependency added to move bytes
+ * that JSON already moves. A file that does not fit is a file that should be
+ * split, and the 413 says so.
+ */
+const csvFileSchema = z
+  .object({
+    name: z.string().min(1).max(255).describe('For error messages and provenance. Never parsed.'),
+    content: z.string().min(1).describe('The file, verbatim, as text.'),
+    format: z
+      .enum(['csv', 'ofx', 'qif'])
+      .optional()
+      .describe('Sniffed from the content if absent.'),
+    presetId: z
+      .enum(CSV_PRESETS.map((preset) => preset.id) as [string, ...string[]])
+      .optional()
+      .describe('One of the built-in column mappings. Mutually exclusive with `profile`.'),
+    profile: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe('A hand-built CSV mapping profile, when no preset fits.'),
+    account: z
+      .object({
+        providerAccountId: z.string().min(1),
+        name: z.string().min(1),
+        type: z.enum(['depository', 'credit', 'loan', 'investment', 'crypto', 'manual']),
+        currency: z.string().length(3),
+        mask: z.string().max(4).nullable().optional(),
+      })
+      .optional()
+      .describe('Required for CSV and QIF, which carry no account identity of their own.'),
+  })
+  .meta({ id: 'ImportFile' });
+
+const connectorManifest = connectorManifestSchema
+  .extend({ capabilities: capabilitiesSchema })
+  .meta({ id: 'ConnectorManifest' });
+const connectionSummary = connectionSummarySchema.meta({ id: 'ConnectionSummary' });
+const connectionAccount = connectionAccountSchema.meta({ id: 'ConnectionAccount' });
+const syncRun = syncRunSchema.meta({ id: 'SyncRun' });
+const connectionDetail = connectionSummary
+  .extend({ accounts: z.array(connectionAccount), recentRuns: z.array(syncRun) })
+  .meta({ id: 'ConnectionDetail' });
+
+const linkResultSchema = z
+  .object({
+    connectionId: z.uuid(),
+    relinked: z.boolean().describe('True when this replaced the credential on an existing row.'),
+    accountIds: z.array(z.uuid()),
+    syncJobId: z.uuid().nullable().describe('The queued backfill, when one was queued.'),
+    syncRunId: z.uuid().nullable().describe('The completed backfill, when it ran inline.'),
+  })
+  .meta({ id: 'LinkResult' });
+
+const syncStartedSchema = z
+  .object({
+    mode: z
+      .enum(['queued', 'inline'])
+      .describe('`inline` means the adapter stages in this process and could not be queued.'),
+    jobId: z.uuid().nullable(),
+    syncRunId: z.uuid().nullable(),
+    deduped: z.boolean().describe('A sync of this connection was already queued or running.'),
+    status: z.enum(['running', 'success', 'partial', 'failed', 'skipped']).nullable(),
+  })
+  .meta({ id: 'SyncStarted' });
+
+export const connectionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
+  const { guards, database, clock } = deps;
+
+  function contextOf(userId: string, requestId: string): ConnectionsContext {
+    return { userId, clock, correlationId: requestId };
+  }
+
+  /**
+   * Link or re-link, then start the backfill.
+   *
+   * `createConnection` and `syncNow` share one transaction on purpose: a link
+   * that committed without its backfill enqueued is a connection that looks
+   * linked and never syncs. The inline branch is the exception documented at the
+   * top of this file, and it runs *after* the commit — an adapter's page loop
+   * must not hold the connection that created the row.
+   */
+  async function link(
+    userId: string,
+    requestId: string,
+    body: { provider: string; input: unknown; config?: Record<string, unknown> },
+    expectConnectionId: string | null,
+  ): Promise<z.infer<typeof linkResultSchema>> {
+    const { registry, orchestrator, secretBox } = deps.connections();
+    const context = contextOf(userId, requestId);
+    const queued = !PROCESS_LOCAL_PROVIDERS.has(body.provider);
+
+    const result = await mapDomainErrors(() =>
+      database.transaction(async (tx) => {
+        const connector = registry.get(body.provider);
+        const created = await createConnection(
+          tx,
+          {
+            input: body.input,
+            connector,
+            secretBox,
+            ledgerWriter,
+            ...(body.config === undefined ? {} : { config: body.config }),
+          },
+          context,
+        );
+        if (expectConnectionId !== null && created.connectionId !== expectConnectionId) {
+          // The artifact linked a *different* provider connection than the row
+          // in the path. Refusing is the only safe answer: silently creating a
+          // second connection under a URL that names the first is how a user
+          // ends up with two of an institution and a doubled net worth.
+          throw new AppError({
+            status: 409,
+            code: 'connections.link_mismatch',
+            title: 'Conflict',
+            detail: 'That link artifact belongs to a different connection.',
+            family: 'domain',
+          });
+        }
+        if (!queued) return { ...created, syncJobId: null };
+        const job = await orchestrator.syncNow(tx, {
+          connectionId: created.connectionId,
+          userId,
+          trigger: 'initial',
+          correlationId: requestId,
+        });
+        return { ...created, syncJobId: job.jobId };
+      }),
+    );
+
+    let syncRunId: string | null = null;
+    if (!queued) {
+      const summary = await orchestrator.syncConnection({
+        connectionId: result.connectionId,
+        userId,
+        trigger: 'initial',
+        correlationId: requestId,
+      });
+      syncRunId = summary.syncRunId;
+    }
+
+    return {
+      connectionId: result.connectionId,
+      relinked: result.relinked,
+      accountIds: [...result.accountIds],
+      syncJobId: result.syncJobId,
+      syncRunId,
+    };
+  }
+
+  return async (app) => {
+    app.get(
+      '/connectors',
+      {
+        schema: {
+          operationId: 'listConnectors',
+          summary: 'Every provider this deployment can link',
+          description:
+            'The "Add a connection" screen, as data. A new adapter appears here by being ' +
+            'registered at the composition root; no UI change is required (08 §2.7).',
+          tags: ['connections'],
+          response: {
+            200: z.object({ connectors: z.array(connectorManifest) }),
+            ...problems(401, 503),
+          },
+        },
+      },
+      async (request) => {
+        await guards.requireSession(request);
+        const { registry } = deps.connections();
+        return {
+          connectors: registry.manifests().map((manifest) => {
+            // Copied, not spread through: the adapter's capability object is
+            // frozen and its arrays are `readonly`, which the response schema's
+            // (mutable) inferred type will not accept. One `[...]` here is
+            // cheaper than a mutable capability declaration everywhere else.
+            const capabilities = registry.get(manifest.provider).capabilities();
+            return {
+              ...manifest,
+              capabilities: {
+                ...capabilities,
+                supports: [...capabilities.supports],
+                currencies:
+                  capabilities.currencies === 'multi'
+                    ? capabilities.currencies
+                    : [...capabilities.currencies],
+              },
+            };
+          }),
+        };
+      },
+    );
+
+    app.get(
+      '/connections',
+      {
+        schema: {
+          operationId: 'listConnections',
+          summary: 'Every connection, with status and freshness',
+          description:
+            'No credential appears in this payload — not as a field, not as a redacted ' +
+            'placeholder, not as a boolean called `hasToken`. `status` plus `errorSince` is what ' +
+            'the UI actually needs to say "stale for 26 hours".',
+          tags: ['connections'],
+          response: {
+            200: z.object({ connections: z.array(connectionSummary) }),
+            ...problems(401, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        return { connections: await listConnectionSummaries(database, session.userId) };
+      },
+    );
+
+    app.get(
+      '/connections/:connectionId',
+      {
+        schema: {
+          operationId: 'getConnection',
+          summary: 'One connection, its accounts and its recent runs',
+          tags: ['connections'],
+          params: z.object({ connectionId: z.uuid() }),
+          response: { 200: connectionDetail, ...problems(401, 404, 503) },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        return mapDomainErrors(() =>
+          getConnectionDetail(database, session.userId, request.params.connectionId),
+        );
+      },
+    );
+
+    app.post(
+      '/connections',
+      {
+        schema: {
+          operationId: 'createConnection',
+          summary: 'Link a provider',
+          description:
+            'Needs a step-up assertion (D21). `input` is opaque and validated by the adapter — a ' +
+            'Plaid public token, a set of manual accounts, a file upload descriptor. A union here ' +
+            'would have to grow with every provider and would be wrong the first time one ' +
+            'changed its link flow. Re-linking an institution already connected updates that row ' +
+            'and preserves its cursor and accounts; it never creates a second one.',
+          tags: ['connections'],
+          body: z.object({
+            provider: z.string().min(1),
+            input: z.unknown(),
+            config: z.record(z.string(), z.unknown()).optional(),
+          }),
+          response: { 201: linkResultSchema, ...problems(400, 401, 403, 409, 502, 503) },
+        },
+      },
+      async (request, reply) => {
+        const session = await guards.requireFreshSession(request);
+        const result = await link(
+          session.userId,
+          String(request.id),
+          {
+            provider: request.body.provider,
+            input: request.body.input,
+            ...(request.body.config === undefined ? {} : { config: request.body.config }),
+          },
+          null,
+        );
+        return reply.code(201).send(result);
+      },
+    );
+
+    app.post(
+      '/connections/:connectionId/complete',
+      {
+        schema: {
+          operationId: 'completeConnection',
+          summary: 'Finish a link whose flow ran in the browser',
+          description:
+            'The second half of a provider-hosted flow (08 §3.6): the user came back from Plaid ' +
+            'Link with a public token and this exchanges it. Needs a step-up assertion. The ' +
+            'resulting connection must be the one named in the path, or this is a 409 — silently ' +
+            'creating a second connection under the first one’s URL is how a net worth doubles.',
+          tags: ['connections'],
+          params: z.object({ connectionId: z.uuid() }),
+          body: z.object({
+            input: z.unknown(),
+            config: z.record(z.string(), z.unknown()).optional(),
+          }),
+          response: { 200: linkResultSchema, ...problems(400, 401, 403, 404, 409, 502, 503) },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireFreshSession(request);
+        const row = await mapDomainErrors(() =>
+          requireConnection(database, session.userId, request.params.connectionId),
+        );
+        return link(
+          session.userId,
+          String(request.id),
+          {
+            provider: row.provider,
+            input: request.body.input,
+            ...(request.body.config === undefined ? {} : { config: request.body.config }),
+          },
+          request.params.connectionId,
+        );
+      },
+    );
+
+    app.post(
+      '/connections/:connectionId/reconnect',
+      {
+        schema: {
+          operationId: 'reconnectConnection',
+          summary: 'Replace the credential on an existing connection',
+          description:
+            'Needs a step-up assertion: a new credential is an addition, not a read. The cursor ' +
+            'and every mapped account survive, which is the whole point — 08 §3.9, "losing ' +
+            'account identity on reconnect is the classic way a personal finance app silently ' +
+            'doubles a user’s net worth". `reconnectFlow` on the connector says what the UI ' +
+            'should have collected: `provider_hosted`, `credential_form`, `reupload` or `none`.',
+          tags: ['connections'],
+          params: z.object({ connectionId: z.uuid() }),
+          body: z.object({
+            input: z.unknown(),
+            config: z.record(z.string(), z.unknown()).optional(),
+          }),
+          response: {
+            200: linkResultSchema.extend({
+              reconnectFlow: z.enum(['provider_hosted', 'credential_form', 'reupload', 'none']),
+            }),
+            ...problems(400, 401, 403, 404, 409, 502, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireFreshSession(request);
+        const { registry } = deps.connections();
+        const row = await mapDomainErrors(() =>
+          requireConnection(database, session.userId, request.params.connectionId),
+        );
+        const reconnectFlow = registry.get(row.provider).capabilities().reconnectFlow;
+        const result = await link(
+          session.userId,
+          String(request.id),
+          {
+            provider: row.provider,
+            input: request.body.input,
+            ...(request.body.config === undefined ? {} : { config: request.body.config }),
+          },
+          request.params.connectionId,
+        );
+        return { ...result, reconnectFlow };
+      },
+    );
+
+    app.post(
+      '/connections/:connectionId/sync',
+      {
+        schema: {
+          operationId: 'syncConnection',
+          summary: 'Ask for a sync now',
+          description:
+            'Returns the queued work, never the result: the result is in `sync_runs` and on the ' +
+            'event stream. Deduped and singleton on the connection — a webhook, the nightly ' +
+            'schedule and an impatient user cannot start three cursor loops on one connection, ' +
+            'which 04 §4.4 calls "the fastest way to corrupt cursor state".',
+          tags: ['connections'],
+          params: z.object({ connectionId: z.uuid() }),
+          response: { 202: syncStartedSchema, ...problems(401, 404, 409, 503) },
+        },
+      },
+      async (request, reply) => {
+        const session = await guards.requireSession(request);
+        const { orchestrator } = deps.connections();
+        const row = await mapDomainErrors(() =>
+          requireConnection(database, session.userId, request.params.connectionId),
+        );
+
+        if (PROCESS_LOCAL_PROVIDERS.has(row.provider)) {
+          const summary = await mapDomainErrors(() =>
+            orchestrator.syncConnection({
+              connectionId: row.id,
+              userId: session.userId,
+              trigger: 'manual',
+              correlationId: String(request.id),
+            }),
+          );
+          return reply.code(202).send({
+            mode: 'inline' as const,
+            jobId: null,
+            syncRunId: summary.syncRunId,
+            deduped: false,
+            status: summary.status,
+          });
+        }
+
+        const job = await mapDomainErrors(() =>
+          database.transaction((tx) =>
+            orchestrator.syncNow(tx, {
+              connectionId: row.id,
+              userId: session.userId,
+              trigger: 'manual',
+              correlationId: String(request.id),
+            }),
+          ),
+        );
+        return reply.code(202).send({
+          mode: 'queued' as const,
+          jobId: job.jobId,
+          syncRunId: null,
+          deduped: job.deduped,
+          status: null,
+        });
+      },
+    );
+
+    app.get(
+      '/connections/:connectionId/sync-runs',
+      {
+        schema: {
+          operationId: 'listSyncRuns',
+          summary: 'The sync history',
+          description:
+            '08 §6.3: "`sync_runs` is the observability surface that matters… this single feature ' +
+            "eliminates most 'why is my balance wrong' debugging\". Every attempt leaves a row, " +
+            'including the ones that failed before the first page.',
+          tags: ['connections'],
+          params: z.object({ connectionId: z.uuid() }),
+          querystring: z.object({
+            limit: z.coerce.number().int().min(1).max(200).default(50),
+          }),
+          response: {
+            200: z.object({ runs: z.array(syncRun) }),
+            ...problems(401, 404, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        await mapDomainErrors(() =>
+          requireConnection(database, session.userId, request.params.connectionId),
+        );
+        return {
+          runs: await listSyncRuns(
+            database,
+            session.userId,
+            request.params.connectionId,
+            request.query.limit,
+          ),
+        };
+      },
+    );
+
+    app.delete(
+      '/connections/:connectionId',
+      {
+        schema: {
+          operationId: 'disconnectConnection',
+          summary: 'Disconnect a provider',
+          description:
+            'Needs a step-up assertion (D21). Revokes at the provider best-effort, then destroys ' +
+            'the local credential — the local half always happens, because a provider that is ' +
+            'down must not be able to stop a user from disconnecting. **Accounts, transactions ' +
+            'and the sync history are kept**: "disconnect" and "delete my data" are different ' +
+            'requests and only one of them is reversible. `revokedAtProvider: false` means we ' +
+            'could not tell the provider; with Plaid the Item still occupies a billing slot until ' +
+            'it is removed there, so the UI should say so.',
+          tags: ['connections'],
+          params: z.object({ connectionId: z.uuid() }),
+          response: {
+            200: z.object({
+              revokedAtProvider: z.boolean(),
+              providerSlotMayRemain: z
+                .boolean()
+                .describe('True when revocation failed: the provider may still hold the item.'),
+            }),
+            ...problems(401, 403, 404, 409, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireFreshSession(request);
+        const { registry, secretBox } = deps.connections();
+        const result = await mapDomainErrors(async () => {
+          const row = await requireConnection(
+            database,
+            session.userId,
+            request.params.connectionId,
+          );
+          return disconnectConnection(
+            database,
+            {
+              connectionId: row.id,
+              connector: registry.get(row.provider),
+              secretBox,
+            },
+            contextOf(session.userId, String(request.id)),
+          );
+        });
+        return {
+          revokedAtProvider: result.revokedAtProvider,
+          providerSlotMayRemain: !result.revokedAtProvider,
+        };
+      },
+    );
+
+    app.post(
+      '/imports/csv',
+      {
+        schema: {
+          operationId: 'importFiles',
+          summary: 'Import a CSV, OFX/QFX or QIF file',
+          description:
+            'Creates a file-import connection on the first upload and stages onto it thereafter, ' +
+            'then runs the import **synchronously** — a file upload has no meaningful "come back ' +
+            'later", and the adapter stages in this process (see the module comment). ' +
+            'Re-importing the same file changes nothing: every row is identified by a hash of its ' +
+            'own content, and the ledger’s natural key catches whatever the staging layer misses.',
+          tags: ['connections'],
+          body: z.object({
+            connectionId: z
+              .uuid()
+              .optional()
+              .describe('Omit to create a new file-import connection.'),
+            displayName: z.string().min(1).max(120).default('File import'),
+            files: z.array(csvFileSchema).min(1).max(20),
+          }),
+          response: {
+            200: z.object({
+              connectionId: z.uuid(),
+              syncRunId: z.uuid().nullable(),
+              staged: z.int().nonnegative(),
+              skipped: z.int().nonnegative().describe('Rows already staged by an earlier upload.'),
+              status: z.enum(['running', 'success', 'partial', 'failed', 'skipped']).nullable(),
+            }),
+            ...problems(400, 401, 404, 413, 422, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const { registry, orchestrator } = deps.connections();
+        const connector = registry.get(IMPORT_PROVIDER);
+        if (!(connector instanceof CsvImportConnector)) {
+          throw new AppError({
+            status: 503,
+            code: 'connections.unknown_provider',
+            title: 'Service Unavailable',
+            detail: 'The file-import adapter is not registered in this deployment.',
+            family: 'internal',
+          });
+        }
+
+        const files: CsvFileInput[] = request.body.files.map((file) => ({
+          name: file.name,
+          content: file.content,
+          ...(file.format === undefined ? {} : { format: file.format }),
+          ...(file.presetId === undefined
+            ? file.profile === undefined
+              ? {}
+              : { profile: file.profile as never }
+            : { profile: file.presetId }),
+          ...(file.account === undefined
+            ? {}
+            : {
+                account: {
+                  providerAccountId: file.account.providerAccountId,
+                  name: file.account.name,
+                  type: file.account.type,
+                  currency: file.account.currency,
+                  mask: file.account.mask ?? null,
+                },
+              }),
+        }));
+
+        // A new connection runs `connect`, which stages every file itself.
+        if (request.body.connectionId === undefined) {
+          const linked = await link(
+            session.userId,
+            String(request.id),
+            {
+              provider: IMPORT_PROVIDER,
+              input: { displayName: request.body.displayName, files },
+            },
+            null,
+          );
+          return {
+            connectionId: linked.connectionId,
+            syncRunId: linked.syncRunId,
+            staged: 0,
+            skipped: 0,
+            status: null,
+          };
+        }
+
+        const row = await mapDomainErrors(() =>
+          requireConnection(database, session.userId, request.body.connectionId as string),
+        );
+        let staged = 0;
+        let skipped = 0;
+        await mapDomainErrors(async () => {
+          for (const file of files) {
+            const result = connector.addFile(row.providerConnectionId, file);
+            staged += result.staged;
+            skipped += result.skipped;
+          }
+        });
+
+        const summary = await mapDomainErrors(() =>
+          orchestrator.syncConnection({
+            connectionId: row.id,
+            userId: session.userId,
+            trigger: 'manual',
+            correlationId: String(request.id),
+          }),
+        );
+
+        return {
+          connectionId: row.id,
+          syncRunId: summary.syncRunId,
+          staged,
+          skipped,
+          status: summary.status,
+        };
+      },
+    );
+  };
+};

@@ -68,6 +68,19 @@ export interface TransactionFilters {
   readonly transfers?: 'include' | 'exclude' | 'only';
   /** Free text over the effective payee name. */
   readonly search?: string;
+  /**
+   * Rows the user has not assigned a category to.
+   *
+   * The *ledger's* meaning of uncategorized, which is `user_category_id IS NULL`
+   * and nothing more. A row that `@ctx/categorization` has classified but the
+   * user has never touched is still uncategorized by this definition, because
+   * the ledger cannot see that context's assignments — `transactions` stores the
+   * user's choice and only the user's. The transactions screen's
+   * "Uncategorized ●12" chip needs the *effective* category and therefore needs
+   * categorization's read model joined in; this filter is the Phase 1 stand-in
+   * and is documented as such in the WP 1.5 evidence note.
+   */
+  readonly uncategorized?: boolean;
   /** Tombstoned rows are hidden by default. */
   readonly includeRemoved?: boolean;
   /** Cross-provider duplicates are shown by default — marked, never hidden. */
@@ -157,6 +170,8 @@ function filterConditions(userId: string, filters: TransactionFilters): (SQL | u
   if (filters.amountMaxMinor !== undefined) {
     conditions.push(lte(transactions.effectiveAmountMinor, filters.amountMaxMinor));
   }
+  if (filters.uncategorized === true) conditions.push(isNull(transactions.userCategoryId));
+  if (filters.uncategorized === false) conditions.push(isNotNull(transactions.userCategoryId));
   if (filters.pending !== undefined) conditions.push(eq(transactions.pending, filters.pending));
   if (filters.excluded !== undefined) {
     conditions.push(eq(transactions.userExcluded, filters.excluded));
