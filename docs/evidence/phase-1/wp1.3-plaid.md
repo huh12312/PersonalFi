@@ -8,9 +8,10 @@ map, `FakePlaidApi` and its recorded-shape fixtures, the shared conformance
 suite run against the adapter, and the live Sandbox runbook.
 
 Repo `/home/chris/Projects/PersonalFi`, branch `main`. Node 26, pnpm, `plaid`
-47.0.0. **No Plaid credentials exist on this machine**, so every result below
-comes from the hermetic suite; §7 is how Chris runs the one test that talks to
-Plaid.
+47.0.0. Most of what follows comes from the hermetic suite, which needs no
+credentials; §7 is the runbook for the one test that talks to Plaid, and §7a is
+the record of running it — against real Sandbox credentials, held only as file
+secrets under `SECRETS_DIR` — for the first time.
 
 ---
 
@@ -34,8 +35,9 @@ Plaid.
 | No-token-in-logs, with a scanner proven able to fail               | `test/log-hygiene.test.ts`    |
 | Live Sandbox smoke, gated and self-cleaning                        | `test/sandbox.test.ts`        |
 
-**209 tests, 208 passing, 1 skipped** (the live Sandbox smoke). 5,316 lines
-across `src/` and `test/`.
+**213 tests, 212 passing, 1 skipped** (the live Sandbox smoke, with no
+credentials present — see §7a for the run where it wasn't). 5,427 lines across
+`src/` and `test/`.
 
 ---
 
@@ -342,12 +344,16 @@ lines, as its own comment predicted.
 | -------------------------- | -------------------------- |
 | `test/errors.test.ts`      | 76                         |
 | `test/map.test.ts`         | 53                         |
-| `test/connector.test.ts`   | 33                         |
+| `test/connector.test.ts`   | 37                         |
 | `test/log-hygiene.test.ts` | 20                         |
 | `test/conformance.test.ts` | 12                         |
 | `test/pins.test.ts`        | 12                         |
 | `test/sandbox.test.ts`     | 2 + 1 skipped              |
-| **Total**                  | **208 passing, 1 skipped** |
+| **Total**                  | **212 passing, 1 skipped** |
+
+`connector.test.ts` gained four tests (33 → 37) for the
+`transactions_update_status` behaviour §7a's live run confirmed: see "a page
+that arrives before the historical extract has finished" in that file.
 
 ---
 
@@ -426,18 +432,36 @@ if `PLAID_ENV` says otherwise.
 
 ### Run it
 
+Credentials are read from files under `SECRETS_DIR` (`secrets/` in this repo),
+mode `0400`, never typed on the command line and never committed — the same
+convention `docs/CONVENTIONS.md` §Configuration requires for every other
+secret. Create the three files once:
+
+```bash
+install -m 0400 /dev/stdin secrets/plaid_client_id <<<'<your client id>'
+install -m 0400 /dev/stdin secrets/plaid_secret    <<<'<your sandbox secret>'
+install -m 0400 /dev/stdin secrets/plaid_env       <<<'sandbox'
+```
+
+Then run the smoke test by reading them straight into the single test process,
+without ever echoing them to a terminal or a log:
+
 ```bash
 export PATH=$HOME/.local/bin:$PATH
 cd /home/chris/Projects/PersonalFi
 
-PLAID_CLIENT_ID=<your client id> \
-PLAID_SECRET=<your sandbox secret> \
-PLAID_ENV=sandbox \
-  npx vitest run --project connector-plaid test/sandbox.test.ts
+env PLAID_CLIENT_ID="$(cat secrets/plaid_client_id)" \
+    PLAID_SECRET="$(cat secrets/plaid_secret)" \
+    PLAID_ENV="$(cat secrets/plaid_env)" \
+  pnpm vitest run --project connector-plaid test/sandbox.test.ts
 ```
 
-Do not put the keys in a file in the repo. When `packages/config` grows the
-schema in §8, they belong in `SECRETS_DIR` like every other secret.
+Do not put the keys in a file tracked by git, and do not paste them into a
+chat transcript, an agent prompt, or a commit message — see §7a below for what
+happened the one time that rule was broken. When `packages/config` grows the
+schema in §8, the same three values move from ad hoc files to the validated
+`PLAID_CLIENT_ID` / `PLAID_SECRET` / `PLAID_ENV` config keys, still sourced
+from `SECRETS_DIR`.
 
 ### What it does, in order
 
@@ -487,6 +511,99 @@ cannot quietly stop meaning what it says.
 For **Production** OAuth institutions, the `redirect_uri` must also be
 registered under **Allowed redirect URIs** in the Plaid Dashboard (01 §1.7,
 D12). Nothing in this repo can verify that, which is why it is written here.
+
+---
+
+## 7a. Live Sandbox run (2026-09-15)
+
+**Outcome: PASS.** `test/sandbox.test.ts` ran against real Plaid Sandbox for
+the first time, closing the largest open risk this work package carried (§9,
+"Live Sandbox smoke has never been run"). Credentials came from
+`secrets/plaid_client_id`, `secrets/plaid_secret`, `secrets/plaid_env` (mode
+`0400`, gitignored) per the updated §7 runbook; no secret value was echoed,
+logged, or written anywhere by this run.
+
+```
+env PLAID_CLIENT_ID="$(cat secrets/plaid_client_id)" \
+    PLAID_SECRET="$(cat secrets/plaid_secret)" \
+    PLAID_ENV="$(cat secrets/plaid_env)" \
+  pnpm vitest run --project connector-plaid test/sandbox.test.ts
+```
+
+Result: **1 file, 3 tests passed**, 26.04 s. (Without credentials the same
+file runs 2 passing + 1 skipped — see §5's test-count table — because the
+`describe.skipIf(!configured)` block that does the real linking becomes live.)
+The log was grepped for the client id and the secret before this document was
+written; neither appears in it, matching the test's own in-band assertion that
+the recording logger never captured them.
+
+### What it found
+
+A freshly linked Sandbox Item's `/transactions/sync` does **not** raise
+`PRODUCT_NOT_READY` while Plaid's historical extract is still running, which
+is what `01`'s error-map narrative assumed and `test/errors.test.ts` had only
+ever exercised as a thrown error. Instead it answers `200` with an empty page
+(`added`/`modified`/`removed: []`, `has_more: false`) and
+`transactions_update_status: 'NOT_READY'`, then `'INITIAL_UPDATE_COMPLETE'`
+(still possibly empty), before finally `'HISTORICAL_UPDATE_COMPLETE'` once real
+rows exist. A caller's retry loop that only watches for a thrown
+`PRODUCT_NOT_READY` would read the empty `NOT_READY`/`INITIAL_UPDATE_COMPLETE`
+page as "this Item is done and has no transactions" and never come back for
+the real ones.
+
+This was fixed in the same change that discovered it (snapshot commit
+`05f254b`, already on `main` at the time this closeout ran):
+
+- `PLAID_HISTORICAL_UPDATE_COMPLETE` (`src/provider.ts`) names the one status
+  value that means "actually finished."
+- `syncTransactions` (`src/connector.ts`) now classifies an empty,
+  non-`has_more` page whose status is anything **other** than
+  `HISTORICAL_UPDATE_COMPLETE` as the same `PRODUCT_NOT_READY` / `transient`
+  condition the error map already carries, so every existing retry loop —
+  including this test's own 3 s/20-attempt loop and the future orchestrator's
+  — needs no new code path. A genuinely empty, finished account (steady state
+  after backfill) still returns normally instead of retrying forever, because
+  `HISTORICAL_UPDATE_COMPLETE` is excluded from the rule.
+- Four hermetic tests in `test/connector.test.ts` ("a page that arrives before
+  the historical extract has finished") pin this against `NOT_READY`,
+  `INITIAL_UPDATE_COMPLETE` (empty and non-empty), and
+  `HISTORICAL_UPDATE_COMPLETE`, using `FakePlaidApi`'s existing per-page
+  `transactions_update_status` field — no fake changes were needed, since
+  `FakePlaidApi.transactionsSync` already returns whatever
+  `TransactionsSyncResponse` a scripted page specifies (`test/fake.ts`).
+
+No further real-Plaid behaviour surfaced in this run that the hermetic suite
+does not already model: `connect`, `createLinkToken`, the sync-to-exhaustion
+loop, `listAccounts`, `syncBalances`, `health`, a real `sandbox/item/reset_login`
+→ `ITEM_LOGIN_REQUIRED` → `auth_required`/`AUTH_REQUIRED` classification,
+`createUpdateLinkToken`, and `disconnect` → a post-revoke sync rejection all
+behaved exactly as `test/fixtures/` and `FakePlaidApi` already assumed.
+
+### Step results (from the single 120 s test body)
+
+| Step                                                  | Result                                                                                                                                                          |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/sandbox/public_token/create` + `connect()`          | pass — item id, ≥1 account, access token returned exactly once                                                                                                  |
+| `createLinkToken()`                                   | pass — real `link-sandbox-…` token, pins on the wire                                                                                                            |
+| `/transactions/sync` to exhaustion                    | pass — pages > 0, transactions > 0 (retried through the not-ready statuses above without any caller-visible difference from a normal `PRODUCT_NOT_READY` retry) |
+| `listAccounts`, `syncBalances`, `health`              | pass — decoded shapes matched what `map.ts` expects                                                                                                             |
+| `sandbox/item/reset_login` → sync                     | pass — real `ITEM_LOGIN_REQUIRED` → `auth_required`/`AUTH_REQUIRED`; `health().reachable` false                                                                 |
+| `createUpdateLinkToken()`                             | pass — real link token, no `products` in the request                                                                                                            |
+| `disconnect()` → sync                                 | pass — rejects as a `ConnectorError`                                                                                                                            |
+| No public token / secret / client id in logger output | pass                                                                                                                                                            |
+| `afterAll` Item cleanup                               | ran; no orphaned Sandbox Item                                                                                                                                   |
+
+Total wall time: 26.04 s, well inside the 120 s test timeout and the 110 s
+sync deadline passed to `syncOptions`.
+
+### Housekeeping
+
+The Sandbox secret was pasted into a chat transcript during this work package
+(see `docs/plan/01-execution-log.md`, 2026-09-14 23:24 entry). **Rotate the
+Plaid Sandbox secret** (Dashboard → Developers → Keys → regenerate) and update
+`secrets/plaid_secret` before relying on it again. Sandbox has no financial
+blast radius, but a secret that has left the file it belongs in is not a
+secret; treat this the same as any other credential exposure.
 
 ---
 
@@ -553,14 +670,14 @@ Reported rather than worked around.
 
 ## 9. Deferred
 
-| Item                                                                                            | Why, and when                                                                                                                                                                                         |
-| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Live Sandbox smoke has never been run**                                                       | No credentials on this machine. It is written, gated and self-cleaning; §7 is the runbook. **This is the largest open risk in WP 1.3** — nothing has confirmed Plaid agrees with the recorded shapes. |
-| Webhooks (`TRANSACTIONS_REMOVED`, `ITEM_ERROR`, `NEW_ACCOUNTS_AVAILABLE`, `PENDING_DISCONNECT`) | D12: polling is the default; webhooks are an optional compose profile. `PlaidConnector.classifyItemError` already exists for the out-of-band path, so the receiver is the missing half.               |
-| Webhook signature verification (JWT, `/webhook_verification_key/get`)                           | Follows the webhook receiver. Must land in the same change, not after it.                                                                                                                             |
-| `/accounts/balance/get` rate limiting (5/min, 30/hr per Item)                                   | Needs a port field — §8 item 6. Today the adapter simply does not call it on sync.                                                                                                                    |
-| Cost-basis derivation from investment transactions                                              | 01 §5.5: `Holding.cost_basis` fill rates vary and are often _total_ rather than per-share. Phase 3 prefers deriving; Phase 1 carries what Plaid reports.                                              |
-| `is_investments_fallback_item` handling                                                         | Present on both investments responses; not yet read. Signals a degraded investments extract.                                                                                                          |
-| `LiabilitiesObject.loan` and `.line_of_credit`                                                  | Newer Plaid arrays, no fixture, no account type that would produce one in Sandbox. `credit`, `student` and `mortgage` are mapped and tested.                                                          |
-| Crypto (`subtype: crypto exchange`) beyond the type mapping                                     | Mapped to `crypto` and unit-tested, but no end-to-end fixture: Plaid Sandbox has no crypto institution.                                                                                               |
-| `transactions_update_status`                                                                    | Returned on every sync page and currently ignored. `HISTORICAL_UPDATE_COMPLETE` is what tells the UI a backfill has genuinely finished rather than merely paused.                                     |
+| Item                                                                                            | Why, and when                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~Live Sandbox smoke has never been run~~                                                       | **Done, §7a (2026-09-15): PASS.** The empty-page/`NOT_READY` behaviour it found is fixed and covered by four hermetic tests; nothing else diverged from the recorded fixtures.                                                                                                                                    |
+| Webhooks (`TRANSACTIONS_REMOVED`, `ITEM_ERROR`, `NEW_ACCOUNTS_AVAILABLE`, `PENDING_DISCONNECT`) | D12: polling is the default; webhooks are an optional compose profile. `PlaidConnector.classifyItemError` already exists for the out-of-band path, so the receiver is the missing half.                                                                                                                           |
+| Webhook signature verification (JWT, `/webhook_verification_key/get`)                           | Follows the webhook receiver. Must land in the same change, not after it.                                                                                                                                                                                                                                         |
+| `/accounts/balance/get` rate limiting (5/min, 30/hr per Item)                                   | Needs a port field — §8 item 6. Today the adapter simply does not call it on sync.                                                                                                                                                                                                                                |
+| Cost-basis derivation from investment transactions                                              | 01 §5.5: `Holding.cost_basis` fill rates vary and are often _total_ rather than per-share. Phase 3 prefers deriving; Phase 1 carries what Plaid reports.                                                                                                                                                          |
+| `is_investments_fallback_item` handling                                                         | Present on both investments responses; not yet read. Signals a degraded investments extract.                                                                                                                                                                                                                      |
+| `LiabilitiesObject.loan` and `.line_of_credit`                                                  | Newer Plaid arrays, no fixture, no account type that would produce one in Sandbox. `credit`, `student` and `mortgage` are mapped and tested.                                                                                                                                                                      |
+| Crypto (`subtype: crypto exchange`) beyond the type mapping                                     | Mapped to `crypto` and unit-tested, but no end-to-end fixture: Plaid Sandbox has no crypto institution.                                                                                                                                                                                                           |
+| `transactions_update_status`, surfaced past the not-ready check                                 | §7a: now _read_, to classify an empty pre-backfill page as `PRODUCT_NOT_READY` instead of "done." Still not exposed to a caller or the UI as a distinct "backfill genuinely finished" signal — `HISTORICAL_UPDATE_COMPLETE` only suppresses the retry classification, it is not returned from `syncTransactions`. |
