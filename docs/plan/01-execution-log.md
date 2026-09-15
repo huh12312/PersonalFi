@@ -79,11 +79,11 @@ Waves: 1.1 → (1.2 ∥ 1.4) → (1.3 ∥ 1.5) → 1.6 → 1.7. Hand actions bef
 
 If you are continuing this build from a fresh context, this section is the state of record.
 
-**Done and committed on main:** Phase 0 entirely (WP 0.1–0.7, gate GO, all findings closed). Phase 1: WP 1.1 Ledger (64c0551), WP 1.2 Connector port + Manual/CSV/Seed adapters + orchestrator (4cd993b), WP 1.4 Categorization (27fbb67), WP 1.5 API composition + 24 routes + SSE (593cd3c; `just check` 1083 tests).
+**Done and committed on main:** Phase 0 entirely (WP 0.1–0.7, gate GO, all findings closed). Phase 1: WP 1.1 Ledger (64c0551), WP 1.2 Connector port + Manual/CSV/Seed adapters + orchestrator (4cd993b), WP 1.4 Categorization (27fbb67), WP 1.5 API composition + 24 routes + SSE (593cd3c; `just check` 1083 tests), WP 1.3 Plaid adapter (905c5b3; 208 tests; live Sandbox smoke still unrun, needs keys).
 
 **In flight, snapshot-committed, needs a fresh finishing agent each (message-resume does not survive restarts; fresh `Agent` launches with a state brief do):**
 - WP 1.3 `@connector/plaid` (packages/connectors/plaid): connector, provider/errors/api files exist; hermetic FakePlaidApi + fixtures were next; then conformance via `describeConnectorConformance`, error-map tests, sandbox runbook, evidence docs/evidence/phase-1/wp1.3-plaid.md. Known lint issues: prettier on src/{errors,provider}.ts; `@connector/plaid` importing `plaid` needs a boundary-layer entry in scripts/eslint-boundaries.js.
-- (WP 1.5 done.) In flight at 593cd3c: WP 1.3 Plaid finishing agent; a Sonnet fixer for the orchestrator balance-sync gap (packages/contexts/connections/src/orchestrator.ts never called syncBalances; pinned by an api test named `(known gap)`); WP 1.6 UI (Sonnet, apps/web) against the committed OpenAPI contract.
+- (WP 1.3 and 1.5 done.) In flight at 905c5b3: a Sonnet fixer for the orchestrator balance-sync gap (packages/contexts/connections/src/orchestrator.ts never called syncBalances; pinned by an api test named `(known gap)`); WP 1.6 UI (Sonnet, apps/web) against the committed OpenAPI contract; a Sonnet follow-up applying the categorization root vitest/boundary entries and the ledger rule-tier hook + consumer registration.
 
 **Orchestrator follow-ups after 1.3 lands (shared files):** add root vitest projects `categorization` and `categorization-db` (entries in docs/evidence/phase-1/wp1.4-categorization.md §5) and delete packages/contexts/categorization/vitest.config.ts; add a `categorization` boundary layer allowing @core/testkit + @core/seed and remove the three eslint-disable directives in its test/harness.ts; apply the ledger `resolveEffective` rule-tier hook (additive diff in wp1.4 evidence §6).
 
