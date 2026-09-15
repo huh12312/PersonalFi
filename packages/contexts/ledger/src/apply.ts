@@ -58,7 +58,7 @@ import { LedgerError } from './errors.ts';
 import { TransactionSupersededByPosted, TransactionsUpserted } from './events.ts';
 import { ensureMerchants } from './merchant-store.ts';
 import { dedupKeyOf, normaliseMerchantName } from './normalise.ts';
-import { EMPTY_OVERLAY, type ProviderTransactionInput } from './types.ts';
+import { EMPTY_OVERLAY, NO_RULE, type ProviderTransactionInput } from './types.ts';
 
 /** Postgres caps a statement at 65535 bound parameters; this stays well inside it. */
 const INSERT_CHUNK = 400;
@@ -524,6 +524,10 @@ function newTransaction(
     userExcluded: EMPTY_OVERLAY.userExcluded,
     userCategoryId: EMPTY_OVERLAY.userCategoryId,
     userMerchantName: EMPTY_OVERLAY.userMerchantName,
+    // The rule tier (04 §2.2's middle tier) is @ctx/categorization's to write,
+    // through setRuleCategory — never here. A brand-new row starts with no rule
+    // decision, same as it starts with no user edit.
+    ruleCategoryId: NO_RULE.ruleCategoryId,
     isTransfer: false,
     transferLinkId: null,
     refundOfId: null,

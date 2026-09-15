@@ -26,7 +26,7 @@
 export const CONTEXT_ID = 'ledger' as const;
 
 // --- the resolver, and the shapes it speaks --------------------------------
-export { resolveEffective, withinDays } from './effective.ts';
+export { resolveCategoryId, resolveEffective, withinDays } from './effective.ts';
 export { normaliseMerchantName, dedupKeyOf, type NormalisedMerchant } from './normalise.ts';
 export {
   EMPTY_OVERLAY,
@@ -46,7 +46,7 @@ export { LedgerError, isLedgerError, type LedgerErrorCode } from './errors.ts';
 
 // --- the executor shapes a caller needs ------------------------------------
 export type { LedgerDatabase, LedgerExecutor, LedgerContext } from './db.ts';
-export { factOf, overlayOf, effectiveOf, transactionOf } from './db.ts';
+export { factOf, overlayOf, ruleOf, effectiveOf, transactionOf } from './db.ts';
 
 // --- events ----------------------------------------------------------------
 export {
@@ -86,7 +86,7 @@ export {
   type UpsertAccountInput,
   type UpsertAccountResult,
 } from './accounts.ts';
-export { setTransactionOverlay, type OverlayPatch } from './overlay.ts';
+export { setRuleCategory, setTransactionOverlay, type OverlayPatch } from './overlay.ts';
 
 // --- heuristics ------------------------------------------------------------
 export {
@@ -122,11 +122,15 @@ export {
   decodeCursor,
   encodeCursor,
   getTransaction,
+  listForCategorization,
   listMerchants,
   listRemovedTransactions,
   listTransactions,
   scanForProjectionCheck,
   sumTransactions,
+  type CategorizationFeedFilters,
+  type CategorizationFeedPage,
+  type CategorizationFeedRow,
   type ListTransactionsInput,
   type TransactionDetail,
   type TransactionFilters,

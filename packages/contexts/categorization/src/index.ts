@@ -150,6 +150,7 @@ export {
   type CategorizableTransactionPage,
   type LedgerPort,
   type ListForCategorizationInput,
+  type WriteRuleCategoryInput,
 } from './ledger-port.ts';
 
 // --- errors ----------------------------------------------------------------

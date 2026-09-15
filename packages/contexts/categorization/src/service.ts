@@ -269,6 +269,26 @@ export async function categorizeTransactions(
       }
       changed.push(transaction.id);
       bySource[decision.source] = (bySource[decision.source] ?? 0) + 1;
+
+      // The rule tier's write path (wp1.4 evidence §6): only a *winning* rule
+      // decision is worth pushing to @ctx/ledger's resolveEffective seam. A
+      // preview never writes anything, here or anywhere (dryRun above already
+      // guaranteed that), and every other source (merchant_default, provider,
+      // classifier, none) is a tier ledger has no column for — it stays entirely
+      // in this context's own category_assignments, read back through
+      // explainAssignment.
+      if (options.dryRun !== true && decision.source === 'rule') {
+        const ruleCategoryId = idByKey.get(decision.categoryKey);
+        if (ruleCategoryId !== undefined) {
+          await port.writeRuleCategory({
+            userId: context.userId,
+            transactionId: transaction.id,
+            ruleCategoryId,
+            correlationId: context.correlationId,
+            causationId: context.causationId ?? null,
+          });
+        }
+      }
     }
 
     if (changed.length > 0 && options.dryRun !== true) {

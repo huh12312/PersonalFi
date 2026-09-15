@@ -23,6 +23,7 @@ import type {
   CategorizationContext,
   CategorizationDatabase,
   LedgerPort,
+  WriteRuleCategoryInput,
 } from '../src/index.ts';
 
 export { ADMIN_URL, generateDemoData, recordingLogger, waitFor, type TestDatabase };
@@ -113,7 +114,7 @@ export function transactionFixture(
 }
 
 /**
- * An in-memory `LedgerPort` over a fixed list.
+ * An in-memory `LedgerPort`, recording, over a fixed list.
  *
  * The port is the seam this context reads the ledger through (`src/ledger-port.ts`),
  * and a fake is the *right* double here rather than a compromise: the real
@@ -121,8 +122,20 @@ export function transactionFixture(
  * `@ctx/ledger`'s query rather than this context's write path. What these suites
  * assert — one current assignment per transaction, an event and its rows
  * committing together — is entirely about tables this package owns.
+ *
+ * `ruleCategoryWrites` records every `writeRuleCategory` call so a test can
+ * assert both halves of the rule tier's write path: that a winning `rule`
+ * decision reaches `@ctx/ledger`'s seam, and that every other tier
+ * (`merchant_default`, `provider`, `classifier`, `none`) never touches it.
  */
-export function inMemoryPort(transactions: readonly CategorizableTransaction[]): LedgerPort {
+export interface RecordingLedgerPort extends LedgerPort {
+  readonly ruleCategoryWrites: WriteRuleCategoryInput[];
+}
+
+export function inMemoryPort(
+  transactions: readonly CategorizableTransaction[],
+): RecordingLedgerPort {
+  const ruleCategoryWrites: WriteRuleCategoryInput[] = [];
   return {
     listForCategorization: (input) => {
       const wanted = input.transactionIds;
@@ -134,6 +147,11 @@ export function inMemoryPort(transactions: readonly CategorizableTransaction[]):
       );
       return Promise.resolve({ items, nextCursor: null });
     },
+    writeRuleCategory: (input) => {
+      ruleCategoryWrites.push(input);
+      return Promise.resolve();
+    },
+    ruleCategoryWrites,
   };
 }
 

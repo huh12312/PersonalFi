@@ -152,6 +152,18 @@ export const transactions = pgTable(
     userCategoryId: uuid('user_category_id'),
     userMerchantName: text('user_merchant_name'),
 
+    // --- rule tier (04 §2.2's middle tier) ------------------------------------
+    /**
+     * The rule tier's answer, 04 §2.2's middle tier. Written only by
+     * `@ctx/categorization` through the `LedgerPort` it reads this context
+     * through (`setRuleCategory`), never by a user edit. Opaque for the same
+     * reason as `userCategoryId`: no foreign key, and ledger never interprets
+     * it. `resolveEffective`'s tier order (`userCategoryId ?? ruleCategoryId`)
+     * is what keeps a user override in charge regardless of what this holds.
+     * Migration `0007_ledger_rule_category.sql`, additive.
+     */
+    ruleCategoryId: uuid('rule_category_id'),
+
     // --- ledger-derived ------------------------------------------------------
     isTransfer: flagColumn('is_transfer').notNull().default(false),
     transferLinkId: uuid('transfer_link_id'),

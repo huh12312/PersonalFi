@@ -5,7 +5,7 @@
 # Third-Party Notices
 
 PersonalFi is MIT-licensed. This file lists the runtime (production) dependency tree —
-`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:50d515f440eaef26.
+`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:93352f677f3665b1.
 devDependencies (build tooling, test frameworks) are not distributed and are not listed
 here; see `licenses.policy.yaml` for the policy that governs both.
 
@@ -163,19 +163,24 @@ part of PersonalFi’s dependency tree and are not listed here.
 - `@visx/text`@4.0.0 — https://github.com/airbnb/visx#readme
 - `@visx/tooltip`@4.0.0 — https://github.com/airbnb/visx#readme
 - `abstract-logging`@2.0.1 — https://github.com/jsumners/abstract-logging#readme
+- `agent-base`@6.0.2 — https://github.com/TooTallNate/node-agent-base#readme
 - `ajv`@8.20.0 — https://ajv.js.org
 - `ajv-formats`@3.0.1 — https://github.com/ajv-validator/ajv-formats#readme
 - `ansi-colors`@4.1.3 — https://github.com/doowb/ansi-colors
 - `aria-hidden`@1.2.6 — https://github.com/theKashey/aria-hidden#readme
+- `asynckit`@0.4.0 — https://github.com/alexindigo/asynckit#readme
 - `atomic-sleep`@1.0.0 — https://github.com/davidmarkclements/atomic-sleep#readme
 - `avvio`@9.3.0 — https://github.com/fastify/avvio#readme
+- `axios`@1.20.0 — https://axios-http.com
 - `balanced-match`@0.4.2, 1.0.2 — https://github.com/juliangruber/balanced-match
 - `bundle-name`@4.1.0 — https://github.com/sindresorhus/bundle-name#readme
 - `c12`@3.3.4 — https://github.com/unjs/c12#readme
+- `call-bind-apply-helpers`@1.0.2 — https://github.com/ljharb/call-bind-apply-helpers#readme
 - `chokidar`@5.0.0 — https://github.com/paulmillr/chokidar
 - `classnames`@2.5.1 — https://github.com/JedWatson/classnames#readme
 - `clsx`@2.1.1 — https://github.com/lukeed/clsx#readme
 - `cmdk`@1.1.1 — https://github.com/pacocoursey/cmdk#readme
+- `combined-stream`@1.0.8 — https://github.com/felixge/node-combined-stream
 - `commander`@15.0.0 — https://github.com/tj/commander.js#readme
 - `confbox`@0.2.4, 0.3.1 — https://github.com/unjs/confbox#readme
 - `cookie`@1.1.1, 2.0.1 — https://github.com/jshttp/cookie#readme
@@ -189,9 +194,15 @@ part of PersonalFi’s dependency tree and are not listed here.
 - `default-browser-id`@5.0.1 — https://github.com/sindresorhus/default-browser-id#readme
 - `define-lazy-prop`@3.0.0 — https://github.com/sindresorhus/define-lazy-prop#readme
 - `defu`@6.1.7 — https://github.com/unjs/defu#readme
+- `delayed-stream`@1.0.0 — https://github.com/felixge/node-delayed-stream
 - `dequal`@2.0.3 — https://github.com/lukeed/dequal#readme
 - `destr`@2.0.5 — https://github.com/unjs/destr#readme
 - `detect-node-es`@1.1.0 — https://github.com/thekashey/detect-node
+- `dunder-proto`@1.0.1 — https://github.com/es-shims/dunder-proto#readme
+- `es-define-property`@1.0.1 — https://github.com/ljharb/es-define-property#readme
+- `es-errors`@1.3.0 — https://github.com/ljharb/es-errors#readme
+- `es-object-atoms`@1.1.2 — https://github.com/ljharb/es-object-atoms#readme
+- `es-set-tostringtag`@2.1.0 — https://github.com/es-shims/es-set-tostringtag#readme
 - `exsolve`@1.1.1 — https://github.com/unjs/exsolve#readme
 - `fast-decode-uri-component`@1.0.1 — https://github.com/delvedor/fast-decode-uri-component#readme
 - `fast-deep-equal`@3.1.3 — https://github.com/epoberezkin/fast-deep-equal#readme
@@ -201,10 +212,20 @@ part of PersonalFi’s dependency tree and are not listed here.
 - `fastify-plugin`@6.0.0 — https://github.com/fastify/fastify-plugin#readme
 - `fastify-type-provider-zod`@7.0.0 — https://github.com/turkerdev/fastify-type-provider-zod
 - `find-my-way`@9.9.0 — https://github.com/delvedor/find-my-way#readme
+- `follow-redirects`@1.16.0 — https://github.com/follow-redirects/follow-redirects
+- `form-data`@4.0.6 — https://github.com/form-data/form-data#readme
+- `function-bind`@1.1.2 — https://github.com/Raynos/function-bind
+- `get-intrinsic`@1.3.0 — https://github.com/ljharb/get-intrinsic#readme
 - `get-nonce`@1.0.1 — https://github.com/theKashey/get-nonce
+- `get-proto`@1.0.1 — https://github.com/ljharb/get-proto#readme
 - `get-tsconfig`@4.14.0 — https://github.com/privatenumber/get-tsconfig#readme
 - `giget`@3.3.1 — https://github.com/unjs/giget#readme
+- `gopd`@1.2.0 — https://github.com/ljharb/gopd#readme
+- `has-symbols`@1.1.0 — https://github.com/ljharb/has-symbols#readme
+- `has-tostringtag`@1.0.2 — https://github.com/inspect-js/has-tostringtag#readme
 - `hash-wasm`@4.12.0 — https://github.com/Daninet/hash-wasm#readme
+- `hasown`@2.0.4 — https://github.com/inspect-js/hasOwn#readme
+- `https-proxy-agent`@5.0.1 — https://github.com/TooTallNate/node-https-proxy-agent#readme
 - `ipaddr.js`@2.5.0 — https://github.com/whitequark/ipaddr.js#readme
 - `is-docker`@3.0.0 — https://github.com/sindresorhus/is-docker#readme
 - `is-in-ssh`@1.0.0 — https://github.com/sindresorhus/is-in-ssh#readme
@@ -217,6 +238,9 @@ part of PersonalFi’s dependency tree and are not listed here.
 - `json-schema-traverse`@1.0.0 — https://github.com/epoberezkin/json-schema-traverse#readme
 - `luxon`@3.7.2 — https://github.com/moment/luxon#readme
 - `math-expression-evaluator`@1.4.0 — https://github.com/redhivesoftware/math-expression-evaluator#readme
+- `math-intrinsics`@1.1.0 — https://github.com/es-shims/math-intrinsics#readme
+- `mime-db`@1.52.0 — https://github.com/jshttp/mime-db#readme
+- `mime-types`@2.1.35 — https://github.com/jshttp/mime-types#readme
 - `ms`@2.1.3 — https://github.com/vercel/ms#readme
 - `ohash`@2.0.12 — https://github.com/unjs/ohash#readme
 - `on-exit-leak-free`@2.1.2 — https://github.com/mcollina/on-exit-or-gc#readme
@@ -236,12 +260,14 @@ part of PersonalFi’s dependency tree and are not listed here.
 - `pino-abstract-transport`@3.0.0 — https://github.com/pinojs/pino-abstract-transport#readme
 - `pino-std-serializers`@7.1.0 — https://github.com/pinojs/pino-std-serializers#readme
 - `pkg-types`@2.3.2 — https://github.com/unjs/pkg-types#readme
+- `plaid`@47.0.0 — https://github.com/plaid/plaid-node#readme
 - `postgres-array`@2.0.0 — https://github.com/bendrucker/postgres-array#readme
 - `postgres-bytea`@1.0.1 — https://github.com/bendrucker/postgres-bytea#readme
 - `postgres-date`@1.0.7 — https://github.com/bendrucker/postgres-date#readme
 - `postgres-interval`@1.2.0 — https://github.com/bendrucker/postgres-interval#readme
 - `powershell-utils`@0.1.0 — https://github.com/sindresorhus/powershell-utils#readme
 - `process-warning`@4.0.1, 5.1.0 — https://github.com/fastify/fastify-warning#readme
+- `proxy-from-env`@2.1.0 — https://github.com/Rob--W/proxy-from-env#readme
 - `pvtsutils`@1.3.6 — https://github.com/PeculiarVentures/pvtsutils#readme
 - `pvutils`@1.2.0 — https://github.com/PeculiarVentures/pvutils#readme
 - `quick-format-unescaped`@4.0.4 — https://github.com/davidmarkclements/quick-format#readme

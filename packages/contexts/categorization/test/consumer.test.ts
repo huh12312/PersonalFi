@@ -112,6 +112,7 @@ describe.skipIf(NO_DATABASE)('the categorization consumer', () => {
   /** The pump, wired to this context's consumer and an in-memory ledger. */
   function pumpOver(transactions: readonly CategorizableTransaction[]) {
     const logger = recordingLogger();
+    const port = inMemoryPort(transactions);
     const pump = createConsumerPump({
       pool: database.pool,
       // `@core/db`'s `Database` and the platform's `TransactionalExecutor` are
@@ -124,11 +125,11 @@ describe.skipIf(NO_DATABASE)('the categorization consumer', () => {
       consumers: [
         createCategorizationConsumer({
           database: database.db,
-          port: inMemoryPort(transactions),
+          port,
         }),
       ],
     });
-    return { pump, logger };
+    return { pump, logger, port };
   }
 
   async function publishUpserted(
@@ -177,7 +178,7 @@ describe.skipIf(NO_DATABASE)('the categorization consumer', () => {
 
   it('categorises the transactions a sync page named', async () => {
     const coffee = transactionFixture({ providerCategory: COFFEE_PFC });
-    const { pump, logger } = pumpOver([coffee]);
+    const { pump, logger, port } = pumpOver([coffee]);
 
     await publishUpserted({ added: [coffee.id] });
     expect(await pump.drain()).toBe(1);
@@ -198,6 +199,10 @@ describe.skipIf(NO_DATABASE)('the categorization consumer', () => {
       written: 1,
       bySource: { provider: 1 },
     });
+    // The provider tier lives entirely in this context's own
+    // `category_assignments` — @ctx/ledger has no column for it, so the port's
+    // write side must stay silent.
+    expect(port.ruleCategoryWrites).toEqual([]);
   });
 
   it('stores the whole decision chain, losers included', async () => {
@@ -251,7 +256,7 @@ describe.skipIf(NO_DATABASE)('the categorization consumer', () => {
       actions: [{ type: 'set_category', categoryKey: 'dining.restaurants' }],
     });
 
-    const { pump } = pumpOver([coffee]);
+    const { pump, port } = pumpOver([coffee]);
     await publishUpserted({ added: [coffee.id] });
     await pump.drain();
 
@@ -260,6 +265,20 @@ describe.skipIf(NO_DATABASE)('the categorization consumer', () => {
       source: 'rule',
       rule_id: ruleId,
     });
+
+    // wp1.4 evidence §6: a winning rule decision is the one tier that also
+    // reaches @ctx/ledger's resolveEffective seam, through the LedgerPort —
+    // never a direct import (decision D8).
+    const idByKey = await categoryIdsByKey(database.db, database.userId);
+    expect(port.ruleCategoryWrites).toEqual([
+      {
+        userId: database.userId,
+        transactionId: coffee.id,
+        ruleCategoryId: idByKey.get('dining.restaurants'),
+        correlationId: CORRELATION_ID,
+        causationId: expect.any(String),
+      },
+    ]);
   });
 
   it('does not compete with a category the user already set', async () => {

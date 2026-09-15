@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: MIT
 import { DateOnly } from '@core/kernel';
 import { normaliseMerchantName } from './normalise.ts';
-import { NO_RULE, type EffectiveTransaction, type RuleResolution, type TransactionFact, type TransactionOverlay } from './types.ts';
+import {
+  NO_RULE,
+  type EffectiveTransaction,
+  type RuleResolution,
+  type TransactionFact,
+  type TransactionOverlay,
+} from './types.ts';
 
 /**
  * The one function that resolves provider truth against user intent.
@@ -41,6 +47,25 @@ import { NO_RULE, type EffectiveTransaction, type RuleResolution, type Transacti
  * deferred to WP 2.1, where the budget period actually exists to be configured
  * against; doing it now would be a setting with nothing to change the answer to.
  */
+
+/**
+ * The category tier order, alone: an explicit user edit, then a rule the user
+ * wrote in advance, then nothing (04 §2.2's first two tiers; the provider and
+ * everything below it are `@ctx/categorization`'s own tiers and never reach
+ * this column — see `category_assignments`).
+ *
+ * Exported and shared rather than inlined twice: `resolveEffective` calls it to
+ * build the projection at write time, and `effectiveOf` (`db.ts`) calls it to
+ * rehydrate a stored row without a fact in hand. Two implementations of one
+ * tier order is exactly the drift this module's header exists to prevent.
+ */
+export function resolveCategoryId(
+  overlay: TransactionOverlay,
+  rule: RuleResolution = NO_RULE,
+): string | null {
+  return overlay.userCategoryId ?? rule.ruleCategoryId;
+}
+
 export function resolveEffective(
   fact: TransactionFact,
   overlay: TransactionOverlay,
@@ -68,12 +93,11 @@ export function resolveEffective(
     merchantDisplayName: normalised.display === '' ? null : normalised.display,
     pending: fact.pending,
     excluded: overlay.userExcluded,
-    // Tier order, and the only place that knows it: an explicit user edit, then
-    // a rule the user wrote in advance, then nothing. The provider's own
-    // category is deliberately absent — `@ctx/categorization` owns that mapping
-    // and writes its result to `category_assignments`, so surfacing it here
-    // would be a second place that decides what a transaction is.
-    categoryId: overlay.userCategoryId ?? rule.ruleCategoryId,
+    // The provider's own category is deliberately absent — `@ctx/categorization`
+    // owns that mapping and writes its result to `category_assignments`, so
+    // surfacing it here would be a second place that decides what a transaction
+    // is.
+    categoryId: resolveCategoryId(overlay, rule),
     note: blankToNull(overlay.userNote),
   };
 }

@@ -9,9 +9,11 @@ import {
 } from '@core/kernel';
 import type { Executor } from '@core/platform';
 import type { SQL } from 'drizzle-orm';
+import { resolveCategoryId } from './effective.ts';
 import type {
   EffectiveTransaction,
   LedgerTransaction,
+  RuleResolution,
   TransactionFact,
   TransactionOverlay,
 } from './types.ts';
@@ -102,6 +104,15 @@ export function overlayOf(row: TransactionRow): TransactionOverlay {
 }
 
 /**
+ * The rule tier's stored answer, as `resolveEffective`'s `rule` argument
+ * expects it. The other half of `overlayOf`: sparse, opaque, and written by
+ * nothing under `src/` except `setRuleCategory` (`overlay.ts`).
+ */
+export function ruleOf(row: TransactionRow): RuleResolution {
+  return { ruleCategoryId: row.ruleCategoryId };
+}
+
+/**
  * Rehydrate the stored effective columns.
  *
  * Note what this does *not* do: recompute them. The stored columns are the
@@ -109,6 +120,13 @@ export function overlayOf(row: TransactionRow): TransactionOverlay {
  * the whole point of denormalising them. `effective-invariant.test.ts` is what
  * keeps the two honest — it walks every row in the database and asserts the stored
  * values equal a fresh resolution of the fact and overlay.
+ *
+ * `categoryId` is the one field here that is not simply read back: there is no
+ * stored `effective_category_id` column, unlike `effective_date` and its
+ * siblings, because the category tier order needs only the overlay and the rule
+ * column — both already on this row — and never the fact. Computing it here
+ * rather than denormalising a seventh `effective_*` column is one fewer column a
+ * rule write or a user edit would have to keep in sync.
  */
 export function effectiveOf(row: TransactionRow): EffectiveTransaction {
   const merchantName = row.userMerchantName ?? row.effectiveName;
@@ -120,7 +138,7 @@ export function effectiveOf(row: TransactionRow): EffectiveTransaction {
     merchantDisplayName: row.effectiveMerchantId === null ? null : merchantName,
     pending: row.pending,
     excluded: row.userExcluded,
-    categoryId: row.userCategoryId,
+    categoryId: resolveCategoryId(overlayOf(row), ruleOf(row)),
     note: row.userNote,
   };
 }

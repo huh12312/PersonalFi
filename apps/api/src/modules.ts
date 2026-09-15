@@ -10,15 +10,24 @@
  *
  * What each module contributes in Phase 1:
  *
- * | Module               | Events | Consumers | Jobs                                | Schedule |
- * | -------------------- | ------ | --------- | ----------------------------------- | -------- |
- * | `module.ledger`      | 5      | —         | —                                   | —        |
- * | `module.connections` | 3      | —         | `connections.sync`, `…sync_all`     | nightly  |
+ * | Module                  | Events | Consumers                          | Jobs                            | Schedule |
+ * | ----------------------- | ------ | ----------------------------------- | -------------------------------- | -------- |
+ * | `module.ledger`         | 5      | —                                   | —                                | —        |
+ * | `module.connections`    | 3      | —                                   | `connections.sync`, `…sync_all` | nightly  |
+ * | `module.categorization` | 3      | `categorization.assignments@v1`    | —                                | —        |
  *
  * The Ledger registers **no consumer**, deliberately. It is the writer: it
- * states facts and reacts to none. The empty column is the shape of 08 §1.3's
- * "one event, one owner" and not an omission.
+ * states facts and reacts to none. Categorization is the first module here that
+ * *does* — it reacts to `ledger.TransactionsUpserted` /
+ * `ledger.TransactionSupersededByPosted` and writes its own tables plus, for a
+ * winning rule decision only, one column back in `@ctx/ledger` through the
+ * `LedgerPort` `apps/api/src/domain.ts` implements (wp1.4 evidence §6).
  */
+import {
+  CATEGORIZATION_EVENTS,
+  createCategorizationConsumer,
+  type CategorizationDatabase,
+} from '@ctx/categorization';
 import {
   CONNECTIONS_EVENTS,
   listSyncableConnections,
@@ -28,10 +37,19 @@ import {
   type SyncOrchestrator,
 } from '@ctx/connections';
 import { LEDGER_EVENTS } from '@ctx/ledger';
+import { systemClock, type Clock } from '@core/kernel';
+import { createCategorizationLedgerPort } from './domain.ts';
 import type { ModuleRegistration } from './platform.ts';
 
 export interface ModuleWiringOptions {
-  readonly database: ConnectionsDatabase;
+  /**
+   * One pool-backed handle, shared across every context's own typed alias
+   * (`ConnectionsDatabase`, `LedgerDatabase`, `CategorizationDatabase` are all
+   * `@core/db`'s `Database`) — every bounded context lives in one Postgres
+   * instance (docs/CONVENTIONS.md's table-ownership model), so this is one
+   * connection pool, not three.
+   */
+  readonly database: ConnectionsDatabase & CategorizationDatabase;
   readonly orchestrator: SyncOrchestrator;
   /**
    * The account holder's display timezone.
@@ -41,6 +59,8 @@ export interface ModuleWiringOptions {
    * is neither quiet hours nor the start of a banking day.
    */
   readonly timezone: string;
+  /** Defaults to `systemClock`; a caller only overrides it in a test. */
+  readonly clock?: Clock;
 }
 
 /** Connections the nightly fan-out should touch: `reauth_required` is skipped. */
@@ -53,7 +73,7 @@ async function syncableConnectionIds(
 }
 
 export function appModules(options: ModuleWiringOptions): readonly ModuleRegistration[] {
-  const { database, orchestrator } = options;
+  const { database, orchestrator, clock = systemClock } = options;
   return [
     { flagKey: 'module.ledger', events: LEDGER_EVENTS },
     {
@@ -73,6 +93,20 @@ export function appModules(options: ModuleWiringOptions): readonly ModuleRegistr
           timezone: options.timezone,
         });
       },
+    },
+    {
+      flagKey: 'module.categorization',
+      events: CATEGORIZATION_EVENTS,
+      // Sync-triggered only, per WP 1.4 §5's decision order: `decide()` is a pure
+      // function of current state, so a re-run is safe, and the consumer's own
+      // `run_on_sync` filter (`loadRules`) is what keeps a rule that should only
+      // apply retroactively from firing on every incoming page.
+      consumers: [
+        createCategorizationConsumer({
+          database,
+          port: createCategorizationLedgerPort(database, clock),
+        }),
+      ],
     },
   ];
 }

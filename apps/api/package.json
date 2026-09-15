@@ -21,6 +21,7 @@
     "@core/kernel": "workspace:*",
     "@core/platform": "workspace:*",
     "@core/secretbox": "workspace:*",
+    "@ctx/categorization": "workspace:*",
     "@ctx/connections": "workspace:*",
     "@ctx/identity": "workspace:*",
     "@ctx/ledger": "workspace:*",

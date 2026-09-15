@@ -473,3 +473,123 @@ told the user something false about how sure it is.
 - **Classifier retraining cadence.** `retrainClassifier` is manual and
   `classifier_versions` keeps exactly one active model per user; deciding when
   to call it belongs with the job scheduler.
+
+---
+
+## 9. Wiring closed
+
+§5, §6 and §8's "deferred" items are closed. Verified by grep against `main`
+before touching anything: the root `vitest.config.ts` `categorization`/
+`categorization-db` projects, the `scripts/eslint-boundaries.js` `categorization`
+layer, and `resolveEffective`'s `rule: RuleResolution = NO_RULE` parameter were
+**already on `main`** — a prior agent landed them. This closes what was still
+open: the ledger side of the rule tier's write path, the consumer registration
+in `apps/api`, and the real `LedgerPort` adapter.
+
+### `@ctx/ledger`
+
+- **`packages/db/migrations/0007_ledger_rule_category.sql`** — additive:
+  `ALTER TABLE transactions ADD COLUMN rule_category_id UUID`. Same shape as
+  `user_category_id` (opaque, no foreign key, decision D8). Not owned by this
+  work package's file list, but there was no way to give the rule tier a real
+  column without it; noted here and in the final report as a deviation.
+- **`schema/transactions.ts`** — `ruleCategoryId` column, documented next to
+  `userCategoryId`.
+- **`src/effective.ts`** — `resolveCategoryId(overlay, rule)` extracted as the
+  one place that knows the category tier order (`userCategoryId ?? ruleCategoryId`),
+  called from both `resolveEffective` and `db.ts`'s `effectiveOf`.
+- **`src/db.ts`** — `ruleOf(row)` (the other half of `overlayOf`), and
+  `effectiveOf` now resolves `categoryId` through `resolveCategoryId` instead of
+  reading `userCategoryId` alone — the fix that actually makes the rule tier
+  visible to every reader (`getTransaction`, `listTransactions`).
+- **`src/overlay.ts`** — `setRuleCategory(executor, input, context)`: the
+  narrowest possible write, one column, never `user_category_id`. `null` clears
+  it.
+- **`src/read.ts`** — `listForCategorization`, a new read model purpose-built
+  for `@ctx/categorization`'s decision engine (join to `transactions_provider`
+  and `accounts`, filterable by `transactionIds`/`accountIds`/date range, keyset
+  paginated). Deliberately not a reuse of `listTransactions`: it returns the raw,
+  **unmerged** `userCategoryId`, because handing over the _effective_ (rule-merged)
+  category here would make a rule's own prior answer look like a user edit
+  forever after — see the long comment on the function.
+- **`src/apply.ts`** — one-line fix: the new-transaction placeholder row now
+  sets `ruleCategoryId: NO_RULE.ruleCategoryId` so a fresh sync-created row
+  compiles and starts with no rule decision, same as no user edit.
+- All five exported from `src/index.ts`.
+- Tests: `src/effective.test.ts` (5 new cases: the tier-order property test, "a
+  rule answers when the user has not spoken", "the user always beats a rule,
+  even a rule set after the user spoke", "neither user nor rule leaves the
+  category unset", "defaults the rule argument to NO_RULE"); new file
+  `test/rule-category.test.ts` (6 cases against a real Postgres: a rule answers
+  when nothing else has; the user beats the rule regardless of write order; a
+  rule write never overwrites or outranks an existing user override — asserted
+  both on the effective read and on the raw `user_category_id` column; a rule
+  can be cleared; a cross-user write is refused).
+
+### `@ctx/categorization`
+
+- **`src/ledger-port.ts`** — `LedgerPort` gained `writeRuleCategory(input)`
+  (`WriteRuleCategoryInput`: `userId`, `transactionId`, `ruleCategoryId`,
+  `correlationId`, `causationId`), read-only no longer for exactly one write.
+- **`src/service.ts`** — `categorizeTransactions` calls
+  `port.writeRuleCategory` immediately after a successful write whose winning
+  `decision.source === 'rule'`, and only then: every other tier
+  (`merchant_default`, `provider`, `classifier`, `none`) has no column in
+  `@ctx/ledger` and stays entirely in this context's own
+  `category_assignments`. Never called when `dryRun` is set (a preview writes
+  nothing, anywhere).
+- **`test/harness.ts`** — `inMemoryPort` is now `RecordingLedgerPort`: it
+  implements `writeRuleCategory` and records every call in
+  `ruleCategoryWrites`, so a test can assert both that a rule's write happened
+  and that nothing else's did. No `eslint-disable` remained to remove — `main`
+  had already landed the boundary-layer entry.
+- Tests: `test/consumer.test.ts`'s "categorises the transactions a sync page
+  named" now also asserts `port.ruleCategoryWrites` is empty for a
+  provider-sourced decision; "lets a rule beat the provider, and records which
+  rule" now also asserts the exact `writeRuleCategory` payload a winning rule
+  produces.
+
+### `apps/api` — the composition root
+
+- **`src/domain.ts`** — `createCategorizationLedgerPort(database, clock): LedgerPort`,
+  the real adapter. `listForCategorization` maps `@ctx/ledger`'s
+  `listForCategorization` rows to `CategorizableTransaction`; `writeRuleCategory`
+  opens its own transaction and calls `setRuleCategory`. A genuine translation,
+  unlike `ledgerWriter` above it in the same file: `@ctx/categorization` and
+  `@ctx/ledger` declare structurally different shapes on purpose (neither
+  imports the other — decision D8), so something in the composition root has to
+  sit between them.
+- **`src/modules.ts`** — `appModules()` gained a third entry,
+  `{ flagKey: 'module.categorization', events: CATEGORIZATION_EVENTS, consumers: [createCategorizationConsumer(...)] }`,
+  after `module.ledger` and `module.connections` in the table and in the array,
+  matching the existing pattern (flag key, events, then whatever the module
+  runs). `ModuleWiringOptions.database` is now typed
+  `ConnectionsDatabase & CategorizationDatabase` — both aliases of one
+  `@core/db` `Database`, because every context lives in one Postgres instance —
+  and gained an optional `clock`, defaulted to `systemClock` inside the
+  function so no existing call site (`worker.ts`) needed to change.
+- **`src/platform.ts`** — `MODULE_FLAGS` gained `module.categorization`
+  (`defaultEnabled: true`). Not owned by this work package's file list either,
+  but `resolveModules` fails an unlisted flag key closed (treats it as
+  disabled, logs a warning) — without this entry the consumer registration
+  above would be correct code that never runs. Noted as a deviation.
+- **New test, `test/db/categorization-wiring.test.ts`** — "a synced transaction
+  ends up with an effective category from the rule tier": seeds the taxonomy,
+  inserts a rule by raw SQL (no rules CRUD route exists yet), links a manual
+  connection and syncs a matching transaction through the real
+  `POST /connections` → `SyncOrchestrator` → `applyProviderTransactions` path,
+  builds the _actual_ `appModules()` registration and drains it through a real
+  `createConsumerPump` (the same shape `worker.ts` builds — `app.ts` never runs
+  consumers itself, by design), then reads `GET /transactions` and asserts the
+  returned `categoryId` is the rule's category, having been null beforehand.
+
+### Not done here
+
+- **No REST surface for rules** (create/list/enable/disable). The wiring test
+  above inserts a rule with raw SQL for exactly this reason. WP 1.5's route set
+  did not include one; still open.
+- **`apps/api/package.json`** needed one line this session could not add
+  (dependency edits are out of scope): `"@ctx/categorization": "workspace:*",`,
+  alphabetically before `"@ctx/connections"`. A symlink at
+  `apps/api/node_modules/@ctx/categorization` stood in for it during
+  verification; `pnpm install` will need to run once the line lands for real.

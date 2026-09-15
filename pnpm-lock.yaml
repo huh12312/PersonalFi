@@ -235,6 +235,9 @@ importers:
       '@core/secretbox':
         specifier: workspace:*
         version: link:../../packages/secretbox
+      '@ctx/categorization':
+        specifier: workspace:*
+        version: link:../../packages/contexts/categorization
       '@ctx/connections':
         specifier: workspace:*
         version: link:../../packages/contexts/connections

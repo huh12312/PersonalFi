@@ -46,7 +46,15 @@ import {
   type LedgerWriter,
   type RegisteredConnector,
 } from '@ctx/connections';
-import { applyProviderTransactions, recordBalance, upsertAccount } from '@ctx/ledger';
+import type { LedgerPort } from '@ctx/categorization';
+import {
+  applyProviderTransactions,
+  listForCategorization,
+  recordBalance,
+  setRuleCategory,
+  upsertAccount,
+  type LedgerDatabase,
+} from '@ctx/ledger';
 
 /**
  * `@ctx/ledger`, as `@ctx/connections` asked for it.
@@ -59,6 +67,77 @@ export const ledgerWriter: LedgerWriter = {
   upsertAccount,
   recordBalance,
 };
+
+/**
+ * `@ctx/categorization`'s `LedgerPort`, for real.
+ *
+ * Unlike `ledgerWriter` above, this is a genuine adapter rather than bare
+ * function references, and has to be: `@ctx/categorization`'s
+ * `CategorizableTransaction` and `@ctx/ledger`'s `listForCategorization` row are
+ * deliberately two different types (`@ctx/ledger` cannot import the other
+ * context's type without importing the other context, which is exactly what
+ * this port exists to avoid — decision D8), so something has to translate
+ * between them, and this file — the composition root — is the only layer
+ * allowed to.
+ *
+ * `writeRuleCategory` is the one write `@ctx/categorization` makes into another
+ * context's table, and it is routed through `setRuleCategory` — the one ledger
+ * function that touches `rule_category_id` and nothing else (wp1.4 evidence §6).
+ * It is deliberately not routed through the categorization write's own
+ * transaction: the two contexts do not share one, by design, the same way
+ * `ledgerWriter`'s three functions each open their own.
+ */
+export function createCategorizationLedgerPort(database: LedgerDatabase, clock: Clock): LedgerPort {
+  return {
+    async listForCategorization(input) {
+      const page = await listForCategorization(database, {
+        userId: input.userId,
+        filters: {
+          ...(input.transactionIds === undefined ? {} : { transactionIds: input.transactionIds }),
+          ...(input.accountIds === undefined ? {} : { accountIds: input.accountIds }),
+          ...(input.dateFrom === undefined ? {} : { dateFrom: input.dateFrom }),
+          ...(input.dateTo === undefined ? {} : { dateTo: input.dateTo }),
+        },
+        cursor: input.cursor ?? null,
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+      });
+      return {
+        items: page.items.map((row) => ({
+          id: row.id,
+          accountId: row.accountId,
+          accountType: row.accountType,
+          payee: row.payee,
+          rawDescriptor: row.rawDescriptor,
+          providerMerchantName: row.providerMerchantName,
+          merchantId: row.merchantId,
+          amountMinor: row.amount.minor,
+          currency: row.amount.currency,
+          date: row.date,
+          providerCategory: row.providerCategory,
+          // No provider or import path populates an MCC yet (wp1.4 evidence §8,
+          // "MCC tier"); @ctx/ledger has no column to read one from.
+          mcc: null,
+          isTransfer: row.isTransfer,
+          userCategoryId: row.userCategoryId,
+        })),
+        nextCursor: page.nextCursor,
+      };
+    },
+    async writeRuleCategory(input) {
+      await database.transaction(async (tx) =>
+        setRuleCategory(
+          tx,
+          {
+            userId: input.userId,
+            transactionId: input.transactionId,
+            ruleCategoryId: input.ruleCategoryId,
+          },
+          { clock, correlationId: input.correlationId, causationId: input.causationId ?? null },
+        ),
+      );
+    },
+  };
+}
 
 /**
  * Adapters whose staged rows live in this process's memory.

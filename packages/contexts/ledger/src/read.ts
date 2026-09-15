@@ -38,11 +38,13 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import {
+  accounts,
   merchants,
   transactionSplits,
   transactions,
   transactionsProvider,
   transferLinks,
+  type AccountType,
   type TransferMatchKind,
 } from '../schema/index.ts';
 import { dateOnlyOf, moneyOf, transactionOf, type LedgerExecutor } from './db.ts';
@@ -356,6 +358,137 @@ export async function getTransaction(
       userCategoryId: split.userCategoryId,
       note: split.note,
     })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The feed @ctx/categorization's decision engine reads
+// ---------------------------------------------------------------------------
+
+export interface CategorizationFeedFilters {
+  /** Categorise exactly these. What the sync consumer's `LedgerPort` adapter passes. */
+  readonly transactionIds?: readonly string[];
+  readonly accountIds?: readonly string[];
+  readonly dateFrom?: DateOnlyType;
+  readonly dateTo?: DateOnlyType;
+}
+
+export interface CategorizationFeedRow {
+  readonly id: string;
+  readonly accountId: string;
+  readonly accountType: AccountType;
+  /** The ledger's resolved payee — `effective_name`. */
+  readonly payee: string;
+  /** The provider's raw descriptor, before anyone cleaned it. */
+  readonly rawDescriptor: string;
+  readonly providerMerchantName: string | null;
+  readonly merchantId: string | null;
+  readonly amount: Money;
+  readonly date: DateOnlyType;
+  readonly providerCategory: unknown;
+  readonly isTransfer: boolean;
+  /**
+   * Tier 1, raw — **not** `resolveCategoryId`'s merged view. Non-null means the
+   * user has spoken and the decision engine must not compete; see the warning on
+   * `listForCategorization` below for why this must never be the *effective*
+   * category.
+   */
+  readonly userCategoryId: string | null;
+}
+
+export interface CategorizationFeedPage {
+  readonly items: readonly CategorizationFeedRow[];
+  readonly nextCursor: string | null;
+}
+
+/**
+ * Everything `@ctx/categorization`'s decision function is allowed to see about a
+ * transaction, one page at a time.
+ *
+ * A dedicated read model rather than a reuse of `listTransactions` or
+ * `getTransaction`, because the two callers want structurally different things.
+ * The app's list page wants the *effective* view: money, date and category, all
+ * resolved. The decision engine wants the raw ingredients that view was resolved
+ * from, plus exactly one field off the overlay — `userCategoryId` — and only in
+ * its **unmerged** form.
+ *
+ * Handing over `effective.categoryId` (`resolveCategoryId`'s output, which now
+ * includes the rule tier) here instead would be a bug with teeth: once a rule's
+ * own prior answer starts flowing into the slot `decide()` reads as "the user
+ * said so", tier 1 wins by construction on every subsequent run, the rule tier
+ * never gets a chance to re-decide, and a category becomes permanent the moment
+ * a rule first sets it — indistinguishable from a real user edit forever after.
+ * `userCategoryId` here is always the raw stored column, never the resolver's
+ * output.
+ *
+ * `@ctx/categorization` never calls this directly — `personalfi/layer-imports`
+ * forbids one context importing another (decision D8) — the composition root
+ * (`apps/api/src/domain.ts`) adapts this to that context's `LedgerPort`.
+ */
+export async function listForCategorization(
+  executor: LedgerExecutor,
+  input: {
+    readonly userId: string;
+    readonly filters?: CategorizationFeedFilters;
+    readonly cursor?: string | null;
+    readonly limit?: number;
+  },
+): Promise<CategorizationFeedPage> {
+  const limit = Math.min(Math.max(input.limit ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+  const filters = input.filters ?? {};
+  const conditions: (SQL | undefined)[] = [
+    eq(transactions.userId, input.userId),
+    isNull(transactions.removedAt),
+  ];
+  if (filters.transactionIds !== undefined && filters.transactionIds.length > 0) {
+    conditions.push(inArray(transactions.id, [...filters.transactionIds]));
+  }
+  if (filters.accountIds !== undefined && filters.accountIds.length > 0) {
+    conditions.push(inArray(transactions.accountId, [...filters.accountIds]));
+  }
+  if (filters.dateFrom !== undefined) {
+    conditions.push(gte(transactions.effectiveDate, filters.dateFrom));
+  }
+  if (filters.dateTo !== undefined)
+    conditions.push(lte(transactions.effectiveDate, filters.dateTo));
+
+  const cursor = decodeCursor(input.cursor);
+  if (cursor !== null) {
+    conditions.push(
+      sql`(${transactions.effectiveDate}, ${transactions.id}) < (${cursor.date}::date, ${cursor.id}::uuid)`,
+    );
+  }
+
+  const rows = await executor
+    .select({ transaction: transactions, fact: transactionsProvider, accountType: accounts.type })
+    .from(transactions)
+    .innerJoin(transactionsProvider, eq(transactions.currentFactId, transactionsProvider.id))
+    .innerJoin(accounts, eq(transactions.accountId, accounts.id))
+    .where(and(...conditions))
+    .orderBy(desc(transactions.effectiveDate), desc(transactions.id))
+    .limit(limit + 1);
+
+  const page = rows.slice(0, limit);
+  const last = page.at(-1);
+  return {
+    items: page.map((row): CategorizationFeedRow => ({
+      id: row.transaction.id,
+      accountId: row.transaction.accountId,
+      accountType: row.accountType,
+      payee: row.transaction.effectiveName,
+      rawDescriptor: row.fact.name,
+      providerMerchantName: row.fact.merchantName,
+      merchantId: row.transaction.effectiveMerchantId,
+      amount: moneyOf(row.transaction.effectiveAmountMinor, row.transaction.effectiveCurrency),
+      date: dateOnlyOf(row.transaction.effectiveDate),
+      providerCategory: row.fact.providerCategory,
+      isTransfer: row.transaction.isTransfer,
+      userCategoryId: row.transaction.userCategoryId,
+    })),
+    nextCursor:
+      rows.length > limit && last !== undefined
+        ? encodeCursor(last.transaction.effectiveDate, last.transaction.id)
+        : null,
   };
 }
 

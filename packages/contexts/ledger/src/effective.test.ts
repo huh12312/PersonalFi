@@ -8,9 +8,15 @@
 import { DateOnly, money, type DateOnly as DateOnlyType } from '@core/kernel';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { resolveEffective, withinDays } from './effective.ts';
+import { resolveCategoryId, resolveEffective, withinDays } from './effective.ts';
 import { dedupKeyOf, normaliseMerchantName } from './normalise.ts';
-import { EMPTY_OVERLAY, type TransactionFact, type TransactionOverlay } from './types.ts';
+import {
+  EMPTY_OVERLAY,
+  NO_RULE,
+  type RuleResolution,
+  type TransactionFact,
+  type TransactionOverlay,
+} from './types.ts';
 
 const dateArb = fc
   .integer({ min: 15_000, max: 25_000 })
@@ -44,6 +50,10 @@ const overlayArb: fc.Arbitrary<TransactionOverlay> = fc.record({
   userExcluded: fc.boolean(),
   userCategoryId: fc.option(fc.uuid(), { nil: null }),
   userMerchantName: fc.option(fc.string({ maxLength: 30 }), { nil: null }),
+});
+
+const ruleArb: fc.Arbitrary<RuleResolution> = fc.record({
+  ruleCategoryId: fc.option(fc.uuid(), { nil: null }),
 });
 
 describe('resolveEffective', () => {
@@ -84,6 +94,70 @@ describe('resolveEffective', () => {
         expect(effective.categoryId).toBe(overlay.userCategoryId);
       }),
     );
+  });
+
+  it('defaults the rule argument to NO_RULE, so every existing call site is unaffected', () => {
+    fc.assert(
+      fc.property(factArb, overlayArb, (fact, overlay) => {
+        expect(resolveEffective(fact, overlay)).toEqual(resolveEffective(fact, overlay, NO_RULE));
+      }),
+    );
+  });
+
+  it('the category tier order: user beats rule beats neither (04 §2.2)', () => {
+    fc.assert(
+      fc.property(factArb, overlayArb, ruleArb, (fact, overlay, rule) => {
+        const effective = resolveEffective(fact, overlay, rule);
+        expect(effective.categoryId).toBe(overlay.userCategoryId ?? rule.ruleCategoryId);
+      }),
+    );
+  });
+
+  it('a rule answers when the user has not spoken', () => {
+    const fact: TransactionFact = {
+      amount: money(-500n, 'USD'),
+      postedDate: DateOnly.parse('2026-05-20'),
+      authorizedDate: null,
+      name: 'SQ *BLUE BOTTLE 4471',
+      merchantName: null,
+      pending: false,
+    };
+    const ruleCategoryId = '01920000-0000-7000-8000-0000000000aa';
+    const effective = resolveEffective(fact, EMPTY_OVERLAY, { ruleCategoryId });
+    expect(effective.categoryId).toBe(ruleCategoryId);
+  });
+
+  it('the user always beats a rule, even a rule set after the user spoke', () => {
+    const fact: TransactionFact = {
+      amount: money(-500n, 'USD'),
+      postedDate: DateOnly.parse('2026-05-20'),
+      authorizedDate: null,
+      name: 'SQ *BLUE BOTTLE 4471',
+      merchantName: null,
+      pending: false,
+    };
+    const userCategoryId = '01920000-0000-7000-8000-0000000000bb';
+    const ruleCategoryId = '01920000-0000-7000-8000-0000000000cc';
+    const effective = resolveEffective(
+      fact,
+      { ...EMPTY_OVERLAY, userCategoryId },
+      { ruleCategoryId },
+    );
+    expect(effective.categoryId).toBe(userCategoryId);
+    expect(effective.categoryId).not.toBe(ruleCategoryId);
+  });
+
+  it('neither user nor rule leaves the category unset — the provider and classifier tiers live in @ctx/categorization, never here', () => {
+    const fact: TransactionFact = {
+      amount: money(-500n, 'USD'),
+      postedDate: DateOnly.parse('2026-05-20'),
+      authorizedDate: null,
+      name: 'SQ *BLUE BOTTLE 4471',
+      merchantName: null,
+      pending: false,
+    };
+    expect(resolveEffective(fact, EMPTY_OVERLAY, NO_RULE).categoryId).toBeNull();
+    expect(resolveCategoryId(EMPTY_OVERLAY)).toBeNull();
   });
 
   it('never resolves to an empty name', () => {

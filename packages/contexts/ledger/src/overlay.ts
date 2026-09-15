@@ -25,6 +25,7 @@ import { resolveEffective } from './effective.ts';
 import { factOf, overlayOf } from './db.ts';
 import type { LedgerWriteContext } from './accounts.ts';
 import type { LedgerTransaction } from './types.ts';
+import type { TransactionRow } from '../schema/index.ts';
 
 export interface OverlayPatch {
   readonly userNote?: string | null;
@@ -87,4 +88,56 @@ export async function setTransactionOverlay(
   const { id, createdAt: _createdAt, ...rest } = projected;
   await executor.update(transactions).set(rest).where(eq(transactions.id, id));
   return transactionOf(projected);
+}
+
+/**
+ * The rule tier's write path (04 §2.2's middle tier; wp1.4 evidence §6).
+ *
+ * `@ctx/categorization` calls this through the `LedgerPort` it reads this
+ * context through — never a direct import (decision D8) — after `decide()`
+ * picks the `rule` tier for a transaction. Deliberately the narrowest possible
+ * write, and that narrowness is the whole safety argument:
+ *
+ *   * it touches exactly one column, `rule_category_id`, and nothing else on the
+ *     row — never `user_category_id`, never the `effective_*` projection, which
+ *     does not depend on the rule tier and needs no refresh (see `effectiveOf`
+ *     in `db.ts`, which computes `categoryId` from the overlay and this column
+ *     directly rather than storing an eighth denormalised column for it);
+ *   * a caller cannot "overwrite a user override" through this function even by
+ *     mistake, because there is no code path from here to `user_category_id` —
+ *     `resolveEffective`'s tier order (`userCategoryId ?? ruleCategoryId`) is
+ *     what keeps a user's own edit in charge regardless of what a rule writes
+ *     before or after it;
+ *   * `ruleCategoryId: null` clears it, for a rule that stops matching or is
+ *     deleted. `decide()`'s `shouldReplace` already refuses to let a weaker tier
+ *     (merchant default, provider, classifier) demote a rule-sourced decision —
+ *     see 04 §5.2 — so in practice this is called only when a *rule* is the one
+ *     deciding, never as a side effect of a lower tier winning.
+ */
+export async function setRuleCategory(
+  executor: LedgerExecutor,
+  input: { userId: string; transactionId: string; ruleCategoryId: string | null },
+  context: LedgerWriteContext,
+): Promise<LedgerTransaction> {
+  const now = context.clock.now();
+  const rows = await executor
+    .select({ transaction: transactions })
+    .from(transactions)
+    .where(and(eq(transactions.id, input.transactionId), eq(transactions.userId, input.userId)));
+
+  const existing = rows[0]?.transaction;
+  if (existing === undefined) {
+    throw new LedgerError('ledger.transaction_not_found', `no transaction ${input.transactionId}`);
+  }
+
+  const updated: TransactionRow = {
+    ...existing,
+    ruleCategoryId: input.ruleCategoryId,
+    updatedAt: now,
+  };
+  await executor
+    .update(transactions)
+    .set({ ruleCategoryId: updated.ruleCategoryId, updatedAt: updated.updatedAt })
+    .where(eq(transactions.id, input.transactionId));
+  return transactionOf(updated);
 }

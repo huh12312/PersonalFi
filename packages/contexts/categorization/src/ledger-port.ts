@@ -23,10 +23,22 @@
  *     a CSV preview screen that wants to show what *would* be categorised before
  *     importing anything — the engine already works on it.
  *
- * The port is read-only by design. This context writes its own tables and its own
- * events; it never writes a ledger row. The one ledger column that holds a
- * category, `transactions.user_category_id`, is the *user's* overlay, and only
- * the user's own edit through `setTransactionOverlay` may write it.
+ * The port is otherwise read-only by design: this context writes its own tables
+ * and its own events, and never the ledger's `user_category_id` — that column is
+ * the *user's* overlay, and only the user's own edit through
+ * `setTransactionOverlay` may write it.
+ *
+ * One write does cross the seam. Ledger's `resolveEffective` has a rule tier
+ * (04 §2.2's middle tier; wp1.4 evidence §6) sitting between the user's overlay
+ * and provider truth, and this context is that tier's only producer — a
+ * resolution tier with no producer is a tier nobody can test. `decide()` in
+ * `engine.ts` already returns `source: 'rule'` when a rule wins; `writeRuleCategory`
+ * is how that answer reaches the column `resolveEffective`'s `rule` argument
+ * reads, so a list page can show it without joining back into this context's
+ * `category_assignments` on every row. It is still not a `user_category_id`
+ * write, and the real adapter (`apps/api`, the composition root) is expected to
+ * route it at `@ctx/ledger`'s `setRuleCategory` — the one function that touches
+ * that column and nothing else.
  */
 import type { DateOnly } from '@core/kernel';
 
@@ -73,8 +85,24 @@ export interface CategorizableTransactionPage {
   readonly nextCursor: string | null;
 }
 
+export interface WriteRuleCategoryInput {
+  readonly userId: string;
+  readonly transactionId: string;
+  /**
+   * One of this context's own `categories.id` values, or `null` to clear it (a
+   * rule that stopped matching, or was deleted). Never a category *key* — the
+   * ledger stores an opaque id and never resolves it.
+   */
+  readonly ruleCategoryId: string | null;
+  /** Ties this write into the same trace as the sync or rule apply that caused it. */
+  readonly correlationId: string;
+  readonly causationId?: string | null;
+}
+
 export interface LedgerPort {
   listForCategorization(input: ListForCategorizationInput): Promise<CategorizableTransactionPage>;
+  /** Push the rule tier's answer into `@ctx/ledger`'s `resolveEffective` seam. */
+  writeRuleCategory(input: WriteRuleCategoryInput): Promise<void>;
 }
 
 /**

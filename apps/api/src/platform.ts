@@ -73,6 +73,12 @@ export const MODULE_FLAGS: readonly FlagDefinition[] = Object.freeze([
     owner: 'connections',
     removeWhen: 'never — this is the kill switch for every provider sync',
   }),
+  Object.freeze({
+    key: 'module.categorization',
+    defaultEnabled: true,
+    owner: 'categorization',
+    removeWhen: 'never — a synced transaction with no way to gain a category is a worse default',
+  }),
 ]);
 
 export interface Platform {
