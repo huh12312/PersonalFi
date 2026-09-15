@@ -38,7 +38,7 @@ import {
 } from '@ctx/connections';
 import { LEDGER_EVENTS } from '@ctx/ledger';
 import { systemClock, type Clock } from '@core/kernel';
-import { createCategorizationLedgerPort } from './domain.ts';
+import { createCategorizationLedgerPort, PROCESS_LOCAL_PROVIDERS } from './domain.ts';
 import type { ModuleRegistration } from './platform.ts';
 
 export interface ModuleWiringOptions {
@@ -63,13 +63,31 @@ export interface ModuleWiringOptions {
   readonly clock?: Clock;
 }
 
-/** Connections the nightly fan-out should touch: `reauth_required` is skipped. */
+/**
+ * Connections the nightly fan-out should touch: `reauth_required` is skipped,
+ * and so is every `PROCESS_LOCAL_PROVIDERS` connection.
+ *
+ * gate-security-review.md §8.6 N-7: `domain.ts` already documents that a
+ * manual/CSV connection can only be synced *in the process that staged it* —
+ * `ManualStore` is an in-memory `Map` — which is why `POST /connections/:id/sync`
+ * runs those inline instead of enqueuing. The nightly fan-out did not apply the
+ * same rule, so the **worker** (a different process, with an empty store) polled
+ * them and each one failed `AUTH_REQUIRED` ("this manual connection has been
+ * disconnected"). `setConnectionStatus` then wrote `reauth_required`, and the UI
+ * showed a permanent, false "Needs reconnection" on every manual account and
+ * every CSV import after the first nightly run. Observed on the real stack.
+ *
+ * Skipping them is strictly correct today: there is nothing remote to poll, so
+ * a scheduled sync of one can only ever be a no-op or a false failure. When the
+ * durable staging area `domain.ts` describes arrives, this filter goes away with
+ * `PROCESS_LOCAL_PROVIDERS` itself.
+ */
 async function syncableConnectionIds(
   executor: ConnectionsExecutor,
   userId: string,
 ): Promise<readonly string[]> {
   const rows = await listSyncableConnections(executor, userId);
-  return rows.map((row) => row.id);
+  return rows.filter((row) => !PROCESS_LOCAL_PROVIDERS.has(row.provider)).map((row) => row.id);
 }
 
 export function appModules(options: ModuleWiringOptions): readonly ModuleRegistration[] {

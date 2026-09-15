@@ -26,7 +26,7 @@
  * server picks it up on its next run with no separate edit.
  *
  * gate-security-review.md F-3/C-2: the Caddyfile's CSP/COEP header values now
- * contain Caddy `map` placeholders (`{plaid_script_src}`, `{plaid_frame_src}`,
+ * contain Caddy `map` placeholders (`{plaid_script_src}`, `{plaid_frame_src}`, `{plaid_style_src}`,
  * `{plaid_connect_src}`, `{coep_policy}`) that only the real `caddy` binary
  * resolves at request time, gated on `PLAID_ENABLED`. This server parses the
  * Caddyfile's *text*, not a running Caddy, so it must resolve them itself —
@@ -64,6 +64,11 @@ const PLAID_DISABLED_PLACEHOLDERS = {
   '{plaid_script_src}': '',
   '{plaid_frame_src}': '',
   '{plaid_connect_src}': '',
+  // gate-security-review.md §8.4 (F-5) added this fifth placeholder. Leaving it
+  // unresolved glues a literal `{plaid_style_src}` onto `style-src-elem 'self'`,
+  // which makes the whole directive's source list malformed and blocks the
+  // app's own stylesheet — exactly the failure `csp.spec.ts` then reports.
+  '{plaid_style_src}': '',
   '{coep_policy}': 'require-corp',
 };
 

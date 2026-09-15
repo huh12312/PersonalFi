@@ -81,8 +81,12 @@
 		true " https://cdn.plaid.com" " https://cdn.plaid.com" " https://cdn.plaid.com https://sandbox.plaid.com https://production.plaid.com"
 		default "" "" ""
 	}
+	map {$PLAID_ENABLED:false} {plaid_style_src} {
+		true " 'unsafe-inline' https://cdn.plaid.com"
+		default ""
+	}
 	map {$PLAID_ENABLED:false} {coep_policy} {
-		true "credentialless"
+		true "unsafe-none"
 		default "require-corp"
 	}
 
@@ -133,7 +137,7 @@
 		# in that case, so the explicit `frame-src 'self'` here when disabled
 		# changes nothing observable, only makes the Plaid-enabled branch a
 		# clean superset.
-		Content-Security-Policy "default-src 'self'; script-src 'self'; script-src-elem 'self'{plaid_script_src}; frame-src 'self'{plaid_frame_src}; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'{plaid_connect_src}; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; script-src-elem 'self'{plaid_script_src}; frame-src 'self'{plaid_frame_src}; style-src-elem 'self'{plaid_style_src}; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'{plaid_connect_src}; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 		-Server
 	}
 }

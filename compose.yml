@@ -347,7 +347,18 @@ services:
       # job that decrypts a provider credential) — at 512M the KEK derivation
       # is OOM-killed at exit 137 with no output, which is precisely how the
       # api failure presented.
-      resources: { limits: { cpus: '1.0', memory: 512M } }
+      #
+      # gate-security-review.md §8.5 N-4: Phase 1 DID make the worker unlock the
+      # keyring (apps/api/src/worker.ts's `box.unlock`) and did NOT raise this,
+      # and the paragraph above turned out to be an exact prediction. Observed on
+      # the re-gate stack: 189 silent restarts, never a line past "configuration
+      # loaded", so the consumer pump, the job runner and the SCHEDULER never
+      # started — the `schedules` table stayed empty and a queued
+      # `connections.sync` sat `pending` forever. Raised to 1536M, matching the
+      # api, which pays the identical Argon2id cost. KEK_ARGON2_MEMORY_KIB
+      # defaults to 1048576 (1 GiB), so any limit at or below that is a silent
+      # crash loop; `regate-worker-boot.test.ts` now pins limit > KEK memory.
+      resources: { limits: { cpus: '1.0', memory: 1536M } }
 
   migrator:
     <<: *app-image

@@ -129,7 +129,22 @@ async function main(): Promise<void> {
                 database,
                 clock: systemClock,
                 logger,
-                registry: createConnectorRegistry(),
+                // gate-security-review.md §8.5 N-5: this MUST be built from the
+                // same configuration the API's composition root uses
+                // (`app.ts`'s `createConnectorRegistry({ plaid: config.plaid,
+                // … })`). Called with no arguments it silently omits Plaid, and
+                // the worker is the ONLY process that runs a scheduled or
+                // queued sync — so a Plaid Item linked through the API could be
+                // sealed and stored and then never synced, every
+                // `connections.sync` job dying with `no connector is registered
+                // for provider "plaid"` after five attempts. compose.yml mounts
+                // the three plaid_* secrets on this service precisely so this
+                // line can use them.
+                registry: createConnectorRegistry({
+                  plaid: config.plaid,
+                  clock: systemClock,
+                  logger,
+                }),
                 secretBox,
               }).orchestrator,
               timezone: user.displayTimezone,

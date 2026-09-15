@@ -54,15 +54,32 @@ const EXPECTED_CSP_PLAID_DISABLED =
   "font-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'; " +
   "object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
+// gate-security-review.md §8.4 (F-5). Two directives changed after the re-gate
+// drove the REAL `openPlaidLink()` in a real browser against this policy:
+//
+//   * `style-src-elem` carries `'unsafe-inline' https://cdn.plaid.com` — Link
+//     injects an inline `<style>`, and under `style-src-elem 'self'` the frame
+//     loaded with an empty body. This is the one CSP violation that did fire.
+//   * COEP is `unsafe-none`, not `credentialless`. `credentialless` relaxes
+//     COEP for no-cors *subresources* (which is why the CDN script loaded) and
+//     NOT for nested *documents*: a cross-origin iframe must itself send COEP,
+//     and `cdn.plaid.com` sends none, so `link.html` was
+//     `net::ERR_BLOCKED_BY_RESPONSE` — silently, because a COEP block emits no
+//     `securitypolicyviolation` event. The previous remediation's probe read
+//     "no violation + onload fired" as success; it was the signature of a
+//     silent block.
+//
+// Both are Plaid-enabled only; the disabled policy above is unchanged.
 const EXPECTED_CSP_PLAID_ENABLED =
   "default-src 'self'; script-src 'self'; script-src-elem 'self' https://cdn.plaid.com; " +
-  "frame-src 'self' https://cdn.plaid.com; style-src-elem 'self'; style-src-attr 'unsafe-inline'; " +
+  "frame-src 'self' https://cdn.plaid.com; " +
+  "style-src-elem 'self' 'unsafe-inline' https://cdn.plaid.com; style-src-attr 'unsafe-inline'; " +
   "img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://cdn.plaid.com " +
   "https://sandbox.plaid.com https://production.plaid.com; worker-src 'self' blob:; " +
   "manifest-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 const EXPECTED_COEP_PLAID_DISABLED = 'require-corp';
-const EXPECTED_COEP_PLAID_ENABLED = 'credentialless';
+const EXPECTED_COEP_PLAID_ENABLED = 'unsafe-none';
 
 /** A minimal static root so Caddy's `app_routes` catch-all has something to serve at `/`. */
 function writeStaticFixture(): string {
