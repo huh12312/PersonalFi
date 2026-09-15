@@ -17,6 +17,7 @@
  * database looks like afterwards. A test that only ever takes the happy road
  * would pass against an orchestrator with no transaction at all.
  */
+import { money } from '@core/kernel';
 import { sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { listSyncableConnections, requireConnection } from '../../src/connections.ts';
@@ -34,6 +35,7 @@ import {
   connectorWith,
   failingAtPage,
   generateDemoData,
+  ledgerBalanceCount,
   ledgerRowCounts,
   linkFor,
   manualBatch,

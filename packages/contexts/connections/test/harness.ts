@@ -271,16 +271,23 @@ export function recordingLedgerWriter(): RecordingLedgerWriter {
       executor: ConnectionsExecutor,
       input: LedgerRecordBalanceInput,
       _context: LedgerWriteContext,
-    ): Promise<unknown> {
+    ): Promise<{ balanceId: string | null; recorded: boolean }> {
       calls.balances.push(input);
-      await executor.execute(sql`
+      const id = newId();
+      // `RETURNING id` is what makes this double honest about idempotency: the
+      // real `recordBalance` reports `recorded: false` on a natural-key
+      // collision, and the orchestrator's balances count (`sync_runs.added_
+      // count`) depends on being able to tell a genuine insert from a replay.
+      const result = await executor.execute<{ id: string }>(sql`
         INSERT INTO ledger_double_balances (id, user_id, account_id, minor, currency, as_of, source)
-        VALUES (${newId()}::uuid, ${input.userId}::uuid, ${input.accountId}::uuid,
+        VALUES (${id}::uuid, ${input.userId}::uuid, ${input.accountId}::uuid,
                 ${input.current.minor.toString()}::bigint, ${input.current.currency},
                 ${input.asOf.toISOString()}::timestamptz, ${input.source})
         ON CONFLICT (account_id, as_of, source) DO NOTHING
+        RETURNING id
       `);
-      return null;
+      const recorded = result.rows.length > 0;
+      return { balanceId: recorded ? id : null, recorded };
     },
   };
 }
@@ -501,6 +508,14 @@ export async function ledgerRowCounts(
   const total = Number(applied.rows[0]?.total ?? 0);
   const live = Number(applied.rows[0]?.live ?? 0);
   return { total, live, retracted: total - live, accounts: Number(accounts.rows[0]?.count ?? 0) };
+}
+
+/** How many balance observations the double actually holds, for the balances tests. */
+export async function ledgerBalanceCount(database: TestDatabase): Promise<number> {
+  const result = await database.db.execute<{ count: string }>(
+    sql`SELECT count(*) AS count FROM ledger_double_balances`,
+  );
+  return Number(result.rows[0]?.count ?? 0);
 }
 
 /**

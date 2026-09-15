@@ -5,29 +5,16 @@
  * Same shape as `@ctx/ledger`'s: a scratch database per suite, a mutable clock, a
  * write context, and the fixture builders every suite in this directory shares.
  *
- * ## The two `eslint-disable` lines, and why they are here rather than in the policy
- *
  * `@core/testkit` (the scratch database) and `@core/seed` (the demo dataset the
- * golden set is derived from) are **devDependencies** of this package and are
- * imported by nothing under `src/`. `@ctx/ledger` and `@ctx/connections` solved
- * the identical problem the right way — a per-context entry in
- * `scripts/eslint-boundaries.js`'s `LAYERS` naming both packages, so the
- * looseness is visible in the policy instead of hidden in a test file.
- *
- * WP 1.4 does not own `scripts/eslint-boundaries.js` (WP 1.2 is appending to it
- * concurrently), so the entry is **proposed verbatim** in
- * `docs/evidence/phase-1/wp1.4-categorization.md` and these two directives stand
- * in for it. They are confined to this one file precisely so that landing the
- * policy entry is a three-line deletion here and nothing else — and
- * `reportUnusedDisableDirectives: 'error'` will fail the build if whoever lands
- * it forgets, which is the behaviour we want.
+ * golden set is derived from) are **devDependencies** of this package, imported
+ * only from here — nothing under `src/` reaches for either. `scripts/eslint-
+ * boundaries.js`'s `LAYERS` names a `categorization` entry allowing both, the
+ * same arrangement `@ctx/ledger` and `@ctx/connections` use, so the looseness is
+ * visible in the policy instead of hidden behind an `eslint-disable` here.
  */
 import { mutableClock, newId, type MutableClock } from '@core/kernel';
-// eslint-disable-next-line personalfi/layer-imports -- devDependency; see the file header.
 import { generateDemoData } from '@core/seed';
-// eslint-disable-next-line personalfi/layer-imports -- devDependency; see the file header.
 import { ADMIN_URL, createTestDatabase, recordingLogger, waitFor } from '@core/testkit';
-// eslint-disable-next-line personalfi/layer-imports -- devDependency; see the file header.
 import type { TestDatabase } from '@core/testkit';
 import { DateOnly } from '@core/kernel';
 import { sql } from 'drizzle-orm';

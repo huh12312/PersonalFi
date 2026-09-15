@@ -311,6 +311,38 @@ const LAYERS = [
       'retry policy — the orchestrator in @ctx/connections owns all three.',
   },
   {
+    // The production set is the generic context set. The two additions are
+    // dev-only and are declared as `devDependencies` in this package's
+    // package.json, same arrangement as the `ledger` entry above:
+    //
+    //   * `@core/testkit` — the scratch database `categorization-db` runs on;
+    //   * `@core/seed` — the deterministic demo dataset the golden accuracy
+    //     set (`test/golden-harness.ts`) is graded against.
+    //
+    // Both are imported only from `test/`, which is why `test/harness.ts`
+    // could stand in with three `eslint-disable-next-line` directives until
+    // this entry landed (docs/evidence/phase-1/wp1.4-categorization.md §5).
+    name: 'categorization',
+    prefix: 'packages/contexts/categorization/',
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      '@core/contracts',
+      '@core/platform',
+      '@core/secretbox',
+      '@core/testkit',
+      '@core/seed',
+      'drizzle-orm',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'Categorization is a context: it depends on the kernel and on infrastructure, ' +
+      'and on no other context. @core/testkit and @core/seed are dev-only, used only ' +
+      'from test/.',
+  },
+  {
     name: 'context',
     prefix: 'packages/contexts/',
     allow: [

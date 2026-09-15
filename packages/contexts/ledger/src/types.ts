@@ -82,6 +82,23 @@ export const EMPTY_OVERLAY: TransactionOverlay = Object.freeze({
 });
 
 /**
+ * The rule tier's answer for one transaction: 04 §2.2's middle tier.
+ *
+ * Opaque here in exactly the way `userCategoryId` is — the id is one of
+ * `@ctx/categorization`'s `categories.id` values and the ledger never
+ * interprets it. Supplied by the caller (the composition root reads
+ * `category_assignments`), never queried from here: `resolveEffective` is pure
+ * and a resolution function that can do I/O is one that will eventually do I/O
+ * on the read path for 50,000 rows.
+ */
+export interface RuleResolution {
+  readonly ruleCategoryId: string | null;
+}
+
+/** No rule matched. The state every row resolves in until one does. */
+export const NO_RULE: RuleResolution = Object.freeze({ ruleCategoryId: null });
+
+/**
  * What a read path sees: fact and overlay, resolved.
  *
  * `merchantKey` rather than a merchant id, because resolution is pure and a

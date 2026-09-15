@@ -8,9 +8,22 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './app/App.tsx';
+import { client } from './api/generated/client.gen.ts';
+import { Sdk } from './api/generated/index.ts';
+import { registerCsrfInterceptor } from './api/client-runtime-config.ts';
 import { applyPrivacy, getHideAmounts } from './lib/privacy.ts';
 import { applyTheme, getThemePreference } from './lib/theme.ts';
 import './styles/base.css';
+
+// Wires the CSRF header (client-runtime-config.ts's `registerCsrfInterceptor`
+// — the generated client has no CSRF awareness of its own) and constructs the
+// default `Sdk` instance every generated React Query hook resolves through
+// (`Sdk.__registry.get()` in `generated/@tanstack/react-query.gen.ts` throws
+// "No SDK client found" until one exists). Both must run before the first
+// route mounts and fires a query, so — like the theme/privacy calls below —
+// this happens here rather than inside a component.
+registerCsrfInterceptor(client);
+new Sdk();
 
 // Applied before the first `render()` call below — see base.css's
 // `html:not([data-theme-ready]) body { visibility: hidden }` rule and

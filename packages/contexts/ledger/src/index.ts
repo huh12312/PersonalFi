@@ -30,10 +30,12 @@ export { resolveEffective, withinDays } from './effective.ts';
 export { normaliseMerchantName, dedupKeyOf, type NormalisedMerchant } from './normalise.ts';
 export {
   EMPTY_OVERLAY,
+  NO_RULE,
   type EffectiveTransaction,
   type LedgerTransaction,
   type ProviderCounterparty,
   type ProviderTransactionInput,
+  type RuleResolution,
   type TransactionFact,
   type TransactionOverlay,
   type TransactionSplit,

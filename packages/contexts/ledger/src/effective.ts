@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { DateOnly } from '@core/kernel';
 import { normaliseMerchantName } from './normalise.ts';
-import type { EffectiveTransaction, TransactionFact, TransactionOverlay } from './types.ts';
+import { NO_RULE, type EffectiveTransaction, type RuleResolution, type TransactionFact, type TransactionOverlay } from './types.ts';
 
 /**
  * The one function that resolves provider truth against user intent.
@@ -44,6 +44,7 @@ import type { EffectiveTransaction, TransactionFact, TransactionOverlay } from '
 export function resolveEffective(
   fact: TransactionFact,
   overlay: TransactionOverlay,
+  rule: RuleResolution = NO_RULE,
 ): EffectiveTransaction {
   const date = fact.authorizedDate ?? fact.postedDate;
 
@@ -67,7 +68,12 @@ export function resolveEffective(
     merchantDisplayName: normalised.display === '' ? null : normalised.display,
     pending: fact.pending,
     excluded: overlay.userExcluded,
-    categoryId: overlay.userCategoryId,
+    // Tier order, and the only place that knows it: an explicit user edit, then
+    // a rule the user wrote in advance, then nothing. The provider's own
+    // category is deliberately absent — `@ctx/categorization` owns that mapping
+    // and writes its result to `category_assignments`, so surfacing it here
+    // would be a second place that decides what a transaction is.
+    categoryId: overlay.userCategoryId ?? rule.ruleCategoryId,
     note: blankToNull(overlay.userNote),
   };
 }

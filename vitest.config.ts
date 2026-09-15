@@ -124,6 +124,26 @@ export default defineConfig({
         test: { name: 'ledger', include: ['src/**/*.test.ts'], environment: 'node' },
       },
       {
+        root: './packages/contexts/categorization',
+        test: {
+          name: 'categorization',
+          include: ['src/**/*.test.ts', 'test/golden.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        root: './packages/contexts/categorization',
+        test: {
+          name: 'categorization-db',
+          include: ['test/**/*.test.ts'],
+          exclude: ['test/golden.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 120_000,
+          hookTimeout: 300_000,
+        },
+      },
+      {
         // Every claim in these suites is a claim about Postgres: a unique index
         // arbitrating a replayed sync page, a keyset scan that stays stable while
         // rows are inserted above it, a partial index making "what is pending?"

@@ -71,6 +71,41 @@
  * "`sync_runs` is the observability surface that matters… This single feature
  * eliminates most 'why is my balance wrong' debugging." A run that never started
  * and a run that failed look identical from the outside otherwise.
+ *
+ * ## 6. Balances follow the transactions delta, and never unwind it
+ *
+ * Closes the gap tracked in docs/evidence/phase-1/wp1.5-api.md §7.1: every
+ * adapter implements `syncBalances`, `LedgerWriter` declares `recordBalance`,
+ * and until now nothing ever called either, so a provider-linked account's
+ * balance was `null` forever.
+ *
+ * `#syncBalancesIfDue` runs *after* the transactions run has already committed
+ * (or definitively failed), never inside `#commitPages`'s transaction and never
+ * under the transactions run's own `sync_runs` row. Two reasons, both hard
+ * requirements rather than taste:
+ *
+ *   * `syncBalances` is a second network call. Making it before the
+ *     transactions delta commits would hold that delta hostage to a request
+ *     that has nothing to do with it — the same "no remote call inside a
+ *     transaction" rule `#runPages` already follows for `listAccounts`.
+ *   * A balances failure must never relabel or roll back a transactions delta
+ *     that already committed. It gets its **own** `sync_runs` row
+ *     (`operation: 'balances'`), classified the same way a transactions
+ *     failure is (`errorKind`/`errorCode`/`errorDetail`), so "why is my
+ *     balance stale" and "why is my last transaction missing" are answered by
+ *     two different rows instead of one row lying about which half failed.
+ *
+ * It runs when the connector declares `balances` and the transactions half
+ * produced *something* — success, partial, or (the one case no Phase 1
+ * adapter exercises, since every adapter declares `transactions`) a connector
+ * that only has balances to give. It does not run behind a transactions
+ * failure that left zero pages committed: a connector that could not
+ * authenticate cannot answer a balances question either, and asking anyway
+ * would spend the same rate limit the reconnect needs (invariant 4's reasoning
+ * applies here too). A sync that finds no balances to report — CSV/QIF, or a
+ * manual connection nobody ever entered one on — writes no `balances` row at
+ * all: a row exists to explain a recording or a failure, not to say "nothing
+ * happened" a second time when the transactions row already said so.
  */
 import { newId, type Clock } from '@core/kernel';
 import {
@@ -113,6 +148,7 @@ import {
   supports,
   type ConnectionHandle,
   type Connector,
+  type ConnectorCapabilities,
   type ProviderTransactionFact,
   type SyncOptions,
   type TransactionPage,
@@ -362,17 +398,26 @@ export class SyncOrchestrator {
     const counters: Counters = { pages: 0, added: 0, modified: 0, removed: 0, restarts: 0 };
     let failure: ConnectorError | null = null;
     let cursorAfter = row.transactionsCursor;
+    // Hoisted out of the `try`: the balances step below (invariant 6) reuses
+    // this handle rather than opening the sealed credential a second time.
+    let handle: ConnectionHandle | null = null;
 
     try {
-      const handle = await openHandle(row, secretBox, input.userId);
-      cursorAfter = await this.#runPages(handle, connector, {
-        connectionId: row.id,
-        syncRunId,
-        startCursor: row.transactionsCursor,
-        counters,
-        context,
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-      });
+      handle = await openHandle(row, secretBox, input.userId);
+      // Every Phase 1 adapter declares `transactions` (the conformance suite
+      // requires it), so this is always true today. The guard exists for the
+      // one case the port allows and no adapter yet is: a connector that only
+      // has balances to give.
+      if (supports(capabilities, 'transactions')) {
+        cursorAfter = await this.#runPages(handle, connector, {
+          connectionId: row.id,
+          syncRunId,
+          startCursor: row.transactionsCursor,
+          counters,
+          context,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+        });
+      }
     } catch (cause) {
       failure = asConnectorError(cause);
     }
@@ -434,6 +479,20 @@ export class SyncOrchestrator {
       );
     }
 
+    // Invariant 6. Deliberately after the block above: the transactions run is
+    // already committed and its row already written, so nothing balances does
+    // from here on can touch either.
+    await this.#syncBalancesIfDue({
+      handle,
+      connector,
+      capabilities,
+      connectionId: row.id,
+      trigger: input.trigger,
+      context,
+      transactionsFailed: failure !== null,
+      transactionsPageCount: counters.pages,
+    });
+
     return {
       syncRunId,
       connectionId: row.id,
@@ -449,6 +508,131 @@ export class SyncOrchestrator {
       error: failure,
       skippedBecause: null,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Balances — invariant 6
+  // -------------------------------------------------------------------------
+
+  /**
+   * Ask the connector for its current balances and record each one, unless the
+   * transactions half of this sync gave us no reason to.
+   *
+   * Never throws: a balances failure is a fact about *this* operation, not
+   * about the sync as a whole, and the caller has already returned the
+   * transactions summary by the time this settles the `balances` `sync_runs`
+   * row and logs a warning.
+   */
+  async #syncBalancesIfDue(input: {
+    readonly handle: ConnectionHandle | null;
+    readonly connector: Connector;
+    readonly capabilities: ConnectorCapabilities;
+    readonly connectionId: string;
+    readonly trigger: SyncTrigger;
+    readonly context: ConnectionsContext;
+    /** Whether the transactions half ended in `failure !== null`. */
+    readonly transactionsFailed: boolean;
+    /** `counters.pages` from the transactions half. */
+    readonly transactionsPageCount: number;
+  }): Promise<void> {
+    const { handle, connector, capabilities, context } = input;
+    if (handle === null || !supports(capabilities, 'balances')) return;
+    // Do not chase a balance behind a transactions run that produced nothing
+    // at all — auth_required, a provider that never answered, a stream that
+    // never terminated. Asking anyway would spend rate limit the reconnect
+    // needs, for a question we already know the answer to (04 §4.5's
+    // reasoning for invariant 4, applied here).
+    if (input.transactionsFailed && input.transactionsPageCount === 0) return;
+
+    const { clock, database, ledgerWriter } = this.#options;
+    const startedAt = clock.now();
+    let recorded = 0;
+    let failure: ConnectorError | null = null;
+
+    try {
+      const options = this.#syncOptions(capabilities, context.clock, undefined);
+      const facts = await connector.syncBalances(handle, options);
+      // Nothing to report, and no error either: CSV/QIF, or a manual
+      // connection nobody entered a balance on. A `sync_runs` row exists to
+      // explain a recording or a failure, not to repeat "nothing happened"
+      // when the transactions row already said so.
+      if (facts.length === 0) return;
+
+      recorded = await database.transaction(async (tx) => {
+        const accounts = await accountMap(tx, input.connectionId);
+        const writeContext = {
+          clock: context.clock,
+          correlationId: context.correlationId,
+          causationId: context.causationId ?? null,
+        };
+        let count = 0;
+        for (const fact of facts) {
+          const accountId = accounts.get(fact.providerAccountId);
+          if (accountId === undefined) {
+            // Same contract as `groupByAccount`: a provider account id we have
+            // never mapped is a contract violation, not a balance to drop.
+            throw ConnectorError.fromCondition(
+              'MALFORMED_RESPONSE',
+              `${connector.provider} returned a balance for an account it never listed`,
+              { redactedContext: { provider: connector.provider } },
+            );
+          }
+          const result = await ledgerWriter.recordBalance(
+            tx,
+            {
+              userId: context.userId,
+              accountId,
+              current: fact.current,
+              available: fact.available,
+              limit: fact.limit,
+              asOf: fact.asOf,
+              source: 'provider',
+            },
+            writeContext,
+          );
+          if (wasBalanceRecorded(result)) count += 1;
+        }
+        return count;
+      });
+    } catch (cause) {
+      failure = asConnectorError(cause);
+    }
+
+    const finishedAt = clock.now();
+    await database.insert(syncRuns).values({
+      id: newId(),
+      userId: context.userId,
+      connectionId: input.connectionId,
+      trigger: input.trigger,
+      operation: 'balances',
+      status: failure === null ? 'success' : 'failed',
+      cursorBefore: null,
+      cursorAfter: null,
+      pageCount: 1,
+      addedCount: recorded,
+      modifiedCount: 0,
+      removedCount: 0,
+      restartCount: 0,
+      errorKind: failure?.kind ?? null,
+      errorCode: failure?.condition ?? failure?.providerCode ?? null,
+      errorDetail: failure === null ? null : errorDetailOf(failure),
+      correlationId: context.correlationId,
+      startedAt,
+      finishedAt,
+      durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
+    });
+
+    if (failure !== null) {
+      this.#logger.warn(
+        {
+          connectionId: input.connectionId,
+          kind: failure.kind,
+          condition: failure.condition,
+          correlationId: context.correlationId,
+        },
+        'balances sync failed',
+      );
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -901,6 +1085,23 @@ function errorDetailOf(error: ConnectorError): Record<string, unknown> {
     message: error.message,
     context: error.redactedContext,
   };
+}
+
+/**
+ * Did `LedgerWriter.recordBalance` actually write a row?
+ *
+ * The port types the return `unknown` on purpose (see `ledger-writer.ts`): it
+ * cannot name `@ctx/ledger`'s real return shape without importing the ledger,
+ * which is the one direction `personalfi/layer-imports` forbids. The real
+ * implementation returns `{ recorded: boolean }` — `false` when the natural
+ * key `(account_id, as_of, source)` already existed and the insert was a
+ * no-op — so this reads that field where it is present and assumes "recorded"
+ * otherwise. An unrecognised shape must not make `sync_runs.added_count` look
+ * smaller than what genuinely happened.
+ */
+function wasBalanceRecorded(result: unknown): boolean {
+  if (typeof result !== 'object' || result === null || !('recorded' in result)) return true;
+  return (result as { recorded: unknown }).recorded !== false;
 }
 
 function blank(
