@@ -98,10 +98,10 @@ describe('ConnectionsScreen', () => {
 
   it('lists connections with health, last-sync, and account count', async () => {
     stubFetchRoutes([
-      { match: '/auth/session', handle: () => jsonResponse(SESSION) },
-      { match: '/sync/stream', handle: () => emptySseResponse() },
+      { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
+      { match: '/api/sync/stream', handle: () => emptySseResponse() },
       {
-        match: '/connections',
+        match: '/api/connections',
         method: 'GET',
         handle: () =>
           jsonResponse({
@@ -120,7 +120,7 @@ describe('ConnectionsScreen', () => {
             ],
           }),
       },
-      { match: '/connectors', handle: () => jsonResponse({ connectors: [MANUAL_CONNECTOR] }) },
+      { match: '/api/connectors', handle: () => jsonResponse({ connectors: [MANUAL_CONNECTOR] }) },
     ]);
 
     renderConnections();
@@ -133,10 +133,10 @@ describe('ConnectionsScreen', () => {
 
   it('shows an empty state with an "Add connection" action when there are none', async () => {
     stubFetchRoutes([
-      { match: '/auth/session', handle: () => jsonResponse(SESSION) },
-      { match: '/sync/stream', handle: () => emptySseResponse() },
-      { match: '/connections', method: 'GET', handle: () => jsonResponse({ connections: [] }) },
-      { match: '/connectors', handle: () => jsonResponse({ connectors: [MANUAL_CONNECTOR] }) },
+      { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
+      { match: '/api/sync/stream', handle: () => emptySseResponse() },
+      { match: '/api/connections', method: 'GET', handle: () => jsonResponse({ connections: [] }) },
+      { match: '/api/connectors', handle: () => jsonResponse({ connectors: [MANUAL_CONNECTOR] }) },
     ]);
 
     renderConnections();
@@ -149,17 +149,17 @@ describe('ConnectionsScreen', () => {
     let connections: ConnectionSummary[] = [];
 
     stubFetchRoutes([
-      { match: '/auth/session', handle: () => jsonResponse(SESSION) },
-      { match: '/sync/stream', handle: () => emptySseResponse() },
-      { match: '/connections', method: 'GET', handle: () => jsonResponse({ connections }) },
-      { match: '/connectors', handle: () => jsonResponse({ connectors: [MANUAL_CONNECTOR] }) },
-      { match: '/auth/step-up/options', handle: () => jsonResponse({ options: {} }) },
+      { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
+      { match: '/api/sync/stream', handle: () => emptySseResponse() },
+      { match: '/api/connections', method: 'GET', handle: () => jsonResponse({ connections }) },
+      { match: '/api/connectors', handle: () => jsonResponse({ connectors: [MANUAL_CONNECTOR] }) },
+      { match: '/api/auth/step-up/options', handle: () => jsonResponse({ options: {} }) },
       {
-        match: '/auth/step-up/verify',
+        match: '/api/auth/step-up/verify',
         handle: () => jsonResponse({ freshUntil: new Date(Date.now() + 300_000).toISOString() }),
       },
       {
-        match: '/connections',
+        match: '/api/connections',
         method: 'POST',
         handle: async ({ request }) => {
           createBody = await request.json();

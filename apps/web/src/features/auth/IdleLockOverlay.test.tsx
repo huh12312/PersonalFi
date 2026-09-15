@@ -44,10 +44,10 @@ describe('IdleLockOverlay', () => {
         const raw =
           typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
         const path = new URL(raw, 'http://localhost/').pathname;
-        if (path === '/auth/step-up/options') {
+        if (path === '/api/auth/step-up/options') {
           return jsonResponse({ options: {} });
         }
-        if (path === '/auth/step-up/verify') {
+        if (path === '/api/auth/step-up/verify') {
           return jsonResponse({ freshUntil: new Date().toISOString() });
         }
         throw new Error(`IdleLockOverlay.test.tsx: no fetch handler stubbed for ${path}`);

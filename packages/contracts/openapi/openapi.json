@@ -8507,6 +8507,16 @@
               }
             }
           },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Default Response",
             "content": {
@@ -8579,6 +8589,16 @@
               }
             }
           },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Default Response",
             "content": {
@@ -8595,7 +8615,7 @@
   },
   "servers": [
     {
-      "url": "/"
+      "url": "/api"
     }
   ],
   "tags": [

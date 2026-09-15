@@ -39,14 +39,60 @@
 }
 
 # ---------- one security-header policy, imported by every listener ----------
+#
+# gate-security-review.md F-3/C-2: `apps/web/src/lib/plaid-link.ts` loads
+# `https://cdn.plaid.com/link/v2/stable/link-initialize.js` via an injected
+# `<script>`, then renders Link in an iframe that talks to
+# `https://sandbox.plaid.com`/`https://production.plaid.com`. Against the base
+# policy below — no `cdn.plaid.com` in `script-src`, no `frame-src` at all (so
+# `default-src 'self'` governs frames too), `connect-src 'self'` — every one of
+# those three fails, proven in the browser (§3/§7 of that review). Widening the
+# policy unconditionally would be wrong for the (default) deployment with no
+# Plaid secrets configured: `'self'`-only is strictly the safer policy and
+# there is no reason a Plaid-less install should carry a wider allowlist for a
+# provider it never talks to.
+#
+# `PLAID_ENABLED` (set by compose.yml on this service from whether the three
+# `plaid_*` secrets are mounted on `api`/`worker` — C-3, a concurrent change;
+# this file only ever reads the env var, never the secrets themselves) picks
+# between the narrow and Plaid-widened policy at Caddy startup. `{$VAR:default}`
+# is resolved once, when Caddy adapts this file into its running config, not
+# per request — so the `map` directives below (inside the snippet, so both
+# listeners get the same choice — Caddy's directive-order table runs `map`
+# before `header` regardless of the order they're written in) are not a
+# per-request branch on anything a client controls, they are a fixed choice
+# for the life of the process, exactly like every other value in this snippet.
+#
+# `Cross-Origin-Embedder-Policy: require-corp` blocks the cross-origin script
+# *and* the iframe outright, independent of the CSP widening: `cdn.plaid.com`
+# serves neither a `Cross-Origin-Resource-Policy` header nor CORS headers on
+# `link-initialize.js` (confirmed empirically —
+# docs/evidence/phase-1/gate-remediation-web.md's C-2 probe), so a
+# `require-corp` page can never load it no matter what the CSP says.
+# `credentialless` keeps this deployment cross-origin-isolated (the property
+# COEP exists for) while not requiring a third party's cooperation for
+# subresources that carry no credentials in the first place — which a
+# `<script src>`/iframe load of Plaid's public CDN never does. The
+# gate-remediation probe recorded `blocked` under `require-corp` and `loaded`
+# under `credentialless` with the widened CSP; only the Plaid-enabled case
+# relaxes this, the default stays `require-corp`.
 (security_headers) {
+	map {$PLAID_ENABLED:false} {plaid_script_src} {plaid_frame_src} {plaid_connect_src} {
+		true " https://cdn.plaid.com" " https://cdn.plaid.com" " https://cdn.plaid.com https://sandbox.plaid.com https://production.plaid.com"
+		default "" "" ""
+	}
+	map {$PLAID_ENABLED:false} {coep_policy} {
+		true "credentialless"
+		default "require-corp"
+	}
+
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "no-referrer"
 		Cross-Origin-Opener-Policy "same-origin"
-		Cross-Origin-Embedder-Policy "require-corp"
+		Cross-Origin-Embedder-Policy "{coep_policy}"
 		Cross-Origin-Resource-Policy "same-origin"
 		Permissions-Policy "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
 
@@ -71,23 +117,64 @@
 		#
 		# `worker-src blob:` is required by the vite-plugin-pwa service worker
 		# registration; `img-src blob:` by canvas/chart exports.
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		#
+		# `script-src-elem`/`frame-src`/`connect-src` carry the Plaid CDN only
+		# when `{plaid_script_src}`/`{plaid_frame_src}`/`{plaid_connect_src}`
+		# are non-empty (the `map` above, gated on `PLAID_ENABLED`) — empty
+		# string is a no-op appended to the end of the directive's source list.
+		# `script-src-elem` (not a wider `script-src`) is the narrowest
+		# directive that actually governs `apps/web/src/lib/plaid-link.ts`'s
+		# injected `<script src="https://cdn.plaid.com/...">`: it takes
+		# precedence over `script-src` for script *elements* specifically
+		# (same split-directive pattern as `style-src-elem`/`style-src-attr`
+		# above), so `'unsafe-eval'`/inline-script exposure is not widened to
+		# get Link's loader past the policy. No `frame-src` at all (as before)
+		# when Plaid is disabled — `default-src 'self'` already governs frames
+		# in that case, so the explicit `frame-src 'self'` here when disabled
+		# changes nothing observable, only makes the Plaid-enabled branch a
+		# clean superset.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; script-src-elem 'self'{plaid_script_src}; frame-src 'self'{plaid_frame_src}; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'{plaid_connect_src}; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 		-Server
 	}
 }
 
 # ---------- one routing policy, imported by every listener ----------
 #
-# The API mounts exactly three prefixes (packages/contracts/openapi/openapi.json:
-# `/auth/*`, `/health`, `/ready`). Everything else is the SPA, served straight
-# off disk by this container from the `apps/web` bundle baked into the image by
-# docker/caddy.Dockerfile.
+# The API gets its own namespace: everything under `/api/*` is Caddy stripping
+# the prefix and proxying to `api:8080`; everything else is the SPA, served
+# straight off disk by this container from the `apps/web` bundle baked into
+# the image by docker/caddy.Dockerfile.
 #
-# The old file had a `handle /api/*` block that proxied to `api:8080` *without*
-# stripping the prefix, against an API that mounts nothing under `/api` — every
-# request through it 404'd (M-3), and because the block looked load-bearing,
-# the catch-all that actually served traffic was the one place missing
-# `X-Forwarded-Proto`. It is gone; the three real prefixes are listed by name.
+# gate-security-review.md F-4/C-1a: this used to be three `handle` blocks
+# proxying `/auth/*`, `/health`, `/ready` by name at the site root — true in
+# Phase 0, when that was the whole API. WP 1.5 and WP 1.3b brought the contract
+# (packages/contracts/openapi/openapi.json) to eleven top-level prefixes and
+# nobody updated the three-prefix list; the other eight (`/accounts`,
+# `/connections`, `/connectors`, `/imports`, `/net-worth`, `/sync`,
+# `/transactions`, `/transfers`) fell through to the SPA catch-all below, which
+# rewrites any extensionless path to `/index.html` — every one of those routes
+# answered `200 text/html` through the real proxy, silently, not an error.
+#
+# Prefix-listing at the root can never be a durable fix for this, independent
+# of how careful anyone is about keeping the list in sync: the SPA and the API
+# share the same path namespace by design (`/transactions` is both a
+# `apps/web/src/routes` client route and a `GET /transactions` API operation),
+# distinguishable only by `Accept`/`Sec-Fetch-Dest`, which a `handle path`
+# matcher cannot see. `handle_path /api/*` below is a real namespace instead:
+# the API is everything under `/api`, the SPA is everything that is not, and
+# the distinction is the path itself rather than a maintained list. The
+# contract's `servers` entry (`apps/api/src/app.ts`) says `/api` for the same
+# reason. `scripts/check-proxy-routes.ts` (C-1b) parses the contract's path
+# prefixes and this file's routed prefix and fails the build if they
+# disagree — the control that would have caught the eight-prefix drift the day
+# WP 1.5 landed, which is the whole reason this rewrite happened at all.
+#
+# The very first version of this file *did* have a `handle /api/*` block, and
+# it was deleted (not fixed) in Phase 0 because it proxied without stripping
+# the prefix, against an API that mounted nothing under `/api` at all — every
+# request through it 404'd (M-3). The idea was right and the implementation
+# was wrong; `handle_path` (which strips, `handle` does not) is that same idea
+# done correctly, now that the API and the contract actually agree on `/api`.
 #
 # Trusted-proxy posture, stated rather than inherited (C-1/M-1):
 #   * No `trusted_proxies` directive appears anywhere in this file, on either
@@ -112,21 +199,16 @@
 # of :8080), so `request.protocol` in the API is `https` for every request it
 # actually serves.
 (app_routes) {
-	handle /auth/* {
-		reverse_proxy api:8080 {
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto https
-		}
-	}
-
-	handle /health {
-		reverse_proxy api:8080 {
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto https
-		}
-	}
-
-	handle /ready {
+	# `handle_path` (not `handle`) strips the matched prefix before proxying —
+	# the API keeps mounting every route at its own root (`/auth/*`, `/health`,
+	# `/transactions`, ...; see apps/api/src/app.ts and apps/api/src/routes/**,
+	# unchanged by this file), so `api:8080` receives `/auth/session`, not
+	# `/api/auth/session`, exactly as it always has. Everything the API mounts —
+	# all eleven top-level prefixes in the contract, including `/health` and
+	# `/ready` — is reachable this way and nothing else is; `not path_regexp`
+	# style carve-outs are not needed because the SPA's own routes never begin
+	# with `/api`.
+	handle_path /api/* {
 		reverse_proxy api:8080 {
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto https
@@ -143,8 +225,8 @@
 	# docker/caddy.Dockerfile) but it meant a scanner or a broken deploy could
 	# never tell "missing asset" from "app is up" by status code alone. `handle`
 	# blocks are sorted by matcher specificity, so this fires before the
-	# catch-all below regardless of file order (same pattern as
-	# `handle /auth/*` etc. above).
+	# catch-all below regardless of file order (same pattern as `handle_path
+	# /api/*` above).
 	@staticPaths path /assets/* /fonts/* /icons/* /sw.js /manifest.webmanifest
 	handle @staticPaths {
 		root * /srv/web

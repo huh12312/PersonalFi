@@ -119,7 +119,7 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     const path = url.pathname;
     const method = request.method();
 
-    if (path === '/auth/session') {
+    if (path === '/api/auth/session') {
       if (!state.authenticated) {
         return route.fulfill(
           json({ code: 'unauthenticated', title: 'Unauthenticated', status: 401 }, 401),
@@ -128,16 +128,16 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       return route.fulfill(json(SESSION));
     }
 
-    if (path === '/auth/login/options' && method === 'POST') {
+    if (path === '/api/auth/login/options' && method === 'POST') {
       return route.fulfill(json({ options: {} }));
     }
 
-    if (path === '/auth/totp/verify' && method === 'POST') {
+    if (path === '/api/auth/totp/verify' && method === 'POST') {
       state.authenticated = true;
       return route.fulfill(json({ ok: true }));
     }
 
-    if (path === '/auth/step-up/options' && method === 'POST') {
+    if (path === '/api/auth/step-up/options' && method === 'POST') {
       // A minimal-but-valid PublicKeyCredentialRequestOptionsJSON:
       // `@simplewebauthn/browser`'s `startAuthentication` base64url-decodes
       // `challenge` before it ever calls `navigator.credentials.get` (see
@@ -155,16 +155,16 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       );
     }
 
-    if (path === '/auth/step-up/verify' && method === 'POST') {
+    if (path === '/api/auth/step-up/verify' && method === 'POST') {
       state.steppedUp = true;
       return route.fulfill(json({ freshUntil: new Date(Date.now() + 300_000).toISOString() }));
     }
 
-    if (path === '/accounts' && method === 'GET') {
+    if (path === '/api/accounts' && method === 'GET') {
       return route.fulfill(json({ accounts: [ACCOUNT] }));
     }
 
-    if (path === '/net-worth') {
+    if (path === '/api/net-worth') {
       return route.fulfill(
         json({
           asOf: new Date().toISOString(),
@@ -181,13 +181,13 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       );
     }
 
-    if (path === '/transactions' && method === 'GET') {
+    if (path === '/api/transactions' && method === 'GET') {
       return route.fulfill(
         json({ items: [TRANSACTION], nextCursor: null, summary: { count: 1, totals: [] } }),
       );
     }
 
-    if (path === '/transactions/txn_1' && method === 'GET') {
+    if (path === '/api/transactions/txn_1' && method === 'GET') {
       return route.fulfill(
         json({
           ...TRANSACTION,
@@ -215,20 +215,20 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       );
     }
 
-    if (path === '/transactions/txn_1' && method === 'PATCH') {
+    if (path === '/api/transactions/txn_1' && method === 'PATCH') {
       state.lastPatchBody = request.postDataJSON();
       return route.fulfill(json({ ...TRANSACTION, categoryId: null }));
     }
 
-    if (path === '/connectors') {
+    if (path === '/api/connectors') {
       return route.fulfill(json({ connectors: [MANUAL_CONNECTOR] }));
     }
 
-    if (path === '/connections' && method === 'GET') {
+    if (path === '/api/connections' && method === 'GET') {
       return route.fulfill(json({ connections: state.connections }));
     }
 
-    if (path === '/connections' && method === 'POST') {
+    if (path === '/api/connections' && method === 'POST') {
       state.lastCreateConnectionBody = request.postDataJSON();
       if (!state.steppedUp) {
         return route.fulfill(
@@ -273,7 +273,7 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       );
     }
 
-    if (path === '/sync/stream' || path.endsWith('/events')) {
+    if (path === '/api/sync/stream' || path.endsWith('/events')) {
       return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
     }
 

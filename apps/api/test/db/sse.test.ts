@@ -26,6 +26,7 @@
 import { DateOnly, money, mutableClock } from '@core/kernel';
 import { manualTransaction } from '@connector/manual';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { SSE_MAX_STREAMS_PER_SESSION } from '../../src/routes/events.ts';
 import {
   createApiHarness,
   linkManual,
@@ -387,23 +388,29 @@ describe.skipIf(NO_DATABASE)('server-sent event streams', () => {
      * a checked-out client is usually an *already established* backend being
      * handed out, so the server-side connection count does not move and would
      * make this assertion silently vacuous — it did, on the first run.
+     *
+     * `SSE_MAX_STREAMS_PER_SESSION` streams, not one more (R-9, gate C-6):
+     * `h.stale` is one session, and a fourth open on it now gets a `429`
+     * rather than a connection — see `events.test.ts` for that cap's own
+     * claims. This test's claim is unaffected: it still proves every one of
+     * the streams the session was allowed to hold gets its connection back.
      */
     const checkedOut = (): number => h.database.pool.totalCount - h.database.pool.idleCount;
     const before = checkedOut();
 
     const streams: OpenStream[] = [];
     try {
-      for (let index = 0; index < 4; index += 1) {
+      for (let index = 0; index < SSE_MAX_STREAMS_PER_SESSION; index += 1) {
         streams.push(await openStream(base, '/sync/stream', h.stale));
       }
       for (const stream of streams) {
         await stream.waitFor('the stream to open', () => stream.raw().includes(': stream open'));
       }
-      expect(checkedOut()).toBeGreaterThanOrEqual(before + 4);
+      expect(checkedOut()).toBeGreaterThanOrEqual(before + SSE_MAX_STREAMS_PER_SESSION);
     } finally {
-      // Always, even when the assertion above fails: four streams left open
-      // would hang `app.close()` in `afterAll` and bury this failure under a
-      // hook timeout.
+      // Always, even when the assertion above fails: streams left open would
+      // hang `app.close()` in `afterAll` and bury this failure under a hook
+      // timeout.
       for (const stream of streams) await stream.close();
     }
 

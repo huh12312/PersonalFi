@@ -147,24 +147,41 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
         license: { name: 'MIT', identifier: 'MIT' },
       },
       /**
-       * Relative, deliberately.
+       * Relative, deliberately — and now `/api`, not `/`.
        *
-       * This document is generated at build time and `openapi-ts` bakes
-       * `servers[0].url` into the frontend client as its base URL. An absolute
-       * one freezes whatever host the *generator* ran on into the bundle: the
-       * committed spec carried `http://127.0.0.1:8080` (the `BASE_URL` default
-       * used by `emit-openapi`), so every browser call from `https://personalfi.lan`
-       * would have been cross-origin to a loopback address — a mixed-content
-       * block, a CORS failure, and a request that never reaches the API, all from
-       * a value nobody set on purpose.
+       * gate-security-review.md F-4/C-1a: `docker/Caddyfile` used to proxy three
+       * hand-picked prefixes (`/auth/*`, `/health`, `/ready`) at the site root,
+       * against an API that (by WP 1.5/1.3b) mounts eleven. The other eight fell
+       * through to the SPA catch-all and answered `200 text/html` — silently
+       * wrong, not an error. Routing by prefix at the root can never be fixed by
+       * listing more prefixes: `/transactions` and `/accounts` are both SPA
+       * routes (`apps/web/src/routes`) and API routes, distinguishable only by
+       * `Accept`/`Sec-Fetch-Dest`, which `handle` blocks don't see.
        *
-       * `/` makes the client same-origin by construction, which is also the only
-       * deployment this application supports: the SPA is served from the same
-       * Caddy site as the API. The externally visible URL is still in
-       * `BASE_URL`, where operator-facing output (the `just bootstrap-user`
-       * enrolment link) reads it.
+       * The fix is a namespace, not a bigger prefix list: Caddy now proxies
+       * exactly `handle_path /api/*` (strips the prefix) to this API, and the
+       * SPA owns every other path unconditionally. This app's own route paths
+       * are unchanged — it still mounts `/auth/*`, `/health`, `/transactions`,
+       * etc. at the root, same as always, because Caddy is the one stripping
+       * `/api` before the request ever reaches `api:8080`.
+       *
+       * This document is generated at build time and `openapi-ts` *could* bake
+       * `servers[0].url` into the frontend client as its base URL, except
+       * `apps/web/openapi-ts.shared.mjs` sets `baseUrl: false` specifically to
+       * stop that (see that file's own comment) — the real default lives in the
+       * hand-written, regeneration-proof `apps/web/src/api/client-runtime-config.ts`
+       * instead. `servers` here is still `/api`, not an absolute URL: an
+       * absolute one would freeze whatever host the *generator* ran on into the
+       * document (the old value was `http://127.0.0.1:8080`, the `BASE_URL`
+       * default used by `emit-openapi`), which is wrong for every real
+       * deployment and is exactly the mistake `baseUrl: false` exists to be
+       * independent of. `/api` documents the contract truthfully — this is
+       * where every operation in this document is actually reachable from a
+       * browser — without being load-bearing for the generated client's
+       * runtime behaviour. `scripts/check-proxy-routes.ts` (C-1b) asserts this
+       * value and `docker/Caddyfile`'s routed prefix agree.
        */
-      servers: [{ url: '/' }],
+      servers: [{ url: '/api' }],
       tags: [
         { name: 'system', description: 'Liveness, readiness, and operational endpoints.' },
         {

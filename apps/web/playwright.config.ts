@@ -2,7 +2,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright config, scoped to `e2e/`. Three independent suites, two
+ * Playwright config, scoped to `e2e/`. Four independent suites, two
  * `webServer`s:
  *
  *   - `smoke.spec.ts` (project `chromium`) boots the Vite dev server and
@@ -14,7 +14,9 @@ import { defineConfig, devices } from '@playwright/test';
  *     walks login → transactions → edit a category → accounts → connections
  *     → add a manual account, with an axe pass per screen. The network is
  *     mocked (`e2e/support/mock-api.ts`) rather than backed by a live
- *     `apps/api` + Postgres — see that file's header for why.
+ *     `apps/api` + Postgres — see that file's header for why. Also asserts
+ *     (gate-security-review.md F-4/C-1a) that every API call the app makes
+ *     goes to `/api/...`.
  *   - `csp.spec.ts` (project `csp`, gate-remediation-web.md H-3/M-1) builds
  *     the app in `e2e-csp` mode and serves the result behind the *exact*
  *     production `Content-Security-Policy` header via
@@ -23,10 +25,19 @@ import { defineConfig, devices } from '@playwright/test';
  *     that can observe a *runtime* CSP violation — `scripts/check-csp.ts`
  *     is a static regex over the built HTML shell and cannot (see that
  *     file's header for the full list of what it can't see).
+ *   - `csp-plaid.spec.ts` (project `csp-plaid`, gate-security-review.md
+ *     F-3/C-2) runs the real `docker/Caddyfile` through a real `caddy`
+ *     container, once with `PLAID_ENABLED` unset and once `true`, and
+ *     asserts the emitted CSP/COEP headers against policy strings committed
+ *     in the test — not re-derived from the Caddyfile, unlike `csp.spec.ts`
+ *     and `csp-static-server.mjs` (deliberately: see that file's own header).
+ *     No browser page, no `webServer` of its own — it manages its own Caddy
+ *     container per test and talks to it with plain `fetch`.
  *
  * Playwright starts and tears down both `webServer`s regardless of which
  * project's tests are selected; running the full `playwright test` suite is
- * therefore self-contained (no server left running afterward).
+ * therefore self-contained (no server left running afterward). `csp-plaid`
+ * starts and stops its own Caddy container per test, independent of both.
  */
 const isCI = process.env['CI'] !== undefined;
 
@@ -49,6 +60,13 @@ export default defineConfig({
       name: 'csp',
       testMatch: /csp\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:5184' },
+    },
+    {
+      // No browser fixture requested by any test in this file, so no
+      // `devices[...]`/`baseURL` is needed — it only calls `docker` and
+      // `fetch`. Needs `docker` on PATH and a daemon it can talk to.
+      name: 'csp-plaid',
+      testMatch: /csp-plaid\.spec\.ts/,
     },
   ],
   webServer: [

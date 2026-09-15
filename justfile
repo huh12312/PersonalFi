@@ -19,7 +19,16 @@ install:
 # `just verify` is. A green `just check` was being read as a green CI run all
 # through Phase 0 while CI was red at HEAD (the gate review's process finding),
 # so the two names now mean different things on purpose.
-check: typecheck lint test
+check: typecheck lint check-proxy-routes test
+
+# gate-security-review.md F-4/C-1b: the control whose absence let F-4 ship —
+# nothing compared docker/Caddyfile's proxied prefixes to
+# packages/contracts/openapi/openapi.json's actual routes. Grouped with `lint`
+# conceptually (a static, no-database, no-build check over checked-in files)
+# but kept as its own recipe rather than folded into `pnpm run lint` so it
+# needs no package.json edit to wire up; `check` above runs it directly.
+check-proxy-routes:
+    node scripts/check-proxy-routes.ts
 
 # Everything CI will run, locally, in CI's order. A green `just verify` is the
 # claim "the pipeline will be green"; nothing else in this file is.
@@ -265,6 +274,23 @@ gen-pg-secrets:
 # Build the api/worker/migrator, backup, and proxy images.
 build:
     docker compose build
+
+# gate-security-review.md C-1c: the api image's Dockerfile fix (docker/api.Dockerfile,
+# F-1) is proven by `apps/api/test/gate-image-closure.test.ts`, but that test
+# self-skips whenever the named image doesn't exist — and nothing in `just
+# check`/`just verify` ever builds one, which is exactly how F-1 (the image
+# hadn't booted since WP 1.2) went unnoticed for a full phase. Deliberately
+# NOT folded into `just verify`: that recipe already documents its own
+# docker/network cost budget (gitleaks, trivy) and a full `docker compose
+# build` is minutes more on top for a check relevant only when
+# docker/api.Dockerfile or apps/api's production dependency closure changed.
+# `docker compose build api` names the image `${REGISTRY:-personalfi}/api:${PERSONALFI_VERSION:-dev}`
+# — the test's own default when `PERSONALFI_API_IMAGE` is unset — so a plain
+# local run needs no env var. Run this before a push that touches either of
+# those; see RUNBOOK.md's pre-push list.
+verify-images:
+    docker compose build api
+    pnpm exec vitest run apps/api/test/gate-image-closure.test.ts
 
 # Extract Caddy's internal-CA root certificate so it can be imported into a
 # browser/OS trust store (RUNBOOK.md "Trust the internal CA"). Needs the

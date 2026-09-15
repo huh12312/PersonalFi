@@ -97,6 +97,39 @@ echo "placeholder" > secrets/b2_application_key
 # and set RCLONE_REMOTE=b2:<your-bucket-name> in .env.
 
 chmod 444 secrets/b2_key_id secrets/b2_application_key
+
+# 6. Plaid (optional — C-3, gate-security-review.md §2.2 F-2). `compose.yml`
+#    declares `plaid_client_id`, `plaid_secret` and `plaid_env` as file
+#    secrets on `api` and `worker` (never on `proxy` or `backup` — neither
+#    has any use for a Plaid credential), and Compose refuses to start a
+#    container that mounts a secret whose host file does not exist — there
+#    is no "optional bind mount" in its secret model. So these three are
+#    created **empty** unconditionally, whether or not this deployment is
+#    using Plaid yet:
+touch secrets/plaid_client_id secrets/plaid_secret secrets/plaid_env
+chmod 444 secrets/plaid_client_id secrets/plaid_secret secrets/plaid_env
+#    `packages/config` treats a zero-length secret file exactly as it treats
+#    a missing one (`load.ts`'s `loadConfig`, tested in `load.test.ts`), so
+#    three empty files boot exactly as three absent ones would: the API logs
+#    "plaid not configured; connector not registered" and `GET /connectors`
+#    omits Plaid. Nothing else to do until you actually want Plaid.
+#
+#    To actually enable it: sign up at https://dashboard.plaid.com, create a
+#    Sandbox (then, later, Production) API key, and write the Client ID and
+#    secret into the two files above (mode 0400 via `just harden-secrets`,
+#    same as every other secret here):
+#      echo -n '<client id>'      > secrets/plaid_client_id
+#      echo -n '<secret>'         > secrets/plaid_secret
+#      echo -n 'sandbox'          > secrets/plaid_env   # or 'production' —
+#                                                        # see PLAID_ALLOW_PRODUCTION
+#                                                        # below; D16.
+#    Then, in `.env`: set `PLAID_ENABLED=true` (so `docker/Caddyfile` widens
+#    its CSP for `cdn.plaid.com`/`sandbox.plaid.com`/`production.plaid.com` —
+#    C-2), and, only if you need an OAuth institution (most US banks do not),
+#    `PLAID_REDIRECT_URI=https://<PUBLIC_HOST>/link/oauth` — see
+#    `.env.example` for both. `@core/config` refuses to boot if the redirect
+#    URI is set but is not `https` or does not share an origin with
+#    `AUTH_ALLOWED_ORIGINS`.
 ```
 
 #### Secret file modes: 0444 by default, 0400 via `just harden-secrets`
@@ -168,6 +201,12 @@ The two settings that matter for a fresh box:
   `personalfi.lan` refuses to start, by design, rather than failing later in
   the browser. If you want passkeys over Tailscale, set `PUBLIC_HOST` to the
   tailnet name and reach the box by that name on the LAN too.
+
+If step 2 wrote real content into `secrets/plaid_client_id`/`plaid_secret`,
+also set `PLAID_ENABLED=true` (and, for an OAuth institution,
+`PLAID_REDIRECT_URI`) — see `.env.example`'s Plaid section and step 2, item 6,
+above. Leave both unset for a deployment with no Plaid secrets yet; the
+defaults (`PLAID_ENABLED=false`, no redirect URI) are correct for that case.
 
 ### 4. Bring the stack up
 
@@ -349,6 +388,74 @@ actually fails — as opposed to one that hasn't run yet — reports unhealthy.
 On a fresh `docker compose up -d`, expect `backup` to go `healthy` within a
 few minutes with no operator action; see
 `docs/evidence/phase-0/gate-remediation-4.md` for the timed proof.
+
+---
+
+## What survives a disconnect
+
+**A disconnected provider's sealed credential is not necessarily gone from
+every copy of the database the moment `DELETE /connections/{id}` returns 200.**
+
+`disconnectConnection` (`packages/contexts/connections/src/connections.ts`)
+sets `connections.sealed_credentials = NULL` in the **live** database
+immediately, unconditionally — that half always happens, and is correct: it
+is what "disconnect" means from the ledger's own point of view, and it happens
+even when the provider itself could not be reached to revoke the token
+(`revokedAtProvider: false`).
+
+It does not, and cannot, reach into a backup already taken. This repo's
+nightly backup (`docker/backup/backup.sh`) is a full `pg_dump`, encrypted with
+`age` and retained:
+
+- **`BACKUP_RETENTION_DAYS`, 30 days by default**, on the local `backups`
+  volume — a dump taken the night before a disconnect still holds that
+  connection's sealed credential (still sealed, still under the KEK — see
+  below) for up to thirty more nightly prunes.
+- **Indefinitely on Backblaze B2**, if `RCLONE_REMOTE` is set (`RUNBOOK.md`
+  "Backup"): `backup.sh` `rclone copy`s every dump it takes and never deletes
+  one from B2 — object lock (D24) is the point, and this application does not
+  and should not hold the ability to delete an already-written backup. B2's
+  own bucket-level object-lock retention policy, not `BACKUP_RETENTION_DAYS`,
+  governs how long a pushed copy is immutable there; that policy is set on the
+  bucket when it is created, outside anything this repo configures.
+
+**This is not a plaintext exposure.** The dump itself is `age`-encrypted end
+to end, and the credential inside it is _itself_ sealed under the KEK
+(`SecretBox`, D5) — two independent layers, neither of which a disconnect
+touches or needs to touch. A backup that leaks discloses nothing about a
+disconnected connection's credential that it did not already disclose about
+every _connected_ one.
+
+**Why it is still worth stating plainly, not just filing as "fine":** D5's
+scope rule — "key loss = re-link providers, never = lose the ledger" — assumes
+the KEK is the _only_ thing standing between a backup and a live provider
+token, and a user who clicks "disconnect" reasonably believes the credential
+itself is gone everywhere, not just live. Neither is quite true while an old
+backup exists.
+
+**What actually retires an old credential: KEK rotation.** The envelope design
+(03 §2, D5) is epoch-keyed — each sealed value is bound to the KEK that sealed
+it, so rotating the KEK and re-sealing every live row under the new one
+changes what unwraps a _live_ row, but does nothing to ciphertext already
+frozen inside a `.dump.age` file, because that ciphertext is never touched by
+the rotation. A backup taken _after_ a rotation carries only values sealed
+under the new KEK; a backup taken _before_ it still needs the _old_ KEK's
+epoch to open, and once the old epoch's derivation material is itself
+destroyed (not merely superseded — actually deleted, which rotation as
+designed does not yet automate; see "Master-key rotation" below, which is a
+pointer, not a shipped procedure, as of this writing), no key remaining on the
+box can open that old backup's sealed columns at all, disconnected credential
+included. Rotation is therefore the operation that actually retires an old
+credential from backup exposure, not disconnect, and not the local retention
+window lapsing (thirty days after disconnect, the _local_ copy ages out on its
+own — B2 does not, absent rotation and destruction of the old epoch's key
+material).
+
+**In short:** disconnect stops the credential from being used and clears it
+from the live database. If backups matter to your threat model — someone with
+read access to `backups/` or the B2 bucket, not read access to this host's
+`secrets/master_key` — treat a disconnect as "revoked, pending the backup
+retention window and, fully, a KEK rotation," not as "gone."
 
 ---
 

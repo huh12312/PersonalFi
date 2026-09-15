@@ -137,6 +137,58 @@ describe('loadConfig', () => {
     }
   });
 
+  /**
+   * C-3 (gate-security-review.md §2.2): `compose.yml`'s file secrets must
+   * exist on the host or `docker compose up` refuses to start the container
+   * at all — there is no "optional bind mount" in Compose's secret model.
+   * For an optional secret (the three `plaid_*` files) that forces a choice:
+   * either every operator hand-creates empty placeholder files for secrets
+   * they are not using, or an empty file has to mean the same thing as no
+   * file. This is the second, applied uniformly — including to a *required*
+   * secret, where "empty" must fail exactly as loudly as "missing" and never
+   * silently succeed with a zero-length passphrase.
+   */
+  it('treats a zero-length secret file as absent, the same as no file at all', () => {
+    const config = loadConfig({
+      env: env({ ROLE: 'migrator' }),
+      readSecret: secretsFrom({ master_key: undefined, database_url: '' }),
+    });
+    // `database_url` has an env fallback (`DATABASE_URL`, set by `env()`), so
+    // an empty *file* falling through to it is the proof the file was treated
+    // as absent rather than as "present, with an empty connection string".
+    expect(config.databaseUrl.reveal()).toBe(VALID_URL);
+  });
+
+  it('treats a whitespace-only secret file as absent too, not as a blank credential', () => {
+    const config = loadConfig({
+      env: env(),
+      readSecret: secretsFrom({ database_url: '   \n\t  ' }),
+    });
+    expect(config.databaseUrl.reveal()).toBe(VALID_URL);
+  });
+
+  it('refuses to start api/worker/cli when master_key is an empty file, exactly as when absent', () => {
+    for (const role of ['api', 'worker', 'cli'] as const) {
+      let thrown: unknown;
+      try {
+        loadConfig({
+          env: env({ ROLE: role }),
+          readSecret: secretsFrom({ master_key: '' }),
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(
+        thrown,
+        `ROLE=${role} must refuse to start on an empty master_key file`,
+      ).toBeInstanceOf(ConfigError);
+      expect(
+        (thrown as ConfigError).problems.some((p) => p.key === 'secret:master_key'),
+        `ROLE=${role} must name the empty passphrase as missing`,
+      ).toBe(true);
+    }
+  });
+
   it('still rejects a role nothing can start as', () => {
     // The enum is a guard, not a free-text field: a typo'd `ROLE: wroker` in
     // compose should fail loudly at boot rather than silently run as the default.
@@ -639,6 +691,33 @@ describe('Plaid (WP 1.3b — config)', () => {
     expect(config.plaid).toBeNull();
   });
 
+  it('boots with Plaid unconfigured when both files exist but are empty (C-3 bootstrap placeholder)', () => {
+    // RUNBOOK.md's "Create secrets" has the operator generate empty
+    // plaid_client_id/plaid_secret/plaid_env placeholders unconditionally
+    // (compose.yml requires the files to exist), so an empty file — not
+    // ENOENT — is the file an operator who has not signed up for Plaid
+    // actually has on disk.
+    const config = loadConfig({
+      env: env(),
+      readSecret: secretsFrom({ plaid_client_id: '', plaid_secret: '\n' }),
+    });
+    expect(config.plaid).toBeNull();
+  });
+
+  it('treats an empty plaid_secret file as missing when plaid_client_id is present', () => {
+    let error: unknown;
+    try {
+      loadConfig({
+        env: env(),
+        readSecret: secretsFrom({ plaid_client_id: CLIENT_ID, plaid_secret: '   ' }),
+      });
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(ConfigError);
+    expect((error as ConfigError).problems.some((p) => p.key === 'secret:plaid_secret')).toBe(true);
+  });
+
   it('refuses to boot with only a client id and no secret', () => {
     expect(() =>
       loadConfig({
@@ -765,6 +844,10 @@ describe('Plaid (WP 1.3b — config)', () => {
 
     const set = loadConfig({
       env: env({
+        // The redirect URI's origin has to be one of AUTH_ALLOWED_ORIGINS
+        // (see the describe block below) — this deployment's own.
+        AUTH_RP_ID: 'nuc.tailnet-fake.ts.net',
+        AUTH_ALLOWED_ORIGINS: 'https://nuc.tailnet-fake.ts.net',
         PLAID_REDIRECT_URI: 'https://nuc.tailnet-fake.ts.net/link/oauth',
         PLAID_WEBHOOK_URL: 'https://nuc.tailnet-fake.ts.net/webhooks/plaid',
       }),
@@ -772,6 +855,74 @@ describe('Plaid (WP 1.3b — config)', () => {
     });
     expect(set.plaid?.redirectUri).toBe('https://nuc.tailnet-fake.ts.net/link/oauth');
     expect(set.plaid?.webhookUrl).toBe('https://nuc.tailnet-fake.ts.net/webhooks/plaid');
+  });
+
+  describe('PLAID_REDIRECT_URI (D12; gate-security-review.md §2.2 F-2, §6 C-3)', () => {
+    const MATCHING_ORIGIN = {
+      AUTH_RP_ID: 'nuc.tailnet-fake.ts.net',
+      AUTH_ALLOWED_ORIGINS: 'https://nuc.tailnet-fake.ts.net',
+    } as const;
+
+    it('accepts an https redirect URI whose origin is an allowed origin', () => {
+      const config = loadConfig({
+        env: env({
+          ...MATCHING_ORIGIN,
+          PLAID_REDIRECT_URI: 'https://nuc.tailnet-fake.ts.net/link/oauth',
+        }),
+        readSecret: secretsFrom({ plaid_client_id: CLIENT_ID, plaid_secret: SECRET }),
+      });
+      expect(config.plaid?.redirectUri).toBe('https://nuc.tailnet-fake.ts.net/link/oauth');
+    });
+
+    it('refuses a non-https redirect URI, even when its origin would otherwise match', () => {
+      expect(() =>
+        loadConfig({
+          env: env({
+            AUTH_RP_ID: 'nuc.tailnet-fake.ts.net',
+            AUTH_ALLOWED_ORIGINS: 'http://nuc.tailnet-fake.ts.net',
+            PLAID_REDIRECT_URI: 'http://nuc.tailnet-fake.ts.net/link/oauth',
+          }),
+          readSecret: secretsFrom({ plaid_client_id: CLIENT_ID, plaid_secret: SECRET }),
+        }),
+      ).toThrowError(/PLAID_REDIRECT_URI/);
+    });
+
+    it('refuses a redirect URI whose origin is not an allowed origin', () => {
+      let error: unknown;
+      try {
+        loadConfig({
+          env: env({
+            ...MATCHING_ORIGIN,
+            // Different host than AUTH_ALLOWED_ORIGINS above.
+            PLAID_REDIRECT_URI: 'https://not-this-deployment.example.com/link/oauth',
+          }),
+          readSecret: secretsFrom({ plaid_client_id: CLIENT_ID, plaid_secret: SECRET }),
+        });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(ConfigError);
+      const problem = (error as ConfigError).problems.find((p) => p.key === 'PLAID_REDIRECT_URI');
+      expect(problem?.problem).toMatch(/not one of AUTH_ALLOWED_ORIGINS/);
+    });
+
+    it('is not a problem when unset, even with no Plaid credentials at all', () => {
+      const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+      expect(config.plaid).toBeNull();
+    });
+
+    it('treats an empty-string env value as absent, the same as an unset key', () => {
+      // compose.yml passes this through as `${PLAID_REDIRECT_URI:-}` — an
+      // operator with no PLAID_REDIRECT_URI in .env hands the container an
+      // empty string, not a missing key. `z.url()` alone would reject "" as
+      // an invalid URL and fail every fresh boot with no Plaid OAuth in use.
+      const config = loadConfig({
+        env: env({ PLAID_REDIRECT_URI: '', PLAID_WEBHOOK_URL: '' }),
+        readSecret: secretsFrom({ plaid_client_id: CLIENT_ID, plaid_secret: SECRET }),
+      });
+      expect(config.plaid?.redirectUri).toBeNull();
+      expect(config.plaid?.webhookUrl).toBeNull();
+    });
   });
 
   it('never puts the client id or secret in an error message', () => {

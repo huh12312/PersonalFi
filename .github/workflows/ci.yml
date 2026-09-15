@@ -122,6 +122,15 @@ jobs:
       - name: schema ownership
         run: pnpm run lint:schema-ownership
 
+      # gate-security-review.md F-4/C-1b: parses packages/contracts/openapi/
+      # openapi.json's servers url and top-level path prefixes against
+      # docker/Caddyfile's routed prefixes — the control whose absence let F-4
+      # (Caddy proxying 3 of 11 API prefixes) ship silently for a full phase.
+      # No database, no build: a static, checked-in-files-only check, same
+      # shape as the three steps above.
+      - name: proxy routes match the contract
+        run: node scripts/check-proxy-routes.ts
+
   test:
     name: unit tests
     runs-on: ubuntu-latest
@@ -388,6 +397,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Only actually used by the api-image gate-image-closure step below
+      # (C-1c) — kept at job scope, not step scope, since actions/setup-node
+      # is cheap and every other matrix entry just skips the step that needs it.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       # Single-arch (the runner's own arch), loaded into the local docker
@@ -423,6 +438,26 @@ jobs:
             exit 1
           fi
           echo "lightningcss: absent (verified)"
+
+      # gate-security-review.md F-1/C-1c: F-1 was "the api image hadn't booted
+      # since WP 1.2" — a Dockerfile prune step deleted a package the runtime
+      # needed, and nothing in `just check`, `just verify`, or CI ever started
+      # the built image, so a restart-looping container shipped clean through
+      # every gate but the one that actually ran `docker compose up`.
+      # `apps/api/test/gate-image-closure.test.ts` is the regression test (it
+      # asks pnpm for @app/api's production closure, asserts every project in
+      # it survived the prune, then imports the composition root *inside* the
+      # image); it self-skips whenever `docker image inspect` can't find its
+      # target, which up to now was always, in every job. This is that image,
+      # named exactly as the test's `PERSONALFI_API_IMAGE` override expects.
+      - name: gate-image-closure (api image actually boots)
+        if: matrix.image == 'api'
+        env:
+          PERSONALFI_API_IMAGE: personalfi/api:ci
+        run: |
+          npm install --global pnpm@12.4.1
+          pnpm install --frozen-lockfile
+          pnpm exec vitest run apps/api/test/gate-image-closure.test.ts
 
       - name: sbom (syft, SPDX + CycloneDX)
         run: |

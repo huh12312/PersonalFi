@@ -25,6 +25,22 @@
  * runtime, so the two cannot drift again: change the Caddyfile and this test
  * server picks it up on its next run with no separate edit.
  *
+ * gate-security-review.md F-3/C-2: the Caddyfile's CSP/COEP header values now
+ * contain Caddy `map` placeholders (`{plaid_script_src}`, `{plaid_frame_src}`,
+ * `{plaid_connect_src}`, `{coep_policy}`) that only the real `caddy` binary
+ * resolves at request time, gated on `PLAID_ENABLED`. This server parses the
+ * Caddyfile's *text*, not a running Caddy, so it must resolve them itself —
+ * to the same values Caddy's `map` produces for the `default` (Plaid-disabled)
+ * case, since that's what this app build always is. Getting this wrong is not
+ * cosmetic: an unresolved `{plaid_script_src}` glued onto `'self'` with no
+ * separating space (`'self'{plaid_script_src}`) is one malformed CSP source
+ * token, which browsers reject outright — leaving `script-src-elem` with zero
+ * valid sources, i.e. blocking *every* script, not just Plaid's. (Caught
+ * exactly this way: `csp.spec.ts`'s kitchen-sink tests failed to render
+ * anything at all until this substitution was added.) `csp-plaid.spec.ts` is
+ * the test that actually exercises the Plaid-enabled variant, against a real
+ * `caddy` process rather than this static approximation of the default case.
+ *
  * Launched by Playwright's `webServer` (playwright.config.ts) — Playwright
  * owns the process lifecycle (start before tests, kill after), so nothing
  * here needs to handle its own shutdown beyond what SIGTERM/SIGINT already
@@ -43,25 +59,55 @@ const port = 5184;
 // apps/web/e2e -> apps/web -> apps -> repo root -> docker/Caddyfile.
 const caddyfilePath = join(here, '..', '..', '..', 'docker', 'Caddyfile');
 
+/** Caddy's `map {$PLAID_ENABLED:false} {...}` `default` row — see this file's own header. */
+const PLAID_DISABLED_PLACEHOLDERS = {
+  '{plaid_script_src}': '',
+  '{plaid_frame_src}': '',
+  '{plaid_connect_src}': '',
+  '{coep_policy}': 'require-corp',
+};
+
+function resolvePlaidDisabledPlaceholders(value) {
+  let resolved = value;
+  for (const [token, replacement] of Object.entries(PLAID_DISABLED_PLACEHOLDERS)) {
+    resolved = resolved.split(token).join(replacement);
+  }
+  return resolved;
+}
+
 /**
- * Parses the `Content-Security-Policy "..."` line out of the
- * `(security_headers)` snippet in `docker/Caddyfile` — the exact string
- * Caddy sends on both listeners (`import security_headers` in that file) —
- * rather than keeping a second, hand-maintained copy of it here.
+ * Parses the `Content-Security-Policy "..."` and `Cross-Origin-Embedder-Policy
+ * "..."` lines out of the `(security_headers)` snippet in `docker/Caddyfile`
+ * — the exact strings Caddy sends on both listeners (`import security_headers`
+ * in that file) — rather than keeping a second, hand-maintained copy of them
+ * here.
  */
-async function readContentSecurityPolicy() {
+async function readSecurityHeaders() {
   const caddyfile = await readFile(caddyfilePath, 'utf8');
-  const match = /^\s*Content-Security-Policy\s+"([^"]*)"\s*$/m.exec(caddyfile);
-  if (!match) {
+  const cspMatch = /^\s*Content-Security-Policy\s+"([^"]*)"\s*$/m.exec(caddyfile);
+  if (!cspMatch) {
     throw new Error(
       `csp-static-server: could not find a Content-Security-Policy directive in ${caddyfilePath} — ` +
         'has the (security_headers) snippet in docker/Caddyfile changed shape?',
     );
   }
-  return match[1];
+  const coepMatch = /^\s*Cross-Origin-Embedder-Policy\s+"([^"]*)"\s*$/m.exec(caddyfile);
+  if (!coepMatch) {
+    throw new Error(
+      `csp-static-server: could not find a Cross-Origin-Embedder-Policy directive in ${caddyfilePath} — ` +
+        'has the (security_headers) snippet in docker/Caddyfile changed shape?',
+    );
+  }
+  return {
+    contentSecurityPolicy: resolvePlaidDisabledPlaceholders(cspMatch[1]),
+    crossOriginEmbedderPolicy: resolvePlaidDisabledPlaceholders(coepMatch[1]),
+  };
 }
 
-const CONTENT_SECURITY_POLICY = await readContentSecurityPolicy();
+const {
+  contentSecurityPolicy: CONTENT_SECURITY_POLICY,
+  crossOriginEmbedderPolicy: CROSS_ORIGIN_EMBEDDER_POLICY,
+} = await readSecurityHeaders();
 
 const CONTENT_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -115,6 +161,7 @@ const server = createServer((req, res) => {
     try {
       const body = await readFile(filePath);
       res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+      res.setHeader('Cross-Origin-Embedder-Policy', CROSS_ORIGIN_EMBEDDER_POLICY);
       res.setHeader('Content-Type', CONTENT_TYPES[extname(filePath)] ?? 'application/octet-stream');
       res.writeHead(200);
       res.end(body);

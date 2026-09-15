@@ -30,15 +30,15 @@ function readCsrfToken(): string | undefined {
 
 /**
  * Same primer as `pending-contracts.ts`'s `ensureCsrfCookie` — a browser that
- * lands directly on a deep link has made no `/auth/*` request yet, so it has
- * no `__Host-pfi_csrf` cookie the moment the *first* generated-client mutation
- * fires. `/auth/unlock-state` is a GET (skips the CSRF check), needs no
- * session, and answers while the app is locked, so it is safe to call from
- * here unconditionally.
+ * lands directly on a deep link has made no `/api/auth/*` request yet, so it
+ * has no `__Host-pfi_csrf` cookie the moment the *first* generated-client
+ * mutation fires. `/api/auth/unlock-state` is a GET (skips the CSRF check),
+ * needs no session, and answers while the app is locked, so it is safe to
+ * call from here unconditionally.
  */
 async function ensureCsrfCookie(): Promise<void> {
   if (readCsrfToken() !== undefined) return;
-  await fetch('/auth/unlock-state', { credentials: 'same-origin' }).catch(() => undefined);
+  await fetch('/api/auth/unlock-state', { credentials: 'same-origin' }).catch(() => undefined);
 }
 
 /**
@@ -87,19 +87,30 @@ export function registerCsrfInterceptor(client: InterceptableClient): void {
  * Wired into codegen via `runtimeConfigPath` in `openapi-ts.shared.mjs`,
  * `@hey-api/client-fetch`'s escape hatch for exactly this case. `pnpm
  * --filter @app/web gen` regenerates `src/api/generated` from
- * `packages/contracts/openapi/openapi.json` on every run and would re-bake
- * whatever that document's `servers` entry says; this file is hand-written
- * and gitignore-exempt, so it is the one place the override survives
- * regeneration.
+ * `packages/contracts/openapi/openapi.json` on every run; `baseUrl: false` on
+ * the `@hey-api/client-fetch` plugin (see that file's own comment) stops the
+ * generator from ever baking that document's `servers` entry into
+ * `client.gen.ts`, so this hand-written, gitignore-exempt file is the *only*
+ * place the base URL is set, and `pnpm gen` cannot change what it produces —
+ * that is what "keeps the generated files byte-reproducible" means here
+ * (gate-security-review.md C-1a): the contract's `servers` value
+ * (`apps/api/src/app.ts`) documents where the API lives for humans and for
+ * `scripts/check-proxy-routes.ts`, and is otherwise inert as far as codegen
+ * output goes — this constant is what the browser actually uses.
  *
  * Both overrides exist because the generated defaults are wrong for a
  * same-origin deployment behind Caddy:
  *
- *   - `baseUrl: ''` — every request is relative to wherever the SPA itself
- *     was served from, which is exactly where Caddy proxies `/auth`,
- *     `/health`, and `/ready` too. Taking the contract's `servers` entry
- *     instead would bake the generating machine's origin into the bundle:
- *     an environment-specific origin to get wrong, and CORS on every call.
+ *   - `baseUrl: '/api'` — every request is relative to wherever the SPA
+ *     itself was served from, at the `/api` prefix Caddy's `handle_path
+ *     /api/*` strips before proxying to `api:8080` (docker/Caddyfile,
+ *     gate-security-review.md F-4/C-1a). Taking the contract's `servers`
+ *     entry instead would bake the generating machine's origin into the
+ *     bundle: an environment-specific origin to get wrong, and CORS on every
+ *     call. `/api` rather than `''` (the pre-C-1a value) is the one line that
+ *     actually moves every generated-client call — SSE included, since
+ *     `core/serverSentEvents.gen.ts` composes off the same `baseUrl` — onto
+ *     the API's own namespace instead of colliding with the SPA's routes.
  *   - `credentials: 'same-origin'` — without it the generated client sends
  *     no cookies at all, so every authenticated request would be anonymous.
  *     `'same-origin'` rather than `'include'` because the session cookie
@@ -111,7 +122,7 @@ export function createClientConfig<T extends object>(
 ): T & { baseUrl: string; credentials: 'same-origin' } {
   return {
     ...config,
-    baseUrl: '',
+    baseUrl: '/api',
     credentials: 'same-origin',
   } as T & { baseUrl: string; credentials: 'same-origin' };
 }

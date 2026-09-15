@@ -150,6 +150,37 @@ export default defineConfig(({ mode }) => ({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  /**
+   * gate-security-review.md F-4/C-1a: the generated client's `baseUrl` is
+   * `/api` (`src/api/client-runtime-config.ts`), matching `docker/Caddyfile`'s
+   * `handle_path /api/*` (strips the prefix, forwards to the API's own
+   * root-mounted routes — `apps/api` itself is unchanged, still mounting
+   * `/auth/*`, `/transactions`, etc. at its own root). A raw `pnpm --filter
+   * @app/web dev` run has no Caddy in front of it, so this mirrors the same
+   * strip-and-forward against a directly-running `apps/api` (`just dev`,
+   * default `HTTP_PORT=8080`) — a local convenience only, not exercised by
+   * any test: `smoke.spec.ts`/`app-walkthrough.spec.ts` mock every call via
+   * `page.route` (`e2e/support/mock-api.ts`), which intercepts before a
+   * request ever reaches this proxy, and `csp.spec.ts` is served by
+   * `e2e/csp-static-server.mjs`, not `vite dev`, and makes no API calls at
+   * all. Dev-server-only; `vite build` ignores `server.proxy` entirely.
+   *
+   * Port `8080` is a literal, not `process.env['API_DEV_PORT']` — this file
+   * isn't application runtime code (`@core/config` doesn't apply, and
+   * `no-restricted-properties` on `process.env` still flags it repo-wide),
+   * and `packages/config/src/schema.ts`'s own `HTTP_PORT` default is `8080`,
+   * so the two can only drift by someone changing one default and not the
+   * other, same risk as any other hardcoded local-dev convenience value.
+   */
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8080',
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/api/, ''),
+      },
+    },
+  },
   build: {
     target: 'es2022',
     modulePreload: { polyfill: false },

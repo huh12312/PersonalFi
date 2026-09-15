@@ -123,6 +123,30 @@ secrets:
     file: ./secrets/b2_key_id
   b2_application_key:
     file: ./secrets/b2_application_key
+  # Optional, file-only (01 §1.10: never published or shared) — C-3,
+  # gate-security-review.md §2.2 F-2. Attached to `api` and `worker` only
+  # (`@core/config`'s `loadConfig()`), never to `proxy` (a static file server
+  # and reverse proxy has no use for a Plaid credential) or `backup` (a `pg_dump`
+  # process has no use for one either — the ciphertext it dumps is already
+  # sealed under the KEK, not under these). Compose requires every declared
+  # secret's host file to exist before `docker compose up` will start a
+  # container that mounts it — there is no "optional bind mount" in Compose's
+  # secret model — so `RUNBOOK.md` "Create secrets" has the operator generate
+  # these three **empty** when Plaid is not in use. `packages/config/src/load.ts`
+  # treats a zero-length (or whitespace-only) secret file exactly as it treats
+  # a missing one (tested: `packages/config/src/load.test.ts` "treats a
+  # zero-length secret file as absent"), so an empty placeholder is
+  # indistinguishable from no file at all to `@core/config` — Plaid simply
+  # is not registered, the same as before this file existed.
+  plaid_client_id:
+    file: ./secrets/plaid_client_id
+  plaid_secret:
+    file: ./secrets/plaid_secret
+  # `sandbox` | `production`, as text — not required to exist with content;
+  # see `resolvePlaid` (packages/config/src/load.ts), which defaults to
+  # `sandbox` when this file is absent or empty but credentials are present.
+  plaid_env:
+    file: ./secrets/plaid_env
 
 services:
   proxy:
@@ -152,6 +176,16 @@ services:
       # They were allowed to disagree once (P0-4) and nothing announced it.
       PUBLIC_HOST: ${PUBLIC_HOST:-personalfi.lan}
       CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:-chris@thebrutus.org}
+      # C-3, gate-security-review.md §2.2 F-2/§2.3 F-3/§6 C-2: `docker/Caddyfile`
+      # reads this to decide whether to widen its CSP for `cdn.plaid.com` /
+      # `sandbox.plaid.com` / `production.plaid.com` — a deployment with no
+      # Plaid secrets keeps the narrower default policy. This service has no
+      # way to read `secrets/plaid_client_id` itself (it never mounts Plaid
+      # secrets — see the `secrets:` block above), so the operator states the
+      # fact here rather than Caddy inferring it. See `.env.example` for how
+      # to set it, and keep it in agreement with whether `secrets/plaid_client_id`
+      # and `secrets/plaid_secret` actually have content.
+      PLAID_ENABLED: ${PLAID_ENABLED:-false}
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -211,7 +245,16 @@ services:
       AUTH_ALLOWED_ORIGINS: https://${PUBLIC_HOST:-personalfi.lan}${EXTRA_ALLOWED_ORIGINS:+,${EXTRA_ALLOWED_ORIGINS}}
       SECRETS_DIR: /run/secrets
       ROLE: api
-    secrets: [database_url, master_key]
+      # Non-secret Plaid deployment shape (packages/config/src/schema.ts) — the
+      # credentials themselves are the three `plaid_*` file secrets below, never
+      # an env var (01 §1.10). Empty/unset is fine: `PLAID_REDIRECT_URI` defaults
+      # to `null` (OAuth institutions disabled) and `@core/config` refuses to
+      # boot if it is set but is not https or does not share an origin with
+      # AUTH_ALLOWED_ORIGINS (C-3). Mirrors `PLAID_ENABLED` on `proxy`, above —
+      # keep the two in agreement; see `.env.example`.
+      PLAID_ENABLED: ${PLAID_ENABLED:-false}
+      PLAID_REDIRECT_URI: ${PLAID_REDIRECT_URI:-}
+    secrets: [database_url, master_key, plaid_client_id, plaid_secret, plaid_env]
     networks: [frontend, backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
     user: '10001:10001'
@@ -265,7 +308,12 @@ services:
       AUTH_ALLOWED_ORIGINS: https://${PUBLIC_HOST:-personalfi.lan}${EXTRA_ALLOWED_ORIGINS:+,${EXTRA_ALLOWED_ORIGINS}}
       SECRETS_DIR: /run/secrets
       ROLE: worker
-    secrets: [database_url, master_key]
+      # See the identical block on `api`, above — the worker is what actually
+      # runs a Plaid sync (`SyncOrchestrator`), so it needs the same three
+      # secrets and the same non-secret shape, not just the credential.
+      PLAID_ENABLED: ${PLAID_ENABLED:-false}
+      PLAID_REDIRECT_URI: ${PLAID_REDIRECT_URI:-}
+    secrets: [database_url, master_key, plaid_client_id, plaid_secret, plaid_env]
     networks: [backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
     user: '10001:10001'

@@ -37,11 +37,13 @@ import {
   CsvImportConnector,
   IMPORT_PROVIDER,
 } from '@connector/csv';
+import { PLAID_PROVIDER } from '@connector/plaid';
 import {
   capabilitiesSchema,
   connectionAccountSchema,
   connectionSummarySchema,
   connectorManifestSchema,
+  countConnectionsByProvider,
   createConnection,
   disconnectConnection,
   getConnectionDetail,
@@ -141,6 +143,19 @@ export function contextOf(deps: RouteDeps, userId: string, requestId: string): C
 }
 
 /**
+ * D16: Trial's hard cap on Plaid Items, per `client_id` (i.e. per
+ * *deployment*, not per user or per connection). `/item/remove` does not free
+ * a slot Plaid already counted, so the only lever this application has is
+ * refusing to spend an eleventh Item locally, before ever calling Plaid.
+ *
+ * Lives here, not in `routes/plaid.ts`, because the check it names is enforced
+ * inside `linkConnection` (below) — the one path every provider-linking route
+ * shares — and `routes/plaid.ts` imports it from here for its own route
+ * description rather than declaring a second copy that could drift.
+ */
+export const PLAID_ITEM_LIMIT = 10;
+
+/**
  * Link or re-link, then start the backfill.
  *
  * Exported (not a closure inside `connectionRoutes`) so `routes/plaid.ts` can
@@ -154,6 +169,21 @@ export function contextOf(deps: RouteDeps, userId: string, requestId: string): C
  * linked and never syncs. The inline branch is the exception documented at the
  * top of this file, and it runs *after* the commit — an adapter's page loop
  * must not hold the connection that created the row.
+ *
+ * ## The Plaid Item ratchet is enforced here, not in a route (R-7, gate C-3)
+ *
+ * The gate found the ten-Item check only inside `POST /connections/plaid/exchange`
+ * — so `POST /connections { "provider": "plaid", ... }` reached a real Item
+ * exchange with the ratchet never consulted, and the count it did run was
+ * `listConnectionSummaries(database, session.userId)`, scoped to one user
+ * while Plaid's own cap is per deployment. Every provider-linking route in
+ * this file (`POST /connections`, `/complete`, `/reconnect`) and
+ * `routes/plaid.ts`'s `/connections/plaid/exchange` all call this one
+ * function, so putting the check here — before `connector.connect` is ever
+ * called — is the only placement that cannot be bypassed by routing around
+ * it, and `countConnectionsByProvider` (`@ctx/connections`) counts every row
+ * for the provider, across every user, disconnected included (D16: a
+ * disconnected row may still hold a Plaid slot `/item/remove` never freed).
  */
 export async function linkConnection(
   deps: RouteDeps,
@@ -170,6 +200,27 @@ export async function linkConnection(
   const result = await mapDomainErrors(() =>
     database.transaction(async (tx) => {
       const connector = registry.get(body.provider);
+
+      if (body.provider === PLAID_PROVIDER) {
+        // Before `connector.connect` — a real Item exchange — is ever called.
+        // Refusing here is what makes this a *ratchet* rather than a billing
+        // surprise discovered after the fact.
+        const existingCount = await countConnectionsByProvider(tx, body.provider);
+        if (existingCount >= PLAID_ITEM_LIMIT) {
+          throw new AppError({
+            status: 409,
+            code: 'connections.plaid_item_limit',
+            title: 'Conflict',
+            detail:
+              `This deployment already has ${String(existingCount)} Plaid connections, at the ` +
+              `Trial plan's ${String(PLAID_ITEM_LIMIT)}-Item cap. Disconnect one first — and ` +
+              'remove it in the Plaid dashboard, since /item/remove there is what actually frees ' +
+              'a slot.',
+            family: 'domain',
+          });
+        }
+      }
+
       const created = await createConnection(
         tx,
         {

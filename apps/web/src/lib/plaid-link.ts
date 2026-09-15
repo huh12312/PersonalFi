@@ -17,12 +17,16 @@
  * stays the client-side half — loading Plaid's script and driving
  * `window.Plaid` — and knows nothing about how a token was obtained.
  *
- * **CSP note**: loading `cdn.plaid.com` needs `script-src`/`connect-src`
- * `https://cdn.plaid.com` and `https://production.plaid.com`/
- * `https://sandbox.plaid.com` in the proxy's Content-Security-Policy header
- * (Caddy, not `apps/web` — `scripts/check-csp.ts` only checks the built HTML
- * for an inline `<script>`, not the runtime CSP header). Flagged in the
- * evidence doc for whoever owns that config.
+ * **CSP note — resolved, gate-security-review.md F-3/C-2.** Loading
+ * `cdn.plaid.com` needs `script-src-elem`/`frame-src`/`connect-src` widened
+ * for it, plus a `Cross-Origin-Embedder-Policy` that doesn't require the CDN's
+ * cooperation (it serves neither CORP nor CORS headers on
+ * `link-initialize.js`). `docker/Caddyfile`'s `(security_headers)` snippet now
+ * does both, gated on `PLAID_ENABLED` so a deployment with no Plaid secrets
+ * keeps the strict, Plaid-less policy — see that file and
+ * docs/evidence/phase-1/gate-remediation-web.md for the probe that proved it
+ * (`blocked` under the old policy / `require-corp`, `loaded` once both
+ * changed).
  */
 
 declare global {

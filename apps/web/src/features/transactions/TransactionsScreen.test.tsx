@@ -101,10 +101,10 @@ describe('TransactionsScreen', () => {
 
   it('renders the transaction list with formatted amounts and account names', async () => {
     stubFetchRoutes([
-      { match: '/auth/session', handle: () => jsonResponse(SESSION) },
-      { match: '/accounts', handle: () => jsonResponse({ accounts: [ACCOUNT] }) },
+      { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
+      { match: '/api/accounts', handle: () => jsonResponse({ accounts: [ACCOUNT] }) },
       {
-        match: '/transactions',
+        match: '/api/transactions',
         handle: () =>
           jsonResponse({
             items: [transaction({ id: 'txn_1' })],
@@ -123,10 +123,10 @@ describe('TransactionsScreen', () => {
 
   it('shows pending and transfer badges', async () => {
     stubFetchRoutes([
-      { match: '/auth/session', handle: () => jsonResponse(SESSION) },
-      { match: '/accounts', handle: () => jsonResponse({ accounts: [ACCOUNT] }) },
+      { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
+      { match: '/api/accounts', handle: () => jsonResponse({ accounts: [ACCOUNT] }) },
       {
-        match: '/transactions',
+        match: '/api/transactions',
         handle: () =>
           jsonResponse({
             items: [
@@ -147,10 +147,10 @@ describe('TransactionsScreen', () => {
 
   it('shows an empty state when there are no transactions', async () => {
     stubFetchRoutes([
-      { match: '/auth/session', handle: () => jsonResponse(SESSION) },
-      { match: '/accounts', handle: () => jsonResponse({ accounts: [] }) },
+      { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
+      { match: '/api/accounts', handle: () => jsonResponse({ accounts: [] }) },
       {
-        match: '/transactions',
+        match: '/api/transactions',
         handle: () =>
           jsonResponse({ items: [], nextCursor: null, summary: { count: 0, totals: [] } }),
       },
@@ -164,10 +164,10 @@ describe('TransactionsScreen', () => {
   it('opens the detail sheet and saves a note edit through the overlay endpoint', async () => {
     let patchedBody: unknown = null;
     stubFetchRoutes([
-      { match: '/auth/session', handle: () => jsonResponse(SESSION) },
-      { match: '/accounts', handle: () => jsonResponse({ accounts: [ACCOUNT] }) },
+      { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
+      { match: '/api/accounts', handle: () => jsonResponse({ accounts: [ACCOUNT] }) },
       {
-        match: '/transactions',
+        match: '/api/transactions',
         method: 'GET',
         handle: () =>
           jsonResponse({
@@ -177,7 +177,7 @@ describe('TransactionsScreen', () => {
           }),
       },
       {
-        match: '/transactions/txn_1',
+        match: '/api/transactions/txn_1',
         method: 'GET',
         handle: () =>
           jsonResponse({
@@ -205,7 +205,7 @@ describe('TransactionsScreen', () => {
           }),
       },
       {
-        match: '/transactions/txn_1',
+        match: '/api/transactions/txn_1',
         method: 'PATCH',
         handle: async ({ request }) => {
           patchedBody = await request.json();

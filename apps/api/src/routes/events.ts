@@ -53,6 +53,34 @@
  * filtering them by connection would require a join the outbox deliberately does
  * not support — a consumer that wants more re-reads the read model. Per-row
  * progress is on `/sync/stream`.
+ *
+ * ## Concurrent-stream caps (R-9, gate-security-review.md §5.3/§6 C-6)
+ *
+ * Each open stream holds **one dedicated connection out of the shared pool**
+ * for its entire life (`createNotifyListener`'s `pool.connect()`, released in
+ * `finally`). With no cap, `DATABASE_POOL_MAX` browser tabs on one session —
+ * stolen cookie or not — exhaust the pool and take down every other route,
+ * reads and mutations alike, because they all borrow from the same pool. The
+ * gate measured this at 10 tabs against the production default.
+ *
+ * Two caps, both enforced in-process (this deployment runs one `api`
+ * container; `compose.yml` has no replica count to share state across):
+ *
+ * - **Per session** (`SSE_MAX_STREAMS_PER_SESSION`, below): a real browser
+ *   opens a handful of tabs at most. Three covers "the dashboard plus two
+ *   background tabs" and is small enough that a stolen cookie cannot starve
+ *   the pool on its own.
+ * - **Global** (`sseGlobalLimit`, below): derived from the pool's own `max`
+ *   rather than a second constant that can drift from it — half the pool,
+ *   floored at 1, so streams can never claim every connection the process
+ *   holds. The other half stays available for ordinary request handling,
+ *   which borrows a connection for the length of one query rather than the
+ *   length of a browser tab.
+ *
+ * Exceeding either returns `429` with `Retry-After` before the stream ever
+ * opens a socket or checks a connection out of the pool; the slot is released
+ * the moment the stream's own `finally` runs, whether the client closed it or
+ * the server ended it.
  */
 import type { Database } from '@core/db';
 import { CHANNEL, createNotifyListener, domainEvents, toInstant } from '@core/platform';
@@ -60,8 +88,118 @@ import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { problems } from '../problem.ts';
+import { AppError, PROBLEM_CONTENT_TYPE, problems, toProblem } from '../problem.ts';
 import type { RouteDeps } from './deps.ts';
+
+/**
+ * A real browser opens a handful of tabs at most (R-9). Not configurable: a
+ * per-deployment override here is a lever an operator reaches for under
+ * exactly the load this cap exists to survive, which is how a cap stops being
+ * one. `sseGlobalLimit` is the knob that actually moves with the deployment.
+ */
+export const SSE_MAX_STREAMS_PER_SESSION = 3;
+
+/** How long a `429` here asks the client to wait before retrying. */
+const SSE_RETRY_AFTER_SECONDS = 5;
+
+/**
+ * Half the pool, floored at 1 — never all of it. `poolMax` is
+ * `pg.Pool#options.max`, which is `DATABASE_POOL_MAX` verbatim (`main.ts`
+ * passes it straight through to `createPool`), so this tracks the deployment's
+ * actual pool size rather than a hardcoded number that could drift from it.
+ */
+export function sseGlobalLimit(poolMax: number): number {
+  return Math.max(1, Math.floor(poolMax / 2));
+}
+
+type SlotResult =
+  | { readonly ok: true; readonly release: () => void }
+  | { readonly ok: false; readonly reason: 'session' | 'global' };
+
+/**
+ * In-process accounting for the two caps above. One instance per `api`
+ * process (constructed once, inside `eventRoutes`, and closed over by both
+ * route handlers), which is exactly right for a deployment with one `api`
+ * container and no shared state between replicas.
+ */
+export class StreamSlots {
+  readonly #perSession = new Map<string, number>();
+  #global = 0;
+  // Not TS constructor-parameter-property shorthand: `log-hygiene.test.ts`
+  // boots the real application under plain `node`'s type-stripping mode,
+  // which does not support that syntax — see that suite's own header.
+  readonly #perSessionLimit: number;
+  readonly #globalLimit: number;
+
+  constructor(perSessionLimit: number, globalLimit: number) {
+    this.#perSessionLimit = perSessionLimit;
+    this.#globalLimit = globalLimit;
+  }
+
+  /** Current count for one session. Exposed for tests, not for a route. */
+  countFor(sessionId: string): number {
+    return this.#perSession.get(sessionId) ?? 0;
+  }
+
+  /** Current total across every session. Exposed for tests, not for a route. */
+  get globalCount(): number {
+    return this.#global;
+  }
+
+  acquire(sessionId: string): SlotResult {
+    const current = this.#perSession.get(sessionId) ?? 0;
+    if (current >= this.#perSessionLimit) return { ok: false, reason: 'session' };
+    if (this.#global >= this.#globalLimit) return { ok: false, reason: 'global' };
+
+    this.#perSession.set(sessionId, current + 1);
+    this.#global += 1;
+    let released = false;
+
+    return {
+      ok: true,
+      release: () => {
+        if (released) return; // idempotent: a double-release must not free a slot twice
+        released = true;
+        const next = (this.#perSession.get(sessionId) ?? 1) - 1;
+        if (next <= 0) this.#perSession.delete(sessionId);
+        else this.#perSession.set(sessionId, next);
+        this.#global -= 1;
+      },
+    };
+  }
+}
+
+/**
+ * `429`, built and sent directly rather than thrown through `app.ts`'s shared
+ * error handler — that handler runs after the SSE headers could already be
+ * written, and a `Retry-After` set on the reply before a throw is one more
+ * thing to trust about ordering when a `reply.code(429).send(...)` here says
+ * exactly what happens with no assumption at all.
+ */
+async function sendTooManyStreams(
+  reply: FastifyReply,
+  request: FastifyRequest,
+  reason: 'session' | 'global',
+): Promise<void> {
+  const detail =
+    reason === 'session'
+      ? `This session already has ${String(SSE_MAX_STREAMS_PER_SESSION)} concurrent event ` +
+        'stream(s) open. Close one (another tab, an old connection) before opening another.'
+      : 'This deployment has reached its concurrent event-stream limit. Try again shortly.';
+  const error = new AppError({
+    status: 429,
+    code: reason === 'session' ? 'connections.sse_session_limit' : 'connections.sse_global_limit',
+    title: 'Too Many Requests',
+    detail,
+    family: 'user',
+  });
+  const { problem } = toProblem(error, String(request.id), request.url);
+  await reply
+    .code(429)
+    .header('retry-after', String(SSE_RETRY_AFTER_SECONDS))
+    .type(PROBLEM_CONTENT_TYPE)
+    .send(problem);
+}
 
 /** Domain event type → SSE event name. Anything absent is not streamed. */
 const EVENT_NAMES: Readonly<Record<string, string>> = {
@@ -152,6 +290,14 @@ async function latestSeq(database: Database, userId: string): Promise<bigint> {
 export const eventRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
   const { clock, guards, database, pool } = deps;
 
+  // One tracker for the process, shared by both routes below — a tab open on
+  // `/sync/stream` and a tab open on `/connections/{id}/events` both hold a
+  // pool connection and both count against the same two caps (R-9).
+  const slots = new StreamSlots(
+    SSE_MAX_STREAMS_PER_SESSION,
+    sseGlobalLimit(pool.options.max ?? 10),
+  );
+
   /**
    * The stream itself, shared by both routes.
    *
@@ -177,8 +323,18 @@ export const eventRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
     raw.write(': stream open\n\n');
 
     let closed = false;
+    // Resolved the instant the socket closes, so the loop below does not have
+    // to wait out the rest of a `listener.wait(POLL_MS)` call (up to a second)
+    // before it notices — which matters for R-9's slot release, and for
+    // `finally` releasing the pool connection promptly rather than merely
+    // "eventually".
+    let notifyClosed: (() => void) | null = null;
+    const closedSignal = new Promise<void>((resolve) => {
+      notifyClosed = resolve;
+    });
     const onClose = (): void => {
       closed = true;
+      notifyClosed?.();
     };
     request.raw.on('close', onClose);
     request.raw.on('error', onClose);
@@ -226,7 +382,7 @@ export const eventRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         if (closed || raw.writableEnded) break;
         if (rows.length === BATCH) continue;
 
-        await listener.wait(POLL_MS);
+        await Promise.race([listener.wait(POLL_MS), closedSignal]);
         if (clock.nowMs() - lastBeatMs >= HEARTBEAT_MS && !closed && !raw.writableEnded) {
           raw.write(': heartbeat\n\n');
           lastBeatMs = clock.nowMs();
@@ -255,17 +411,26 @@ export const eventRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           tags: ['connections'],
           querystring: z.object({ from: z.string().optional() }),
           produces: ['text/event-stream'],
-          response: { 200: z.string(), ...problems(401, 503) },
+          response: { 200: z.string(), ...problems(401, 429, 503) },
         },
       },
       async (request, reply) => {
         const session = await guards.requireSession(request);
-        await stream(request, reply, {
-          userId: session.userId,
-          aggregateId: null,
-          types: ALL_TYPES,
-          from: resumeFrom(request.headers['last-event-id'], request.query.from),
-        });
+        const slot = slots.acquire(session.id);
+        if (!slot.ok) {
+          await sendTooManyStreams(reply, request, slot.reason);
+          return;
+        }
+        try {
+          await stream(request, reply, {
+            userId: session.userId,
+            aggregateId: null,
+            types: ALL_TYPES,
+            from: resumeFrom(request.headers['last-event-id'], request.query.from),
+          });
+        } finally {
+          slot.release();
+        }
       },
     );
 
@@ -284,17 +449,26 @@ export const eventRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           params: z.object({ connectionId: z.uuid() }),
           querystring: z.object({ from: z.string().optional() }),
           produces: ['text/event-stream'],
-          response: { 200: z.string(), ...problems(401, 404, 503) },
+          response: { 200: z.string(), ...problems(401, 404, 429, 503) },
         },
       },
       async (request, reply) => {
         const session = await guards.requireSession(request);
-        await stream(request, reply, {
-          userId: session.userId,
-          aggregateId: request.params.connectionId,
-          types: CONNECTION_TYPES,
-          from: resumeFrom(request.headers['last-event-id'], request.query.from),
-        });
+        const slot = slots.acquire(session.id);
+        if (!slot.ok) {
+          await sendTooManyStreams(reply, request, slot.reason);
+          return;
+        }
+        try {
+          await stream(request, reply, {
+            userId: session.userId,
+            aggregateId: request.params.connectionId,
+            types: CONNECTION_TYPES,
+            from: resumeFrom(request.headers['last-event-id'], request.query.from),
+          });
+        } finally {
+          slot.release();
+        }
       },
     );
   };

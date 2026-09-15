@@ -50,3 +50,23 @@ services:
   #   ports:
   #     - '192.168.1.50:443:8443'
   #     - '192.168.1.50:80:8080'
+
+  # Turn on Plaid's widened CSP (C-3, gate-security-review.md §2.2 F-2/§6 C-3)
+  # without editing .env. The *preferred* place for this is `.env.example`'s
+  # PLAID_ENABLED — compose.yml already reads `${PLAID_ENABLED:-false}` on
+  # proxy/api/worker, so setting it in `.env` is enough on its own and this
+  # override is redundant with that. It exists here anyway for the same
+  # reason the rest of this file does: a quick local flip while iterating,
+  # with nothing to remember to revert in a file compose reads unconditionally.
+  # Set all three together, and only once secrets/plaid_client_id and
+  # secrets/plaid_secret actually have content — a `true` here with empty
+  # secret files widens the CSP for a connector that never registers.
+  # proxy:
+  #   environment:
+  #     PLAID_ENABLED: 'true'
+  # api:
+  #   environment:
+  #     PLAID_ENABLED: 'true'
+  # worker:
+  #   environment:
+  #     PLAID_ENABLED: 'true'

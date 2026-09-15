@@ -200,6 +200,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     });
   }
   problems.push(...webAuthnProblems(env.AUTH_RP_ID, allowedOrigins, isProduction));
+  problems.push(...plaidRedirectUriProblems(env.PLAID_REDIRECT_URI, allowedOrigins));
 
   // `SESSION_COOKIE_SECURE=false` exists only for a plain-HTTP local/integration
   // harness (apps/api/test/cookies.test.ts) — a session cookie without `Secure`
@@ -381,6 +382,63 @@ function webAuthnProblems(
         'AUTH_RP_ID must be the registrable host of at least one AUTH_ALLOWED_ORIGINS entry — ' +
         'the exact hostname, no scheme and no port. For https://personalfi.lan set ' +
         'AUTH_RP_ID=personalfi.lan. See 03 §3.2 and P0-4.',
+    });
+  }
+
+  return problems;
+}
+
+/**
+ * `PLAID_REDIRECT_URI` (D12; gate-security-review.md §2.2 F-2, §6 C-3): the
+ * page Plaid Link sends the browser back to after an OAuth institution's own
+ * login page. Two properties matter enough to check at boot rather than
+ * discover mid-Link:
+ *
+ * - **Must be `https`.** Plaid requires it unconditionally for an OAuth
+ *   redirect — there is no loopback exception the way `AUTH_ALLOWED_ORIGINS`
+ *   gets one in development, because Plaid itself refuses a non-`https`
+ *   `redirect_uri` (`INVALID_FIELD`), so a plain-HTTP value would only ever
+ *   fail at Plaid rather than here.
+ * - **Must share an origin with an allowed origin.** `PlaidConnector` sends
+ *   this verbatim as `redirect_uri` (`connector.ts#linkTokenBase`); if its
+ *   origin is not one this deployment's CSRF/WebAuthn allow-list already
+ *   trusts, the browser lands back on a page this application never actually
+ *   serves as itself — the OAuth return silently fails, or worse, succeeds
+ *   against something unintended.
+ *
+ * `null` (the default) is never a problem: D12 says LAN-only deployments have
+ * no OAuth redirect and Plaid Link disables OAuth institutions without one.
+ */
+function plaidRedirectUriProblems(
+  redirectUri: string | null,
+  allowedOrigins: readonly string[],
+): ConfigProblem[] {
+  if (redirectUri === null) return [];
+  const problems: ConfigProblem[] = [];
+  // `environmentSchema`'s `z.url()` already guarantees this parses; a second
+  // try/catch here would be dead code, not defence in depth.
+  const url = new URL(redirectUri);
+
+  if (url.protocol !== 'https:') {
+    problems.push({
+      key: 'PLAID_REDIRECT_URI',
+      problem:
+        `is "${redirectUri}", which is not https; Plaid refuses a non-https redirect_uri ` +
+        'for an OAuth institution (INVALID_FIELD)',
+      hint: 'use an https URL — Caddy terminates TLS in front of this process',
+    });
+  }
+
+  if (!allowedOrigins.includes(url.origin)) {
+    problems.push({
+      key: 'PLAID_REDIRECT_URI',
+      problem:
+        `is "${redirectUri}", whose origin (${url.origin}) is not one of ` +
+        `AUTH_ALLOWED_ORIGINS (${allowedOrigins.join(', ') || '(empty)'}) — Plaid Link would send ` +
+        'the browser back to a page this application does not serve as itself',
+      hint:
+        'set PLAID_REDIRECT_URI to a path on the same origin as PUBLIC_HOST, e.g. ' +
+        'https://personalfi.lan/link/oauth, or add its origin to AUTH_ALLOWED_ORIGINS',
     });
   }
 

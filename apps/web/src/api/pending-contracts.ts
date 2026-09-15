@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 /**
- * Hand-written client for `/auth/*`, mirroring 11 of the 18 operations.
+ * Hand-written client for `/api/auth/*` (Caddy's `handle_path /api/*` strips
+ * the prefix before it reaches the API, which still mounts this router at
+ * `/auth/*` — gate-security-review.md F-4/C-1a), mirroring 11 of the 18
+ * operations.
  *
  * It exists for three request-level behaviours the generated client does not
  * have: `ensureCsrfCookie()` plus the `x-csrf-token` header (without which
@@ -35,17 +38,18 @@ function readCsrfToken(): string | undefined {
  * The API mints that cookie from an `onRequest` hook on the `/auth/*` plugin,
  * so *any* reply from that prefix carries one — but only a reply. A browser
  * that lands directly on `/register?token=...` or `/login` has never made an
- * `/auth/*` request, so its first request is the mutation itself, which is
- * rejected `403 csrf_failed` before the freshly-minted cookie is of any use.
- * That made first-run passkey enrolment and every cold-start login impossible:
- * the failure was structural, not racy.
+ * `/api/auth/*` request, so its first request is the mutation itself, which
+ * is rejected `403 csrf_failed` before the freshly-minted cookie is of any
+ * use. That made first-run passkey enrolment and every cold-start login
+ * impossible: the failure was structural, not racy.
  *
- * `/auth/unlock-state` is the right primer: it is a GET (so the CSRF check
- * skips it), it requires no session, and it answers while the app is locked.
+ * `/api/auth/unlock-state` is the right primer: it is a GET (so the CSRF
+ * check skips it), it requires no session, and it answers while the app is
+ * locked.
  */
 async function ensureCsrfCookie(): Promise<void> {
   if (readCsrfToken() !== undefined) return;
-  await fetch('/auth/unlock-state', { credentials: 'include' }).catch(() => undefined);
+  await fetch('/api/auth/unlock-state', { credentials: 'include' }).catch(() => undefined);
 }
 
 /**
@@ -187,18 +191,18 @@ const okSchema = z.object({ ok: z.literal(true) });
 /* ------------------------------------------------------------------------ */
 
 export function getUnlockState(): Promise<UnlockState> {
-  return apiFetch('/auth/unlock-state', unlockStateSchema);
+  return apiFetch('/api/auth/unlock-state', unlockStateSchema);
 }
 
 export function getSession(): Promise<SessionState> {
-  return apiFetch('/auth/session', sessionStateSchema);
+  return apiFetch('/api/auth/session', sessionStateSchema);
 }
 
 export function startRegistration(body: {
   registrationToken?: string;
 }): Promise<{ userId: string; options: WebauthnPayload }> {
   return apiFetch(
-    '/auth/register/options',
+    '/api/auth/register/options',
     z.object({ userId: z.string(), options: webauthnPayloadSchema }),
     { method: 'POST', body: JSON.stringify(body) },
   );
@@ -215,7 +219,7 @@ export function finishRegistration(body: {
   enrolSecondAuthenticator: boolean;
 }> {
   return apiFetch(
-    '/auth/register/verify',
+    '/api/auth/register/verify',
     z.object({
       credential: credentialSchema,
       credentialCount: z.number().int(),
@@ -227,7 +231,7 @@ export function finishRegistration(body: {
 }
 
 export function startLogin(): Promise<{ options: WebauthnPayload }> {
-  return apiFetch('/auth/login/options', z.object({ options: webauthnPayloadSchema }), {
+  return apiFetch('/api/auth/login/options', z.object({ options: webauthnPayloadSchema }), {
     method: 'POST',
   });
 }
@@ -236,41 +240,47 @@ export function finishLogin(body: {
   response: WebauthnPayload;
   trustedDevice?: boolean;
 }): Promise<{ ok: true }> {
-  return apiFetch('/auth/login/verify', okSchema, { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/api/auth/login/verify', okSchema, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 export function loginWithTotp(body: {
   token: string;
   trustedDevice?: boolean;
 }): Promise<{ ok: true }> {
-  return apiFetch('/auth/totp/verify', okSchema, { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/api/auth/totp/verify', okSchema, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 export function loginWithRecoveryCode(body: {
   code: string;
 }): Promise<{ ok: true; remainingCodes: number }> {
   return apiFetch(
-    '/auth/recovery-code/verify',
+    '/api/auth/recovery-code/verify',
     z.object({ ok: z.literal(true), remainingCodes: z.number().int() }),
     { method: 'POST', body: JSON.stringify(body) },
   );
 }
 
 export function startStepUp(): Promise<{ options: WebauthnPayload }> {
-  return apiFetch('/auth/step-up/options', z.object({ options: webauthnPayloadSchema }), {
+  return apiFetch('/api/auth/step-up/options', z.object({ options: webauthnPayloadSchema }), {
     method: 'POST',
   });
 }
 
 export function finishStepUp(body: { response: WebauthnPayload }): Promise<{ freshUntil: string }> {
-  return apiFetch('/auth/step-up/verify', z.object({ freshUntil: z.string() }), {
+  return apiFetch('/api/auth/step-up/verify', z.object({ freshUntil: z.string() }), {
     method: 'POST',
     body: JSON.stringify(body),
   });
 }
 
 export function logout(): Promise<{ ok: true }> {
-  return apiFetch('/auth/logout', okSchema, { method: 'POST' });
+  return apiFetch('/api/auth/logout', okSchema, { method: 'POST' });
 }
 
 /**

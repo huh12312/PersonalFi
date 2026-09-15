@@ -22,7 +22,11 @@
  * 3. **`POST /connections/{id}/plaid/update-link-token` omits `products`** —
  *    01 §1.7: populating it in update mode re-initialises the Item's product
  *    set and can re-bill it.
- * 4. **The D16 ten-Item ratchet** refuses an eleventh Plaid connection.
+ * 4. **The D16 ten-Item ratchet (R-7, gate-security-review.md §5.2/§6 C-3)**
+ *    refuses an eleventh Plaid connection — counted across every user in the
+ *    deployment, not just the caller's own; not freed by disconnecting one;
+ *    and enforced inside `linkConnection` itself, so `POST /connections`
+ *    cannot bypass it by routing around `/connections/plaid/exchange`.
  * 5. **Step-up gates exchange and update-link-token**; link-token needs only a
  *    session.
  */
@@ -35,6 +39,7 @@ import {
   testClock,
 } from '@connector/plaid/test';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { PLAID_ITEM_LIMIT } from '../../src/routes/connections.ts';
 import {
   createApiHarness,
   expectStatus,
@@ -276,24 +281,46 @@ describe.skipIf(NO_DATABASE)('plaid routes (wp1.3b)', () => {
 
   // -------------------------------------------------------------- the ratchet
 
-  it('refuses an eleventh Plaid connection (D16: Trial’s ten-Item cap)', async () => {
-    const secondUserId = await h.database.createUser('Plaid Ratchet Holder');
-    const session = await h.issueSession({ fresh: true, userId: secondUserId });
-    const exchangesBefore = api.requestsTo('item/public_token/exchange').length;
+  /** The raw row count — a control that reads through its own read model could pass by accident. */
+  async function plaidConnectionCount(harness: ApiHarness): Promise<number> {
+    const result = await harness.database.pool.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM connections WHERE provider = 'plaid'`,
+    );
+    return result.rows[0]?.count ?? 0;
+  }
 
-    for (let i = 0; i < 10; i += 1) {
+  it('is global (not per-user), survives a disconnect, and cannot be bypassed via POST /connections', async () => {
+    // Earlier tests in this suite already exchanged a handful of real Items
+    // under h.fresh — that is the whole point of counting globally, so fill
+    // only the *remaining* headroom rather than assuming a fresh deployment.
+    const before = await plaidConnectionCount(h);
+    const remaining = PLAID_ITEM_LIMIT - before;
+    expect(remaining, 'earlier tests must not already have reached the cap').toBeGreaterThan(0);
+
+    const holderA = await h.database.createUser('Plaid Ratchet Holder A');
+    const sessionA = await h.issueSession({ fresh: true, userId: holderA });
+
+    let lastConnectionId = '';
+    for (let i = 0; i < remaining; i += 1) {
       const accessToken = `access-plaid-ratchet-${String(i)}-do-not-leak`;
       const publicToken = `public-plaid-ratchet-${String(i)}`;
       api.addItem(fakePlaidItem({ accessToken, publicToken, itemId: `item-ratchet-${String(i)}` }));
       const response = await h.request({
         method: 'POST',
         url: '/connections/plaid/exchange',
-        session,
+        session: sessionA,
         body: { publicToken },
       });
       expectStatus(response, 201);
+      lastConnectionId = (response.json() as LinkResultBody).connectionId;
     }
+    expect(await plaidConnectionCount(h)).toBe(PLAID_ITEM_LIMIT);
 
+    // A *different* user, holding zero Plaid connections of their own, still
+    // cannot get an eleventh Item: the cap is Plaid's, per `client_id` — i.e.
+    // per deployment — not per account holder (R-7).
+    const holderB = await h.database.createUser('Plaid Ratchet Holder B');
+    const sessionB = await h.issueSession({ fresh: true, userId: holderB });
     const eleventhPublicToken = 'public-plaid-ratchet-eleventh';
     api.addItem(
       fakePlaidItem({
@@ -302,17 +329,61 @@ describe.skipIf(NO_DATABASE)('plaid routes (wp1.3b)', () => {
         itemId: 'item-ratchet-eleventh',
       }),
     );
+    const exchangesBefore = api.requestsTo('item/public_token/exchange').length;
     const refused = await h.request({
       method: 'POST',
       url: '/connections/plaid/exchange',
-      session,
+      session: sessionB,
       body: { publicToken: eleventhPublicToken },
     });
     expect(refused.statusCode).toBe(409);
     expect(problemOf(refused)['code']).toBe('connections.plaid_item_limit');
+    // No Item was spent on the refusal: the exchange never ran.
+    expect(api.requestsTo('item/public_token/exchange').length).toBe(exchangesBefore);
 
-    // And no Item was spent on the refusal: the exchange never ran for the
-    // eleventh attempt, only for the ten that were let through.
-    expect(api.requestsTo('item/public_token/exchange').length - exchangesBefore).toBe(10);
-  });
+    // The bypass: the *generic* `POST /connections` route, not the dedicated
+    // `/exchange` one. This is R-7's actual finding — the check used to live
+    // only in `routes/plaid.ts`'s exchange handler, so this exact request
+    // reached a real Item exchange with the ratchet never consulted.
+    const bypassPublicToken = 'public-plaid-ratchet-bypass';
+    api.addItem(
+      fakePlaidItem({
+        accessToken: 'access-plaid-ratchet-bypass',
+        publicToken: bypassPublicToken,
+        itemId: 'item-ratchet-bypass',
+      }),
+    );
+    const bypass = await h.request({
+      method: 'POST',
+      url: '/connections',
+      session: sessionB,
+      body: { provider: 'plaid', input: { publicToken: bypassPublicToken } },
+    });
+    expect(bypass.statusCode).toBe(409);
+    expect(problemOf(bypass)['code']).toBe('connections.plaid_item_limit');
+    expect(api.requestsTo('item/public_token/exchange').length).toBe(exchangesBefore);
+
+    // Disconnect one of the connections just created. D16/R-6:
+    // `/item/remove` does not free a slot at Plaid, so the local ratchet
+    // must not either — the row survives (status changes; the row does
+    // not disappear), the count stays at the cap, and an eleventh Item is
+    // still refused afterwards.
+    const disconnect = await h.request({
+      method: 'DELETE',
+      url: `/connections/${lastConnectionId}`,
+      session: sessionA,
+    });
+    expectStatus(disconnect, 200);
+    expect(await plaidConnectionCount(h)).toBe(PLAID_ITEM_LIMIT);
+
+    const afterDisconnect = await h.request({
+      method: 'POST',
+      url: '/connections/plaid/exchange',
+      session: sessionB,
+      body: { publicToken: eleventhPublicToken },
+    });
+    expect(afterDisconnect.statusCode).toBe(409);
+    expect(problemOf(afterDisconnect)['code']).toBe('connections.plaid_item_limit');
+    expect(api.requestsTo('item/public_token/exchange').length).toBe(exchangesBefore);
+  }, 60_000);
 });

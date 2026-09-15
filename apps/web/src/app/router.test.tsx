@@ -80,7 +80,7 @@ function stubFetch(handlers: Record<string, Handler>): void {
 describe('router', () => {
   beforeEach(() => {
     queryClient.clear();
-    stubFetch({ '/auth/session': () => jsonResponse(AUTHENTICATED_SESSION) });
+    stubFetch({ '/api/auth/session': () => jsonResponse(AUTHENTICATED_SESSION) });
   });
 
   afterEach(() => {
@@ -140,7 +140,7 @@ describe('/_app auth guard (gate-remediation-web.md M-3/M-8)', () => {
   });
 
   it('redirects an unauthenticated visitor to /login, preserving the intended path', async () => {
-    stubFetch({ '/auth/session': () => jsonResponse({ code: 'unauthenticated' }, 401) });
+    stubFetch({ '/api/auth/session': () => jsonResponse({ code: 'unauthenticated' }, 401) });
     const { testQueryClient, testRouter } = createTestRouter('/accounts');
 
     render(
@@ -157,7 +157,7 @@ describe('/_app auth guard (gate-remediation-web.md M-3/M-8)', () => {
   });
 
   it('sends a visitor who is already signed in straight through, without a redirect', async () => {
-    stubFetch({ '/auth/session': () => jsonResponse(AUTHENTICATED_SESSION) });
+    stubFetch({ '/api/auth/session': () => jsonResponse(AUTHENTICATED_SESSION) });
     const { testQueryClient, testRouter } = createTestRouter('/accounts');
 
     render(
@@ -173,11 +173,11 @@ describe('/_app auth guard (gate-remediation-web.md M-3/M-8)', () => {
   it('returns to the originally intended path after a successful sign-in', async () => {
     let authenticated = false;
     stubFetch({
-      '/auth/session': () =>
+      '/api/auth/session': () =>
         authenticated
           ? jsonResponse(AUTHENTICATED_SESSION)
           : jsonResponse({ code: 'unauthenticated' }, 401),
-      '/auth/totp/verify': () => {
+      '/api/auth/totp/verify': () => {
         authenticated = true;
         return jsonResponse({ ok: true });
       },

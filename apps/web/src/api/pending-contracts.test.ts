@@ -27,7 +27,7 @@ describe('apiFetch', () => {
   it('always sends credentials: include, even if the caller tries to weaken it', async () => {
     // Deliberately hostile input: a caller (or a future refactor) trying to
     // override credentials must not be able to weaken the request.
-    await apiFetch('/auth/session', z.object({ ok: z.literal(true) }), {
+    await apiFetch('/api/auth/session', z.object({ ok: z.literal(true) }), {
       credentials: 'omit',
     });
 
@@ -36,7 +36,7 @@ describe('apiFetch', () => {
   });
 
   it('merges caller-supplied headers instead of dropping them', async () => {
-    await apiFetch('/auth/session', z.object({ ok: z.literal(true) }), {
+    await apiFetch('/api/auth/session', z.object({ ok: z.literal(true) }), {
       headers: { 'X-Test-Header': 'present' },
     });
 
@@ -52,7 +52,7 @@ describe('apiFetch', () => {
     // which isn't what this test is checking.
     vi.spyOn(document, 'cookie', 'get').mockReturnValue('__Host-pfi_csrf=test-token');
 
-    await apiFetch('/auth/logout', z.object({ ok: z.literal(true) }), {
+    await apiFetch('/api/auth/logout', z.object({ ok: z.literal(true) }), {
       method: 'POST',
       headers: { 'X-Test-Header': 'present' },
     });
@@ -76,33 +76,33 @@ describe('apiFetch', () => {
       // No cookie at all — a browser that landed straight on /register or /login.
       vi.spyOn(document, 'cookie', 'get').mockReturnValue('');
 
-      await apiFetch('/auth/login/options', z.object({ ok: z.literal(true) }), {
+      await apiFetch('/api/auth/login/options', z.object({ ok: z.literal(true) }), {
         method: 'POST',
       });
 
       expect(fetchMock).toHaveBeenCalledTimes(2);
       const [primePath, primeInit] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(primePath).toBe('/auth/unlock-state');
+      expect(primePath).toBe('/api/auth/unlock-state');
       expect(primeInit.credentials).toBe('include');
       // ...and the real mutation still goes out, after it.
       const [mutationPath] = fetchMock.mock.calls[1] as [string, RequestInit];
-      expect(mutationPath).toBe('/auth/login/options');
+      expect(mutationPath).toBe('/api/auth/login/options');
     });
 
     it('does not prime when a CSRF cookie is already present', async () => {
       vi.spyOn(document, 'cookie', 'get').mockReturnValue('__Host-pfi_csrf=test-token');
 
-      await apiFetch('/auth/logout', z.object({ ok: z.literal(true) }), { method: 'POST' });
+      await apiFetch('/api/auth/logout', z.object({ ok: z.literal(true) }), { method: 'POST' });
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const [path] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(path).toBe('/auth/logout');
+      expect(path).toBe('/api/auth/logout');
     });
 
     it('sends an empty JSON object for a bodyless mutation', async () => {
       vi.spyOn(document, 'cookie', 'get').mockReturnValue('__Host-pfi_csrf=test-token');
 
-      await apiFetch('/auth/logout', z.object({ ok: z.literal(true) }), { method: 'POST' });
+      await apiFetch('/api/auth/logout', z.object({ ok: z.literal(true) }), { method: 'POST' });
 
       const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(requestInit.body).toBe('{}');
@@ -111,7 +111,7 @@ describe('apiFetch', () => {
     it('never overwrites a body the caller supplied', async () => {
       vi.spyOn(document, 'cookie', 'get').mockReturnValue('__Host-pfi_csrf=test-token');
 
-      await apiFetch('/auth/login/verify', z.object({ ok: z.literal(true) }), {
+      await apiFetch('/api/auth/login/verify', z.object({ ok: z.literal(true) }), {
         method: 'POST',
         body: JSON.stringify({ trustedDevice: true }),
       });
@@ -123,11 +123,11 @@ describe('apiFetch', () => {
     it('leaves safe methods alone: no priming, no synthesised body', async () => {
       vi.spyOn(document, 'cookie', 'get').mockReturnValue('');
 
-      await apiFetch('/auth/session', z.object({ ok: z.literal(true) }));
+      await apiFetch('/api/auth/session', z.object({ ok: z.literal(true) }));
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const [path, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(path).toBe('/auth/session');
+      expect(path).toBe('/api/auth/session');
       expect(requestInit.body).toBeUndefined();
     });
   });

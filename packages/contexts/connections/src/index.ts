@@ -70,6 +70,7 @@ export { ConnectorRegistry, type RegisteredConnector } from './registry.ts';
 // --- lifecycle --------------------------------------------------------------
 export {
   accountMap,
+  countConnectionsByProvider,
   createConnection,
   disconnectConnection,
   getConnection,

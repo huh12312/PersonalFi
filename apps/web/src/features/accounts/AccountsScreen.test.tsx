@@ -60,7 +60,7 @@ function renderAccounts(initialPath = '/accounts') {
 describe('AccountsScreen', () => {
   beforeEach(() => {
     ensureApiClient();
-    stubFetchRoutes([{ match: '/auth/session', handle: () => jsonResponse(SESSION) }]);
+    stubFetchRoutes([{ match: '/api/auth/session', handle: () => jsonResponse(SESSION) }]);
   });
 
   afterEach(() => {
@@ -109,9 +109,9 @@ describe('AccountsScreen', () => {
     };
 
     stubFetchRoutes([
-      { match: '/auth/session', handle: () => jsonResponse(SESSION) },
-      { match: '/accounts', handle: () => jsonResponse({ accounts }) },
-      { match: '/net-worth', handle: () => jsonResponse(netWorth) },
+      { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
+      { match: '/api/accounts', handle: () => jsonResponse({ accounts }) },
+      { match: '/api/net-worth', handle: () => jsonResponse(netWorth) },
     ]);
 
     renderAccounts();
@@ -124,9 +124,12 @@ describe('AccountsScreen', () => {
 
   it('shows an empty state with a call to action when there are no accounts', async () => {
     stubFetchRoutes([
-      { match: '/auth/session', handle: () => jsonResponse(SESSION) },
-      { match: '/accounts', handle: () => jsonResponse({ accounts: [] }) },
-      { match: '/net-worth', handle: () => jsonResponse({ asOf: null, totals: [], inputs: [] }) },
+      { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
+      { match: '/api/accounts', handle: () => jsonResponse({ accounts: [] }) },
+      {
+        match: '/api/net-worth',
+        handle: () => jsonResponse({ asOf: null, totals: [], inputs: [] }),
+      },
     ]);
 
     renderAccounts();
@@ -137,9 +140,12 @@ describe('AccountsScreen', () => {
 
   it('shows a retry action when the accounts request fails', async () => {
     stubFetchRoutes([
-      { match: '/auth/session', handle: () => jsonResponse(SESSION) },
-      { match: '/accounts', handle: () => jsonResponse({ code: 'internal' }, 500) },
-      { match: '/net-worth', handle: () => jsonResponse({ asOf: null, totals: [], inputs: [] }) },
+      { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
+      { match: '/api/accounts', handle: () => jsonResponse({ code: 'internal' }, 500) },
+      {
+        match: '/api/net-worth',
+        handle: () => jsonResponse({ asOf: null, totals: [], inputs: [] }),
+      },
     ]);
 
     renderAccounts();

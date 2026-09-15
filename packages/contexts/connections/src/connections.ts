@@ -22,7 +22,7 @@
 import { newId } from '@core/kernel';
 import { appendEvent } from '@core/platform';
 import type { SecretBox } from '@core/secretbox';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import {
   connectionAccounts,
   connections,
@@ -395,6 +395,32 @@ export async function openHandle(
 // ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
+
+/**
+ * Every connection row ever created for a provider, across **every user** in
+ * this deployment, **including a disconnected one**.
+ *
+ * Backs the Plaid Item ratchet (D16; gate-security-review.md R-7, condition
+ * C-3): Trial's ten-Item cap is per `client_id`, i.e. per *deployment*, not
+ * per user, and `/item/remove` does not free a slot Plaid already counted —
+ * so a row scoped to one user or filtered to `status != 'disconnected'` would
+ * undercount on both axes. This has no `userId` filter and no status filter
+ * for exactly that reason; do not add either without re-reading D16.
+ *
+ * A plain count, not a list: the caller (`linkConnection`) only ever needs
+ * the number, and a provider-wide table scan without a status/user predicate
+ * is already about as cheap as this query gets.
+ */
+export async function countConnectionsByProvider(
+  executor: ConnectionsExecutor,
+  provider: string,
+): Promise<number> {
+  const rows = await executor
+    .select({ count: sql<string>`count(*)` })
+    .from(connections)
+    .where(eq(connections.provider, provider));
+  return Number(rows[0]?.count ?? '0');
+}
 
 export async function getConnection(
   executor: ConnectionsExecutor,

@@ -38,19 +38,29 @@
  * counts, including a disconnected one: `DELETE /connections/{id}` may leave
  * `providerSlotMayRemain: true` (wp1.5-api.md §1), so a locally "gone"
  * connection can still hold a Plaid slot.
+ *
+ * **Enforced in `linkConnection` (`routes/connections.ts`), not here.** The
+ * gate (R-7, gate-security-review.md §5.2/§6 C-3) found the check only in this
+ * route's handler — so `POST /connections` with `provider: "plaid"` reached a
+ * real Item exchange with no ratchet consulted at all, and the count run here
+ * was scoped to one user while Plaid's cap is per deployment. This route no
+ * longer runs its own check; `linkConnection` runs one, before it ever calls
+ * `connector.connect`, counted with `countConnectionsByProvider` across every
+ * user and every status. `PLAID_ITEM_LIMIT` is imported from there so this
+ * route's description below names the same number rather than a second
+ * constant that could drift from it.
  */
 import { PLAID_PROVIDER, PlaidConnector } from '@connector/plaid';
-import { listConnectionSummaries, openHandle, requireConnection } from '@ctx/connections';
+import { openHandle, requireConnection } from '@ctx/connections';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { AppError, problems } from '../problem.ts';
 import { isoInstant } from '../wire.ts';
-import { linkConnection, linkResultSchema } from './connections.ts';
+import { linkConnection, linkResultSchema, PLAID_ITEM_LIMIT } from './connections.ts';
 import { mapDomainErrors } from './domain-errors.ts';
 import type { RouteDeps } from './deps.ts';
 
-/** D16: Trial's hard cap. Local ratchet — see the file comment. */
-export const PLAID_ITEM_LIMIT = 10;
+export { PLAID_ITEM_LIMIT };
 
 function plaidUnavailable(): AppError {
   return new AppError({
@@ -157,21 +167,11 @@ export const plaidRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         const session = await guards.requireFreshSession(request);
         requirePlaidConnector(deps);
 
-        const existing = await listConnectionSummaries(database, session.userId);
-        const plaidCount = existing.filter((row) => row.provider === PLAID_PROVIDER).length;
-        if (plaidCount >= PLAID_ITEM_LIMIT) {
-          throw new AppError({
-            status: 409,
-            code: 'connections.plaid_item_limit',
-            title: 'Conflict',
-            detail:
-              `This deployment already has ${String(plaidCount)} Plaid connections, at the ` +
-              `Trial plan's ${String(PLAID_ITEM_LIMIT)}-Item cap. Disconnect one first — and remove ` +
-              'it in the Plaid dashboard, since /item/remove there is what actually frees a slot.',
-            family: 'domain',
-          });
-        }
-
+        // The ratchet itself lives in `linkConnection` now (R-7, C-3) — see the
+        // file comment. Duplicating the count-and-refuse here would be a second
+        // copy that could drift, and it already did once: this route's own
+        // check counted only `session.userId`'s rows against a per-deployment
+        // cap.
         const result = await linkConnection(
           deps,
           session.userId,

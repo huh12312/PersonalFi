@@ -20,6 +20,22 @@ test('login, edit a transaction category, and add a manual account', async ({ pa
   await installFakeWebAuthnAssertion(page);
   const api = await installApiMocks(page);
 
+  // gate-security-review.md F-4/C-1a: every API call the generated client
+  // (and the hand-written `pending-contracts.ts` auth client) makes now goes
+  // to `/api/...` — `docker/Caddyfile`'s `handle_path /api/*` strips the
+  // prefix before it reaches `apps/api`, so a request that *doesn't* carry it
+  // would 404 or worse, fall through to a same-origin path the SPA itself
+  // handles. `mock-api.ts`'s route matchers already require the `/api` prefix
+  // to fire at all (this walkthrough would fail well before the assertion
+  // below if the app called bare `/auth/session`), but this makes the
+  // regression this whole condition exists for an explicit assertion rather
+  // than an implicit side effect of the mocks matching.
+  const apiRequestPaths: string[] = [];
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith('/api/')) apiRequestPaths.push(path);
+  });
+
   // --- Login -------------------------------------------------------------
   await page.goto('/login');
   await expect(page.getByRole('heading', { name: 'Sign in to PersonalFi' })).toBeVisible();
@@ -89,4 +105,14 @@ test('login, edit a transaction category, and add a manual account', async ({ pa
 
   await injectAxe(page);
   await expectNoAxeViolations(page, 'connections (with a connection)');
+
+  // gate-security-review.md F-4/C-1a: the whole walkthrough above only ever
+  // succeeded because every API call landed under `/api/...` — assert that
+  // directly, and that it covers more than just the one auth call every
+  // screen makes on load.
+  expect(apiRequestPaths.length).toBeGreaterThan(0);
+  expect(apiRequestPaths.every((p) => p.startsWith('/api/'))).toBe(true);
+  expect(apiRequestPaths.some((p) => p.startsWith('/api/auth/'))).toBe(true);
+  expect(apiRequestPaths.some((p) => p === '/api/transactions')).toBe(true);
+  expect(apiRequestPaths.some((p) => p === '/api/connections')).toBe(true);
 });

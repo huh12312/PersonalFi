@@ -2,6 +2,23 @@
 import { z } from 'zod';
 
 /**
+ * An optional URL env var, `null` when absent — including when it is present
+ * but empty.
+ *
+ * `compose.yml` passes these through as `${PLAID_REDIRECT_URI:-}`, the same
+ * default-to-empty-string pattern the rest of the file uses for an optional
+ * value (`RCLONE_REMOTE: ${RCLONE_REMOTE:-}`), so an operator who has not set
+ * it in `.env` hands this process an **empty string**, not an absent key.
+ * Plain `z.url().nullable()` only ever sees `null` when the key is missing
+ * from `process.env` entirely — a real deployment path this schema is never
+ * actually exercised against — so without this, every fresh box with no
+ * `PLAID_REDIRECT_URI` in `.env` would fail to boot on `"" is not a valid URL"`.
+ */
+function nullableUrlEnv() {
+  return z.preprocess((value) => (value === '' ? null : value), z.url().nullable().default(null));
+}
+
+/**
  * Non-secret deployment configuration. Env vars only.
  *
  * User *preferences* (base currency, budget period start, quiet hours, feature
@@ -184,10 +201,16 @@ export const environmentSchema = z.object({
    * `https://<node>.<tailnet>.ts.net/link/oauth`. `null` disables OAuth
    * institutions rather than sending Plaid an empty string, which is a hard
    * `INVALID_FIELD` (wp1.3-plaid.md §1).
+   *
+   * Validated further in `load.ts`'s `plaidRedirectUriProblems` (C-3,
+   * gate-security-review.md §2.2 F-2/§6 C-3): when set, it must be `https`
+   * and its origin must be one of `AUTH_ALLOWED_ORIGINS` — Plaid Link would
+   * otherwise send the browser back to a page this deployment does not
+   * actually serve as itself.
    */
-  PLAID_REDIRECT_URI: z.url().nullable().default(null),
+  PLAID_REDIRECT_URI: nullableUrlEnv(),
   /** D12: null by default. Polling is the ingestion path; webhooks are optional. */
-  PLAID_WEBHOOK_URL: z.url().nullable().default(null),
+  PLAID_WEBHOOK_URL: nullableUrlEnv(),
   /**
    * The one flag standing between a misconfigured `plaid_env` file and a real
    * charge against the Production Plaid account (D16: Trial plan, sandbox-first).
