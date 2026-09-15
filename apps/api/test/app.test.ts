@@ -184,17 +184,23 @@ describe('API shell', () => {
     await app.close();
   });
 
-  it('serves the OpenAPI document with a relative server URL', async () => {
-    // `openapi-ts` bakes `servers[0].url` into the frontend client as its base
-    // URL. An absolute one freezes the *generator's* host into the browser
-    // bundle — the committed spec carried `http://127.0.0.1:8080`, so every call
-    // from `https://personalfi.lan` would have been cross-origin to a loopback
-    // address: mixed content, CORS, and a request that never arrives.
+  it('serves the OpenAPI document with a relative server URL under /api (C-1a)', async () => {
+    // `openapi-ts` *could* bake `servers[0].url` into the frontend client as its
+    // base URL, except `apps/web/openapi-ts.shared.mjs` sets `baseUrl: false`
+    // specifically to stop that — see `app.ts`'s own comment on this field. An
+    // absolute URL here would freeze the *generator's* host into the document
+    // instead — the committed spec once carried `http://127.0.0.1:8080`, so
+    // every call from `https://personalfi.lan` would have been cross-origin to
+    // a loopback address: mixed content, CORS, and a request that never
+    // arrives. `/api`, not `/`, since gate-security-review.md F-4/C-1a:
+    // `docker/Caddyfile` now proxies exactly `handle_path /api/*` (stripped)
+    // to this API, not the site root — `scripts/check-proxy-routes.ts` (C-1b)
+    // asserts this value and the Caddyfile's routed prefix agree.
     const { app } = await buildApp({ config: testConfig(), pool: unreachablePool });
     await app.ready();
 
     const spec = app.swagger() as { servers?: { url: string }[] };
-    expect(spec.servers).toEqual([{ url: '/' }]);
+    expect(spec.servers).toEqual([{ url: '/api' }]);
 
     await app.close();
   });

@@ -293,9 +293,16 @@ export const eventRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
   // One tracker for the process, shared by both routes below — a tab open on
   // `/sync/stream` and a tab open on `/connections/{id}/events` both hold a
   // pool connection and both count against the same two caps (R-9).
+  //
+  // `pool.options` itself, not only `.max`, can be absent: test doubles that
+  // stand in for `pg.Pool` (e.g. `apps/api/test/app.test.ts`'s
+  // `unreachablePool`, built as a two-method object cast to `pg.Pool`) never
+  // set it, and `buildApp` builds the real route tree against them. `?.`
+  // rather than a required `PoolLike` shape, so the shell tests keep the
+  // minimal doubles they already have.
   const slots = new StreamSlots(
     SSE_MAX_STREAMS_PER_SESSION,
-    sseGlobalLimit(pool.options.max ?? 10),
+    sseGlobalLimit(pool.options?.max ?? 10),
   );
 
   /**
