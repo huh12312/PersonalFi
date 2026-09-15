@@ -65,18 +65,32 @@ RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store,sharin
 # message named `main.ts` rather than the package actually missing. Found by the
 # Phase 0 security gate; a hand-maintained list of a computed set will rot again,
 # so it is computed.
+#
+# The DELETE set is computed too, and that is the Phase 1 security gate's fix.
+# The loop used to glob `apps/* packages/* packages/contexts/*`, i.e. it knew
+# the workspace was exactly two levels deep everywhere except one hardcoded
+# nested directory. WP 1.2 then added `packages/connectors/{port,manual,csv,
+# plaid}`. `packages/connectors` matched `packages/*`, was not itself a project
+# and so never appeared in KEEP, and was deleted whole — taking all four
+# connectors with it. The api image had not booted since (`Cannot find package
+# '@connector/csv' imported from /app/apps/api/src/domain.ts`, exit 78, restart
+# loop) and nothing in CI or `just verify` ever starts the image, so nothing
+# said so. Asking pnpm for every workspace project removes the depth assumption
+# entirely: a grouping directory is never a project, so it is never a candidate
+# for deletion, at any nesting.
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked \
-    KEEP="$(pnpm list --filter '@app/api...' --depth -1 --prod --json \
-      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const p of JSON.parse(s))console.log(require("node:path").relative("/app",p.path))})')" && \
-    test -n "$KEEP" && \
+    projects() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const p of JSON.parse(s)){const r=require("node:path").relative("/app",p.path);if(r)console.log(r)}})'; } && \
+    KEEP="$(pnpm list --filter '@app/api...' --depth -1 --prod --json | projects)" && \
+    ALL="$(pnpm list -r --depth -1 --json | projects)" && \
+    test -n "$KEEP" && test -n "$ALL" && \
     echo "$KEEP" | grep -qx 'apps/api' && \
     printf 'keeping workspace projects:\n%s\n' "$KEEP" && \
-    for dir in apps/* packages/* packages/contexts/*; do \
+    for dir in $ALL; do \
+      case "$dir" in /*|*..*) echo "refusing to prune $dir" >&2; exit 1;; esac; \
       [ -d "$dir" ] || continue; \
-      [ "$dir" = packages/contexts ] && continue; \
       echo "$KEEP" | grep -qx "$dir" || rm -rf "$dir"; \
     done && \
-    rmdir packages/contexts 2>/dev/null || true
+    find apps packages -depth -type d -empty -delete 2>/dev/null || true
 
 RUN rm -rf scripts docs .github \
            compose.dev.yml eslint.config.js vitest.config.ts \
