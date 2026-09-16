@@ -73,6 +73,73 @@ const TRANSACTION = {
   updatedAt: new Date().toISOString(),
 };
 
+/**
+ * `GET /categories` (gate condition D-6, finding N-3).
+ *
+ * The re-gate's own note about this walkthrough was that "the mocked Playwright
+ * walkthrough cannot see that because its mock serves a category list the real
+ * API does not have" — which was true: the mock served nothing, so the
+ * walkthrough's category step could only ever clear a category, and the empty
+ * picker in the real deployment was invisible here. This shape is the one
+ * `apps/api/src/routes/categories.ts` emits, including `assignable: false` on
+ * the heading, so a picker that started offering headings would fail the
+ * walkthrough rather than pass it.
+ */
+const CATEGORIES = [
+  {
+    id: 'cat_dining',
+    key: 'dining',
+    parentId: null,
+    label: 'Dining',
+    description: 'Eating out.',
+    kind: 'expense',
+    icon: 'utensils',
+    sort: 100,
+    isSystem: true,
+    archivedAt: null,
+    assignable: false,
+  },
+  {
+    id: 'cat_dining_coffee',
+    key: 'dining.coffee',
+    parentId: 'cat_dining',
+    label: 'Coffee Shops',
+    description: 'Coffee and tea.',
+    kind: 'expense',
+    icon: 'coffee',
+    sort: 101,
+    isSystem: true,
+    archivedAt: null,
+    assignable: true,
+  },
+  {
+    id: 'cat_dining_restaurants',
+    key: 'dining.restaurants',
+    parentId: 'cat_dining',
+    label: 'Restaurants',
+    description: 'Sit-down meals.',
+    kind: 'expense',
+    icon: 'utensils',
+    sort: 102,
+    isSystem: true,
+    archivedAt: null,
+    assignable: true,
+  },
+  {
+    id: 'cat_uncategorised',
+    key: 'uncategorised',
+    parentId: null,
+    label: 'Uncategorised',
+    description: 'We do not know yet.',
+    kind: 'other',
+    icon: 'circle-help',
+    sort: 900,
+    isSystem: true,
+    archivedAt: null,
+    assignable: true,
+  },
+];
+
 const MANUAL_CONNECTOR = {
   provider: 'manual',
   displayName: 'Manual account',
@@ -218,6 +285,10 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     if (path === '/api/transactions/txn_1' && method === 'PATCH') {
       state.lastPatchBody = request.postDataJSON();
       return route.fulfill(json({ ...TRANSACTION, categoryId: null }));
+    }
+
+    if (path === '/api/categories' && method === 'GET') {
+      return route.fulfill(json({ categories: CATEGORIES }));
     }
 
     if (path === '/api/connectors') {

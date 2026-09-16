@@ -41,6 +41,114 @@ export interface FetchRoute {
 }
 
 /**
+ * The two-level slice of the real taxonomy the picker tests need.
+ *
+ * Small and shaped exactly like `GET /categories`: one heading that is *not*
+ * assignable with two children that are, one childless top-level row
+ * (`uncategorised`, which is how the real taxonomy ships it), and a non-expense
+ * `kind` so the grouping's kind annotation is exercised rather than assumed.
+ * Real ids, because `app-walkthrough.spec.ts` asserts the id that reaches the
+ * PATCH body and a placeholder there would prove nothing.
+ */
+export const TEST_CATEGORIES = [
+  {
+    id: 'cat_dining',
+    key: 'dining',
+    parentId: null,
+    label: 'Dining',
+    description: 'Eating out.',
+    kind: 'expense',
+    icon: 'utensils',
+    sort: 100,
+    isSystem: true,
+    archivedAt: null,
+    assignable: false,
+  },
+  {
+    id: 'cat_dining_restaurants',
+    key: 'dining.restaurants',
+    parentId: 'cat_dining',
+    label: 'Restaurants',
+    description: 'Sit-down meals.',
+    kind: 'expense',
+    icon: 'utensils',
+    sort: 101,
+    isSystem: true,
+    archivedAt: null,
+    assignable: true,
+  },
+  {
+    id: 'cat_dining_coffee',
+    key: 'dining.coffee',
+    parentId: 'cat_dining',
+    label: 'Coffee Shops',
+    description: 'Coffee and tea.',
+    kind: 'expense',
+    icon: 'coffee',
+    sort: 102,
+    isSystem: true,
+    archivedAt: null,
+    assignable: true,
+  },
+  {
+    id: 'cat_transfers',
+    key: 'transfers',
+    parentId: null,
+    label: 'Transfers',
+    description: 'Movement between your own accounts.',
+    kind: 'transfer',
+    icon: 'arrow-left-right',
+    sort: 200,
+    isSystem: true,
+    archivedAt: null,
+    assignable: false,
+  },
+  {
+    id: 'cat_transfers_internal',
+    key: 'transfers.internal',
+    parentId: 'cat_transfers',
+    label: 'Internal Transfer',
+    description: 'Between two of your accounts.',
+    kind: 'transfer',
+    icon: 'arrow-left-right',
+    sort: 201,
+    isSystem: true,
+    archivedAt: null,
+    assignable: true,
+  },
+  {
+    id: 'cat_uncategorised',
+    key: 'uncategorised',
+    parentId: null,
+    label: 'Uncategorised',
+    description: 'We do not know yet.',
+    kind: 'other',
+    icon: 'circle-help',
+    sort: 900,
+    isSystem: true,
+    archivedAt: null,
+    assignable: true,
+  },
+] as const;
+
+/**
+ * `GET /categories`, for every `stubFetchRoutes` list that mounts a screen
+ * containing a `CategoryPicker`.
+ *
+ * Exported as a route rather than left to each test to spell out, because
+ * `stubFetchRoutes` throws on an unstubbed path by design — so a screen that
+ * starts rendering a picker breaks every suite that mounts it until this is
+ * added, which is the behaviour we want, and a shared constant is how that stays
+ * a one-line fix instead of six copies of a fixture drifting apart.
+ */
+export function categoriesRoute(): FetchRoute {
+  return {
+    match: '/api/categories',
+    handle: () => jsonResponse({ categories: TEST_CATEGORIES }),
+  };
+}
+
+/**
  * Routes a stubbed global `fetch` by method + pathname, first match wins —
  * the same idea as `src/app/router.test.tsx`'s `stubFetch`, generalised with
  * a method and a `RegExp` match (several screens PATCH/POST/DELETE the same

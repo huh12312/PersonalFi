@@ -607,10 +607,16 @@ async function resolveMerchants(
     const fact = store.factsById.get(plan.row.currentFactId);
     if (fact === undefined) continue;
 
-    // Decision D25's full rule, which the read path cannot run because
-    // `TransactionFact` carries no counterparties: a provider that asserts a
-    // merchant *entity* has told us a payee exists on evidence we do not have,
-    // so its answer outranks the text gate, and its ids are recorded on the row.
+    // Decision D25's full rule: a provider that asserts a merchant *entity* has
+    // told us a payee exists on evidence we do not have, so its answer outranks
+    // the text gate, and its ids are recorded on the row.
+    //
+    // The inputs here must be *exactly* the inputs `resolveEffective` sees, or
+    // this half creates a `merchants` row the projection half never points at.
+    // That is not a coincidence to be maintained by hand: `factOf` puts
+    // `provider` and `counterparties` on `TransactionFact` precisely so both
+    // halves read the same evidence, and `merchant-identity.test.ts` asserts the
+    // orphan count is zero rather than trusting the two call sites to agree.
     const overlay = overlayOf(plan.row);
     const identity = resolveMerchantIdentity({
       name: fact.row.name,

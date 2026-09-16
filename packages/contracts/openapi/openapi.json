@@ -550,6 +550,87 @@
           "detail"
         ]
       },
+      "CategoryInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "What `PATCH /transactions/{id}` accepts as `categoryId`."
+          },
+          "key": {
+            "type": "string",
+            "description": "Stable across releases and renames — what rules and the provider mapping key on. A user-created category has one too, so this is never a `TAXONOMY` lookup."
+          },
+          "parentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null for a top-level heading."
+          },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "income",
+              "expense",
+              "transfer",
+              "investment",
+              "other"
+            ]
+          },
+          "icon": {
+            "type": "string",
+            "description": "A Lucide icon name (decision D20). A key, never markup."
+          },
+          "sort": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "isSystem": {
+            "type": "boolean",
+            "description": "true for a row the shipped taxonomy installed."
+          },
+          "archivedAt": {
+            "description": "Archived categories are hidden, never deleted: a budget from March must still say what it meant. Only present when `includeArchived` was asked for.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assignable": {
+            "type": "boolean",
+            "description": "false for a heading with children. Money lands on a leaf; a grouping is not a destination."
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "parentId",
+          "label",
+          "description",
+          "kind",
+          "icon",
+          "sort",
+          "isSystem",
+          "archivedAt",
+          "assignable"
+        ]
+      },
       "ImportFileInput": {
         "type": "object",
         "properties": {
@@ -2848,6 +2929,88 @@
           "kind",
           "outcome",
           "detail"
+        ],
+        "additionalProperties": false
+      },
+      "Category": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "What `PATCH /transactions/{id}` accepts as `categoryId`."
+          },
+          "key": {
+            "type": "string",
+            "description": "Stable across releases and renames — what rules and the provider mapping key on. A user-created category has one too, so this is never a `TAXONOMY` lookup."
+          },
+          "parentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null for a top-level heading."
+          },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "income",
+              "expense",
+              "transfer",
+              "investment",
+              "other"
+            ]
+          },
+          "icon": {
+            "type": "string",
+            "description": "A Lucide icon name (decision D20). A key, never markup."
+          },
+          "sort": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "isSystem": {
+            "type": "boolean",
+            "description": "true for a row the shipped taxonomy installed."
+          },
+          "archivedAt": {
+            "description": "Archived categories are hidden, never deleted: a budget from March must still say what it meant. Only present when `includeArchived` was asked for.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assignable": {
+            "type": "boolean",
+            "description": "false for a heading with children. Money lands on a leaf; a grouping is not a destination."
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "parentId",
+          "label",
+          "description",
+          "kind",
+          "icon",
+          "sort",
+          "isSystem",
+          "archivedAt",
+          "assignable"
         ],
         "additionalProperties": false
       },
@@ -8202,6 +8365,77 @@
         }
       }
     },
+    "/categories": {
+      "get": {
+        "operationId": "listCategories",
+        "summary": "This user's chart of categories, in display order",
+        "tags": [
+          "categories"
+        ],
+        "description": "Flat and ordered: a child follows its parent, and `parentId` carries the structure. Archived categories are omitted unless asked for — a picker must not offer a category the user retired, but a historic assignment still points at one. Categories are per user (decision D6), so this is never a shared list.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ]
+            },
+            "in": "query",
+            "name": "includeArchived",
+            "required": false,
+            "description": "Default false. Set only by a management screen, never by a picker."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "categories": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Category"
+                      }
+                    }
+                  },
+                  "required": [
+                    "categories"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/connections/plaid/link-token": {
       "post": {
         "operationId": "createPlaidLinkToken",
@@ -8638,6 +8872,10 @@
     {
       "name": "connections",
       "description": "Providers, the link and reconnect flows, sync history, and the server-sent event streams that carry sync progress."
+    },
+    {
+      "name": "categories",
+      "description": "The chart of categories this user may assign to. Per user (decision D6), seeded from the shipped taxonomy at boot, and editable by the user thereafter — so the list is read from the table, never from the constant."
     }
   ]
 }

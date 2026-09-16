@@ -383,19 +383,31 @@ export function merchantAbstainReasonOf(cleaned: string): MerchantAbstainReason 
   const letters = residue.replaceAll(/[^A-Z]/gu, '');
   if (letters.length < MIN_ALPHABETIC) return 'too_few_letters';
 
-  const tokens = residue.split(' ').filter((token) => token !== '');
+  // Tokens are compared by their alphanumeric content (`stripPunctuation`), so a
+  // token that has *no* alphanumeric content is not a word at all. Dropping
+  // those is what makes `PAYMENT - THANK YOU` — a real and common card-payment
+  // descriptor — read the same as `PAYMENT THANK YOU`; without it the bare `-`
+  // is a token no vocabulary can contain, `tokens.every(...)` is false, and one
+  // dash rescues the phrase from a gate that exists to refuse it. Filtering can
+  // only ever make the vocabulary rule refuse *more*, never a real payee fewer:
+  // a name survives on the strength of a word the vocabulary lacks, and
+  // punctuation is never that word.
+  const tokens = residue
+    .split(' ')
+    .map((token) => stripPunctuation(token))
+    .filter((token) => token !== '');
 
   // `TRANSFER TO HIGH-YIELD SAVINGS`. The tail is one of the user's own account
   // names, so a `merchants` row here does not name a payee — it names an
   // account, and Phase 2 would hang a budget rule off it.
   for (const [index, token] of tokens.entries()) {
     const next = tokens[index + 1];
-    if (!TRANSFER_VERBS.has(stripPunctuation(token))) continue;
-    if (next !== undefined && !TRANSFER_DIRECTIONS.has(stripPunctuation(next))) continue;
+    if (!TRANSFER_VERBS.has(token)) continue;
+    if (next !== undefined && !TRANSFER_DIRECTIONS.has(next)) continue;
     return 'self_transfer';
   }
 
-  if (tokens.every((token) => OPERATION_VOCABULARY.has(stripPunctuation(token)))) {
+  if (tokens.every((token) => OPERATION_VOCABULARY.has(token))) {
     return 'bank_operation';
   }
 
@@ -432,11 +444,7 @@ export interface MerchantIdentityInput {
 
 /** Which tier answered. Recorded so a merchant row's provenance is inspectable. */
 export type MerchantIdentitySource =
-  | 'user'
-  | 'provider_entity'
-  | 'provider_name'
-  | 'descriptor'
-  | 'none';
+  'user' | 'provider_entity' | 'provider_name' | 'descriptor' | 'none';
 
 export interface MerchantIdentity {
   /** `null` means *no `merchants` row*, and is the whole point of D25. */

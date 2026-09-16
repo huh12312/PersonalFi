@@ -17,9 +17,12 @@ export interface TransactionsFilterBarProps {
 
 /**
  * Search + date/account/category filters (deliverable 1). "Category" is
- * represented today only as the "Uncategorized" toggle: `GET /categories`
- * does not exist yet (`CategoryPicker.tsx`'s own doc), so a real category
- * combobox has nothing to search — the same honest-placeholder call.
+ * represented here only as the "Uncategorized" toggle, and deliberately so even
+ * now that `GET /categories` exists (gate condition D-6): filtering *by* a
+ * category needs a `categoryId` parameter on `GET /transactions`, which the
+ * contract does not have. Rendering a picker that could not narrow the list
+ * would be a control that does nothing. Phase 2's reports work adds both halves
+ * together.
  *
  * Search is debounced locally (250ms) so every keystroke doesn't re-fire the
  * keyset query; every other control commits immediately, since a `<select>`

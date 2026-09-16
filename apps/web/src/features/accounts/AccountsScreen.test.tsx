@@ -8,6 +8,7 @@ import { routeTree } from '../../routeTree.gen.ts';
 import {
   ensureApiClient,
   jsonResponse,
+  categoriesRoute,
   stubFetchRoutes,
 } from '../../test-support/api-test-utils.ts';
 import type { Account, NetWorth } from '../../api/generated/types.gen.ts';
@@ -109,6 +110,7 @@ describe('AccountsScreen', () => {
     };
 
     stubFetchRoutes([
+      categoriesRoute(),
       { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
       { match: '/api/accounts', handle: () => jsonResponse({ accounts }) },
       { match: '/api/net-worth', handle: () => jsonResponse(netWorth) },
@@ -124,6 +126,7 @@ describe('AccountsScreen', () => {
 
   it('shows an empty state with a call to action when there are no accounts', async () => {
     stubFetchRoutes([
+      categoriesRoute(),
       { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
       { match: '/api/accounts', handle: () => jsonResponse({ accounts: [] }) },
       {
@@ -140,6 +143,7 @@ describe('AccountsScreen', () => {
 
   it('shows a retry action when the accounts request fails', async () => {
     stubFetchRoutes([
+      categoriesRoute(),
       { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
       { match: '/api/accounts', handle: () => jsonResponse({ code: 'internal' }, 500) },
       {

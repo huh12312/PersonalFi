@@ -9,6 +9,7 @@ import { routeTree } from '../../routeTree.gen.ts';
 import {
   ensureApiClient,
   jsonResponse,
+  categoriesRoute,
   stubFetchRoutes,
 } from '../../test-support/api-test-utils.ts';
 import type { ConnectionSummary, ConnectorManifest } from '../../api/generated/types.gen.ts';
@@ -98,6 +99,7 @@ describe('ConnectionsScreen', () => {
 
   it('lists connections with health, last-sync, and account count', async () => {
     stubFetchRoutes([
+      categoriesRoute(),
       { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
       { match: '/api/sync/stream', handle: () => emptySseResponse() },
       {
@@ -133,6 +135,7 @@ describe('ConnectionsScreen', () => {
 
   it('shows an empty state with an "Add connection" action when there are none', async () => {
     stubFetchRoutes([
+      categoriesRoute(),
       { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
       { match: '/api/sync/stream', handle: () => emptySseResponse() },
       { match: '/api/connections', method: 'GET', handle: () => jsonResponse({ connections: [] }) },
@@ -149,6 +152,7 @@ describe('ConnectionsScreen', () => {
     let connections: ConnectionSummary[] = [];
 
     stubFetchRoutes([
+      categoriesRoute(),
       { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
       { match: '/api/sync/stream', handle: () => emptySseResponse() },
       { match: '/api/connections', method: 'GET', handle: () => jsonResponse({ connections }) },

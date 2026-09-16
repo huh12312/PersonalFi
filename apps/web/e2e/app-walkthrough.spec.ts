@@ -61,9 +61,27 @@ test('login, edit a transaction category, and add a manual account', async ({ pa
 
   await page.getByText('Blue Bottle Coffee').first().click();
   await expect(page.getByRole('heading', { name: 'Blue Bottle Coffee' })).toBeVisible();
-  await page.getByLabel('Category').selectOption('');
+  // Pick a *named* category, and assert the id the API assigned reaches the
+  // PATCH body (gate condition D-6, finding N-3). Until `GET /categories`
+  // existed the picker offered one option, so this step could only ever clear a
+  // category — which is exactly why the re-gate's browser walk found the empty
+  // picker and this suite did not. Selecting by visible label rather than by
+  // value is the point: a picker that rendered labels it could not resolve to
+  // ids would fail here instead of silently patching the wrong thing.
+  const categoryPicker = page.getByLabel('Category');
+  await expect(categoryPicker.getByRole('option', { name: 'Coffee Shops' })).toBeAttached();
+  // Headings are `<optgroup>` labels, never values: money lands on a leaf.
+  await expect(categoryPicker.getByRole('option', { name: 'Dining' })).toHaveCount(0);
+  await categoryPicker.selectOption({ label: 'Coffee Shops' });
   await expect
     .poll(() => api.lastPatchBody, { message: 'PATCH /transactions/txn_1 was never sent' })
+    .toEqual({ categoryId: 'cat_dining_coffee' });
+
+  // …and clearing it still works, which is the assertion this step used to make
+  // on its own.
+  await categoryPicker.selectOption('');
+  await expect
+    .poll(() => api.lastPatchBody, { message: 'clearing the category was never sent' })
     .toEqual({ categoryId: null });
   await page.keyboard.press('Escape');
 
@@ -115,4 +133,7 @@ test('login, edit a transaction category, and add a manual account', async ({ pa
   expect(apiRequestPaths.some((p) => p.startsWith('/api/auth/'))).toBe(true);
   expect(apiRequestPaths.some((p) => p === '/api/transactions')).toBe(true);
   expect(apiRequestPaths.some((p) => p === '/api/connections')).toBe(true);
+  // D-6: the picker's list comes from the API under the same `/api` namespace,
+  // not from a constant compiled into the bundle.
+  expect(apiRequestPaths.some((p) => p === '/api/categories')).toBe(true);
 });

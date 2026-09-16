@@ -184,6 +184,20 @@ export {
   transactionIdsOf,
 } from './consumer.ts';
 
+// --- the chart of categories, as a user has it -----------------------------
+// The read model behind `GET /categories` and the boot pass that makes sure
+// there is something to read (gate conditions D-6 / N-3). `listCategories`
+// reads the *table*, never `TAXONOMY`: the constant is what we ship, the table
+// is what the user has, and after a rename or a custom category they differ.
+export {
+  ensureTaxonomy,
+  listCategories,
+  type EnsureTaxonomyInput,
+  type EnsureTaxonomyResult,
+  type ListCategoriesOptions,
+  type UserCategory,
+} from './categories.ts';
+
 // --- seeding and service ---------------------------------------------------
 export {
   categoryIdsByKey,

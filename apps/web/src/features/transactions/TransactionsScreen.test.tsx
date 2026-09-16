@@ -9,6 +9,7 @@ import { routeTree } from '../../routeTree.gen.ts';
 import {
   ensureApiClient,
   jsonResponse,
+  categoriesRoute,
   stubFetchRoutes,
 } from '../../test-support/api-test-utils.ts';
 import type { Account, Transaction } from '../../api/generated/types.gen.ts';
@@ -101,6 +102,7 @@ describe('TransactionsScreen', () => {
 
   it('renders the transaction list with formatted amounts and account names', async () => {
     stubFetchRoutes([
+      categoriesRoute(),
       { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
       { match: '/api/accounts', handle: () => jsonResponse({ accounts: [ACCOUNT] }) },
       {
@@ -123,6 +125,7 @@ describe('TransactionsScreen', () => {
 
   it('shows pending and transfer badges', async () => {
     stubFetchRoutes([
+      categoriesRoute(),
       { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
       { match: '/api/accounts', handle: () => jsonResponse({ accounts: [ACCOUNT] }) },
       {
@@ -147,6 +150,7 @@ describe('TransactionsScreen', () => {
 
   it('shows an empty state when there are no transactions', async () => {
     stubFetchRoutes([
+      categoriesRoute(),
       { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
       { match: '/api/accounts', handle: () => jsonResponse({ accounts: [] }) },
       {
@@ -164,6 +168,7 @@ describe('TransactionsScreen', () => {
   it('opens the detail sheet and saves a note edit through the overlay endpoint', async () => {
     let patchedBody: unknown = null;
     stubFetchRoutes([
+      categoriesRoute(),
       { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
       { match: '/api/accounts', handle: () => jsonResponse({ accounts: [ACCOUNT] }) },
       {
@@ -225,5 +230,15 @@ describe('TransactionsScreen', () => {
     fireEvent.blur(noteField);
 
     await waitFor(() => expect(patchedBody).toEqual({ note: 'Team coffee' }));
+
+    // The category half of the same sheet (gate condition D-6, finding N-3).
+    // The re-gate could set a note here and *not* a category, because the picker
+    // had one option; this asserts the real category id from `GET /categories`
+    // reaches the same overlay endpoint.
+    const categoryField = await screen.findByLabelText('Category');
+    await screen.findByRole('option', { name: 'Coffee Shops' });
+    await user.selectOptions(categoryField, 'cat_dining_coffee');
+
+    await waitFor(() => expect(patchedBody).toEqual({ categoryId: 'cat_dining_coffee' }));
   });
 });

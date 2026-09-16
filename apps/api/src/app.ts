@@ -11,6 +11,7 @@ import { createDatabase } from '@core/db';
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { newId, systemClock, type Clock } from '@core/kernel';
 import type { TransactionalExecutor } from '@core/platform';
+import { ensureTaxonomy } from '@ctx/categorization';
 import type { ConnectorRegistry } from '@ctx/connections';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import {
@@ -30,6 +31,7 @@ import { buildLoggerOptions } from './logging.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
 import { accountRoutes } from './routes/accounts.ts';
 import { authRoutes } from './routes/auth.ts';
+import { categoryRoutes } from './routes/categories.ts';
 import { connectionRoutes } from './routes/connections.ts';
 import type { RouteDeps } from './routes/deps.ts';
 import { eventRoutes } from './routes/events.ts';
@@ -206,6 +208,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
             'Providers, the link and reconnect flows, sync history, and the server-sent event ' +
             'streams that carry sync progress.',
         },
+        {
+          name: 'categories',
+          description:
+            'The chart of categories this user may assign to. Per user (decision D6), seeded ' +
+            'from the shipped taxonomy at boot, and editable by the user thereafter — so the ' +
+            'list is read from the table, never from the constant.',
+        },
       ],
     },
     transform: jsonSchemaTransform,
@@ -348,8 +357,63 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(accountRoutes(deps));
   await app.register(transactionRoutes(deps));
   await app.register(connectionRoutes(deps));
+  await app.register(categoryRoutes(deps));
   await app.register(plaidRoutes(deps));
   await app.register(eventRoutes(deps));
+
+  /**
+   * Install the shipped category taxonomy for every user (condition D-6, N-3).
+   *
+   * **Here rather than in a migration.** `categories` is `user_id`-scoped (D6),
+   * and migrations run before any user exists — `just bootstrap-user` creates the
+   * first one afterwards — so there is literally nothing for a migration to seed.
+   * An applied migration is also immutable while `TAXONOMY` gains categories in
+   * later releases, and transcribing ~130 rows into SQL would give the app two
+   * copies of its own taxonomy for a release to drift apart.
+   *
+   * **Here rather than in `modules.ts` or in identity's user-creation path.**
+   * `modules.ts` is the event-consumer registry and this is not a consumer;
+   * hanging it off `UserService.createPrimary` would put a categorization concern
+   * inside the identity context and — worse — would only ever run for users
+   * created *after* this release, leaving the one user who already exists with
+   * the empty picker the re-gate found. A pass every boot is what makes a
+   * category added in v0.3 appear for a user created in v0.1.
+   *
+   * **Here rather than inside `@ctx/categorization`.** The obvious shape was a
+   * `seedAllUsersTaxonomy` that read `users` itself, and the schema-ownership
+   * check refused it: `users` belongs to `@ctx/identity`. "Which users exist?" is
+   * a question only this file may ask — the composition root is the one place
+   * that knows about both contexts — so it asks identity's own `UserService`
+   * (`security.users()`, which is deliberately usable before the KEK exists) and
+   * hands the ids to `ensureTaxonomy`. `findPrimary` is today's whole answer
+   * because `createPrimary` refuses a second user outright; when identity grows
+   * a multi-user reader, this call site grows with it and `ensureTaxonomy`,
+   * which already takes a list, does not change at all.
+   *
+   * **`onReady` rather than inline.** `buildApp` is called by `emit-openapi` and
+   * by the shell tests with no database behind it at all; an inline await would
+   * make every one of them pay a failing round trip before a single route was
+   * registered. The hook runs once, after the routes are mounted and before the
+   * socket accepts anything.
+   *
+   * **Logged and survived, never fatal**, for the same reason `main.ts` treats
+   * the config snapshot that way: a database that is up but not yet migrated
+   * should get an API that can *say so* on `/ready`, not a crash loop that tells
+   * the operator nothing. The cost of the happy path is one pass over ~130 rows
+   * per user that almost always writes nothing.
+   */
+  app.addHook('onReady', async () => {
+    try {
+      const primary = await security.users().findPrimary();
+      const result = await ensureTaxonomy(database, {
+        userIds: primary === null ? [] : [primary.id],
+        clock,
+      });
+      app.log.info({ ...result }, 'category taxonomy ensured');
+    } catch (error) {
+      app.log.warn({ err: error }, 'could not seed the category taxonomy; continuing');
+    }
+  });
 
   return { app, security };
 }

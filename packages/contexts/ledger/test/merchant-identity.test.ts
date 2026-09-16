@@ -505,26 +505,34 @@ describe.skipIf(NO_DATABASE)('D25 merchant identity — provider entity ids', ()
   });
 
   /**
-   * OPEN DEFECT — a counterparty entity id alone creates an orphan merchant.
+   * Tier 2 reaches `transactions.effective_merchant_id`, not just `merchants`.
    *
-   * `resolveMerchantIdentity`'s tier 2 says a `counterparties[].entity_id` is the
-   * provider asserting a payee on evidence we do not have, and that the
-   * assertion outranks the text gate; `apply.ts`'s `resolveMerchants` calls it
-   * with the counterparties and duly creates the `merchants` row. But the value
-   * written to `transactions.effective_merchant_id` comes from
-   * `projectEffective` → `resolveEffective`, and `resolveEffective` calls
-   * `resolveMerchantIdentity` *without* counterparties (`TransactionFact` carries
-   * none, by design). So the two halves of the write path disagree: the row is
-   * created and nothing points at it.
+   * This was a real defect, found by an earlier revision of this file and fixed
+   * in `src/`. `resolveMerchantIdentity`'s tier 2 says a
+   * `counterparties[].entity_id` is the provider asserting a payee on evidence
+   * we do not have, and that the assertion outranks the text gate; `apply.ts`'s
+   * `resolveMerchants` called it with the counterparties and duly created the
+   * `merchants` row. But the value written to `transactions.effective_merchant_id`
+   * comes from `projectEffective` → `resolveEffective`, and `resolveEffective`
+   * was calling `resolveMerchantIdentity` *without* counterparties, because
+   * `TransactionFact` did not carry any. The two halves of one write path
+   * therefore disagreed, and the visible damage was a `merchants` row with zero
+   * transactions — exactly the orphan a Phase 2 budget or subscription rule
+   * would attach to and never fire.
    *
-   * The visible damage is a `merchants` row with zero transactions — exactly the
-   * orphan a Phase 2 budget or subscription rule would attach to and never fire.
+   * The fix widened `TransactionFact` (`provider`, `counterparties`) and had
+   * `factOf` populate them, rather than passing `resolveMerchants`'s answer into
+   * the projection. Both keep `resolveEffective` pure; only this one keeps it a
+   * function of *the fact and the overlay*, which is what `effective-invariant.
+   * test.ts` re-resolves from when it walks every row and asserts the stored
+   * columns still match. Handing the projection a pre-computed merchant id would
+   * have made the invariant check a tautology and moved a tier of the resolution
+   * order out of the one function that is allowed to know it.
    *
-   * This test asserts the behaviour **as it is today**, deliberately, so that it
-   * goes red the moment somebody fixes it and the fix cannot land without this
-   * file being revisited. It is not an endorsement.
+   * The orphan count is what actually pins the two halves together: the non-null
+   * link alone would still pass if they diverged again in the other direction.
    */
-  it('OPEN DEFECT: an entity id alone creates a merchant row no transaction points at', async () => {
+  it('links the transaction when a counterparty entity id is the only evidence', async () => {
     await apply([
       providerTransaction({
         providerTransactionId: 'entity-only',
@@ -542,19 +550,27 @@ describe.skipIf(NO_DATABASE)('D25 merchant identity — provider entity ids', ()
       }),
     ]);
 
-    // The write path's *identity* half did the right thing…
+    // The write path's *identity* half: one row, from the provider's assertion.
     const rows = await merchantRows(database);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.normalized_key).toBe('bluebottlecoffee');
     expect(rows[0]?.provider_entity_ids).toEqual(['plaid:eyg8o776k0Q']);
 
-    // …and the *projection* half did not: the transaction is unlinked, so the
-    // row above is an orphan. Should read `not.toBeNull()` once the projection
-    // learns about counterparties.
-    expect(await merchantOfTransaction(database, 'entity-only')).toBeNull();
+    // …and the *projection* half, agreeing with it: the transaction points at
+    // the row the identity half created, not at NULL.
+    const linked = await merchantOfTransaction(database, 'entity-only');
+    expect(linked).not.toBeNull();
+    expect(linked?.id).toBe(rows[0]?.id);
+    expect(linked?.normalized_key).toBe('bluebottlecoffee');
 
-    // Stated as the invariant it breaks, so the failure message is about the
-    // damage rather than about one `null`.
+    // Non-vacuity: the descriptor on its own is refused, so the link above is
+    // the entity assertion doing the work and not a gate that never fired.
+    const bare = resolveMerchantIdentity({ name: 'ONLINE PAYMENT' });
+    expect(bare.key).toBeNull();
+    expect(bare.abstainReason).toBe('bank_operation');
+
+    // Stated as the invariant it used to break, so a re-divergence fails with a
+    // message about the damage rather than about one `null`.
     const orphans = await database.db.execute<{ count: string }>(sql`
       SELECT count(*) AS count
         FROM merchants m
@@ -563,23 +579,35 @@ describe.skipIf(NO_DATABASE)('D25 merchant identity — provider entity ids', ()
            SELECT 1 FROM transactions t WHERE t.effective_merchant_id = m.id
          )
     `);
-    expect(Number(orphans.rows[0]?.count ?? -1)).toBe(1);
+    expect(Number(orphans.rows[0]?.count ?? -1)).toBe(0);
   });
 
-  it('records that PAYMENT THANK YOU is not refused by the vocabulary gate', () => {
-    // Documented gap, not an endorsement. `PAYMENT` is in
-    // `OPERATION_VOCABULARY`; `THANK` and `YOU` are not, so `tokens.every(...)`
-    // is false and a very common credit-card-payment descriptor still earns a
-    // `merchants` row. Asserted so the behaviour is visible in the evidence and
-    // so closing the gap is a deliberate, test-updating act rather than a
-    // silent one.
-    const identity = resolveMerchantIdentity({ name: 'PAYMENT THANK YOU' });
-    expect(identity.key).toBe('paymentthankyou');
-    expect(identity.abstainReason).toBeNull();
-    expect(identity.source).toBe('descriptor');
+  it('refuses PAYMENT THANK YOU and the other card-payment phrasings', async () => {
+    // `PAYMENT THANK YOU` and its variants are how most US card issuers describe
+    // a statement payment. Every one of them is a transfer, so a `merchants` row
+    // here is both the commonest noise merchant in the wild and a budget line
+    // Phase 2 would build on a movement between the user's own accounts.
+    for (const descriptor of [
+      'PAYMENT THANK YOU',
+      'ONLINE PAYMENT THANK YOU',
+      'PAYMENT - THANK YOU',
+      'ELECTRONIC PAYMENT THANK YOU',
+      'MOBILE PAYMENT THANK YOU',
+      'AUTOPAY PAYMENT THANK YOU',
+      'PAYMENT THANK YOU - WEB',
+      'DIRECT DEBIT PAYMENT THANK YOU',
+      'CREDIT CARD PAYMENT THANK YOU',
+      'STATEMENT CREDIT',
+    ]) {
+      const identity = resolveMerchantIdentity({ name: descriptor });
+      expect(identity.key, descriptor).toBeNull();
+      expect(identity.abstainReason, descriptor).toBe('bank_operation');
+      expect(identity.source, descriptor).toBe('none');
+    }
 
-    // The provider tiers still cover the case a caller cares about: a stated
-    // merchant name wins outright, whatever the descriptor says.
+    // The provider tiers still override the gate, which is what keeps the
+    // vocabulary safe to extend: a stated merchant name wins outright, whatever
+    // the descriptor says.
     const stated = resolveMerchantIdentity({
       name: 'PAYMENT THANK YOU',
       merchantName: 'Blue Bottle Coffee',
@@ -589,6 +617,19 @@ describe.skipIf(NO_DATABASE)('D25 merchant identity — provider entity ids', ()
     expect(stated.key).toBe('bluebottlecoffee');
     expect(stated.source).toBe('provider_entity');
     expect(stated.entityIds).toEqual(['plaid:eyg8o776k0Q']);
+
+    // And the refusal reaches the table, not just the pure function: the row
+    // lands with no merchant and the `merchants` table stays empty.
+    await apply([
+      providerTransaction({
+        providerTransactionId: 'thank-you',
+        name: 'PAYMENT THANK YOU',
+        merchantName: null,
+        counterparties: null,
+      }),
+    ]);
+    expect(await merchantOfTransaction(database, 'thank-you')).toBeNull();
+    expect(await merchantRows(database)).toHaveLength(0);
   });
 });
 

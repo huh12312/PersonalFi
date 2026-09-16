@@ -98,7 +98,18 @@ export async function listCategories(
     icon: string;
     sort: number;
     is_system: boolean;
-    archived_at: Date | null;
+    /**
+     * `string | Date`, and the union is not defensive — it is what this driver
+     * actually returns. A `TIMESTAMPTZ` read through the query *builder* arrives
+     * as a `Date`, and the same column read through `execute()` with raw SQL
+     * arrives as the wire string `2026-09-16 14:28:13.829141+00`. Declaring it
+     * `Date` and passing it through cost an afternoon: every archived category
+     * turned `GET /categories?includeArchived=true` into a 500 at the response
+     * serialiser, because `toISOString` is not a function on a string.
+     * `explainAssignment` in `service.ts` types `decided_at` the same way for the
+     * same reason.
+     */
+    archived_at: string | Date | null;
     child_count: string;
   }>(sql`
     SELECT c.id,
@@ -128,7 +139,7 @@ export async function listCategories(
     icon: row.icon,
     sort: row.sort,
     isSystem: row.is_system,
-    archivedAt: row.archived_at,
+    archivedAt: row.archived_at === null ? null : new Date(row.archived_at),
     // Assignable means "money can land here". A heading with children is a
     // grouping, not a destination; `uncategorised` is childless on purpose,
     // because "we do not know" does not decompose. Computed from the table
@@ -138,36 +149,58 @@ export async function listCategories(
   }));
 }
 
-export interface SeedAllUsersResult {
+export interface EnsureTaxonomyInput {
+  /**
+   * Whose charts to ensure. Supplied by the caller, **never** queried here.
+   *
+   * The first draft of this function selected the ids out of identity's own
+   * `users` table, and the schema-ownership check caught it: that table belongs
+   * to `@ctx/identity`, and one innocent read of another context's table is how
+   * two packages stop being changeable independently. "Which users exist?" is a
+   * question only the
+   * composition root may ask — it is the one place allowed to know about both
+   * contexts — so `apps/api/src/app.ts` asks identity's own `UserService` and
+   * passes the answer in. That also makes this function trivially testable with
+   * a list of ids and no `users` row at all.
+   */
+  readonly userIds: readonly string[];
+  readonly clock: Clock;
+}
+
+export interface EnsureTaxonomyResult {
   readonly users: number;
   readonly categoriesInserted: number;
 }
 
 /**
- * Seed every existing user's taxonomy. The boot pass behind condition D-6.
+ * Ensure each named user has the shipped taxonomy. The boot pass behind D-6.
  *
- * One user at a time and one transaction per user, rather than one transaction
- * for all of them: a partially seeded *user* is the failure that matters (a
- * category missing from a picker three screens later), and a second user's
- * failure is no reason to roll back the first user's working chart. Today there
- * is exactly one user, and D6 says multi-user is additive later — this loop is
- * what "additive" means in practice.
+ * One user at a time, rather than one pass for all of them: a partially seeded
+ * *user* is the failure that matters (a category missing from a picker three
+ * screens later), and a second user's failure is no reason to undo the first
+ * user's working chart. Today identity's `createPrimary` refuses a second user
+ * outright, so this loop runs exactly once — and D6 says multi-user is additive
+ * later, which is what taking a *list* rather than a single id is for.
+ *
+ * Idempotent by construction: `seedSystemTaxonomy` is an `ON CONFLICT (user_id,
+ * key) DO UPDATE` over ~130 rows that reuses the existing id, so running it
+ * every boot re-issues nothing that `category_assignments` already points at and
+ * is how a category added in a later release reaches a user created by an
+ * earlier one.
  *
  * The caller decides what a failure means. In `buildApp` it is logged and
  * survived, for the same reason the config snapshot is: a database that is up
  * but not yet migrated should get an API that can *say so* on `/ready`, not a
  * crash loop that tells the operator nothing.
  */
-export async function seedAllUsersTaxonomy(
+export async function ensureTaxonomy(
   executor: CategorizationExecutor,
-  clock: Clock,
-): Promise<SeedAllUsersResult> {
-  const users = await executor.execute<{ id: string }>(sql`SELECT id FROM users ORDER BY id`);
-
+  input: EnsureTaxonomyInput,
+): Promise<EnsureTaxonomyResult> {
   let categoriesInserted = 0;
-  for (const user of users.rows) {
-    const result = await seedSystemTaxonomy(executor, { userId: user.id, clock });
+  for (const userId of input.userIds) {
+    const result = await seedSystemTaxonomy(executor, { userId, clock: input.clock });
     categoriesInserted += result.categoriesInserted;
   }
-  return { users: users.rows.length, categoriesInserted };
+  return { users: input.userIds.length, categoriesInserted };
 }
