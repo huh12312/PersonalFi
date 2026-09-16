@@ -217,9 +217,22 @@ drill-worker-restart:
 #
 # Wired into CI as the `compose-hardening` job, into `just verify`, and into
 # the lefthook pre-commit hook.
+#
+# gate-security-review.md §8.11 D-4: the compose-file gate above never checked
+# whether the *host secret files* it declares are actually readable by the
+# uid that will consume them — that gap is what let harden-secrets' hand-
+# written secret list rot (N-1) with nothing red until `docker compose up`
+# crash-looped on EACCES. check-secret-ownership.sh is the computed version:
+# it derives the expected owner/mode from compose.yml's own `secrets:`/`user:`
+# declarations rather than a second hand-written list.
+check-secret-ownership:
+    bash scripts/check-secret-ownership.sh --self-test
+    bash scripts/check-secret-ownership.sh
+
 hardening-check:
     bash scripts/compose-hardening-check.sh --self-test
     bash scripts/compose-hardening-check.sh
+    just check-secret-ownership
 
 # Old name, kept so existing hooks/docs/muscle memory keep working.
 compose-lint: hardening-check
@@ -704,8 +717,17 @@ harden-secrets:
     set -euo pipefail
     cd "${SECRETS_DIR}"
     sudo chmod 0700 .
-    # database_url and master_key are read by api/worker/migrator (10001).
-    for f in database_url master_key; do
+    # database_url, master_key and the three plaid_* secrets are read by
+    # api/worker/migrator (10001). Keep this list in step with compose.yml's
+    # `secrets:` on those services — gate-security-review.md §8.2 N-1 / §8.11
+    # D-4: the plaid_* secrets landed in C-3, were mounted on api and worker,
+    # and were never added here, so 0400-owned-by-you (what an operator gets
+    # from following RUNBOOK.md's "Create secrets" step 6 literally) made
+    # both api and worker crash-loop on EACCES the moment Plaid was enabled.
+    # scripts/check-secret-ownership.sh is the computed check that would catch
+    # this list rotting again the way the image-prune delete set and the
+    # Caddyfile's proxied prefixes both rotted before it.
+    for f in database_url master_key plaid_client_id plaid_secret plaid_env; do
       [[ -e "$f" ]] || continue
       sudo chown 10001:10001 "$f" && sudo chmod 0400 "$f"
     done

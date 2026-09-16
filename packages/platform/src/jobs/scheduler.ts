@@ -52,6 +52,14 @@ export interface SchedulerOptions {
   /** How often to look for due schedules. Default 30s (08 §6.2). */
   readonly tickIntervalMs?: number;
   readonly random?: () => number;
+  /**
+   * Called at the top of every tick pass, whether or not this process holds
+   * scheduler leadership (D-3, gate-security-review.md §8.5 N-6): a follower
+   * that never becomes leader is still alive and ticking, and the liveness
+   * signal is about the loop running, not about which process is in charge of
+   * it. Wire it to `LivenessWriter.touch(...)`.
+   */
+  readonly onTick?: () => void;
 }
 
 export interface Scheduler {
@@ -152,6 +160,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     metrics,
     tickIntervalMs = 30_000,
     random = Math.random,
+    onTick,
   } = options;
 
   let running = false;
@@ -223,6 +232,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
 
   async function loop(): Promise<void> {
     while (running) {
+      onTick?.();
       if (lease === null) {
         lease = await tryAcquireAdvisoryLease(pool, SCHEDULER_ADVISORY_LOCK_KEY);
         metrics?.gauge(METRIC.schedulerIsLeader, lease === null ? 0 : 1);

@@ -50,6 +50,20 @@ export interface ProviderTransactionInput {
  * exhaustively; one that takes the whole row invites a future contributor to
  * reach for `raw` and put provider-specific logic in the one place that must stay
  * provider-agnostic.
+ *
+ * `provider` and `counterparties` were added for decision D25 and are the only
+ * widening this slice has taken. They are here because they have to be: D25's
+ * second tier says a provider asserting a merchant *entity* outranks our text
+ * heuristics, and if the read path could not see that assertion it would resolve
+ * a different merchant than the write path did — which is the exact divergence
+ * `resolveEffective` exists to make impossible, and which showed up in testing as
+ * a `merchants` row no transaction pointed at. They are *not* a licence to reach
+ * further: `raw`, `location` and `providerCategory` remain out, because nothing
+ * about what a transaction *is* may depend on a field only one provider sends.
+ *
+ * Optional rather than required so the hundreds of existing `TransactionFact`
+ * literals in tests keep compiling; absent means "no provider evidence", which is
+ * the honest reading for a hand-built fact.
  */
 export interface TransactionFact {
   readonly amount: Money;
@@ -58,6 +72,8 @@ export interface TransactionFact {
   readonly name: string;
   readonly merchantName: string | null;
   readonly pending: boolean;
+  readonly provider?: string | null;
+  readonly counterparties?: readonly ProviderCounterparty[] | null;
 }
 
 /**

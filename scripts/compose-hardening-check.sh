@@ -49,6 +49,11 @@ cd "$REPO_ROOT"
 export REPO_ROOT
 
 FIXTURE="scripts/fixtures/compose-hostile.yml"
+# D-7: a minimal, otherwise-clean base and an override fragment that adds
+# `privileged: true` to the one service the base defines — proves overrides
+# are rendered *layered on their base*, not standalone (see check_layered).
+OVERRIDE_BASE_FIXTURE="scripts/fixtures/compose-hostile-override-base.yml"
+OVERRIDE_FIXTURE="scripts/fixtures/compose-hostile-override.yml"
 
 # Fail closed, with a sentence that says what to install. This runs in the
 # lefthook pre-commit hook too, so "docker is not on this machine" has to be a
@@ -95,11 +100,21 @@ trap 'rm -f "$EVALUATOR"' EXIT
 
 cat >"$EVALUATOR" <<'NODE'
 // Evaluates one `docker compose config --format json` document against the
-// P0-6/P0-7 rule set. Reads the JSON on stdin; argv[2] is the file label.
-// Prints one line per violation ("RULE_ID<TAB>service<TAB>detail") on stdout
-// and a human summary on stderr. Exit 0 = clean, 1 = violations.
+// P0-6/P0-7 rule set. Reads the JSON on stdin; argv[2] is the display label
+// (what gets printed); argv[3], if given, is the file whose EXCEPTIONS entries
+// apply — see the D-7 note below. Prints one line per violation
+// ("RULE_ID<TAB>service<TAB>detail") on stdout and a human summary on stderr.
+// Exit 0 = clean, 1 = violations.
 
 const label = process.argv[2] ?? '(stdin)';
+// D-7 (gate-security-review.md §8.2 N-2): a layered render's label is
+// "compose.yml+compose.override.yml" (see check_layered below) so the human
+// output says what was actually evaluated — but `db`'s documented
+// missing-read-only exception is a property of compose.yml, not of whatever
+// happens to be layered on top of it, and must still apply. argv[3] lets the
+// caller say "look up exceptions as if this were compose.yml" without
+// changing what gets printed.
+const exceptionLabel = process.argv[3] ?? label;
 
 // Documented, auditable exceptions. Anything not listed here is enforced on
 // every service in every compose file. Keyed "<basename>:<service>:<rule>".
@@ -223,7 +238,7 @@ async function readStdin() {
 
 const doc = JSON.parse(await readStdin());
 const services = doc.services ?? {};
-const basename = label.split('/').pop();
+const basename = exceptionLabel.split('/').pop();
 const violations = [];
 const waived = [];
 
@@ -367,13 +382,16 @@ process.stderr.write(
 process.exit(violations.length > 0 ? 1 : 0);
 NODE
 
-# Renders one compose file's fully-resolved model. `--profile '*'` enables
-# every profile so the sidecar/local-llm/webhooks placeholders are held to the
-# same bar as the default services — the old grep saw them because it read raw
-# text, and a profile-gated hazard is still a hazard.
+# Renders one or more compose files' fully-resolved model, layered in the
+# order given (`-f a -f b` == compose's own override semantics: `b` merges
+# onto `a`). `--profile '*'` enables every profile so the sidecar/local-llm/
+# webhooks placeholders are held to the same bar as the default services — the
+# old grep saw them because it read raw text, and a profile-gated hazard is
+# still a hazard.
 compose_config() {
-  local file="$1"
-  docker compose -f "$file" --profile '*' config --format json
+  local args=()
+  for file in "$@"; do args+=(-f "$file"); done
+  docker compose "${args[@]}" --profile '*' config --format json
 }
 
 # Files with nothing but comments under `services:` (compose.override.example.yml
@@ -409,6 +427,37 @@ check_file() {
   return "$rc"
 }
 
+# D-7 (gate-security-review.md §8.2 N-2): an override fragment has no image or
+# build context of its own — `docker compose -f override config` alone is
+# rejected by Compose, correctly, the same way any incomplete service
+# definition is. The old gate read that rejection as "nothing to check" for
+# every override, including `compose.override.yml`, the one Compose itself
+# auto-loads on top of `compose.yml` with no `-f` flag at all — so the
+# documented Plaid-enabling override in compose.override.example.yml broke
+# `just verify` the moment anyone actually used it (a real, non-hostile,
+# documented workflow going red is worse than a hostile one: it teaches
+# operators to stop running the gate). This renders `base` and `override`
+# layered, exactly as `docker compose up` would, and evaluates the merged
+# result — so a hostile trait added only in the override (a `privileged: true`
+# nobody would put in compose.yml itself) is still caught.
+check_layered() {
+  local base="$1" override="$2"
+  local label="${base}+${override}"
+  local json rc=0
+  if ! json="$(compose_config "$base" "$override" 2>/tmp/compose-hardening-config-err.$$)"; then
+    echo "compose-hardening-check: FAIL: $label: 'docker compose config' rejected the layered pair:" >&2
+    sed 's/^/    /' "/tmp/compose-hardening-config-err.$$" >&2
+    rm -f "/tmp/compose-hardening-config-err.$$"
+    return 1
+  fi
+  rm -f "/tmp/compose-hardening-config-err.$$"
+  # exceptionLabel = $base: db's documented missing-read-only exception is a
+  # property of compose.yml and must still apply when something is layered on
+  # top of it that has nothing to do with db.
+  printf '%s' "$json" | node "$EVALUATOR" "$label" "$base" >/dev/null || rc=$?
+  return "$rc"
+}
+
 self_test() {
   echo "compose-hardening-check: --self-test: running $FIXTURE through the gate" >&2
   local json fired rc=0 missing=()
@@ -428,6 +477,39 @@ self_test() {
   echo "  fixture triggered $(wc -l <<<"$fired") distinct rule(s): $(tr '\n' ' ' <<<"$fired")" >&2
   if [ "$rc" -eq 0 ]; then
     echo "compose-hardening-check: SELF-TEST PASS (all ${#EXPECTED_RULES[@]} rules fire on a hostile file)" >&2
+  fi
+
+  # D-7: prove the override fragment is rejected standalone (the shape that
+  # used to be silently read as "nothing to check") and that layering it on
+  # its base catches the hostile trait it adds.
+  echo "compose-hardening-check: --self-test: layered override rendering ($OVERRIDE_FIXTURE on $OVERRIDE_BASE_FIXTURE)" >&2
+  if compose_config "$OVERRIDE_FIXTURE" >/dev/null 2>&1; then
+    echo "compose-hardening-check: SELF-TEST FAILED: $OVERRIDE_FIXTURE unexpectedly parses standalone" \
+      "— it no longer exercises the 'fragment with no image/build context' shape check_layered exists for" >&2
+    rc=1
+  fi
+  local layered_json layered_fired
+  layered_json="$(compose_config "$OVERRIDE_BASE_FIXTURE" "$OVERRIDE_FIXTURE")"
+  layered_fired="$(printf '%s' "$layered_json" | node "$EVALUATOR" "${OVERRIDE_BASE_FIXTURE}+${OVERRIDE_FIXTURE}" "$OVERRIDE_BASE_FIXTURE" 2>/dev/null | cut -f1 | sort -u || true)"
+  if ! grep -qx 'privileged' <<<"$layered_fired"; then
+    echo "compose-hardening-check: SELF-TEST FAILED: layering $OVERRIDE_FIXTURE onto $OVERRIDE_BASE_FIXTURE" \
+      "did not report 'privileged' — overrides are not actually being evaluated" >&2
+    rc=1
+  else
+    echo "  layered override fixture triggered: privileged" >&2
+  fi
+  # And the base alone, un-layered, must stay clean — otherwise this fixture
+  # pair would not isolate "the override introduced the hazard" from "the
+  # base was already hostile", and the self-test above would prove nothing.
+  local base_fired
+  base_fired="$(compose_config "$OVERRIDE_BASE_FIXTURE" | node "$EVALUATOR" "$OVERRIDE_BASE_FIXTURE" 2>/dev/null | cut -f1 | sort -u || true)"
+  if [ -n "$base_fired" ]; then
+    echo "compose-hardening-check: SELF-TEST FAILED: $OVERRIDE_BASE_FIXTURE alone already fires ($base_fired)" \
+      "— it must be clean so the layered fixture proves the override is what's caught" >&2
+    rc=1
+  fi
+  if [ "$rc" -eq 0 ]; then
+    echo "compose-hardening-check: SELF-TEST PASS (layered override rendering catches a hostile trait the base does not have)" >&2
   fi
   return "$rc"
 }
@@ -478,8 +560,25 @@ fi
 
 FAIL=0
 for file in "${FILES[@]}"; do
+  if [ "$file" = "compose.override.yml" ]; then
+    # D-7: not checked standalone — an override fragment legitimately has no
+    # image/build context of its own, and `compose.yml` is always the file it
+    # layers onto in practice (this is the one filename Compose itself
+    # auto-loads with no `-f` flag). Checked layered, below, instead.
+    continue
+  fi
   check_file "$file" || FAIL=1
 done
+
+if [ -e "compose.override.yml" ]; then
+  if [ -e "compose.yml" ]; then
+    check_layered "compose.yml" "compose.override.yml" || FAIL=1
+  else
+    echo "compose-hardening-check: FAIL: compose.override.yml exists but compose.yml does not" \
+      "— nothing for it to layer onto" >&2
+    FAIL=1
+  fi
+fi
 
 if [ "$FAIL" -ne 0 ]; then
   echo "compose-hardening-check: FAIL — one or more compose files violate the P0-6/P0-7 baseline" >&2

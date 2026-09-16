@@ -34,6 +34,7 @@ import {
 import { newId, type DateOnly, type Money } from '@core/kernel';
 import { z } from 'zod';
 import { type ManualStore, type ManualEntry } from './store.ts';
+import type { StagingStore } from './staging.ts';
 
 export const MANUAL_PROVIDER = 'manual';
 
@@ -113,14 +114,38 @@ export interface ManualConnectorOptions {
 export class ManualConnector implements Connector {
   readonly provider: string;
   readonly displayName: string;
-  readonly #store: ManualStore;
+  /**
+   * Always in-memory, always written first. `connect()` stages an account
+   * before this connector has been told which `connections` row or which user
+   * it belongs to (neither is on the `unknown` input `connect` accepts), so
+   * there is no `userId` to hand a durable store at that point — see
+   * `staging.ts`'s module comment. Every other public method receives a
+   * `ConnectionHandle`, which does carry both, and `#sync` is where the two
+   * ids finally meet the durable store, if one is attached.
+   */
+  readonly #local: ManualStore;
+  /** `null` until `attachStagingStore` runs — a test with no database, say. */
+  #durable: StagingStore | null = null;
+  /** How many of `#local`'s log entries, per connection, are already durable. */
+  readonly #flushed = new Map<string, number>();
   readonly #pageSize: number;
 
   constructor(options: ManualConnectorOptions) {
-    this.#store = options.store;
+    this.#local = options.store;
     this.#pageSize = options.pageSize ?? 100;
     this.provider = options.provider ?? MANUAL_PROVIDER;
     this.displayName = options.displayName ?? MANUAL_MANIFEST.displayName;
+  }
+
+  /**
+   * Point this connector at a durable mirror. Called once, at boot, by
+   * `apps/api/src/domain.ts` — the one place a `Database` and this registry
+   * both exist. Idempotent, and safe to call again with the same store: a
+   * request in flight during the swap keeps using whatever `#durable` was at
+   * the time each of its `await`s resumed, and the next call sees the new one.
+   */
+  attachStagingStore(store: StagingStore): void {
+    this.#durable = store;
   }
 
   capabilities(): ConnectorCapabilities {
@@ -143,8 +168,8 @@ export class ManualConnector implements Connector {
       capabilities: ['accounts', 'balances', 'transactions'],
     }));
 
-    this.#store.open(providerConnectionId);
-    this.#store.append(providerConnectionId, { accounts });
+    this.#local.open(providerConnectionId);
+    this.#local.append(providerConnectionId, { accounts });
 
     return {
       providerConnectionId,
@@ -159,8 +184,8 @@ export class ManualConnector implements Connector {
   }
 
   async listAccounts(handle: ConnectionHandle): Promise<readonly ProviderAccountFact[]> {
-    this.#assertOpen(handle);
-    return this.#store.accounts(handle.providerConnectionId);
+    await this.#sync(handle);
+    return this.#local.accounts(handle.providerConnectionId);
   }
 
   async syncTransactions(
@@ -168,9 +193,9 @@ export class ManualConnector implements Connector {
     cursor: Cursor | null,
     _options: SyncOptions,
   ): Promise<TransactionPage> {
-    this.#assertOpen(handle);
+    await this.#sync(handle);
     const after = parseCursor(cursor);
-    const entries = this.#store.entriesAfter(handle.providerConnectionId, after, this.#pageSize);
+    const entries = this.#local.entriesAfter(handle.providerConnectionId, after, this.#pageSize);
 
     if (entries.length === 0) {
       // Terminal page. `nextCursor` repeats the caller's position rather than
@@ -179,7 +204,7 @@ export class ManualConnector implements Connector {
       // support" (cursor-contract rule 3), which is the opposite of true here.
       return {
         ...emptyPage(cursorOf(String(after))),
-        accounts: cursor === null ? this.#store.accounts(handle.providerConnectionId) : [],
+        accounts: cursor === null ? this.#local.accounts(handle.providerConnectionId) : [],
       };
     }
 
@@ -195,9 +220,9 @@ export class ManualConnector implements Connector {
       removed,
       // Only on the first page: an account upsert is idempotent, but repeating it
       // on every page of a 24-month backfill is 60 pointless writes.
-      accounts: cursor === null ? this.#store.accounts(handle.providerConnectionId) : [],
+      accounts: cursor === null ? this.#local.accounts(handle.providerConnectionId) : [],
       nextCursor: cursorOf(String(last)),
-      hasMore: last < this.#store.highestSeq(handle.providerConnectionId),
+      hasMore: last < this.#local.highestSeq(handle.providerConnectionId),
     };
   }
 
@@ -205,21 +230,113 @@ export class ManualConnector implements Connector {
     handle: ConnectionHandle,
     _options: SyncOptions,
   ): Promise<readonly ProviderBalanceFact[]> {
-    this.#assertOpen(handle);
+    await this.#sync(handle);
     assertSupports(this.provider, this.capabilities(), 'balances');
-    return this.#store.balances(handle.providerConnectionId);
+    return this.#local.balances(handle.providerConnectionId);
   }
 
   async disconnect(handle: ConnectionHandle): Promise<void> {
-    this.#store.close(handle.providerConnectionId);
+    this.#local.close(handle.providerConnectionId);
+    this.#flushed.delete(handle.providerConnectionId);
+    if (this.#durable !== null) await this.#durable.close(handle.connectionId);
   }
 
   // No `health`: the optional probe exists so the health job can ask a *remote*
   // whether it is still reachable without spending refresh budget. There is no
   // remote here, and a probe that always answers "yes" is worse than none.
 
-  #assertOpen(handle: ConnectionHandle): void {
-    if (this.#store.has(handle.providerConnectionId)) return;
+  /**
+   * Make `#local` current before a call reads it: hydrate from `#durable` if
+   * this process has never opened the connection, then flush whatever `#local`
+   * now holds back to `#durable` so a *different* process can see it next.
+   *
+   * Order matters. Hydrating first means a process that has staged nothing of
+   * its own does not flush an empty state over rows another process already
+   * made durable; flushing second means the accounts `connect()` staged (which
+   * had no durable store to write to at the time — see `#local`'s doc comment)
+   * reach it before this call returns.
+   */
+  async #sync(handle: ConnectionHandle): Promise<void> {
+    if (this.#durable === null) {
+      this.#assertLocallyOpen(handle);
+      return;
+    }
+    if (!this.#local.has(handle.providerConnectionId)) {
+      if (!(await this.#durable.has(handle.connectionId))) {
+        this.#assertLocallyOpen(handle); // throws — neither layer has it.
+      }
+      await this.#hydrate(handle);
+    }
+    await this.#flush(handle);
+  }
+
+  async #hydrate(handle: ConnectionHandle): Promise<void> {
+    const durable = this.#durable;
+    if (durable === null) return;
+    const { connectionId, providerConnectionId } = handle;
+    this.#local.open(providerConnectionId);
+    const [accounts, balances, entries] = await Promise.all([
+      durable.accounts(connectionId),
+      durable.balances(connectionId),
+      durable.entriesAfter(connectionId, 0, Number.MAX_SAFE_INTEGER),
+    ]);
+    if (accounts.length > 0 || balances.length > 0) {
+      this.#local.append(providerConnectionId, { accounts, balances });
+    }
+    // One `append` per entry, in durable order: `ManualStore#push` numbers a
+    // pushed entry `previous + 1` regardless of how many are pushed per call,
+    // so replaying one at a time reproduces the exact sequence numbers the
+    // process that originally staged them assigned — which is what lets the
+    // orchestrator's persisted cursor (a plain string) mean the same position
+    // in either process.
+    for (const entry of entries) {
+      if (entry.kind === 'removed' || entry.fact === null) {
+        this.#local.append(providerConnectionId, {
+          removed: [
+            { providerAccountId: entry.providerAccountId, providerTransactionId: entry.providerTransactionId },
+          ],
+        });
+      } else if (entry.kind === 'added') {
+        this.#local.append(providerConnectionId, { added: [entry.fact] });
+      } else {
+        this.#local.append(providerConnectionId, { modified: [entry.fact] });
+      }
+    }
+    this.#flushed.set(providerConnectionId, entries.length);
+  }
+
+  async #flush(handle: ConnectionHandle): Promise<void> {
+    const durable = this.#durable;
+    if (durable === null) return;
+    const { connectionId, userId, providerConnectionId } = handle;
+    await durable.open(connectionId, userId);
+
+    const accounts = this.#local.accounts(providerConnectionId);
+    if (accounts.length > 0) await durable.putAccounts(connectionId, userId, accounts);
+
+    const balances = this.#local.balances(providerConnectionId);
+    if (balances.length > 0) await durable.putBalances(connectionId, userId, balances);
+
+    const already = this.#flushed.get(providerConnectionId) ?? 0;
+    const all = this.#local.entriesAfter(providerConnectionId, 0, Number.MAX_SAFE_INTEGER);
+    const pending = all.slice(already);
+    if (pending.length > 0) {
+      await durable.appendTransactions(
+        connectionId,
+        userId,
+        pending.map((entry) => ({
+          kind: entry.kind,
+          providerAccountId: entry.providerAccountId,
+          providerTransactionId: entry.providerTransactionId,
+          fact: entry.fact,
+        })),
+      );
+      this.#flushed.set(providerConnectionId, all.length);
+    }
+  }
+
+  #assertLocallyOpen(handle: ConnectionHandle): void {
+    if (this.#local.has(handle.providerConnectionId)) return;
     // A disconnected connection is gone, and asking it for data is not a
     // transient failure that a retry will fix.
     throw ConnectorError.fromCondition(

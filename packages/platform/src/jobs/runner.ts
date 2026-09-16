@@ -76,6 +76,15 @@ export interface JobRunnerOptions {
   readonly pollIntervalMs?: number;
   readonly heartbeatIntervalMs?: number;
   /**
+   * Called at the top of every claim-loop pass, whether or not it claims
+   * anything (D-3, gate-security-review.md §8.5 N-6): the liveness signal a
+   * healthcheck reads has to prove the loop is *running*, not that it is
+   * finding work, since an idle queue and a dead loop look identical from the
+   * outside otherwise. Wire it to `LivenessWriter.touch(...)`; this package
+   * has no opinion on where the signal is written or how staleness is judged.
+   */
+  readonly onPoll?: () => void;
+  /**
    * A job whose heartbeat is this stale is reclaimed. Default 3x the heartbeat
    * interval, which tolerates one missed pulse and a slow query.
    */
@@ -120,6 +129,7 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
     heartbeatIntervalMs = 15_000,
     shutdownGraceMs = 30_000,
     random = Math.random,
+    onPoll,
   } = options;
 
   const workerId = options.workerId ?? newId();
@@ -380,6 +390,11 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
 
   async function claimLoop(): Promise<void> {
     while (running) {
+      // Refresh before doing anything else this pass: a slow claim/execute
+      // cycle should not make the liveness signal look fresher than the loop
+      // actually is, but it must never make an otherwise-healthy loop look
+      // stale either.
+      onPoll?.();
       let claimedAny = false;
       while (running && inFlight.size < concurrency) {
         const job = await claim();

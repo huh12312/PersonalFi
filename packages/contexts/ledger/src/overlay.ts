@@ -80,7 +80,14 @@ export async function setTransactionOverlay(
       : await ensureMerchants(
           executor,
           input.userId,
-          new Map([[effective.merchantKey, effective.merchantDisplayName ?? effective.name]]),
+          // No entity ids: this path has a user's typed name and an existing
+          // row, not a provider's assertion (decision D25).
+          new Map([
+            [
+              effective.merchantKey,
+              { display: effective.merchantDisplayName ?? effective.name, entityIds: [] },
+            ],
+          ]),
           now,
         );
 

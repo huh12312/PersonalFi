@@ -59,3 +59,9 @@ export {
   type DecimalSeparator,
 } from './scalars.ts';
 export { ImportError, asInvalidInput } from './errors.ts';
+export type {
+  StagedEntry,
+  StagedTransactionInput,
+  StagedTransactionKind,
+  StagingStore,
+} from './staging.ts';

@@ -27,7 +27,20 @@ export const CONTEXT_ID = 'ledger' as const;
 
 // --- the resolver, and the shapes it speaks --------------------------------
 export { resolveCategoryId, resolveEffective, withinDays } from './effective.ts';
-export { normaliseMerchantName, dedupKeyOf, type NormalisedMerchant } from './normalise.ts';
+export {
+  normaliseMerchantName,
+  dedupKeyOf,
+  // Decision D25: merchant identity, and the gate that refuses it.
+  resolveMerchantIdentity,
+  merchantAbstainReasonOf,
+  type NormalisedMerchant,
+  type MerchantIdentity,
+  type MerchantIdentityInput,
+  type MerchantIdentitySource,
+  type MerchantAbstainReason,
+  type MerchantCounterparty,
+} from './normalise.ts';
+export { pruneNoiseMerchants } from './merchant-store.ts';
 export {
   EMPTY_OVERLAY,
   NO_RULE,

@@ -12,6 +12,32 @@
  * arrives as pages and is committed per page, like everything else — which is
  * what keeps the import inside the 30-second budget of 08 §7 without one
  * transaction holding a lock over `transactions` for the whole of it.
+ *
+ * ## Durable staging (decision D-5), and why `addFile` stays synchronous
+ *
+ * `#staged` is an in-memory `Map`, unchanged from before this connector had a
+ * durable backing store: it is still what `addFile` and `connect` write to,
+ * synchronously, and still what every read comes from. `apps/api/src/routes/connections.ts`
+ * calls `connector.addFile(...)` directly, unawaited, so `addFile` returning a
+ * `Promise` would silently break that call site — a route this package's
+ * OWNERSHIP.md does not claim, and so cannot change to accommodate an async
+ * `addFile`.
+ *
+ * `StagingStore` (`staging.ts`) is a mirror this connector reads from and
+ * writes to at the one seam every request already crosses: `#sync`, called at
+ * the top of every method that receives a `ConnectionHandle` (`listAccounts`,
+ * `syncTransactions`, `syncBalances`) — every method `connect` and `addFile`
+ * are *not*, because neither is told a `connectionId` or a `userId`.
+ * `apps/api`'s route always calls the orchestrator (which calls those three)
+ * in the same request, immediately after staging a file, so by the time the
+ * HTTP response returns, whatever `addFile` staged has already been flushed to
+ * the durable store. The gap this leaves: a *second* `addFile` call, in a
+ * process that has never synced this connection since it booted, stages onto
+ * an empty local `Map` and reports `skipped: 0` for rows another process
+ * already staged durably. Recorded in
+ * docs/evidence/phase-1/wp1.2-connections.md's "Durable staging (D-5)"
+ * section — the ledger's own natural-key upsert still absorbs the eventual
+ * duplicate, per `addFile`'s own comment below.
  */
 import {
   ConnectorError,
@@ -35,6 +61,7 @@ import { parseCsvProfile } from './config.ts';
 import { asInvalidInput } from './errors.ts';
 import { IMPORT_PROVIDER, importFile, type ImportFileInput } from './import.ts';
 import { presetById, type CsvProfile } from './presets.ts';
+import type { StagingStore } from './staging.ts';
 
 export const CSV_CAPABILITIES: ConnectorCapabilities = Object.freeze({
   supports: Object.freeze([
@@ -103,10 +130,24 @@ export class CsvImportConnector implements Connector {
   readonly provider = IMPORT_PROVIDER;
   readonly displayName = CSV_MANIFEST.displayName;
   readonly #staged = new Map<string, Staged>();
+  /** `null` until `attachStagingStore` runs — a test with no database, say. */
+  #durable: StagingStore | null = null;
+  /** How many of `#staged`'s transactions, per connection, are already durable. */
+  readonly #flushed = new Map<string, number>();
   readonly #pageSize: number;
 
   constructor(options: CsvConnectorOptions = {}) {
     this.#pageSize = options.pageSize ?? 500;
+  }
+
+  /**
+   * Point this connector at a durable mirror. Called once, at boot, by
+   * `apps/api/src/domain.ts` — the one place a `Database` and this registry
+   * both exist. See the module comment for why `addFile` itself never touches
+   * it directly.
+   */
+  attachStagingStore(store: StagingStore): void {
+    this.#durable = store;
   }
 
   capabilities(): ConnectorCapabilities {
@@ -193,6 +234,7 @@ export class CsvImportConnector implements Connector {
   }
 
   async listAccounts(handle: ConnectionHandle): Promise<readonly ProviderAccountFact[]> {
+    await this.#sync(handle);
     return [...this.#state(handle.providerConnectionId).accounts.values()];
   }
 
@@ -201,6 +243,7 @@ export class CsvImportConnector implements Connector {
     cursor: Cursor | null,
     _options: SyncOptions,
   ): Promise<TransactionPage> {
+    await this.#sync(handle);
     const state = this.#state(handle.providerConnectionId);
     const from = parseCursor(cursor, state.transactions.length);
     const slice = state.transactions.slice(from, from + this.#pageSize);
@@ -228,6 +271,7 @@ export class CsvImportConnector implements Connector {
     handle: ConnectionHandle,
     _options: SyncOptions,
   ): Promise<readonly ProviderBalanceFact[]> {
+    await this.#sync(handle);
     assertSupports(this.provider, this.capabilities(), 'balances');
     // Empty for CSV and QIF, populated for OFX (`LEDGERBAL`). An empty array here
     // is honest: the file genuinely stated no balance.
@@ -236,6 +280,8 @@ export class CsvImportConnector implements Connector {
 
   async disconnect(handle: ConnectionHandle): Promise<void> {
     this.#staged.delete(handle.providerConnectionId);
+    this.#flushed.delete(handle.providerConnectionId);
+    if (this.#durable !== null) await this.#durable.close(handle.connectionId);
   }
 
   #open(providerConnectionId: string): void {
@@ -258,6 +304,78 @@ export class CsvImportConnector implements Connector {
       );
     }
     return state;
+  }
+
+  /**
+   * Make `#staged` current before a call reads it: hydrate from `#durable` if
+   * this process has never opened the connection, then flush whatever
+   * `#staged` now holds back to `#durable` so a *different* process — the
+   * worker, or the api after a restart — can see it next. See the module
+   * comment for why `addFile` cannot do this itself.
+   */
+  async #sync(handle: ConnectionHandle): Promise<void> {
+    const durable = this.#durable;
+    if (durable === null) return; // `#state` below throws if nothing was ever staged.
+    if (!this.#staged.has(handle.providerConnectionId)) {
+      if (await durable.has(handle.connectionId)) await this.#hydrate(handle);
+    }
+    await this.#flush(handle);
+  }
+
+  async #hydrate(handle: ConnectionHandle): Promise<void> {
+    const durable = this.#durable;
+    if (durable === null) return;
+    const { connectionId, providerConnectionId } = handle;
+    const [accounts, balances, entries] = await Promise.all([
+      durable.accounts(connectionId),
+      durable.balances(connectionId),
+      durable.entriesAfter(connectionId, 0, Number.MAX_SAFE_INTEGER),
+    ]);
+    this.#open(providerConnectionId);
+    const state = this.#state(providerConnectionId);
+    for (const account of accounts) state.accounts.set(account.providerAccountId, account);
+    for (const balance of balances) state.balances.set(balance.providerAccountId, balance);
+    // Durable order is staging order (see the migration's `seq` column), so
+    // replaying it in order reproduces the same array `addFile` would have
+    // built — which is what keeps the offset-based cursor meaning the same
+    // position in either process.
+    for (const entry of entries) {
+      if (entry.fact === null) continue; // this connector only ever stages `added`.
+      state.seen.add(entry.providerTransactionId);
+      state.transactions.push(entry.fact);
+    }
+    this.#flushed.set(providerConnectionId, entries.length);
+  }
+
+  async #flush(handle: ConnectionHandle): Promise<void> {
+    const durable = this.#durable;
+    if (durable === null) return;
+    const state = this.#staged.get(handle.providerConnectionId);
+    if (state === undefined) return; // nothing local to flush; #state() below will throw.
+    const { connectionId, userId, providerConnectionId } = handle;
+    await durable.open(connectionId, userId);
+
+    const accounts = [...state.accounts.values()];
+    if (accounts.length > 0) await durable.putAccounts(connectionId, userId, accounts);
+
+    const balances = [...state.balances.values()];
+    if (balances.length > 0) await durable.putBalances(connectionId, userId, balances);
+
+    const already = this.#flushed.get(providerConnectionId) ?? 0;
+    const pending = state.transactions.slice(already);
+    if (pending.length > 0) {
+      await durable.appendTransactions(
+        connectionId,
+        userId,
+        pending.map((fact) => ({
+          kind: 'added',
+          providerAccountId: fact.providerAccountId,
+          providerTransactionId: fact.providerTransactionId,
+          fact,
+        })),
+      );
+      this.#flushed.set(providerConnectionId, state.transactions.length);
+    }
   }
 }
 

@@ -27,6 +27,13 @@ Tables listed here are _claimed_; most do not exist yet. Claiming early is the p
 - `connection_accounts`
 - `sync_runs`
 
+### Built (migration 0008)
+
+- `connection_staged_facts` — durable staging for the process-local connectors
+  (Manual, CSV/OFX/QIF), decision D-5. See the migration's header for why this
+  is one table with a `kind` column rather than three, and why the dedupe key
+  is `provider_transaction_id` rather than `fingerprint`.
+
 ### Claimed, not yet built
 
 - `providers`

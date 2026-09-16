@@ -12,6 +12,12 @@ export {
   type ManualTransactionInput,
 } from './connector.ts';
 export { ManualStore, type ManualBatch, type ManualEntry, type ManualEntryKind } from './store.ts';
+export type {
+  StagedEntry,
+  StagedTransactionInput,
+  StagedTransactionKind,
+  StagingStore,
+} from './staging.ts';
 export {
   SEED_MANIFEST,
   SEED_PROVIDER,

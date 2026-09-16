@@ -30,3 +30,10 @@ export {
   type SyncRunStatus,
   type SyncTrigger,
 } from './connections.ts';
+export {
+  STAGED_FACT_KINDS,
+  connectionStagedFacts,
+  type ConnectionStagedFactRow,
+  type NewConnectionStagedFactRow,
+  type StagedFactKind,
+} from './staging.ts';

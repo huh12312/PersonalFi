@@ -18,15 +18,30 @@
  * "nothing in `@ctx/connections`'s own test suite can prove the shapes still
  * match" — and this is the thing that closes it.
  *
- * ## Process-local adapters
+ * ## Process-local adapters, and their durable staging (decision D-5)
  *
- * `ManualConnector`, `CsvImportConnector` and `SeedConnector` stage their rows in
- * **process memory** (WP 1.2: `ManualStore`, `CsvImportConnector#staged`). A
- * connection of one of those providers can therefore only be synced by the
- * process that staged it, which is why `PROCESS_LOCAL_PROVIDERS` exists and why
- * `POST /connections/:id/sync` runs those inline instead of enqueuing a job the
- * worker would pick up and find nothing for. See the evidence note; making the
- * manual/CSV staging area durable is `@ctx/connections`'s to do, not this file's.
+ * `ManualConnector` and `CsvImportConnector` each keep a fast, in-process
+ * buffer (`ManualStore`, `CsvImportConnector`'s own `#staged`) as their
+ * primary read/write path — `connect()` and `addFile()` still write to it
+ * synchronously, unchanged from WP 1.2. `attachStagingStore()` below points
+ * both at `@ctx/connections`'s durable `connection_staged_facts` table
+ * (migration `0008_connections_staging.sql`), which every subsequent call
+ * that carries a `ConnectionHandle` (`listAccounts`, `syncTransactions`,
+ * `syncBalances`) reads from and writes to, so that a *different* process —
+ * the worker, or the api after a restart — can pick up exactly where the
+ * process that staged the rows left off. `SeedConnector` is deliberately
+ * excluded: it is a demo fixture with no user data to protect, and its rows
+ * are meant to be regenerable, not durable.
+ *
+ * `PROCESS_LOCAL_PROVIDERS` still exists, and still controls one thing:
+ * whether `apps/api/src/routes/connections.ts` runs a user-triggered sync
+ * *inline* (immediate feedback in the HTTP response) or *enqueues* it for the
+ * worker. That used to be load-bearing for correctness — a job enqueued for
+ * one of these providers landed on the worker's own, unrelated in-memory
+ * store and produced a successful sync of nothing (gate-security-review.md
+ * §8.6 N-7). Now that both stores are durable, it is purely a UX choice: the
+ * worker *can* sync a Manual or CSV connection correctly, which is why
+ * `apps/api/src/modules.ts`'s nightly fan-out no longer filters by this set.
  */
 import { CSV_MANIFEST, CsvImportConnector, IMPORT_PROVIDER } from '@connector/csv';
 import {

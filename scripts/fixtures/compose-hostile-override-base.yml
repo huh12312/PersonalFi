@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: MIT
+#
+# Fixture (D-7, gate-security-review.md §8.2 N-2 / §8.11 D-7), used only by
+# compose-hardening-check.sh's --self-test.
+#
+# `docker compose -f compose-hostile-override.yml config` alone is rejected by
+# Compose — an override fragment has no `image`/`build` of its own, the exact
+# shape `compose.override.example.yml`'s real, documented Plaid-enabling
+# override has. The old gate read that rejection as "nothing to check" for
+# every override, including `compose.override.yml`, which Compose itself
+# auto-loads on top of `compose.yml` with no `-f` flag at all — so a real
+# operator following the documented Plaid-enablement workflow broke
+# `just verify` (N-2). This file is the clean base half of a fixture pair that
+# proves the fix: layered with compose-hostile-override.yml, the merged result
+# must fire `privileged`; standing alone, it must fire nothing at all, so the
+# self-test can tell "the override introduced the hazard" apart from "the base
+# was already hostile".
+services:
+  clean:
+    image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    user: '65534:65534'
+    command: ['sleep', 'infinity']

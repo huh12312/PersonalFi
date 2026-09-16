@@ -56,8 +56,13 @@ import { dateOnlyOf, factOf, moneyOf, outboxOf, overlayOf, type LedgerExecutor }
 import { resolveEffective } from './effective.ts';
 import { LedgerError } from './errors.ts';
 import { TransactionSupersededByPosted, TransactionsUpserted } from './events.ts';
-import { ensureMerchants } from './merchant-store.ts';
-import { dedupKeyOf, normaliseMerchantName } from './normalise.ts';
+import { ensureMerchants, type WantedMerchant } from './merchant-store.ts';
+import {
+  dedupKeyOf,
+  normaliseMerchantName,
+  resolveMerchantIdentity,
+  type MerchantCounterparty,
+} from './normalise.ts';
 import { EMPTY_OVERLAY, NO_RULE, type ProviderTransactionInput } from './types.ts';
 
 /** Postgres caps a statement at 65535 bound parameters; this stays well inside it. */
@@ -596,14 +601,36 @@ async function resolveMerchants(
   userId: string,
   now: Date,
 ): Promise<Map<string, string>> {
-  const wanted = new Map<string, string>(); // normalised key -> display name
+  const wanted = new Map<string, WantedMerchant>(); // normalised key -> row material
   for (const plan of store.txnsById.values()) {
     if (!plan.isNew && !plan.dirty) continue;
     const fact = store.factsById.get(plan.row.currentFactId);
     if (fact === undefined) continue;
-    const effective = resolveEffective(factOf(fact.row), overlayOf(plan.row));
-    if (effective.merchantKey === null) continue;
-    wanted.set(effective.merchantKey, effective.merchantDisplayName ?? effective.name);
+
+    // Decision D25's full rule, which the read path cannot run because
+    // `TransactionFact` carries no counterparties: a provider that asserts a
+    // merchant *entity* has told us a payee exists on evidence we do not have,
+    // so its answer outranks the text gate, and its ids are recorded on the row.
+    const overlay = overlayOf(plan.row);
+    const identity = resolveMerchantIdentity({
+      name: fact.row.name,
+      merchantName: fact.row.merchantName,
+      userMerchantName: overlay.userMerchantName,
+      provider: fact.row.provider,
+      counterparties: fact.row.counterparties as readonly MerchantCounterparty[] | null,
+    });
+    if (identity.key === null) continue;
+
+    // Union the evidence: two facts for one payee may each carry a different
+    // entity id, and `ensureMerchants` is called once with the merged view.
+    const existing = wanted.get(identity.key);
+    wanted.set(identity.key, {
+      display: existing?.display ?? identity.display,
+      entityIds:
+        existing === undefined
+          ? identity.entityIds
+          : [...new Set([...existing.entityIds, ...identity.entityIds])].sort(),
+    });
   }
   return ensureMerchants(executor, userId, wanted, now);
 }

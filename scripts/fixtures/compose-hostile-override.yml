@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT
+#
+# Fixture (D-7, gate-security-review.md §8.2 N-2 / §8.11 D-7), used only by
+# compose-hardening-check.sh's --self-test. The override half of the pair: an
+# override fragment with no `image`/`build` context of its own — the same
+# shape `compose.override.example.yml`'s real Plaid-enabling override has —
+# that adds `privileged: true` to the one service compose-hostile-override-
+# base.yml defines cleanly. `docker compose -f this-file config` alone is
+# correctly rejected by Compose; layered on its base
+# (`docker compose -f base -f this-file config`) it must still be caught.
+services:
+  clean:
+    privileged: true

@@ -313,6 +313,17 @@ services:
       # secrets and the same non-secret shape, not just the credential.
       PLAID_ENABLED: ${PLAID_ENABLED:-false}
       PLAID_REDIRECT_URI: ${PLAID_REDIRECT_URI:-}
+      # D-3 (gate-security-review.md §8.11, §8.5 N-6): named explicitly here,
+      # not left to packages/config/src/schema.ts's own defaults, so the
+      # healthcheck below reads the *exact same* numbers the job runner and
+      # scheduler actually poll at. Two independent hardcoded copies of "5000"
+      # and "30000" is precisely the hand-maintained-pair failure this
+      # document has already found three times (the image prune's delete set,
+      # harden-secrets' secret list, the Caddyfile's proxied prefixes) — this
+      # is the fourth place it could happen and the one place in this file it
+      # is avoided by construction: one env var, read by both.
+      JOB_POLL_INTERVAL_MS: ${JOB_POLL_INTERVAL_MS:-5000}
+      SCHEDULER_INTERVAL_MS: ${SCHEDULER_INTERVAL_MS:-30000}
     secrets: [database_url, master_key, plaid_client_id, plaid_secret, plaid_env]
     networks: [backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
@@ -321,14 +332,33 @@ services:
       db: { condition: service_healthy }
       migrator: { condition: service_completed_successfully }
     healthcheck:
-      # Placeholder until WP 0.3 lands apps/api/src/worker.ts: a real check
-      # should assert a pg-boss heartbeat row is fresh, matching the pattern
-      # `/ready` uses for api. Nothing in this compose file depends_on
-      # worker's health today, so this only affects `docker compose ps` output.
-      test: ['CMD', 'node', '-e', 'process.exit(0)']
-      interval: 60s
+      # D-3 (gate-security-review.md §8.5 N-4/N-6): the old check was
+      # `node -e 'process.exit(0)'` — it asserted the Node binary exists and
+      # nothing else, and reported `healthy` through all 189 of N-4's silent
+      # restarts, in which the consumer pump, job runner and scheduler never
+      # started. `apps/api/src/worker.ts` now writes a heartbeat file under
+      # `/tmp/liveness` (a tmpfs mount, so this works under `read_only: true`)
+      # every time the job runner polls and every time the scheduler ticks.
+      # This reads those files' timestamps and fails unless at least one of:
+      #   (a) the worker is deliberately idle (no account holder enrolled yet
+      #       — `idle.heartbeat` exists and neither of the other two does),
+      #   (b) both `job-runner.heartbeat` and `scheduler.heartbeat` exist and
+      #       are each fresher than 3x their own poll interval.
+      # A missing master_key or a locked keyring falls into neither bucket —
+      # deliberately: "syncs will not run" was previously silent, and now
+      # surfaces as unhealthy exactly as a dead job runner does. Nothing in
+      # this compose file depends_on worker's health, so this only affects
+      # `docker compose ps` / `docker inspect` visibility, not startup ordering.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "const fs=require('node:fs');const dir='/tmp/liveness';const now=Date.now();const jobMax=(Number(process.env.JOB_POLL_INTERVAL_MS)||5000)*3;const schedMax=(Number(process.env.SCHEDULER_INTERVAL_MS)||30000)*3;const age=(n)=>{try{return now-Number(fs.readFileSync(dir+'/'+n+'.heartbeat','utf8'));}catch{return null;}};const idle=fs.existsSync(dir+'/idle.heartbeat');const jobAge=age('job-runner');const schedAge=age('scheduler');if(idle&&jobAge===null&&schedAge===null){process.exit(0);}if(jobAge===null||jobAge>jobMax){process.stderr.write('job-runner heartbeat missing or stale (age='+jobAge+'ms max='+jobMax+'ms)\\n');process.exit(1);}if(schedAge===null||schedAge>schedMax){process.stderr.write('scheduler heartbeat missing or stale (age='+schedAge+'ms max='+schedMax+'ms)\\n');process.exit(1);}process.exit(0);",
+        ]
+      interval: 15s
       timeout: 5s
-      start_period: 30s
+      start_period: 45s
       retries: 3
     deploy:
       # 512M, not 1536M. The Phase 0 gate raised both api and worker to 1536M

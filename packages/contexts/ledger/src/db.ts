@@ -13,6 +13,7 @@ import { resolveCategoryId } from './effective.ts';
 import type {
   EffectiveTransaction,
   LedgerTransaction,
+  ProviderCounterparty,
   RuleResolution,
   TransactionFact,
   TransactionOverlay,
@@ -83,6 +84,11 @@ export function factOf(row: TransactionProviderRow): TransactionFact {
     name: row.name,
     merchantName: row.merchantName,
     pending: row.pending,
+    // Decision D25, tier 2. Without these the read path would resolve a
+    // different merchant than the write path did for any descriptor whose only
+    // evidence of a payee is a provider entity id.
+    provider: row.provider,
+    counterparties: row.counterparties as readonly ProviderCounterparty[] | null,
   };
 }
 

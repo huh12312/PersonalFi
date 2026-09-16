@@ -116,8 +116,12 @@ chmod 444 secrets/plaid_client_id secrets/plaid_secret secrets/plaid_env
 #
 #    To actually enable it: sign up at https://dashboard.plaid.com, create a
 #    Sandbox (then, later, Production) API key, and write the Client ID and
-#    secret into the two files above (mode 0400 via `just harden-secrets`,
-#    same as every other secret here):
+#    secret into the two files above. `just harden-secrets` now covers these
+#    three (gate-security-review.md §8.2 N-1 / §8.11 D-4 — it did not before,
+#    and a deployment that hardened its secrets per an earlier version of
+#    this sentence crash-looped both `api` and `worker` on EACCES the moment
+#    Plaid was enabled). Run it after writing real content here, same as
+#    every other secret:
 #      echo -n '<client id>'      > secrets/plaid_client_id
 #      echo -n '<secret>'         > secrets/plaid_secret
 #      echo -n 'sandbox'          > secrets/plaid_env   # or 'production' —
@@ -161,9 +165,19 @@ just harden-secrets     # sudo chown/chmod per consuming service
 ls -l secrets/
 # -r-------- 1 10001 10001 database_url      api / worker / migrator
 # -r-------- 1 10001 10001 master_key        api / worker
+# -r-------- 1 10001 10001 plaid_client_id   api / worker
+# -r-------- 1 10001 10001 plaid_secret      api / worker
+# -r-------- 1 10001 10001 plaid_env         api / worker
 # -r--r----- 1     70  10002 pg_password     postgres (owner) + backup (group)
 # -r-------- 1 10002 10002 age_recipient     backup
 ```
+
+`just hardening-check` (part of `just verify`) then runs
+`scripts/check-secret-ownership.sh` against these files: it re-derives the
+expected owner/mode for every secret from `compose.yml`'s own `secrets:`/
+`user:` declarations, so a secret this recipe forgets again — the same way it
+forgot `plaid_*` the first time — fails loudly instead of crash-looping the
+next `docker compose up`.
 
 After that you can no longer `cat secrets/master_key` without `sudo` either —
 which is the point — and `just gen-*` will need `sudo` to rewrite them.

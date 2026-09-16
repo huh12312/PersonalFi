@@ -150,6 +150,10 @@ describeWithDb('runMigrations', () => {
       // 0006_categorization: the nine @ctx/categorization tables — categories,
       //   category_assignments, classifier_examples, classifier_versions,
       //   mcc_codes, merchant_profiles, provider_category_map, rule_runs, rules.
+      // 0007_ledger_rule_category: one column on transactions (@ctx/ledger); no
+      //   new table.
+      // 0008_connections_staging: connection_staged_facts (@ctx/connections) —
+      //   durable staging for the Manual/CSV connectors (decision D-5).
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
@@ -161,6 +165,7 @@ describeWithDb('runMigrations', () => {
         'classifier_versions',
         'config_snapshots',
         'connection_accounts',
+        'connection_staged_facts',
         'connections',
         'domain_events',
         'encryption_keys',

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { DateOnly } from '@core/kernel';
-import { normaliseMerchantName } from './normalise.ts';
+import { resolveMerchantIdentity } from './normalise.ts';
 import {
   NO_RULE,
   type EffectiveTransaction,
@@ -76,21 +76,34 @@ export function resolveEffective(
   // A user's merchant name wins over the provider's; the provider's cleaned
   // `merchant_name` wins over the raw descriptor. The raw descriptor is the last
   // resort because it is the one that reads like `SQ *BLUE BOTTLE COFFEE`.
-  const userName = blankToNull(overlay.userMerchantName);
-  const providerName = blankToNull(fact.merchantName);
+  // That order lives in `resolveMerchantIdentity` and nowhere else.
   const rawName = fact.name;
 
-  const displaySource = userName ?? providerName ?? rawName;
-  const normalised = normaliseMerchantName(displaySource);
+  // Decision D25. `identity.key` is `null` when the descriptor names a banking
+  // operation rather than a payee — `CHECK 1234`, `TRANSFER TO SAVINGS` — so no
+  // `merchants` row is created for it. The *display* is unaffected: the row still
+  // reads as what the bank sent, it simply has no merchant identity to group on.
+  //
+  // The counterparties are passed through deliberately: this must compute the
+  // *same* key the write path computes, or a descriptor whose only evidence of a
+  // payee is a provider entity id gets a `merchants` row that no transaction
+  // points at.
+  const identity = resolveMerchantIdentity({
+    name: rawName,
+    merchantName: fact.merchantName,
+    userMerchantName: overlay.userMerchantName,
+    provider: fact.provider ?? null,
+    counterparties: fact.counterparties ?? null,
+  });
 
   return {
     date,
     amount: fact.amount,
     // The name shown in the list. Falls back to the raw descriptor rather than to
     // an empty string: a row with no name at all is worse than an ugly one.
-    name: normalised.display === '' ? rawName : normalised.display,
-    merchantKey: normalised.key === '' ? null : normalised.key,
-    merchantDisplayName: normalised.display === '' ? null : normalised.display,
+    name: identity.display === '' ? rawName : identity.display,
+    merchantKey: identity.key,
+    merchantDisplayName: identity.display === '' ? null : identity.display,
     pending: fact.pending,
     excluded: overlay.userExcluded,
     // The provider's own category is deliberately absent — `@ctx/categorization`

@@ -67,6 +67,9 @@ export {
 // --- the registry -----------------------------------------------------------
 export { ConnectorRegistry, type RegisteredConnector } from './registry.ts';
 
+// --- durable staging for the process-local connectors (decision D-5) --------
+export { createCsvStagingStore, createManualStagingStore } from './staging.ts';
+
 // --- lifecycle --------------------------------------------------------------
 export {
   accountMap,

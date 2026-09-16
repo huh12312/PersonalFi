@@ -28,6 +28,7 @@ import { UserService } from '@ctx/identity';
 import {
   createConsumerPump,
   createJobRunner,
+  createLivenessWriter,
   createScheduler,
   outboxHealth,
   queueHealth,
@@ -55,6 +56,20 @@ async function main(): Promise<void> {
 
   const platform = buildPlatform({ config, pool });
 
+  /**
+   * D-3 (gate-security-review.md §8.5 N-6): a liveness signal the job runner
+   * and scheduler refresh on every poll, so compose.yml's healthcheck can
+   * assert freshness instead of merely asserting the process exists. `/tmp`
+   * is the tmpfs mount compose.yml gives this container under `read_only:
+   * true`, so this needs no capability and no writable rootfs.
+   *
+   * N-4's 189 restarts never got here — the process died deriving the KEK,
+   * before a single heartbeat could be written, which the healthcheck below
+   * would report as unhealthy from the very first missed poll rather than
+   * for the whole life of the container.
+   */
+  const liveness = createLivenessWriter({ dir: '/tmp/liveness', clock: systemClock });
+
   const snapshot = await recordConfigSnapshot(platform.db, {
     role: 'worker',
     payload: describeConfig(config),
@@ -81,6 +96,13 @@ async function main(): Promise<void> {
     // Not an error: a freshly migrated database has no account holder until the
     // first passkey is enrolled. Come back after a restart rather than crash-looping.
     logger.warn({}, 'no account holder yet; the worker will idle until one is enrolled');
+    // D-3: this is the one case where "no job-runner or scheduler heartbeat"
+    // is the correct, intended state rather than a silent death — a fresh
+    // install's healthcheck must not fail just because nobody has enrolled a
+    // passkey yet. Everything else that skips building a runner or scheduler
+    // below (an absent master_key, a locked keyring) leaves this untouched on
+    // purpose, so the healthcheck reports it exactly as it should: unhealthy.
+    liveness.touch('idle');
   } else {
     const userId = user.id;
     await platform.flags.watch(pool);
@@ -181,6 +203,9 @@ async function main(): Promise<void> {
         heartbeatIntervalMs: config.env.JOB_HEARTBEAT_INTERVAL_MS,
         shutdownGraceMs: config.env.WORKER_SHUTDOWN_GRACE_MS,
         ...(config.env.WORKER_ID === undefined ? {} : { workerId: config.env.WORKER_ID }),
+        // D-3: compose.yml's worker healthcheck reads this file's freshness
+        // against JOB_POLL_INTERVAL_MS * 3.
+        onPoll: () => liveness.touch('job-runner'),
       });
       await runner.start();
     } else {
@@ -194,6 +219,9 @@ async function main(): Promise<void> {
         logger,
         metrics: platform.metrics,
         tickIntervalMs: config.env.SCHEDULER_INTERVAL_MS,
+        // D-3: compose.yml's worker healthcheck reads this file's freshness
+        // against SCHEDULER_INTERVAL_MS * 3.
+        onTick: () => liveness.touch('scheduler'),
       });
       await scheduler.start();
     } else {

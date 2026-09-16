@@ -131,6 +131,11 @@ export {
   type MetricLabels,
 } from './metrics.ts';
 export { platformExecutor } from './database.ts';
+export {
+  createLivenessWriter,
+  type LivenessWriter,
+  type LivenessWriterOptions,
+} from './liveness.ts';
 export { toInstant, toInstantOrNull, type TimestampValue } from './instants.ts';
 export { createSleeper, type Sleeper } from './sleep.ts';
 export {
