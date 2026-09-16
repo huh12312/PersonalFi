@@ -223,9 +223,15 @@ describe('resolveMerchantIdentity — the tier order', () => {
 
 /** The descriptor shapes a bank actually emits, as generators. */
 const merchantWord = fc.stringMatching(/^[A-Z][A-Z]{2,11}$/u);
+// A "real name" is one the gate resolves on its own. The generator can emit
+// operation vocabulary as a word (`ACH`, `CARD`, ...) and a name made only of
+// those is refused as `bank_operation` by design, so the descriptor-style
+// property below would otherwise fail on the gate doing its job rather than on
+// a style stripping a name. Filtering here keeps the property about styles.
 const realName = fc
   .array(merchantWord, { minLength: 1, maxLength: 3 })
-  .map((words) => words.join(' '));
+  .map((words) => words.join(' '))
+  .filter((name) => normaliseMerchantName(name).merchantKey !== null);
 const storeNumber = fc.integer({ min: 1, max: 99_999 });
 const cityState = fc.constantFrom('SEATTLE WA', 'PORTLAND OR', 'SALT LAKE CITY UT', 'AUSTIN TX');
 
