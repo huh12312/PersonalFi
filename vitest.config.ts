@@ -221,6 +221,30 @@ export default defineConfig({
         },
       },
       {
+        // Phase 2 WP 2.2/2.3 (docs/plan/02-phase-2-dispatch.md §3). The engine
+        // is pure; its golden-corpus gates live under test/ but need no
+        // database, so they run here rather than in `recurring-db`.
+        root: './packages/contexts/recurring',
+        test: {
+          name: 'recurring',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        // WP 2.3's persistence, lifecycle and consumer claims are claims about
+        // Postgres (idempotent replay, merchants-unchanged, forecast rows).
+        // Skips itself when DATABASE_URL is unset, like every other `*-db`.
+        root: './packages/contexts/recurring',
+        test: {
+          name: 'recurring-db',
+          include: ['test/db/**/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 30_000,
+        },
+      },
+      {
         // The orchestrator's claims are all claims about Postgres: that a page's
         // ledger rows and its cursor advance commit together, that an injected
         // failure mid-pagination leaves both consistent, that a restart rewinds

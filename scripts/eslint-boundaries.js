@@ -343,6 +343,32 @@ const LAYERS = [
       'from test/.',
   },
   {
+    // Phase 2 WP 2.2/2.3 (docs/plan/02-phase-2-dispatch.md §4 shared files).
+    // Same shape as `categorization`: the named layer exists so test/ may use
+    // @core/testkit and @core/seed. Note what is absent: `@ctx/ledger`. The
+    // engine groups on `merchantId` (D25) and receives ledger rows through a
+    // port WP 2.3 adapts in apps/api — never through an import.
+    name: 'recurring',
+    prefix: 'packages/contexts/recurring/',
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      '@core/contracts',
+      '@core/platform',
+      '@core/secretbox',
+      '@core/testkit',
+      '@core/seed',
+      'drizzle-orm',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'Recurring is a context: it depends on the kernel and on infrastructure, ' +
+      'and on no other context. @core/testkit and @core/seed are dev-only, used only ' +
+      'from test/.',
+  },
+  {
     name: 'context',
     prefix: 'packages/contexts/',
     allow: [
