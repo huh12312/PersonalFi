@@ -662,10 +662,10 @@ applyProviderTransactions, upsertAccount, recordBalance }` in `apps/api` is
   it holds — but nothing **reads** the column yet. Until 1.5 threads it to
   `addFile`, a per-institution mapping profile is supplied per call rather than
   remembered.
-- `CsvImportConnector` stages rows in memory, so a process restart between
+- ~~`CsvImportConnector` stages rows in memory, so a process restart between
   upload and sync loses them and the cursor reads as `CURSOR_EXPIRED`. Correct
   but unhelpful; durable staging is 1.5's, once there is a route that receives
-  the file.
+  the file.~~ **Closed by decision D-5** — see §13.
 
 **Nothing the Ledger's API lacked.** `applyProviderTransactions`,
 `upsertAccount` and `recordBalance` all take the executor first, which is the
@@ -674,3 +674,142 @@ take the pool could not participate in the orchestrator's transaction, and the
 central invariant would have been unimplementable. `ProviderTransactionInput`
 being structurally a subset of `ProviderTransactionFact` is the other thing that
 went right — it is why the orchestrator has no mapping step.
+
+---
+
+## 13. Durable staging (decision D-5)
+
+Phase 1 close-out condition D-5 (gate-security-review.md §8.6 N-7, §8.11):
+`ManualStore` and `CsvImportConnector`'s own `#staged` map were per-process, in
+memory. A user-triggered sync after an api restart failed
+(`AUTH_REQUIRED`, "this manual connection has been disconnected"), and the
+worker — a different process — could never sync one of these connections at
+all; the nightly fan-out had to filter them out (`PROCESS_LOCAL_PROVIDERS` in
+`apps/api/src/modules.ts`), which stopped the false failure but left both gaps
+`domain.ts` named as this context's to close.
+
+### Design, in five lines
+
+1. One table, `connection_staged_facts` (migration
+   `0008_connections_staging.sql`), owned by `@ctx/connections`, `kind`-
+   discriminated into upserted **state** (`account`, `balance` — last write
+   wins) and an append-only **log** (`transaction_added`/`_modified`/`_removed`).
+2. The dedupe key on `transaction_added` is `(connection_id,
+provider_transaction_id)`, not `fingerprint`: two genuinely identical
+   same-day transactions share a fingerprint but not a `provider_transaction_id`
+   (see the migration's header for the "two coffees" example).
+3. `ManualConnector`/`CsvImportConnector` keep their existing in-memory buffer
+   (`ManualStore`, `#staged`) as the fast, synchronous path `connect()`/
+   `addFile()` already wrote to; `attachStagingStore` — called once by
+   `apps/api/src/domain.ts`'s `attachDurableStaging`, itself called from
+   `createDomainRuntime` (the one function `app.ts`, `worker.ts` and every test
+   that builds a runtime already calls with a `database` and the `registry` it
+   built, so neither composition root needed to change) — points both at a
+   `StagingStore` built on this table.
+4. Every connector method that carries a `ConnectionHandle` (`listAccounts`,
+   `syncTransactions`, `syncBalances`) hydrates the in-memory buffer from the
+   durable store on first use in this process, then flushes whatever the
+   buffer holds back to the durable store before returning — see `#sync`/
+   `#hydrate`/`#flush` in each connector's `connector.ts`.
+5. There is no separate "consumed" column. The cursor **is** the consumption
+   marker: a page is a slice of an immutable, ordered (`seq`) prefix, so the
+   same cursor read twice returns the same rows twice, which is exactly the
+   idempotent/monotonic/resumable contract the conformance suite already
+   requires of every adapter.
+
+### The table
+
+| Column                                                                             | Meaning                                                                                 |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `seq`                                                                              | `BIGSERIAL`, one sequence shared by every kind — the cursor, stringified                |
+| `id`                                                                               | App-generated UUIDv7                                                                    |
+| `user_id`, `connection_id`                                                         | Both `NOT NULL`, both `REFERENCES ... ON DELETE CASCADE`                                |
+| `kind`                                                                             | `account` \| `balance` \| `transaction_added` \| `_modified` \| `_removed`              |
+| `provider_account_id`                                                              | Always present                                                                          |
+| `provider_transaction_id`                                                          | Transaction kinds only; the dedupe key with `connection_id`                             |
+| `fingerprint`, `amount_minor`/`amount_currency`, `available_*`, `limit_*`, `as_of` | Typed money/decimal columns — never a float (see the migration's "no float, ever" note) |
+| `fact`                                                                             | `JSONB`; everything else the fact carries that is not money                             |
+
+Indexes: `(connection_id, seq)` for the cursor read; a partial unique index on
+`(connection_id, provider_transaction_id) WHERE kind = 'transaction_added'` for
+the dedupe; a partial unique index on `(connection_id, kind,
+provider_account_id) WHERE kind IN ('account','balance')` for the state
+upsert; `(user_id)` for defense-in-depth scoping.
+
+### Invariants
+
+- **A staged row is consumed at most once per cursor position.** Idempotence
+  comes from the partial unique index above, not from application logic that
+  could be bypassed — sabotaged red by removing `onConflictDoNothing` (below).
+- **A connection's rows are visible only through its own `connection_id`.**
+  Every read is `WHERE connection_id = $1`; `user_id` is carried for
+  defense-in-depth but is not itself the isolation boundary (ownership of a
+  `connection_id` is checked once, upstream, by `requireConnection`/
+  `openHandle`, before any connector method is ever called with it) —
+  sabotaged red by dropping the `connection_id` filter (below).
+- **The orchestrator's own cursor-inside-write-tx invariant is unaffected.**
+  Nothing here changes `SyncOrchestrator`'s commit boundary: staging a fact
+  durably and applying it to the ledger remain two different writes, exactly
+  as `connect()` staging an account and `linkAccounts()` upserting it always
+  were (`src/staging.ts`'s module comment).
+- **The nightly fan-out no longer needs to exclude these providers.** Durable
+  staging means a process that never linked a Manual/CSV connection can
+  correctly hydrate and sync it, so excluding it from the schedule only makes
+  it stale. `PROCESS_LOCAL_PROVIDERS` still exists — `routes/connections.ts`
+  reads it to decide whether a user-triggered sync runs inline or is queued,
+  a latency choice now, not a correctness one — but `apps/api/src/modules.ts`'s
+  `syncableConnectionIds` no longer consults it.
+
+### Tests
+
+| Project          | New/changed tests                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connections-db` | `test/db/staging.test.ts` (new, 6 tests): "a fresh store instance sees exactly what an earlier one staged (restart survival)"; "the CSV staging store, not just the manual one, survives a fresh instance the same way"; "appendTransactions is idempotent on provider_transaction_id — replaying a batch stages nothing twice"; "two sync runs each consume only the rows staged since their own cursor — none twice, none missed"; "a second user's staged rows never appear under the first user's connection, or vice versa"; "close() purges everything staged for a connection, and only that connection" |
+| `api-db`         | `test/db/closeout-staging.test.ts` (new, 4 tests): "a Manual connection staged in one process syncs correctly in a second process over the same database — restart survival, and each staged row consumed exactly once"; "a CSV import staged in one process syncs successfully in a second process over the same database"; "a second account holder cannot see or sync the first holder's connection"; "the nightly fan-out includes a Manual connection with no PROCESS_LOCAL_PROVIDERS filter, and a worker-shaped process completes its sync"                                                              |
+| `api`            | `test/regate-worker-boot.test.ts`'s "nightly fan-out (re-gate N-7, closed by decision D-5)" block re-gated: "includes process-local providers in the scheduled fan-out — no PROCESS_LOCAL_PROVIDERS filter" (was "excludes…"), "keeps the process-local providers named — routes/connections.ts still uses the set for inline-vs-queued sync" (was "keeps the in-memory connectors in PROCESS_LOCAL_PROVIDERS", assertion direction unchanged)                                                                                                                                                                  |
+
+All eleven affected projects green: `connector-manual` 13, `connector-csv` 112,
+`connections` 51, `connections-db` 42 (36 pre-existing + 6 new), `db` 10,
+`api` 57, `api-db` 97 (96 + 1 pre-existing skip, `plaid-sandbox.test.ts`,
+needs a real network).
+
+### Sabotage — each broken once, observed red, restored
+
+Both breaks were made in `packages/contexts/connections/src/staging.ts`,
+observed red against `connections-db`, then restored with a byte-identical
+copy and confirmed with `git diff --quiet`.
+
+**Idempotence** — `appendTransactions`'s `.onConflictDoNothing({...})` removed:
+
+```
+FAIL  |connections-db| test/db/staging.test.ts > durable staging (decision D-5) >
+  appendTransactions is idempotent on provider_transaction_id — replaying a batch stages nothing twice
+Caused by: error: duplicate key value violates unique constraint "connection_staged_facts_added_dedup_idx"
+Detail: Key (connection_id, provider_transaction_id)=(…, txn-idem-1) already exists.
+```
+
+RED first try — and it fails loudly (a constraint violation) rather than
+silently double-staging, because the partial unique index in the migration is
+a second, independent enforcement of the same rule.
+
+**User scoping** — `accounts()`'s `connectionId` filter dropped (query became
+`WHERE kind = 'account'` with no connection scope):
+
+```
+FAIL  |connections-db| test/db/staging.test.ts > durable staging (decision D-5) >
+  a second user's staged rows never appear under the first user's connection, or vice versa
+AssertionError: expected [ 'acct-checking', 'second-holder-checking' ] to deeply equal [ 'acct-checking' ]
+```
+
+RED first try, correctly localised to the connection whose read leaked the
+other's account.
+
+### What is unchanged
+
+`SeedConnector` is deliberately excluded from durable staging — it is a demo
+fixture with no user data to protect, and its rows are meant to be
+regenerable, not durable. `CsvImportConnector.addFile` stays synchronous (the
+module comment on `packages/connectors/csv/src/connector.ts` explains why:
+`apps/api/src/routes/connections.ts` calls it directly, unawaited, and does
+not own the change needed to make it `async`); the durable flush still happens
+at the next call that carries a `ConnectionHandle`, in the same request.

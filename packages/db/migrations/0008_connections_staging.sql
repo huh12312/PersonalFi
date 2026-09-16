@@ -171,8 +171,8 @@ CREATE UNIQUE INDEX connection_staged_facts_state_idx
 CREATE INDEX connection_staged_facts_user_idx ON connection_staged_facts (user_id);
 
 COMMENT ON TABLE connection_staged_facts IS
-  'Durable staging for the process-local connectors (Manual, CSV/OFX/QIF) -- decision D-5. Owner: @ctx/connections.';
+  'Durable staging for the process-local connectors (Manual, CSV/OFX/QIF), decision D-5. Owner: @ctx/connections.';
 COMMENT ON COLUMN connection_staged_facts.seq IS
   'Total order across every kind. The cursor ManualConnector/CsvImportConnector hand the orchestrator, stringified.';
 COMMENT ON COLUMN connection_staged_facts.fact IS
-  'Everything the fact carries that is not money: never a value a ledger balance depends on.';
+  'Everything the fact carries that is not a monetary amount: never a value a ledger balance depends on.';

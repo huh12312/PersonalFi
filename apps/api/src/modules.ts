@@ -38,7 +38,7 @@ import {
 } from '@ctx/connections';
 import { LEDGER_EVENTS } from '@ctx/ledger';
 import { systemClock, type Clock } from '@core/kernel';
-import { createCategorizationLedgerPort, PROCESS_LOCAL_PROVIDERS } from './domain.ts';
+import { createCategorizationLedgerPort } from './domain.ts';
 import type { ModuleRegistration } from './platform.ts';
 
 export interface ModuleWiringOptions {
@@ -64,30 +64,40 @@ export interface ModuleWiringOptions {
 }
 
 /**
- * Connections the nightly fan-out should touch: `reauth_required` is skipped,
- * and so is every `PROCESS_LOCAL_PROVIDERS` connection.
+ * Connections the nightly fan-out should touch: everything `listSyncableConnections`
+ * returns, which already excludes `reauth_required` (no auto-retrying a
+ * connection whose reconnect needs the user) and anything without an
+ * `AUTH_REQUIRED`-less history — see that function's own doc comment.
  *
- * gate-security-review.md §8.6 N-7: `domain.ts` already documents that a
- * manual/CSV connection can only be synced *in the process that staged it* —
- * `ManualStore` is an in-memory `Map` — which is why `POST /connections/:id/sync`
- * runs those inline instead of enqueuing. The nightly fan-out did not apply the
- * same rule, so the **worker** (a different process, with an empty store) polled
- * them and each one failed `AUTH_REQUIRED` ("this manual connection has been
- * disconnected"). `setConnectionStatus` then wrote `reauth_required`, and the UI
- * showed a permanent, false "Needs reconnection" on every manual account and
- * every CSV import after the first nightly run. Observed on the real stack.
+ * **History (re-gate N-7, closed by decision D-5).** This function used to
+ * also filter out every `PROCESS_LOCAL_PROVIDERS` connection
+ * (`apps/api/src/domain.ts`), because `ManualStore` and `CsvImportConnector`'s
+ * `#staged` map were per-process, in-memory state: the **worker** — a
+ * different process, with an empty store — polled a Manual or CSV connection
+ * it had never staged, got `AUTH_REQUIRED` ("this manual connection has been
+ * disconnected"), and `setConnectionStatus` wrote a permanent, false "Needs
+ * reconnection" on every manual account and every CSV import after the first
+ * nightly run. Observed on the real stack (gate-security-review.md §8.6).
  *
- * Skipping them is strictly correct today: there is nothing remote to poll, so
- * a scheduled sync of one can only ever be a no-op or a false failure. When the
- * durable staging area `domain.ts` describes arrives, this filter goes away with
- * `PROCESS_LOCAL_PROVIDERS` itself.
+ * `connection_staged_facts` (migration `0008_connections_staging.sql`) closed
+ * the actual gap: both connectors now read/write through a durable
+ * `StagingStore` (`apps/api/src/domain.ts`'s `attachDurableStaging`), so a
+ * process that never staged a connection's rows hydrates them from Postgres
+ * before it needs them. The worker syncing a Manual or CSV connection it
+ * never linked is therefore the same operation as any other scheduled sync,
+ * and excluding it here would only make it staler, not safer — the opposite
+ * of what this function is for. `apps/api/test/regate-worker-boot.test.ts`'s
+ * "nightly fan-out (re-gate N-7)" describe block re-gates this: the fan-out
+ * source no longer names `PROCESS_LOCAL_PROVIDERS`, and
+ * `apps/api/test/db/closeout-staging.test.ts` proves a worker-run fan-out
+ * actually completes a Manual sync end to end.
  */
 async function syncableConnectionIds(
   executor: ConnectionsExecutor,
   userId: string,
 ): Promise<readonly string[]> {
   const rows = await listSyncableConnections(executor, userId);
-  return rows.filter((row) => !PROCESS_LOCAL_PROVIDERS.has(row.provider)).map((row) => row.id);
+  return rows.map((row) => row.id);
 }
 
 export function appModules(options: ModuleWiringOptions): readonly ModuleRegistration[] {

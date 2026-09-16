@@ -23,25 +23,35 @@
  * `ManualConnector` and `CsvImportConnector` each keep a fast, in-process
  * buffer (`ManualStore`, `CsvImportConnector`'s own `#staged`) as their
  * primary read/write path — `connect()` and `addFile()` still write to it
- * synchronously, unchanged from WP 1.2. `attachStagingStore()` below points
- * both at `@ctx/connections`'s durable `connection_staged_facts` table
- * (migration `0008_connections_staging.sql`), which every subsequent call
- * that carries a `ConnectionHandle` (`listAccounts`, `syncTransactions`,
- * `syncBalances`) reads from and writes to, so that a *different* process —
- * the worker, or the api after a restart — can pick up exactly where the
- * process that staged the rows left off. `SeedConnector` is deliberately
- * excluded: it is a demo fixture with no user data to protect, and its rows
- * are meant to be regenerable, not durable.
+ * synchronously, unchanged from WP 1.2. `attachDurableStaging` below (called
+ * from `createDomainRuntime`, the one function every call site — `app.ts`,
+ * `worker.ts`, and every test that builds a runtime — already calls with a
+ * `database` and the `registry` it built) points both at `@ctx/connections`'s
+ * durable `connection_staged_facts` table (migration
+ * `0008_connections_staging.sql`), which every subsequent call that carries a
+ * `ConnectionHandle` (`listAccounts`, `syncTransactions`, `syncBalances`)
+ * reads from and writes to, so that a *different* process — the worker, or
+ * the api after a restart — can pick up exactly where the process that
+ * staged the rows left off. It is attached here, rather than inside
+ * `createConnectorRegistry`, specifically so that `app.ts` and `worker.ts`
+ * need no change: both already call `createConnectorRegistry()` with no
+ * database (it has none to give at that point — see `app.ts`'s "constructed,
+ * not initialised" note) and both already call `createDomainRuntime({
+ * database, registry, … })` once the database is available. `SeedConnector`
+ * is deliberately excluded: it is a demo fixture with no user data to
+ * protect, and its rows are meant to be regenerable, not durable.
  *
- * `PROCESS_LOCAL_PROVIDERS` still exists, and still controls one thing:
+ * `PROCESS_LOCAL_PROVIDERS` still exists, but now controls exactly one thing:
  * whether `apps/api/src/routes/connections.ts` runs a user-triggered sync
- * *inline* (immediate feedback in the HTTP response) or *enqueues* it for the
- * worker. That used to be load-bearing for correctness — a job enqueued for
- * one of these providers landed on the worker's own, unrelated in-memory
- * store and produced a successful sync of nothing (gate-security-review.md
- * §8.6 N-7). Now that both stores are durable, it is purely a UX choice: the
- * worker *can* sync a Manual or CSV connection correctly, which is why
- * `apps/api/src/modules.ts`'s nightly fan-out no longer filters by this set.
+ * *inline* (immediate feedback in the HTTP response, and the only way
+ * `POST /imports/csv` can return `staged`/`skipped` counts in the same
+ * response) or *enqueues* it for the worker. That used to be load-bearing for
+ * correctness — a job enqueued for one of these providers landed on the
+ * worker's own, unrelated in-memory store and produced a successful sync of
+ * nothing (gate-security-review.md §8.6 N-7). Now that both stores are
+ * durable, it is purely a UX choice: the worker *can* sync a Manual or CSV
+ * connection correctly, which is why `apps/api/src/modules.ts`'s nightly
+ * fan-out no longer filters by this set (re-gated below).
  */
 import { CSV_MANIFEST, CsvImportConnector, IMPORT_PROVIDER } from '@connector/csv';
 import {
@@ -66,6 +76,8 @@ import type { SecretBox } from '@core/secretbox';
 import {
   ConnectorRegistry,
   SyncOrchestrator,
+  createCsvStagingStore,
+  createManualStagingStore,
   type LedgerWriter,
   type RegisteredConnector,
 } from '@ctx/connections';
@@ -163,12 +175,23 @@ export function createCategorizationLedgerPort(database: LedgerDatabase, clock: 
 }
 
 /**
- * Adapters whose staged rows live in this process's memory.
+ * Adapters whose primary read/write path is an in-process buffer rather than
+ * a remote API — `ManualConnector`'s `ManualStore`, `CsvImportConnector`'s own
+ * `#staged` map, and the demo `SeedConnector`.
  *
- * Read `PROCESS_LOCAL_PROVIDERS.has(provider)` as "syncing this connection is
- * only meaningful in the process that linked it". A durable adapter — Plaid,
- * SimpleFIN, anything with a credential and a remote — is absent from this set
- * and syncs through the job queue like everything else.
+ * Since decision D-5 (`attachDurableStaging` above), a connection on one of
+ * these providers **can** be synced correctly from a process that never
+ * linked it — the worker, or the api after a restart — because the durable
+ * mirror hydrates `#local`/`#staged` on first use. `PROCESS_LOCAL_PROVIDERS`
+ * therefore no longer gates *correctness* anywhere (the nightly fan-out,
+ * `apps/api/src/modules.ts`, does not consult it), only *latency*:
+ * `apps/api/src/routes/connections.ts` still reads this set to decide whether
+ * a user-triggered sync runs inline in the HTTP response (immediate feedback,
+ * and the only way `POST /imports/csv` can return `staged`/`skipped` counts
+ * synchronously) or is enqueued for the worker to pick up. A durable adapter —
+ * Plaid, SimpleFIN, anything with a credential and a remote — is absent from
+ * this set and always goes through the job queue, because there is no
+ * "immediate" answer to give for a call that has to leave the process.
  */
 export const PROCESS_LOCAL_PROVIDERS: ReadonlySet<string> = new Set([
   MANUAL_PROVIDER,
@@ -264,7 +287,34 @@ export interface DomainRuntime {
   readonly clock: Clock;
 }
 
+/**
+ * Point the registry's Manual and CSV connectors, if registered, at their
+ * durable mirror — decision D-5. Idempotent (both connectors' own
+ * `attachStagingStore` docs say so), so calling this again on the same
+ * registry — `app.ts`'s `deps.connections()` rebuilds a `DomainRuntime` every
+ * time the `SecretBox` is re-initialised — costs nothing and changes nothing.
+ * A registry built without one of these two providers (a future deployment
+ * shape, or a narrow test registry) simply skips it: `registry.has` first,
+ * never `registry.get`, so an absent provider is not an error here the way it
+ * is at a sync call site.
+ */
+function attachDurableStaging(registry: ConnectorRegistry, database: Database): void {
+  if (registry.has(MANUAL_PROVIDER)) {
+    const connector = registry.get(MANUAL_PROVIDER);
+    if (connector instanceof ManualConnector) {
+      connector.attachStagingStore(createManualStagingStore(database));
+    }
+  }
+  if (registry.has(IMPORT_PROVIDER)) {
+    const connector = registry.get(IMPORT_PROVIDER);
+    if (connector instanceof CsvImportConnector) {
+      connector.attachStagingStore(createCsvStagingStore(database));
+    }
+  }
+}
+
 export function createDomainRuntime(options: DomainRuntimeOptions): DomainRuntime {
+  attachDurableStaging(options.registry, options.database);
   const orchestrator = new SyncOrchestrator({
     database: options.database,
     registry: options.registry,

@@ -108,34 +108,54 @@ describe('worker memory budget (re-gate N-4)', () => {
   });
 });
 
-describe('nightly fan-out (re-gate N-7)', () => {
+describe('nightly fan-out (re-gate N-7, closed by decision D-5)', () => {
   /**
-   * `domain.ts` already states the invariant: a `PROCESS_LOCAL_PROVIDERS`
-   * connection can only be synced in the process that staged it, which is why
-   * `POST /connections/:id/sync` runs those inline. The nightly fan-out runs in
-   * the WORKER, a different process with an empty `ManualStore`, so it must
-   * apply the same rule — otherwise every manual account and CSV import fails
-   * `AUTH_REQUIRED` on the first nightly run and the UI shows a permanent,
-   * false "Needs reconnection". Observed on the real stack before this fix.
+   * Originally: `domain.ts` stated the invariant that a `PROCESS_LOCAL_PROVIDERS`
+   * connection can only be synced in the process that staged it, and the nightly
+   * fan-out did not apply the same rule the sync route did — the WORKER, a
+   * different process with an empty `ManualStore`, polled a manual/CSV
+   * connection it never staged and flipped it to `reauth_required` with a
+   * permanent, false "Needs reconnection". Observed on the real stack.
+   *
+   * `connection_staged_facts` (migration `0008_connections_staging.sql`) closed
+   * the actual gap: `ManualConnector` and `CsvImportConnector` now read and
+   * write through a durable `StagingStore` that `apps/api/src/domain.ts`'s
+   * `attachDurableStaging` attaches, so any process — including one that never
+   * linked the connection — hydrates the rows it needs before it needs them.
+   * The fan-out no longer has a reason to exclude these providers, and this
+   * case is re-gated to assert exactly that: the filter is gone from the
+   * source, and (`apps/api/test/db/closeout-staging.test.ts`) a worker-shaped
+   * fan-out actually schedules and completes a Manual sync.
    */
-  it('excludes process-local providers from the scheduled fan-out', () => {
+  it('includes process-local providers in the scheduled fan-out — no PROCESS_LOCAL_PROVIDERS filter', () => {
     const modules = repoFile('apps/api/src/modules.ts');
     const fanOut = /async function syncableConnectionIds\(([\s\S]*?)\n}/.exec(modules)?.[1];
     expect(fanOut, 'apps/api/src/modules.ts has no syncableConnectionIds').toBeDefined();
     expect(
       fanOut?.includes('PROCESS_LOCAL_PROVIDERS'),
-      'the nightly fan-out does not exclude PROCESS_LOCAL_PROVIDERS connections, so the ' +
-        'worker will poll manual/CSV connections it never staged and flip each one to ' +
-        'reauth_required with a false "Needs reconnection".',
-    ).toBe(true);
+      'the nightly fan-out still excludes PROCESS_LOCAL_PROVIDERS connections, but decision ' +
+        'D-5 made Manual/CSV staging durable (connection_staged_facts) — the worker can now ' +
+        'sync a connection it never staged, and excluding it here only makes it stale, not safer.',
+    ).toBe(false);
+    expect(
+      /^import\s*\{[^}]*\bPROCESS_LOCAL_PROVIDERS\b[^}]*\}\s*from\s*'\.\/domain\.ts';$/m.test(
+        modules,
+      ),
+      'apps/api/src/modules.ts imports PROCESS_LOCAL_PROVIDERS from domain.ts but has no live ' +
+        'use for it left — the fan-out filter is gone, so this is now a routing (inline vs. ' +
+        'queued) concern owned by routes/connections.ts alone. A mention in a doc comment ' +
+        'explaining the history is fine; an import is not.',
+    ).toBe(false);
   });
 
-  it('keeps the in-memory connectors in PROCESS_LOCAL_PROVIDERS', () => {
+  it('keeps the process-local providers named — routes/connections.ts still uses the set for inline-vs-queued sync', () => {
     for (const provider of ['manual', 'file_import', 'seed']) {
       expect(
         PROCESS_LOCAL_PROVIDERS.has(provider),
-        `${provider} stages rows in process memory; dropping it from PROCESS_LOCAL_PROVIDERS ` +
-          `puts it back into the worker's nightly fan-out (re-gate N-7).`,
+        `${provider} still stages onto an in-process buffer first; ` +
+          `apps/api/src/routes/connections.ts reads PROCESS_LOCAL_PROVIDERS to decide whether ` +
+          `a user-triggered sync runs inline or is queued. Durable staging (D-5) made that a ` +
+          `latency choice, not a correctness one, but the set itself is still load-bearing there.`,
       ).toBe(true);
     }
   });

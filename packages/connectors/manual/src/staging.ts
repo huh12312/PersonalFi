@@ -24,7 +24,11 @@
  * across that boundary, only structurally compatible, the same trick
  * `SeedDatasetLike` (`seed.ts`) uses for `@core/seed`.
  */
-import type { ProviderAccountFact, ProviderBalanceFact, ProviderTransactionFact } from '@connector/port';
+import type {
+  ProviderAccountFact,
+  ProviderBalanceFact,
+  ProviderTransactionFact,
+} from '@connector/port';
 import type { ManualEntryKind } from './store.ts';
 
 export type StagedTransactionKind = ManualEntryKind;
@@ -74,10 +78,6 @@ export interface StagingStore {
   accounts(connectionId: string): Promise<readonly ProviderAccountFact[]>;
   balances(connectionId: string): Promise<readonly ProviderBalanceFact[]>;
   /** Entries with `seq > after`, at most `limit` of them, in order. */
-  entriesAfter(
-    connectionId: string,
-    after: number,
-    limit: number,
-  ): Promise<readonly StagedEntry[]>;
+  entriesAfter(connectionId: string, after: number, limit: number): Promise<readonly StagedEntry[]>;
   highestSeq(connectionId: string): Promise<number>;
 }

@@ -22,7 +22,11 @@
  * public method except `connect` and `addFile`, neither of which is told a
  * `connectionId` or a `userId`).
  */
-import type { ProviderAccountFact, ProviderBalanceFact, ProviderTransactionFact } from '@connector/port';
+import type {
+  ProviderAccountFact,
+  ProviderBalanceFact,
+  ProviderTransactionFact,
+} from '@connector/port';
 
 /**
  * CSV, OFX and QIF statements only ever add: "Re-import is zero new rows"
@@ -65,10 +69,6 @@ export interface StagingStore {
   ): Promise<{ staged: number; skipped: number }>;
   accounts(connectionId: string): Promise<readonly ProviderAccountFact[]>;
   balances(connectionId: string): Promise<readonly ProviderBalanceFact[]>;
-  entriesAfter(
-    connectionId: string,
-    after: number,
-    limit: number,
-  ): Promise<readonly StagedEntry[]>;
+  entriesAfter(connectionId: string, after: number, limit: number): Promise<readonly StagedEntry[]>;
   highestSeq(connectionId: string): Promise<number>;
 }

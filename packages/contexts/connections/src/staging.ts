@@ -64,7 +64,9 @@ function balanceFromRow(row: ConnectionStagedFactRow): ProviderBalanceFact {
     providerAccountId: row.providerAccountId,
     current: money(row.amountMinor as bigint, row.amountCurrency as string),
     available:
-      row.availableMinor === null ? null : money(row.availableMinor, row.availableCurrency as string),
+      row.availableMinor === null
+        ? null
+        : money(row.availableMinor, row.availableCurrency as string),
     limit: row.limitMinor === null ? null : money(row.limitMinor, row.limitCurrency as string),
     asOf: row.asOf as Date,
   };
@@ -80,7 +82,10 @@ function transactionFromRow(row: ConnectionStagedFactRow): ProviderTransactionFa
     isoCurrency: (fact['isoCurrency'] as string | null) ?? null,
     postedDate: fact['postedDate'] as ProviderTransactionFact['postedDate'],
     authorizedDate: (fact['authorizedDate'] as ProviderTransactionFact['authorizedDate']) ?? null,
-    postedAt: fact['postedAt'] === null || fact['postedAt'] === undefined ? null : new Date(fact['postedAt'] as string),
+    postedAt:
+      fact['postedAt'] === null || fact['postedAt'] === undefined
+        ? null
+        : new Date(fact['postedAt'] as string),
     authorizedAt:
       fact['authorizedAt'] === null || fact['authorizedAt'] === undefined
         ? null
@@ -221,7 +226,7 @@ function buildStagingStore(database: ConnectionsDatabase): ManualStagingStore & 
         id: newId(),
         userId,
         connectionId,
-        kind: (`transaction_${entry.kind}` as const),
+        kind: `transaction_${entry.kind}` as const,
         providerAccountId: entry.providerAccountId,
         providerTransactionId: entry.providerTransactionId,
         fingerprint: entry.fact?.fingerprint ?? null,
@@ -246,7 +251,10 @@ function buildStagingStore(database: ConnectionsDatabase): ManualStagingStore & 
         .select()
         .from(connectionStagedFacts)
         .where(
-          and(eq(connectionStagedFacts.connectionId, connectionId), eq(connectionStagedFacts.kind, 'account')),
+          and(
+            eq(connectionStagedFacts.connectionId, connectionId),
+            eq(connectionStagedFacts.kind, 'account'),
+          ),
         );
       return rows.map(accountFromRow);
     },
@@ -256,7 +264,10 @@ function buildStagingStore(database: ConnectionsDatabase): ManualStagingStore & 
         .select()
         .from(connectionStagedFacts)
         .where(
-          and(eq(connectionStagedFacts.connectionId, connectionId), eq(connectionStagedFacts.kind, 'balance')),
+          and(
+            eq(connectionStagedFacts.connectionId, connectionId),
+            eq(connectionStagedFacts.kind, 'balance'),
+          ),
         );
       return rows.map(balanceFromRow);
     },
@@ -288,7 +299,10 @@ function buildStagingStore(database: ConnectionsDatabase): ManualStagingStore & 
         .select({ seq: connectionStagedFacts.seq })
         .from(connectionStagedFacts)
         .where(
-          and(eq(connectionStagedFacts.connectionId, connectionId), inArray(connectionStagedFacts.kind, TRANSACTION_KINDS)),
+          and(
+            eq(connectionStagedFacts.connectionId, connectionId),
+            inArray(connectionStagedFacts.kind, TRANSACTION_KINDS),
+          ),
         )
         .orderBy(desc(connectionStagedFacts.seq))
         .limit(1);

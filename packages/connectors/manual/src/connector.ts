@@ -293,7 +293,10 @@ export class ManualConnector implements Connector {
       if (entry.kind === 'removed' || entry.fact === null) {
         this.#local.append(providerConnectionId, {
           removed: [
-            { providerAccountId: entry.providerAccountId, providerTransactionId: entry.providerTransactionId },
+            {
+              providerAccountId: entry.providerAccountId,
+              providerTransactionId: entry.providerTransactionId,
+            },
           ],
         });
       } else if (entry.kind === 'added') {
