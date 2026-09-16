@@ -267,6 +267,28 @@ export default defineConfig({
         },
       },
       {
+        // Phase 2 WP 2.4 (docs/plan/02-phase-2-dispatch.md §3): the egress
+        // allow-list, quiet-hours and coalescing rules are pure; they run here.
+        root: './packages/contexts/notifications',
+        test: {
+          name: 'notifications',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        // The outbox's at-most-once `dedupeKey`, the sealed channel-config
+        // custody read, and dead-letter recovery are claims about Postgres.
+        root: './packages/contexts/notifications',
+        test: {
+          name: 'notifications-db',
+          include: ['test/db/**/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 30_000,
+        },
+      },
+      {
         // The orchestrator's claims are all claims about Postgres: that a page's
         // ledger rows and its cursor advance commit together, that an injected
         // failure mid-pagination leaves both consistent, that a restart rewinds

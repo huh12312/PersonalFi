@@ -712,15 +712,40 @@ importers:
 
   packages/contexts/notifications:
     dependencies:
+      '@core/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
       '@core/db':
         specifier: workspace:*
         version: link:../../db
       '@core/kernel':
         specifier: workspace:*
         version: link:../../kernel
+      '@core/platform':
+        specifier: workspace:*
+        version: link:../../platform
+      '@core/secretbox':
+        specifier: workspace:*
+        version: link:../../secretbox
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+      nodemailer:
+        specifier: 10.0.2
+        version: 10.0.2
+      zod:
+        specifier: 4.5.4
+        version: 4.5.4
+    devDependencies:
+      '@core/seed':
+        specifier: workspace:*
+        version: link:../../seed
+      '@core/testkit':
+        specifier: workspace:*
+        version: link:../../testkit
+      '@types/nodemailer':
+        specifier: 8.0.1
+        version: 8.0.1
 
   packages/contexts/planning:
     dependencies:
@@ -3082,6 +3107,9 @@ packages:
   '@types/node@26.4.1':
     resolution: {integrity: sha512-k97ENvZWtvA6yqz5/FS6a7duDgOPEeOQOc2iKS/nY6mX6qJUKtLnWzQS+Xj6tXweyj6ZcTAK2Qecetnvi9nCLA==}
 
+  '@types/nodemailer@8.0.1':
+    resolution: {integrity: sha512-PxpaInm8V1JQDd4j0ds5HfvWQk8JupS1C0Picb96QJsrrRDjBH+DlK7L4ZdNSqNULhiZRQHc40nLVShaGxXAMw==}
+
   '@types/pg@8.23.1':
     resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
 
@@ -4859,6 +4887,10 @@ packages:
   node-releases@2.0.54:
     resolution: {integrity: sha512-YHs7BmmcsdAI5Ozuf8JZo6PT0mv2GIWC9vMfvUC3dp65M8hn7Ux8CPL+2oBI7juNuj9d0ndhTcznq2ODBps9cQ==}
     engines: {node: '>=18'}
+
+  nodemailer@10.0.2:
+    resolution: {integrity: sha512-83mO0TnWXySiJXdMAIUYmlXYdJ2KUq/w8EJgc4ogKU2UssaHf7ZPeuHcb4YCxeNiM0DDshnm291U0/ClrSZZsg==}
+    engines: {node: '>=20.0.0'}
 
   object-inspect@1.13.4:
     resolution: {integrity: sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==}
@@ -7881,6 +7913,10 @@ snapshots:
     dependencies:
       undici-types: 8.3.0
 
+  '@types/nodemailer@8.0.1':
+    dependencies:
+      '@types/node': 26.4.1
+
   '@types/pg@8.23.1':
     dependencies:
       '@types/node': 26.4.1
@@ -9724,6 +9760,8 @@ snapshots:
   natural-compare@1.4.0: {}
 
   node-releases@2.0.54: {}
+
+  nodemailer@10.0.2: {}
 
   object-inspect@1.13.4: {}
 

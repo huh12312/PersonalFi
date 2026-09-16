@@ -5,7 +5,7 @@
 # Third-Party Notices
 
 PersonalFi is MIT-licensed. This file lists the runtime (production) dependency tree —
-`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:6d9a9e50006e240a.
+`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:925af7169fb43503.
 devDependencies (build tooling, test frameworks) are not distributed and are not listed
 here; see `licenses.policy.yaml` for the policy that governs both.
 
@@ -316,6 +316,10 @@ part of PersonalFi’s dependency tree and are not listed here.
 ## MIT and ISC
 
 - `@visx/vendor`@4.0.0 — https://github.com/airbnb/visx#readme
+
+## MIT-0
+
+- `nodemailer`@10.0.2 — https://nodemailer.com/
 
 ## Python-2.0
 

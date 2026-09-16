@@ -394,6 +394,33 @@ const LAYERS = [
       'from test/.',
   },
   {
+    // Phase 2 WP 2.4 (docs/plan/02-phase-2-dispatch.md §4 shared files).
+    // The one context allowed a network client: `nodemailer` for the SMTP
+    // adapter. Egress is the security surface — destination allow-list,
+    // scheme allow-list, literal-IP/private-range refusal, no redirects —
+    // and it lives inside this package, not in the caller.
+    name: 'notifications',
+    prefix: 'packages/contexts/notifications/',
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      '@core/contracts',
+      '@core/platform',
+      '@core/secretbox',
+      '@core/testkit',
+      '@core/seed',
+      'drizzle-orm',
+      'nodemailer',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'Notifications is a context: it depends on the kernel and on infrastructure, ' +
+      'and on no other context. nodemailer is its only third-party client and is ' +
+      'confined here. @core/testkit and @core/seed are dev-only, used only from test/.',
+  },
+  {
     name: 'context',
     prefix: 'packages/contexts/',
     allow: [
