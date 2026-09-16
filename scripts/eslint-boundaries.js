@@ -369,6 +369,31 @@ const LAYERS = [
       'from test/.',
   },
   {
+    // Phase 2 WP 2.1 (docs/plan/02-phase-2-dispatch.md §4 shared files). Same
+    // shape as `recurring`. Budgeting reads the ledger through a `LedgerPort`
+    // adapted in apps/api (transfers and net refunds excluded there), never
+    // through an `@ctx/ledger` import.
+    name: 'budgeting',
+    prefix: 'packages/contexts/budgeting/',
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      '@core/contracts',
+      '@core/platform',
+      '@core/secretbox',
+      '@core/testkit',
+      '@core/seed',
+      'drizzle-orm',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'Budgeting is a context: it depends on the kernel and on infrastructure, ' +
+      'and on no other context. @core/testkit and @core/seed are dev-only, used only ' +
+      'from test/.',
+  },
+  {
     name: 'context',
     prefix: 'packages/contexts/',
     allow: [

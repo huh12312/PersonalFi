@@ -245,6 +245,28 @@ export default defineConfig({
         },
       },
       {
+        // Phase 2 WP 2.1 (docs/plan/02-phase-2-dispatch.md §3): envelope math
+        // and the RTA identity are pure over Money; those run here.
+        root: './packages/contexts/budgeting',
+        test: {
+          name: 'budgeting',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        // Period rolls across DST, the actuals consumer, and the identity
+        // asserted after every mutation on the seed are claims about Postgres.
+        root: './packages/contexts/budgeting',
+        test: {
+          name: 'budgeting-db',
+          include: ['test/db/**/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 30_000,
+        },
+      },
+      {
         // The orchestrator's claims are all claims about Postgres: that a page's
         // ledger rows and its cursor advance commit together, that an injected
         // failure mid-pagination leaves both consistent, that a restart rewinds
