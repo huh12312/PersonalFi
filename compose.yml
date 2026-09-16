@@ -341,7 +341,8 @@ services:
       # every time the job runner polls and every time the scheduler ticks.
       # This reads those files' timestamps and fails unless at least one of:
       #   (a) the worker is deliberately idle (no account holder enrolled yet
-      #       — `idle.heartbeat` exists and neither of the other two does),
+      #       — `idle.heartbeat` exists, is fresher than 3x JOB_POLL_INTERVAL_MS,
+      #       and neither of the other two heartbeats exists),
       #   (b) both `job-runner.heartbeat` and `scheduler.heartbeat` exist and
       #       are each fresher than 3x their own poll interval.
       # A missing master_key or a locked keyring falls into neither bucket —
@@ -349,12 +350,22 @@ services:
       # surfaces as unhealthy exactly as a dead job runner does. Nothing in
       # this compose file depends_on worker's health, so this only affects
       # `docker compose ps` / `docker inspect` visibility, not startup ordering.
+      #
+      # The idle bucket's own freshness check is not incidental: the first
+      # cut of this check only asked "does idle.heartbeat exist", and a
+      # kill -STOP of a worker that had already reached idle (a freshly
+      # migrated database, before the first passkey is enrolled — the state
+      # every real deployment starts in) reported `healthy` forever off the
+      # one heartbeat written at boot, exactly the failure D-3 exists to
+      # close. `apps/api/src/worker.ts` now re-touches `idle.heartbeat` on
+      # the job runner's own poll cadence for as long as it stays idle, so
+      # this can hold it to the same staleness bar as the other two.
       test:
         [
           'CMD',
           'node',
           '-e',
-          "const fs=require('node:fs');const dir='/tmp/liveness';const now=Date.now();const jobMax=(Number(process.env.JOB_POLL_INTERVAL_MS)||5000)*3;const schedMax=(Number(process.env.SCHEDULER_INTERVAL_MS)||30000)*3;const age=(n)=>{try{return now-Number(fs.readFileSync(dir+'/'+n+'.heartbeat','utf8'));}catch{return null;}};const idle=fs.existsSync(dir+'/idle.heartbeat');const jobAge=age('job-runner');const schedAge=age('scheduler');if(idle&&jobAge===null&&schedAge===null){process.exit(0);}if(jobAge===null||jobAge>jobMax){process.stderr.write('job-runner heartbeat missing or stale (age='+jobAge+'ms max='+jobMax+'ms)\\n');process.exit(1);}if(schedAge===null||schedAge>schedMax){process.stderr.write('scheduler heartbeat missing or stale (age='+schedAge+'ms max='+schedMax+'ms)\\n');process.exit(1);}process.exit(0);",
+          "const fs=require('node:fs');const dir='/tmp/liveness';const now=Date.now();const jobMax=(Number(process.env.JOB_POLL_INTERVAL_MS)||5000)*3;const schedMax=(Number(process.env.SCHEDULER_INTERVAL_MS)||30000)*3;const age=(n)=>{try{return now-Number(fs.readFileSync(dir+'/'+n+'.heartbeat','utf8'));}catch{return null;}};const idleAge=age('idle');const jobAge=age('job-runner');const schedAge=age('scheduler');if(idleAge!==null&&jobAge===null&&schedAge===null){if(idleAge>jobMax){process.stderr.write('idle heartbeat missing or stale (age='+idleAge+'ms max='+jobMax+'ms)\\n');process.exit(1);}process.exit(0);}if(jobAge===null||jobAge>jobMax){process.stderr.write('job-runner heartbeat missing or stale (age='+jobAge+'ms max='+jobMax+'ms)\\n');process.exit(1);}if(schedAge===null||schedAge>schedMax){process.stderr.write('scheduler heartbeat missing or stale (age='+schedAge+'ms max='+schedMax+'ms)\\n');process.exit(1);}process.exit(0);",
         ]
       interval: 15s
       timeout: 5s

@@ -341,6 +341,19 @@ jobs:
       - name: the gate catches a hostile compose file
         run: bash scripts/compose-hardening-check.sh --self-test
 
+      # D-4 (gate-security-review.md §8.2 N-1, §8.11 D-4): the computed
+      # ownership/mode check for every secret compose.yml mounts on a
+      # service, styled after — and run right after — the check above. CI
+      # has no real ./secrets (every file secret is absent), so the "real"
+      # run below finds nothing to check and passes trivially; --self-test
+      # is what actually exercises it here, against a synthetic fixture that
+      # needs no root.
+      - name: the secret-ownership gate catches a mismatched owner/mode
+        run: bash scripts/check-secret-ownership.sh --self-test
+
+      - name: every mounted secret that exists is owned for its consumer(s)
+        run: bash scripts/check-secret-ownership.sh
+
       - name: every compose file meets the P0-6/P0-7 baseline
         run: bash scripts/compose-hardening-check.sh
 

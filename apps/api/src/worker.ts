@@ -91,6 +91,7 @@ async function main(): Promise<void> {
   let runner: JobRunner | null = null;
   let scheduler: Scheduler | null = null;
   let secretBox: SecretBox | null = null;
+  let idleHeartbeatTimer: NodeJS.Timeout | null = null;
 
   if (user === null) {
     // Not an error: a freshly migrated database has no account holder until the
@@ -102,7 +103,20 @@ async function main(): Promise<void> {
     // passkey yet. Everything else that skips building a runner or scheduler
     // below (an absent master_key, a locked keyring) leaves this untouched on
     // purpose, so the healthcheck reports it exactly as it should: unhealthy.
+    //
+    // A single touch here is not enough on its own: idle can last indefinitely
+    // (nobody has enrolled yet) or forever (a fresh install nobody has touched),
+    // and a healthcheck that only asked "does idle.heartbeat exist" would keep
+    // reporting healthy through a hang or a SIGSTOP exactly the way N-4's
+    // `node -e 'process.exit(0)'` did — this was caught re-running D-3's own
+    // kill -STOP proof against a freshly migrated database with no account
+    // holder enrolled, which is the first state every real deployment is in.
+    // Re-touching on the job runner's own poll cadence, even though no job
+    // runner exists yet, gives compose.yml's healthcheck a signal that can
+    // only stay fresh while this process's event loop is actually turning.
     liveness.touch('idle');
+    idleHeartbeatTimer = setInterval(() => liveness.touch('idle'), config.env.JOB_POLL_INTERVAL_MS);
+    idleHeartbeatTimer.unref?.();
   } else {
     const userId = user.id;
     await platform.flags.watch(pool);
@@ -249,6 +263,7 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     logger.info({ signal }, 'shutting down');
+    if (idleHeartbeatTimer !== null) clearInterval(idleHeartbeatTimer);
     try {
       await scheduler?.stop();
       await pump?.stop();
