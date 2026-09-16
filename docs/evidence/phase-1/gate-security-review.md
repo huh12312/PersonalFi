@@ -2028,3 +2028,622 @@ blocked everything. Fixed in the same file (one entry plus the comment saying
 why). That is the same hand-maintained-list failure this document has now named
 six times — caught this time, by an existing test, within minutes. It is the
 fifth file in the diff below.
+
+---
+
+## 9. D-2 independent re-walk
+
+**Reviewer:** Opus, independent. This reviewer did not write the re-gate's four
+fixes (`49228fe`), nor any of the three close-out commits it is validating
+(`01a4d7c` categories + D25, `919902e` durable staging, `05c09b5` worker
+healthcheck + `harden-secrets` + layered override). Everything below was
+observed on a stack **built from `HEAD` = `d037329`** and torn down afterwards.
+
+A first attempt at this re-walk was killed by a rate limit at step 6. It is not
+reused: the stack was rebuilt, the database volume destroyed (`down -v`), a new
+user bootstrapped, a new internal CA pinned, and every `d2-*` screenshot in this
+section was taken by this run. The only thing carried over from the killed
+attempt is the shape of the Playwright harness, which is itself carried from
+§7/§8.3 so the walks stay comparable.
+
+### 9.1 The stack, from HEAD
+
+```
+$ docker compose build && docker compose up -d
+$ docker compose ps
+SERVICE   STATE     STATUS
+api       running   Up (healthy)
+backup    running   Up (healthy)
+db        running   Up (healthy)
+proxy     running   Up (healthy)
+worker    running   Up (healthy)
+```
+
+Five of five healthy, including the **new** worker healthcheck from `05c09b5`
+(D-3) — which is sabotaged in §9.6 rather than taken on trust.
+
+Plaid was enabled the way the RUNBOOK and `compose.override.example.yml`
+describe: a local `compose.override.yml` copied from the example with the three
+commented `PLAID_ENABLED: 'true'` blocks uncommented, and nothing else changed —
+no `.env` edit. Confirmed as compose actually renders it, not as written:
+
+```
+$ docker compose config --format json | node -e "…"
+proxy true
+api true
+worker true
+```
+
+`secrets/plaid_client_id`, `plaid_secret` and `plaid_env` were found already
+hardened and were **not touched**: `-r-------- 10001 10001` each. `just
+harden-secrets` needs a `sudo` this reviewer does not have, so D-4's computed
+check was run instead and passes on the real tree:
+
+```
+$ bash scripts/check-secret-ownership.sh
+  hardening in progress: 9 secret(s) held to the strict bar, 0 violation(s)
+check-secret-ownership: PASS
+```
+
+Both the api and the worker report the secrets present and Plaid registered:
+
+```
+api:    plaid configured; connector registered {"provider":"plaid","environment":"sandbox"}
+api:    "secretsPresent":["database_url","master_key","plaid_client_id","plaid_secret","plaid_env"]
+worker: "secretsPresent":["database_url","master_key","plaid_client_id","plaid_secret","plaid_env"]
+```
+
+— i.e. N-1 and N-5 both stay closed on a hardened install.
+
+### 9.2 The walk harness
+
+Same construction as §7 and §8.3, deliberately:
+
+- **the real internal CA, pinned by SPKI hash.** Chromium launched with
+  `--ignore-certificate-errors-spki-list=<sha256 of Caddy's leaf SPKI>` and
+  `ignoreHTTPSErrors: false`; chain separately checked with `curl --cacert`
+  against the root copied out of the proxy container:
+  `ssl_verify_result=0 http=200`.
+- **a real CDP virtual authenticator** (`WebAuthn.addVirtualAuthenticator`,
+  ctap2/internal, resident key, user verification), credentials exported with
+  `WebAuthn.getCredentials` and re-attached per stage with `addCredential` and an
+  advancing `signCount`, so every ceremony — enrolment, login, and each step-up
+  assertion — is a real one.
+- `--host-resolver-rules=MAP personalfi.lan 127.0.0.1`; no mocks, no route
+  interception, no dev server.
+- `securitypolicyviolation` collected via a **context**-level init script, so the
+  listener also exists inside Link's `cdn.plaid.com` iframe rather than only in
+  the top frame.
+
+Live headers through Caddy with `PLAID_ENABLED=true` (observed, not read out of
+the Caddyfile) — this is D-1's subject matter as landed:
+
+```
+content-security-policy: default-src 'self'; script-src 'self';
+  script-src-elem 'self' https://cdn.plaid.com;
+  frame-src 'self' https://cdn.plaid.com;
+  style-src-elem 'self' 'unsafe-inline' https://cdn.plaid.com;
+  style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self';
+  connect-src 'self' https://cdn.plaid.com https://sandbox.plaid.com https://production.plaid.com;
+  worker-src 'self' blob:; manifest-src 'self'; object-src 'none';
+  frame-ancestors 'none'; base-uri 'none'; form-action 'self'
+cross-origin-embedder-policy: unsafe-none
+```
+
+### 9.3 Steps 0–1 — enrolment, login, and `/api/...`
+
+| #   | Step                    | Observed through the real proxy                                                                                                                                                                                                                                | Screenshot                                    |
+| --- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| 0a  | Enrol a passkey         | `/register#token=…` → `POST /api/auth/register/options -> 200` → real `create()` on the virtual authenticator → `POST /api/auth/register/verify -> 200`; the app advanced to **"Add a backup passkey"**.                                                       | `d2-01-register.png`, `d2-02-after-enrol.png` |
+| 0b  | Sign **out**, then in   | Signed out to force a cold login, then `POST /api/auth/login/options -> 200` → real assertion → **`POST /api/auth/login/verify -> 200 {"ok":true}`** → **`GET /api/auth/session -> 200 {"userId":"01a0ac4a-…","authMethod":"webauthn","fresh":true}`**.        | `d2-03-signed-in.png`                         |
+| 1   | `/api/...` answers JSON | `GET /api/transactions -> 200 {"items":[],…}`, `/api/accounts -> 200 {"accounts":[]}`, `/api/connections -> 200`, `/api/connectors -> 200 {…"plaid"…}`, `/api/net-worth -> 200`, `/api/categories -> 200`. JSON, not `<!doctype html>` — **F-4 stays closed.** | `d2-04`/`d2-05`/`d2-06-*-empty.png`           |
+
+Zero CSP violations and zero page errors across steps 0–1.
+
+**Harness note, not a finding.** The backup-passkey step could not be completed:
+one virtual authenticator already holding a resident credential for this
+RP/user is correctly excluded by `excludeCredentials`, and the app reported
+"Could not create that passkey. Try again." That is WebAuthn behaving as
+specified, not a defect — D21's second authenticator needs a second device.
+
+### 9.4 D2-1 (MEDIUM, new) — on a fresh install the category taxonomy is never seeded, so D-6 does not actually close
+
+This is the first thing the walk found, and it is the same shape as every
+decisive finding in this document: a control that is correct in itself but is
+wired to the wrong moment.
+
+`apps/api/src/app.ts` seeds the taxonomy in an `onReady` hook — once per api
+**boot** — by asking identity for the primary user and passing its id to
+`ensureTaxonomy`. The RUNBOOK's documented install order is step 4
+`docker compose up` and _then_ step 7 `just bootstrap-user`. So on every fresh
+install the hook runs when there is no user yet:
+
+```
+api boot:   {"users":0,"categoriesInserted":0,"msg":"category taxonomy ensured"}
+$ just bootstrap-user name="D2 Reviewer" …
+$ docker compose exec db psql … -c 'select count(*) from categories'
+ 0
+$ curl … /api/categories
+{"categories":[]}
+```
+
+and it stays empty indefinitely, because nothing asks the operator to restart
+the api after enrolling. `CategoryPicker` then renders exactly one option,
+`Uncategorized` — **the N-3 symptom, unchanged, on the deployment path the
+RUNBOOK prescribes.** Proven to be the boot-order and nothing else by restarting
+the container and changing nothing else:
+
+```
+$ docker compose restart api
+api boot:   {"users":1,"categoriesInserted":153,"msg":"category taxonomy ensured"}
+ count
+   153
+```
+
+`app.ts`'s own doc comment anticipates the mirror-image risk ("hanging it off
+`UserService.createPrimary` … would only ever run for users created _after_ this
+release") and picks the boot pass to cover the upgrade case — but a boot-only
+pass cannot cover the _install_ case, and the install case is the one every new
+deployment takes. Both are needed.
+
+**Not fixed here** (MEDIUM, not Critical/High). The exact diff, in
+`apps/api/src/bin/bootstrap-user.ts` — the one other place that is already a
+composition root and already knows the new user's id:
+
+```diff
+@@ apps/api/src/bin/bootstrap-user.ts
++import { ensureTaxonomy } from '@ctx/categorization';
+@@
+     user = await users.createPrimary({ displayName, displayTimezone: timezone });
+     out(`user created      ${user.displayName} (${user.id})`);
+     out(`time zone         ${user.displayTimezone}`);
++    // The api's `onReady` taxonomy pass (app.ts) runs once per boot and the
++    // RUNBOOK creates the user *after* `docker compose up`, so on a fresh
++    // install that pass saw zero users and seeded nothing (D-2 re-walk D2-1).
++    // Seed here too: boot covers upgrades, this covers installs.
++    const seeded = await ensureTaxonomy(pool, { userIds: [user.id], clock: systemClock });
++    out(`categories        ${seeded.categoriesInserted} seeded`);
+```
+
+A regression test belongs with it: build the app against a database with **no**
+user, run `bootstrap-user`'s path, and assert `GET /categories` is non-empty
+without an api restart. The existing D-6 tests all seed a user first, which is
+why none of them sees this.
+
+### 9.5 Steps 2–6 — Manual, CSV, transactions, a real category, balances, connections
+
+The taxonomy was seeded (by the api restart in §9.4) before this stage, so the
+category half of step 4 is walked against the **real** 153-row taxonomy, not a
+hand-seeded row.
+
+| #   | Step                        | Observed through the real proxy                                                                                                                                                                                                                                                                                                                                                                     | Screenshot                                                     |
+| --- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| 2   | Manual account              | Add connection → tabs render from `GET /connectors` as **`["Bank or brokerage (Plaid)","File import","Manual account"]`** → "Rental property" → **`POST /api/connections -> 201 {"connectionId":"01a0ac52-2e73-…","accountIds":[…],"syncRunId":"01a0ac52-2e9e-…"}`**. Card: _Rental property — Connected · 1 account · Synced 0 seconds ago_.                                                       | `d2-07-add-connection-dialog.png`, `d2-08-manual-added.png`    |
+| 3   | CSV import                  | File import tab → five-row `Date,Description,Amount` fixture, preset `iso_signed`, account "Checking 1234" → **`POST /api/imports/csv -> 200 {"connectionId":"01a0ac52-5f01-…","syncRunId":"01a0ac52-5f13-…"}`**.                                                                                                                                                                                   | `d2-09-csv-form.png`, `d2-10-csv-imported.png`                 |
+| 3b  | Transactions visible        | `/transactions` lists all five, each on **Checking 1234**: _Sep 7 **D2 Rewalk Merchant** −$19.99_, _Sep 5 City Power AND Light −$131.40_, _Sep 3 **Whole Foods MKT** −$84.17_, _Sep 2 Acme Payroll Direct DEP +$2,450.00_, _Sep 1 **Blue Bottle Coffee** −$6.25_. The merchant names are D25's four-tier resolution working on raw descriptors (`BLUE BOTTLE COFFEE #4412` → _Blue Bottle Coffee_). | `d2-11-transactions-list.png`                                  |
+| 4   | **Real category + a note**  | Detail sheet → `CategoryPicker` renders **133 selectable options across 21 `<optgroup>`s** from `GET /api/categories` (`Income · income`, `Transfers · transfer`, `Groceries`, `Dining & Drinks`, …) — not the single inert "Uncategorized" of N-3. Picked **"Supermarkets"** → `PATCH /api/transactions/{id} -> 200`. Note written, saved on blur → a second `PATCH -> 200`.                       | `d2-12-transaction-detail.png`, `d2-13-transaction-edited.png` |
+| 4b  | …both persist over a reload | **Full page reload**, row re-opened: the select reads back `{"value":"01a0ac4f-2c36-…","label":"Supermarkets"}` and the textarea the exact note. Read back from the API as well, not just from the rendered control: `GET /api/transactions` → `{"categoryId":"01a0ac4f-2c36-…","note":"D-2 re-walk note: category + note persistence check","merchantName":"D2 Rewalk Merchant"}`. **Persisted.**  | `d2-14-transaction-persisted.png`                              |
+| 5   | Accounts and balances       | `/accounts` renders both accounts under **CASH** with a Net worth tile; every balance reads **"No balance yet"** and `GET /api/net-worth -> {"asOf":null,"totals":[],"inputs":[…]}`. Neither the manual nor the CSV connector supplies a balance — correct for them; real balances arrive with Plaid in step 8.                                                                                     | `d2-15-accounts-balances.png`                                  |
+| 6   | Connections                 | Both cards **Connected · 1 account · Synced …**, each with _Sync now_ / _Disconnect_ / _Show sync history_. The SSE pill tracked live from **"No syncs yet"** (before any connection) to **"Synced 0 seconds ago"**, so it is a live stream and not a static render.                                                                                                                                | `d2-16-connections-healthy.png`                                |
+
+**Zero CSP violations, zero page errors, zero console errors across steps 2–6.**
+
+#### D-5 — the api restart, which is the case N-7's mitigation did _not_ cover
+
+Row counts and connector state captured, `docker compose restart api` (so every
+process-local store in the api is empty), then **"Sync now" clicked in the real
+browser on both connections**:
+
+```
+before:  transactions 5 | D2 statements file_import active | Rental property manual active
+         connection_staged_facts: 5 transaction_added + 2 account rows (durable, 919902e)
+
+$ docker compose restart api        # api reports healthy again
+
+POST /api/connections/01a0ac52-5f01-…/sync -> 202 {"mode":"inline","syncRunId":"01a0ac54-a935-…","status":"success"}
+POST /api/connections/01a0ac52-2e73-…/sync -> 202 {"mode":"inline","syncRunId":"01a0ac54-cca1-…","status":"success"}
+
+after:   transactions 5   (no duplicates — the staging dedupe held)
+         GET /api/connections -> both "status":"active", both lastSyncedAt advanced
+         sync_runs: initial/success, initial/success, manual/success, manual/success — no AUTH_REQUIRED
+```
+
+Under the pre-`919902e` code this is exactly where the in-memory `ManualStore`
+lost its state and the card flipped, falsely and permanently, to **"Needs
+reconnection"**. It does not: both connections stay **Connected**, both sync,
+and the five rows do not duplicate. **D-5 holds in the deployed system.**
+Screenshots `d2-17-after-api-restart.png`, `d2-18-synced-after-restart.png`.
+
+#### D2-2 (LOW, new) — `POST /api/imports/csv` reports `staged: 0` for every first upload
+
+The contract describes `staged` as a count of rows staged
+(`apps/api/src/routes/connections.ts:672`), and on the **new-connection** branch
+it is hard-coded:
+
+```ts
+// apps/api/src/routes/connections.ts:727-733 — a new connection runs `link`,
+// which stages every file itself, and the count is not plumbed back out.
+return {
+  connectionId: linked.connectionId,
+  syncRunId: linked.syncRunId,
+  staged: 0,
+  skipped: 0,
+  status: null,
+};
+```
+
+The observed response for the five-row import was
+`{"staged":0,"skipped":0,"status":null}` while `connection_staged_facts` held
+five `transaction_added` rows. Nothing in the UI reads the field today, so the
+impact is nil — but it is, once more, a reported signal that cannot distinguish
+"staged nothing" from "staged everything", which is the failure mode this
+document has now named seven times. Either plumb the count out of `link` or
+mark the field nullable and document that the first upload does not report one.
+
+### 9.6 Step 7 — Plaid Link under the production CSP
+
+`ins_109508` / "First Platypus Bank", `user_good` and `pass_good` are Plaid's
+**published** Sandbox test credentials, not secrets. No `client_id`, `secret`,
+`access_token` or `link_token` value appears in this section beyond the
+non-secret `link-sandbox-…` handles Link itself prints.
+
+Add connection → **Bank or brokerage (Plaid)** → _Connect_:
+
+```
+POST /api/connections/plaid/link-token -> 200 {"linkToken":"link-sandbox-6e85ef09-…","expiresAt":…}
+```
+
+Link then ran, in the real browser, inside
+`cdn.plaid.com/link/v2/stable/link.html`, and this reviewer drove Link's own UI
+end to end:
+
+| Link pane                     | Observed                                                                                                       |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| consent                       | _"PersonalFi uses Plaid to connect your account"_ → **Continue without phone number**                          |
+| institution search            | typed "Platypus" → the real result list (`Platypus No Products`, `Platypus OAuth Bank`, `First Platypus Bank`) |
+| institution                   | **First Platypus Bank** → _3 associated institutions_ → the non-OAuth entry                                    |
+| credentials                   | _"Log into First Platypus Bank"_ → `user_good` / `pass_good`                                                   |
+| account picker                | _"Your accounts"_ — **14** accounts (Plaid Checking ••0000 $100.00, Saving ••1111, CD ••2222, …)               |
+| verifying                     | _"Retrieving financial data from First Platypus Bank"_                                                         |
+| **Success**                   | **"Your account has been successfully linked to PersonalFi"**                                                  |
+| post-success enrolment upsell | _"Save First Platypus Bank with Plaid"_ → **Finish without saving**                                            |
+
+then, back in the app:
+
+```
+POST /api/connections/plaid/exchange -> 201
+  {"connectionId":"01a0ac63-76c3-7487-9aba-167252176450","relinked":false,
+   "accountIds":[ …14 ids… ]}
+```
+
+**`securitypolicyviolation` events: zero.** Collected from every frame,
+including Link's own `cdn.plaid.com` document (the listener is installed on the
+browser _context_, not the page, so a refusal inside the child document is
+visible). Zero page errors, zero console errors. Screenshots
+`d2-19-plaid-tab.png`, `d2-21-plaid-00…13.png` (each Link pane), `d2-22-plaid-after.png`.
+
+**Two harness traps worth recording**, because both look exactly like "Link did
+not open"/"the exchange is broken" and neither is:
+
+1. Link attaches **two** iframes — the UI (`link.html`) and a hidden 0×0
+   `link-open.html`. A frame matcher keyed on `plaid.com` picks the hidden one,
+   reads an empty `document.body`, and reports a Link that never rendered. Match
+   `link.html`.
+2. **`onSuccess` does not fire at the "Success" pane.** Link then shows an
+   optional _"Save <bank> with Plaid"_ enrolment upsell, and only once that is
+   dismissed (**Finish without saving**) does the callback run and the app
+   exchange the public token. A walk that stops at the word "Success" has
+   observed Plaid succeeding and the **application doing nothing** — this
+   reviewer hit exactly that on the first attempt: Success on screen, `Plaid
+configured`, and **no `POST /plaid/exchange` in the api log at all**. That is
+   the same class of false signal as F-5's `onload` probe, in the walk rather
+   than in a test, and it is worth pinning in whatever automated Link walk Phase
+   2 builds.
+
+### 9.7 Step 8 — the first sync completes
+
+| What                    | Observed                                                                                                                                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Connections card        | **First Platypus Bank — Connected · 14 accounts · Synced 1 minute ago** (not "Never synced": N-5 stays closed)                                                                                                                                                                  |
+| SSE status pill, live   | `"Synced 1 minute ago"` → _Sync now_ → `"Synced 0 seconds ago"` within 2.5 s, with no reload                                                                                                                                                                                    |
+| Sync path               | `POST /api/connections/{id}/sync -> 202 {"mode":"queued","jobId":"01a0ac64-bfc9-…"}` — **queued to the worker**, which executed it; the Manual/CSV ones came back `{"mode":"inline"}`                                                                                           |
+| Data                    | **394 Plaid transactions**, **14 balance rows**, `sync_runs` `initial/success` for both `transactions` and `balances`, `sealed_credentials IS NOT NULL`                                                                                                                         |
+| Transactions list       | `/transactions` shows Plaid rows (_Sep 10 ACH Electronic CreditGUSTO PAY_, _Uber_, _United Airlines_, …) and the account filter offers all 14 Plaid accounts plus Checking 1234 / Rental property                                                                               |
+| `GET /api/transactions` | `summary {"count":399,…}` = 394 Plaid + the 5 CSV rows                                                                                                                                                                                                                          |
+| **Balances** (step 5′)  | `/accounts` now reads **Net worth −$77,164.15**, **CASH $62,589.00**, _Plaid CD ••2222 +$1,000.00_, _Money Market ••4444 +$43,200.00_, **CREDIT CARDS −$5,430.00** … The manual and CSV accounts still read "No balance yet", which is correct for connectors that supply none. |
+
+Screenshots `d2-23-after-first-sync.png`, `d2-24-sse-pill.png`,
+`d2-25-transactions-after-plaid.png`, `d2-26-accounts-balances.png`. Zero CSP
+violations, zero console errors.
+
+### 9.8 Steps 9–11 — forced reauth, reconnect, scheduled sync, disconnect
+
+#### Step 9a — forced reauth
+
+Issued from **inside the api container**, using the deployment's own key custody
+(`SecretBox.unlock` → `openText`), so the access token never left the process and
+nothing but status codes was printed:
+
+```
+kek unlocked
+credential keys present: access_token
+POST https://sandbox.plaid.com/sandbox/item/reset_login -> 200 reset_login= true error= null
+```
+
+Next sync from the UI (`POST /connections/{id}/sync -> 202 {"mode":"queued","jobId":…}` —
+the **worker** executed it) and the app changed, live over SSE, to:
+
+> **1 connection needs attention** · **First Platypus Bank — Needs reconnection ·
+> 14 accounts** · _Reconnect_ / _Sync now_ / _Disconnect_
+
+Screenshot `d2-27-reauth-required.png`.
+
+#### Step 9b — Reconnect, zero data loss
+
+```
+POST /api/connections/{id}/plaid/update-link-token -> 200 {"linkToken":"link-sandbox-40eaee2b-…"}
+```
+
+Link opened in **update mode** — _"Enter your password — Securely reconnect your
+account. **User ID: use•••••**"_, i.e. it did not re-ask for the institution —
+password `pass_good`, then:
+
+```
+POST /api/connections/{id}/reconnect -> 200
+  {"connectionId":"01a0ac63-76c3-…","relinked":true,"accountIds":[ the SAME 14 ids ]}
+```
+
+Card back to **Connected · 14 accounts**. **Zero data loss, checked in the
+database before and after:**
+
+|                                | before reconnect  | after reconnect             |
+| ------------------------------ | ----------------- | --------------------------- |
+| Plaid transactions             | 394               | **394**                     |
+| CSV transactions               | 5                 | **5**                       |
+| Plaid accounts                 | 14                | **14** (same connection id) |
+| sealed credential              | present (stale)   | present (**re-sealed**)     |
+| connection status              | `reauth_required` | `active`                    |
+| user overlay (note + category) | 1 row             | **1 row, byte-identical**   |
+
+`account_balances` went 28 → 42: a third 14-row balance snapshot from the
+post-reconnect sync. That table is append-only history, so growth is the correct
+behaviour, not duplication.
+
+Screenshots `d2-28-before-reconnect.png`, `d2-29-reconnect-dialog.png`,
+`d2-30-reconnect-*.png`, `d2-31-reconnected.png`. Zero CSP violations throughout.
+
+**Harness note (third Link trap).** Update mode _also_ opens on the phone-enrolment
+consent pane, and its primary `#aut-button` is **disabled** until a phone number
+is typed. A driver that clicks `#aut-button` — or any "Continue"-named button
+without excluding `[disabled]` — hangs there forever on a pane that looks
+interactive. The pane must be dismissed with `#aut-secondary-button`
+("Continue without phone number"), and the password pane submitted through the
+form (Enter in the `input[type=password]`), not through a guessed id.
+
+#### Step 10 — a SCHEDULED worker sync, with no user action
+
+Browser closed, no request from any client. Schedule shortened exactly as §8.6
+did (`cron='* * * * *'`, `jitter_seconds=0`), then `sync_runs` polled:
+
+```
+t=5s  scheduled_runs=0
+t=10s scheduled_runs=0
+t=15s scheduled_runs=0
+t=20s scheduled_runs=2      <- within ~20 s of the shortened schedule
+
+ display_name    | provider    | trigger   | status  | operation    | error_kind
+-----------------+-------------+-----------+---------+--------------+------------
+ D2 statements   | file_import | scheduled | success |  transactions |
+ Rental property | manual      | scheduled | success |  transactions |
+
+connections after the run:
+ D2 statements       | file_import | active
+ First Platypus Bank | plaid       | active
+ Rental property     | manual      | active
+```
+
+worker log:
+
+```
+sync skipped {"connectionId":"01a0ac63-76c3-…","reason":"min_interval"}
+```
+
+Two things the brief asked for, both answered:
+
+- **Plaid was skipped**, by `min_interval`, because the reconnect sync had just
+  run — the rate-limit ratchet doing its job, exactly as in §8.6.
+- **Manual and CSV _ran_, and succeeded.** This is the load-bearing change since
+  the re-gate. N-7's symptom — every scheduled run flipping both non-Plaid
+  connections to a false, sticky "Needs reconnection" — **does not reproduce**,
+  and it does not reproduce because the connections are genuinely syncable from
+  the worker now (durable staging, `919902e`), not because they were filtered out
+  of the fan-out. Both stayed `active`, both produced a `success` run, and the
+  scheduled fan-out reaches every provider.
+
+Schedule restored to `15 3 * * *` / 1200 s jitter afterwards, `next_run_at` cleared.
+
+#### Step 11 — Disconnect, and the step-up that guards it
+
+This reviewer deliberately **waited out the 300 s step-up freshness window**
+before clicking Disconnect (polling `GET /api/auth/session` until
+`"fresh":false`), so the mutation would be refused rather than sliding through on
+a session that had just authenticated. It was:
+
+```
+DELETE /api/connections/{id} -> 403 {"code":"step_up_required",
+    "detail":"This operation needs a recent passkey assertion. Call /auth/step-up/options."}
+POST   /api/auth/step-up/options -> 200        <- real assertion on the virtual authenticator
+POST   /api/auth/step-up/verify  -> 200 {"freshUntil":"2026-09-16T23:30:36.598Z"}
+DELETE /api/connections/{id} -> 200 {"revokedAtProvider":true,"providerSlotMayRemain":false}
+```
+
+That is the step-up refusal **and** the real-ceremony retry, observed in a
+browser against the deployed stack rather than in a unit test.
+
+**Independently confirmed at Plaid**, with the access token stashed inside the
+container before the disconnect and read back after (the stash lived in the
+container's tmpfs and the probe deleted it itself):
+
+```
+BEFORE DISCONNECT: /item/get status=200 error_code=null            item_present=true
+AFTER  DISCONNECT: /item/get status=400 error_code=ITEM_NOT_FOUND  item_present=false
+stash deleted: true
+```
+
+Locally: `First Platypus Bank | plaid | disconnected`, **`sealed_credentials IS
+NULL`**, and the **394 transactions retained as history**. Screenshots
+`d2-32-before-disconnect.png`, `d2-33-disconnect-confirm.png`,
+`d2-34-disconnected.png`.
+
+**The Sandbox Item is removed**, so the teardown obligation is met.
+
+### 9.9 D2-3 (LOW, new) — a Link "Success" that is never exchanged strands an Item at Plaid
+
+Found by this reviewer's own first attempt at step 7 (§9.6, trap 2). Link reached
+**Success** — which means Plaid has already created a real Item and a real
+`public_token` — and the app never exchanged it, because `onSuccess` had not
+fired yet. The browser was then closed.
+
+The consequence is not local: locally there is simply no connection row, which is
+clean. At **Plaid** there is now an Item that
+
+- counts against the Sandbox Item quota,
+- is invisible to this deployment (no row, no `access_token`), and
+- **cannot be removed via `/item/remove`**, because that call needs the very
+  `access_token` the un-exchanged `public_token` would have produced.
+
+Per instruction it was **not** removed; it is recorded here so it is not a
+surprise later. It can only be cleared from the Plaid dashboard.
+
+The same shape in production is worse than in Sandbox: a user who closes the tab
+between Link's Success and the app's exchange has granted an institution
+connection that the app cannot see, cannot sync and cannot revoke — and, from the
+bank's side, an authorisation that stays live. Two mitigations, in order of
+preference:
+
+1. **Exchange first, await nothing else.** `onSuccess` should `POST
+/connections/plaid/exchange` as its very first statement, before any state
+   update, navigation, toast or analytics `await`. (The step-up round trip is
+   already inside that call, so this does not weaken the guard.)
+2. Failing that, document the orphan path in `RUNBOOK.md` beside "What survives a
+   disconnect", including that the only cleanup is the Plaid dashboard.
+
+This is **LOW** as observed (Sandbox, one Item) but it is the only finding in this
+walk with a real-money analogue, and it is cheap to close.
+
+### 9.10 Sabotage log — the two close-out controls, broken on the running stack
+
+Both breaks were made against the **live deployment**, not against a test, and
+both were restored.
+
+| #   | Control (condition)                                   | Break                                                                               | Result                                                                                                                                                                                                                                                                                                                             |
+| --- | ----------------------------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1  | **Worker healthcheck that can fail (D-3, `05c09b5`)** | `kill -STOP` on the worker's node pid inside the container (`/proc/6/stat` → `T`)   | **RED.** First probe failure at ~22 s (`job-runner heartbeat missing or stale (age=21938ms max=15000ms)`), then 37 s, then 52 s; Docker marked the container **`unhealthy` at 60 s**. `kill -CONT` (`/proc/6/stat` → `R`) → **`healthy` again within 20 s**. This is the exact scenario N-4 hid behind 189 `healthy` restarts.     |
+| S2  | **Plaid CSP gated on `PLAID_ENABLED` (C-2 / D-1)**    | `PLAID_ENABLED: 'false'` on `proxy` only in `compose.override.yml`; proxy recreated | **RED.** Headers collapsed to `script-src-elem 'self'`, `frame-src 'self'`, `connect-src 'self'`, `cross-origin-embedder-policy: require-corp`. In the browser: **exactly one `securitypolicyviolation` — `script-src-elem :: https://cdn.plaid.com/link/v2/stable/link-initialize.js`** — and **no Link iframe attached at all**. |
+
+S2 is worth two extra sentences, because it is the control F-5 showed cannot be
+measured carelessly. The block was recorded as a **fired event**, not as the
+absence of an iframe: the same probe reports `violations=0` and a live
+`link.html` frame when Plaid is enabled, and `violations=1` with zero frames when
+it is not, so the signal distinguishes the two states in both directions. Note
+also that `POST /api/connections/plaid/link-token` still returned **200** during
+S2 — the api was left enabled on purpose — which proves the proxy's CSP, and not
+an api feature flag, is what actually gates Link.
+
+Restored: `PLAID_ENABLED: 'true'` on the proxy, proxy recreated, headers
+re-verified live (`script-src-elem 'self' https://cdn.plaid.com`,
+`cross-origin-embedder-policy: unsafe-none`), all five services healthy.
+
+**One correction to `closeout-ops.md`'s wording, not a finding.** D-3's evidence
+says the frozen worker "reads unhealthy in 10 s". What happens in 10–22 s is that
+the _probe_ starts failing; Docker only transitions the container to `unhealthy`
+after `retries: 3` at `interval: 15s`, i.e. **~60 s**. The control works; the
+number in the evidence is the probe's latency, not the container's.
+
+### 9.11 Conditions, and the Phase 1 status line
+
+| #        | Condition                                   | Status after this re-walk                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **D-2**  | Independent re-walk of steps 7–11           | **CLOSED.** All eleven steps walked from `HEAD` by a reviewer who wrote none of the fixes: Link opened under the production CSP with zero violations and completed to exchange `201`; first sync 394 transactions + 14 balances; forced reauth → **Needs reconnection** → Reconnect `relinked:true` with zero data loss; a **scheduled** worker sync fired with no user action; disconnect confirmed at Plaid (`ITEM_NOT_FOUND`). Plus the regression of steps 1–6 and the api-restart durability check. |
+| **D-3**  | Worker healthcheck that can fail            | **CLOSED**, sabotaged red on the running stack (S1).                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **D-4**  | `harden-secrets` + computed ownership check | **CLOSED** as far as this environment can show: `check-secret-ownership.sh` PASS on the real tree, all five `plaid_*`/custody secrets at the strict bar, and both api and worker read them with no `EACCES`. `just harden-secrets` itself needs a `sudo` this reviewer does not have.                                                                                                                                                                                                                    |
+| **D-5**  | Durable staging for Manual/CSV              | **CLOSED**, and twice: a user-triggered sync after `docker compose restart api` succeeds with no duplicates, and the **scheduled** fan-out now syncs Manual and CSV successfully instead of marking them `reauth_required`. N-7 does not reproduce.                                                                                                                                                                                                                                                      |
+| **D-6**  | Route the category taxonomy                 | **CLOSED at the UI, OPEN at install.** `GET /categories` is routed and `CategoryPicker` renders 133 options in 21 groups from the real taxonomy, and a pick persists. But on a fresh install the taxonomy is never seeded at all (**D2-1**), so a new deployment still gets N-3's empty picker until the api restarts.                                                                                                                                                                                   |
+| **D-7**  | Layered compose override rendering          | **CLOSED** in use: the documented `compose.override.yml` workflow is exactly how Plaid was enabled here, and `docker compose config` rendered the layered result correctly on all three services.                                                                                                                                                                                                                                                                                                        |
+| **D-1**  | Ratify the CSP/COEP trades                  | **OPEN — Chris + security.** Unchanged and not this reviewer's to close. Both trades were observed live: `cross-origin-embedder-policy: unsafe-none` and `style-src-elem 'self' 'unsafe-inline' https://cdn.plaid.com`, Plaid-enabled only, and S2 shows both revert cleanly when Plaid is off. D26 awaits ratification.                                                                                                                                                                                 |
+| **C-1c** | Image closure in a real Actions run         | **OPEN — needs a remote.** Still no environment with one.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+#### New findings from this walk
+
+| id       | Severity | Finding                                                                                                                  | State                              |
+| -------- | -------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| **D2-1** | MEDIUM   | Fresh installs never seed the category taxonomy (`ensureTaxonomy` is boot-only; the RUNBOOK creates the user after boot) | Not fixed; exact diff in §9.4      |
+| **D2-2** | LOW      | `POST /api/imports/csv` reports `staged: 0` for every first upload                                                       | Not fixed; diff site named in §9.5 |
+| **D2-3** | LOW      | A Link "Success" whose `public_token` is never exchanged strands an unremovable Item at Plaid                            | Not fixed; two mitigations in §9.9 |
+
+**Why D2-1 was not fixed in place.** The rule this reviewer was given allows a
+Critical/High to be fixed in ≤30 lines _with a test_. D2-1 is MEDIUM, and more to
+the point the correct fix site — `apps/api/src/bin/bootstrap-user.ts` — is a
+top-level-await bin script with no seam a ≤30-line test can drive, while the
+testable alternative (seeding lazily inside `GET /categories`) puts a write in a
+read path and is an architecture decision, not a gate's. The diff is in §9.4 for
+whoever owns it. That is the same reasoning §8.6 gave for leaving N-7 to the
+connector-port owner, and that decision aged well.
+
+#### PHASE 1 STATUS
+
+**D-2 is closed. Phase 1's remaining conditions are D-1 (Chris's ratification of
+D26) and C-1c (needs a remote), plus three new non-blocking findings — D2-1
+(MEDIUM), D2-2 (LOW) and D2-3 (LOW) — none of which is a security defect and none
+of which blocks exit.** The two carried-forward items that are not conditions are
+unchanged: two _real_ institutions syncing on schedule, and a month of real data
+with zero internal transfers, both of which need Chris's own accounts.
+
+For the first time in this project, a reviewer who wrote none of the code
+observed the whole Phase 1 path work on a stack built from `HEAD` — including the
+two things the re-gate had to fix itself (the worker doing work, and Link
+actually opening) and the two things the close-out agents built to fix what the
+re-gate found (a healthcheck that fails, and staging that survives a restart).
+Every one of them held under a break made by this reviewer.
+
+### 9.12 Tree state, teardown and hygiene
+
+```
+$ git status --short          # this reviewer's changes only
+ M docs/evidence/phase-1/gate-security-review.md      # this section
+ M docs/plan/01-execution-log.md                      # one Phase 1 WP row
+ M/?? docs/evidence/phase-1/screenshots/d2-*.png      # the walk
+```
+
+No source file was modified and no test added: nothing this walk found was a
+Critical or a High, and the one MEDIUM's fix site is not testable in the budget
+allowed (§9.11). `packages/contexts/recurring/**` also appears in `git status` —
+**those are not this reviewer's** and were not touched, read or reverted; they
+were present in the working tree from other Phase 2 work in flight.
+
+**Stack teardown:** `docker compose down -v`. The `compose.override.yml` this
+reviewer created was deleted. `.env` was never edited. The three
+`secrets/plaid_*` files were left exactly as found (`-r-------- 10001 10001`,
+mode `0400`) — confirmed by re-running `scripts/check-secret-ownership.sh`. The
+nightly schedule was restored to `15 3 * * *` / 1200 s jitter before teardown.
+
+**The Sandbox Item created by the completed walk was removed** and independently
+confirmed gone at Plaid (`ITEM_NOT_FOUND`) _before_ teardown. One earlier Item,
+created by the harness's incomplete first Link attempt, could not be removed and
+is recorded as **D2-3**.
+
+**Evidence hygiene.** The `just bootstrap-user` enrolment token was single-use and
+is consumed; it is not in this document and every transcript containing it was
+redacted at the shell before being read. No Plaid `client_id`, `secret`,
+`access_token`, session cookie or CSRF token appears anywhere in §9 — the
+`reset_login` and `/item/get` probes were written to run entirely inside the api
+container and to print HTTP status codes and error codes only, and the token
+stash they used lived in the container's tmpfs and was deleted by the probe
+itself (verified: `stash deleted: true`). `ins_109508`, `user_good` and
+`pass_good` are Plaid's published Sandbox test credentials. The `link-sandbox-…`
+handles quoted here are the non-secret ids Link itself prints and are expired.
+
+**The walk scripts** are in `/tmp/d2/` (`support.mjs`, `w1`–`w8`, `probe-*.mjs`,
+`item-probe.mjs`, `reset-login.mjs`), deliberately outside the repo so `docs/`
+needs no eslint widening for browser globals — the same choice §7 and §8.12 made.
+They are run from `apps/web` so `@playwright/test` resolves.
