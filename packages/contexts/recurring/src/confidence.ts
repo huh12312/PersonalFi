@@ -97,9 +97,7 @@ export function featuresOf(inputs: ConfidenceInputs): ConfidenceFeatures {
     maturity: Math.min(1, Math.max(0, (inputs.occurrences - 1) / 4)),
     merchantPrior: merchantPrior(inputs.merchantClass),
     recency:
-      inputs.periodDays <= 0
-        ? 0
-        : clamp01(1 - inputs.daysSinceLast / (2 * inputs.periodDays)),
+      inputs.periodDays <= 0 ? 0 : clamp01(1 - inputs.daysSinceLast / (2 * inputs.periodDays)),
     coverage: clamp01(inputs.coverage),
   };
 }

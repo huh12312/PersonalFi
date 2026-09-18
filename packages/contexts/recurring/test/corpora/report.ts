@@ -28,6 +28,7 @@ import {
   surfacedStreams,
 } from './metrics.ts';
 import { REALITY_NOTES, syntheticCorpus } from './synthetic.ts';
+import { periodsPerYear } from '../../src/index.ts';
 
 function write(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -35,11 +36,7 @@ function write(line: string): void {
 
 const sabotageArg = process.argv.find((argument) => argument.startsWith('--sabotage'));
 const sabotage: 'none' | 'tiebreak' | 'ceiling' =
-  sabotageArg === undefined
-    ? 'none'
-    : sabotageArg.includes('ceiling')
-      ? 'ceiling'
-      : 'tiebreak';
+  sabotageArg === undefined ? 'none' : sabotageArg.includes('ceiling') ? 'ceiling' : 'tiebreak';
 
 const corpus = syntheticCorpus();
 const result = runDetection(corpus.inputs, corpus.facts, corpus.today, {
@@ -92,22 +89,40 @@ write(
 );
 write('| 8 | trial-conversion recall | ≥ 0.80 | not implemented (07 §2.7 needs a price table) |');
 write('');
-write(`false positives: ${metrics.falsePositives.map((stream) => stream.streamKey).join(', ') || 'none'}`);
-write(`missed: ${metrics.missed.map((stream) => `${stream.goldId}/${stream.merchantId}`).join(', ') || 'none'}`);
+write(
+  `false positives: ${metrics.falsePositives.map((stream) => stream.streamKey).join(', ') || 'none'}`,
+);
+write(
+  `missed: ${metrics.missed.map((stream) => `${stream.goldId}/${stream.merchantId}`).join(', ') || 'none'}`,
+);
 write('');
 
-// How often does the tie-break actually decide anything? Printed because the
-// answer turned out to be "often, and never above the recurring floor".
+// How often does the tie-break actually decide anything, and what does getting
+// it wrong cost? Always measured longest-vs-shortest on the *unsabotaged*
+// engine, so the line means the same thing in both modes.
+const longest = runDetection(corpus.inputs, corpus.facts, corpus.today, {
+  preferLongestCadence: true,
+});
 const shortest = runDetection(corpus.inputs, corpus.facts, corpus.today, {
   preferLongestCadence: false,
 });
 const byKeyShortest = new Map(shortest.streams.map((stream) => [stream.streamKey, stream]));
-const relabelled = result.streams.filter(
+const relabelled = longest.streams.filter(
   (stream) => byKeyShortest.get(stream.streamKey)?.cadence !== stream.cadence,
 );
+let periodsLongest = 0;
+let periodsShortest = 0;
+for (const stream of relabelled) {
+  const other = byKeyShortest.get(stream.streamKey);
+  if (stream.cadence === 'UNKNOWN' || other === undefined || other.cadence === 'UNKNOWN') continue;
+  periodsLongest += periodsPerYear(stream.cadence);
+  periodsShortest += periodsPerYear(other.cadence);
+}
 write(
-  `tie-break: ${relabelled.length}/${result.streams.length} streams change cadence when it is inverted; ` +
-    `${relabelled.filter((stream) => stream.cadenceScore >= 0.7).length} of those score >= 0.70`,
+  `tie-break: ${relabelled.length}/${longest.streams.length} streams change cadence when it is inverted; ` +
+    `${relabelled.filter((stream) => stream.cadenceScore >= 0.7).length} of those score >= 0.70; ` +
+    `promised charges/year for those streams ${periodsLongest} -> ${periodsShortest} ` +
+    `(${(periodsShortest / Math.max(1, periodsLongest)).toFixed(1)}x)`,
 );
 write('');
 
@@ -121,7 +136,9 @@ for (const [label, facts] of [
     ...(sabotage === 'ceiling' ? { subscriptionMonthlyCeilingMajor: 10_000_000n } : {}),
   });
   const subscriptions = advResult.streams.filter((stream) => stream.type === 'SUBSCRIPTION');
-  write(`adversarial (${label}): streams=${advResult.streams.length} SUBSCRIPTION=${subscriptions.length}`);
+  write(
+    `adversarial (${label}): streams=${advResult.streams.length} SUBSCRIPTION=${subscriptions.length}`,
+  );
   for (const stream of advResult.streams) {
     write(
       `  ${stream.merchantId} type=${stream.type} cadence=${stream.cadence} ` +

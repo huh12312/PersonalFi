@@ -48,17 +48,24 @@ describe('price change', () => {
     // And through the whole engine: the prorated charge buckets away from the
     // stream on amount, so the subscription keeps its price and its model.
     const facts = new Map<string, MerchantFacts>([['mer-1', { class: 'SUBSCRIPTION' }]]);
-    const rows: RecurringInput[] = series([1299n, 1299n, 1299n, 433n, 1299n, 1299n, 1299n, 1299n]).map(
-      (occurrence) => ({
-        transactionId: occurrence.transactionId,
-        merchantId: 'mer-1',
-        accountId: 'acc-1',
-        amount: occurrence.amount,
-        date: occurrence.date,
-        pending: false,
-        isTransfer: false,
-      }),
-    );
+    const rows: RecurringInput[] = series([
+      1299n,
+      1299n,
+      1299n,
+      433n,
+      1299n,
+      1299n,
+      1299n,
+      1299n,
+    ]).map((occurrence) => ({
+      transactionId: occurrence.transactionId,
+      merchantId: 'mer-1',
+      accountId: 'acc-1',
+      amount: occurrence.amount,
+      date: occurrence.date,
+      pending: false,
+      isTransfer: false,
+    }));
     const result = detectRecurring(rows, {
       clock: fixedClock('2025-09-15T12:00:00Z'),
       timeZone: 'UTC',
@@ -99,7 +106,15 @@ describe('price change', () => {
     // A payroll-style deposit whose amount moves a few tenths of a percent.
     // Every window is inside tolerance and the medians still differ by more
     // than 3%; only the MAD floor separates this from a raise.
-    const occurrences = series([142_010n, 139_880n, 141_550n, 144_090n, 143_260n, 140_770n, 145_120n]);
+    const occurrences = series([
+      142_010n,
+      139_880n,
+      141_550n,
+      144_090n,
+      143_260n,
+      140_770n,
+      145_120n,
+    ]);
     const changes = detectPriceChanges(occurrences, {
       ...MONTHLY_FIXED,
       tolerance: Money.of(7_100n, 'USD'),

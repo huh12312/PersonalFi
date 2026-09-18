@@ -15,12 +15,15 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   CADENCES,
+  TIE_BAND,
   generateSchedule,
   inferCadence,
+  periodDaysOf,
   scoreCadence,
   specOf,
   uncertaintyDays,
 } from './cadence.ts';
+import type { Cadence } from './types.ts';
 
 function dates(...values: readonly string[]): DateOnly[] {
   return values.map((value) => DateOnly.parse(value));
@@ -92,8 +95,14 @@ describe('cadence inference', () => {
 
   it('a semimonthly stream is not read as monthly with unexplained extras', () => {
     const observed = dates(
-      '2026-01-01', '2026-01-15', '2026-02-01', '2026-02-15',
-      '2026-03-01', '2026-03-15', '2026-04-01', '2026-04-15',
+      '2026-01-01',
+      '2026-01-15',
+      '2026-02-01',
+      '2026-02-15',
+      '2026-03-01',
+      '2026-03-15',
+      '2026-04-01',
+      '2026-04-15',
     );
     const inference = inferCadence(observed);
     expect(inference.cadence).toBe('SEMIMONTHLY');
@@ -162,18 +171,66 @@ describe('cadence properties', () => {
   });
 
   it('the longest cadence wins a near-tie, and only a near-tie', () => {
+    // This test was, for a while, only its second half: it generated clean
+    // monthly streams, which are a near-tie with nothing, so it exercised the
+    // argmax and never the tie-break. Inverting the tie-break in `cadence.ts`
+    // left the entire suite green. The first two assertions below are the
+    // repair, and they are what the evidence file's sabotage now turns red.
+
+    // (a) The invariant itself, on the **default** path, over date sets sparse
+    //     and irregular enough that several cadences really do land inside
+    //     `TIE_BAND`. Stated on `considered`, which is the same candidate list
+    //     the tie-break reduces over.
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.integer({ min: 0, max: 800 }), { minLength: 2, maxLength: 9 }),
+        (offsets) => {
+          const base = DateOnly.parse('2024-01-10');
+          const observed = [...offsets]
+            .sort((left, right) => left - right)
+            .map((offset) => DateOnly.addDays(base, offset));
+          const inference = inferCadence(observed);
+          if (inference.cadence === 'UNKNOWN' || inference.considered.length === 0) return;
+
+          const best = Math.max(...inference.considered.map((entry) => entry.score));
+          const tied = inference.considered.filter((entry) => entry.score >= best - TIE_BAND);
+          const longest = Math.max(...tied.map((entry) => periodDaysOf(entry.cadence)));
+          expect(periodDaysOf(inference.cadence), JSON.stringify(observed)).toBe(longest);
+        },
+      ),
+      { numRuns: 400 },
+    );
+
+    // (b) The case that makes the invariant worth having, concretely. Two
+    //     unrelated purchases six weeks apart tie four ways at 0.750; the
+    //     argmax is arbitrary between them and the tie-break is the only thing
+    //     choosing. Preferring the longest makes the engine's unavoidable
+    //     mistake *cheap*: it forecasts one charge a year from a pair it cannot
+    //     explain, instead of a quarterly bill that is four times the
+    //     commitment and four times the wrong notifications.
+    const sparse = dates('2024-01-10', '2024-02-19');
+    const byDefault = inferCadence(sparse);
+    const inverted = inferCadence(sparse, { preferLongest: false });
+    expect(byDefault.cadence).toBe('ANNUAL');
+    // A live tie, not a vacuous one: the other reading scores the same and is
+    // strictly shorter, so something had to choose.
+    expect(inverted.cadence).toBe('QUARTERLY');
+    expect(Math.abs(inverted.score - byDefault.score)).toBeLessThanOrEqual(TIE_BAND);
+    expect(periodDaysOf(byDefault.cadence as Cadence)).toBeGreaterThan(
+      periodDaysOf(inverted.cadence as Cadence),
+    );
+
+    // (c) …and only a near-tie. A clean monthly stream is not tied with
+    //     anything, so the tie-break has nothing to decide and the two
+    //     settings must agree.
     fc.assert(
       fc.property(fc.integer({ min: 3, max: 24 }), (count) => {
         const base = DateOnly.parse('2024-03-05');
         const observed = Array.from({ length: count }, (_, index) =>
           DateOnly.addMonths(base, index),
         );
-        const longest = inferCadence(observed, { preferLongest: true });
-        const shortest = inferCadence(observed, { preferLongest: false });
-        // A clean monthly stream is not a near-tie with anything, so the
-        // tie-break has nothing to decide and both settings agree.
-        expect(longest.cadence).toBe('MONTHLY');
-        expect(shortest.cadence).toBe('MONTHLY');
+        expect(inferCadence(observed, { preferLongest: true }).cadence).toBe('MONTHLY');
+        expect(inferCadence(observed, { preferLongest: false }).cadence).toBe('MONTHLY');
       }),
       { numRuns: 50 },
     );

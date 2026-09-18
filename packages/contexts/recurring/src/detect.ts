@@ -43,10 +43,7 @@ import { buildSegments, groupCoarse, segmentKey, type StreamSegment } from './gr
 import { isCrossSegmentMigration, migrationWithin } from './migration.ts';
 import { predictNextDue } from './next-due.ts';
 import { detectPriceChanges } from './price-change.ts';
-import {
-  DEFAULT_SUBSCRIPTION_MONTHLY_CEILING_MAJOR,
-  typeStream,
-} from './typing.ts';
+import { DEFAULT_SUBSCRIPTION_MONTHLY_CEILING_MAJOR, typeStream } from './typing.ts';
 import type {
   DetectionResult,
   MerchantClass,
@@ -69,8 +66,10 @@ export interface DetectionOptions {
   /**
    * 07 §2.3's tie-break: prefer the longest cadence among near-ties.
    *
-   * Exposed only so the sabotage in `docs/evidence/phase-2/wp2.2-recurring-engine.md`
-   * can invert it and watch the golden gate go red. Production never sets it.
+   * Exposed only so the corpus harness can run the engine both ways and the
+   * gate can assert which way it decided (`golden-streams.test.ts` → `'the
+   * cadence tie-break decides real streams, and always towards the longer'`).
+   * Production never sets it.
    */
   readonly preferLongestCadence?: boolean;
 }
@@ -138,7 +137,9 @@ function buildStream(
   const currentLevel =
     latestChange === undefined
       ? occurrences
-      : occurrences.filter((occurrence) => !DateOnly.isBefore(occurrence.date, latestChange.effectiveDate));
+      : occurrences.filter(
+          (occurrence) => !DateOnly.isBefore(occurrence.date, latestChange.effectiveDate),
+        );
   const profile = profileAmounts(
     (currentLevel.length > 0 ? currentLevel : occurrences).map((occurrence) => occurrence.amount),
   );
@@ -192,9 +193,7 @@ function buildStream(
     coverage,
   });
   const confidence =
-    mergeProposal === null
-      ? scored.confidence
-      : scored.confidence * mergeProposal.confidenceFactor;
+    mergeProposal === null ? scored.confidence : scored.confidence * mergeProposal.confidenceFactor;
 
   const typed = typeStream({
     sign: segment.sign,
@@ -299,10 +298,7 @@ export function detectRecurring(
           const later = built[j] as StreamSegment;
           if (!isCrossSegmentMigration(earlier, later)) continue;
           const union = [...earlier.inputs, ...later.inputs];
-          const rebuilt = buildSegments(
-            { ...group, inputs: union },
-            { preferLongest },
-          );
+          const rebuilt = buildSegments({ ...group, inputs: union }, { preferLongest });
           built = built.filter((_, index) => index !== i && index !== j).concat(rebuilt);
           mergedAny = true;
           break outer;

@@ -66,7 +66,12 @@ export { profileAmounts, type AmountProfile } from './amount.ts';
 export { groupCoarse, signOf, type CoarseGroup } from './grouping.ts';
 export { detectPriceChanges, type PriceChangeOptions } from './price-change.ts';
 export { predictNextDue, type NextDueInputs } from './next-due.ts';
-export { assessDormancy, graceDays, type DormancyInputs, type DormancyOutcome } from './dormancy.ts';
+export {
+  assessDormancy,
+  graceDays,
+  type DormancyInputs,
+  type DormancyOutcome,
+} from './dormancy.ts';
 export { detectDuplicateServices } from './duplicate-service.ts';
 export {
   DEFAULT_SUBSCRIPTION_MONTHLY_CEILING_MAJOR,

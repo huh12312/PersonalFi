@@ -27,29 +27,25 @@ const arbitraryInput = fc
     pending: fc.boolean(),
     isTransfer: fc.boolean(),
   })
-  .map(
-    (raw): RecurringInput => ({
-      transactionId: `t-${raw.transactionId}`,
-      merchantId: raw.merchantId,
-      accountId: raw.accountId,
-      amount: Money.of(BigInt(raw.minor), 'USD'),
-      date: DateOnly.addDays(DateOnly.parse('2024-01-01'), raw.dayOffset),
-      pending: raw.pending,
-      isTransfer: raw.isTransfer,
-    }),
-  );
+  .map((raw): RecurringInput => ({
+    transactionId: `t-${raw.transactionId}`,
+    merchantId: raw.merchantId,
+    accountId: raw.accountId,
+    amount: Money.of(BigInt(raw.minor), 'USD'),
+    date: DateOnly.addDays(DateOnly.parse('2024-01-01'), raw.dayOffset),
+    pending: raw.pending,
+    isTransfer: raw.isTransfer,
+  }));
 
-const arbitraryLedger = fc
-  .array(arbitraryInput, { minLength: 1, maxLength: 60 })
-  .map((rows) => {
-    // Transaction ids are unique in the ledger; the generator may repeat them.
-    const seen = new Set<string>();
-    return rows.filter((row) => {
-      if (seen.has(row.transactionId)) return false;
-      seen.add(row.transactionId);
-      return true;
-    });
+const arbitraryLedger = fc.array(arbitraryInput, { minLength: 1, maxLength: 60 }).map((rows) => {
+  // Transaction ids are unique in the ledger; the generator may repeat them.
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    if (seen.has(row.transactionId)) return false;
+    seen.add(row.transactionId);
+    return true;
   });
+});
 
 describe('grouping', () => {
   it('stage 1 groups on merchant, sign and currency — and nothing else', () => {
@@ -108,10 +104,7 @@ describe('grouping', () => {
     }
     const segments = buildSegments(groupCoarse(rows)[0]!);
     expect(segments).toHaveLength(2);
-    expect(segments.map((segment) => segment.amount.typical.minor).sort()).toEqual([
-      -1299n,
-      -299n,
-    ]);
+    expect(segments.map((segment) => segment.amount.typical.minor).sort()).toEqual([-1299n, -299n]);
   });
 });
 
@@ -151,9 +144,7 @@ describe('grouping properties', () => {
 
         expect(assigned.length).toBe(usable.length);
         expect(new Set(assigned)).toEqual(new Set(usable.map((row) => row.transactionId)));
-        expect(result.diagnostics.skippedPending).toBe(
-          rows.filter((row) => row.pending).length,
-        );
+        expect(result.diagnostics.skippedPending).toBe(rows.filter((row) => row.pending).length);
         expect(result.diagnostics.skippedTransfers).toBe(
           rows.filter((row) => !row.pending && row.isTransfer).length,
         );

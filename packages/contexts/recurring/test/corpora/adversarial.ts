@@ -90,8 +90,20 @@ export function adversarialCorpus(seed: number = ADVERSARIAL_SEED): AdversarialC
   }
 
   // Quarterly estimated tax: four a year, same payee, large and fixed-ish.
-  for (const anchor of ['2023-09-15', '2024-01-15', '2024-04-15', '2024-06-15', '2024-09-15',
-    '2025-01-15', '2025-04-15', '2025-06-15', '2025-09-15', '2026-01-15', '2026-04-15', '2026-06-15']) {
+  for (const anchor of [
+    '2023-09-15',
+    '2024-01-15',
+    '2024-04-15',
+    '2024-06-15',
+    '2024-09-15',
+    '2025-01-15',
+    '2025-04-15',
+    '2025-06-15',
+    '2025-09-15',
+    '2026-01-15',
+    '2026-04-15',
+    '2026-06-15',
+  ]) {
     push(ADVERSARIAL_FAMILIES.estimatedTax, 'acc-checking', DateOnly.parse(anchor), -350_000n);
   }
 

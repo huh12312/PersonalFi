@@ -29,7 +29,7 @@ import {
   runDetection,
 } from './corpora/metrics.ts';
 import { syntheticCorpus } from './corpora/synthetic.ts';
-import { CANDIDATE_CONFIDENCE } from '../src/index.ts';
+import { CANDIDATE_CONFIDENCE, periodDaysOf, periodsPerYear } from '../src/index.ts';
 
 const corpus = syntheticCorpus();
 const result = runDetection(corpus.inputs, corpus.facts, corpus.today);
@@ -110,6 +110,43 @@ describe('golden streams', () => {
     expect(result.diagnostics.skippedPending).toBeGreaterThan(0);
   });
 
+  it('the cadence tie-break decides real streams, and always towards the longer', () => {
+    // The corpus-level half of the tie-break gate. 07 §2.3's rule is only
+    // evidence if the corpus contains cases where it decides something and the
+    // gate notices which way it decided — otherwise inverting the rule is
+    // invisible, which is exactly what it was.
+    const inverted = runDetection(corpus.inputs, corpus.facts, corpus.today, {
+      preferLongestCadence: false,
+    });
+    const byKey = new Map(inverted.streams.map((stream) => [stream.streamKey, stream]));
+    const decided = result.streams.filter(
+      (stream) => byKey.get(stream.streamKey)?.cadence !== stream.cadence,
+    );
+
+    // The corpus must actually exercise it, or this test is vacuous.
+    expect(decided.length).toBeGreaterThan(5);
+
+    let periodsDefault = 0;
+    let periodsInverted = 0;
+    for (const stream of decided) {
+      const other = byKey.get(stream.streamKey);
+      if (stream.cadence === 'UNKNOWN' || other === undefined || other.cadence === 'UNKNOWN') {
+        continue;
+      }
+      expect(periodDaysOf(stream.cadence), stream.streamKey).toBeGreaterThan(
+        periodDaysOf(other.cadence),
+      );
+      periodsDefault += periodsPerYear(stream.cadence);
+      periodsInverted += periodsPerYear(other.cadence);
+    }
+
+    // What the rule buys, in the only unit that matters downstream: WP 2.3's
+    // forward cash-flow asks these streams how often they charge. Inverting the
+    // tie-break makes the engine promise many more charges a year out of the
+    // same evidence — sparse, ambiguous rows it cannot actually explain.
+    expect(periodsInverted).toBeGreaterThan(periodsDefault * 3);
+  });
+
   it('a refund never becomes recurring income', () => {
     const inflows = result.streams.filter((stream) => stream.sign === 'INFLOW');
     expect(inflows.length).toBeGreaterThan(0);
@@ -132,7 +169,10 @@ describe('adversarial streams', () => {
     ] as const) {
       const outcome = runDetection(adversarial.inputs, facts, adversarial.today);
       const subscriptions = outcome.streams.filter((stream) => stream.type === 'SUBSCRIPTION');
-      expect(subscriptions.map((stream) => stream.merchantId), label).toEqual([]);
+      expect(
+        subscriptions.map((stream) => stream.merchantId),
+        label,
+      ).toEqual([]);
 
       // And every family is accounted for with a named reason, so a green test
       // cannot mean "the engine found nothing at all".

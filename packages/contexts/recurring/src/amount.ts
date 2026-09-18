@@ -49,10 +49,7 @@ function magnitude(value: bigint): bigint {
  * Returns index lists into `items`, ordered by the bucket's median magnitude, so
  * the bucket index is stable for a given input and can go into a stream key.
  */
-export function bucketByAmount<T>(
-  items: readonly T[],
-  amountOf: (item: T) => Money,
-): T[][] {
+export function bucketByAmount<T>(items: readonly T[], amountOf: (item: T) => Money): T[][] {
   if (items.length === 0) return [];
   const code = amountOf(items[0] as T).currency;
   const gapFloor = majorToMinor(BUCKET_GAP_FLOOR_MAJOR, code);

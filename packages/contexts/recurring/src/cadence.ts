@@ -12,8 +12,9 @@
  *     prediction is what stops Feb 28 from pinning the rest of the year.
  *  2. **Sparseness.** Three monthly hits also "fit" as a weekly schedule that
  *     missed three quarters of its slots. A mean gap cannot tell them apart; a
- *     coverage term can, and the tie-break below finishes the job by preferring
- *     the **longest** cadence among near-ties.
+ *     coverage term plus a per-cadence `min_n` can, and the tie-break below
+ *     covers the residue by preferring the **longest** cadence among genuine
+ *     near-ties.
  *  3. **Weekends.** Many billers post on the next business day, so a Saturday
  *     slot lands on Monday. Tolerance is therefore widened **asymmetrically**,
  *     forward only, by `WEEKEND_FORWARD_TOLERANCE_DAYS` when the predicted date
@@ -227,7 +228,9 @@ export function dayOfMonthPairOf(dates: readonly DateOnly[]): [number, number] |
     counts.set(dom, (counts.get(dom) ?? 0) + 1);
   }
   if (counts.size < 2) return null;
-  const ranked = [...counts.entries()].sort((a, b) => (b[1] - a[1] !== 0 ? b[1] - a[1] : a[0] - b[0]));
+  const ranked = [...counts.entries()].sort((a, b) =>
+    b[1] - a[1] !== 0 ? b[1] - a[1] : a[0] - b[0],
+  );
   const first = ranked[0]?.[0] as number;
   const second = ranked[1]?.[0] as number;
   return first <= second ? [first, second] : [second, first];
@@ -359,12 +362,32 @@ export interface CadenceInference {
 /**
  * Pick a cadence.
  *
- * The tie-break is the load-bearing line: among everything within `TIE_BAND` of
- * the best score, take the **longest** period. Three monthly hits score well as
- * "weekly with 75% of its slots missing" only if coverage is ignored, and they
- * score *identically* to monthly under a scheme that rewards tightness alone.
- * Inverting this one comparison is the sabotage recorded in the evidence file:
- * it takes the golden corpus from precision 1.00 to below the gate.
+ * Among everything within `TIE_BAND` of the best score, take the **longest**
+ * period.
+ *
+ * What this line is *not*: the defence against "three monthly hits look like a
+ * sparse weekly schedule". That is the coverage term plus `minOccurrences` in
+ * `scoreCadence`, and they settle it decisively — monthly beats weekly there by
+ * more than 0.2, which is four tie-bands.
+ *
+ * What it actually is: the rule that makes an *unavoidable* mistake cheap. Two
+ * unrelated purchases a few weeks apart tie four ways at 0.750 — quarterly,
+ * semiannual and annual explain that pair exactly as well as each other, and no
+ * amount of scoring can separate them from two rows. Preferring the longest
+ * means the engine promises one charge a year rather than four, so the
+ * forward cash-flow it feeds (WP 2.3) over-commits by the smallest amount the
+ * evidence allows.
+ *
+ * Measured on the golden corpus: inverting this comparison relabels 11 of 110
+ * streams, every one of them towards a shorter period, and multiplies the
+ * promised charges per year for those streams by more than 3×. It does **not**
+ * move precision or recall — none of the affected streams clears the operating
+ * point, because the n=2 `EARLY_DETECTION` cap already holds them at 0.70. The
+ * two tests that do go red are `cadence.test.ts` → `'the longest cadence wins a
+ * near-tie, and only a near-tie'` and `golden-streams.test.ts` → `'the cadence
+ * tie-break decides real streams, and always towards the longer'`. Both were
+ * written *after* observing that an earlier suite stayed green under this
+ * sabotage; see `docs/evidence/phase-2/wp2.2-recurring-engine.md` §6.
  */
 export function inferCadence(
   dates: readonly DateOnly[],

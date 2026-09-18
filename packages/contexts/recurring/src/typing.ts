@@ -34,7 +34,7 @@
  * mortgage not listed as a subscription?" without anybody reading this file.
  */
 
-import { Money } from '@core/kernel';
+import type { Money } from '@core/kernel';
 import { periodsPerYear } from './cadence.ts';
 import type {
   AmountModel,

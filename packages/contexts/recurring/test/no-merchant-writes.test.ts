@@ -70,9 +70,12 @@ function engineSources(): Array<{ file: string; code: string }> {
 
 describe('no merchant writes', () => {
   it('the engine exports no function that takes a descriptor', () => {
-    const functions = Object.entries(surface).filter(
-      (entry): entry is [string, (...args: never[]) => unknown] => typeof entry[1] === 'function',
-    );
+    const functions: Array<readonly [string, (...args: never[]) => unknown]> = [];
+    for (const [name, value] of Object.entries(surface)) {
+      if (typeof value === 'function') {
+        functions.push([name, value as unknown as (...args: never[]) => unknown]);
+      }
+    }
     expect(functions.length).toBeGreaterThan(5);
 
     for (const [name, fn] of functions) {

@@ -62,12 +62,7 @@ export type StreamType =
 
 /** 07 §2.4 (`EARLY_DETECTION`) and §2.8 (the dormancy ladder). */
 export type StreamStatus =
-  | 'EARLY_DETECTION'
-  | 'ACTIVE'
-  | 'AT_RISK'
-  | 'MIGRATED'
-  | 'LIKELY_CANCELED'
-  | 'CANCELED';
+  'EARLY_DETECTION' | 'ACTIVE' | 'AT_RISK' | 'MIGRATED' | 'LIKELY_CANCELED' | 'CANCELED';
 
 export type Sign = 'OUTFLOW' | 'INFLOW';
 
@@ -80,14 +75,7 @@ export type Sign = 'OUTFLOW' | 'INFLOW';
  * them for equality.
  */
 export type MerchantClass =
-  | 'SUBSCRIPTION'
-  | 'UTILITY'
-  | 'LOAN'
-  | 'TAX'
-  | 'P2P'
-  | 'RETAIL'
-  | 'PAYROLL'
-  | 'UNKNOWN';
+  'SUBSCRIPTION' | 'UTILITY' | 'LOAN' | 'TAX' | 'P2P' | 'RETAIL' | 'PAYROLL' | 'UNKNOWN';
 
 export interface MerchantFacts {
   readonly class: MerchantClass;

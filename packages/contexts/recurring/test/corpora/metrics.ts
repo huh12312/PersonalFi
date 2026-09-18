@@ -58,10 +58,7 @@ function jaccard(left: readonly string[], right: readonly string[]): number {
   return union === 0 ? 0 : intersection / union;
 }
 
-export function surfacedStreams(
-  result: DetectionResult,
-  threshold: number,
-): RecurringStream[] {
+export function surfacedStreams(result: DetectionResult, threshold: number): RecurringStream[] {
   return result.streams.filter(
     (stream) => RECURRING_TYPES.has(stream.type) && stream.confidence >= threshold,
   );
