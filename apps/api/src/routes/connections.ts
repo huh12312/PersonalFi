@@ -36,6 +36,11 @@ import {
   type CsvFileInput,
   CsvImportConnector,
   IMPORT_PROVIDER,
+  importFile,
+  parseCsvProfile,
+  presetById,
+  type CsvProfile,
+  type ImportFileInput,
 } from '@connector/csv';
 import { PLAID_PROVIDER } from '@connector/plaid';
 import {
@@ -97,6 +102,73 @@ const csvFileSchema = z
       .describe('Required for CSV and QIF, which carry no account identity of their own.'),
   })
   .meta({ id: 'ImportFile' });
+
+/**
+ * `CsvFileInput.profile` → a resolved `CsvProfile`, or `null` for a format that
+ * carries its own header (OFX). Duplicates `CsvImportConnector`'s own private
+ * `resolveProfile` on purpose: both call the same two exported functions in the
+ * same order, so the two can never disagree about what a preset id resolves to,
+ * and this file has no way to reach the connector's private method to share it
+ * (D2-2's fix runs here, not inside the connector — see `stagedCountsOf`).
+ */
+function resolveImportProfile(file: CsvFileInput): CsvProfile | null {
+  if (file.profile === undefined) return null;
+  if (typeof file.profile !== 'string') return parseCsvProfile(file.profile);
+  const preset = presetById(file.profile);
+  if (preset === null) {
+    throw new AppError({
+      status: 400,
+      code: 'connections.unknown_provider',
+      title: 'Bad Request',
+      detail: `no import preset named ${JSON.stringify(file.profile)}`,
+      family: 'user',
+    });
+  }
+  return preset;
+}
+
+/**
+ * How many rows a first upload actually staged (D2-2, gate-security-review.md
+ * §9.4).
+ *
+ * `CsvImportConnector.connect()` calls its own `addFile` once per file and
+ * discards each call's `{staged, skipped}` — the counts a *second* upload onto
+ * an existing connection already gets, one line down in this same route. This
+ * recomputes the identical count with the identical pure function
+ * (`importFile`, content-hash deduped by `providerTransactionId`, cumulative
+ * across the batch exactly as `addFile`'s own loop is), so a first cold upload
+ * reports the true row count instead of the `0` a client could not trust.
+ *
+ * Deliberately a second parse rather than a change to the connector: the
+ * connector's in-memory state is not this file's to reach into, and a CSV
+ * upload is bounded (`csvFileSchema`'s 1 MiB body limit, twenty files), so
+ * paying the parse twice costs milliseconds, not correctness.
+ */
+function stagedCountsOf(files: readonly CsvFileInput[]): { staged: number; skipped: number } {
+  const seen = new Set<string>();
+  let staged = 0;
+  let skipped = 0;
+  for (const file of files) {
+    const profile = resolveImportProfile(file);
+    const request: ImportFileInput = {
+      name: file.name,
+      content: file.content,
+      ...(file.format === undefined ? {} : { format: file.format }),
+      ...(file.account === undefined ? {} : { account: file.account }),
+      ...(profile === null ? {} : { profile }),
+    };
+    const result = importFile(request);
+    for (const transaction of result.transactions) {
+      if (seen.has(transaction.providerTransactionId)) {
+        skipped += 1;
+        continue;
+      }
+      seen.add(transaction.providerTransactionId);
+      staged += 1;
+    }
+  }
+  return { staged, skipped };
+}
 
 const connectorManifest = connectorManifestSchema
   .extend({ capabilities: capabilitiesSchema })
@@ -713,7 +785,15 @@ export const connectionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               }),
         }));
 
-        // A new connection runs `connect`, which stages every file itself.
+        // A new connection runs `connect`, which stages every file itself and
+        // discards the per-file `{staged, skipped}` `addFile` returns — that
+        // discard is D2-2 (gate-security-review.md §9.4): the first upload's
+        // response always said `staged: 0` even though the rows landed. Fixed
+        // by recomputing the same counts here, over the same files, with the
+        // same pure parse `addFile` itself uses — see `stagedCountsOf` below.
+        // Safe to do *after* `link` returns rather than before: if any file
+        // failed to parse, `connect` would already have thrown, and this call
+        // never runs.
         if (request.body.connectionId === undefined) {
           const linked = await link(
             session.userId,
@@ -724,11 +804,12 @@ export const connectionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             },
             null,
           );
+          const { staged, skipped } = stagedCountsOf(files);
           return {
             connectionId: linked.connectionId,
             syncRunId: linked.syncRunId,
-            staged: 0,
-            skipped: 0,
+            staged,
+            skipped,
             status: null,
           };
         }

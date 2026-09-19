@@ -110,7 +110,7 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             'not offer a category the user retired, but a historic assignment still points ' +
             'at one. Categories are per user (decision D6), so this is never a shared list.\n\n' +
             '**D2-1 lazy repair.** `ensureTaxonomy` also runs once here, idempotently, when ' +
-            'this session\'s user has zero categories — the api\'s `onReady` pass only ever ' +
+            "this session's user has zero categories — the api's `onReady` pass only ever " +
             'seeds users that already exist *at boot*, and `bootstrap-user` creates the ' +
             'account holder afterwards (docs/evidence/phase-1/gate-security-review.md §9.4). ' +
             'This route is what every screen that needs a category actually calls, so fixing ' +
@@ -166,7 +166,7 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             '05 §5.2\'s "create new category" escape hatch. `parentId: null` creates a new ' +
             'top-level heading; a non-null `parentId` creates a leaf under it and inherits its ' +
             '`kind` (a leaf cannot have a different kind than its parent — that is what keeps a ' +
-            'spend report\'s totals meaning what they say). The two-level `CHECK` ' +
+            "spend report's totals meaning what they say). The two-level `CHECK` " +
             '(migration 0006) is enforced before the write: a `parentId` that already has a ' +
             'parent of its own is refused, not silently flattened.',
           tags: ['categories'],
@@ -178,7 +178,7 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             kind: z
               .enum(['income', 'expense', 'transfer', 'investment', 'other'])
               .optional()
-              .describe('Only used when `parentId` is null. A leaf inherits its parent\'s.'),
+              .describe("Only used when `parentId` is null. A leaf inherits its parent's."),
           }),
           response: {
             201: z.object({ category: categorySchema }),
@@ -217,7 +217,7 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           description:
             'Deliberately narrow: `label`, `description` and `icon` only. `kind` and the ' +
             'parent/child structure are not editable here — both are structural (the seeding ' +
-            'pass\'s own rule for why a re-seed never touches them) and changing either after ' +
+            "pass's own rule for why a re-seed never touches them) and changing either after " +
             'transactions have been filed under a category is how a report silently moves ' +
             'money between totals. Works on a system category as well as a custom one: a user ' +
             'renaming "Dining & Drinks" to "Eating Out" is exactly what this is for.',
@@ -231,7 +231,9 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             })
             .refine(
               (body) =>
-                body.label !== undefined || body.description !== undefined || body.icon !== undefined,
+                body.label !== undefined ||
+                body.description !== undefined ||
+                body.icon !== undefined,
               'a PATCH with no fields changes nothing; say what to change',
             ),
           response: {

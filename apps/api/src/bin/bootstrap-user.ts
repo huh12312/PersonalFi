@@ -30,8 +30,9 @@
 import { parseArgs } from 'node:util';
 import { loadConfig, ConfigError, describeKek } from '@core/config';
 import { systemClock } from '@core/kernel';
-import { createPool } from '@core/db';
+import { createDatabase, createPool } from '@core/db';
 import { SecretBox, isSecretBoxError } from '@core/secretbox';
+import { ensureTaxonomy } from '@ctx/categorization';
 import {
   assertIanaZone,
   isAuthError,
@@ -111,6 +112,20 @@ try {
     user = await users.createPrimary({ displayName, displayTimezone: timezone });
     out(`user created      ${user.displayName} (${user.id})`);
     out(`time zone         ${user.displayTimezone}`);
+
+    // D2-1 (docs/evidence/phase-1/gate-security-review.md §9.4): seed the
+    // taxonomy for *this* user right now, rather than leaving it to the api's
+    // `onReady` pass — which only runs at boot and therefore only ever saw
+    // this user on the *next* restart. `GET /categories`'s own lazy repair
+    // (`routes/categories.ts`) covers every other user-creation path there
+    // will ever be; this is the one for the account holder this command just
+    // made. Idempotent, so running it again on a `reissue` (existing user)
+    // costs one query and inserts nothing.
+    const result = await ensureTaxonomy(createDatabase(pool), {
+      userIds: [user.id],
+      clock: systemClock,
+    });
+    out(`taxonomy          ${String(result.categoriesInserted)} categories seeded`);
   } else {
     out(`user              ${user.displayName} (${user.id})`);
   }

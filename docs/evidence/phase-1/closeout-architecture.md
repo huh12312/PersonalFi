@@ -461,9 +461,6 @@ work. It is untouched by this change.
 - **No `POST /categories`.** The picker is read-only, and 05 §5.2's searchable
   combobox with a "create new category" escape hatch still needs a write route to
   be worth building. Phase 2.
-- **No category filter on `GET /transactions`.** Noted in §2.5; the filter bar
-  keeps its "Uncategorized only" toggle until the contract grows a `categoryId`
-  parameter.
 - **Multi-user seeding waits on identity.** `ensureTaxonomy` already takes a list
   of user ids; `apps/api/src/app.ts` supplies `findPrimary()`'s single answer
   because that is identity's only enumeration and `createPrimary` refuses a

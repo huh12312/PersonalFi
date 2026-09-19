@@ -16,20 +16,57 @@
  * so "what does net worth include?" and "what does the accounts page show?"
  * cannot disagree. FX conversion is a Phase 2 table; adding dollars to euros
  * here would be a wrong number rendered confidently.
+ *
+ * ## Manual entry (WP 2.5) closes wp1.6 §7's "`ManualAccountForm` reads 'No
+ * balance yet'"
+ *
+ * `POST /connections { provider: "manual", ... }` (`connections.ts`) creates the
+ * account; nothing before this WP could ever put a balance or a transaction on
+ * it afterwards. `POST /accounts/{id}/balance` is a direct call into
+ * `recordBalance` — the same append-only observation `applyProviderTransactions`
+ * would write from a sync, just with `source: 'manual'` and a human typing the
+ * numbers instead of a page from Plaid. `POST /accounts/{id}/transactions` is
+ * the same idea over `applyProviderTransactions` itself, with `@connector/manual`'s
+ * `manualTransaction()` computing the mandatory fingerprint (08 §2.5) so a
+ * hand-typed row reconciles against a future provider backfill exactly like any
+ * other adapter's does. Both bypass `ManualConnector`/`ManualStore` on purpose:
+ * that pair exists to give an *initial* batch of accounts a `connect()` and a
+ * sync history, but `applyProviderTransactions` and `recordBalance` are the
+ * actual ledger writers underneath every adapter's sync, already scoped to
+ * `(userId, accountId)` and already the one place `TransactionsUpserted` /
+ * `BalanceRecorded` get emitted — a second path through the connector would be
+ * a second way to reach the same table.
+ *
+ * Both routes are scoped to `account.provider === MANUAL_PROVIDER`: a Plaid or
+ * CSV account's balance and transactions arrive from that adapter, not by hand,
+ * and letting this route write into one would put a fabricated row next to real
+ * provider facts under the same natural key.
+ *
+ * **Step-up (decision D21), matching `connections.ts`'s policy.** A manual
+ * balance or transaction changes net worth exactly the way linking or removing
+ * a connection does — a stolen session cookie must not be enough to inflate a
+ * balance or invent a transaction that budgeting and reports then treat as
+ * ground truth. Every other route in this file (`GET`, the net-worth read, the
+ * `includeInNetWorth`/`closed` toggle) needs only a session, unchanged.
  */
+import { DateOnly, Money } from '@core/kernel';
 import {
+  applyProviderTransactions,
   listAccounts,
   netWorthNow,
+  recordBalance,
   setAccountClosed,
   setIncludeInNetWorth,
   type AccountSummary,
   type NetWorthNow,
 } from '@ctx/ledger';
+import { MANUAL_PROVIDER, manualTransaction } from '@connector/manual';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { AppError, problems } from '../problem.ts';
 import {
   booleanQuery,
+  dateOnlyQuery,
   instantOrNull,
   isoInstant,
   money,
@@ -147,6 +184,41 @@ function serialiseNetWorth(result: NetWorthNow): z.infer<typeof netWorthSchema> 
 
 export const accountRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
+
+  /**
+   * Fetch one account, scoped to this user, and confirm it takes manual entry.
+   *
+   * `listAccounts` rather than a single-row query — the same "re-read through
+   * the read model" choice `PATCH /accounts/{id}` below makes, so `assignable`,
+   * `balance` and every other derived field come from the one place that
+   * computes them. A 404 here is indistinguishable from "belongs to another
+   * user": both are `listAccounts` returning no row for this `userId`.
+   */
+  async function requireManualAccount(userId: string, accountId: string): Promise<AccountSummary> {
+    const accounts = await listAccounts(database, { userId, includeClosed: true });
+    const account = accounts.find((candidate) => candidate.id === accountId);
+    if (account === undefined) {
+      throw new AppError({
+        status: 404,
+        code: 'ledger.account_not_found',
+        title: 'Not Found',
+        detail: `No account ${accountId}.`,
+        family: 'user',
+      });
+    }
+    if (account.provider !== MANUAL_PROVIDER) {
+      throw new AppError({
+        status: 422,
+        code: 'ledger.account_not_manual',
+        title: 'Unprocessable Content',
+        detail:
+          `Account ${accountId} is backed by ${account.provider}; its balance and transactions ` +
+          'arrive from that connection, not by hand.',
+        family: 'user',
+      });
+    }
+    return account;
+  }
 
   return async (app) => {
     app.get(
@@ -266,6 +338,179 @@ export const accountRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       async (request) => {
         const session = await guards.requireSession(request);
         return serialiseNetWorth(await netWorthNow(database, { userId: session.userId }));
+      },
+    );
+
+    app.post(
+      '/accounts/:accountId/balance',
+      {
+        schema: {
+          operationId: 'recordManualBalance',
+          summary: 'Record a balance for a manual account',
+          description:
+            'Only for `provider: "manual"` accounts (see this file\'s module comment) — a 422 ' +
+            'otherwise. Appends through `recordBalance`, the same writer a sync uses, with ' +
+            '`source: "manual"`; it never replaces a prior observation, so a correction is a new ' +
+            'row with a later `asOf`, not an edit of an old one. Needs a step-up assertion, the ' +
+            'same policy `connections.ts` uses for every write that moves net worth.',
+          tags: ['accounts'],
+          params: z.object({ accountId: z.uuid() }),
+          body: z.object({
+            current: moneySchema.describe(
+              'Contribution to net worth. A card you owe on is negative.',
+            ),
+            available: moneySchema.nullable().optional(),
+            limit: moneySchema
+              .nullable()
+              .optional()
+              .describe('A magnitude, not a contribution: always positive.'),
+            asOf: isoInstant
+              .optional()
+              .describe('Defaults to now — when the observation is entered, not backdated.'),
+          }),
+          response: {
+            200: z.object({ account: accountSchema, recorded: z.boolean() }),
+            ...problems(400, 401, 403, 404, 409, 422, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireFreshSession(request);
+        const { accountId } = request.params;
+        await requireManualAccount(session.userId, accountId);
+
+        const result = await mapDomainErrors(() =>
+          recordBalance(
+            database,
+            {
+              userId: session.userId,
+              accountId,
+              current: Money.fromJSON(request.body.current),
+              ...(request.body.available === undefined
+                ? {}
+                : {
+                    available:
+                      request.body.available === null
+                        ? null
+                        : Money.fromJSON(request.body.available),
+                  }),
+              ...(request.body.limit === undefined
+                ? {}
+                : {
+                    limit: request.body.limit === null ? null : Money.fromJSON(request.body.limit),
+                  }),
+              asOf: request.body.asOf === undefined ? clock.now() : new Date(request.body.asOf),
+              source: 'manual',
+            },
+            { clock, correlationId: String(request.id) },
+          ),
+        );
+
+        // Re-read: `recordBalance` only returns the new row's id, and `balance`
+        // on the wire is always "the latest", which is a `listAccounts` rule.
+        const accounts = await listAccounts(database, {
+          userId: session.userId,
+          includeClosed: true,
+        });
+        const account = accounts.find((candidate) => candidate.id === accountId);
+        if (account === undefined) {
+          throw new AppError({
+            status: 404,
+            code: 'ledger.account_not_found',
+            title: 'Not Found',
+            detail: `No account ${accountId}.`,
+            family: 'user',
+          });
+        }
+        return { account: serialiseAccount(account), recorded: result.recorded };
+      },
+    );
+
+    app.post(
+      '/accounts/:accountId/transactions',
+      {
+        schema: {
+          operationId: 'createManualTransactions',
+          summary: 'Add one or more hand-entered transactions to a manual account',
+          description:
+            'Only for `provider: "manual"` accounts — a 422 otherwise. Builds each row through ' +
+            "`@connector/manual`'s `manualTransaction()`, which computes the mandatory " +
+            'fingerprint (08 §2.5) and a content-hash id, so entering the same row twice is one ' +
+            'row and a later real import of the same charge reconciles against it rather than ' +
+            'duplicating it. Writes through `applyProviderTransactions`, the same function every ' +
+            "adapter's sync uses, so `categorization.AssignmentsChanged` and budgeting's consumer " +
+            'see a typed transaction exactly like a synced one. Needs a step-up assertion, the ' +
+            'same policy `connections.ts` uses for every write that moves net worth.',
+          tags: ['accounts'],
+          params: z.object({ accountId: z.uuid() }),
+          body: z.object({
+            transactions: z
+              .array(
+                z.object({
+                  amount: moneySchema.describe(
+                    'Negative is money leaving the account, on every account type — the same ' +
+                      'sign convention every provider adapter uses.',
+                  ),
+                  postedDate: dateOnlyQuery,
+                  name: z.string().min(1).max(200).describe('What the user typed. Never sniffed.'),
+                  merchantName: z.string().min(1).max(200).nullable().optional(),
+                  pending: z.boolean().optional(),
+                }),
+              )
+              .min(1)
+              .max(50),
+          }),
+          response: {
+            201: z.object({
+              addedTransactionIds: z.array(z.uuid()),
+              updatedTransactionIds: z.array(z.uuid()),
+            }),
+            ...problems(400, 401, 403, 404, 409, 422, 503),
+          },
+        },
+      },
+      async (request, reply) => {
+        const session = await guards.requireFreshSession(request);
+        const { accountId } = request.params;
+        const account = await requireManualAccount(session.userId, accountId);
+        const currency = account.currency.trim();
+
+        const facts = request.body.transactions.map((item) => {
+          const amount = Money.fromJSON(item.amount);
+          if (amount.currency !== currency) {
+            throw new AppError({
+              status: 409,
+              code: 'ledger.currency_mismatch',
+              title: 'Conflict',
+              detail: `account ${accountId} is in ${currency}, this entry is in ${amount.currency}`,
+              family: 'domain',
+            });
+          }
+          return manualTransaction({
+            providerAccountId: account.providerAccountId,
+            amount,
+            postedDate: DateOnly.parse(item.postedDate),
+            name: item.name,
+            merchantName: item.merchantName ?? null,
+            pending: item.pending ?? false,
+          });
+        });
+
+        const result = await mapDomainErrors(() =>
+          applyProviderTransactions(database, {
+            userId: session.userId,
+            accountId,
+            provider: MANUAL_PROVIDER,
+            added: facts,
+            clock,
+            correlationId: String(request.id),
+          }),
+        );
+
+        return reply.code(201).send({
+          addedTransactionIds: [...result.addedTransactionIds],
+          updatedTransactionIds: [...result.updatedTransactionIds],
+        });
       },
     );
   };

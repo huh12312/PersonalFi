@@ -29,12 +29,7 @@
  * away.
  */
 import { DateOnly, money as makeMoney, type Money as MoneyType } from '@core/kernel';
-import {
-  actionsSchema,
-  conditionsSchema,
-  createRuleFromTransaction,
-  type Rule,
-} from '@ctx/categorization';
+import { createRuleFromTransaction, listRuleRecords } from '@ctx/categorization';
 import {
   confirmTransferPair,
   getTransaction,
@@ -56,6 +51,7 @@ import { createCategorizationLedgerPort } from '../domain.ts';
 import { AppError, problems } from '../problem.ts';
 import { clearTransactionSplits, setTransactionSplits } from '../ledger-splits.ts';
 import { mapDomainErrors } from './domain-errors.ts';
+import { ruleRecordSchema, serialiseRule } from './rules.ts';
 import {
   booleanQuery,
   dateOnly,
@@ -67,7 +63,6 @@ import {
   money,
   moneySchema,
 } from '../wire.ts';
-import { mapDomainErrors } from './domain-errors.ts';
 import type { RouteDeps } from './deps.ts';
 
 /** Rows per page of the export loop. Not the API page size; this one never ships. */
@@ -651,6 +646,91 @@ export const transactionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             transactionId: request.params.transactionId,
           }),
         );
+      },
+    );
+
+    app.post(
+      '/transactions/:transactionId/rule',
+      {
+        schema: {
+          operationId: 'createRuleFromTransaction',
+          summary: '"Always categorise like this" — a rule seeded from one transaction',
+          description:
+            'The wp1.4/wp1.6 carry-over ("Rule-from-transaction" — `createRuleFromTransaction` ' +
+            'existed in `@ctx/categorization` with no route). Builds a `payee contains <cleaned ' +
+            "descriptor>` condition and a `set_category` action from this transaction's own " +
+            'payee, validated exactly as `POST /rules` validates one: `categoryKey` must name a ' +
+            'leaf category belonging to this user. `POST /rules/preview` is how to see what a ' +
+            'retroactive apply of the new rule would change before running it. A session is ' +
+            "enough — see `rules.ts`'s module comment for why this file's rules routes need no " +
+            'step-up assertion.',
+          tags: ['rules'],
+          params: z.object({ transactionId: z.uuid() }),
+          body: z.object({
+            categoryKey: z.string().min(1).max(64),
+            name: z.string().min(1).max(120).optional(),
+            priority: z.int().min(0).max(10_000).optional(),
+            runOnSync: z.boolean().optional(),
+          }),
+          response: {
+            201: z.object({ rule: ruleRecordSchema }),
+            ...problems(400, 401, 404, 422, 503),
+          },
+        },
+      },
+      async (request, reply) => {
+        const session = await guards.requireSession(request);
+        const { transactionId } = request.params;
+        const categorizationPort = createCategorizationLedgerPort(database, clock);
+        const page = await categorizationPort.listForCategorization({
+          userId: session.userId,
+          transactionIds: [transactionId],
+        });
+        const transaction = page.items[0];
+        if (transaction === undefined) {
+          throw new AppError({
+            status: 404,
+            code: 'ledger.transaction_not_found',
+            title: 'Not Found',
+            detail: `No transaction ${transactionId}.`,
+            family: 'user',
+          });
+        }
+
+        const created = await mapDomainErrors(() =>
+          createRuleFromTransaction(
+            database,
+            {
+              transaction,
+              categoryKey: request.body.categoryKey,
+              ...(request.body.name === undefined ? {} : { name: request.body.name }),
+              ...(request.body.priority === undefined ? {} : { priority: request.body.priority }),
+              ...(request.body.runOnSync === undefined
+                ? {}
+                : { runOnSync: request.body.runOnSync }),
+            },
+            { userId: session.userId, clock, correlationId: String(request.id) },
+          ),
+        );
+
+        // `createRuleFromTransaction` returns the validated `Rule`, not the
+        // persisted `RuleRecord` (it carries no `createdAt`/`lastAppliedAt` —
+        // service.ts's own return type). Re-read by the id it just inserted so
+        // the response is the one shape every rules route returns.
+        const rules = await listRuleRecords(database, session.userId);
+        const record = rules.find((rule) => rule.id === created.id);
+        if (record === undefined) {
+          // Unreachable outside a concurrent delete of the row this request
+          // just committed; fail loudly rather than send a rule that vanished.
+          throw new AppError({
+            status: 404,
+            code: 'categorization.rule_not_found',
+            title: 'Not Found',
+            detail: `Rule ${created.id} was created but could not be re-read.`,
+            family: 'domain',
+          });
+        }
+        return reply.code(201).send({ rule: serialiseRule(record) });
       },
     );
 

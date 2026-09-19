@@ -1774,6 +1774,764 @@
           "expiresAt"
         ]
       },
+      "RuleInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "conditions": {
+            "type": "object",
+            "properties": {
+              "all": {
+                "default": [],
+                "maxItems": 16,
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "payee"
+                        },
+                        "match": {
+                          "type": "string",
+                          "enum": [
+                            "contains",
+                            "not_contains",
+                            "starts_with",
+                            "ends_with",
+                            "equals"
+                          ]
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "match",
+                        "value"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "payee_regex"
+                        },
+                        "pattern": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "pattern"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "amount"
+                        },
+                        "minMinor": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^-?\\d+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "maxMinor": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^-?\\d+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "absolute": {
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "minMinor",
+                        "maxMinor"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "direction"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "inflow",
+                            "outflow"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "direction"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "account"
+                        },
+                        "accountIds": {
+                          "minItems": 1,
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "accountIds"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "day_of_month"
+                        },
+                        "from": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 31
+                        },
+                        "to": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 31
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "from",
+                        "to"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "provider_category"
+                        },
+                        "codes": {
+                          "minItems": 1,
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 96
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "codes"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "currency"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 3
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "currency"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "is_transfer"
+                        },
+                        "value": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "any": {
+                "default": [],
+                "maxItems": 16,
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "payee"
+                        },
+                        "match": {
+                          "type": "string",
+                          "enum": [
+                            "contains",
+                            "not_contains",
+                            "starts_with",
+                            "ends_with",
+                            "equals"
+                          ]
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "match",
+                        "value"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "payee_regex"
+                        },
+                        "pattern": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "pattern"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "amount"
+                        },
+                        "minMinor": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^-?\\d+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "maxMinor": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^-?\\d+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "absolute": {
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "minMinor",
+                        "maxMinor"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "direction"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "inflow",
+                            "outflow"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "direction"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "account"
+                        },
+                        "accountIds": {
+                          "minItems": 1,
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "accountIds"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "day_of_month"
+                        },
+                        "from": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 31
+                        },
+                        "to": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 31
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "from",
+                        "to"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "provider_category"
+                        },
+                        "codes": {
+                          "minItems": 1,
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 96
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "codes"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "currency"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 3
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "currency"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "is_transfer"
+                        },
+                        "value": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "actions": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "set_category"
+                    },
+                    "categoryKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "categoryKey"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "set_merchant_name"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "name"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "set_note"
+                    },
+                    "note": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "note"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "add_tag"
+                    },
+                    "tag": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 48
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "tag"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "exclude"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "mark_transfer"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "split"
+                    },
+                    "parts": {
+                      "minItems": 2,
+                      "maxItems": 20,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "categoryKey": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "shareBasisPoints": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 10000
+                          }
+                        },
+                        "required": [
+                          "categoryKey",
+                          "shareBasisPoints"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "parts"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "link_recurring"
+                    },
+                    "seriesKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "seriesKey"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "notify"
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 240
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "message"
+                  ]
+                }
+              ]
+            }
+          },
+          "runOnSync": {
+            "type": "boolean"
+          },
+          "stopProcessing": {
+            "type": "boolean"
+          },
+          "createdFromTransactionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when this rule was created from \"always categorise X as Y\"."
+          },
+          "lastAppliedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastAppliedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "priority",
+          "enabled",
+          "conditions",
+          "actions",
+          "runOnSync",
+          "stopProcessing",
+          "createdFromTransactionId",
+          "lastAppliedAt",
+          "lastAppliedCount",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "RuleApplyResultInput": {
+        "type": "object",
+        "properties": {
+          "ruleId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "runId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "preview": {
+            "type": "boolean"
+          },
+          "matchedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "changedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sample": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "transactionId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "payee": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "transactionId",
+                "payee"
+              ]
+            }
+          },
+          "actionsRecorded": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Non-`set_category` actions on this rule that are validated but inert today (`link_recurring`, `notify`) — recorded, not yet acted on. Always empty for a preview."
+          }
+        },
+        "required": [
+          "ruleId",
+          "runId",
+          "preview",
+          "matchedCount",
+          "changedCount",
+          "sample",
+          "actionsRecorded"
+        ]
+      },
       "TransactionSplitInput": {
         "type": "object",
         "properties": {
@@ -4174,6 +4932,802 @@
         ],
         "additionalProperties": false
       },
+      "Rule": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "conditions": {
+            "type": "object",
+            "properties": {
+              "all": {
+                "default": [],
+                "maxItems": 16,
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "payee"
+                        },
+                        "match": {
+                          "type": "string",
+                          "enum": [
+                            "contains",
+                            "not_contains",
+                            "starts_with",
+                            "ends_with",
+                            "equals"
+                          ]
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "match",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "payee_regex"
+                        },
+                        "pattern": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "pattern"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "amount"
+                        },
+                        "minMinor": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^-?\\d+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "maxMinor": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^-?\\d+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "absolute": {
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "minMinor",
+                        "maxMinor",
+                        "absolute"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "direction"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "inflow",
+                            "outflow"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "direction"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "account"
+                        },
+                        "accountIds": {
+                          "minItems": 1,
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "accountIds"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "day_of_month"
+                        },
+                        "from": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 31
+                        },
+                        "to": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 31
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "from",
+                        "to"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "provider_category"
+                        },
+                        "codes": {
+                          "minItems": 1,
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 96
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "codes"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "currency"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 3
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "currency"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "is_transfer"
+                        },
+                        "value": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "any": {
+                "default": [],
+                "maxItems": 16,
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "payee"
+                        },
+                        "match": {
+                          "type": "string",
+                          "enum": [
+                            "contains",
+                            "not_contains",
+                            "starts_with",
+                            "ends_with",
+                            "equals"
+                          ]
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "match",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "payee_regex"
+                        },
+                        "pattern": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "pattern"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "amount"
+                        },
+                        "minMinor": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^-?\\d+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "maxMinor": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^-?\\d+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "absolute": {
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "minMinor",
+                        "maxMinor",
+                        "absolute"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "direction"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "inflow",
+                            "outflow"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "direction"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "account"
+                        },
+                        "accountIds": {
+                          "minItems": 1,
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "accountIds"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "day_of_month"
+                        },
+                        "from": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 31
+                        },
+                        "to": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 31
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "from",
+                        "to"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "provider_category"
+                        },
+                        "codes": {
+                          "minItems": 1,
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 96
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "codes"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "currency"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 3
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "currency"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "is_transfer"
+                        },
+                        "value": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "all",
+              "any"
+            ],
+            "additionalProperties": false
+          },
+          "actions": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "set_category"
+                    },
+                    "categoryKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "categoryKey"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "set_merchant_name"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "set_note"
+                    },
+                    "note": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "note"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "add_tag"
+                    },
+                    "tag": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 48
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "tag"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "exclude"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "mark_transfer"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "split"
+                    },
+                    "parts": {
+                      "minItems": 2,
+                      "maxItems": 20,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "categoryKey": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "shareBasisPoints": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 10000
+                          }
+                        },
+                        "required": [
+                          "categoryKey",
+                          "shareBasisPoints"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "parts"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "link_recurring"
+                    },
+                    "seriesKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "seriesKey"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "notify"
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 240
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "runOnSync": {
+            "type": "boolean"
+          },
+          "stopProcessing": {
+            "type": "boolean"
+          },
+          "createdFromTransactionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when this rule was created from \"always categorise X as Y\"."
+          },
+          "lastAppliedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastAppliedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "priority",
+          "enabled",
+          "conditions",
+          "actions",
+          "runOnSync",
+          "stopProcessing",
+          "createdFromTransactionId",
+          "lastAppliedAt",
+          "lastAppliedCount",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "RuleApplyResult": {
+        "type": "object",
+        "properties": {
+          "ruleId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "runId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "preview": {
+            "type": "boolean"
+          },
+          "matchedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "changedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sample": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "transactionId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "payee": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "transactionId",
+                "payee"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "actionsRecorded": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Non-`set_category` actions on this rule that are validated but inert today (`link_recurring`, `notify`) — recorded, not yet acted on. Always empty for a preview."
+          }
+        },
+        "required": [
+          "ruleId",
+          "runId",
+          "preview",
+          "matchedCount",
+          "changedCount",
+          "sample",
+          "actionsRecorded"
+        ],
+        "additionalProperties": false
+      },
       "TransactionSplit": {
         "type": "object",
         "properties": {
@@ -6097,6 +7651,351 @@
         }
       }
     },
+    "/accounts/{accountId}/balance": {
+      "post": {
+        "operationId": "recordManualBalance",
+        "summary": "Record a balance for a manual account",
+        "tags": [
+          "accounts"
+        ],
+        "description": "Only for `provider: \"manual\"` accounts (see this file's module comment) — a 422 otherwise. Appends through `recordBalance`, the same writer a sync uses, with `source: \"manual\"`; it never replaces a prior observation, so a correction is a new row with a later `asOf`, not an edit of an old one. Needs a step-up assertion, the same policy `connections.ts` uses for every write that moves net worth.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "current": {
+                    "$ref": "#/components/schemas/MoneyInput"
+                  },
+                  "available": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/MoneyInput"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "limit": {
+                    "description": "A magnitude, not a contribution: always positive.",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/MoneyInput"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "asOf": {
+                    "description": "Defaults to now — when the observation is entered, not backdated.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "current"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "$ref": "#/components/schemas/Account"
+                    },
+                    "recorded": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "account",
+                    "recorded"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{accountId}/transactions": {
+      "post": {
+        "operationId": "createManualTransactions",
+        "summary": "Add one or more hand-entered transactions to a manual account",
+        "tags": [
+          "accounts"
+        ],
+        "description": "Only for `provider: \"manual\"` accounts — a 422 otherwise. Builds each row through `@connector/manual`'s `manualTransaction()`, which computes the mandatory fingerprint (08 §2.5) and a content-hash id, so entering the same row twice is one row and a later real import of the same charge reconciles against it rather than duplicating it. Writes through `applyProviderTransactions`, the same function every adapter's sync uses, so `categorization.AssignmentsChanged` and budgeting's consumer see a typed transaction exactly like a synced one. Needs a step-up assertion, the same policy `connections.ts` uses for every write that moves net worth.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "transactions": {
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "amount": {
+                          "$ref": "#/components/schemas/MoneyInput"
+                        },
+                        "postedDate": {
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "description": "What the user typed. Never sniffed."
+                        },
+                        "merchantName": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pending": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "amount",
+                        "postedDate",
+                        "name"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "transactions"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "addedTransactionIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      }
+                    },
+                    "updatedTransactionIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "addedTransactionIds",
+                    "updatedTransactionIds"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/transactions": {
       "get": {
         "operationId": "listTransactions",
@@ -7094,6 +8993,132 @@
             }
           },
           "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transactions/{transactionId}/rule": {
+      "post": {
+        "operationId": "createRuleFromTransaction",
+        "summary": "\"Always categorise like this\" — a rule seeded from one transaction",
+        "tags": [
+          "rules"
+        ],
+        "description": "The wp1.4/wp1.6 carry-over (\"Rule-from-transaction\" — `createRuleFromTransaction` existed in `@ctx/categorization` with no route). Builds a `payee contains <cleaned descriptor>` condition and a `set_category` action from this transaction's own payee, validated exactly as `POST /rules` validates one: `categoryKey` must name a leaf category belonging to this user. `POST /rules/preview` is how to see what a retroactive apply of the new rule would change before running it. A session is enough — see `rules.ts`'s module comment for why this file's rules routes need no step-up assertion.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "categoryKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000
+                  },
+                  "runOnSync": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "categoryKey"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "transactionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rule": {
+                      "$ref": "#/components/schemas/Rule"
+                    }
+                  },
+                  "required": [
+                    "rule"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -8372,7 +10397,7 @@
         "tags": [
           "categories"
         ],
-        "description": "Flat and ordered: a child follows its parent, and `parentId` carries the structure. Archived categories are omitted unless asked for — a picker must not offer a category the user retired, but a historic assignment still points at one. Categories are per user (decision D6), so this is never a shared list.",
+        "description": "Flat and ordered: a child follows its parent, and `parentId` carries the structure. Archived categories are omitted unless asked for — a picker must not offer a category the user retired, but a historic assignment still points at one. Categories are per user (decision D6), so this is never a shared list.\n\n**D2-1 lazy repair.** `ensureTaxonomy` also runs once here, idempotently, when this session's user has zero categories — the api's `onReady` pass only ever seeds users that already exist *at boot*, and `bootstrap-user` creates the account holder afterwards (docs/evidence/phase-1/gate-security-review.md §9.4). This route is what every screen that needs a category actually calls, so fixing the read here closes the gap for any user-creation path, present or future, without an api restart.",
         "parameters": [
           {
             "schema": {
@@ -8414,6 +10439,2218 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCategory",
+        "summary": "Create a custom category",
+        "tags": [
+          "categories"
+        ],
+        "description": "05 §5.2's \"create new category\" escape hatch. `parentId: null` creates a new top-level heading; a non-null `parentId` creates a leaf under it and inherits its `kind` (a leaf cannot have a different kind than its parent — that is what keeps a spend report's totals meaning what they say). The two-level `CHECK` (migration 0006) is enforced before the write: a `parentId` that already has a parent of its own is refused, not silently flattened.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "parentId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "icon": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "kind": {
+                    "description": "Only used when `parentId` is null. A leaf inherits its parent's.",
+                    "type": "string",
+                    "enum": [
+                      "income",
+                      "expense",
+                      "transfer",
+                      "investment",
+                      "other"
+                    ]
+                  }
+                },
+                "required": [
+                  "parentId",
+                  "label"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "category": {
+                      "$ref": "#/components/schemas/Category"
+                    }
+                  },
+                  "required": [
+                    "category"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categories/{categoryId}": {
+      "patch": {
+        "operationId": "renameCategory",
+        "summary": "Rename or re-describe a category",
+        "tags": [
+          "categories"
+        ],
+        "description": "Deliberately narrow: `label`, `description` and `icon` only. `kind` and the parent/child structure are not editable here — both are structural (the seeding pass's own rule for why a re-seed never touches them) and changing either after transactions have been filed under a category is how a report silently moves money between totals. Works on a system category as well as a custom one: a user renaming \"Dining & Drinks\" to \"Eating Out\" is exactly what this is for.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "icon": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "categoryId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "category": {
+                      "$ref": "#/components/schemas/Category"
+                    }
+                  },
+                  "required": [
+                    "category"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "archiveCategory",
+        "summary": "Archive a category",
+        "tags": [
+          "categories"
+        ],
+        "description": "Archives, never deletes (same reasoning as a closed account or a removed transaction): every `category_assignments`, `rules` and provider-mapping row that points at this id keeps resolving exactly as before, and `GET /categories` simply omits it unless `includeArchived` is asked for. Archiving a heading also archives its non-archived children — a leaf left visible under a heading the picker no longer shows would be reachable only by id, which is a worse state than archiving both. Idempotent: archiving an already-archived category is a 200 with `changed: false`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "categoryId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "category": {
+                      "$ref": "#/components/schemas/Category"
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    },
+                    "childrenArchived": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "category",
+                    "changed",
+                    "childrenArchived"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rules": {
+      "get": {
+        "operationId": "listRules",
+        "summary": "This user's categorisation rules, by ascending priority",
+        "tags": [
+          "rules"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Rule"
+                      }
+                    }
+                  },
+                  "required": [
+                    "rules"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createRule",
+        "summary": "Create a rule",
+        "tags": [
+          "rules"
+        ],
+        "description": "Validated the same way a stored rule is re-validated on read (`rules/schema.ts`): a `set_category` action must name a leaf category that belongs to this user — a custom category (`POST /categories`) or a system one, never another user's.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "conditions": {
+                    "type": "object",
+                    "properties": {
+                      "all": {
+                        "default": [],
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "payee"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "enum": [
+                                    "contains",
+                                    "not_contains",
+                                    "starts_with",
+                                    "ends_with",
+                                    "equals"
+                                  ]
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "match",
+                                "value"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "payee_regex"
+                                  ]
+                                },
+                                "pattern": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "pattern"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "amount"
+                                  ]
+                                },
+                                "minMinor": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^-?\\d+$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maxMinor": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^-?\\d+$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "absolute": {
+                                  "default": false,
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "minMinor",
+                                "maxMinor"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "direction"
+                                  ]
+                                },
+                                "direction": {
+                                  "type": "string",
+                                  "enum": [
+                                    "inflow",
+                                    "outflow"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "direction"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "account"
+                                  ]
+                                },
+                                "accountIds": {
+                                  "minItems": 1,
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "format": "uuid",
+                                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "accountIds"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "day_of_month"
+                                  ]
+                                },
+                                "from": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 31
+                                },
+                                "to": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 31
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "from",
+                                "to"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "provider_category"
+                                  ]
+                                },
+                                "codes": {
+                                  "minItems": 1,
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 96
+                                  }
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "codes"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "currency"
+                                  ]
+                                },
+                                "currency": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 3
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "currency"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "is_transfer"
+                                  ]
+                                },
+                                "value": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "value"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "any": {
+                        "default": [],
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "payee"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "enum": [
+                                    "contains",
+                                    "not_contains",
+                                    "starts_with",
+                                    "ends_with",
+                                    "equals"
+                                  ]
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "match",
+                                "value"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "payee_regex"
+                                  ]
+                                },
+                                "pattern": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "pattern"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "amount"
+                                  ]
+                                },
+                                "minMinor": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^-?\\d+$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maxMinor": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^-?\\d+$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "absolute": {
+                                  "default": false,
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "minMinor",
+                                "maxMinor"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "direction"
+                                  ]
+                                },
+                                "direction": {
+                                  "type": "string",
+                                  "enum": [
+                                    "inflow",
+                                    "outflow"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "direction"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "account"
+                                  ]
+                                },
+                                "accountIds": {
+                                  "minItems": 1,
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "format": "uuid",
+                                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "accountIds"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "day_of_month"
+                                  ]
+                                },
+                                "from": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 31
+                                },
+                                "to": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 31
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "from",
+                                "to"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "provider_category"
+                                  ]
+                                },
+                                "codes": {
+                                  "minItems": 1,
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 96
+                                  }
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "codes"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "currency"
+                                  ]
+                                },
+                                "currency": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 3
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "currency"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "is_transfer"
+                                  ]
+                                },
+                                "value": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "value"
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "actions": {
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "set_category"
+                              ]
+                            },
+                            "categoryKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "categoryKey"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "set_merchant_name"
+                              ]
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "name"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "set_note"
+                              ]
+                            },
+                            "note": {
+                              "type": "string",
+                              "maxLength": 500
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "note"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "add_tag"
+                              ]
+                            },
+                            "tag": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 48
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "tag"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "exclude"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "mark_transfer"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "split"
+                              ]
+                            },
+                            "parts": {
+                              "minItems": 2,
+                              "maxItems": 20,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "categoryKey": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
+                                  },
+                                  "shareBasisPoints": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 10000
+                                  }
+                                },
+                                "required": [
+                                  "categoryKey",
+                                  "shareBasisPoints"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "parts"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "link_recurring"
+                              ]
+                            },
+                            "seriesKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "seriesKey"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "notify"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 240
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "message"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "runOnSync": {
+                    "type": "boolean"
+                  },
+                  "stopProcessing": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "conditions",
+                  "actions"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rule": {
+                      "$ref": "#/components/schemas/Rule"
+                    }
+                  },
+                  "required": [
+                    "rule"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rules/{ruleId}": {
+      "patch": {
+        "operationId": "updateRule",
+        "summary": "Update a rule",
+        "tags": [
+          "rules"
+        ],
+        "description": "Partial: an omitted field keeps its stored value.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "conditions": {
+                    "type": "object",
+                    "properties": {
+                      "all": {
+                        "default": [],
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "payee"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "enum": [
+                                    "contains",
+                                    "not_contains",
+                                    "starts_with",
+                                    "ends_with",
+                                    "equals"
+                                  ]
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "match",
+                                "value"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "payee_regex"
+                                  ]
+                                },
+                                "pattern": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "pattern"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "amount"
+                                  ]
+                                },
+                                "minMinor": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^-?\\d+$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maxMinor": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^-?\\d+$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "absolute": {
+                                  "default": false,
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "minMinor",
+                                "maxMinor"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "direction"
+                                  ]
+                                },
+                                "direction": {
+                                  "type": "string",
+                                  "enum": [
+                                    "inflow",
+                                    "outflow"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "direction"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "account"
+                                  ]
+                                },
+                                "accountIds": {
+                                  "minItems": 1,
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "format": "uuid",
+                                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "accountIds"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "day_of_month"
+                                  ]
+                                },
+                                "from": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 31
+                                },
+                                "to": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 31
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "from",
+                                "to"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "provider_category"
+                                  ]
+                                },
+                                "codes": {
+                                  "minItems": 1,
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 96
+                                  }
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "codes"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "currency"
+                                  ]
+                                },
+                                "currency": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 3
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "currency"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "is_transfer"
+                                  ]
+                                },
+                                "value": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "value"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "any": {
+                        "default": [],
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "payee"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "enum": [
+                                    "contains",
+                                    "not_contains",
+                                    "starts_with",
+                                    "ends_with",
+                                    "equals"
+                                  ]
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "match",
+                                "value"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "payee_regex"
+                                  ]
+                                },
+                                "pattern": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "pattern"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "amount"
+                                  ]
+                                },
+                                "minMinor": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^-?\\d+$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maxMinor": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^-?\\d+$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "absolute": {
+                                  "default": false,
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "minMinor",
+                                "maxMinor"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "direction"
+                                  ]
+                                },
+                                "direction": {
+                                  "type": "string",
+                                  "enum": [
+                                    "inflow",
+                                    "outflow"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "direction"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "account"
+                                  ]
+                                },
+                                "accountIds": {
+                                  "minItems": 1,
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "format": "uuid",
+                                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "accountIds"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "day_of_month"
+                                  ]
+                                },
+                                "from": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 31
+                                },
+                                "to": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 31
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "from",
+                                "to"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "provider_category"
+                                  ]
+                                },
+                                "codes": {
+                                  "minItems": 1,
+                                  "maxItems": 64,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 96
+                                  }
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "codes"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "currency"
+                                  ]
+                                },
+                                "currency": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 3
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "currency"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "is_transfer"
+                                  ]
+                                },
+                                "value": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "value"
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "actions": {
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "set_category"
+                              ]
+                            },
+                            "categoryKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "categoryKey"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "set_merchant_name"
+                              ]
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "name"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "set_note"
+                              ]
+                            },
+                            "note": {
+                              "type": "string",
+                              "maxLength": 500
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "note"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "add_tag"
+                              ]
+                            },
+                            "tag": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 48
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "tag"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "exclude"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "mark_transfer"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "split"
+                              ]
+                            },
+                            "parts": {
+                              "minItems": 2,
+                              "maxItems": 20,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "categoryKey": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
+                                  },
+                                  "shareBasisPoints": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 10000
+                                  }
+                                },
+                                "required": [
+                                  "categoryKey",
+                                  "shareBasisPoints"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "parts"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "link_recurring"
+                              ]
+                            },
+                            "seriesKey": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "seriesKey"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "notify"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 240
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "message"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "runOnSync": {
+                    "type": "boolean"
+                  },
+                  "stopProcessing": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "ruleId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rule": {
+                      "$ref": "#/components/schemas/Rule"
+                    }
+                  },
+                  "required": [
+                    "rule"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteRule",
+        "summary": "Delete a rule",
+        "tags": [
+          "rules"
+        ],
+        "description": "A hard delete — `rule_runs` cascades with it (migration 0006). Unlike a category, a rule carries no history another row points back at, so there is nothing an archive would preserve.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "ruleId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rules/preview": {
+      "post": {
+        "operationId": "previewRule",
+        "summary": "Preview what applying a rule retroactively would change",
+        "tags": [
+          "rules"
+        ],
+        "description": "Writes nothing, emits no event: \"this will change 912 transactions\" shown before the fact is what turns a retroactive apply from a trap into a tool. Runs the exact code path `POST /rules/{id}/apply` runs, so the count it shows is the count that will actually happen.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ruleId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "retroactive": {
+                    "description": "Without this, only transactions with no user category are matched.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "ruleId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleApplyResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rules/{ruleId}/apply": {
+      "post": {
+        "operationId": "applyRule",
+        "summary": "Apply a rule retroactively",
+        "tags": [
+          "rules"
+        ],
+        "description": "The non-preview half of `POST /rules/preview` — see this file's module comment for why it exists here. Emits `categorization.RuleApplied`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "retroactive": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "ruleId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleApplyResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -8876,6 +13113,10 @@
     {
       "name": "categories",
       "description": "The chart of categories this user may assign to. Per user (decision D6), seeded from the shipped taxonomy at boot, and editable by the user thereafter — so the list is read from the table, never from the constant."
+    },
+    {
+      "name": "rules",
+      "description": "The categorisation rule language, as CRUD, plus preview/apply and \"always categorise like this transaction\". A session is enough — see rules.ts's module comment for why this file does not need a step-up assertion."
     }
   ]
 }

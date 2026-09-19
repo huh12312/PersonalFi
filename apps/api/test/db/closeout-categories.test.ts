@@ -167,25 +167,33 @@ describe.skipIf(NO_DATABASE)('GET /categories (gate condition D-6)', () => {
     // The boot pass seeds the users identity names, and identity's only
     // enumeration today is `findPrimary` — because `createPrimary` refuses a
     // second user outright. So a row inserted straight into `users` (which only
-    // a test can do) has no chart, and gets a 200 with an empty list rather than
-    // somebody else's categories. Asserted rather than glossed over: "empty" and
-    // "the first user's" are very different failures and this pins which one.
+    // a test can do) starts with no chart of its own — never somebody else's
+    // categories, which is the failure this pins.
+    //
+    // D2-1 (WP 2.5, gate-security-review.md §9.4) changed what happens next:
+    // `GET /categories` now lazily seeds a session's user the first time it
+    // finds zero rows, so the very first call already returns the full chart
+    // rather than `[]` — the old empty-until-restart gap is exactly what that
+    // fix closed, and `taxonomy-bootstrap.test.ts` pins the claim in full.
+    // This test's own concern survives unchanged below it: two users' charts
+    // stay disjoint, and `ensureTaxonomy` still accepts a list for a
+    // multi-user boot pass.
     const otherSession = await h.issueSession({ userId: otherUserId });
-    const beforeSeeding = await list(otherSession);
-    expect(beforeSeeding.status).toBe(200);
-    expect(beforeSeeding.categories).toEqual([]);
+    const lazilySeeded = await list(otherSession);
+    expect(lazilySeeded.status).toBe(200);
+    expect(lazilySeeded.categories).toHaveLength(FLAT_TAXONOMY.length);
 
-    // What a multi-user build's boot pass does: the same call, more ids.
-    // `ensureTaxonomy` takes a list precisely so this is the only line that
-    // changes when identity grows a reader that returns more than one.
+    // What a multi-user build's boot pass does: the same call, more ids. Both
+    // users' charts already exist (the first from `onReady`, the second from
+    // the lazy repair above), so this inserts nothing — `ensureTaxonomy`
+    // taking a list is what lets a future multi-user reader plug in here
+    // without this call site changing at all.
     const pass = await ensureTaxonomy(h.database.db, {
       userIds: [h.database.userId, otherUserId],
       clock: systemClock,
     });
     expect(pass.users).toBe(2);
-    // The first user's chart already exists, so only the second user's rows are
-    // new — which is the idempotency claim and the per-user claim at once.
-    expect(pass.categoriesInserted).toBe(FLAT_TAXONOMY.length);
+    expect(pass.categoriesInserted).toBe(0);
 
     const mine = await list();
     const theirs = await list(otherSession);

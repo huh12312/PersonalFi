@@ -37,6 +37,7 @@ import type { RouteDeps } from './routes/deps.ts';
 import { eventRoutes } from './routes/events.ts';
 import { healthRoutes } from './routes/health.ts';
 import { plaidRoutes } from './routes/plaid.ts';
+import { ruleRoutes } from './routes/rules.ts';
 import { transactionRoutes } from './routes/transactions.ts';
 
 export const CORRELATION_ID_HEADER = 'x-correlation-id';
@@ -215,6 +216,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
             'from the shipped taxonomy at boot, and editable by the user thereafter — so the ' +
             'list is read from the table, never from the constant.',
         },
+        {
+          name: 'rules',
+          description:
+            'The categorisation rule language, as CRUD, plus preview/apply and ' +
+            '"always categorise like this transaction". A session is enough — see rules.ts\'s ' +
+            'module comment for why this file does not need a step-up assertion.',
+        },
       ],
     },
     transform: jsonSchemaTransform,
@@ -358,6 +366,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(transactionRoutes(deps));
   await app.register(connectionRoutes(deps));
   await app.register(categoryRoutes(deps));
+  await app.register(ruleRoutes(deps));
   await app.register(plaidRoutes(deps));
   await app.register(eventRoutes(deps));
 

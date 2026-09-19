@@ -45,6 +45,7 @@ import {
   deleteRule,
   listRuleRecords,
   updateRule,
+  type ApplyRuleResult,
   type RuleRecord,
 } from '@ctx/categorization';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
@@ -55,7 +56,13 @@ import { instantOrNull, isoInstant } from '../wire.ts';
 import { mapDomainErrors } from './domain-errors.ts';
 import type { RouteDeps } from './deps.ts';
 
-const ruleRecordSchema = z
+/**
+ * Exported so `routes/transactions.ts`'s `POST /transactions/{id}/rule` can
+ * return exactly this shape — the same "the rule this call just created,
+ * fully formed" response `POST /rules` gives — rather than a second,
+ * structurally identical schema `.meta({ id: 'Rule' })` would collide with.
+ */
+export const ruleRecordSchema = z
   .object({
     id: z.uuid(),
     name: z.string(),
@@ -76,7 +83,7 @@ const ruleRecordSchema = z
   })
   .meta({ id: 'Rule' });
 
-function serialiseRule(rule: RuleRecord): z.infer<typeof ruleRecordSchema> {
+export function serialiseRule(rule: RuleRecord): z.infer<typeof ruleRecordSchema> {
   return {
     id: rule.id,
     name: rule.name,
@@ -120,6 +127,25 @@ const applyResultSchema = z
       ),
   })
   .meta({ id: 'RuleApplyResult' });
+
+/**
+ * `ApplyRuleResult`'s `sample`/`actionsRecorded` are `readonly` — correct for a
+ * context's own return type — but the zod-inferred response type is mutable,
+ * so a plain `return applyRule(...)` does not typecheck. Spreading into new
+ * arrays here is cheap (a preview's sample is capped, per `service.ts`) and
+ * keeps the readonly-ness everywhere else in the context intact.
+ */
+function serialiseApplyResult(result: ApplyRuleResult): z.infer<typeof applyResultSchema> {
+  return {
+    ruleId: result.ruleId,
+    runId: result.runId,
+    preview: result.preview,
+    matchedCount: result.matchedCount,
+    changedCount: result.changedCount,
+    sample: result.sample.map((row) => ({ transactionId: row.transactionId, payee: row.payee })),
+    actionsRecorded: [...result.actionsRecorded],
+  };
+}
 
 export const ruleRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
@@ -195,10 +221,12 @@ export const ruleRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           description: 'Partial: an omitted field keeps its stored value.',
           tags: ['rules'],
           params: z.object({ ruleId: z.uuid() }),
-          body: ruleWriteBody.partial().refine(
-            (body) => Object.values(body).some((value) => value !== undefined),
-            'a PATCH with no fields changes nothing; say what to change',
-          ),
+          body: ruleWriteBody
+            .partial()
+            .refine(
+              (body) => Object.values(body).some((value) => value !== undefined),
+              'a PATCH with no fields changes nothing; say what to change',
+            ),
           response: {
             200: z.object({ rule: ruleRecordSchema }),
             ...problems(400, 401, 404, 422, 503),
@@ -276,7 +304,7 @@ export const ruleRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
       async (request) => {
         const session = await guards.requireSession(request);
-        return mapDomainErrors(() =>
+        const result = await mapDomainErrors(() =>
           applyRule(
             database,
             port(),
@@ -290,6 +318,7 @@ export const ruleRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             { userId: session.userId, clock, correlationId: String(request.id) },
           ),
         );
+        return serialiseApplyResult(result);
       },
     );
 
@@ -300,7 +329,7 @@ export const ruleRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           operationId: 'applyRule',
           summary: 'Apply a rule retroactively',
           description:
-            'The non-preview half of `POST /rules/preview` — see this file\'s module comment ' +
+            "The non-preview half of `POST /rules/preview` — see this file's module comment " +
             'for why it exists here. Emits `categorization.RuleApplied`.',
           tags: ['rules'],
           params: z.object({ ruleId: z.uuid() }),
@@ -313,7 +342,7 @@ export const ruleRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
       async (request) => {
         const session = await guards.requireSession(request);
-        return mapDomainErrors(() =>
+        const result = await mapDomainErrors(() =>
           applyRule(
             database,
             port(),
@@ -327,6 +356,7 @@ export const ruleRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             { userId: session.userId, clock, correlationId: String(request.id) },
           ),
         );
+        return serialiseApplyResult(result);
       },
     );
   };

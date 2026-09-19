@@ -30,10 +30,7 @@
  *   sentence we wrote — plus `retryable`, which is the only thing the UI has to
  *   decide between "try again" and "this needs you".
  */
-import {
-  isCategorizationError,
-  type CategorizationErrorCode,
-} from '@ctx/categorization';
+import { isCategorizationError, type CategorizationErrorCode } from '@ctx/categorization';
 import { ConnectorError, isConnectionsError, type ConnectionsErrorCode } from '@ctx/connections';
 import { isLedgerError, type LedgerErrorCode } from '@ctx/ledger';
 import { AppError } from '../problem.ts';
