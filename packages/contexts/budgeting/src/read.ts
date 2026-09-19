@@ -91,9 +91,7 @@ export async function getPeriod(
   const periodRows = await executor
     .select()
     .from(budgetPeriods)
-    .where(
-      and(eq(budgetPeriods.id, input.periodId), eq(budgetPeriods.userId, input.userId)),
-    );
+    .where(and(eq(budgetPeriods.id, input.periodId), eq(budgetPeriods.userId, input.userId)));
   const period = periodRows[0];
   if (period === undefined) return null;
 
@@ -110,12 +108,7 @@ export async function getPeriod(
   const lineRows = await executor
     .select()
     .from(budgetLines)
-    .where(
-      and(
-        eq(budgetLines.budgetPeriodId, period.id),
-        eq(budgetLines.userId, input.userId),
-      ),
-    )
+    .where(and(eq(budgetLines.budgetPeriodId, period.id), eq(budgetLines.userId, input.userId)))
     .orderBy(asc(budgetLines.priority), asc(budgetLines.id));
 
   const actualsRows = await executor
@@ -199,9 +192,7 @@ export async function getPeriod(
       code,
     ),
     totalCreditCardPaymentAvailable: Money.sum(
-      lines
-        .filter((line) => line.kind === 'credit_card_payment')
-        .map((line) => line.available),
+      lines.filter((line) => line.kind === 'credit_card_payment').map((line) => line.available),
       code,
     ),
   };
@@ -226,12 +217,7 @@ export async function listPeriods(
   const rows = await executor
     .select()
     .from(budgetPeriods)
-    .where(
-      and(
-        eq(budgetPeriods.budgetId, input.budgetId),
-        eq(budgetPeriods.userId, input.userId),
-      ),
-    )
+    .where(and(eq(budgetPeriods.budgetId, input.budgetId), eq(budgetPeriods.userId, input.userId)))
     .orderBy(asc(budgetPeriods.sequence));
   return rows.map((row) => ({
     id: row.id,
@@ -245,10 +231,7 @@ export async function listPeriods(
   }));
 }
 
-export async function listBudgets(
-  executor: BudgetingExecutor,
-  input: { readonly userId: string },
-) {
+export async function listBudgets(executor: BudgetingExecutor, input: { readonly userId: string }) {
   return executor
     .select()
     .from(budgets)
@@ -280,9 +263,7 @@ export async function identityTermsOf(
   const periodRows = await executor
     .select()
     .from(budgetPeriods)
-    .where(
-      and(eq(budgetPeriods.id, input.periodId), eq(budgetPeriods.userId, input.userId)),
-    );
+    .where(and(eq(budgetPeriods.id, input.periodId), eq(budgetPeriods.userId, input.userId)));
   const period = periodRows[0];
   if (period === undefined) return null;
   const code = period.currency;

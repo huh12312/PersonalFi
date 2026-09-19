@@ -69,7 +69,7 @@
  * The CCP envelopes are not unaccounted for — they are pinned by identity II in
  * `src/credit.ts`, against the card's own balance. Worked in full, with the
  * algebra that shows the two forms are equivalent, in
- * `docs/evidence/phase-2/wp2.1-budgeting.md` §2.
+ * `docs/evidence/phase-2/wp2.1-budgeting.md` §1.5.
  *
  * ## What this buys, for free
  *

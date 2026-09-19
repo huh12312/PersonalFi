@@ -123,9 +123,18 @@ export function applyCardEffects(input: CardPeriodInput): CardPeriodResult {
  * Identity II, as a function, so the service can assert it on every recompute
  * and the test can assert it against the ledger's own balance.
  *
- * `owed` is the *positive* magnitude of what the card balance says you owe —
+ * `owed` is `−balance`, and deliberately **not** clamped at zero.
  * `@ctx/ledger` stores a credit balance as a negative number, house convention,
- * so the adapter negates it once at the port boundary and never again.
+ * so a card you owe $500 on gives `owed = 500`.
+ *
+ * An **overpaid** card — balance positive, because a payment landed before the
+ * charges it was meant to cover, or a large refund arrived — gives a *negative*
+ * `owed`, and that is correct rather than a case to clamp away: the CCP envelope
+ * is correspondingly negative, because envelope money went out to pay a card
+ * that did not owe it, and the two cancel. Clamping at zero makes identity II
+ * fail on an entirely ordinary autopay, and since the caller asserts this
+ * identity by throwing, the failure aborts the recompute and freezes every later
+ * envelope.
  */
 export function cardIdentityHolds(owed: MoneyType, card: CardPeriodResult): boolean {
   return Money.equals(owed, Money.add(card.available, card.unfundedDebt));

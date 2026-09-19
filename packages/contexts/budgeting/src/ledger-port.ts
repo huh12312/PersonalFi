@@ -14,7 +14,7 @@
  * `apps/api/src/domain.ts`, the composition root and the only layer allowed to
  * wire contexts together, supplies the adapter over `listTransactions` and
  * `listAccounts`. The exact lines to add are in
- * `docs/evidence/phase-2/wp2.1-budgeting.md` §7.
+ * `docs/evidence/phase-2/wp2.1-budgeting.md` §10.
  *
  * The port is **read-only**. Budgeting writes its own six tables and its own
  * events and never touches the ledger's — unlike `@ctx/categorization`, whose
@@ -83,7 +83,18 @@ export interface BudgetTransaction {
   readonly budgetDate: DateOnly;
   /** Signed. Negative = outflow. */
   readonly amount: MoneyType;
-  /** The *effective* category — user overlay, then rule, then provider. */
+  /**
+   * The *effective* category.
+   *
+   * As `@ctx/ledger` resolves it today that is **user overlay, then rule** —
+   * `resolveCategoryId(overlayOf(row), ruleOf(row))`,
+   * `packages/contexts/ledger/src/db.ts:147` — and **not** a third provider
+   * tier. The consequence here is that a transaction categorised only by the
+   * provider lands in the uncategorised envelope rather than in its category.
+   * Whether that is the right resolution order is a categorization question, not
+   * a budgeting one; recorded as open item 7 in
+   * `docs/evidence/phase-2/wp2.1-budgeting.md` rather than worked around.
+   */
   readonly categoryId: string | null;
   readonly funding: FundingSource;
   /** Non-null when this row is one leg of a paired internal transfer. */
@@ -120,9 +131,7 @@ export interface LedgerPort {
    */
   listForBudget(input: ListForBudgetInput): Promise<BudgetTransactionPage>;
   /** On-budget accounts and their working balances. The right-hand side of identity I. */
-  listBudgetAccounts(input: {
-    readonly userId: string;
-  }): Promise<readonly BudgetAccount[]>;
+  listBudgetAccounts(input: { readonly userId: string }): Promise<readonly BudgetAccount[]>;
 }
 
 /** Walk every page. Every caller here wants the whole window. */
@@ -198,7 +207,13 @@ export function createFakeLedger(options: { readonly pageSize?: number } = {}): 
         // Lexicographic on `YYYY-MM-DD` is chronological, which is half of why
         // `DateOnly` is an ISO string; `id` breaks the tie so a page boundary
         // cannot reorder two same-day rows between two calls.
-        .sort((a, b) => (a.budgetDate === b.budgetDate ? a.id.localeCompare(b.id) : a.budgetDate < b.budgetDate ? -1 : 1));
+        .sort((a, b) =>
+          a.budgetDate === b.budgetDate
+            ? a.id.localeCompare(b.id)
+            : a.budgetDate < b.budgetDate
+              ? -1
+              : 1,
+        );
       const limit = Math.min(input.limit ?? pageSize, pageSize);
       const items = matching.slice(offset, offset + limit);
       const next = offset + limit;

@@ -82,11 +82,7 @@ import {
   ReadyToAssignChanged,
 } from './events.ts';
 import { onBudgetBalances, streamForBudget, type LedgerPort } from './ledger-port.ts';
-import {
-  periodContaining,
-  periodsRemainingInclusive,
-  type PeriodGridSettings,
-} from './periods.ts';
+import { periodContaining, periodsRemainingInclusive, type PeriodGridSettings } from './periods.ts';
 import { identityHolds, readyToAssign } from './rta.ts';
 
 export interface BudgetingDependencies {
@@ -168,10 +164,7 @@ export async function openPeriod(
     .select({ sequence: budgetPeriods.sequence })
     .from(budgetPeriods)
     .where(
-      and(
-        eq(budgetPeriods.budgetId, budget.id),
-        lt(budgetPeriods.startDate, bounds.startDate),
-      ),
+      and(eq(budgetPeriods.budgetId, budget.id), lt(budgetPeriods.startDate, bounds.startDate)),
     )
     .orderBy(sql`${budgetPeriods.sequence} DESC`)
     .limit(1);
@@ -260,10 +253,7 @@ async function ensureCreditCardPaymentLines(
     .select({ creditAccountId: budgetLines.creditAccountId })
     .from(budgetLines)
     .where(
-      and(
-        eq(budgetLines.budgetPeriodId, period.id),
-        eq(budgetLines.kind, 'credit_card_payment'),
-      ),
+      and(eq(budgetLines.budgetPeriodId, period.id), eq(budgetLines.kind, 'credit_card_payment')),
     );
   const have = new Set(existing.map((row) => row.creditAccountId));
 
@@ -558,9 +548,7 @@ export async function recomputePeriod(
   const lineRows = await executor
     .select()
     .from(budgetLines)
-    .where(
-      and(eq(budgetLines.budgetPeriodId, period.id), eq(budgetLines.userId, context.userId)),
-    )
+    .where(and(eq(budgetLines.budgetPeriodId, period.id), eq(budgetLines.userId, context.userId)))
     .orderBy(asc(budgetLines.priority), asc(budgetLines.id));
 
   const cardEffects = new Map<string, CardEffect[]>();
@@ -616,10 +604,14 @@ export async function recomputePeriod(
   const cardResults = [];
   for (const row of lineRows) {
     if (row.kind !== 'credit_card_payment' || row.creditAccountId === null) continue;
+    // Both halves of the opening come from the *carryover* columns, which only a
+    // roll writes. Reading `unfundedDebtMinor` here instead would read back this
+    // recompute's own previous answer and add the period's borrowing twice —
+    // see the column comment in `0009_budgeting.sql`.
     const opening: CardOpening = {
       creditAccountId: row.creditAccountId,
       available: Money.of(row.carryoverMinor, code),
-      unfundedDebt: Money.of(row.unfundedDebtMinor, code),
+      unfundedDebt: Money.of(row.carryoverUnfundedDebtMinor, code),
     };
     const result = applyCardEffects({
       opening,
@@ -673,7 +665,20 @@ export async function recomputePeriod(
   for (const card of cardResults) {
     const account = scoped.find((candidate) => candidate.id === card.result.creditAccountId);
     if (account?.workingBalance == null) continue;
-    const owed = Money.absolute(Money.min(account.workingBalance, zero));
+    // `owed = −balance`, with no clamp at zero.
+    //
+    // Clamping — `|min(balance, 0)|` — looks harmless because a card normally
+    // has a negative balance, and it is wrong for the one case that is not:
+    // an **overpaid** card, whose balance is positive because the bank owes the
+    // user. It happens whenever a payment lands before the charges it was meant
+    // to cover, which is ordinary autopay behaviour, and it also happens after a
+    // large refund. Under the clamp, `owed` reads 0 while `available(CCP)` is
+    // correctly negative, identity II fails, and — because this assertion throws
+    // — the recompute aborts and *every* later envelope stops updating.
+    //
+    // Unclamped, the identity is symmetric and stays true: a $250 overpayment is
+    // `owed = −250 = available(CCP) −250 + unfunded 0`.
+    const owed = Money.negate(account.workingBalance);
     if (!cardIdentityHolds(owed, card.result)) {
       throw new BudgetingError(
         'budgeting.card_identity_violation',
@@ -841,7 +846,16 @@ async function reconcileAlerts(
     );
   const key = (lineId: string | null, threshold: AlertThreshold) => `${lineId ?? '-'}:${threshold}`;
   const have = new Map(existing.map((row) => [key(row.budgetLineId, row.threshold), row] as const));
-  const want = new Map<string, { lineId: string | null; threshold: AlertThreshold; ratio: string | null; available: MoneyType; categoryId: string | null }>();
+  const want = new Map<
+    string,
+    {
+      lineId: string | null;
+      threshold: AlertThreshold;
+      ratio: string | null;
+      available: MoneyType;
+      categoryId: string | null;
+    }
+  >();
 
   for (const outcome of outcomes) {
     const assigned = Money.add(
@@ -1041,6 +1055,11 @@ export async function rollPeriod(
         assignedSource: 'USER',
         carryoverMinor: out.minor,
         availableMinor: out.minor,
+        // The debt crosses the boundary intact — it is owed until it is paid,
+        // and no rollover policy discharges it. Both columns are set because
+        // the next period opens with its closing equal to its opening until
+        // something is borrowed in it.
+        carryoverUnfundedDebtMinor: line.unfundedDebtMinor,
         unfundedDebtMinor: line.unfundedDebtMinor,
         currency: code,
         rolloverPolicy: line.rolloverPolicy,
@@ -1164,7 +1183,10 @@ export async function runAutoAssign(
   );
 
   const grid = gridOf(budget);
-  const bounds = { startDate: period.startDate as DateOnlyType, endDate: period.endDate as DateOnlyType };
+  const bounds = {
+    startDate: period.startDate as DateOnlyType,
+    endDate: period.endDate as DateOnlyType,
+  };
   const candidates: AutoAssignCandidate[] = lines.map((line) => {
     const needed = neededThisPeriod({
       goalType: line.goalType,

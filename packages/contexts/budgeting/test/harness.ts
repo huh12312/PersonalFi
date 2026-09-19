@@ -41,7 +41,7 @@ import { createBudget, type CreateBudgetInput } from '../src/budget.ts';
 import { upsertLine } from '../src/budget.ts';
 import { createFakeLedger, type BudgetAccount, type FakeLedger } from '../src/ledger-port.ts';
 import type { BudgetingContext } from '../src/db.ts';
-import { openPeriod } from '../src/service.ts';
+import { markDirtyFrom, openPeriod, recomputeDirty } from '../src/service.ts';
 import type { BudgetRow, BudgetPeriodRow } from '../schema/index.ts';
 
 export { ADMIN_URL, createFakeLedger, type FakeLedger, type TestDatabase };
@@ -103,7 +103,19 @@ export interface Scenario {
   readonly context: BudgetingContext;
   readonly checking: string;
   readonly card: string;
-  readonly categories: Readonly<Record<string, string>>;
+  /**
+   * Named rather than `Record<string, string>` on purpose. Under
+   * `noUncheckedIndexedAccess` an index signature makes every destructured
+   * envelope id `string | undefined`, which every suite would then have to
+   * narrow at each use — twelve `?? ''`s that each turn a missing envelope into
+   * a silent miscategorisation instead of a compile error.
+   */
+  readonly categories: {
+    readonly groceries: string;
+    readonly rent: string;
+    readonly fun: string;
+    readonly income: string;
+  };
 }
 
 /**
@@ -162,7 +174,13 @@ export async function openWithLines(
     readonly categoryId: string;
     readonly priority?: number;
     readonly rolloverPolicy?: 'ROLLOVER' | 'RESET' | 'ROLLOVER_ALLOW_NEGATIVE';
-    readonly goalType?: 'NONE' | 'MONTHLY_TARGET' | 'TARGET_BY_DATE' | 'MINIMUM_BALANCE' | 'PCT_OF_INCOME' | 'REFILL_UP_TO';
+    readonly goalType?:
+      | 'NONE'
+      | 'MONTHLY_TARGET'
+      | 'TARGET_BY_DATE'
+      | 'MINIMUM_BALANCE'
+      | 'PCT_OF_INCOME'
+      | 'REFILL_UP_TO';
     readonly goalAmountMinor?: bigint | null;
     readonly goalTargetDate?: DateOnlyType | null;
     readonly goalPercent?: string | null;
@@ -239,6 +257,36 @@ export function post(
   );
   void sequence;
   return id;
+}
+
+/**
+ * Do to the budget what the consumer would have done for a ledger row dated
+ * `from`: dirty the period containing it and every later one, then recompute
+ * them oldest-first.
+ *
+ * This exists because `post` deliberately does **not** do it. A transaction
+ * landing in the ledger changes nothing about this context's cached envelopes
+ * until something marks them stale — that is the whole of 07 §1.4 rule 6, and
+ * `recomputeDirty` on its own is a no-op precisely because the previous
+ * recompute left the period clean. A harness that folded the dirtying into
+ * `post` would make every suite pass without a cascade existing at all, which is
+ * the one thing these suites are here to prove.
+ *
+ * `from` is required rather than defaulted to "dirty everything" for the same
+ * reason: a default that over-dirties would let a cascade that marks too narrow
+ * a window look correct.
+ */
+export async function settle(state: Scenario, from: DateOnlyType): Promise<void> {
+  await markDirtyFrom(state.database.db, state.context, {
+    budgetId: state.budget.id,
+    date: from,
+  });
+  await recomputeDirty(
+    state.database.db,
+    state.context,
+    { port: state.ledger.port },
+    state.budget.id,
+  );
 }
 
 /** A paired internal transfer: two legs, one link id, both invisible to budgets. */

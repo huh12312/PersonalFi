@@ -241,10 +241,7 @@ export function createBudgetingConsumer(dependencies: {
               .update(budgetPeriods)
               .set({ dirty: true, updatedAt: context.clock.now() })
               .where(
-                and(
-                  eq(budgetPeriods.budgetId, budget.id),
-                  eq(budgetPeriods.userId, event.userId),
-                ),
+                and(eq(budgetPeriods.budgetId, budget.id), eq(budgetPeriods.userId, event.userId)),
               );
           } else {
             await markDirtyFrom(tx, budgetingContext, { budgetId: budget.id, date });

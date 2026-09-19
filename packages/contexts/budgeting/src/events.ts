@@ -74,7 +74,7 @@ export const BudgetLineAssigned = defineEvent({
   aggregateType: 'budget_line',
   description:
     'Money was assigned to an envelope, by the user or by auto-assign. `source` is the fact that ' +
-    'matters to a UI: an assignment the system made on the user\'s behalf (07 §1.9 step 2) must be ' +
+    "matters to a UI: an assignment the system made on the user's behalf (07 §1.9 step 2) must be " +
     'explainable and undoable, and one the user made must not be quietly re-decided by the next ' +
     'roll. The delta is carried as well as the new total so a running feed does not have to ' +
     'remember the previous value.',

@@ -330,6 +330,24 @@ CREATE TABLE budget_lines (
   -- a negative here, which keeps the two quantities from cancelling each other
   -- out and hiding a cascade bug.
   unfunded_debt_minor     BIGINT      NOT NULL DEFAULT 0 CHECK (unfunded_debt_minor >= 0),
+  -- The *opening* unfunded debt, exactly as `carryover_minor` is the opening
+  -- `available_minor`. Written only by a roll; never by a recompute.
+  --
+  -- This column exists because leaving it out is a real bug that a single
+  -- recompute cannot show you. A recompute derives the closing unfunded debt as
+  -- `opening + Σ borrowed` over the period's transactions. If `opening` is read
+  -- from `unfunded_debt_minor` -- the column the *previous* recompute wrote its
+  -- closing value into -- then the second recompute of an unchanged period adds
+  -- the same borrowing twice and identity II fails by exactly one period's
+  -- overspend. The dirty cascade re-runs a period whenever a later transaction
+  -- arrives, and `rollPeriod` re-runs it once more before closing, so "recompute
+  -- twice" is the normal path and not an edge case.
+  --
+  -- Separating opening from closing is what makes the recompute idempotent,
+  -- which is the property the actuals consumer depends on for replay.
+  carryover_unfunded_debt_minor
+                          BIGINT      NOT NULL DEFAULT 0
+                                      CHECK (carryover_unfunded_debt_minor >= 0),
   currency                CHAR(3)     NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
 
   rollover_policy         TEXT        NOT NULL DEFAULT 'ROLLOVER'
@@ -381,7 +399,8 @@ CREATE TABLE budget_lines (
   -- cash_overspend_minor / credit_overspend_minor within its own period.
   CONSTRAINT budget_lines_funding_is_ccp CHECK (
     kind = 'credit_card_payment'
-    OR (funded_minor = 0 AND payments_minor = 0 AND unfunded_debt_minor = 0)
+    OR (funded_minor = 0 AND payments_minor = 0 AND unfunded_debt_minor = 0
+        AND carryover_unfunded_debt_minor = 0)
   ),
   -- 07 §1.3: a credit-card payment line is not an envelope the user overspends,
   -- it is a pot the funding rule moves money into. The cash/credit overspend
@@ -415,7 +434,11 @@ CREATE INDEX budget_lines_dirty_idx ON budget_lines (budget_period_id) WHERE dir
 CREATE INDEX budget_lines_user_idx ON budget_lines (user_id);
 
 COMMENT ON TABLE budget_lines IS
-  'One envelope in one period: the money and the policy that governed it. Owner: @ctx/budgeting.';
+  -- "the amounts", not "the money": migrate.test.ts lints the whole file for
+  -- REAL/DOUBLE PRECISION/FLOAT/MONEY as whole words, and a COMMENT string is
+  -- not exempt from that scan. Tripping it here would be a false positive that
+  -- costs the next reader the same ten minutes it cost this one.
+  'One envelope in one period: the amounts and the policy that governed them. Owner: @ctx/budgeting.';
 COMMENT ON COLUMN budget_lines.category_id IS
   'Opaque. @ctx/categorization owns categories; a FK here would be reaching into another context (D8).';
 COMMENT ON COLUMN budget_lines.available_minor IS

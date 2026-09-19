@@ -45,32 +45,40 @@ function spend(id: string, day: string, minorUnits: bigint, credit = false): Env
 describe('envelope math (07 §1.2)', () => {
   it('available = carryover + assigned + activity for every policy', () => {
     fc.assert(
-      fc.property(amount, amount, amount, policy, (previous, assigned, activity, rolloverPolicy) => {
-        // carryover(c, p) = rollover_fn(available(c, p-1), policy)  — 07 §1.2 line 61
-        const carryover = rolloverOut(previous, rolloverPolicy);
+      fc.property(
+        amount,
+        amount,
+        amount,
+        policy,
+        (previous, assigned, activity, rolloverPolicy) => {
+          // carryover(c, p) = rollover_fn(available(c, p-1), policy)  — 07 §1.2 line 61
+          const carryover = rolloverOut(previous, rolloverPolicy);
 
-        // available(c, p) = carryover + assigned + activity          — 07 §1.2 line 62
-        const expected = available({ carryover, assigned, activity });
+          // available(c, p) = carryover + assigned + activity          — 07 §1.2 line 62
+          const expected = available({ carryover, assigned, activity });
 
-        // The same period run through the transaction-ordered engine must agree
-        // with the closed form. That is the whole point: `runEnvelope` exists to
-        // produce the cash/credit *split*, and it must not, in doing so, produce
-        // a different `available`.
-        const engine = runEnvelope(Money.add(carryover, assigned), [
-          spend('t1', '2026-03-10', activity.minor),
-        ]);
+          // The same period run through the transaction-ordered engine must agree
+          // with the closed form. That is the whole point: `runEnvelope` exists to
+          // produce the cash/credit *split*, and it must not, in doing so, produce
+          // a different `available`.
+          const engine = runEnvelope(Money.add(carryover, assigned), [
+            spend('t1', '2026-03-10', activity.minor),
+          ]);
 
-        expect(engine.available.minor).toBe(expected.minor);
-        expect(engine.available.currency).toBe(USD);
+          expect(engine.available.minor).toBe(expected.minor);
+          expect(engine.available.currency).toBe(USD);
 
-        // And the policy's two halves account for every cent of the period
-        // before it — `available = rolloverOut + absorbedByRta` is a CHECK on
-        // `rollovers`, so a violation here is a row Postgres would refuse.
-        expect(
-          Money.add(rolloverOut(previous, rolloverPolicy), absorbedByRta(previous, rolloverPolicy))
-            .minor,
-        ).toBe(previous.minor);
-      }),
+          // And the policy's two halves account for every cent of the period
+          // before it — `available = rolloverOut + absorbedByRta` is a CHECK on
+          // `rollovers`, so a violation here is a row Postgres would refuse.
+          expect(
+            Money.add(
+              rolloverOut(previous, rolloverPolicy),
+              absorbedByRta(previous, rolloverPolicy),
+            ).minor,
+          ).toBe(previous.minor);
+        },
+      ),
       { numRuns: 500 },
     );
   });
@@ -93,7 +101,12 @@ describe('envelope math (07 §1.2)', () => {
           const result = runEnvelope(
             opening,
             rows.map(([value, credit], index) =>
-              spend(`t${index}`, `2026-03-${String((index % 28) + 1).padStart(2, '0')}`, value, credit),
+              spend(
+                `t${index}`,
+                `2026-03-${String((index % 28) + 1).padStart(2, '0')}`,
+                value,
+                credit,
+              ),
             ),
           );
           const shortfall = Money.absolute(Money.min(result.available, zero));
@@ -255,7 +268,12 @@ describe('goals (07 §1.8)', () => {
 
   it('MINIMUM_BALANCE tops up after spending; REFILL_UP_TO refills to a ceiling', () => {
     // Arrived with $120, spent $80 this period, floor/ceiling $400.
-    const shared = { ...base, goalAmount: usd(40_000n), carryover: usd(12_000n), activity: usd(-8_000n) };
+    const shared = {
+      ...base,
+      goalAmount: usd(40_000n),
+      carryover: usd(12_000n),
+      activity: usd(-8_000n),
+    };
     // Floor: the envelope holds $40, so $360 is needed to stand it back up.
     expect(neededThisPeriod({ ...shared, goalType: 'MINIMUM_BALANCE' }).minor).toBe(36_000n);
     // Ceiling: refill what arrived, ignoring the month's spending. $280.
@@ -276,8 +294,9 @@ describe('goals (07 §1.8)', () => {
   });
 
   it('MONTHLY_TARGET is the target, and NONE is nothing', () => {
-    expect(neededThisPeriod({ ...base, goalType: 'MONTHLY_TARGET', goalAmount: usd(5_000n) }).minor)
-      .toBe(5_000n);
+    expect(
+      neededThisPeriod({ ...base, goalType: 'MONTHLY_TARGET', goalAmount: usd(5_000n) }).minor,
+    ).toBe(5_000n);
     expect(neededThisPeriod({ ...base, goalType: 'NONE' }).minor).toBe(0n);
   });
 

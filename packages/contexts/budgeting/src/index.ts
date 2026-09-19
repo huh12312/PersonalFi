@@ -17,7 +17,7 @@
  *
  * One entry in `apps/api/src/modules.ts` and one adapter in
  * `apps/api/src/domain.ts`; the exact lines are in
- * `docs/evidence/phase-2/wp2.1-budgeting.md` §7.
+ * `docs/evidence/phase-2/wp2.1-budgeting.md` §10.
  *
  * ```ts
  * {
@@ -124,7 +124,12 @@ export {
   type AutoAssignEntry,
   type AutoAssignPlan,
 } from './auto-assign.ts';
-export { computeActuals, type ActualsInput, type ActualsResult, type LineActivity } from './actuals.ts';
+export {
+  computeActuals,
+  type ActualsInput,
+  type ActualsResult,
+  type LineActivity,
+} from './actuals.ts';
 
 // --- services --------------------------------------------------------------
 export {

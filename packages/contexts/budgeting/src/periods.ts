@@ -73,10 +73,7 @@ function strideIndex(anchor: DateOnlyType, date: DateOnlyType, stride: number): 
 }
 
 /** The half-open period containing `date`, for any grid. */
-export function periodContaining(
-  settings: PeriodGridSettings,
-  date: DateOnlyType,
-): PeriodBounds {
+export function periodContaining(settings: PeriodGridSettings, date: DateOnlyType): PeriodBounds {
   switch (settings.kind) {
     case 'CALENDAR_MONTH': {
       const start = DateOnly.startOfMonth(date);
@@ -104,7 +101,11 @@ export function periodContaining(
     case 'CUSTOM': {
       const anchor = assertAnchor(settings);
       const stride =
-        settings.kind === 'WEEKLY' ? 7 : settings.kind === 'BIWEEKLY' ? 14 : (settings.lengthDays ?? 0);
+        settings.kind === 'WEEKLY'
+          ? 7
+          : settings.kind === 'BIWEEKLY'
+            ? 14
+            : (settings.lengthDays ?? 0);
       if (!Number.isInteger(stride) || stride < 1) {
         throw new RangeError(`period kind ${settings.kind} needs a positive length, got ${stride}`);
       }
@@ -129,9 +130,7 @@ export function previousPeriod(settings: PeriodGridSettings, bounds: PeriodBound
 
 /** `startDate <= date < endDate`. The only containment test in the package. */
 export function contains(bounds: PeriodBounds, date: DateOnlyType): boolean {
-  return (
-    !DateOnly.isBefore(date, bounds.startDate) && DateOnly.isBefore(date, bounds.endDate)
-  );
+  return !DateOnly.isBefore(date, bounds.startDate) && DateOnly.isBefore(date, bounds.endDate);
 }
 
 /**

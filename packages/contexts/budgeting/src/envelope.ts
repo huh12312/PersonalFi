@@ -323,7 +323,7 @@ function divideRoundingUp(amount: MoneyType, parts: number): MoneyType {
  * and names the other five. The five definitions below are this work package's,
  * chosen so that no two of them collapse into each other, and they are called
  * out as ours rather than as the memo's in
- * `docs/evidence/phase-2/wp2.1-budgeting.md` §3.
+ * `docs/evidence/phase-2/wp2.1-budgeting.md` §1.4.
  */
 export function neededThisPeriod(input: GoalInput): MoneyType {
   const zero = Money.zero(input.currency);
@@ -346,9 +346,7 @@ export function neededThisPeriod(input: GoalInput): MoneyType {
     case 'TARGET_BY_DATE': {
       const target = input.goalAmount ?? zero;
       const held = Money.add(input.carryover, input.activity);
-      const gap = atLeastZero(
-        Money.subtract(Money.subtract(target, held), input.scheduledInflows),
-      );
+      const gap = atLeastZero(Money.subtract(Money.subtract(target, held), input.scheduledInflows));
       return divideRoundingUp(gap, Math.max(1, input.periodsRemainingInclusive));
     }
 

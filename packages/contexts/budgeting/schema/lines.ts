@@ -33,7 +33,6 @@ import {
 } from '@core/db';
 import { index, integer, numeric, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
-
 /**
  * 07 §1.3: `CCP[card]` "is auto-created 1:1 with each on-budget credit account
  * and is not user-deletable."
@@ -94,6 +93,19 @@ export const budgetLines = pgTable(
     paymentsMinor: amountMinorColumn('payments_minor').notNull().default(0n),
     /** CCP lines: identity II — what is owed that no envelope ever covered. */
     unfundedDebtMinor: amountMinorColumn('unfunded_debt_minor').notNull().default(0n),
+    /**
+     * The *opening* unfunded debt, as `carryoverMinor` is the opening
+     * `availableMinor`. Written by a roll, never by a recompute.
+     *
+     * Without the split, a recompute would read its own previous closing value
+     * as this period's opening and add the period's borrowing a second time —
+     * and since the dirty cascade re-runs a period on every late transaction,
+     * "recompute twice" is the normal path. The migration's comment on this
+     * column carries the full derivation.
+     */
+    carryoverUnfundedDebtMinor: amountMinorColumn('carryover_unfunded_debt_minor')
+      .notNull()
+      .default(0n),
     currency: currencyColumn().notNull(),
 
     rolloverPolicy: text('rollover_policy').$type<RolloverPolicy>().notNull().default('ROLLOVER'),

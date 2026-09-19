@@ -93,14 +93,17 @@ export function computeActuals(input: ActualsInput): ActualsResult {
   const zero = Money.zero(input.currency);
   const roleOf = new Map(input.accounts.map((account) => [account.id, account] as const));
 
-  const byCategory = new Map<string | null, {
-    categoryId: string | null;
-    transactions: EnvelopeTransaction[];
-    transactionCount: number;
-    transferExcludedCount: number;
-    refundNettedCount: number;
-    refund: MoneyType;
-  }>();
+  const byCategory = new Map<
+    string | null,
+    {
+      categoryId: string | null;
+      transactions: EnvelopeTransaction[];
+      transactionCount: number;
+      transferExcludedCount: number;
+      refundNettedCount: number;
+      refund: MoneyType;
+    }
+  >();
   const cardPayments = new Map<string, MoneyType>();
   let income = zero;
   let transferExcludedCount = 0;

@@ -45,6 +45,7 @@ import {
   openWithLines,
   post,
   scenario,
+  settle,
   transfer,
   usd,
   type Scenario,
@@ -95,10 +96,32 @@ describe.skipIf(NO_DATABASE)('the Ready-to-Assign identity', () => {
       userId: state.context.userId,
       periodId,
     });
+
+    // 07 §1.3 line 130: "`CCP[card]` is auto-created 1:1 with each on-budget
+    // credit account and is not user-deletable."
+    //
+    // Asserted rather than assumed, and the reason is a sabotage that was run
+    // and recorded in the evidence note. Identity II is checked *per CCP line*,
+    // so a defect that stops the lines being created leaves nothing to check and
+    // both identities pass vacuously — identity I because it is how RTA is
+    // defined, identity II because the loop below has no iterations. Pinning the
+    // 1:1 correspondence is what turns "no CCP lines" from silence into a
+    // failure.
+    const onBudgetCards = accounts
+      .filter((candidate) => candidate.role === 'CREDIT' && !candidate.closed)
+      .map((candidate) => candidate.id)
+      .sort();
+    expect(
+      cards.map((card) => card.creditAccountId).sort(),
+      `${label}: one CCP line per on-budget credit account (07 §1.3 line 130)`,
+    ).toEqual(onBudgetCards);
+
     for (const card of cards) {
       const account = accounts.find((candidate) => candidate.id === card.creditAccountId);
       if (account?.workingBalance == null) continue;
-      const owed = Money.absolute(Money.min(account.workingBalance, Money.zero(USD)));
+      // `owed = −balance`, unclamped: an overpaid card has a positive balance
+      // and therefore a negative `owed`, and identity II must still hold.
+      const owed = Money.negate(account.workingBalance);
       expect(
         Money.formatAmount(Money.add(card.available, card.unfundedDebt)),
         `${label}: owed on ${card.creditAccountId} must equal available(CCP) + unfundedDebt`,
@@ -173,7 +196,7 @@ describe.skipIf(NO_DATABASE)('the Ready-to-Assign identity', () => {
       minor: -180_000n,
       categoryId: rent,
     });
-    await recomputeDirty(database.db, state.context, { port: state.ledger.port }, state.budget.id);
+    await settle(state, d('2026-03-12'));
     await assertIdentity(state, march.id, 'after paying rent in cash');
 
     // --- mutation 3: credit spending, which is where CCP earns its keep ----
@@ -183,7 +206,7 @@ describe.skipIf(NO_DATABASE)('the Ready-to-Assign identity', () => {
       minor: -25_000n,
       categoryId: groceries,
     });
-    await recomputeDirty(database.db, state.context, { port: state.ledger.port }, state.budget.id);
+    await settle(state, d('2026-03-14'));
     await assertIdentity(state, march.id, 'after $250 of groceries on the card');
 
     // --- mutation 4: a refund ---------------------------------------------
@@ -193,7 +216,7 @@ describe.skipIf(NO_DATABASE)('the Ready-to-Assign identity', () => {
       minor: -10_000n,
       categoryId: fun,
     });
-    await recomputeDirty(database.db, state.context, { port: state.ledger.port }, state.budget.id);
+    await settle(state, d('2026-03-16'));
     await assertIdentity(state, march.id, 'after a $100 night out');
 
     post(state, {
@@ -203,7 +226,7 @@ describe.skipIf(NO_DATABASE)('the Ready-to-Assign identity', () => {
       categoryId: fun,
       refundOfId: purchase,
     });
-    await recomputeDirty(database.db, state.context, { port: state.ledger.port }, state.budget.id);
+    await settle(state, d('2026-03-18'));
     await assertIdentity(state, march.id, 'after a $40 refund');
 
     // --- mutation 5: a card payment (a transfer, so zero activity) ---------
@@ -213,7 +236,7 @@ describe.skipIf(NO_DATABASE)('the Ready-to-Assign identity', () => {
       date: d('2026-03-20'),
       minor: 25_000n,
     });
-    await recomputeDirty(database.db, state.context, { port: state.ledger.port }, state.budget.id);
+    await settle(state, d('2026-03-20'));
     await assertIdentity(state, march.id, 'after paying the card');
 
     // --- mutation 6: a credit overspend -----------------------------------
@@ -223,7 +246,7 @@ describe.skipIf(NO_DATABASE)('the Ready-to-Assign identity', () => {
       minor: -50_000n,
       categoryId: fun,
     });
-    await recomputeDirty(database.db, state.context, { port: state.ledger.port }, state.budget.id);
+    await settle(state, d('2026-03-22'));
     await assertIdentity(state, march.id, 'after a $500 credit overspend on fun');
 
     // --- mutation 7..N: thirteen consecutive rolls, one per period ---------
@@ -231,12 +254,60 @@ describe.skipIf(NO_DATABASE)('the Ready-to-Assign identity', () => {
     // Thirteen because the evidence note's run is thirteen and because twelve
     // would let a bug that is annual rather than monthly hide: the thirteenth
     // period is the first one whose predecessor is a year old.
+    // ### Which period the identity is a statement about
+    //
+    // 07 §1.2 line 85 writes the invariant "for all p", and taken with no
+    // further reading that is false the moment a period closes — not because the
+    // cascade is wrong, but because the two sides are dated differently.
+    // `Σ_a balance(a)` is the balance *now*; `Σ_c available(c, p)` for a closed p
+    // is frozen at the moment p closed. Spending $75 in April therefore moves the
+    // right-hand side and cannot move March's left-hand side, and no arrangement
+    // of a forward-only cascade will make it.
+    //
+    // Making "for all p" literally true would need a balance *as of* each
+    // period's end date — a quantity neither `LedgerPort` nor 07 §1.10's model
+    // carries, and one whose only consumer would be this assertion. The reading
+    // that matches the data we actually have is that the identity is a statement
+    // about the **open** period, which is also the only period whose RTA the user
+    // can act on. `RTA` on a closed period is a historical snapshot.
+    //
+    // So the loop asserts two different things, and both are load-bearing:
+    //
+    //   1. the identity on the open period, after every mutation — this is the
+    //      one that catches a stale cache, and it is what caught the missing
+    //      dirty-mark that made this suite red;
+    //   2. that March, once closed, is never rewritten again — the forward-only
+    //      half of 07 §1.4 rule 6, which a cascade that dirtied too much would
+    //      break and which the identity alone would not notice.
+    //
+    // Recorded as a correction to the memo in
+    // `docs/evidence/phase-2/wp2.1-budgeting.md` §2.
+    const marchFingerprint = async (): Promise<string> => {
+      const terms = await identityTermsOf(database.db, {
+        userId: state.context.userId,
+        periodId: march.id,
+      });
+      // March's *own* persisted columns only. `futureAssignments` is read across
+      // later periods and legitimately grows as they are opened, so including it
+      // would make this assert that no period after March ever changes.
+      return JSON.stringify({
+        available: [...(terms?.categoryAvailable ?? [])].map(Money.formatAmount).sort(),
+        readyToAssign: Money.formatAmount(terms?.readyToAssign ?? usd(0n)),
+      });
+    };
+    let marchFrozen: string | null = null;
+
     let current = march.id;
     for (let index = 0; index < 13; index += 1) {
-      const rolled = await rollPeriod(database.db, state.context, { port: state.ledger.port }, {
-        budgetId: state.budget.id,
-        periodId: current,
-      });
+      const rolled = await rollPeriod(
+        database.db,
+        state.context,
+        { port: state.ledger.port },
+        {
+          budgetId: state.budget.id,
+          periodId: current,
+        },
+      );
       current = rolled.toPeriodId;
 
       // A little spending in every period, so no roll is a no-op.
@@ -245,18 +316,28 @@ describe.skipIf(NO_DATABASE)('the Ready-to-Assign identity', () => {
         .from(budgetPeriods)
         .where(eq(budgetPeriods.id, current));
       const start = period[0]?.startDate;
-      if (start !== undefined) {
-        post(state, {
-          accountId: index % 2 === 0 ? state.checking : state.card,
-          date: DateOnly.addDays(DateOnly.parse(start), 3),
-          minor: -7_500n,
-          categoryId: groceries,
-        });
-      }
-      await recomputeDirty(database.db, state.context, { port: state.ledger.port }, state.budget.id);
+      if (start === undefined) throw new Error(`rolled into a period with no start date`);
+      const spentOn = DateOnly.addDays(DateOnly.parse(start), 3);
+      post(state, {
+        accountId: index % 2 === 0 ? state.checking : state.card,
+        date: spentOn,
+        minor: -7_500n,
+        categoryId: groceries,
+      });
+      await settle(state, spentOn);
       await assertIdentity(state, current, `after roll ${index + 1} of 13`);
-      await assertIdentity(state, march.id, `March still holds after roll ${index + 1}`);
+
+      // March closed on the first roll; from then on nothing may rewrite it.
+      const fingerprint = await marchFingerprint();
+      if (marchFrozen === null) marchFrozen = fingerprint;
+      else {
+        expect(
+          fingerprint,
+          `roll ${index + 1} rewrote March — the cascade must be forward-only`,
+        ).toBe(marchFrozen);
+      }
     }
+    expect(marchFrozen, 'the loop must have closed March').not.toBeNull();
   }, 180_000);
 
   it('conservation: Σ rolloverOut(n) = Σ rolloverIn(n+1)', () => {
@@ -333,12 +414,17 @@ describe.skipIf(NO_DATABASE)('the Ready-to-Assign identity', () => {
       minor: -30_000n,
       categoryId: groceries,
     });
-    await recomputeDirty(database.db, state.context, { port: state.ledger.port }, state.budget.id);
+    await settle(state, d('2026-04-10'));
 
-    const rolled = await rollPeriod(database.db, state.context, { port: state.ledger.port }, {
-      budgetId: state.budget.id,
-      periodId: first.id,
-    });
+    const rolled = await rollPeriod(
+      database.db,
+      state.context,
+      { port: state.ledger.port },
+      {
+        budgetId: state.budget.id,
+        periodId: first.id,
+      },
+    );
 
     const rows = await database.db
       .select()
