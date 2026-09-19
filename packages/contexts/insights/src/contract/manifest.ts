@@ -60,7 +60,11 @@ export const TriggerSchema = z.union([
 
 export const AdvisorManifestSchema = z
   .strictObject({
-    advisor_id: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9_.-]*$/),
+    advisor_id: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[a-z0-9][a-z0-9_.-]*$/),
     version: z.string().min(1).max(32),
     contract_version: z.literal(ADVISOR_CONTRACT_MAJOR),
     kind: AdvisorKindSchema,
@@ -113,6 +117,9 @@ export function resolveLimits(manifest: AdvisorManifest): ResolvedLimits {
   return {
     timeoutMs: Math.min(manifest.limits.timeout_ms, PLATFORM_LIMITS.timeoutMs),
     maxInsights: Math.min(manifest.limits.max_insights, PLATFORM_LIMITS.maxInsights),
-    maxResponseBytes: Math.min(manifest.limits.max_response_bytes, PLATFORM_LIMITS.maxResponseBytes),
+    maxResponseBytes: Math.min(
+      manifest.limits.max_response_bytes,
+      PLATFORM_LIMITS.maxResponseBytes,
+    ),
   };
 }

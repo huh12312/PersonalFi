@@ -120,7 +120,11 @@ export const EvidenceSchema = z.strictObject({
  * `derivations.ts` for the parser, which is a parser and not an `eval`.
  */
 export const DerivationSchema = z.strictObject({
-  id: z.string().min(1).max(64).regex(/^[A-Za-z0-9_.-]+$/),
+  id: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9_.-]+$/),
   /** `$0 * $1` — `$n` is `inputs[n]`. */
   expression: z.string().min(1).max(512),
   inputs: z.array(SourceRefSchema).min(1).max(16),
@@ -157,14 +161,26 @@ export const InsightSchema = z.strictObject({
    * Stable across runs ⇒ idempotent upsert, not duplicates. Combined with
    * `period` and `advisor_id` it is the natural key `insights` upserts on.
    */
-  key: z.string().min(1).max(160).regex(/^[A-Za-z0-9_.:-]+$/),
+  key: z
+    .string()
+    .min(1)
+    .max(160)
+    .regex(/^[A-Za-z0-9_.:-]+$/),
   /**
    * The period this insight is *about* — `2026-09`, `2026-Q3`, or `all_time`.
    * Part of the upsert key, so last month's "dining is over budget" is a
    * different row from this month's rather than an overwrite of it.
    */
-  period: z.string().min(1).max(32).regex(/^[A-Za-z0-9_-]+$/),
-  type: z.string().min(1).max(64).regex(/^[A-Za-z0-9_.-]+$/),
+  period: z
+    .string()
+    .min(1)
+    .max(32)
+    .regex(/^[A-Za-z0-9_-]+$/),
+  type: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9_.-]+$/),
   severity: z.enum(SEVERITIES),
   title: z.string().min(1).max(160),
   summary_md: z.string().min(1).max(2000),

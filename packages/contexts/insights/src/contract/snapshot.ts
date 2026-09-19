@@ -49,7 +49,11 @@ const yearMonth = z.string().regex(/^\d{4}-\d{2}$/, 'YYYY-MM');
 /** A ratio in [0,1]. Floats are correct here and may never reach a `_minor` column. */
 const unitInterval = z.number().min(0).max(1);
 /** `MERCHANT_<12 hex>`, or any opaque ref the builder minted. Never a name. */
-const opaqueRef = z.string().min(1).max(64).regex(/^[A-Za-z0-9_:.-]+$/, 'opaque ref');
+const opaqueRef = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9_:.-]+$/, 'opaque ref');
 
 /**
  * 03 §8.3's amount buckets. A band, not a figure.

@@ -2,11 +2,396 @@
 /**
  * `@ctx/insights` — Insights / Advisory.
  *
- * The `Advisor` contract and the insight feed. The only context that reads broadly, and it does so through a single assembler (`SnapshotBuilder`) so data minimisation has exactly one implementation point.
+ * The `Advisor` contract and the insight feed. The only context that reads
+ * broadly, and it does so through a single assembler (`SnapshotBuilder`) so
+ * data minimisation has exactly one implementation point.
  *
- * This file is the context's *only* public surface. Everything else under `src/`
- * is internal, and no other context may import from it.
+ * This file is the context's *only* public surface. Everything else under
+ * `src/` is internal, and no other context may import from it.
+ *
+ * ## What WP 2.6 ships: a platform, with no advisors in it
+ *
+ * There is no rule catalogue here. `createAdvisorRegistry([])` is a complete,
+ * working registry that proposes nothing, and that is what the app runs until
+ * WP 2.7's twenty built-ins arrive. What WP 2.6 provides is everything those
+ * rules — and, in Phase 5, a local model, and in Phase 6 a third-party
+ * sidecar — will be judged by:
+ *
+ *   * **The contract.** `AdvisorSnapshot`, `AdvisorRequest`, `AdvisorResponse`
+ *     and `AdvisorManifest` as zod definitions, with the normative JSON Schema
+ *     emitted from them into `@core/contracts`' `advisor/v1/` and byte-compared
+ *     by `test/contract-parity.test.ts`. `ADVISOR_CONTRACT_VERSION` is `1.0.0`;
+ *     the wire carries the integer `1`.
+ *   * **`SnapshotBuilder` and the scope catalogue.** One assembler, iterating
+ *     grants rather than sources, with the 08 §4.2 minimisation rules read off
+ *     a declarative table.
+ *   * **The seven-step validation pipeline.** Transport, schema, envelope,
+ *     capability, evidence, derivations, numerals. Its output type is the only
+ *     thing `store.ts` will write, so "nothing reaches the feed unvalidated" is
+ *     a type error rather than a convention.
+ *   * **`pending_review` persistence, the 30/90/permanent dismissal ladder, the
+ *     alert budget, and kill switches 1–3.**
+ *
+ * ## The three claims this package exists to make true
+ *
+ * 1. **An advisor cannot act.** There is no `status` field on the wire, no
+ *    acting member in `proposed_actions[].kind`, no write port, no database
+ *    handle, and no return channel. `test/pending-review.test.ts` sabotages
+ *    each.
+ * 2. **An advisor cannot invent a number.** Every `source_ref` must resolve
+ *    into the snapshot *we* sent, every numeral in every rendered field must be
+ *    traceable to a snapshot value or to arithmetic we re-computed ourselves,
+ *    and every evidence label must agree with what it cites.
+ *    `test/no-fabricated-numbers.test.ts` and `test/evidence-resolution.test.ts`
+ *    sabotage each.
+ * 3. **An advisor sees only what it was granted.** An ungranted scope has no
+ *    code path; `transactions.raw` is unreachable for an `external` advisor by
+ *    a row in a table, not by an `if`. `test/snapshot-scopes.test.ts` asserts
+ *    both.
+ *
+ * ## What WP 2.7 implements against
+ *
+ * `Advisor` (a manifest and one function), `AdvisorRegistry`, and the
+ * `AdvisorSnapshot` shape. A built-in rule is a function from a snapshot to
+ * `Insight[]`; it declares its scopes and its triggers in a manifest, and it is
+ * judged by the same pipeline a Phase 6 sidecar will be. Nothing in this
+ * package knows that built-ins exist.
  */
 
 /** Stable identifier used by feature flags (`module.insights`) and event metadata. */
 export const CONTEXT_ID = 'insights' as const;
+
+// --- The contract ----------------------------------------------------------
+
+export {
+  ADVISOR_CONTRACT_MAJOR,
+  ADVISOR_SCHEMA_BASE,
+  SUPPORTED_CONTRACT_MAJORS,
+} from './contract/version.ts';
+
+export {
+  ADVISOR_KINDS,
+  ADVISOR_SCOPES,
+  SCOPE_CATALOGUE,
+  SCOPE_KEYS,
+  isAdvisorScope,
+  scopeDefinition,
+  scopesPermittedForKind,
+  type AdvisorKind,
+  type AdvisorScope,
+  type ScopeDefinition,
+  type ScopeMinimisation,
+} from './contract/scopes.ts';
+
+export {
+  AMOUNT_BUCKETS,
+  AdvisorSnapshotSchema,
+  BudgetsStatusSchema,
+  CashSummarySchema,
+  CashflowMonthlySchema,
+  MoneyJsonSchema,
+  NetWorthSummarySchema,
+  RecurringListSchema,
+  TransactionsRawSchema,
+  TransactionsSummarySchema,
+  type AdvisorSnapshot,
+  type AmountBucket,
+  type MoneyJson,
+} from './contract/snapshot.ts';
+
+export {
+  AdvisorKindSchema,
+  AdvisorRequestSchema,
+  AdvisorScopeSchema,
+  DigestSchema,
+  type AdvisorRequest,
+} from './contract/request.ts';
+
+export {
+  AdvisorResponseSchema,
+  CONFIDENCE_BASES,
+  DerivationSchema,
+  EvidenceSchema,
+  HORIZONS,
+  ImpactSchema,
+  InsightSchema,
+  PROPOSED_ACTION_KINDS,
+  ProposedActionSchema,
+  SEVERITIES,
+  SourceRefSchema,
+  severityRank,
+  type AdvisorResponse,
+  type ConfidenceBasis,
+  type Derivation,
+  type Evidence,
+  type Impact,
+  type Insight,
+  type ProposedAction,
+  type ProposedActionKind,
+  type Severity,
+} from './contract/response.ts';
+
+export {
+  AdvisorManifestSchema,
+  PLATFORM_LIMITS,
+  TriggerSchema,
+  resolveLimits,
+  type AdvisorManifest,
+  type AdvisorTrigger,
+  type ResolvedLimits,
+} from './contract/manifest.ts';
+
+export {
+  ADVISOR_ARTEFACT_VERSION,
+  advisorSchemaDocuments,
+  serialiseSchema,
+  type SchemaDocument,
+} from './contract/json-schema.ts';
+
+// --- The validator ---------------------------------------------------------
+
+export {
+  VALIDATION_STEPS,
+  validateResponse,
+  type InsightRejection,
+  type ResolvedEvidenceRow,
+  type ResponseRejection,
+  type ValidatedInsight,
+  type ValidationInput,
+  type ValidationOutcome,
+  type ValidationStep,
+} from './validate/pipeline.ts';
+
+export {
+  displayValue,
+  evidenceValueAgrees,
+  isSnapshotRef,
+  parsePath,
+  resolveSourceRef,
+  type RefFailure,
+  type RefResolution,
+} from './validate/evidence.ts';
+
+export {
+  DERIVATION_LITERALS,
+  evaluateDerivation,
+  numericValueOf,
+  type DerivationFailure,
+  type DerivationOutcome,
+} from './validate/derivations.ts';
+
+export {
+  collectNumericCandidates,
+  extractNumerals,
+  isTraceable,
+  maskLiterals,
+  renderingsOf,
+  stringLiteralsOf,
+  stripUrls,
+  traceContext,
+  untraceableNumerals,
+  type Numeral,
+  type TraceContext,
+} from './validate/numerals.ts';
+
+export {
+  MAX_SUMMARY_LENGTH,
+  hasForbiddenCharacter,
+  markdownViolations,
+  renderableStrings,
+  renderedText,
+  type MarkdownViolation,
+  type RenderableFields,
+} from './validate/markdown.ts';
+
+export {
+  checkLink,
+  externalUrlOf,
+  hostMatches,
+  type LinkRefusal,
+  type LinkVerdict,
+} from './validate/links.ts';
+
+// --- The snapshot ----------------------------------------------------------
+
+export {
+  SNAPSHOT_WINDOWS,
+  SnapshotBuilder,
+  bucketOf,
+  monthOf,
+  roundToMultiple,
+  type BuildSnapshotInput,
+  type BuiltSnapshot,
+} from './snapshot/builder.ts';
+
+export {
+  createTokeniser,
+  deriveTokenKey,
+  inputDigest,
+  type TokenDomain,
+  type Tokeniser,
+} from './snapshot/tokens.ts';
+
+/**
+ * The read ports. `apps/api/src/domain.ts` implements them over `@ctx/ledger`,
+ * `@ctx/budgeting` and `@ctx/recurring`; nothing in this package imports those
+ * contexts (the boundary lint enforces it). None of the three has a write
+ * method, which is what makes "an advisor proposes and never acts" structural
+ * at the data layer as well as at the contract.
+ */
+export {
+  CASH_ACCOUNT_TYPES,
+  emptyPorts,
+  inMemoryBudgetPort,
+  inMemoryLedgerPort,
+  inMemoryRecurringPort,
+  type BudgetPort,
+  type CashAccountType,
+  type CategorySpendRow,
+  type FakeLedgerData,
+  type InsightsAccount,
+  type InsightsBudgetLine,
+  type InsightsBudgetPeriod,
+  type InsightsPriceChange,
+  type InsightsRecurringStream,
+  type InsightsTransaction,
+  type LedgerPort,
+  type MerchantSpendRow,
+  type MonthlyCashflowRow,
+  type RecurringPort,
+  type SnapshotPorts,
+} from './snapshot/ports.ts';
+
+// --- Policy ----------------------------------------------------------------
+
+export {
+  COOLDOWN_LADDER_DAYS,
+  PERMANENT_AFTER_DISMISSALS,
+  afterDismissal,
+  afterSnooze,
+  cooldownKey,
+  isSuppressed,
+  rungFor,
+  type CooldownRung,
+  type SuppressionState,
+} from './policy/cooldown.ts';
+
+export {
+  ALERT_BUDGET,
+  ONE_TIME_WEIGHT,
+  applyAlertBudget,
+  belowFloor,
+  effectiveImpactMinor,
+  rank,
+  type BudgetedFeed,
+  type RankableInsight,
+} from './policy/alert-budget.ts';
+
+export {
+  CONSECUTIVE_FAILURE_LIMIT,
+  REJECTION_QUARANTINE_FLOOR,
+  REJECTION_QUARANTINE_RATE,
+  decideRun,
+  shouldQuarantine,
+  type BreakerInputs,
+  type KillSwitchInputs,
+  type QuarantineReason,
+  type RunDecision,
+  type RunRefusal,
+} from './policy/kill-switches.ts';
+
+// --- The registry ----------------------------------------------------------
+
+export {
+  AdvisorRegistry,
+  checkManifest,
+  createAdvisorRegistry,
+  type Advisor,
+  type RegisteredAdvisor,
+  type RegistrationRefusal,
+  type RegistrationVerdict,
+} from './registry.ts';
+
+// --- Events, consumer, jobs ------------------------------------------------
+
+export {
+  AdvisorRunCompleted,
+  AdvisorRunFailed,
+  AdvisorRunStarted,
+  INSIGHTS_EVENTS,
+  InsightAccepted,
+  InsightDismissed,
+  InsightProposed,
+  InsightReviewed,
+} from './events.ts';
+
+export {
+  BASE_EVENT_TYPES,
+  CONSUMER_NAME,
+  advisorsForEvent,
+  createInsightsConsumer,
+  type InsightsConsumerOptions,
+} from './consumer.ts';
+
+export {
+  DEFAULT_ADVISOR_CRON,
+  RUN_ALL_JOB_KIND,
+  RUN_JOB_KIND,
+  SCHEDULE_NAME,
+  createRunAllJob,
+  createRunJob,
+  insightsJobs,
+  registerNightlySchedule,
+  type JobDependencies,
+  type RunJobPayload,
+} from './jobs.ts';
+
+// --- Services and read models ----------------------------------------------
+
+export {
+  reviewInsight,
+  runAdvisor,
+  runAdvisors,
+  type InsightsDependencies,
+  type InsightsSettings,
+  type RunAdvisorInput,
+  type RunAdvisorResult,
+  type ReviewResult,
+} from './service.ts';
+
+export {
+  advisorHealth,
+  insightFeed,
+  listInsights,
+  rankableOf,
+  type ActionView,
+  type AdvisorHealthView,
+  type EvidenceView,
+  type FeedInput,
+  type InsightView,
+} from './read.ts';
+
+export {
+  INSIGHTS_ADVISORY_LOCK_CLASS,
+  clearQuarantine,
+  findAdvisor,
+  findInsight,
+  grantScopes,
+  latestRuns,
+  listAdvisors,
+  listGrants,
+  loadSuppression,
+  loadSuppressions,
+  quarantineAdvisor,
+  recordFeedback,
+  registerAdvisor,
+  revokeScopes,
+  setAdvisorEnabled,
+  type FeedbackInput,
+  type FeedbackResult,
+  type RegisterAdvisorInput,
+  type UpsertInsightInput,
+  type UpsertInsightResult,
+} from './store.ts';
+
+export type { InsightsContext, InsightsDatabase, InsightsExecutor } from './db.ts';

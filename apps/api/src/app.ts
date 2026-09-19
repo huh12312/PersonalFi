@@ -35,8 +35,10 @@ import { categoryRoutes } from './routes/categories.ts';
 import { connectionRoutes } from './routes/connections.ts';
 import type { RouteDeps } from './routes/deps.ts';
 import { eventRoutes } from './routes/events.ts';
+import { exportRoutes } from './routes/export.ts';
 import { healthRoutes } from './routes/health.ts';
 import { plaidRoutes } from './routes/plaid.ts';
+import { reportRoutes } from './routes/reports.ts';
 import { ruleRoutes } from './routes/rules.ts';
 import { transactionRoutes } from './routes/transactions.ts';
 
@@ -223,6 +225,19 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
             '"always categorise like this transaction". A session is enough — see rules.ts\'s ' +
             'module comment for why this file does not need a step-up assertion.',
         },
+        {
+          name: 'reports',
+          description:
+            'Spending, income, the Sankey and budget-vs-actual — pure aggregation over the ' +
+            "contexts' own read models. Transfers excluded and refunds netted, reusing " +
+            "`@ctx/budgeting`'s rule rather than re-deriving it.",
+        },
+        {
+          name: 'export',
+          description:
+            'The full-database bundle: export as a versioned, hash-checked JSONL stream, and ' +
+            'import into a clean instance. Both need a step-up assertion.',
+        },
       ],
     },
     transform: jsonSchemaTransform,
@@ -369,6 +384,8 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(ruleRoutes(deps));
   await app.register(plaidRoutes(deps));
   await app.register(eventRoutes(deps));
+  await app.register(reportRoutes(deps));
+  await app.register(exportRoutes(deps, { secretsDir: config.env.SECRETS_DIR }));
 
   /**
    * Install the shipped category taxonomy for every user (condition D-6, N-3).

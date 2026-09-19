@@ -161,8 +161,12 @@ function fail(state: EvalState, reason: DerivationFailure, detail: string): null
 }
 
 function parseExpression(state: EvalState): decimal.Decimal | null {
-  let left = parseTerm(state);
-  if (left === null) return null;
+  const first = parseTerm(state);
+  if (first === null) return null;
+  // Annotated rather than inferred: `left` is reassigned from `result`, which is
+  // computed from `left`, and TypeScript calls that circular (TS7022) unless one
+  // of the two is declared. Declaring the accumulator is the honest half.
+  let left: decimal.Decimal = first;
   for (;;) {
     const token = state.tokens[state.position];
     if (token === undefined || token.kind !== 'op' || (token.text !== '+' && token.text !== '-')) {
@@ -178,8 +182,9 @@ function parseExpression(state: EvalState): decimal.Decimal | null {
 }
 
 function parseTerm(state: EvalState): decimal.Decimal | null {
-  let left = parseFactor(state);
-  if (left === null) return null;
+  const first = parseFactor(state);
+  if (first === null) return null;
+  let left: decimal.Decimal = first;
   for (;;) {
     const token = state.tokens[state.position];
     if (token === undefined || token.kind !== 'op' || (token.text !== '*' && token.text !== '/')) {

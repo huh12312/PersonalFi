@@ -28,11 +28,7 @@
     },
     "kind": {
       "type": "string",
-      "enum": [
-        "builtin",
-        "local_model",
-        "external"
-      ]
+      "enum": ["builtin", "local_model", "external"]
     },
     "generated_at": {
       "type": "string",
@@ -95,11 +91,7 @@
           "pattern": "^\\d{4}-\\d{2}-\\d{2}T[0-9:.]+Z$"
         }
       },
-      "required": [
-        "max_insights",
-        "max_response_bytes",
-        "deadline"
-      ],
+      "required": ["max_insights", "max_response_bytes", "deadline"],
       "additionalProperties": false
     },
     "snapshot": {
@@ -124,10 +116,7 @@
                   "pattern": "^[A-Z]{3}$"
                 }
               },
-              "required": [
-                "minor",
-                "currency"
-              ],
+              "required": ["minor", "currency"],
               "additionalProperties": false,
               "description": "Money as minor units in a string, paired with an ISO-4217 code."
             },
@@ -143,10 +132,7 @@
                   "pattern": "^[A-Z]{3}$"
                 }
               },
-              "required": [
-                "minor",
-                "currency"
-              ],
+              "required": ["minor", "currency"],
               "additionalProperties": false,
               "description": "Money as minor units in a string, paired with an ISO-4217 code."
             },
@@ -162,10 +148,7 @@
                   "pattern": "^[A-Z]{3}$"
                 }
               },
-              "required": [
-                "minor",
-                "currency"
-              ],
+              "required": ["minor", "currency"],
               "additionalProperties": false,
               "description": "Money as minor units in a string, paired with an ISO-4217 code."
             },
@@ -191,29 +174,17 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   }
                 },
-                "required": [
-                  "month",
-                  "net_worth"
-                ],
+                "required": ["month", "net_worth"],
                 "additionalProperties": false
               }
             }
           },
-          "required": [
-            "as_of",
-            "assets",
-            "liabilities",
-            "net_worth",
-            "trend"
-          ],
+          "required": ["as_of", "assets", "liabilities", "net_worth", "trend"],
           "additionalProperties": false
         },
         "cash_summary": {
@@ -235,10 +206,7 @@
                   "pattern": "^[A-Z]{3}$"
                 }
               },
-              "required": [
-                "minor",
-                "currency"
-              ],
+              "required": ["minor", "currency"],
               "additionalProperties": false,
               "description": "Money as minor units in a string, paired with an ISO-4217 code."
             },
@@ -278,13 +246,7 @@
                   },
                   "type": {
                     "type": "string",
-                    "enum": [
-                      "checking",
-                      "savings",
-                      "money_market",
-                      "cash_management",
-                      "other"
-                    ]
+                    "enum": ["checking", "savings", "money_market", "cash_management", "other"]
                   },
                   "balance": {
                     "type": "object",
@@ -298,10 +260,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -318,12 +277,7 @@
                     ]
                   }
                 },
-                "required": [
-                  "account_ref",
-                  "type",
-                  "balance",
-                  "apy"
-                ],
+                "required": ["account_ref", "type", "balance", "apy"],
                 "additionalProperties": false
               }
             }
@@ -375,10 +329,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -394,10 +345,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -413,10 +361,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -449,40 +394,22 @@
                               "pattern": "^[A-Z]{3}$"
                             }
                           },
-                          "required": [
-                            "minor",
-                            "currency"
-                          ],
+                          "required": ["minor", "currency"],
                           "additionalProperties": false,
                           "description": "Money as minor units in a string, paired with an ISO-4217 code."
                         }
                       },
-                      "required": [
-                        "category_ref",
-                        "category_slug",
-                        "amount"
-                      ],
+                      "required": ["category_ref", "category_slug", "amount"],
                       "additionalProperties": false
                     }
                   }
                 },
-                "required": [
-                  "month",
-                  "income",
-                  "expense",
-                  "net",
-                  "by_category"
-                ],
+                "required": ["month", "income", "expense", "net", "by_category"],
                 "additionalProperties": false
               }
             }
           },
-          "required": [
-            "from_month",
-            "to_month",
-            "currency",
-            "months"
-          ],
+          "required": ["from_month", "to_month", "currency", "months"],
           "additionalProperties": false
         },
         "budgets_status": {
@@ -517,10 +444,7 @@
                   "pattern": "^[A-Z]{3}$"
                 }
               },
-              "required": [
-                "minor",
-                "currency"
-              ],
+              "required": ["minor", "currency"],
               "additionalProperties": false,
               "description": "Money as minor units in a string, paired with an ISO-4217 code."
             },
@@ -583,10 +507,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -602,10 +523,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -621,10 +539,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -640,10 +555,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -659,10 +571,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -678,10 +587,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -697,10 +603,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   }
@@ -797,10 +700,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -816,10 +716,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -835,10 +732,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -881,10 +775,7 @@
                         },
                         "direction": {
                           "type": "string",
-                          "enum": [
-                            "INCREASE",
-                            "DECREASE"
-                          ]
+                          "enum": ["INCREASE", "DECREASE"]
                         },
                         "previous_amount": {
                           "type": "object",
@@ -898,10 +789,7 @@
                               "pattern": "^[A-Z]{3}$"
                             }
                           },
-                          "required": [
-                            "minor",
-                            "currency"
-                          ],
+                          "required": ["minor", "currency"],
                           "additionalProperties": false,
                           "description": "Money as minor units in a string, paired with an ISO-4217 code."
                         },
@@ -917,10 +805,7 @@
                               "pattern": "^[A-Z]{3}$"
                             }
                           },
-                          "required": [
-                            "minor",
-                            "currency"
-                          ],
+                          "required": ["minor", "currency"],
                           "additionalProperties": false,
                           "description": "Money as minor units in a string, paired with an ISO-4217 code."
                         },
@@ -936,10 +821,7 @@
                               "pattern": "^[A-Z]{3}$"
                             }
                           },
-                          "required": [
-                            "minor",
-                            "currency"
-                          ],
+                          "required": ["minor", "currency"],
                           "additionalProperties": false,
                           "description": "Money as minor units in a string, paired with an ISO-4217 code."
                         }
@@ -977,11 +859,7 @@
               }
             }
           },
-          "required": [
-            "as_of",
-            "currency",
-            "streams"
-          ],
+          "required": ["as_of", "currency", "streams"],
           "additionalProperties": false
         },
         "goals_list": {
@@ -1016,10 +894,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -1034,20 +909,12 @@
                     "maximum": 1
                   }
                 },
-                "required": [
-                  "goal_ref",
-                  "name",
-                  "target",
-                  "horizon_months",
-                  "progress"
-                ],
+                "required": ["goal_ref", "name", "target", "horizon_months", "progress"],
                 "additionalProperties": false
               }
             }
           },
-          "required": [
-            "goals"
-          ],
+          "required": ["goals"],
           "additionalProperties": false
         },
         "risk_profile": {
@@ -1070,19 +937,10 @@
             },
             "liquidity_need": {
               "type": "string",
-              "enum": [
-                "low",
-                "medium",
-                "high"
-              ]
+              "enum": ["low", "medium", "high"]
             }
           },
-          "required": [
-            "tolerance",
-            "horizon_years",
-            "tax_bracket_band",
-            "liquidity_need"
-          ],
+          "required": ["tolerance", "horizon_years", "tax_bracket_band", "liquidity_need"],
           "additionalProperties": false
         },
         "market_watchlist": {
@@ -1098,9 +956,7 @@
               }
             }
           },
-          "required": [
-            "symbols"
-          ],
+          "required": ["symbols"],
           "additionalProperties": false
         },
         "holdings_aggregate": {
@@ -1127,10 +983,7 @@
                     "maximum": 1
                   }
                 },
-                "required": [
-                  "asset_class",
-                  "weight"
-                ],
+                "required": ["asset_class", "weight"],
                 "additionalProperties": false
               }
             },
@@ -1151,10 +1004,7 @@
                     "maximum": 1
                   }
                 },
-                "required": [
-                  "symbol",
-                  "weight"
-                ],
+                "required": ["symbol", "weight"],
                 "additionalProperties": false
               }
             },
@@ -1175,10 +1025,7 @@
                     "maximum": 1
                   }
                 },
-                "required": [
-                  "asset_class",
-                  "weight"
-                ],
+                "required": ["asset_class", "weight"],
                 "additionalProperties": false
               }
             },
@@ -1238,10 +1085,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -1257,10 +1101,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -1276,10 +1117,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -1301,10 +1139,7 @@
               }
             }
           },
-          "required": [
-            "as_of",
-            "positions"
-          ],
+          "required": ["as_of", "positions"],
           "additionalProperties": false
         },
         "transactions_summary": {
@@ -1356,20 +1191,12 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   }
                 },
-                "required": [
-                  "category_ref",
-                  "category_slug",
-                  "count",
-                  "total"
-                ],
+                "required": ["category_ref", "category_slug", "count", "total"],
                 "additionalProperties": false
               }
             },
@@ -1402,30 +1229,17 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   }
                 },
-                "required": [
-                  "merchant_ref",
-                  "count",
-                  "total"
-                ],
+                "required": ["merchant_ref", "count", "total"],
                 "additionalProperties": false
               }
             }
           },
-          "required": [
-            "from_month",
-            "to_month",
-            "currency",
-            "by_category",
-            "top_merchants"
-          ],
+          "required": ["from_month", "to_month", "currency", "by_category", "top_merchants"],
           "additionalProperties": false
         },
         "transactions_raw": {
@@ -1486,21 +1300,11 @@
                   },
                   "amount_bucket": {
                     "type": "string",
-                    "enum": [
-                      "0-10",
-                      "10-50",
-                      "50-200",
-                      "200-1000",
-                      "1000-5000",
-                      "5000+"
-                    ]
+                    "enum": ["0-10", "10-50", "50-200", "200-1000", "1000-5000", "5000+"]
                   },
                   "direction": {
                     "type": "string",
-                    "enum": [
-                      "outflow",
-                      "inflow"
-                    ]
+                    "enum": ["outflow", "inflow"]
                   }
                 },
                 "required": [
@@ -1515,12 +1319,7 @@
               }
             }
           },
-          "required": [
-            "from_date",
-            "to_date",
-            "currency",
-            "rows"
-          ],
+          "required": ["from_date", "to_date", "currency", "rows"],
           "additionalProperties": false
         },
         "institutions_names": {
@@ -1544,17 +1343,12 @@
                     "maxLength": 96
                   }
                 },
-                "required": [
-                  "institution_ref",
-                  "name"
-                ],
+                "required": ["institution_ref", "name"],
                 "additionalProperties": false
               }
             }
           },
-          "required": [
-            "institutions"
-          ],
+          "required": ["institutions"],
           "additionalProperties": false
         }
       },

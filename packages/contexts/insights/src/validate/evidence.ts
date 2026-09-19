@@ -152,3 +152,38 @@ export function displayValue(value: unknown): string {
       return JSON.stringify(value) ?? '';
   }
 }
+
+/** `$1,234.50` and `1234.5` are the same claim. Formatting is not a figure. */
+function normalise(text: string): string {
+  return text.replace(/[\s$,%()]/g, '').toLowerCase();
+}
+
+/**
+ * Does `evidence.value` agree with what the ref actually resolved to?
+ *
+ * The answer depends on what came back, and the split is the whole design:
+ *
+ *   * **A primitive** — a slug, a date, a bucket label, a count, a ratio. The
+ *     advisor is quoting something atomic, so the claim must *contain* it or be
+ *     contained by it once formatting is stripped. `'food.dining'` labelled as
+ *     `'Dining'` is a fabrication wearing a citation and is refused here.
+ *   * **An object or an array** — in practice `{ minor, currency }`. There is no
+ *     string form of that a human would write, and demanding one would force
+ *     every advisor to print `{"minor":"1899","currency":"USD"}` instead of
+ *     `$18.99`. So this returns `true` and the *numeral* check carries the
+ *     weight: `18.99` still has to be traceable to a snapshot value or to a
+ *     derivation we recomputed, which is the stronger of the two checks anyway.
+ *
+ * An advisor that cites money and labels it with a number we never sent is
+ * therefore caught, just one step later and by a check that cannot be argued
+ * with. An advisor that cites a category slug and renames it is caught here,
+ * where a numeral check would have had nothing to look at.
+ */
+export function evidenceValueAgrees(claimed: string | null, resolved: unknown): boolean {
+  if (claimed === null) return true;
+  if (resolved !== null && typeof resolved === 'object') return true;
+  const left = normalise(claimed);
+  const right = normalise(displayValue(resolved));
+  if (left.length === 0 || right.length === 0) return left === right;
+  return left.includes(right) || right.includes(left);
+}

@@ -1,0 +1,368 @@
+// SPDX-License-Identifier: MIT
+/**
+ * The read models: the feed, one insight with its evidence, and advisor health.
+ *
+ * ## The alert budget is applied here, not at write time
+ *
+ * Every validated proposal is persisted. The budget — 5 on the dashboard, 20 in
+ * the list, a $50 annual floor — decides what is *shown*, and it is a read-time
+ * decision on purpose:
+ *
+ *   * raising the ceiling shows more immediately, with no re-run;
+ *   * lowering it loses nothing;
+ *   * "why am I not seeing X?" is answerable by reading the row, which still
+ *     exists, rather than by re-deriving what a past run decided to skip.
+ *
+ * The alternative — filtering at write time — makes the budget a property of
+ * the night an insight was proposed, which is the one thing about it that
+ * should not be historical.
+ *
+ * ## Suppression is checked here too, and that is not redundant
+ *
+ * `service.ts` refuses to *propose* a suppressed finding. This refuses to
+ * *show* one. They are different windows: a cooldown that starts after an
+ * insight was already written must hide the existing row, and a
+ * dismissed-then-reopened finding must reappear without waiting for the next
+ * run. Two checks, two moments, one predicate (`policy/cooldown.ts`).
+ */
+import { Money } from '@core/kernel';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import type { InsightsExecutor } from './db.ts';
+import {
+  applyAlertBudget,
+  type BudgetedFeed,
+  type RankableInsight,
+} from './policy/alert-budget.ts';
+import { isSuppressed } from './policy/cooldown.ts';
+import {
+  advisorRuns,
+  advisors,
+  insightActions,
+  insightDismissals,
+  insightEvidence,
+  insights,
+  type InsightStatus,
+} from '../schema/index.ts';
+import type { Severity } from './contract/response.ts';
+
+export interface EvidenceView {
+  readonly position: number;
+  readonly kind: string;
+  readonly label: string;
+  readonly value: string | null;
+  /** The snapshot path, for the UI's click-through. Never a foreign key. */
+  readonly sourceRef: string | null;
+  readonly resolvedDisplay: string | null;
+  readonly href: string | null;
+}
+
+export interface ActionView {
+  readonly position: number;
+  readonly kind: string;
+  readonly label: string;
+  readonly rationaleMd: string;
+  readonly url: string | null;
+}
+
+export interface InsightView {
+  readonly id: string;
+  readonly advisorId: string;
+  readonly key: string;
+  readonly period: string;
+  readonly type: string;
+  readonly severity: Severity;
+  readonly severityClamped: boolean;
+  readonly title: string;
+  readonly summaryMd: string;
+  readonly confidence: number;
+  readonly confidenceBasis: string;
+  readonly horizon: string;
+  readonly status: InsightStatus;
+  readonly annualizedImpact: Money | null;
+  readonly oneTimeImpact: Money | null;
+  readonly impactBasis: string;
+  readonly caveats: readonly string[];
+  readonly inputDigest: string;
+  readonly firstProposedAt: Date;
+  readonly lastProposedAt: Date;
+  readonly expiresAt: Date | null;
+  readonly evidence: readonly EvidenceView[];
+  readonly actions: readonly ActionView[];
+}
+
+export interface FeedInput {
+  readonly userId: string;
+  /** Defaults to the review queue. Pass `[]` for every status. */
+  readonly statuses?: readonly InsightStatus[];
+  readonly advisorIds?: readonly string[];
+  /** Rows to read before the budget is applied. A bound, not a page size. */
+  readonly limit?: number;
+  /**
+   * The instant to judge expiry and suppression against, or `null` to skip
+   * both.
+   *
+   * **Required**, with no default. A read model that reached for `new Date()`
+   * would be the one place in this context that read a wall clock, and the
+   * answer it gave would then differ from the answer the *writer* gave a
+   * millisecond earlier from the injected `Clock`. The caller has a clock;
+   * `null` is how a caller says it genuinely wants the unfiltered set.
+   */
+  readonly now: Date | null;
+}
+
+/** `confidence` comes back as a NUMERIC string. Parsed once, at the edge. */
+function scoreOf(text: string): number {
+  const value = Number.parseFloat(text);
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+}
+
+function moneyOf(minor: bigint | null, code: string | null): Money | null {
+  return minor === null || code === null ? null : Money.of(minor, code);
+}
+
+/**
+ * Every insight matching the filter, with its evidence and actions attached.
+ *
+ * Three queries rather than one join, because a join over two one-to-many
+ * children multiplies the rows and the de-duplication is more code than the
+ * extra round trips are worth at this size. The bound on the parent query is
+ * what keeps the `IN` lists finite.
+ */
+export async function listInsights(
+  executor: InsightsExecutor,
+  input: FeedInput,
+): Promise<readonly InsightView[]> {
+  const statuses = input.statuses ?? (['pending_review'] as const);
+  const conditions = [eq(insights.userId, input.userId)];
+  if (statuses.length > 0) conditions.push(inArray(insights.status, [...statuses]));
+  if (input.advisorIds !== undefined) {
+    if (input.advisorIds.length === 0) return [];
+    conditions.push(inArray(insights.advisorId, [...input.advisorIds]));
+  }
+
+  const rows = await executor
+    .select()
+    .from(insights)
+    .where(and(...conditions))
+    .orderBy(desc(insights.lastProposedAt), asc(insights.key))
+    .limit(Math.min(Math.max(input.limit ?? 200, 1), 1000));
+  if (rows.length === 0) return [];
+
+  const ids = rows.map((row) => row.id);
+  const [evidenceRows, actionRows] = await Promise.all([
+    executor
+      .select()
+      .from(insightEvidence)
+      .where(inArray(insightEvidence.insightId, ids))
+      .orderBy(asc(insightEvidence.insightId), asc(insightEvidence.position)),
+    executor
+      .select()
+      .from(insightActions)
+      .where(inArray(insightActions.insightId, ids))
+      .orderBy(asc(insightActions.insightId), asc(insightActions.position)),
+  ]);
+
+  const evidenceBy = new Map<string, EvidenceView[]>();
+  for (const row of evidenceRows) {
+    const list = evidenceBy.get(row.insightId) ?? [];
+    list.push({
+      position: row.position,
+      kind: row.kind,
+      label: row.label,
+      value: row.value,
+      sourceRef: row.sourceRef,
+      resolvedDisplay: row.resolvedDisplay,
+      href: row.href,
+    });
+    evidenceBy.set(row.insightId, list);
+  }
+
+  const actionsBy = new Map<string, ActionView[]>();
+  for (const row of actionRows) {
+    const list = actionsBy.get(row.insightId) ?? [];
+    list.push({
+      position: row.position,
+      kind: row.kind,
+      label: row.label,
+      rationaleMd: row.rationaleMd,
+      url: row.url,
+    });
+    actionsBy.set(row.insightId, list);
+  }
+
+  const now = input.now;
+  const suppressions =
+    now === null
+      ? new Map<
+          string,
+          { dismissCount: number; suppressedUntil: Date | null; permanent: boolean }
+        >()
+      : await loadSuppressionMap(executor, input.userId);
+
+  const views: InsightView[] = [];
+  for (const row of rows) {
+    if (now !== null && row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime()) {
+      // Still `pending_review` in the table — nobody answered it — but it is no
+      // longer true. See `0012_insights.sql` on why there is no `expired`
+      // status to write instead.
+      continue;
+    }
+    if (
+      now !== null &&
+      row.status === 'pending_review' &&
+      isSuppressed(suppressions.get(`${row.advisorId}|${row.key}`) ?? null, now)
+    ) {
+      continue;
+    }
+    views.push({
+      id: row.id,
+      advisorId: row.advisorId,
+      key: row.key,
+      period: row.period,
+      type: row.type,
+      severity: row.severity as Severity,
+      severityClamped: row.severityClamped,
+      title: row.title,
+      summaryMd: row.summaryMd,
+      confidence: scoreOf(row.confidence),
+      confidenceBasis: row.confidenceBasis,
+      horizon: row.horizon,
+      status: row.status,
+      annualizedImpact: moneyOf(row.impactAnnualizedMinor, row.impactCurrency),
+      oneTimeImpact: moneyOf(row.impactOneTimeMinor, row.impactCurrency),
+      impactBasis: row.impactBasis,
+      caveats: row.caveats,
+      inputDigest: row.inputDigest,
+      firstProposedAt: row.firstProposedAt,
+      lastProposedAt: row.lastProposedAt,
+      expiresAt: row.expiresAt,
+      evidence: evidenceBy.get(row.id) ?? [],
+      actions: actionsBy.get(row.id) ?? [],
+    });
+  }
+  return views;
+}
+
+async function loadSuppressionMap(
+  executor: InsightsExecutor,
+  userId: string,
+): Promise<
+  Map<string, { dismissCount: number; suppressedUntil: Date | null; permanent: boolean }>
+> {
+  const rows = await executor
+    .select()
+    .from(insightDismissals)
+    .where(eq(insightDismissals.userId, userId));
+  const map = new Map<
+    string,
+    { dismissCount: number; suppressedUntil: Date | null; permanent: boolean }
+  >();
+  for (const row of rows) {
+    map.set(`${row.advisorId}|${row.insightKey}`, {
+      dismissCount: row.dismissCount,
+      suppressedUntil: row.suppressedUntil,
+      permanent: row.permanent,
+    });
+  }
+  return map;
+}
+
+/** The ranking projection. One place, so the feed and a test agree on it. */
+export function rankableOf(view: InsightView): RankableInsight {
+  return {
+    key: view.key,
+    severity: view.severity,
+    confidence: view.confidence,
+    annualizedImpact: view.annualizedImpact,
+    oneTimeImpact: view.oneTimeImpact,
+  };
+}
+
+/**
+ * The feed with the alert budget applied.
+ *
+ * Returns all four slices rather than just the visible one, so a UI can say
+ * "and 14 more" and a diagnostic screen can show what the floor excluded — the
+ * question "why is this not in my feed?" has an answer in the return value
+ * rather than requiring a second query.
+ */
+export async function insightFeed(
+  executor: InsightsExecutor,
+  input: FeedInput & { readonly currency: string },
+): Promise<BudgetedFeed<InsightView>> {
+  const views = await listInsights(executor, input);
+  return applyAlertBudget(views, rankableOf, input.currency);
+}
+
+export interface AdvisorHealthView {
+  readonly advisorId: string;
+  readonly displayName: string;
+  readonly kind: string;
+  readonly version: string;
+  readonly enabled: boolean;
+  readonly quarantinedAt: Date | null;
+  readonly quarantineReason: string | null;
+  readonly consecutiveFailures: number;
+  readonly lastRunAt: Date | null;
+  readonly grantedScopes: readonly string[];
+  readonly lastRunStatus: string | null;
+  readonly lastRunRejected: number | null;
+}
+
+/**
+ * One row per registered advisor, with the state of the three kill switches and
+ * the outcome of its most recent run.
+ *
+ * This is the screen an operator looks at when advice stops appearing, and the
+ * two answers it has to be able to give are "it is switched off" and "it keeps
+ * producing output we refuse" — which is why `quarantineReason` and
+ * `lastRunRejected` are both here rather than one standing in for the other.
+ */
+export async function advisorHealth(
+  executor: InsightsExecutor,
+  userId: string,
+): Promise<readonly AdvisorHealthView[]> {
+  const rows = await executor
+    .select()
+    .from(advisors)
+    .where(eq(advisors.userId, userId))
+    .orderBy(asc(advisors.advisorId));
+  if (rows.length === 0) return [];
+
+  const latest = await executor
+    .select({
+      advisorId: advisorRuns.advisorId,
+      status: advisorRuns.status,
+      rejectedCount: advisorRuns.rejectedCount,
+      startedAt: advisorRuns.startedAt,
+      rank: sql<number>`row_number() OVER (PARTITION BY ${advisorRuns.advisorId} ORDER BY ${advisorRuns.startedAt} DESC)`.as(
+        'rank',
+      ),
+    })
+    .from(advisorRuns)
+    .where(eq(advisorRuns.userId, userId));
+
+  const lastByAdvisor = new Map<string, { status: string; rejectedCount: number }>();
+  for (const run of latest) {
+    if (run.rank !== 1) continue;
+    lastByAdvisor.set(run.advisorId, { status: run.status, rejectedCount: run.rejectedCount });
+  }
+
+  return rows.map((row) => {
+    const last = lastByAdvisor.get(row.advisorId);
+    return {
+      advisorId: row.advisorId,
+      displayName: row.displayName,
+      kind: row.kind,
+      version: row.version,
+      enabled: row.enabled,
+      quarantinedAt: row.quarantinedAt,
+      quarantineReason: row.quarantineReason,
+      consecutiveFailures: row.consecutiveFailures,
+      lastRunAt: row.lastRunAt,
+      grantedScopes: row.requiresScopes,
+      lastRunStatus: last?.status ?? null,
+      lastRunRejected: last?.rejectedCount ?? null,
+    };
+  });
+}

@@ -28,9 +28,7 @@ export const ADVISOR_CONTRACT_MAJOR = 1 as const;
  * exists now so that the negotiation code path has something real to read rather
  * than being written for the first time under pressure.
  */
-export const SUPPORTED_CONTRACT_MAJORS: readonly number[] = Object.freeze([
-  ADVISOR_CONTRACT_MAJOR,
-]);
+export const SUPPORTED_CONTRACT_MAJORS: readonly number[] = Object.freeze([ADVISOR_CONTRACT_MAJOR]);
 
 /** `$id` prefix for every schema document in the bundle. */
 export const ADVISOR_SCHEMA_BASE = 'https://personalfi.local/contracts/advisor/v1' as const;

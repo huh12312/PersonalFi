@@ -58,11 +58,7 @@
           }
         }
       },
-      "required": [
-        "runtime_ms",
-        "model",
-        "warnings"
-      ],
+      "required": ["runtime_ms", "model", "warnings"],
       "additionalProperties": false
     },
     "insights": {
@@ -91,12 +87,7 @@
           },
           "severity": {
             "type": "string",
-            "enum": [
-              "info",
-              "notable",
-              "warning",
-              "urgent"
-            ]
+            "enum": ["info", "notable", "warning", "urgent"]
           },
           "title": {
             "type": "string",
@@ -115,21 +106,11 @@
           },
           "confidence_basis": {
             "type": "string",
-            "enum": [
-              "deterministic",
-              "heuristic",
-              "model"
-            ]
+            "enum": ["deterministic", "heuristic", "model"]
           },
           "horizon": {
             "type": "string",
-            "enum": [
-              "immediate",
-              "this_period",
-              "next_quarter",
-              "this_year",
-              "long_term"
-            ]
+            "enum": ["immediate", "this_period", "next_quarter", "this_year", "long_term"]
           },
           "requires_review": {
             "type": "boolean",
@@ -152,10 +133,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -178,10 +156,7 @@
                         "pattern": "^[A-Z]{3}$"
                       }
                     },
-                    "required": [
-                      "minor",
-                      "currency"
-                    ],
+                    "required": ["minor", "currency"],
                     "additionalProperties": false,
                     "description": "Money as minor units in a string, paired with an ISO-4217 code."
                   },
@@ -206,12 +181,7 @@
                 ]
               }
             },
-            "required": [
-              "annualized",
-              "one_time",
-              "basis",
-              "derivation_id"
-            ],
+            "required": ["annualized", "one_time", "basis", "derivation_id"],
             "additionalProperties": false
           },
           "evidence": {
@@ -223,13 +193,7 @@
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "metric",
-                    "transaction",
-                    "series",
-                    "budget_line",
-                    "external"
-                  ]
+                  "enum": ["metric", "transaction", "series", "budget_line", "external"]
                 },
                 "label": {
                   "type": "string",
@@ -272,13 +236,7 @@
                   ]
                 }
               },
-              "required": [
-                "kind",
-                "label",
-                "value",
-                "source_ref",
-                "url"
-              ],
+              "required": ["kind", "label", "value", "source_ref", "url"],
               "additionalProperties": false
             }
           },
@@ -326,13 +284,7 @@
                   ]
                 }
               },
-              "required": [
-                "id",
-                "expression",
-                "inputs",
-                "value",
-                "note"
-              ],
+              "required": ["id", "expression", "inputs", "value", "note"],
               "additionalProperties": false
             }
           },
@@ -344,12 +296,7 @@
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "suggest_only",
-                    "open_url",
-                    "create_goal_draft",
-                    "create_rule_draft"
-                  ]
+                  "enum": ["suggest_only", "open_url", "create_goal_draft", "create_rule_draft"]
                 },
                 "label": {
                   "type": "string",
@@ -372,12 +319,7 @@
                   ]
                 }
               },
-              "required": [
-                "kind",
-                "label",
-                "rationale_md",
-                "url"
-              ],
+              "required": ["kind", "label", "rationale_md", "url"],
               "additionalProperties": false
             }
           },

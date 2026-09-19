@@ -174,9 +174,28 @@ describeWithDb('runMigrations', () => {
       //   (user_id, dedupe_key) is at-most-once delivery, and (user_id,
       //   channel_id, group_key, group_window_start) is digest coalescing —
       //   enforced by the outbox, not by each rule (08 §4.5).
+      // 0012_insights: the eight @ctx/insights tables — advisor_runs,
+      //   advisors, insight_actions, insight_dismissals, insight_evidence,
+      //   insight_feedback, insights, snapshot_grants. None of them carries a
+      //   foreign key into another context's schema: an insight's link back to
+      //   the data is `insight_evidence.source_ref`, a *path into the snapshot
+      //   we sent*, resolved by the API at render time. That is not squeamishness
+      //   about joins — it is what makes "an advisor's evidence never cites data
+      //   we did not send" checkable at all, because a ref that were a foreign
+      //   key would resolve against the database and so would resolve for data
+      //   the advisor never received.
+      //   Three CHECKs carry claims the TypeScript also makes, so a row written
+      //   by any path carries them: insight_actions_kind_is_not_an_action (the
+      //   four non-acting members of 08 §4.3, with no execute/transfer/trade),
+      //   insights_reviewed_has_timestamp (nothing leaves `pending_review`
+      //   without a recorded review), and insight_dismissals_permanent_is_earned
+      //   (the 30/90/permanent ladder's third rung is reachable only at three
+      //   dismissals — a snooze never advances the count).
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
+        'advisor_runs',
+        'advisors',
         'auth_attempts',
         'auth_lockouts',
         'budget_alerts_state',
@@ -197,6 +216,11 @@ describeWithDb('runMigrations', () => {
         'encryption_keys',
         'event_consumer_offsets',
         'feature_flags',
+        'insight_actions',
+        'insight_dismissals',
+        'insight_evidence',
+        'insight_feedback',
+        'insights',
         'job_runs',
         'jobs',
         'ledger_dedup_keys',
@@ -222,6 +246,7 @@ describeWithDb('runMigrations', () => {
         'schema_migrations',
         'security_events',
         'sessions',
+        'snapshot_grants',
         'subscription_metadata',
         'sync_runs',
         'totp_secrets',
