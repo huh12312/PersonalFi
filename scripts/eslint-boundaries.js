@@ -421,6 +421,32 @@ const LAYERS = [
       'confined here. @core/testkit and @core/seed are dev-only, used only from test/.',
   },
   {
+    // Phase 2 WP 2.6/2.7 (docs/plan/02-phase-2-dispatch.md §4 shared files).
+    // Insights reads a minimised snapshot built in apps/api through a port and
+    // validates advisor output against @core/contracts' Advisor schema; it
+    // imports no other context and no LLM client (D22: the local model lands in
+    // Phase 5 behind the same contract).
+    name: 'insights',
+    prefix: 'packages/contexts/insights/',
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      '@core/contracts',
+      '@core/platform',
+      '@core/secretbox',
+      '@core/testkit',
+      '@core/seed',
+      'drizzle-orm',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'Insights is a context: it depends on the kernel and on infrastructure, ' +
+      'and on no other context. @core/testkit and @core/seed are dev-only, used only ' +
+      'from test/.',
+  },
+  {
     name: 'context',
     prefix: 'packages/contexts/',
     allow: [

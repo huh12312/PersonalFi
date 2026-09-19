@@ -30,11 +30,11 @@
 #   `test` (no Postgres, no DATABASE_URL):
 #     kernel, config, api, platform, testkit, seed, secretbox, identity,
 #     ledger, categorization, connector-port, connector-manual, connector-csv,
-#     connector-plaid, connections, recurring, budgeting, notifications
+#     connector-plaid, connections, recurring, budgeting, notifications, insights
 #   `migration-test` (Postgres 18 service, DATABASE_URL set):
 #     db, platform-db, secretbox-db, identity-db, api-db, testkit, ledger-db,
 #     categorization-db, connections-db, recurring-db, budgeting-db,
-#     notifications-db
+#     notifications-db, insights-db
 #   `web` (apps/web has its own vitest config, not part of the root one):
 #     web (vitest), plus Playwright projects `chromium` (smoke) and `csp`
 #
@@ -161,7 +161,7 @@ jobs:
             --project connector-port --project connector-manual \
             --project connector-csv --project connector-plaid \
             --project connections --project recurring --project budgeting \
-            --project notifications
+            --project notifications --project insights
 
   migration-test:
     name: migration test (postgres 18)
@@ -225,7 +225,7 @@ jobs:
             --project identity-db --project api-db --project testkit \
             --project ledger-db --project categorization-db \
             --project connections-db --project recurring-db --project budgeting-db \
-            --project notifications-db
+            --project notifications-db --project insights-db
 
   web:
     name: web (unit, build, playwright)

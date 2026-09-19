@@ -289,6 +289,29 @@ export default defineConfig({
         },
       },
       {
+        // Phase 2 WP 2.6/2.7 (docs/plan/02-phase-2-dispatch.md §3): the
+        // Advisor-contract validation pipeline, the snapshot builder over a
+        // fake port, and the built-in rule catalog are pure; they run here.
+        root: './packages/contexts/insights',
+        test: {
+          name: 'insights',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        // `pending_review` persistence, dedupe/cooldown and the kill switches
+        // are claims about Postgres.
+        root: './packages/contexts/insights',
+        test: {
+          name: 'insights-db',
+          include: ['test/db/**/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 30_000,
+        },
+      },
+      {
         // The orchestrator's claims are all claims about Postgres: that a page's
         // ledger rows and its cursor advance commit together, that an injected
         // failure mid-pagination leaves both consistent, that a restart rewinds
