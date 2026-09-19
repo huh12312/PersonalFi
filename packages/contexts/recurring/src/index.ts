@@ -32,6 +32,28 @@
  * yet and is left to the catalogue work in WP 2.7.
  */
 
+/**
+ * ## What WP 2.3 adds
+ *
+ * Persistence, a lifecycle and a forecast, on top of the same pure engine:
+ *
+ *   * `runDetection` — one pass, one transaction, scoped to the payees a sync
+ *     touched. Rejections are applied to its *input*, so a refused merchant's
+ *     rows are never even read.
+ *   * `confirmCandidate` / `rejectCandidate` / `mergeSeries` — the human half.
+ *     A confirmation pins a series against every future pass; a rejection is
+ *     permanent and writes a `merchantKey → NOT_RECURRING` override.
+ *   * `upcomingCalendar` / `forwardCashFlow` / `safeToSpend` — the read models,
+ *     every number of which carries a band rather than a false precision.
+ *   * `createRecurringConsumer` — the reaction to `ledger.TransactionsUpserted`,
+ *     `ledger.TransactionSupersededByPosted` and
+ *     `categorization.AssignmentsChanged`, idempotent by construction.
+ *
+ * Detection still never creates a merchant, and now has a database to prove it
+ * in: `test/db/no-merchant-creation.test.ts` runs a full pass and asserts the
+ * `merchants` row count **and its ids** are untouched.
+ */
+
 /** Stable identifier used by feature flags (`module.recurring`) and event metadata. */
 export const CONTEXT_ID = 'recurring' as const;
 
@@ -84,6 +106,88 @@ export {
   type TypingInputs,
   type TypingOutcome,
 } from './typing.ts';
+
+// --- WP 2.3: events, persistence, lifecycle, forecast ----------------------
+
+export {
+  CandidateProposed,
+  DuplicateServiceDetected,
+  PriceChangeDetected,
+  RECURRING_EVENTS,
+  SeriesConfirmed,
+  SeriesLapsed,
+} from './events.ts';
+
+export {
+  CONSUMED_EVENT_TYPES,
+  CONSUMER_NAME,
+  createRecurringConsumer,
+  transactionIdsOf,
+  type RecurringConsumerOptions,
+} from './consumer.ts';
+
+export {
+  DEFAULT_HISTORY_DAYS,
+  DETECTION_VERSION,
+  confirmCandidate,
+  confirmSeries,
+  mergeSeries,
+  rejectCandidate,
+  rejectSeries,
+  runDetection,
+  setSeriesMetadata,
+  type CandidateDecisionInput,
+  type DetectionRunInput,
+  type DetectionRunResult,
+  type RecurringDependencies,
+  type RejectionInput,
+  type RejectionResult,
+} from './service.ts';
+
+export {
+  DEFAULT_HORIZON_DAYS,
+  forwardCashFlow,
+  listCandidates,
+  listOverrides,
+  listSeries,
+  projectCharges,
+  projectSeries,
+  safeToSpend,
+  seriesCountsByState,
+  upcomingCalendar,
+  type CalendarDay,
+  type CandidateQueueEntry,
+  type CashFlowForecast,
+  type ProjectedCharge,
+  type ProjectionInput,
+  type SafeToSpend,
+  type SeriesListInput,
+  type UpcomingCalendar,
+} from './read.ts';
+
+/**
+ * The read port. `apps/api/src/domain.ts` implements it over `@ctx/ledger`;
+ * nothing in this package imports that context (the boundary lint enforces it).
+ * It has **no write method**, which is the mechanism behind D25 rather than an
+ * omission — see `ledger-port.ts`'s header.
+ */
+export {
+  collectForRecurring,
+  inMemoryLedgerPort,
+  type LedgerPort,
+  type ListForRecurringInput,
+  type RecurringTransaction,
+  type RecurringTransactionPage,
+} from './ledger-port.ts';
+
+export {
+  RECURRING_ADVISORY_LOCK_CLASS,
+  type MetadataPatch,
+  type RecurringContext,
+  type RecurringDatabase,
+  type RecurringExecutor,
+  type SourceEntry,
+} from './store.ts';
 
 export type {
   AmountModel,

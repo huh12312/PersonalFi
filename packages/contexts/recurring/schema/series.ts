@@ -24,7 +24,16 @@ import {
   updatedAtColumn,
   userIdColumn,
 } from '@core/db';
-import { integer, jsonb, numeric, pgTable, smallint, text, unique, uuid } from 'drizzle-orm/pg-core';
+import {
+  integer,
+  jsonb,
+  numeric,
+  pgTable,
+  smallint,
+  text,
+  unique,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 /** Our relationship with the row. Not the stream's own lifecycle — see `status`. */
 export const SERIES_STATES = ['CANDIDATE', 'ACTIVE', 'ARCHIVED'] as const;

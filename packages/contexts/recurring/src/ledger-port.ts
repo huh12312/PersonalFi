@@ -158,7 +158,10 @@ export function inMemoryLedgerPort(rows: readonly RecurringTransaction[]): Ledge
       const accountFilter =
         input.accountIds === undefined ? null : new Set<string>(input.accountIds);
       const matching = all.filter((row) => {
-        if (merchantFilter !== null && (row.merchantId === null || !merchantFilter.has(row.merchantId)))
+        if (
+          merchantFilter !== null &&
+          (row.merchantId === null || !merchantFilter.has(row.merchantId))
+        )
           return false;
         if (accountFilter !== null && !accountFilter.has(row.accountId)) return false;
         if (input.dateFrom !== undefined && row.date < input.dateFrom) return false;
@@ -167,7 +170,9 @@ export function inMemoryLedgerPort(rows: readonly RecurringTransaction[]): Ledge
       });
       // Sorted by (date, id) so the cursor below is a stable position and not a
       // promise the underlying array happens to keep.
-      matching.sort((a, b) => (a.date === b.date ? a.id.localeCompare(b.id) : a.date < b.date ? -1 : 1));
+      matching.sort((a, b) =>
+        a.date === b.date ? a.id.localeCompare(b.id) : a.date < b.date ? -1 : 1,
+      );
 
       const limit = Math.max(1, input.limit ?? 500);
       const offset = input.cursor === null || input.cursor === undefined ? 0 : Number(input.cursor);

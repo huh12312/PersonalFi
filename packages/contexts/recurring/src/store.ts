@@ -129,8 +129,31 @@ function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
+/**
+ * Structural JSON equality, with keys sorted.
+ *
+ * `JSON.stringify` alone is order-sensitive and Postgres `jsonb` is not: it
+ * normalises object keys (by length, then bytes) on the way in, so a
+ * `merge_proposal` written as `{reason, fromAccountId, toAccountId, …}` reads
+ * back as `{reason, gapDays, segmentKeys, …}`. Comparing the two raw strings
+ * therefore says "changed" on every single pass, which would write every series
+ * on every replay and take `'replaying the consumer twice produces identical
+ * rows'` with it. Found exactly that way; the test is the reason it is fixed.
+ */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value ?? null, (_key, inner: unknown) => {
+    if (inner === null || typeof inner !== 'object' || Array.isArray(inner)) return inner;
+    const record = inner as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(record)
+        .sort()
+        .map((key) => [key, record[key]]),
+    );
+  });
+}
+
 function sameJson(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  return canonicalJson(a) === canonicalJson(b);
 }
 
 // ---------------------------------------------------------------------------
@@ -348,7 +371,11 @@ export interface SeriesValues {
   readonly lastSeen: DateOnly;
   readonly missedPeriods: number;
   readonly coverage: number;
-  readonly nextDue: { readonly date: DateOnly; readonly uncertaintyDays: number; readonly amount: Money } | null;
+  readonly nextDue: {
+    readonly date: DateOnly;
+    readonly uncertaintyDays: number;
+    readonly amount: Money;
+  } | null;
   readonly suppressions: unknown;
   readonly mergeProposal: unknown;
   readonly detectionVersion: string;
@@ -441,7 +468,12 @@ export async function upsertSeries(
         ...shared,
       })
       .returning();
-    return { row: inserted[0] as RecurringSeriesRow, inserted: true, changed: true, previous: null };
+    return {
+      row: inserted[0] as RecurringSeriesRow,
+      inserted: true,
+      changed: true,
+      previous: null,
+    };
   }
 
   const updatePayload = {
@@ -468,7 +500,7 @@ export async function upsertSeries(
 
   const updated = await executor
     .update(recurringSeries)
-    .set({ ...candidateRow, lastDetectedAt: now, updatedAt: now })
+    .set({ ...updatePayload, lastDetectedAt: now, updatedAt: now })
     .where(eq(recurringSeries.id, existing.id))
     .returning();
   return {
@@ -512,7 +544,15 @@ function seriesDiffers(row: RecurringSeriesRow, next: Record<string, unknown>): 
   for (const [key, value] of Object.entries(next)) {
     const current = (row as unknown as Record<string, unknown>)[key];
     if (Array.isArray(value) && Array.isArray(current)) {
-      if (!sameStringArray(value.map(String), current.map(String))) return true;
+      // An array of scalars (`account_ids`, `day_of_month_pair`) compares
+      // element by element; an array of objects (`sources`) must go through
+      // JSON, because `String({...})` is `'[object Object]'` for every entry and
+      // would make two source lists of equal length indistinguishable — a
+      // changed detector confidence would then never be persisted.
+      const scalar = value.every((entry) => typeof entry !== 'object' || entry === null);
+      if (scalar) {
+        if (!sameStringArray(value.map(String), current.map(String))) return true;
+      } else if (!sameJson(value, current)) return true;
       continue;
     }
     if (value instanceof Date || current instanceof Date) {
@@ -538,7 +578,14 @@ export async function markSeriesArchived(
   const now = context.clock.now();
   await executor
     .update(recurringSeries)
-    .set({ state: 'ARCHIVED', archivedAt: now, nextDueDate: null, nextDueUncertaintyDays: null, nextDueAmountMinor: null, updatedAt: now })
+    .set({
+      state: 'ARCHIVED',
+      archivedAt: now,
+      nextDueDate: null,
+      nextDueUncertaintyDays: null,
+      nextDueAmountMinor: null,
+      updatedAt: now,
+    })
     .where(and(eq(recurringSeries.id, seriesId), eq(recurringSeries.userConfirmed, false)));
 }
 
@@ -550,10 +597,46 @@ export async function setSeriesConfirmed(
   const now = context.clock.now();
   const rows = await executor
     .update(recurringSeries)
-    .set({ userConfirmed: true, confirmedAt: now, state: 'ACTIVE', archivedAt: null, updatedAt: now })
+    .set({
+      userConfirmed: true,
+      confirmedAt: now,
+      state: 'ACTIVE',
+      archivedAt: null,
+      updatedAt: now,
+    })
     .where(and(eq(recurringSeries.userId, context.userId), eq(recurringSeries.id, seriesId)))
     .returning();
   return rows[0] ?? null;
+}
+
+/**
+ * Unpin a series and archive it — what a rejection does to the row.
+ *
+ * `user_confirmed` is cleared *in the same statement* that sets `ARCHIVED`,
+ * because `recurring_series_confirmed_not_archived` refuses the combination:
+ * a user who confirmed a series and later rejected it has withdrawn the pin,
+ * and the schema makes "archived but still pinned" unrepresentable rather than
+ * merely discouraged.
+ */
+export async function unpinAndArchiveSeries(
+  executor: RecurringExecutor,
+  context: RecurringContext,
+  seriesId: string,
+): Promise<void> {
+  const now = context.clock.now();
+  await executor
+    .update(recurringSeries)
+    .set({
+      userConfirmed: false,
+      confirmedAt: null,
+      state: 'ARCHIVED',
+      archivedAt: now,
+      nextDueDate: null,
+      nextDueUncertaintyDays: null,
+      nextDueAmountMinor: null,
+      updatedAt: now,
+    })
+    .where(and(eq(recurringSeries.userId, context.userId), eq(recurringSeries.id, seriesId)));
 }
 
 export async function setSeriesMerged(
@@ -997,7 +1080,8 @@ export async function upsertMetadata(
     // 07 §2.10: a usage claim without a source is a claim we cannot stand
     // behind. Defaulting to USER_DECLARED here would launder a heuristic into a
     // confident message, so an unsourced declaration is recorded as HEURISTIC.
-    usageSource: patch.usageSource ?? existing[0]?.usageSource ?? (usageDeclared ? 'HEURISTIC' : null),
+    usageSource:
+      patch.usageSource ?? existing[0]?.usageSource ?? (usageDeclared ? 'HEURISTIC' : null),
     usageDeclaredAt: usageDeclared ? now : (existing[0]?.usageDeclaredAt ?? null),
     cancelUrl: patch.cancelUrl ?? existing[0]?.cancelUrl ?? null,
     notes: patch.notes ?? existing[0]?.notes ?? null,

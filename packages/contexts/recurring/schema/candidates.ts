@@ -19,13 +19,7 @@ import {
 } from '@core/db';
 import { jsonb, numeric, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
-export const CANDIDATE_STATES = [
-  'PROPOSED',
-  'CONFIRMED',
-  'REJECTED',
-  'MERGED',
-  'EXPIRED',
-] as const;
+export const CANDIDATE_STATES = ['PROPOSED', 'CONFIRMED', 'REJECTED', 'MERGED', 'EXPIRED'] as const;
 export type CandidateState = (typeof CANDIDATE_STATES)[number];
 
 /**

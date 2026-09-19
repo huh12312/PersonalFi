@@ -165,6 +165,15 @@ describeWithDb('runMigrations', () => {
       //   another context's schema: `merchant_id` and `transaction_id` are
       //   opaque UUIDs, which is what makes "detection never creates a
       //   merchant" (decision D25) structural rather than a habit.
+      // 0011_notifications: the four @ctx/notifications tables —
+      //   delivery_attempts, notification_channels, notification_outbox,
+      //   notification_rules. `notification_channels.sealed_config` is a
+      //   SecretBox envelope (decision D5) and its host/port/scheme are
+      //   deliberately *not* sealed, so the egress allow-list stays auditable
+      //   without the KEK. Two UNIQUE indexes carry the load-bearing claims:
+      //   (user_id, dedupe_key) is at-most-once delivery, and (user_id,
+      //   channel_id, group_key, group_window_start) is digest coalescing —
+      //   enforced by the outbox, not by each rule (08 §4.5).
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
@@ -183,6 +192,7 @@ describeWithDb('runMigrations', () => {
         'connection_accounts',
         'connection_staged_facts',
         'connections',
+        'delivery_attempts',
         'domain_events',
         'encryption_keys',
         'event_consumer_offsets',
@@ -193,6 +203,9 @@ describeWithDb('runMigrations', () => {
         'mcc_codes',
         'merchant_profiles',
         'merchants',
+        'notification_channels',
+        'notification_outbox',
+        'notification_rules',
         'price_change_events',
         'processed_events',
         'provider_category_map',

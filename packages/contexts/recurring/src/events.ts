@@ -63,7 +63,7 @@ export const SeriesConfirmed = defineEvent({
     'A series became one we are willing to forecast: a human confirmed it, or it cleared the ' +
     'auto-confirm bar. `source` distinguishes the two, and it matters — 04 §5.1 pins a ' +
     'user-confirmed series permanently against the detector, while an auto-confirmed one is still ' +
-    'the detector\'s opinion and can be withdrawn. A merge emits this for the surviving series.',
+    "the detector's opinion and can be withdrawn. A merge emits this for the surviving series.",
   schema: z.object({
     seriesId: uuid,
     merchantId: uuid,
@@ -116,7 +116,7 @@ export const DuplicateServiceDetected = defineEvent({
   type: 'recurring.DuplicateServiceDetected',
   aggregateType: 'recurring_series',
   description:
-    'Two or more live series occupy one node of 07 §2.9\'s service taxonomy, or one merchant is ' +
+    "Two or more live series occupy one node of 07 §2.9's service taxonomy, or one merchant is " +
     'billing twice. Emitted when the *membership of the group* changes, so adding a sixth streaming ' +
     'service says something and re-detecting the same five does not. `annualImpactMinor` is the sum ' +
     'of all but the cheapest — the amount a user would keep by consolidating, not the total spend.',
