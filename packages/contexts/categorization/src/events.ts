@@ -49,6 +49,14 @@ export const RuleApplied = defineEvent({
     retroactive: z.boolean(),
     matchedCount: z.int().nonnegative(),
     changedCount: z.int().nonnegative(),
+    /**
+     * Which of this rule's non-`set_category` actions are in `IMPLEMENTED_ACTIONS`
+     * (WP 2.5). Present so a `link_recurring`/`notify` action is at least visible
+     * on the audit trail today, before WP 2.3/2.4 give either one a real target —
+     * "validated but inert" (`rules/schema.ts`) means recorded here, not silent.
+     * Empty for a rule with no such action, and always empty for a preview.
+     */
+    actionsRecorded: z.array(z.string()).default([]),
   }),
 });
 

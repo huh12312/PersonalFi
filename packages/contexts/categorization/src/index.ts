@@ -184,17 +184,32 @@ export {
   transactionIdsOf,
 } from './consumer.ts';
 
+// --- the retrain schedule (WP 2.5) ------------------------------------------
+export {
+  RETRAIN_CRON,
+  RETRAIN_JOB_KIND,
+  RETRAIN_SCHEDULE_NAME,
+  registerRetrainSchedule,
+  retrainJobHandler,
+} from './schedule.ts';
+
 // --- the chart of categories, as a user has it -----------------------------
 // The read model behind `GET /categories` and the boot pass that makes sure
 // there is something to read (gate conditions D-6 / N-3). `listCategories`
 // reads the *table*, never `TAXONOMY`: the constant is what we ship, the table
 // is what the user has, and after a rename or a custom category they differ.
 export {
+  archiveCategory,
+  createCategory,
   ensureTaxonomy,
   listCategories,
+  renameCategory,
+  type ArchiveCategoryResult,
+  type CreateCategoryInput,
   type EnsureTaxonomyInput,
   type EnsureTaxonomyResult,
   type ListCategoriesOptions,
+  type RenameCategoryInput,
   type UserCategory,
 } from './categories.ts';
 
@@ -209,17 +224,23 @@ export {
   applyRule,
   categorizeTransactions,
   confirmAssignment,
+  createRule,
   createRuleFromTransaction,
   decisionInputOf,
+  deleteRule,
   explainAssignment,
+  listRuleRecords,
   loadClassifier,
   loadMerchantDefaults,
   loadRules,
   retrainClassifier,
+  updateRule,
   type ApplyRuleResult,
   type AssignmentExplanation,
   type CategorizationTrigger,
   type CategorizeOptions,
   type CategorizeResult,
   type ConfirmResult,
+  type RuleRecord,
+  type RuleWriteInput,
 } from './service.ts';

@@ -9,6 +9,15 @@
  * | `LedgerError`            | `domain`    | the system of record refuses the write   |
  * | `ConnectionsError`       | `domain`    | no such connection, unknown provider     |
  * | `ConnectorError`         | `connector` | something outside our boundary failed    |
+ * | `CategorizationError`    | mixed       | no such rule/category, or an invariant   |
+ *
+ * `CategorizationError` (WP 2.5) is the newest addition. Every route this WP
+ * added — `/rules`, `/categories`'s writes, `/transactions/{id}/rule` — calls
+ * into `@ctx/categorization` through `mapDomainErrors`, and before this map
+ * existed every one of those errors fell through to the generic `internal` 500
+ * `toProblem` gives an unrecognised exception (docs/CONVENTIONS.md: "An
+ * unrecognised exception is `internal`") — a 500 for "no rule with that id" is
+ * exactly the wrong-signal shape this file exists to prevent.
  *
  * Two rules hold throughout:
  *
@@ -21,6 +30,10 @@
  *   sentence we wrote — plus `retryable`, which is the only thing the UI has to
  *   decide between "try again" and "this needs you".
  */
+import {
+  isCategorizationError,
+  type CategorizationErrorCode,
+} from '@ctx/categorization';
 import { ConnectorError, isConnectionsError, type ConnectionsErrorCode } from '@ctx/connections';
 import { isLedgerError, type LedgerErrorCode } from '@ctx/ledger';
 import { AppError } from '../problem.ts';
@@ -51,6 +64,27 @@ const CONNECTIONS_STATUS: Readonly<Record<ConnectionsErrorCode, number>> = {
   'connections.locked': 503,
   'connections.unknown_provider': 400,
   'connections.sync_exhausted': 503,
+};
+
+/**
+ * WP 2.5. `not_found` codes are 404s a client can act on directly; the rest are
+ * the engine or a `CHECK` constraint refusing something the request asked for.
+ * `category_not_assignable` also covers "this category belongs to someone
+ * else" — `rules-routes.test.ts`'s "a rule may not be created for another
+ * user's category" — because the lookup that produces it is already scoped to
+ * `user_id` (`categoryIdsByKey`), so a cross-user id is indistinguishable from
+ * a non-existent one, and a 404/422 says so without confirming the other
+ * user's category exists at all.
+ */
+const CATEGORIZATION_STATUS: Readonly<Record<CategorizationErrorCode, number>> = {
+  'categorization.category_not_found': 404,
+  'categorization.rule_not_found': 404,
+  'categorization.assignment_not_found': 404,
+  'categorization.rule_invalid': 400,
+  'categorization.category_not_assignable': 422,
+  'categorization.category_third_level_refused': 422,
+  'categorization.taxonomy_not_seeded': 409,
+  'categorization.system_category_immutable': 409,
 };
 
 const TITLES: Readonly<Record<number, string>> = {
@@ -114,6 +148,17 @@ export function toDomainProblem(error: unknown): unknown {
       title: titleOf(status),
       detail: error.message,
       family: status === 503 ? 'internal' : status === 404 || status === 400 ? 'user' : 'domain',
+    });
+  }
+
+  if (isCategorizationError(error)) {
+    const status = CATEGORIZATION_STATUS[error.code] ?? 409;
+    return new AppError({
+      status,
+      code: error.code,
+      title: titleOf(status),
+      detail: error.message,
+      family: status === 404 || status === 400 || status === 422 ? 'user' : 'domain',
     });
   }
 

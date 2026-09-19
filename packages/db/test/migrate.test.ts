@@ -154,11 +154,27 @@ describeWithDb('runMigrations', () => {
       //   new table.
       // 0008_connections_staging: connection_staged_facts (@ctx/connections) —
       //   durable staging for the Manual/CSV connectors (decision D-5).
+      // 0009_budgeting: the six @ctx/budgeting tables — budget_alerts_state,
+      //   budget_line_actuals, budget_lines, budget_periods, budgets,
+      //   rollovers. Also `CREATE EXTENSION btree_gist`, which the
+      //   non-overlapping-periods EXCLUDE constraint needs; it creates no table
+      //   in `public` and so does not appear below.
+      // 0010_recurring: the five @ctx/recurring tables — price_change_events,
+      //   recurring_candidates, recurring_occurrences, recurring_series,
+      //   subscription_metadata. None of them carries a foreign key into
+      //   another context's schema: `merchant_id` and `transaction_id` are
+      //   opaque UUIDs, which is what makes "detection never creates a
+      //   merchant" (decision D25) structural rather than a habit.
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
         'auth_attempts',
         'auth_lockouts',
+        'budget_alerts_state',
+        'budget_line_actuals',
+        'budget_lines',
+        'budget_periods',
+        'budgets',
         'categories',
         'category_assignments',
         'classifier_examples',
@@ -177,17 +193,23 @@ describeWithDb('runMigrations', () => {
         'mcc_codes',
         'merchant_profiles',
         'merchants',
+        'price_change_events',
         'processed_events',
         'provider_category_map',
         'recovery_codes',
+        'recurring_candidates',
+        'recurring_occurrences',
+        'recurring_series',
         'registration_tokens',
         'rejected_transfer_pairs',
+        'rollovers',
         'rule_runs',
         'rules',
         'schedules',
         'schema_migrations',
         'security_events',
         'sessions',
+        'subscription_metadata',
         'sync_runs',
         'totp_secrets',
         'transaction_splits',

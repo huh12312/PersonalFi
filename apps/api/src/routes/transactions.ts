@@ -30,6 +30,12 @@
  */
 import { DateOnly, money as makeMoney, type Money as MoneyType } from '@core/kernel';
 import {
+  actionsSchema,
+  conditionsSchema,
+  createRuleFromTransaction,
+  type Rule,
+} from '@ctx/categorization';
+import {
   confirmTransferPair,
   getTransaction,
   countTransactions,
@@ -46,8 +52,10 @@ import {
 } from '@ctx/ledger';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import { createCategorizationLedgerPort } from '../domain.ts';
 import { AppError, problems } from '../problem.ts';
 import { clearTransactionSplits, setTransactionSplits } from '../ledger-splits.ts';
+import { mapDomainErrors } from './domain-errors.ts';
 import {
   booleanQuery,
   dateOnly,

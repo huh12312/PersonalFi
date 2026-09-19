@@ -87,6 +87,41 @@
 -- in test/db/period-roll-dst.test.ts pass by construction rather than by luck --
 -- 2026-03-08 is 23 hours long in America/New_York and the period boundary does
 -- not care, because it is a date and not an instant.
+--
+-- ---------------------------------------------------------------------------
+-- Which sum the Ready-to-Assign identity is over (a correction to 07 §1.2)
+-- ---------------------------------------------------------------------------
+--
+-- 07 §1.2 line 77-80 states the identity as
+--
+--     RTA(p) = Σ_a balance(a)               # credit balances are negative
+--            − Σ_c available(c, p)          # "includes credit-card payment categories"
+--            − Σ_{p'>p} Σ_c assigned(c, p')
+--
+-- Those two annotations cannot both hold: a credit purchase moves the card's
+-- balance down by |amt| *and* moves |amt| of envelope money from the category
+-- into CCP[card], so counting the card balance and the CCP envelope in the same
+-- equation books the same dollars twice. Worked in full in
+-- docs/evidence/phase-2/wp2.1-budgeting.md §2; the short version is that with
+-- both terms in, a $50 credit purchase moves RTA by −$50, and a credit purchase
+-- out of an already-funded envelope must move RTA by $0.
+--
+-- The exact form, and what this schema implements, keeps the memo's right-hand
+-- side and drops CCP from the left:
+--
+--     Σ_{lines WHERE kind='category'} available + RTA + future assignments
+--       = Σ_{on-budget accounts} balance                              (identity I)
+--
+-- and pairs it with the card identity that makes `credit_card_payment` lines
+-- load-bearing rather than decorative:
+--
+--     owed(card) = available(CCP[card]) + unfunded_debt(CCP[card])    (identity II)
+--
+-- "every dollar owed on a card is either earmarked to pay it, or was borrowed
+-- without envelope money behind it." Identity II is why `unfunded_debt_minor`
+-- exists below: without it, deleting the CCP auto-line leaves identity I green
+-- and the error invisible, which is the exact failure shape the Phase 1 gates
+-- kept finding.
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
@@ -144,6 +179,13 @@ CREATE TABLE budgets (
   CONSTRAINT budgets_custom_has_length CHECK (
     period_kind <> 'CUSTOM' OR (period_length_days IS NOT NULL AND period_anchor_date IS NOT NULL)
   ),
+  -- The other direction too. A length left behind by a user who switched from
+  -- CUSTOM to CALENDAR_MONTH is a number the grid generator must be able to
+  -- ignore, and "must be able to ignore" is the shape of a bug that only shows
+  -- up when someone switches back.
+  CONSTRAINT budgets_length_only_custom CHECK (
+    period_kind = 'CUSTOM' OR period_length_days IS NULL
+  ),
   CONSTRAINT budgets_anchored_kinds_have_anchor CHECK (
     period_kind NOT IN ('BIWEEKLY', 'WEEKLY') OR period_anchor_date IS NOT NULL
   )
@@ -188,6 +230,14 @@ CREATE TABLE budget_periods (
   -- scratch at any time -- test/db/rta-identity.test.ts asserts that the cached
   -- value equals the recomputed one after every mutation.
   ready_to_assign_minor   BIGINT      NOT NULL DEFAULT 0,
+  -- On-budget inflows landing in this period, transfers excluded and refunds
+  -- netted. Not an input to Ready to Assign -- 07 §1.2 is explicit that summing
+  -- income drifts, and identity I above is what RTA comes from. This column is
+  -- the denominator for `goal_type = 'PCT_OF_INCOME'` (07 §1.8) and for the
+  -- 50/30/20 derived layer (07 §1.6), both of which genuinely are defined on
+  -- income, and it is stored rather than recomputed so that a period's percent
+  -- goal does not silently re-base when a late paycheck arrives in a later one.
+  income_minor            BIGINT      NOT NULL DEFAULT 0,
   currency                CHAR(3)     NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
   -- 07 §1.4 rule 6: "Store `available` as a *computed, cached* value with a
   -- dirty-flag cascade, never as source of truth." This is that flag. A late
@@ -269,6 +319,17 @@ CREATE TABLE budget_lines (
   -- period, and what left it as statement payments.
   funded_minor            BIGINT      NOT NULL DEFAULT 0,
   payments_minor          BIGINT      NOT NULL DEFAULT 0,
+  -- credit_card_payment lines only. Identity II in this file's header: the
+  -- part of what is owed on this card that no envelope ever covered, carried
+  -- across periods because the debt is. Grows by `|amt| - fundable` on every
+  -- credit overspend (07 §1.3) and shrinks when a refund or a payment exceeds
+  -- what the CCP envelope held.
+  --
+  -- Non-negative: you cannot owe a negative amount of unfunded debt. An
+  -- over-funded card shows as a positive `available_minor` on this line, not as
+  -- a negative here, which keeps the two quantities from cancelling each other
+  -- out and hiding a cascade bug.
+  unfunded_debt_minor     BIGINT      NOT NULL DEFAULT 0 CHECK (unfunded_debt_minor >= 0),
   currency                CHAR(3)     NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
 
   rollover_policy         TEXT        NOT NULL DEFAULT 'ROLLOVER'
@@ -314,9 +375,30 @@ CREATE TABLE budget_lines (
   CONSTRAINT budget_lines_goal_has_percent CHECK (
     goal_type <> 'PCT_OF_INCOME' OR goal_percent IS NOT NULL
   ),
-  -- Only a credit-card payment line funds or pays a card.
+  -- Only a credit-card payment line funds or pays a card, and only a
+  -- credit-card payment line can carry unfunded debt: an ordinary envelope's
+  -- overspend is `available_minor < 0` and is split across
+  -- cash_overspend_minor / credit_overspend_minor within its own period.
   CONSTRAINT budget_lines_funding_is_ccp CHECK (
-    kind = 'credit_card_payment' OR (funded_minor = 0 AND payments_minor = 0)
+    kind = 'credit_card_payment'
+    OR (funded_minor = 0 AND payments_minor = 0 AND unfunded_debt_minor = 0)
+  ),
+  -- 07 §1.3: a credit-card payment line is not an envelope the user overspends,
+  -- it is a pot the funding rule moves money into. The cash/credit overspend
+  -- split is a property of the *category* that did the spending.
+  CONSTRAINT budget_lines_ccp_has_no_overspend CHECK (
+    kind <> 'credit_card_payment' OR (cash_overspend_minor = 0 AND credit_overspend_minor = 0)
+  ),
+  -- 07 §1.3's decomposition, as a constraint rather than as a test alone:
+  -- |min(available, 0)| = cash_overspend + credit_overspend. This is what makes
+  -- "cash overspend is red, credit overspend is yellow" a statement about the
+  -- data instead of a statement about the renderer, and it is the cheapest
+  -- possible detector for a funding rule that loses or invents a cent -- a
+  -- rollover that drops one cent per period is invisible for months, and this
+  -- refuses the write on the first one.
+  CONSTRAINT budget_lines_overspend_splits_available CHECK (
+    kind <> 'category'
+    OR LEAST(available_minor, 0) = -(cash_overspend_minor + credit_overspend_minor)
   )
 );
 

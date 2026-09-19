@@ -138,12 +138,25 @@ export type RuleConditions = z.infer<typeof conditionsSchema>;
 /**
  * Actions.
  *
- * `split` and `link_recurring` are placeholders on purpose: the shapes are fixed
- * now so a rule authored in Phase 1 survives into Phase 2, and the engine refuses
- * to apply them (`applied: false`, with a reason) until WP 2.2 and the splits
- * write path exist. A schema that has to change to accommodate a feature is a
- * migration of every stored rule; a schema with an inert branch is a `TODO` the
- * type system can see.
+ * `split` is a placeholder on purpose: the shape is fixed now so a rule authored
+ * in Phase 1 survives into Phase 2, and the engine refuses to apply it
+ * (`applied: false`, with a reason) until the splits write path exists. A schema
+ * that has to change to accommodate a feature is a migration of every stored
+ * rule; a schema with an inert branch is a `TODO` the type system can see.
+ *
+ * `link_recurring` and `notify` moved from that same "inert" bucket into
+ * `IMPLEMENTED_ACTIONS` in WP 2.5 (Phase 2 dispatch §2, "Rule actions beyond
+ * `set_category`"), but "implemented" here means only *validated and recorded*:
+ * `applyRule` accepts a rule carrying either action, matches it, and records
+ * which of them fired on the `categorization.RuleApplied` event
+ * (`actionsRecorded`) — but neither one does anything yet. There is no
+ * `recurring_series` row for `link_recurring` to point at until WP 2.3 builds
+ * one, and no channel for `notify` to send through until WP 2.4's
+ * `NotificationChannel` exists. Moving them here now, inert, means a rule
+ * authored today ("tag every Netflix charge and link it to my Netflix
+ * subscription") is not silently dropped by validation and does not need a
+ * second migration of every stored rule the day WP 2.3/2.4 land — only the
+ * *engine* gains a side effect then, the *schema* does not change.
  */
 export const actionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('set_category'), categoryKey: z.string().min(1).max(64) }),
@@ -165,13 +178,29 @@ export const actionSchema = z.discriminatedUnion('type', [
       .max(20),
   }),
   z.object({ type: z.literal('link_recurring'), seriesKey: z.string().min(1).max(120) }),
+  /**
+   * "Tell me when this rule fires." `message` is the user's own text, never
+   * interpolated into a template server-side (WP 2.4's advice-copy lint is
+   * about advisor prose, not this) — a channel, a rule and quiet hours all
+   * belong to `@ctx/notifications` and none of that exists yet, hence inert.
+   */
+  z.object({ type: z.literal('notify'), message: z.string().min(1).max(240) }),
 ]);
 
 export type RuleAction = z.infer<typeof actionSchema>;
 
 export const actionsSchema = z.array(actionSchema).min(1).max(8);
 
-/** Actions the engine can actually carry out today. The rest are recorded, not run. */
+/**
+ * Actions the engine can actually *carry out or record* today. The rest
+ * (`split`) are recorded on the rule but never run.
+ *
+ * `link_recurring` and `notify` are "validated but inert" (see the doc comment
+ * above `actionSchema`): a rule carrying one is not rejected and `applyRule`
+ * records that it fired, but nothing yet links a recurring series or delivers a
+ * notification. WP 2.3 and WP 2.4 are the targets that turn "recorded" into
+ * "done", and neither needs another schema change to get there.
+ */
 export const IMPLEMENTED_ACTIONS: ReadonlySet<RuleAction['type']> = new Set([
   'set_category',
   'set_merchant_name',
@@ -179,6 +208,8 @@ export const IMPLEMENTED_ACTIONS: ReadonlySet<RuleAction['type']> = new Set([
   'add_tag',
   'exclude',
   'mark_transfer',
+  'link_recurring',
+  'notify',
 ]);
 
 export const ruleSchema = z.object({

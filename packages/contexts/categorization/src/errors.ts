@@ -16,6 +16,13 @@ export type CategorizationErrorCode =
   /** `user` — the request was understood and is not allowed. */
   | 'categorization.rule_invalid'
   | 'categorization.category_not_assignable'
+  /**
+   * `user` — WP 2.5: `categories.categories_two_levels`/`categories_not_self_parent`
+   * only reject the write at the database; this is the same refusal, thrown
+   * before the INSERT so `POST /categories` returns a problem detail naming the
+   * category rather than a raw constraint-violation 500.
+   */
+  | 'categorization.category_third_level_refused'
   /** `domain` — a business invariant refuses. */
   | 'categorization.taxonomy_not_seeded'
   | 'categorization.system_category_immutable';

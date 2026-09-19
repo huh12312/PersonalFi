@@ -32,10 +32,11 @@
  * every boot is what makes a category added in v0.3 appear for a user created in
  * v0.1, and it costs one pass over ~130 rows that almost always writes nothing.
  */
-import type { Clock } from '@core/kernel';
+import { newId, type Clock } from '@core/kernel';
 import { sql } from 'drizzle-orm';
 import type { CategorizationExecutor } from './db.ts';
-import { seedSystemTaxonomy } from './seed-taxonomy.ts';
+import { CategorizationError } from './errors.ts';
+import { categoryIdsByKey, seedSystemTaxonomy } from './seed-taxonomy.ts';
 import type { CategoryKind } from './taxonomy.ts';
 
 /** One row of the chart, as a user sees it. */
@@ -203,4 +204,299 @@ export async function ensureTaxonomy(
     categoriesInserted += result.categoriesInserted;
   }
   return { users: input.userIds.length, categoriesInserted };
+}
+
+// ---------------------------------------------------------------------------
+// Writes (WP 2.5 carry-over: closeout-architecture.md §4, "No POST /categories.
+// The picker is read-only, and 05 §5.2's searchable combobox with a 'create new
+// category' escape hatch still needs a write route to be worth building.")
+// ---------------------------------------------------------------------------
+
+/**
+ * `label` → a `categories.key` fragment: lowercase, `[a-z][a-z0-9_]*`, matching
+ * the `CHECK` migration 0006 puts on the column. Accented characters are folded
+ * rather than dropped ("Crème" → "creme") so a label in the user's own language
+ * still produces a readable key instead of an empty string falling through to
+ * the `c_category` fallback below.
+ */
+function slugifyLabel(label: string): string {
+  const cleaned = label
+    .normalize('NFKD')
+    .replaceAll(/[̀-ͯ]/gu, '')
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/gu, '_')
+    .replaceAll(/^_+|_+$/gu, '')
+    .slice(0, 40);
+  return cleaned.length > 0 && /^[a-z]/u.test(cleaned) ? cleaned : `c_${cleaned || 'category'}`;
+}
+
+/** The row shape every write below needs before it can decide anything. */
+interface CategoryRow {
+  readonly id: string;
+  readonly key: string;
+  readonly parentId: string | null;
+  readonly kind: CategoryKind;
+  readonly archivedAt: Date | null;
+}
+
+async function requireOwnCategory(
+  executor: CategorizationExecutor,
+  userId: string,
+  categoryId: string,
+): Promise<CategoryRow> {
+  const result = await executor.execute<{
+    id: string;
+    key: string;
+    parent_id: string | null;
+    kind: CategoryKind;
+    archived_at: string | Date | null;
+  }>(sql`
+    SELECT id, key, parent_id, kind, archived_at FROM categories
+     WHERE id = ${categoryId} AND user_id = ${userId}
+  `);
+  const row = result.rows[0];
+  // Scoped to `user_id` in the query itself, so a category id that belongs to
+  // another user is indistinguishable from one that does not exist at all —
+  // the same 404 either way, and no confirmation that the other row exists.
+  if (row === undefined) {
+    throw new CategorizationError(
+      'categorization.category_not_found',
+      `no category ${categoryId}`,
+      { categoryId },
+    );
+  }
+  return {
+    id: row.id,
+    key: row.key,
+    parentId: row.parent_id,
+    kind: row.kind,
+    archivedAt: row.archived_at === null ? null : new Date(row.archived_at),
+  };
+}
+
+export interface CreateCategoryInput {
+  readonly userId: string;
+  /** `null` creates a new top-level heading; otherwise a leaf under it. */
+  readonly parentId: string | null;
+  readonly label: string;
+  readonly description?: string;
+  readonly icon?: string;
+  /** Only used for a top-level heading. A leaf always inherits its parent's. */
+  readonly kind?: CategoryKind;
+}
+
+/**
+ * `POST /categories` — the "create a new category" escape hatch 05 §5.2 asks
+ * for. A category made here is indistinguishable from a shipped one to every
+ * other read path (`listCategories`, the rules engine, `category_assignments`)
+ * except `isSystem: false`, which exists only so a future "reset my
+ * categories" knows what it may remove.
+ *
+ * The two-level `CHECK` (`categories_two_levels`, migration 0006) is enforced
+ * here *before* the INSERT, not left to the database: a third-level attempt —
+ * a leaf created under a category that already has a parent — is refused with
+ * `categorization.category_third_level_refused`, a problem detail a client can
+ * render, rather than a raw constraint-violation 500.
+ */
+export async function createCategory(
+  executor: CategorizationExecutor,
+  input: CreateCategoryInput,
+  context: { readonly clock: Clock },
+): Promise<UserCategory> {
+  const label = input.label.trim();
+  if (label.length === 0 || label.length > 120) {
+    throw new CategorizationError(
+      'categorization.rule_invalid',
+      'a category label must be between 1 and 120 characters',
+      { label: input.label },
+    );
+  }
+
+  let parentKey: string | null = null;
+  let kind: CategoryKind;
+  if (input.parentId === null) {
+    kind = input.kind ?? 'expense';
+  } else {
+    const parent = await requireOwnCategory(executor, input.userId, input.parentId);
+    if (parent.parentId !== null) {
+      throw new CategorizationError(
+        'categorization.category_third_level_refused',
+        'a category may have at most two levels; this parent is already a child',
+        { parentId: input.parentId },
+      );
+    }
+    if (parent.archivedAt !== null) {
+      throw new CategorizationError(
+        'categorization.category_not_assignable',
+        'the parent category is archived',
+        { parentId: input.parentId },
+      );
+    }
+    parentKey = parent.key;
+    kind = parent.kind;
+  }
+
+  const idByKey = await categoryIdsByKey(executor, input.userId);
+  const baseSlug = slugifyLabel(label);
+  let key = parentKey === null ? baseSlug : `${parentKey}.${baseSlug}`;
+  for (let suffix = 2; idByKey.has(key); suffix += 1) {
+    if (suffix > 50) {
+      throw new CategorizationError(
+        'categorization.rule_invalid',
+        'could not find a free key for this category; try a more distinct label',
+        { label },
+      );
+    }
+    const suffixed = `${baseSlug}_${String(suffix)}`;
+    key = parentKey === null ? suffixed : `${parentKey}.${suffixed}`;
+  }
+
+  const id = newId();
+  const now = context.clock.now();
+  const description = input.description ?? '';
+  const icon = input.icon ?? 'circle';
+  await executor.execute(sql`
+    INSERT INTO categories
+      (id, user_id, parent_id, key, label, description, kind, icon, sort, is_system,
+       created_at, updated_at)
+    VALUES (
+      ${id}, ${input.userId}, ${input.parentId}, ${key}, ${label}, ${description}, ${kind},
+      ${icon}, 0, FALSE, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz
+    )
+  `);
+
+  return {
+    id,
+    key,
+    parentId: input.parentId,
+    label,
+    description,
+    kind,
+    icon,
+    sort: 0,
+    isSystem: false,
+    archivedAt: null,
+    // A brand-new leaf has no children yet; a brand-new heading has none either
+    // until its first child is created, which is the honest answer for both.
+    assignable: true,
+  };
+}
+
+export interface RenameCategoryInput {
+  readonly userId: string;
+  readonly categoryId: string;
+  readonly label?: string;
+  readonly description?: string;
+  readonly icon?: string;
+}
+
+/**
+ * `PATCH /categories/{id}` — rename or re-describe. Deliberately narrow:
+ * `kind` and `parent_id` are structural (`seed-taxonomy.ts`'s own rule for why
+ * a re-seed never touches them) and changing either after transactions have
+ * been filed under a category is how a spend report silently moves money
+ * between totals. A user who wants a different `kind` archives this one and
+ * creates another.
+ */
+export async function renameCategory(
+  executor: CategorizationExecutor,
+  input: RenameCategoryInput,
+  context: { readonly clock: Clock },
+): Promise<UserCategory> {
+  await requireOwnCategory(executor, input.userId, input.categoryId);
+
+  const label = input.label === undefined ? undefined : input.label.trim();
+  if (label !== undefined && (label.length === 0 || label.length > 120)) {
+    throw new CategorizationError(
+      'categorization.rule_invalid',
+      'a category label must be between 1 and 120 characters',
+      { label: input.label },
+    );
+  }
+
+  await executor.execute(sql`
+    UPDATE categories SET
+      label       = COALESCE(${label ?? null}, label),
+      description = COALESCE(${input.description ?? null}, description),
+      icon        = COALESCE(${input.icon ?? null}, icon),
+      updated_at  = ${context.clock.now().toISOString()}::timestamptz
+     WHERE id = ${input.categoryId} AND user_id = ${input.userId}
+  `);
+
+  const categories = await listCategories(executor, input.userId, { includeArchived: true });
+  const updated = categories.find((category) => category.id === input.categoryId);
+  // Unreachable except under a concurrent delete of the user row itself:
+  // `requireOwnCategory` above already proved this row existed a moment ago.
+  if (updated === undefined) {
+    throw new CategorizationError(
+      'categorization.category_not_found',
+      `no category ${input.categoryId}`,
+      { categoryId: input.categoryId },
+    );
+  }
+  return updated;
+}
+
+export interface ArchiveCategoryResult {
+  readonly category: UserCategory;
+  readonly changed: boolean;
+  /** How many child categories were archived along with a heading. */
+  readonly childrenArchived: number;
+}
+
+/**
+ * `DELETE /categories/{id}` — archive, never delete. `categories.archived_at`
+ * already exists for exactly this (migration 0006: "a category with three
+ * years of history behind it cannot be removed without orphaning those rows or
+ * rewriting them"), so archiving is the whole implementation: every
+ * `category_assignments` row, every `rules.actions[].categoryKey` and every
+ * `provider_category_map`/`mcc_codes` row that points at this id keeps
+ * resolving exactly as before — the row is still there, `listCategories`
+ * simply omits it unless `includeArchived` is asked for.
+ *
+ * Archiving a heading cascades to its non-archived children: a leaf left
+ * visible under a heading the picker no longer shows would be reachable by id
+ * (an existing assignment) but not by browsing, which is a worse state than
+ * archiving both.
+ */
+export async function archiveCategory(
+  executor: CategorizationExecutor,
+  input: { readonly userId: string; readonly categoryId: string },
+  context: { readonly clock: Clock },
+): Promise<ArchiveCategoryResult> {
+  const existing = await requireOwnCategory(executor, input.userId, input.categoryId);
+  if (existing.archivedAt !== null) {
+    const categories = await listCategories(executor, input.userId, { includeArchived: true });
+    const category = categories.find((entry) => entry.id === input.categoryId);
+    if (category === undefined) {
+      throw new CategorizationError(
+        'categorization.category_not_found',
+        `no category ${input.categoryId}`,
+        { categoryId: input.categoryId },
+      );
+    }
+    return { category, changed: false, childrenArchived: 0 };
+  }
+
+  const now = context.clock.now().toISOString();
+  await executor.execute(sql`
+    UPDATE categories SET archived_at = ${now}::timestamptz, updated_at = ${now}::timestamptz
+     WHERE id = ${input.categoryId} AND user_id = ${input.userId}
+  `);
+  const cascaded = await executor.execute<{ id: string }>(sql`
+    UPDATE categories SET archived_at = ${now}::timestamptz, updated_at = ${now}::timestamptz
+     WHERE parent_id = ${input.categoryId} AND user_id = ${input.userId} AND archived_at IS NULL
+    RETURNING id
+  `);
+
+  const categories = await listCategories(executor, input.userId, { includeArchived: true });
+  const category = categories.find((entry) => entry.id === input.categoryId);
+  if (category === undefined) {
+    throw new CategorizationError(
+      'categorization.category_not_found',
+      `no category ${input.categoryId}`,
+      { categoryId: input.categoryId },
+    );
+  }
+  return { category, changed: true, childrenArchived: cascaded.rows.length };
 }

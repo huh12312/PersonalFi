@@ -41,7 +41,13 @@ import { cleanDescriptor } from './normalize/descriptor.ts';
 import { fingerprint } from './normalize/fingerprint.ts';
 import { titleCase } from './normalize/cluster.ts';
 import { matchRule } from './rules/match.ts';
-import { ruleSchema, type Rule } from './rules/schema.ts';
+import {
+  IMPLEMENTED_ACTIONS,
+  ruleSchema,
+  type Rule,
+  type RuleAction,
+  type RuleConditions,
+} from './rules/schema.ts';
 import { categoryIdsByKey, categoryKeysById } from './seed-taxonomy.ts';
 import { UNCATEGORISED_KEY, isAssignableKey } from './taxonomy.ts';
 
@@ -806,6 +812,252 @@ async function nextClassifierVersion(
 // Rules
 // ---------------------------------------------------------------------------
 
+/**
+ * Every `set_category` action's `categoryKey`, resolved against *this user's*
+ * own chart and required to be a leaf.
+ *
+ * The REST surface (WP 2.5) is the first place a rule's category can be
+ * anything other than a value the caller typed straight from `TAXONOMY` — a
+ * user's custom category (`createCategory`) is a row that exists for exactly
+ * one user, keyed the same way a system one is. So this checks the *table*,
+ * scoped to `userId`, rather than the static `isAssignableKey`: a key that
+ * belongs to another user's custom category, or to nobody at all, is
+ * indistinguishable from a typo and refused the same way —
+ * `rules-routes.test.ts`'s "a rule may not be created for another user's
+ * category".
+ */
+async function assertRuleCategoriesOwned(
+  executor: CategorizationExecutor,
+  userId: string,
+  actions: readonly RuleAction[],
+): Promise<void> {
+  const keys = [
+    ...new Set(
+      actions
+        .filter((action) => action.type === 'set_category')
+        .map((action) => (action as Extract<RuleAction, { type: 'set_category' }>).categoryKey),
+    ),
+  ];
+  if (keys.length === 0) return;
+
+  const result = await executor.execute<{ key: string }>(sql`
+    SELECT c.key
+      FROM categories c
+     WHERE c.user_id = ${userId}
+       AND c.key IN (${keys})
+       AND c.archived_at IS NULL
+       AND (SELECT count(*) FROM categories child WHERE child.parent_id = c.id) = 0
+  `);
+  const owned = new Set(result.rows.map((row) => row.key));
+  const missing = keys.find((key) => !owned.has(key));
+  if (missing !== undefined) {
+    throw new CategorizationError(
+      'categorization.category_not_assignable',
+      `${missing} is not an assignable category of yours`,
+      { categoryKey: missing },
+    );
+  }
+}
+
+export interface RuleWriteInput {
+  readonly name: string;
+  readonly priority?: number;
+  readonly enabled?: boolean;
+  readonly conditions: RuleConditions;
+  readonly actions: readonly RuleAction[];
+  readonly runOnSync?: boolean;
+  readonly stopProcessing?: boolean;
+}
+
+export interface RuleRecord extends Rule {
+  readonly lastAppliedAt: Date | null;
+  readonly lastAppliedCount: number;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+interface RuleRow extends Record<string, unknown> {
+  id: string;
+  user_id: string;
+  name: string;
+  priority: number;
+  enabled: boolean;
+  conditions: unknown;
+  actions: unknown;
+  run_on_sync: boolean;
+  stop_processing: boolean;
+  created_from_transaction_id: string | null;
+  last_applied_at: string | Date | null;
+  last_applied_count: number;
+  created_at: string | Date;
+  updated_at: string | Date;
+}
+
+function ruleRecordOf(row: RuleRow): RuleRecord {
+  const parsed = ruleSchema.parse({
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    priority: row.priority,
+    enabled: row.enabled,
+    conditions: row.conditions,
+    actions: row.actions,
+    runOnSync: row.run_on_sync,
+    stopProcessing: row.stop_processing,
+    createdFromTransactionId: row.created_from_transaction_id,
+  });
+  return {
+    ...parsed,
+    lastAppliedAt: row.last_applied_at === null ? null : new Date(row.last_applied_at),
+    lastAppliedCount: Number(row.last_applied_count),
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+/**
+ * Every rule this user has, parsed and with its apply history. Distinct from
+ * `loadRules` (above): that one feeds the matching engine and silently drops a
+ * rule that fails to parse (a broken rule must not stop a sync); this one is
+ * `GET /rules` and a rule the route cannot render is a bug the user should see,
+ * not one hidden from them, so a parse failure here throws.
+ */
+export async function listRuleRecords(
+  executor: CategorizationExecutor,
+  userId: string,
+): Promise<readonly RuleRecord[]> {
+  const result = await executor.execute<RuleRow>(sql`
+    SELECT id, user_id, name, priority, enabled, conditions, actions, run_on_sync,
+           stop_processing, created_from_transaction_id, last_applied_at, last_applied_count,
+           created_at, updated_at
+      FROM rules
+     WHERE user_id = ${userId}
+     ORDER BY priority, id
+  `);
+  return result.rows.map(ruleRecordOf);
+}
+
+async function requireOwnRule(
+  executor: CategorizationExecutor,
+  userId: string,
+  ruleId: string,
+): Promise<RuleRecord> {
+  const result = await executor.execute<RuleRow>(sql`
+    SELECT id, user_id, name, priority, enabled, conditions, actions, run_on_sync,
+           stop_processing, created_from_transaction_id, last_applied_at, last_applied_count,
+           created_at, updated_at
+      FROM rules
+     WHERE id = ${ruleId} AND user_id = ${userId}
+  `);
+  const row = result.rows[0];
+  // Scoped to `user_id` in the query, so another user's rule id reads as
+  // "not found" rather than confirming it exists.
+  if (row === undefined) {
+    throw new CategorizationError('categorization.rule_not_found', `no rule ${ruleId}`, { ruleId });
+  }
+  return ruleRecordOf(row);
+}
+
+/** `POST /rules`. Validates the whole rule, including that its categories are this user's. */
+export async function createRule(
+  executor: CategorizationExecutor,
+  input: { readonly userId: string } & RuleWriteInput,
+): Promise<RuleRecord> {
+  const candidate = {
+    id: newId(),
+    userId: input.userId,
+    name: input.name,
+    priority: input.priority ?? 100,
+    enabled: input.enabled ?? true,
+    conditions: input.conditions,
+    actions: input.actions,
+    runOnSync: input.runOnSync ?? true,
+    stopProcessing: input.stopProcessing ?? false,
+    createdFromTransactionId: null,
+  };
+  const parsed = ruleSchema.safeParse(candidate);
+  if (!parsed.success) {
+    throw new CategorizationError(
+      'categorization.rule_invalid',
+      parsed.error.issues[0]?.message ?? 'rule did not validate',
+      { issues: parsed.error.issues },
+    );
+  }
+  await assertRuleCategoriesOwned(executor, input.userId, parsed.data.actions);
+
+  await executor.execute(sql`
+    INSERT INTO rules
+      (id, user_id, name, priority, enabled, conditions, actions, run_on_sync, stop_processing,
+       created_from_transaction_id)
+    VALUES (
+      ${parsed.data.id}, ${input.userId}, ${parsed.data.name}, ${parsed.data.priority},
+      ${parsed.data.enabled}, ${JSON.stringify(parsed.data.conditions)}::jsonb,
+      ${JSON.stringify(parsed.data.actions)}::jsonb, ${parsed.data.runOnSync},
+      ${parsed.data.stopProcessing}, NULL
+    )
+  `);
+
+  return requireOwnRule(executor, input.userId, parsed.data.id);
+}
+
+/** `PATCH /rules/{id}`. Partial; unset fields keep their stored value. */
+export async function updateRule(
+  executor: CategorizationExecutor,
+  input: { readonly userId: string; readonly ruleId: string } & Partial<RuleWriteInput>,
+): Promise<RuleRecord> {
+  const existing = await requireOwnRule(executor, input.userId, input.ruleId);
+
+  const candidate = {
+    id: existing.id,
+    userId: existing.userId,
+    name: input.name ?? existing.name,
+    priority: input.priority ?? existing.priority,
+    enabled: input.enabled ?? existing.enabled,
+    conditions: input.conditions ?? existing.conditions,
+    actions: input.actions ?? existing.actions,
+    runOnSync: input.runOnSync ?? existing.runOnSync,
+    stopProcessing: input.stopProcessing ?? existing.stopProcessing,
+    createdFromTransactionId: existing.createdFromTransactionId,
+  };
+  const parsed = ruleSchema.safeParse(candidate);
+  if (!parsed.success) {
+    throw new CategorizationError(
+      'categorization.rule_invalid',
+      parsed.error.issues[0]?.message ?? 'rule did not validate',
+      { issues: parsed.error.issues },
+    );
+  }
+  if (input.actions !== undefined) {
+    await assertRuleCategoriesOwned(executor, input.userId, parsed.data.actions);
+  }
+
+  await executor.execute(sql`
+    UPDATE rules SET
+      name            = ${parsed.data.name},
+      priority        = ${parsed.data.priority},
+      enabled         = ${parsed.data.enabled},
+      conditions      = ${JSON.stringify(parsed.data.conditions)}::jsonb,
+      actions         = ${JSON.stringify(parsed.data.actions)}::jsonb,
+      run_on_sync     = ${parsed.data.runOnSync},
+      stop_processing = ${parsed.data.stopProcessing},
+      updated_at      = now()
+     WHERE id = ${input.ruleId} AND user_id = ${input.userId}
+  `);
+
+  return requireOwnRule(executor, input.userId, input.ruleId);
+}
+
+/** `DELETE /rules/{id}`. Hard delete — `rule_runs` cascades with it (migration 0006). */
+export async function deleteRule(
+  executor: CategorizationExecutor,
+  input: { readonly userId: string; readonly ruleId: string },
+): Promise<{ readonly deleted: boolean }> {
+  const result = await executor.execute<{ id: string }>(sql`
+    DELETE FROM rules WHERE id = ${input.ruleId} AND user_id = ${input.userId} RETURNING id
+  `);
+  return { deleted: result.rows.length > 0 };
+}
+
 export interface ApplyRuleResult {
   readonly ruleId: string;
   /** The `rule_runs` row this produced. Present for a preview too — see below. */
@@ -816,6 +1068,20 @@ export interface ApplyRuleResult {
   readonly changedCount: number;
   /** A sample of what would change, for the confirmation dialog. */
   readonly sample: readonly { readonly transactionId: string; readonly payee: string }[];
+  /**
+   * This rule's non-`set_category` actions that are in `IMPLEMENTED_ACTIONS`
+   * (WP 2.5: `link_recurring`, `notify`, and anything earlier already there).
+   * "Recorded", not "done" — see `rules/schema.ts`'s doc comment on
+   * `IMPLEMENTED_ACTIONS`. Always empty for a preview.
+   */
+  readonly actionsRecorded: readonly RuleAction['type'][];
+}
+
+/** A matched rule's non-`set_category` actions that this phase can at least record. */
+function implementedActionsOf(rule: Rule): readonly RuleAction['type'][] {
+  return rule.actions
+    .filter((action) => action.type !== 'set_category' && IMPLEMENTED_ACTIONS.has(action.type))
+    .map((action) => action.type);
 }
 
 /**
@@ -906,8 +1172,11 @@ export async function applyRule(
       matchedCount: matched.length,
       changedCount: result.written,
       sample: matched.slice(0, 10),
+      actionsRecorded: [],
     };
   }
+
+  const actionsRecorded = matched.length > 0 ? implementedActionsOf(rule) : [];
 
   await database.transaction(async (tx) => {
     const executor = tx as unknown as CategorizationExecutor;
@@ -936,6 +1205,7 @@ export async function applyRule(
           retroactive: input.retroactive === true,
           matchedCount: matched.length,
           changedCount: result.written,
+          actionsRecorded: [...actionsRecorded],
         },
         { userId: context.userId, correlationId: context.correlationId },
       ),
@@ -949,6 +1219,7 @@ export async function applyRule(
     matchedCount: matched.length,
     changedCount: result.written,
     sample: matched.slice(0, 10),
+    actionsRecorded,
   };
 }
 
