@@ -143,10 +143,7 @@ export async function listAttempts(
     .select()
     .from(deliveryAttempts)
     .where(
-      and(
-        eq(deliveryAttempts.userId, userId),
-        eq(deliveryAttempts.notificationId, notificationId),
-      ),
+      and(eq(deliveryAttempts.userId, userId), eq(deliveryAttempts.notificationId, notificationId)),
     )
     .orderBy(deliveryAttempts.attempt);
   return rows.map((row) => ({

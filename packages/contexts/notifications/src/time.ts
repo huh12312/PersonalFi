@@ -116,7 +116,9 @@ export function instantForLocalTime(
   date: DateOnlyType,
   minuteOfDay: number,
 ): Date {
-  const [year = 1970, month = 1, day = 1] = date.split('-').map((part) => Number.parseInt(part, 10));
+  const [year = 1970, month = 1, day = 1] = date
+    .split('-')
+    .map((part) => Number.parseInt(part, 10));
   const target = Date.UTC(year, month - 1, day, 0, minuteOfDay, 0);
 
   const first = target - (localEpochMs(timeZone, new Date(target)) - target);
@@ -235,6 +237,6 @@ export function digestWindowFor(
  * arithmetic obvious: `(epochDay + 3) mod 7` is days since Monday.
  */
 export function mondayOnOrBefore(date: DateOnlyType): DateOnlyType {
-  const daysSinceMonday = ((DateOnly.toEpochDay(date) + 3) % 7 + 7) % 7;
+  const daysSinceMonday = (((DateOnly.toEpochDay(date) + 3) % 7) + 7) % 7;
   return DateOnly.addDays(date, -daysSinceMonday);
 }

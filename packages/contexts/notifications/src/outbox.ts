@@ -54,7 +54,7 @@
  * in the evidence note.
  */
 import { newId } from '@core/kernel';
-import { DEFAULT_JOB_BACKOFF, backoffDelayMs, type BackoffOptions } from '@core/platform';
+import { backoffDelayMs, type BackoffOptions } from '@core/platform';
 import { and, eq, sql } from 'drizzle-orm';
 import type { NotificationAction } from './channel.ts';
 import type { NotificationsContext, NotificationsExecutor } from './db.ts';
@@ -241,7 +241,61 @@ export async function claimDueNotifications(
     )
     RETURNING target.*
   `);
-  return result.rows as unknown as readonly NotificationOutboxRow[];
+  return result.rows.map(toOutboxRow);
+}
+
+/**
+ * A raw `RETURNING target.*` row, mapped into the Drizzle row shape.
+ *
+ * This exists because the claim **must** be raw SQL — `FOR UPDATE SKIP LOCKED`
+ * over a subquery is not expressible in the query builder — and a raw row comes
+ * back with Postgres's column names. Casting it to `NotificationOutboxRow` and
+ * reading `row.userId` off it is how a delivery drain silently claims rows and
+ * then delivers none of them: every property is `undefined`, the per-user filter
+ * matches nothing, and the only symptom is an outbox that fills up. There is one
+ * mapping, it is here, and `test/db/dedupe.test.ts` fails if it drifts.
+ */
+function toOutboxRow(raw: Record<string, unknown>): NotificationOutboxRow {
+  return {
+    id: String(raw['id']),
+    userId: String(raw['user_id']),
+    channelId: String(raw['channel_id']),
+    ruleId: asString(raw['rule_id']),
+    dedupeKey: String(raw['dedupe_key']),
+    groupKey: asString(raw['group_key']),
+    groupWindowStart: asDate(raw['group_window_start']),
+    groupWindowEnd: asDate(raw['group_window_end']),
+    groupCount: Number(raw['group_count']),
+    deliveryClass: raw['delivery_class'] as DeliveryClass,
+    priority: raw['priority'] as NotificationPriority,
+    title: String(raw['title']),
+    bodyMd: String(raw['body_md']),
+    deepLink: asString(raw['deep_link']),
+    actions: raw['actions'] ?? [],
+    status: raw['status'] as NotificationOutboxRow['status'],
+    heldReason: (raw['held_reason'] as HeldReason | null) ?? null,
+    attemptCount: Number(raw['attempt_count']),
+    maxAttempts: Number(raw['max_attempts']),
+    notBefore: asDate(raw['not_before']) ?? new Date(0),
+    sourceEventId: asString(raw['source_event_id']),
+    sourceEventType: asString(raw['source_event_type']),
+    correlationId: String(raw['correlation_id']),
+    queuedAt: asDate(raw['queued_at']) ?? new Date(0),
+    deliveredAt: asDate(raw['delivered_at']),
+    deadAt: asDate(raw['dead_at']),
+    lastFailureCode: asString(raw['last_failure_code']),
+    createdAt: asDate(raw['created_at']) ?? new Date(0),
+    updatedAt: asDate(raw['updated_at']) ?? new Date(0),
+  };
+}
+
+function asString(value: unknown): string | null {
+  return value === null || value === undefined ? null : String(value);
+}
+
+function asDate(value: unknown): Date | null {
+  if (value === null || value === undefined) return null;
+  return value instanceof Date ? value : new Date(String(value));
 }
 
 export interface AttemptRecord {
@@ -349,6 +403,20 @@ export interface MarkFailedResult {
  * * `permanent` — they refused us (a 4xx, an SMTP 5xx). Also straight to
  *   `dead`: an invalid credential is not fixed by patience.
  * * `retryable` — backoff, unless this was the last attempt.
+ *
+ * ## The last rung is recorded as `permanent`, and the schema is why
+ *
+ * `delivery_attempts_retryable_has_next` says an attempt whose outcome is
+ * `retryable` must name the attempt that follows it, which is the constraint
+ * form of "retryable means we scheduled a retry". The rung that exhausts
+ * `max_attempts` schedules nothing, so recording the adapter's word for it
+ * would write a row the database correctly refuses — and the refusal lands
+ * inside the delivery job's transaction, where it rolls the whole attempt back
+ * and the ladder never terminates. The exhausting rung is therefore written as
+ * `permanent` with the original reason preserved in `detail`, and the row's
+ * `last_failure_code` becomes `attempts_exhausted`, which is the thing an
+ * operator actually needs to read: not *why* the fifth attempt failed, but that
+ * there will not be a sixth.
  */
 export async function markFailed(
   executor: NotificationsExecutor,
@@ -369,8 +437,14 @@ export async function markFailed(
   },
 ): Promise<MarkFailedResult> {
   const now = context.clock.now();
-  const terminal =
-    input.outcome !== 'retryable' || input.attempt >= input.maxAttempts;
+  const terminal = input.outcome !== 'retryable' || input.attempt >= input.maxAttempts;
+  /** A retryable failure on the rung that exhausts the ladder. See the header. */
+  const exhausted = input.outcome === 'retryable' && terminal;
+  const recordedOutcome = exhausted ? 'permanent' : input.outcome;
+  const recordedDetail = exhausted
+    ? `${input.detail ?? 'retryable failure'} (no further attempts: ${String(input.maxAttempts)} exhausted)`
+    : input.detail;
+  const failureCode = input.refusalCode ?? (exhausted ? 'attempts_exhausted' : input.outcome);
 
   const nextAttemptAt = terminal
     ? null
@@ -384,7 +458,7 @@ export async function markFailed(
     SET status = ${terminal ? 'dead' : 'pending'}::text,
         dead_at = ${terminal ? now.toISOString() : null}::timestamptz,
         attempt_count = ${input.attempt},
-        last_failure_code = ${input.refusalCode ?? input.outcome}::text,
+        last_failure_code = ${failureCode}::text,
         held_reason = NULL,
         not_before = ${(nextAttemptAt ?? now).toISOString()}::timestamptz,
         updated_at = ${now.toISOString()}::timestamptz
@@ -395,10 +469,10 @@ export async function markFailed(
     notificationId: input.notificationId,
     attempt: input.attempt,
     channelKind: input.channelKind,
-    outcome: input.outcome,
+    outcome: recordedOutcome,
     refusalCode: input.refusalCode,
     httpStatus: input.httpStatus,
-    detail: input.detail,
+    detail: recordedDetail,
     durationMs: input.durationMs,
     nextAttemptAt,
     startedAt: input.startedAt,
@@ -419,6 +493,18 @@ export async function markFailed(
  * A `refused` dead letter is retried too, and will be refused again unless the
  * operator changed the allow-list or the user fixed the channel. That is the
  * correct behaviour: the guard, not the retry path, is what decides.
+ *
+ * ## The attempt counter goes forward, never back
+ *
+ * `attempt_count` is **not** reset. It is the high-water mark of a ladder whose
+ * rungs are `delivery_attempts` rows keyed `(notification_id, attempt)` UNIQUE,
+ * so a retry that rewound the counter to zero would make the next attempt claim
+ * the number 1 again and die on that index — turning "retry the dead letter"
+ * into a constraint violation inside the delivery job. What a retry grants is a
+ * *fresh ladder*: `max_attempts` moves out by another five from where the row
+ * already stands. The history then reads as one story — attempts 1–5 failed,
+ * the operator fixed the channel, attempt 6 delivered — which is the whole
+ * reason the attempts survive the row reaching `dead`.
  */
 export async function retryNotification(
   executor: NotificationsExecutor,
@@ -432,7 +518,8 @@ export async function retryNotification(
       status: 'pending',
       deadAt: null,
       heldReason: null,
-      attemptCount: 0,
+      maxAttempts: sql`${notificationOutbox.attemptCount} + ${DEFAULT_MAX_ATTEMPTS}`,
+      lastFailureCode: null,
       notBefore: now,
       updatedAt: now,
     })

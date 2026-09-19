@@ -91,11 +91,7 @@ export function createNotificationsConsumer(
       // silent.
       if (rendered === null) return;
 
-      const matches = await rulesForEvent(
-        dependencies.database,
-        event.userId,
-        event.eventType,
-      );
+      const matches = await rulesForEvent(dependencies.database, event.userId, event.eventType);
       // No channel, or no rule: the normal state of a fresh install.
       if (matches.length === 0) return;
 

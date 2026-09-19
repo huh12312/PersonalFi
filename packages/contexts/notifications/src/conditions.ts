@@ -28,13 +28,7 @@
  * silently becomes "above $10,000.000000000001".
  */
 export type ConditionOperator =
-  | 'eq'
-  | 'neq'
-  | 'in'
-  | 'notIn'
-  | 'isTrue'
-  | 'gteMinor'
-  | 'gteAbsMinor';
+  'eq' | 'neq' | 'in' | 'notIn' | 'isTrue' | 'gteMinor' | 'gteAbsMinor';
 
 export type Conditions = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 

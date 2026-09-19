@@ -103,9 +103,7 @@ function notificationOf(row: NotificationOutboxRow): Notification {
   };
 }
 
-export function createDeliveryJob(
-  dependencies: DeliveryJobDependencies,
-): JobHandlerRegistration {
+export function createDeliveryJob(dependencies: DeliveryJobDependencies): JobHandlerRegistration {
   return defineJob(
     DELIVER_JOB_KIND,
     async (_payload: unknown, context: JobContext) => {
@@ -237,8 +235,11 @@ export async function drainNotifications(
         detail: result.detail ?? null,
         durationMs,
         startedAt,
-        backoff: dependencies.backoff,
-        random: dependencies.random,
+        // Spread rather than assigned: under `exactOptionalPropertyTypes` an
+        // explicit `undefined` is not the same as an absent optional, and
+        // `markFailed` defaults these only when they are absent.
+        ...(dependencies.backoff === undefined ? {} : { backoff: dependencies.backoff }),
+        ...(dependencies.random === undefined ? {} : { random: dependencies.random }),
       });
       await appendFailure(tx, notificationsContext, row, {
         channelKind: channel.kind,

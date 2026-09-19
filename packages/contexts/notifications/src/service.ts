@@ -310,8 +310,7 @@ export async function createRule(
       eventType: input.eventType,
       conditions: input.conditions ?? {},
       deliveryClass: input.deliveryClass,
-      digestCadence:
-        input.deliveryClass === 'DIGEST' ? (input.digestCadence ?? 'WEEKLY') : null,
+      digestCadence: input.deliveryClass === 'DIGEST' ? (input.digestCadence ?? 'WEEKLY') : null,
       timezone: input.timezone,
       quietHoursEnabled,
       quietHoursStartMinute: input.quietHoursStartMinute ?? 1320,
@@ -337,7 +336,9 @@ export async function rulesForEvent(
   executor: NotificationsExecutor,
   userId: string,
   eventType: string,
-): Promise<readonly { readonly rule: NotificationRuleRow; readonly channel: NotificationChannelRow }[]> {
+): Promise<
+  readonly { readonly rule: NotificationRuleRow; readonly channel: NotificationChannelRow }[]
+> {
   const rows = await executor
     .select({ rule: notificationRules, channel: notificationChannels })
     .from(notificationRules)

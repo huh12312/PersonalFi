@@ -197,7 +197,9 @@ export function createEgressPolicy(input: EgressPolicyInput = {}): EgressPolicy 
 
   return Object.freeze({
     allowedHosts: Object.freeze([...new Set(allowedHosts)]),
-    allowedSchemes: Object.freeze([...(input.allowedSchemes ?? ['https', 'smtps', 'smtp+starttls'])]),
+    allowedSchemes: Object.freeze([
+      ...(input.allowedSchemes ?? ['https', 'smtps', 'smtp+starttls']),
+    ]),
     allowedPorts: Object.freeze([...new Set(allowedPorts)]),
     maxResponseBytes: input.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
     timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -277,7 +279,11 @@ function classifyIpv4(address: string): AddressClass {
 }
 
 function classifyIpv6(address: string): AddressClass {
-  const lower = address.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0] ?? '';
+  const lower =
+    address
+      .toLowerCase()
+      .replace(/^\[|\]$/g, '')
+      .split('%')[0] ?? '';
   if (lower === '::' || lower === '') return 'unspecified';
   if (lower === '::1') return 'loopback';
   // ::ffff:127.0.0.1 and ::ffff:7f00:1 are both loopback wearing a v6 hat.
@@ -369,7 +375,13 @@ export function checkDestination(input: DestinationInput, policy: EgressPolicy):
 
   return {
     ok: true,
-    destination: { scheme: input.scheme, host, port: input.port, path: input.path ?? '', addresses: [] },
+    destination: {
+      scheme: input.scheme,
+      host,
+      port: input.port,
+      path: input.path ?? '',
+      addresses: [],
+    },
   };
 }
 
@@ -426,7 +438,10 @@ export async function guardDestination(
     );
   }
   if (addresses.length === 0) {
-    return refuse('dns_resolution_failed', `${syntactic.destination.host} resolved to no addresses`);
+    return refuse(
+      'dns_resolution_failed',
+      `${syntactic.destination.host} resolved to no addresses`,
+    );
   }
 
   for (const address of addresses) {

@@ -108,10 +108,11 @@ export function createNtfyChannel(options: NtfyChannelOptions): NotificationChan
       });
 
       const verdict = classifyStatus(response.status);
-      if (typeof verdict !== 'string') {
-        // A 3xx. `classifyStatus` returns the refusal rather than a class,
-        // because not following a redirect is a decision we made, not a
-        // failure they had.
+      if (verdict.kind === 'refused') {
+        // A 3xx. `classifyStatus` returns a refusal rather than a failure
+        // class, because not following a redirect is a decision we made and
+        // not a failure they had — and `response.location` is deliberately
+        // read and discarded here rather than dialled.
         return {
           outcome: 'refused',
           refusalCode: verdict.code,
@@ -119,11 +120,11 @@ export function createNtfyChannel(options: NtfyChannelOptions): NotificationChan
           detail: verdict.detail,
         };
       }
-      if (verdict === 'ok') {
+      if (verdict.kind === 'ok') {
         return { outcome: 'delivered', httpStatus: response.status };
       }
       return {
-        outcome: verdict,
+        outcome: verdict.kind,
         httpStatus: response.status,
         detail: `ntfy answered HTTP ${String(response.status)}`,
       };

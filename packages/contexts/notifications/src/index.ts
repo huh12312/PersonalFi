@@ -216,8 +216,4 @@ export {
 // ---------------------------------------------------------------------------
 // Database handles
 // ---------------------------------------------------------------------------
-export type {
-  NotificationsContext,
-  NotificationsDatabase,
-  NotificationsExecutor,
-} from './db.ts';
+export type { NotificationsContext, NotificationsDatabase, NotificationsExecutor } from './db.ts';

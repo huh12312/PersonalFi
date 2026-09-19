@@ -62,7 +62,7 @@ export const NotificationDelivered = defineEvent({
   description:
     'A channel accepted the notification. Carries the attempt number because "delivered on the ' +
     'first try" and "delivered on the fourth, after two backoffs" are different statements about ' +
-    'a channel\'s health, and the second is the one that predicts the dead letter next week.',
+    "a channel's health, and the second is the one that predicts the dead letter next week.",
   schema: z.object({
     notificationId: uuid,
     channelId: uuid,

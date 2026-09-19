@@ -16,13 +16,7 @@
  * enforced by the outbox, not by each rule remembering to do it". A rule that
  * forgot would still collide.
  */
-import {
-  createdAtColumn,
-  idColumn,
-  instantColumn,
-  updatedAtColumn,
-  userIdColumn,
-} from '@core/db';
+import { createdAtColumn, idColumn, instantColumn, updatedAtColumn, userIdColumn } from '@core/db';
 import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import type { ChannelKind, DeliveryClass } from './channels.ts';
 
@@ -129,7 +123,10 @@ export const deliveryAttempts = pgTable(
     createdAt: createdAtColumn(),
   },
   (table) => [
-    uniqueIndex('delivery_attempts_notification_attempt_idx').on(table.notificationId, table.attempt),
+    uniqueIndex('delivery_attempts_notification_attempt_idx').on(
+      table.notificationId,
+      table.attempt,
+    ),
     index('delivery_attempts_user_idx').on(table.userId, table.createdAt),
     index('delivery_attempts_refused_idx').on(table.userId, table.refusalCode),
   ],

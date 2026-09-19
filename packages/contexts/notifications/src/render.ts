@@ -124,7 +124,10 @@ export function renderNotification(
         // that a rule is entitled to wait for.
         dedupeKey: `recurring.price:${id}:${confirmed ? 'confirmed' : 'provisional'}`,
         groupKey: 'recurring.price-changes',
-        title: direction === 'INCREASE' ? 'A subscription price went up' : 'A subscription price went down',
+        title:
+          direction === 'INCREASE'
+            ? 'A subscription price went up'
+            : 'A subscription price went down',
         bodyMd: `Annual impact ${formatMinor(impact)} ${currency}${confirmed ? '.' : ' (not yet confirmed).'}`,
         priority: 'normal',
         deepLink: `/recurring?series=${encodeURIComponent(str(payload, 'seriesId'))}`,

@@ -89,10 +89,25 @@ export function createNodeTransport(): HttpTransport {
 
     // The whole point: DNS is not consulted again. Whatever the guard resolved
     // and validated is what the socket connects to.
-    const pinnedLookup: LookupFunction = (_hostname, _options, callback) => {
+    //
+    // Both callback shapes are answered, and that is not defensive padding.
+    // Node's `net` module calls `lookup` with `{ all: true }` whenever
+    // `autoSelectFamily` is on — which it has been by default since Node 20 —
+    // and then reads `addresses[0].address` off the answer. A lookup that only
+    // ever called back with the string form therefore hands `undefined` to
+    // `isIP` and every single send dies with "Invalid IP address: undefined".
+    // `test/egress-allowlist.test.ts`'s live fixtures are what caught it.
+    const pinnedLookup: LookupFunction = (_hostname, options, callback) => {
       const family = address.includes(':') ? 6 : 4;
-      // Node's overloads differ by `options.all`; this callback shape satisfies
-      // both because we only ever return a single address.
+      if (typeof options === 'object' && options !== null && options.all === true) {
+        (
+          callback as unknown as (
+            error: null,
+            addresses: { address: string; family: number }[],
+          ) => void
+        )(null, [{ address, family }]);
+        return;
+      }
       (callback as (error: null, addr: string, family: number) => void)(null, address, family);
     };
 
@@ -113,7 +128,11 @@ export function createNodeTransport(): HttpTransport {
         headers: { ...request.headers, host: destination.host },
         lookup: pinnedLookup,
         ...(secure
-          ? { servername: destination.host, rejectUnauthorized: true, minVersion: 'TLSv1.2' as const }
+          ? {
+              servername: destination.host,
+              rejectUnauthorized: true,
+              minVersion: 'TLSv1.2' as const,
+            }
           : {}),
       };
 
@@ -161,7 +180,9 @@ export function createNodeTransport(): HttpTransport {
       outbound.setTimeout(request.timeoutMs, () => {
         outbound.destroy();
         finish(() =>
-          reject(new EgressRefusedError('timeout', `no response within ${String(request.timeoutMs)} ms`)),
+          reject(
+            new EgressRefusedError('timeout', `no response within ${String(request.timeoutMs)} ms`),
+          ),
         );
       });
 
