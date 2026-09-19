@@ -1,16 +1,33 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://personalfi.local/contracts/advisor/0.1.0.json",
+  "$id": "https://personalfi.local/contracts/advisor/advisor.schema.json",
   "title": "PersonalFi Advisor contract",
-  "description": "Placeholder. Phase 2 (WP 2.x) fills in the AdvisorSnapshot input and the Insight[] output with evidence refs, confidence, severity ceiling, and requires_review. Versioned independently of the HTTP API because built-in rules, a local model, and the sidecar all deliver through it.",
-  "version": "0.1.0",
+  "description": "The index of the Advisor contract bundle (08 §4). Built-in rules, a local model (Phase 5) and the Vibe-Trading sidecar (Phase 6) all deliver through it, which is why it is versioned independently of the HTTP API. The normative documents are the three files under v1/; this file names them and states the wire version. An advisor pins a major and must reject anything it does not understand. The invariant the bundle exists to carry: an advisor receives a minimised, read-only snapshot over a one-way channel and returns proposals — it has no database handle, no token, no write port, and no value it can return that causes an action.",
+  "contractVersion": 1,
+  "artefactVersion": "1.0.0",
+  "supportedContractVersions": [1],
+  "documents": {
+    "request": { "$ref": "https://personalfi.local/contracts/advisor/v1/request.schema.json" },
+    "response": { "$ref": "https://personalfi.local/contracts/advisor/v1/response.schema.json" },
+    "manifest": { "$ref": "https://personalfi.local/contracts/advisor/v1/manifest.schema.json" }
+  },
+  "rules": [
+    "requires_review is the literal true and there is no status property; every insight is persisted as pending_review.",
+    "proposed_actions[].kind is one of suggest_only | open_url | create_goal_draft | create_rule_draft. There is no execute, transfer or trade member.",
+    "evidence is non-empty and every source_ref must resolve into the snapshot that was sent, or to a host in the advisor's egress_allowlist.",
+    "every numeral in a rendered field must be traceable to a snapshot value or to a declared derivation over snapshot values, which the validator re-computes.",
+    "confidence is required; confidence_basis 'deterministic' is reserved for builtin advisors and is checked, not trusted.",
+    "the snapshot carries only granted scopes, minimised per the scope catalogue: tokenised merchants, bucketed amounts where the scope says so, no PII, no raw descriptors, no credentials.",
+    "transactions.raw is never emitted to an external advisor, whatever the grant table says."
+  ],
   "type": "object",
   "properties": {
-    "version": {
-      "const": "0.1.0",
-      "description": "Contract version. Consumers pin a major and must reject anything they do not understand."
+    "contract_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "The wire major, negotiated at registration. Consumers pin it and must reject anything they do not understand."
     }
   },
-  "required": ["version"],
+  "required": ["contract_version"],
   "additionalProperties": true
 }

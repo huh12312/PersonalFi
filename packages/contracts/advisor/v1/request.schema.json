@@ -1,0 +1,1581 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://personalfi.local/contracts/advisor/v1/request.schema.json",
+  "title": "PersonalFi AdvisorRequest v1",
+  "description": "What crosses the boundary to an advisor: a minimised, read-only snapshot with one key per granted scope, the digest we stored, and the limits we enforce. One-way — there is no return channel, no token and no handle (08 §4.1).",
+  "contractVersion": 1,
+  "artefactVersion": "1.0.0",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "type": "number",
+      "const": 1
+    },
+    "request_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "advisor_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "advisor_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "builtin",
+        "local_model",
+        "external"
+      ]
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T[0-9:.]+Z$"
+    },
+    "base_currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "time_zone": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "today": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "granted_scopes": {
+      "maxItems": 13,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "networth.summary",
+          "cash.summary",
+          "cashflow.monthly",
+          "budgets.status",
+          "recurring.list",
+          "goals.list",
+          "risk.profile",
+          "market.watchlist",
+          "holdings.aggregate",
+          "holdings.detail",
+          "transactions.summary",
+          "transactions.raw",
+          "institutions.names"
+        ]
+      }
+    },
+    "input_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "max_insights": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 4194304
+        },
+        "deadline": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T[0-9:.]+Z$"
+        }
+      },
+      "required": [
+        "max_insights",
+        "max_response_bytes",
+        "deadline"
+      ],
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "type": "object",
+      "properties": {
+        "networth_summary": {
+          "type": "object",
+          "properties": {
+            "as_of": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "assets": {
+              "type": "object",
+              "properties": {
+                "minor": {
+                  "type": "string",
+                  "pattern": "^-?\\d{1,20}$"
+                },
+                "currency": {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                }
+              },
+              "required": [
+                "minor",
+                "currency"
+              ],
+              "additionalProperties": false,
+              "description": "Money as minor units in a string, paired with an ISO-4217 code."
+            },
+            "liabilities": {
+              "type": "object",
+              "properties": {
+                "minor": {
+                  "type": "string",
+                  "pattern": "^-?\\d{1,20}$"
+                },
+                "currency": {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                }
+              },
+              "required": [
+                "minor",
+                "currency"
+              ],
+              "additionalProperties": false,
+              "description": "Money as minor units in a string, paired with an ISO-4217 code."
+            },
+            "net_worth": {
+              "type": "object",
+              "properties": {
+                "minor": {
+                  "type": "string",
+                  "pattern": "^-?\\d{1,20}$"
+                },
+                "currency": {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                }
+              },
+              "required": [
+                "minor",
+                "currency"
+              ],
+              "additionalProperties": false,
+              "description": "Money as minor units in a string, paired with an ISO-4217 code."
+            },
+            "trend": {
+              "maxItems": 12,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "month": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}$"
+                  },
+                  "net_worth": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  }
+                },
+                "required": [
+                  "month",
+                  "net_worth"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "as_of",
+            "assets",
+            "liabilities",
+            "net_worth",
+            "trend"
+          ],
+          "additionalProperties": false
+        },
+        "cash_summary": {
+          "type": "object",
+          "properties": {
+            "as_of": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "total": {
+              "type": "object",
+              "properties": {
+                "minor": {
+                  "type": "string",
+                  "pattern": "^-?\\d{1,20}$"
+                },
+                "currency": {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                }
+              },
+              "required": [
+                "minor",
+                "currency"
+              ],
+              "additionalProperties": false,
+              "description": "Money as minor units in a string, paired with an ISO-4217 code."
+            },
+            "account_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "blended_apy": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "emergency_fund_months": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 600
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "accounts": {
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "account_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "checking",
+                      "savings",
+                      "money_market",
+                      "cash_management",
+                      "other"
+                    ]
+                  },
+                  "balance": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "apy": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "account_ref",
+                  "type",
+                  "balance",
+                  "apy"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "as_of",
+            "total",
+            "account_count",
+            "blended_apy",
+            "emergency_fund_months",
+            "accounts"
+          ],
+          "additionalProperties": false
+        },
+        "cashflow_monthly": {
+          "type": "object",
+          "properties": {
+            "from_month": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}$"
+            },
+            "to_month": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}$"
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "months": {
+              "maxItems": 24,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "month": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}$"
+                  },
+                  "income": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "expense": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "net": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "by_category": {
+                    "maxItems": 128,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "category_ref": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[A-Za-z0-9_:.-]+$"
+                        },
+                        "category_slug": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 96
+                        },
+                        "amount": {
+                          "type": "object",
+                          "properties": {
+                            "minor": {
+                              "type": "string",
+                              "pattern": "^-?\\d{1,20}$"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$"
+                            }
+                          },
+                          "required": [
+                            "minor",
+                            "currency"
+                          ],
+                          "additionalProperties": false,
+                          "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                        }
+                      },
+                      "required": [
+                        "category_ref",
+                        "category_slug",
+                        "amount"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "month",
+                  "income",
+                  "expense",
+                  "net",
+                  "by_category"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "from_month",
+            "to_month",
+            "currency",
+            "months"
+          ],
+          "additionalProperties": false
+        },
+        "budgets_status": {
+          "type": "object",
+          "properties": {
+            "period_start": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "period_end": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "period_kind": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "ready_to_assign": {
+              "type": "object",
+              "properties": {
+                "minor": {
+                  "type": "string",
+                  "pattern": "^-?\\d{1,20}$"
+                },
+                "currency": {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                }
+              },
+              "required": [
+                "minor",
+                "currency"
+              ],
+              "additionalProperties": false,
+              "description": "Money as minor units in a string, paired with an ISO-4217 code."
+            },
+            "elapsed": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "lines": {
+              "maxItems": 256,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "line_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                  },
+                  "category_ref": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9_:.-]+$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "category_slug": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 96
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "assigned": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "activity": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "available": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "cash_overspend": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "credit_overspend": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "needed_this_period": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "underfunded": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  }
+                },
+                "required": [
+                  "line_ref",
+                  "category_ref",
+                  "category_slug",
+                  "kind",
+                  "assigned",
+                  "activity",
+                  "available",
+                  "cash_overspend",
+                  "credit_overspend",
+                  "needed_this_period",
+                  "underfunded"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "period_start",
+            "period_end",
+            "period_kind",
+            "currency",
+            "ready_to_assign",
+            "elapsed",
+            "lines"
+          ],
+          "additionalProperties": false
+        },
+        "recurring_list": {
+          "type": "object",
+          "properties": {
+            "as_of": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "streams": {
+              "maxItems": 512,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "series_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                  },
+                  "merchant_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                  },
+                  "cadence": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "type": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "status": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "user_confirmed": {
+                    "type": "boolean"
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "typical_amount": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "observed_min": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "observed_max": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "next_due_date": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "first_seen": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "last_seen": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "periods_per_year": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 366
+                  },
+                  "eligible_for_impact": {
+                    "type": "boolean"
+                  },
+                  "price_changes": {
+                    "maxItems": 12,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "effective_date": {
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "INCREASE",
+                            "DECREASE"
+                          ]
+                        },
+                        "previous_amount": {
+                          "type": "object",
+                          "properties": {
+                            "minor": {
+                              "type": "string",
+                              "pattern": "^-?\\d{1,20}$"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$"
+                            }
+                          },
+                          "required": [
+                            "minor",
+                            "currency"
+                          ],
+                          "additionalProperties": false,
+                          "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                        },
+                        "new_amount": {
+                          "type": "object",
+                          "properties": {
+                            "minor": {
+                              "type": "string",
+                              "pattern": "^-?\\d{1,20}$"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$"
+                            }
+                          },
+                          "required": [
+                            "minor",
+                            "currency"
+                          ],
+                          "additionalProperties": false,
+                          "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                        },
+                        "annual_impact": {
+                          "type": "object",
+                          "properties": {
+                            "minor": {
+                              "type": "string",
+                              "pattern": "^-?\\d{1,20}$"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$"
+                            }
+                          },
+                          "required": [
+                            "minor",
+                            "currency"
+                          ],
+                          "additionalProperties": false,
+                          "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                        }
+                      },
+                      "required": [
+                        "effective_date",
+                        "direction",
+                        "previous_amount",
+                        "new_amount",
+                        "annual_impact"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "series_ref",
+                  "merchant_ref",
+                  "cadence",
+                  "type",
+                  "status",
+                  "user_confirmed",
+                  "confidence",
+                  "typical_amount",
+                  "observed_min",
+                  "observed_max",
+                  "next_due_date",
+                  "first_seen",
+                  "last_seen",
+                  "periods_per_year",
+                  "eligible_for_impact",
+                  "price_changes"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "as_of",
+            "currency",
+            "streams"
+          ],
+          "additionalProperties": false
+        },
+        "goals_list": {
+          "type": "object",
+          "properties": {
+            "goals": {
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "goal_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "horizon_months": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "progress": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "goal_ref",
+                  "name",
+                  "target",
+                  "horizon_months",
+                  "progress"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "goals"
+          ],
+          "additionalProperties": false
+        },
+        "risk_profile": {
+          "type": "object",
+          "properties": {
+            "tolerance": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "horizon_years": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "tax_bracket_band": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16
+            },
+            "liquidity_need": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          "required": [
+            "tolerance",
+            "horizon_years",
+            "tax_bracket_band",
+            "liquidity_need"
+          ],
+          "additionalProperties": false
+        },
+        "market_watchlist": {
+          "type": "object",
+          "properties": {
+            "symbols": {
+              "maxItems": 128,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              }
+            }
+          },
+          "required": [
+            "symbols"
+          ],
+          "additionalProperties": false
+        },
+        "holdings_aggregate": {
+          "type": "object",
+          "properties": {
+            "as_of": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "by_asset_class": {
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "asset_class": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "weight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "asset_class",
+                  "weight"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "top_positions": {
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "symbol": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16
+                  },
+                  "weight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "symbol",
+                  "weight"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "target_allocation": {
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "asset_class": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "weight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "asset_class",
+                  "weight"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "account_type_mix": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "maxLength": 32
+              },
+              "additionalProperties": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "required": [
+            "as_of",
+            "by_asset_class",
+            "top_positions",
+            "target_allocation",
+            "account_type_mix"
+          ],
+          "additionalProperties": false
+        },
+        "holdings_detail": {
+          "type": "object",
+          "properties": {
+            "as_of": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "positions": {
+              "maxItems": 256,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "symbol": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16
+                  },
+                  "quantity": {
+                    "type": "string",
+                    "pattern": "^-?\\d+(\\.\\d+)?$"
+                  },
+                  "cost_basis": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "market_value": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "unrealized": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  },
+                  "oldest_lot_days": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "symbol",
+                  "quantity",
+                  "cost_basis",
+                  "market_value",
+                  "unrealized",
+                  "oldest_lot_days"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "as_of",
+            "positions"
+          ],
+          "additionalProperties": false
+        },
+        "transactions_summary": {
+          "type": "object",
+          "properties": {
+            "from_month": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}$"
+            },
+            "to_month": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}$"
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "by_category": {
+              "maxItems": 128,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "category_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                  },
+                  "category_slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "total": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  }
+                },
+                "required": [
+                  "category_ref",
+                  "category_slug",
+                  "count",
+                  "total"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "top_merchants": {
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "merchant_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "total": {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,20}$"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                  }
+                },
+                "required": [
+                  "merchant_ref",
+                  "count",
+                  "total"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "from_month",
+            "to_month",
+            "currency",
+            "by_category",
+            "top_merchants"
+          ],
+          "additionalProperties": false
+        },
+        "transactions_raw": {
+          "type": "object",
+          "properties": {
+            "from_date": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "to_date": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "rows": {
+              "maxItems": 2000,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "transaction_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                  },
+                  "date": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "merchant_ref": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9_:.-]+$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "category_slug": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 96
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "amount_bucket": {
+                    "type": "string",
+                    "enum": [
+                      "0-10",
+                      "10-50",
+                      "50-200",
+                      "200-1000",
+                      "1000-5000",
+                      "5000+"
+                    ]
+                  },
+                  "direction": {
+                    "type": "string",
+                    "enum": [
+                      "outflow",
+                      "inflow"
+                    ]
+                  }
+                },
+                "required": [
+                  "transaction_ref",
+                  "date",
+                  "merchant_ref",
+                  "category_slug",
+                  "amount_bucket",
+                  "direction"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "from_date",
+            "to_date",
+            "currency",
+            "rows"
+          ],
+          "additionalProperties": false
+        },
+        "institutions_names": {
+          "type": "object",
+          "properties": {
+            "institutions": {
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "institution_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  }
+                },
+                "required": [
+                  "institution_ref",
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "institutions"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "description": "The minimised, read-only view an advisor receives. One key per granted scope."
+    }
+  },
+  "required": [
+    "contract_version",
+    "request_id",
+    "advisor_id",
+    "advisor_version",
+    "kind",
+    "generated_at",
+    "base_currency",
+    "time_zone",
+    "today",
+    "granted_scopes",
+    "input_digest",
+    "limits",
+    "snapshot"
+  ],
+  "additionalProperties": false
+}
