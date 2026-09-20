@@ -142,19 +142,25 @@ chmod 444 secrets/plaid_client_id secrets/plaid_secret secrets/plaid_env
 #    merchant and orphans every `MERCHANT_…` reference an evidence row already
 #    stored. File-only, same posture as `master_key` — never an env var, never
 #    read from `NOTIFICATIONS_ALLOWED_HOSTS`'s neighbourhood in `.env`.
-#      touch secrets/advisor_token_secret        # leave empty to stay opted out
-#      chmod 444 secrets/advisor_token_secret
-#    To actually enable `module.insights`, write a high-entropy value instead:
-#      openssl rand -hex 32 > secrets/advisor_token_secret
-#      chmod 444 secrets/advisor_token_secret
-#    **Open item.** `compose.yml`'s `api`/`worker` services do not yet mount
-#    this file as a Docker secret — that edit is out of this wiring batch's
-#    owned-files list (docs/evidence/phase-2/wp2.w-wiring.md records it). Until
-#    it is added, this file has no effect inside the compose stack even when
-#    present on the host; `apps/api/test/db/phase2-wiring.test.ts` proves the
-#    application-level wiring (the flag, the consumer, the job, the schedule)
-#    by constructing `ModuleWiringOptions` directly, the way every other
-#    module-wiring test in this suite already does.
+#    `compose.yml` declares it as a file secret on `api` and `worker` only
+#    (never `proxy` or `backup`), and — like the three `plaid_*` secrets above
+#    — Compose refuses to start a container that mounts a secret whose host
+#    file does not exist, so it is created **empty** unconditionally, whether
+#    or not this deployment is opting into insights yet:
+touch secrets/advisor_token_secret        # leave empty to stay opted out
+chmod 444 secrets/advisor_token_secret
+#    `packages/config` treats a zero-length secret file exactly as it treats a
+#    missing one (`load.ts`'s `loadConfig`, tested in `load.test.ts`), so an
+#    empty file boots exactly as an absent one would: `apps/api/src/
+#    modules.ts`'s `insightsModule` registers `module.insights`'s flag with no
+#    consumer, no job and no schedule. Nothing else to do until you actually
+#    want insights.
+#
+#    To actually enable `module.insights`, write a high-entropy value instead,
+#    then run `just harden-secrets` (it covers this file the same way it
+#    covers the three `plaid_*` secrets):
+openssl rand -hex 32 > secrets/advisor_token_secret
+chmod 444 secrets/advisor_token_secret
 ```
 
 #### Secret file modes: 0444 by default, 0400 via `just harden-secrets`

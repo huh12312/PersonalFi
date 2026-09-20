@@ -717,17 +717,20 @@ harden-secrets:
     set -euo pipefail
     cd "${SECRETS_DIR}"
     sudo chmod 0700 .
-    # database_url, master_key and the three plaid_* secrets are read by
-    # api/worker/migrator (10001). Keep this list in step with compose.yml's
-    # `secrets:` on those services — gate-security-review.md §8.2 N-1 / §8.11
-    # D-4: the plaid_* secrets landed in C-3, were mounted on api and worker,
-    # and were never added here, so 0400-owned-by-you (what an operator gets
-    # from following RUNBOOK.md's "Create secrets" step 6 literally) made
-    # both api and worker crash-loop on EACCES the moment Plaid was enabled.
-    # scripts/check-secret-ownership.sh is the computed check that would catch
-    # this list rotting again the way the image-prune delete set and the
+    # database_url, master_key, the three plaid_* secrets, and
+    # advisor_token_secret are read by api/worker/migrator (10001). Keep this
+    # list in step with compose.yml's `secrets:` on those services —
+    # gate-security-review.md §8.2 N-1 / §8.11 D-4: the plaid_* secrets landed
+    # in C-3, were mounted on api and worker, and were never added here, so
+    # 0400-owned-by-you (what an operator gets from following RUNBOOK.md
+    # "Create secrets" step 6 literally) made both api and worker crash-loop
+    # on EACCES the moment Plaid was enabled. advisor_token_secret
+    # (docs/evidence/phase-2/wp2.w-wiring.md) is added here for the same
+    # reason, the same day it lands in compose.yml, not after. scripts/
+    # check-secret-ownership.sh is the computed check that would catch this
+    # list rotting again the way the image-prune delete set and the
     # Caddyfile's proxied prefixes both rotted before it.
-    for f in database_url master_key plaid_client_id plaid_secret plaid_env; do
+    for f in database_url master_key plaid_client_id plaid_secret plaid_env advisor_token_secret; do
       [[ -e "$f" ]] || continue
       sudo chown 10001:10001 "$f" && sudo chmod 0400 "$f"
     done

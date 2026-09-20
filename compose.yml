@@ -147,6 +147,20 @@ secrets:
   # `sandbox` when this file is absent or empty but credentials are present.
   plaid_env:
     file: ./secrets/plaid_env
+  # Optional, file-only (wp2.6-insights.md §6 open item 5; docs/evidence/
+  # phase-2/wp2.w-wiring.md). `@ctx/insights` keys every merchant pseudonym it
+  # hands an advisor from this value, mixed with the user id — rotating it
+  # re-pseudonymises every merchant and orphans every `MERCHANT_…` reference
+  # an evidence row already stored, so (like `master_key`) it is never an env
+  # var and never has a fallback derived from another secret. Attached to
+  # `api` and `worker` only, same posture as the `plaid_*` secrets above —
+  # neither `proxy` nor `backup` has any use for it. `packages/config/src/
+  # load.ts` treats a zero-length file exactly as absent, so an empty
+  # placeholder (RUNBOOK.md "Create secrets" step 7) boots identically to no
+  # file at all: `module.insights` registers no consumer, no job and no
+  # schedule until an operator writes a real value here.
+  advisor_token_secret:
+    file: ./secrets/advisor_token_secret
 
 services:
   proxy:
@@ -254,7 +268,8 @@ services:
       # keep the two in agreement; see `.env.example`.
       PLAID_ENABLED: ${PLAID_ENABLED:-false}
       PLAID_REDIRECT_URI: ${PLAID_REDIRECT_URI:-}
-    secrets: [database_url, master_key, plaid_client_id, plaid_secret, plaid_env]
+    secrets:
+      [database_url, master_key, plaid_client_id, plaid_secret, plaid_env, advisor_token_secret]
     networks: [frontend, backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
     user: '10001:10001'
@@ -324,7 +339,8 @@ services:
       # is avoided by construction: one env var, read by both.
       JOB_POLL_INTERVAL_MS: ${JOB_POLL_INTERVAL_MS:-5000}
       SCHEDULER_INTERVAL_MS: ${SCHEDULER_INTERVAL_MS:-30000}
-    secrets: [database_url, master_key, plaid_client_id, plaid_secret, plaid_env]
+    secrets:
+      [database_url, master_key, plaid_client_id, plaid_secret, plaid_env, advisor_token_secret]
     networks: [backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
     user: '10001:10001'
