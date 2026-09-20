@@ -1,29 +1,45 @@
 // SPDX-License-Identifier: MIT
 /**
- * PENDING CONTRACT — no route behind this yet.
+ * The real `/notifications/*` surface, behind the WP 2.11 stub's own shape.
  *
- * WP 2.4 (`packages/contexts/notifications/**`) is building the
- * `NotificationChannel` port, the ntfy/SMTP adapters, and the egress
- * allow-list concurrently with this work package; its scope explicitly
- * covers the context and its migration, not a REST surface
- * (`apps/api/src/routes/notifications.ts` does not exist on this branch —
- * confirmed by inspection before writing this file). This module is the
- * Phase 0 `pending-contracts.ts` pattern applied to that gap: real `fetch`
- * calls, real Zod validation, real React Query hooks, against the paths the
- * REST surface will most plausibly use (`/api/notifications/*`, mirroring
- * `notification_channels`/`notification_rules`) — so that when the route
- * lands, the swap is `apiFetch(...)` → the generated client's
- * `…Options()`/`…Mutation()` factories, in this file only.
- * `NotificationSettingsScreen.tsx` imports the *hooks* this file exports and
- * needs no change at all.
+ * This file used to be a Phase-0 `pending-contracts.ts`-style stub: real
+ * `fetch` calls against paths that did not exist yet
+ * (`docs/evidence/phase-2/wp2.11-inbox-ui.md` §2). WP 2.r built
+ * `apps/api/src/routes/notifications.ts`; this is the swap the stub's own
+ * header promised — `apiFetch(...)` → the generated client — with
+ * `NotificationSettingsScreen.tsx` needing no change at all, per this work
+ * package's own instructions: where the real route's natural shape and the
+ * stub's guessed one differ, the route bent to match the stub, not the other
+ * way around (`docs/evidence/phase-2/wp2.r-routes.md` §5 records exactly
+ * which fields that applies to and why).
  *
- * Until then, every call here 404s against a real deployment — by design,
- * not a bug this file is hiding. The evidence doc records this plainly.
+ * Two real gaps this swap could not paper over, both because the UI's guess
+ * predates the route's actual security design and neither is reachable from
+ * anything `NotificationSettingsScreen.tsx` renders today:
+ *
+ *   * **`destination` is synthesised, never the sealed topic/address.** A
+ *     channel's ntfy topic or SMTP `to` lives inside `sealed_config`
+ *     (decision D5) and is never returned by a read; `destination` here is
+ *     `${destinationHost}:${destinationPort}` — real, non-secret addressing,
+ *     just not literally what the create form typed in.
+ *   * **A bare `destination` string cannot carry SMTP credentials.** Creating
+ *     an `smtp` channel from this screen fills in a guessed relay host and no
+ *     credential (`apps/api/src/routes/notifications.ts`'s
+ *     `configFromDestination`); it will fail `verify` until a real "advanced"
+ *     SMTP form exists — future UI work, not silently faked here.
+ *   * **`useDeleteNotificationRuleMutation` is gone.** There is no
+ *     `DELETE /notifications/rules/{id}` route (`@ctx/notifications` exports
+ *     no delete-by-id for a rule either) and nothing in this codebase called
+ *     the old export — confirmed by grepping every import of this module
+ *     before removing it, rather than assumed.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { z } from 'zod';
 
-import { apiFetch } from '../../api/pending-contracts.ts';
+import { Sdk } from '../../api/generated/sdk.gen.ts';
+import type {
+  NotificationChannel as GeneratedChannel,
+  NotificationRule as GeneratedRule,
+} from '../../api/generated/types.gen.ts';
 
 export const NOTIFICATION_CHANNEL_KINDS = ['ntfy', 'smtp'] as const;
 export type NotificationChannelKind = (typeof NOTIFICATION_CHANNEL_KINDS)[number];
@@ -38,102 +54,163 @@ export const NOTIFICATION_EVENT_TYPES = [
 ] as const;
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
 
-const testResultSchema = z.object({
-  ok: z.boolean(),
-  message: z.string(),
-  testedAt: z.string(),
-});
-export type NotificationTestResult = z.infer<typeof testResultSchema>;
-
-const channelSchema = z.object({
-  id: z.string(),
-  kind: z.enum(NOTIFICATION_CHANNEL_KINDS),
-  displayName: z.string(),
-  enabled: z.boolean(),
-  /** Never a secret value, sealed or otherwise — WP 2.4's own custody rule (wp2.4-notifications.md §"custody"). What's shown here is addressing only: a topic name or a destination address, never a password or token. */
-  destination: z.string(),
-  lastTestResult: testResultSchema.nullable(),
-});
-export type NotificationChannel = z.infer<typeof channelSchema>;
-
-const ruleSchema = z.object({
-  id: z.string(),
-  eventType: z.string(),
-  channelId: z.string(),
-  enabled: z.boolean(),
-  quietHoursStart: z.string().nullable(),
-  quietHoursEnd: z.string().nullable(),
-});
-export type NotificationRule = z.infer<typeof ruleSchema>;
-
-function listChannels(): Promise<{ channels: NotificationChannel[] }> {
-  return apiFetch('/api/notifications/channels', z.object({ channels: z.array(channelSchema) }));
+export interface NotificationTestResult {
+  readonly ok: boolean;
+  readonly message: string;
+  readonly testedAt: string;
 }
 
-function createChannel(body: {
+export interface NotificationChannel {
+  readonly id: string;
+  readonly kind: NotificationChannelKind;
+  readonly displayName: string;
+  readonly enabled: boolean;
+  /** Addressing only, never a secret — see this file's module comment. */
+  readonly destination: string;
+  readonly lastTestResult: NotificationTestResult | null;
+}
+
+export interface NotificationRule {
+  readonly id: string;
+  readonly eventType: string;
+  readonly channelId: string;
+  readonly enabled: boolean;
+  /** `HH:MM`, local time, or `null` when quiet hours are off for this rule. */
+  readonly quietHoursStart: string | null;
+  readonly quietHoursEnd: string | null;
+}
+
+function toChannel(channel: GeneratedChannel): NotificationChannel {
+  return {
+    id: channel.id,
+    kind: channel.kind,
+    displayName: channel.displayName,
+    enabled: channel.enabled,
+    destination: channel.destination,
+    lastTestResult: channel.lastTestResult,
+  };
+}
+
+function minuteToClock(minute: number): string {
+  const hours = Math.floor(minute / 60)
+    .toString()
+    .padStart(2, '0');
+  const mins = (minute % 60).toString().padStart(2, '0');
+  return `${hours}:${mins}`;
+}
+
+function clockToMinute(clock: string): number {
+  const [hoursText = '0', minsText = '0'] = clock.split(':');
+  return Math.min(1439, Math.max(0, Number(hoursText) * 60 + Number(minsText)));
+}
+
+function toRule(rule: GeneratedRule): NotificationRule {
+  return {
+    id: rule.id,
+    eventType: rule.eventType,
+    channelId: rule.channelId,
+    enabled: rule.enabled,
+    quietHoursStart: rule.quietHoursEnabled ? minuteToClock(rule.quietHoursStartMinute) : null,
+    quietHoursEnd: rule.quietHoursEnabled ? minuteToClock(rule.quietHoursEndMinute) : null,
+  };
+}
+
+async function listChannels(): Promise<{ channels: NotificationChannel[] }> {
+  const { data } = await Sdk.__registry.get().listNotificationChannels({ throwOnError: true });
+  return { channels: data.channels.map(toChannel) };
+}
+
+async function createChannel(body: {
   kind: NotificationChannelKind;
   displayName: string;
   destination: string;
 }): Promise<{ channel: NotificationChannel }> {
-  return apiFetch('/api/notifications/channels', z.object({ channel: channelSchema }), {
-    method: 'POST',
-    body: JSON.stringify(body),
+  const { data } = await Sdk.__registry.get().createNotificationChannel({
+    body,
+    throwOnError: true,
   });
+  return { channel: toChannel(data.channel) };
 }
 
-function updateChannel(
+async function updateChannel(
   channelId: string,
   body: { enabled?: boolean; displayName?: string; destination?: string },
 ): Promise<{ channel: NotificationChannel }> {
-  return apiFetch(
-    `/api/notifications/channels/${channelId}`,
-    z.object({ channel: channelSchema }),
-    { method: 'PATCH', body: JSON.stringify(body) },
-  );
+  // `destination` cannot be changed through this route (it is derived from
+  // the sealed config, which a rename does not touch) — silently dropped
+  // rather than sent, since nothing in this codebase ever passes it.
+  const { data } = await Sdk.__registry.get().updateNotificationChannel({
+    path: { channelId },
+    body: { enabled: body.enabled, displayName: body.displayName },
+    throwOnError: true,
+  });
+  return { channel: toChannel(data.channel) };
 }
 
-function sendTestNotification(channelId: string): Promise<{ result: NotificationTestResult }> {
-  return apiFetch(
-    `/api/notifications/channels/${channelId}/test`,
-    z.object({ result: testResultSchema }),
-    { method: 'POST' },
-  );
+async function sendTestNotification(
+  channelId: string,
+): Promise<{ result: NotificationTestResult }> {
+  const { data } = await Sdk.__registry.get().verifyNotificationChannel({
+    path: { channelId },
+    throwOnError: true,
+  });
+  return { result: data.result };
 }
 
-function listRules(): Promise<{ rules: NotificationRule[] }> {
-  return apiFetch('/api/notifications/rules', z.object({ rules: z.array(ruleSchema) }));
+async function listRules(): Promise<{ rules: NotificationRule[] }> {
+  const { data } = await Sdk.__registry.get().listNotificationRules({ throwOnError: true });
+  return { rules: data.rules.map(toRule) };
 }
 
-function createRule(body: {
+async function createRule(body: {
   eventType: string;
   channelId: string;
   quietHoursStart?: string | null;
   quietHoursEnd?: string | null;
 }): Promise<{ rule: NotificationRule }> {
-  return apiFetch('/api/notifications/rules', z.object({ rule: ruleSchema }), {
-    method: 'POST',
-    body: JSON.stringify(body),
+  const { data } = await Sdk.__registry.get().putNotificationRule({
+    body: {
+      channelId: body.channelId,
+      // `PUT /notifications/rules` needs a name and a delivery class the
+      // stub's own create shape never collected; a sensible default for
+      // both, since nothing in this codebase calls this function today.
+      name: body.eventType,
+      eventType: body.eventType,
+      deliveryClass: 'PROMPT',
+      ...(body.quietHoursStart == null
+        ? {}
+        : { quietHoursStartMinute: clockToMinute(body.quietHoursStart) }),
+      ...(body.quietHoursEnd == null
+        ? {}
+        : { quietHoursEndMinute: clockToMinute(body.quietHoursEnd) }),
+    },
+    throwOnError: true,
   });
+  return { rule: toRule(data.rule) };
 }
 
-function updateRule(
+async function updateRule(
   ruleId: string,
   body: { enabled?: boolean; quietHoursStart?: string | null; quietHoursEnd?: string | null },
 ): Promise<{ rule: NotificationRule }> {
-  return apiFetch(`/api/notifications/rules/${ruleId}`, z.object({ rule: ruleSchema }), {
-    method: 'PATCH',
-    body: JSON.stringify(body),
+  const { data } = await Sdk.__registry.get().updateNotificationRule({
+    path: { ruleId },
+    body: {
+      enabled: body.enabled,
+      ...(body.quietHoursStart == null
+        ? {}
+        : { quietHoursStartMinute: clockToMinute(body.quietHoursStart) }),
+      ...(body.quietHoursEnd == null
+        ? {}
+        : { quietHoursEndMinute: clockToMinute(body.quietHoursEnd) }),
+    },
+    throwOnError: true,
   });
-}
-
-function deleteRule(ruleId: string): Promise<{ deleted: boolean }> {
-  return apiFetch(`/api/notifications/rules/${ruleId}`, z.object({ deleted: z.boolean() }), {
-    method: 'DELETE',
-  });
+  return { rule: toRule(data.rule) };
 }
 
 /* -------------------------------------------------------------------------- */
-/* React Query hooks — named as the eventual generated client would name them */
+/* React Query hooks — same names and shapes the old stub exported */
 /* -------------------------------------------------------------------------- */
 
 const channelsQueryKey = ['notifications', 'channels'] as const;
@@ -189,14 +266,6 @@ export function useUpdateNotificationRuleMutation() {
       ruleId: string;
       body: { enabled?: boolean; quietHoursStart?: string | null; quietHoursEnd?: string | null };
     }) => updateRule(variables.ruleId, variables.body),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: rulesQueryKey }),
-  });
-}
-
-export function useDeleteNotificationRuleMutation() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: deleteRule,
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: rulesQueryKey }),
   });
 }

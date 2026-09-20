@@ -11,6 +11,7 @@
  * seconds of Argon2id (breaking `emit-openapi`, which builds the app with no
  * database at all) or hold `null` and push the check into every handler.
  */
+import type { AppConfig } from '@core/config';
 import type { Database } from '@core/db';
 import type { Clock } from '@core/kernel';
 import type pg from 'pg';
@@ -22,6 +23,16 @@ export interface RouteDeps {
   readonly database: Database;
   readonly pool: pg.Pool;
   readonly clock: Clock;
+  /**
+   * Added by WP 2.r: the routes for budgets, recurring, insights and
+   * notification settings need the same operator configuration
+   * `apps/api/src/domain.ts`'s `createNotificationEgressPolicy` and the
+   * `module.insights` wiring already read (the notification egress allow-list,
+   * the advisor token secret) but no route needed before. A plain field, not a
+   * function like `connections()` — unlike the `SecretBox`, config exists from
+   * the moment `buildApp` returns.
+   */
+  readonly config: AppConfig;
   /** The connections wiring, or a 503 problem naming why the app is locked. */
   connections(): DomainRuntime;
 }

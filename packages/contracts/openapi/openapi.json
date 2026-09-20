@@ -550,6 +550,270 @@
           "detail"
         ]
       },
+      "BudgetLineInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "category",
+              "credit_card_payment"
+            ]
+          },
+          "categoryId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "creditAccountId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "carryover": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "assigned": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "activity": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "available": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "cashOverspend": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "creditOverspend": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "rolloverPolicy": {
+            "type": "string",
+            "enum": [
+              "ROLLOVER",
+              "RESET",
+              "ROLLOVER_ALLOW_NEGATIVE"
+            ]
+          },
+          "goalType": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "MONTHLY_TARGET",
+              "TARGET_BY_DATE",
+              "MINIMUM_BALANCE",
+              "PCT_OF_INCOME",
+              "REFILL_UP_TO"
+            ]
+          },
+          "neededThisPeriod": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "underfunded": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "class": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "NEED",
+                  "WANT",
+                  "SAVINGS"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transferExcludedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "refundNettedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "categoryId",
+          "creditAccountId",
+          "name",
+          "carryover",
+          "assigned",
+          "activity",
+          "available",
+          "cashOverspend",
+          "creditOverspend",
+          "rolloverPolicy",
+          "goalType",
+          "neededThisPeriod",
+          "underfunded",
+          "priority",
+          "class",
+          "transferExcludedCount",
+          "refundNettedCount"
+        ]
+      },
+      "BudgetPeriodInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "budgetId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "startDate": {
+            "type": "string"
+          },
+          "endDate": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "readyToAssign": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "income": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "dirty": {
+            "type": "boolean"
+          },
+          "toStayOnTrack": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "totalCategoryAvailable": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "totalCreditCardPaymentAvailable": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BudgetLineInput"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "budgetId",
+          "kind",
+          "startDate",
+          "endDate",
+          "sequence",
+          "status",
+          "readyToAssign",
+          "income",
+          "dirty",
+          "toStayOnTrack",
+          "totalCategoryAvailable",
+          "totalCreditCardPaymentAvailable",
+          "lines"
+        ]
+      },
+      "BudgetPeriodSummaryInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "startDate": {
+            "type": "string"
+          },
+          "endDate": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "readyToAssign": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "dirty": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "startDate",
+          "endDate",
+          "sequence",
+          "status",
+          "readyToAssign",
+          "dirty"
+        ]
+      },
       "CategoryInput": {
         "type": "object",
         "properties": {
@@ -1759,6 +2023,829 @@
           "migrations"
         ]
       },
+      "InsightInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "advisorId": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "period": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "severityClamped": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summaryMd": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "confidenceBasis": {
+            "type": "string"
+          },
+          "horizon": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending_review",
+              "accepted",
+              "dismissed",
+              "snoozed"
+            ]
+          },
+          "annualizedImpact": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "oneTimeImpact": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "impactBasis": {
+            "type": "string"
+          },
+          "caveats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "inputDigest": {
+            "type": "string"
+          },
+          "firstProposedAt": {
+            "type": "string"
+          },
+          "lastProposedAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "sourceRef": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "resolvedDisplay": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "href": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "position",
+                "kind",
+                "label",
+                "value",
+                "sourceRef",
+                "resolvedDisplay",
+                "href"
+              ]
+            }
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "rationaleMd": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "position",
+                "kind",
+                "label",
+                "rationaleMd",
+                "url"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "advisorId",
+          "key",
+          "period",
+          "type",
+          "severity",
+          "severityClamped",
+          "title",
+          "summaryMd",
+          "confidence",
+          "confidenceBasis",
+          "horizon",
+          "status",
+          "annualizedImpact",
+          "oneTimeImpact",
+          "impactBasis",
+          "caveats",
+          "inputDigest",
+          "firstProposedAt",
+          "lastProposedAt",
+          "expiresAt",
+          "evidence",
+          "actions"
+        ]
+      },
+      "AdvisorHealthInput": {
+        "type": "object",
+        "properties": {
+          "advisorId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "quarantinedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quarantineReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "consecutiveFailures": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "lastRunAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "grantedScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "lastRunStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastRunRejected": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "advisorId",
+          "displayName",
+          "kind",
+          "version",
+          "enabled",
+          "quarantinedAt",
+          "quarantineReason",
+          "consecutiveFailures",
+          "lastRunAt",
+          "grantedScopes",
+          "lastRunStatus",
+          "lastRunRejected"
+        ]
+      },
+      "NotificationChannelInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ntfy",
+              "smtp"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "destinationHost": {
+            "type": "string"
+          },
+          "destinationPort": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "scheme": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "verifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verifyFailureCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastDeliveryAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastTestResult": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "testedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ok",
+                  "message",
+                  "testedAt"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "displayName",
+          "destinationHost",
+          "destinationPort",
+          "scheme",
+          "destination",
+          "enabled",
+          "verifiedAt",
+          "verifyFailureCode",
+          "lastDeliveryAt",
+          "lastTestResult"
+        ]
+      },
+      "NotificationRuleInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channelId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "conditions": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "deliveryClass": {
+            "type": "string",
+            "enum": [
+              "P0_SAFETY",
+              "PROMPT",
+              "DIGEST"
+            ]
+          },
+          "digestCadence": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "DAILY",
+                  "WEEKLY"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "quietHoursEnabled": {
+            "type": "boolean"
+          },
+          "quietHoursStartMinute": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "quietHoursEndMinute": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "channelId",
+          "name",
+          "eventType",
+          "conditions",
+          "deliveryClass",
+          "digestCadence",
+          "timezone",
+          "quietHoursEnabled",
+          "quietHoursStartMinute",
+          "quietHoursEndMinute",
+          "enabled"
+        ]
+      },
+      "NotificationOutboxEntryInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channelId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "ruleId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "held",
+              "sending",
+              "delivered",
+              "failed",
+              "dead"
+            ]
+          },
+          "heldReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deliveryClass": {
+            "type": "string",
+            "enum": [
+              "P0_SAFETY",
+              "PROMPT",
+              "DIGEST"
+            ]
+          },
+          "priority": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "bodyMd": {
+            "type": "string"
+          },
+          "deepLink": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "attemptCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "maxAttempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "notBefore": {
+            "type": "string"
+          },
+          "queuedAt": {
+            "type": "string"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deadAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastFailureCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "channelId",
+          "ruleId",
+          "status",
+          "heldReason",
+          "deliveryClass",
+          "priority",
+          "title",
+          "bodyMd",
+          "deepLink",
+          "groupKey",
+          "groupCount",
+          "attemptCount",
+          "maxAttempts",
+          "notBefore",
+          "queuedAt",
+          "deliveredAt",
+          "deadAt",
+          "lastFailureCode"
+        ]
+      },
+      "NotificationDeadLetterInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channelId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "ruleId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "held",
+              "sending",
+              "delivered",
+              "failed",
+              "dead"
+            ]
+          },
+          "heldReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deliveryClass": {
+            "type": "string",
+            "enum": [
+              "P0_SAFETY",
+              "PROMPT",
+              "DIGEST"
+            ]
+          },
+          "priority": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "bodyMd": {
+            "type": "string"
+          },
+          "deepLink": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "attemptCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "maxAttempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "notBefore": {
+            "type": "string"
+          },
+          "queuedAt": {
+            "type": "string"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deadAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastFailureCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attempt": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "outcome": {
+                  "type": "string"
+                },
+                "refusalCode": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "httpStatus": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "durationMs": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "nextAttemptAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "finishedAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "attempt",
+                "outcome",
+                "refusalCode",
+                "httpStatus",
+                "detail",
+                "durationMs",
+                "nextAttemptAt",
+                "finishedAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "channelId",
+          "ruleId",
+          "status",
+          "heldReason",
+          "deliveryClass",
+          "priority",
+          "title",
+          "bodyMd",
+          "deepLink",
+          "groupKey",
+          "groupCount",
+          "attemptCount",
+          "maxAttempts",
+          "notBefore",
+          "queuedAt",
+          "deliveredAt",
+          "deadAt",
+          "lastFailureCode",
+          "attempts"
+        ]
+      },
       "PlaidLinkTokenInput": {
         "type": "object",
         "properties": {
@@ -1772,6 +2859,232 @@
         "required": [
           "linkToken",
           "expiresAt"
+        ]
+      },
+      "RecurringProjectedChargeInput": {
+        "type": "object",
+        "properties": {
+          "seriesId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "streamKey": {
+            "type": "string"
+          },
+          "merchantId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "cadence": {
+            "type": "string"
+          },
+          "sign": {
+            "type": "string",
+            "enum": [
+              "OUTFLOW",
+              "INFLOW"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "userConfirmed": {
+            "type": "boolean"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "date": {
+            "type": "string"
+          },
+          "earliest": {
+            "type": "string"
+          },
+          "latest": {
+            "type": "string"
+          },
+          "uncertaintyDays": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "expected": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "low": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "high": {
+            "$ref": "#/components/schemas/MoneyInput"
+          }
+        },
+        "required": [
+          "seriesId",
+          "streamKey",
+          "merchantId",
+          "type",
+          "cadence",
+          "sign",
+          "status",
+          "userConfirmed",
+          "confidence",
+          "slot",
+          "date",
+          "earliest",
+          "latest",
+          "uncertaintyDays",
+          "expected",
+          "low",
+          "high"
+        ]
+      },
+      "RecurringSeriesInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "streamKey": {
+            "type": "string"
+          },
+          "merchantId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "userConfirmed": {
+            "type": "boolean"
+          },
+          "cadence": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "sign": {
+            "type": "string",
+            "enum": [
+              "OUTFLOW",
+              "INFLOW"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "typicalAmount": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "observedMin": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "observedMax": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "nextDueDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "firstSeen": {
+            "type": "string"
+          },
+          "lastSeen": {
+            "type": "string"
+          },
+          "duplicateNode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "streamKey",
+          "merchantId",
+          "state",
+          "status",
+          "userConfirmed",
+          "cadence",
+          "type",
+          "sign",
+          "confidence",
+          "typicalAmount",
+          "observedMin",
+          "observedMax",
+          "nextDueDate",
+          "firstSeen",
+          "lastSeen",
+          "duplicateNode"
+        ]
+      },
+      "RecurringCandidateInput": {
+        "type": "object",
+        "properties": {
+          "candidateId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "seriesId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merchantId": {
+            "type": "string"
+          },
+          "streamKey": {
+            "type": "string"
+          },
+          "cadence": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "proposedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidateId",
+          "seriesId",
+          "merchantId",
+          "streamKey",
+          "cadence",
+          "type",
+          "confidence",
+          "amount",
+          "proposedAt"
         ]
       },
       "ReportDrillThroughInput": {
@@ -3887,6 +5200,273 @@
         ],
         "additionalProperties": false
       },
+      "BudgetLine": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "category",
+              "credit_card_payment"
+            ]
+          },
+          "categoryId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "creditAccountId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "carryover": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "assigned": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "activity": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "available": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "cashOverspend": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "creditOverspend": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "rolloverPolicy": {
+            "type": "string",
+            "enum": [
+              "ROLLOVER",
+              "RESET",
+              "ROLLOVER_ALLOW_NEGATIVE"
+            ]
+          },
+          "goalType": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "MONTHLY_TARGET",
+              "TARGET_BY_DATE",
+              "MINIMUM_BALANCE",
+              "PCT_OF_INCOME",
+              "REFILL_UP_TO"
+            ]
+          },
+          "neededThisPeriod": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "underfunded": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "class": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "NEED",
+                  "WANT",
+                  "SAVINGS"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transferExcludedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "refundNettedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "categoryId",
+          "creditAccountId",
+          "name",
+          "carryover",
+          "assigned",
+          "activity",
+          "available",
+          "cashOverspend",
+          "creditOverspend",
+          "rolloverPolicy",
+          "goalType",
+          "neededThisPeriod",
+          "underfunded",
+          "priority",
+          "class",
+          "transferExcludedCount",
+          "refundNettedCount"
+        ],
+        "additionalProperties": false
+      },
+      "BudgetPeriod": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "budgetId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "startDate": {
+            "type": "string"
+          },
+          "endDate": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "readyToAssign": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "income": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "dirty": {
+            "type": "boolean"
+          },
+          "toStayOnTrack": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "totalCategoryAvailable": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "totalCreditCardPaymentAvailable": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BudgetLine"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "budgetId",
+          "kind",
+          "startDate",
+          "endDate",
+          "sequence",
+          "status",
+          "readyToAssign",
+          "income",
+          "dirty",
+          "toStayOnTrack",
+          "totalCategoryAvailable",
+          "totalCreditCardPaymentAvailable",
+          "lines"
+        ],
+        "additionalProperties": false
+      },
+      "BudgetPeriodSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "startDate": {
+            "type": "string"
+          },
+          "endDate": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "readyToAssign": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "dirty": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "startDate",
+          "endDate",
+          "sequence",
+          "status",
+          "readyToAssign",
+          "dirty"
+        ],
+        "additionalProperties": false
+      },
       "Category": {
         "type": "object",
         "properties": {
@@ -5113,6 +6693,841 @@
         ],
         "additionalProperties": false
       },
+      "Insight": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "advisorId": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "period": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "severityClamped": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summaryMd": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "confidenceBasis": {
+            "type": "string"
+          },
+          "horizon": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending_review",
+              "accepted",
+              "dismissed",
+              "snoozed"
+            ]
+          },
+          "annualizedImpact": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "oneTimeImpact": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "impactBasis": {
+            "type": "string"
+          },
+          "caveats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "inputDigest": {
+            "type": "string"
+          },
+          "firstProposedAt": {
+            "type": "string"
+          },
+          "lastProposedAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "sourceRef": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "resolvedDisplay": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "href": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "position",
+                "kind",
+                "label",
+                "value",
+                "sourceRef",
+                "resolvedDisplay",
+                "href"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "rationaleMd": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "position",
+                "kind",
+                "label",
+                "rationaleMd",
+                "url"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "advisorId",
+          "key",
+          "period",
+          "type",
+          "severity",
+          "severityClamped",
+          "title",
+          "summaryMd",
+          "confidence",
+          "confidenceBasis",
+          "horizon",
+          "status",
+          "annualizedImpact",
+          "oneTimeImpact",
+          "impactBasis",
+          "caveats",
+          "inputDigest",
+          "firstProposedAt",
+          "lastProposedAt",
+          "expiresAt",
+          "evidence",
+          "actions"
+        ],
+        "additionalProperties": false
+      },
+      "AdvisorHealth": {
+        "type": "object",
+        "properties": {
+          "advisorId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "quarantinedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quarantineReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "consecutiveFailures": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "lastRunAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "grantedScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "lastRunStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastRunRejected": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "advisorId",
+          "displayName",
+          "kind",
+          "version",
+          "enabled",
+          "quarantinedAt",
+          "quarantineReason",
+          "consecutiveFailures",
+          "lastRunAt",
+          "grantedScopes",
+          "lastRunStatus",
+          "lastRunRejected"
+        ],
+        "additionalProperties": false
+      },
+      "NotificationChannel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ntfy",
+              "smtp"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "destinationHost": {
+            "type": "string"
+          },
+          "destinationPort": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "scheme": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "verifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verifyFailureCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastDeliveryAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastTestResult": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "testedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ok",
+                  "message",
+                  "testedAt"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "displayName",
+          "destinationHost",
+          "destinationPort",
+          "scheme",
+          "destination",
+          "enabled",
+          "verifiedAt",
+          "verifyFailureCode",
+          "lastDeliveryAt",
+          "lastTestResult"
+        ],
+        "additionalProperties": false
+      },
+      "NotificationRule": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channelId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "conditions": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "deliveryClass": {
+            "type": "string",
+            "enum": [
+              "P0_SAFETY",
+              "PROMPT",
+              "DIGEST"
+            ]
+          },
+          "digestCadence": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "DAILY",
+                  "WEEKLY"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "quietHoursEnabled": {
+            "type": "boolean"
+          },
+          "quietHoursStartMinute": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "quietHoursEndMinute": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "channelId",
+          "name",
+          "eventType",
+          "conditions",
+          "deliveryClass",
+          "digestCadence",
+          "timezone",
+          "quietHoursEnabled",
+          "quietHoursStartMinute",
+          "quietHoursEndMinute",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "NotificationOutboxEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channelId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "ruleId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "held",
+              "sending",
+              "delivered",
+              "failed",
+              "dead"
+            ]
+          },
+          "heldReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deliveryClass": {
+            "type": "string",
+            "enum": [
+              "P0_SAFETY",
+              "PROMPT",
+              "DIGEST"
+            ]
+          },
+          "priority": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "bodyMd": {
+            "type": "string"
+          },
+          "deepLink": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "attemptCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "maxAttempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "notBefore": {
+            "type": "string"
+          },
+          "queuedAt": {
+            "type": "string"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deadAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastFailureCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "channelId",
+          "ruleId",
+          "status",
+          "heldReason",
+          "deliveryClass",
+          "priority",
+          "title",
+          "bodyMd",
+          "deepLink",
+          "groupKey",
+          "groupCount",
+          "attemptCount",
+          "maxAttempts",
+          "notBefore",
+          "queuedAt",
+          "deliveredAt",
+          "deadAt",
+          "lastFailureCode"
+        ],
+        "additionalProperties": false
+      },
+      "NotificationDeadLetter": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "channelId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "ruleId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "held",
+              "sending",
+              "delivered",
+              "failed",
+              "dead"
+            ]
+          },
+          "heldReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deliveryClass": {
+            "type": "string",
+            "enum": [
+              "P0_SAFETY",
+              "PROMPT",
+              "DIGEST"
+            ]
+          },
+          "priority": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "bodyMd": {
+            "type": "string"
+          },
+          "deepLink": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "attemptCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "maxAttempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "notBefore": {
+            "type": "string"
+          },
+          "queuedAt": {
+            "type": "string"
+          },
+          "deliveredAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deadAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastFailureCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attempt": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "outcome": {
+                  "type": "string"
+                },
+                "refusalCode": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "httpStatus": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "durationMs": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "nextAttemptAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "finishedAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "attempt",
+                "outcome",
+                "refusalCode",
+                "httpStatus",
+                "detail",
+                "durationMs",
+                "nextAttemptAt",
+                "finishedAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "channelId",
+          "ruleId",
+          "status",
+          "heldReason",
+          "deliveryClass",
+          "priority",
+          "title",
+          "bodyMd",
+          "deepLink",
+          "groupKey",
+          "groupCount",
+          "attemptCount",
+          "maxAttempts",
+          "notBefore",
+          "queuedAt",
+          "deliveredAt",
+          "deadAt",
+          "lastFailureCode",
+          "attempts"
+        ],
+        "additionalProperties": false
+      },
       "PlaidLinkToken": {
         "type": "object",
         "properties": {
@@ -5126,6 +7541,235 @@
         "required": [
           "linkToken",
           "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "RecurringProjectedCharge": {
+        "type": "object",
+        "properties": {
+          "seriesId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "streamKey": {
+            "type": "string"
+          },
+          "merchantId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "cadence": {
+            "type": "string"
+          },
+          "sign": {
+            "type": "string",
+            "enum": [
+              "OUTFLOW",
+              "INFLOW"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "userConfirmed": {
+            "type": "boolean"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "date": {
+            "type": "string"
+          },
+          "earliest": {
+            "type": "string"
+          },
+          "latest": {
+            "type": "string"
+          },
+          "uncertaintyDays": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "expected": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "low": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "high": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "seriesId",
+          "streamKey",
+          "merchantId",
+          "type",
+          "cadence",
+          "sign",
+          "status",
+          "userConfirmed",
+          "confidence",
+          "slot",
+          "date",
+          "earliest",
+          "latest",
+          "uncertaintyDays",
+          "expected",
+          "low",
+          "high"
+        ],
+        "additionalProperties": false
+      },
+      "RecurringSeries": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "streamKey": {
+            "type": "string"
+          },
+          "merchantId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "userConfirmed": {
+            "type": "boolean"
+          },
+          "cadence": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "sign": {
+            "type": "string",
+            "enum": [
+              "OUTFLOW",
+              "INFLOW"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "typicalAmount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "observedMin": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "observedMax": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "nextDueDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "firstSeen": {
+            "type": "string"
+          },
+          "lastSeen": {
+            "type": "string"
+          },
+          "duplicateNode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "streamKey",
+          "merchantId",
+          "state",
+          "status",
+          "userConfirmed",
+          "cadence",
+          "type",
+          "sign",
+          "confidence",
+          "typicalAmount",
+          "observedMin",
+          "observedMax",
+          "nextDueDate",
+          "firstSeen",
+          "lastSeen",
+          "duplicateNode"
+        ],
+        "additionalProperties": false
+      },
+      "RecurringCandidate": {
+        "type": "object",
+        "properties": {
+          "candidateId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "seriesId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merchantId": {
+            "type": "string"
+          },
+          "streamKey": {
+            "type": "string"
+          },
+          "cadence": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "proposedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidateId",
+          "seriesId",
+          "merchantId",
+          "streamKey",
+          "cadence",
+          "type",
+          "confidence",
+          "amount",
+          "proposedAt"
         ],
         "additionalProperties": false
       },
@@ -14227,6 +16871,3222 @@
           }
         }
       }
+    },
+    "/budgets/current": {
+      "get": {
+        "operationId": "getCurrentBudgetPeriod",
+        "summary": "Today's budget period, with every envelope line",
+        "tags": [
+          "budgets"
+        ],
+        "description": "Lazily creates the WP 2.1 §6 default budget and opens the containing period if neither exists yet — the same 'opened by whoever first needs it' rule `apps/api/src/modules.ts` documents for `module.budgeting`.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "budgetId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    },
+                    "period": {
+                      "$ref": "#/components/schemas/BudgetPeriod"
+                    }
+                  },
+                  "required": [
+                    "budgetId",
+                    "currency",
+                    "period"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/budgets/periods": {
+      "get": {
+        "operationId": "listBudgetPeriods",
+        "summary": "Every period of this budget, oldest first — the period picker",
+        "tags": [
+          "budgets"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "budgetId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "periods": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BudgetPeriodSummary"
+                      }
+                    }
+                  },
+                  "required": [
+                    "periods"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/budgets/lines": {
+      "post": {
+        "operationId": "createBudgetLine",
+        "summary": "Create (or re-open) the envelope for one category in one period",
+        "tags": [
+          "budgets"
+        ],
+        "description": "Upsert on `(periodId, categoryId)`, matching `@ctx/budgeting`'s own `upsertLine` (see this file's module comment: not on the context's public surface, re-implemented here against its published `./schema`).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "periodId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "categoryId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "rolloverPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "ROLLOVER",
+                      "RESET",
+                      "ROLLOVER_ALLOW_NEGATIVE"
+                    ]
+                  },
+                  "goalType": {
+                    "type": "string",
+                    "enum": [
+                      "NONE",
+                      "MONTHLY_TARGET",
+                      "TARGET_BY_DATE",
+                      "MINIMUM_BALANCE",
+                      "PCT_OF_INCOME",
+                      "REFILL_UP_TO"
+                    ]
+                  },
+                  "goalAmount": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/MoneyInput"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "goalTargetDate": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "goalPercent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "class": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "NEED",
+                          "WANT",
+                          "SAVINGS"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "periodId",
+                  "categoryId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "line": {
+                      "$ref": "#/components/schemas/BudgetLine"
+                    }
+                  },
+                  "required": [
+                    "line"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/budgets/lines/{lineId}": {
+      "patch": {
+        "operationId": "updateBudgetLine",
+        "summary": "Assign money to an envelope, or change its goal / rollover policy",
+        "tags": [
+          "budgets"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "assigned": {
+                    "$ref": "#/components/schemas/MoneyInput"
+                  },
+                  "rolloverPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "ROLLOVER",
+                      "RESET",
+                      "ROLLOVER_ALLOW_NEGATIVE"
+                    ]
+                  },
+                  "goalType": {
+                    "type": "string",
+                    "enum": [
+                      "NONE",
+                      "MONTHLY_TARGET",
+                      "TARGET_BY_DATE",
+                      "MINIMUM_BALANCE",
+                      "PCT_OF_INCOME",
+                      "REFILL_UP_TO"
+                    ]
+                  },
+                  "goalAmount": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/MoneyInput"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "goalTargetDate": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "goalPercent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "class": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "NEED",
+                          "WANT",
+                          "SAVINGS"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "lineId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "line": {
+                      "$ref": "#/components/schemas/BudgetLine"
+                    }
+                  },
+                  "required": [
+                    "line"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/budgets/periods/roll": {
+      "post": {
+        "operationId": "rollBudgetPeriod",
+        "summary": "Close a period and open the next one, carrying over and auto-assigning",
+        "tags": [
+          "budgets"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "budgetId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "periodId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
+                "required": [
+                  "budgetId",
+                  "periodId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "fromPeriodId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "toPeriodId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "lineCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "rolledOut": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "absorbedByRta": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "autoAssigned": {
+                      "$ref": "#/components/schemas/Money"
+                    }
+                  },
+                  "required": [
+                    "fromPeriodId",
+                    "toPeriodId",
+                    "lineCount",
+                    "rolledOut",
+                    "absorbedByRta",
+                    "autoAssigned"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recurring/series": {
+      "get": {
+        "operationId": "listRecurringSeries",
+        "summary": "Every stream this user has, confirmed or not",
+        "tags": [
+          "recurring"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "states",
+            "required": false
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "types",
+            "required": false
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "merchantIds",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "series": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RecurringSeries"
+                      }
+                    }
+                  },
+                  "required": [
+                    "series"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recurring/candidates": {
+      "get": {
+        "operationId": "listRecurringCandidates",
+        "summary": "The open questions: streams nobody has confirmed or rejected yet",
+        "tags": [
+          "recurring"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "candidates": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RecurringCandidate"
+                      }
+                    }
+                  },
+                  "required": [
+                    "candidates"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recurring/candidates/{candidateId}/confirm": {
+      "post": {
+        "operationId": "confirmRecurringCandidate",
+        "summary": "Confirm a candidate: pin its series against the detector, permanently",
+        "tags": [
+          "recurring"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "candidateId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "seriesId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": [
+                    "seriesId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recurring/candidates/{candidateId}/reject": {
+      "post": {
+        "operationId": "rejectRecurringCandidate",
+        "summary": "Reject a candidate, permanently — never proposed again at this scope",
+        "tags": [
+          "recurring"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "MERCHANT",
+                      "STREAM"
+                    ]
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "candidateId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "candidateId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "merchantId": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "archivedSeriesId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "candidateId",
+                    "merchantId",
+                    "scope",
+                    "archivedSeriesId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recurring/series/{seriesId}/merge": {
+      "post": {
+        "operationId": "mergeRecurringSeries",
+        "summary": "Merge this series into another — card migration, confirmed by a human",
+        "tags": [
+          "recurring"
+        ],
+        "description": "`:seriesId` is the source; it is archived. `targetSeriesId` survives.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "targetSeriesId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "targetSeriesId"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "seriesId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "targetSeriesId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": [
+                    "targetSeriesId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recurring/upcoming": {
+      "get": {
+        "operationId": "getRecurringUpcoming",
+        "summary": "The calendar of charges expected in the next window",
+        "tags": [
+          "recurring"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365
+            },
+            "in": "query",
+            "name": "days",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "chargeCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "days": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string"
+                          },
+                          "outflow": {
+                            "$ref": "#/components/schemas/Money"
+                          },
+                          "inflow": {
+                            "$ref": "#/components/schemas/Money"
+                          },
+                          "charges": {
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/components/schemas/RecurringProjectedCharge"
+                            }
+                          }
+                        },
+                        "required": [
+                          "date",
+                          "outflow",
+                          "inflow",
+                          "charges"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "currency",
+                    "chargeCount",
+                    "days"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recurring/forecast": {
+      "get": {
+        "operationId": "getRecurringForecast",
+        "summary": "The forward cash-flow forecast — a 30-day band by default",
+        "tags": [
+          "recurring"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365
+            },
+            "in": "query",
+            "name": "days",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "outflow": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "inflow": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "net": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "netLow": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "netHigh": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "chargeCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "charges": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RecurringProjectedCharge"
+                      }
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "currency",
+                    "outflow",
+                    "inflow",
+                    "net",
+                    "netLow",
+                    "netHigh",
+                    "chargeCount",
+                    "charges"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recurring/safe-to-spend": {
+      "get": {
+        "operationId": "getSafeToSpend",
+        "summary": "Cash on hand, minus the worst case of what recurring commitments will take",
+        "tags": [
+          "recurring"
+        ],
+        "description": "Defaults `availableCash` to the sum of on-budget CASH accounts (the same reader `@ctx/budgeting`'s screen uses); pass it explicitly to price a hypothetical.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365
+            },
+            "in": "query",
+            "name": "days",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^-?\\d+$"
+            },
+            "in": "query",
+            "name": "availableCashMinor",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 3
+            },
+            "in": "query",
+            "name": "currency",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "in": "query",
+            "name": "countExpectedIncome",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "availableCash": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "committed": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "committedWorstCase": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "expectedIncome": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "safe": {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    "committedCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "currency",
+                    "availableCash",
+                    "committed",
+                    "committedWorstCase",
+                    "expectedIncome",
+                    "safe",
+                    "committedCount"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights": {
+      "get": {
+        "operationId": "listInsightsFeed",
+        "summary": "The advisory feed: pending review and already-reviewed, alert budget applied",
+        "tags": [
+          "insights"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "pending_review",
+                  "accepted",
+                  "dismissed",
+                  "snoozed"
+                ]
+              }
+            },
+            "in": "query",
+            "name": "statuses",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dashboard": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Insight"
+                      }
+                    },
+                    "list": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Insight"
+                      }
+                    },
+                    "overflow": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Insight"
+                      }
+                    },
+                    "belowFloor": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Insight"
+                      }
+                    }
+                  },
+                  "required": [
+                    "dashboard",
+                    "list",
+                    "overflow",
+                    "belowFloor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/{insightId}": {
+      "get": {
+        "operationId": "getInsight",
+        "summary": "One insight, with its evidence panel",
+        "tags": [
+          "insights"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "insightId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "insight": {
+                      "$ref": "#/components/schemas/Insight"
+                    }
+                  },
+                  "required": [
+                    "insight"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/{insightId}/review": {
+      "post": {
+        "operationId": "reviewInsight",
+        "summary": "Accept, dismiss, snooze or reopen an insight",
+        "tags": [
+          "insights"
+        ],
+        "description": "A dismissal starts the 30/90/permanent cooldown ladder — the third dismissal of the same finding suppresses it permanently (`@ctx/insights`'s `policy/cooldown.ts`).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "accept",
+                      "dismiss",
+                      "snooze",
+                      "reopen"
+                    ]
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "snoozeUntil": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "insightId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "insightId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "dismissCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "permanent": {
+                      "type": "boolean"
+                    },
+                    "suppressedUntil": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "insightId",
+                    "status",
+                    "dismissCount",
+                    "permanent",
+                    "suppressedUntil"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/advisors": {
+      "get": {
+        "operationId": "listAdvisors",
+        "summary": "Every registered advisor, with the state of its kill switches",
+        "tags": [
+          "insights"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "advisors": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AdvisorHealth"
+                      }
+                    }
+                  },
+                  "required": [
+                    "advisors"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/advisors/{advisorId}/enabled": {
+      "post": {
+        "operationId": "setAdvisorEnabled",
+        "summary": "Kill switch 2: turn one advisor on or off for this user",
+        "tags": [
+          "insights"
+        ],
+        "description": "Needs a step-up assertion — it changes what runs on a schedule.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "clearQuarantine": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "advisorId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "advisorId": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "advisorId",
+                    "enabled"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/advisors/run": {
+      "post": {
+        "operationId": "runAdvisors",
+        "summary": "Manually trigger the nightly advisor pass, for one advisor or every registered one",
+        "tags": [
+          "insights"
+        ],
+        "description": "Needs a step-up assertion. 503 when no `advisor_token_secret` is configured.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "advisorId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "runId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "advisorId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "completed",
+                              "failed",
+                              "refused"
+                            ]
+                          },
+                          "refusal": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "proposed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "accepted": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "rejected": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "suppressed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "inserted": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "quarantined": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "runId",
+                          "advisorId",
+                          "status",
+                          "refusal",
+                          "proposed",
+                          "accepted",
+                          "rejected",
+                          "suppressed",
+                          "inserted",
+                          "quarantined"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "results"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/channels": {
+      "get": {
+        "operationId": "listNotificationChannels",
+        "summary": "This user’s notification channels, redacted",
+        "tags": [
+          "notifications"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NotificationChannel"
+                      }
+                    }
+                  },
+                  "required": [
+                    "channels"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createNotificationChannel",
+        "summary": "Add a channel — sealed on write, disabled until verified",
+        "tags": [
+          "notifications"
+        ],
+        "description": "Needs a step-up assertion. Accepts either the simple `{kind, displayName, destination}` form (one address field, per-kind defaults for everything else — see this file's module comment) or the full `{displayName, config}` form for a client that wants to set every field itself. The destination is checked against the egress allow-list before the row is written; with the default deny-all allow-list this refuses with `notifications.host_not_allowed` rather than a 500.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "displayName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "ntfy",
+                          "smtp"
+                        ]
+                      },
+                      "destination": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "displayName",
+                      "kind",
+                      "destination"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "displayName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "config": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "ntfy"
+                                ]
+                              },
+                              "scheme": {
+                                "type": "string",
+                                "enum": [
+                                  "https"
+                                ]
+                              },
+                              "host": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "port": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 65535
+                              },
+                              "topic": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9_-]{1,64}$"
+                              },
+                              "accessToken": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 512
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "scheme",
+                              "host",
+                              "port",
+                              "topic",
+                              "accessToken"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "smtp"
+                                ]
+                              },
+                              "scheme": {
+                                "type": "string",
+                                "enum": [
+                                  "smtps",
+                                  "smtp+starttls"
+                                ]
+                              },
+                              "host": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "port": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 65535
+                              },
+                              "username": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 320
+                              },
+                              "password": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512
+                              },
+                              "from": {
+                                "type": "string",
+                                "format": "email",
+                                "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                              },
+                              "to": {
+                                "type": "string",
+                                "format": "email",
+                                "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "scheme",
+                              "host",
+                              "port",
+                              "username",
+                              "password",
+                              "from",
+                              "to"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "displayName",
+                      "config"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "channel": {
+                      "$ref": "#/components/schemas/NotificationChannel"
+                    }
+                  },
+                  "required": [
+                    "channel"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/channels/{channelId}/verify": {
+      "post": {
+        "operationId": "verifyNotificationChannel",
+        "summary": "Send a real test notification through this channel",
+        "tags": [
+          "notifications"
+        ],
+        "description": "Reaches the destination for real, through the egress policy, and reports what happened — never throws for a refusal (`{result: {ok: false, message}}` for a disallowed host, a connection failure, or a bad credential); a 404 is reserved for a channel id that does not exist at all.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "channelId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "testedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "message",
+                        "testedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/channels/{channelId}": {
+      "patch": {
+        "operationId": "updateNotificationChannel",
+        "summary": "Enable/disable a channel, or rename it",
+        "tags": [
+          "notifications"
+        ],
+        "description": "Needs a step-up assertion, the same policy as creating a channel: `enabled` is kill-switch state, not decoration. `@ctx/notifications`'s own `setChannelEnabled` is used for the enabled flag; the display name is a direct column write (see this file's module comment on what the context does not export).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "channelId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "channel": {
+                      "$ref": "#/components/schemas/NotificationChannel"
+                    }
+                  },
+                  "required": [
+                    "channel"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteNotificationChannel",
+        "summary": "Delete a channel — its rules and outbox entries cascade with it",
+        "tags": [
+          "notifications"
+        ],
+        "description": "Needs a step-up assertion, the same policy as creating one. Idempotent: deleting a channel that is not (or no longer) this user’s own returns `deleted: false`, not a 404.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "channelId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/rules": {
+      "get": {
+        "operationId": "listNotificationRules",
+        "summary": "Every notification rule this user has",
+        "tags": [
+          "notifications"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rules": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NotificationRule"
+                      }
+                    }
+                  },
+                  "required": [
+                    "rules"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putNotificationRule",
+        "summary": "Create a rule, or replace one by id",
+        "tags": [
+          "notifications"
+        ],
+        "description": "Omit `id` to create; pass it to replace an existing rule this user owns. A `P0_SAFETY` rule may not also claim quiet hours (`notification_rules_p0_ignores_quiet_hours`); this route enforces the same default `createRule` does.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "channelId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "eventType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "conditions": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "deliveryClass": {
+                    "type": "string",
+                    "enum": [
+                      "P0_SAFETY",
+                      "PROMPT",
+                      "DIGEST"
+                    ]
+                  },
+                  "digestCadence": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "DAILY",
+                          "WEEKLY"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "quietHoursEnabled": {
+                    "type": "boolean"
+                  },
+                  "quietHoursStartMinute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1439
+                  },
+                  "quietHoursEndMinute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1439
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "channelId",
+                  "name",
+                  "eventType",
+                  "deliveryClass"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rule": {
+                      "$ref": "#/components/schemas/NotificationRule"
+                    }
+                  },
+                  "required": [
+                    "rule"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/rules/{ruleId}": {
+      "patch": {
+        "operationId": "updateNotificationRule",
+        "summary": "Enable/disable a rule, or move its quiet-hours window",
+        "tags": [
+          "notifications"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "quietHoursStartMinute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1439
+                  },
+                  "quietHoursEndMinute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1439
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "ruleId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rule": {
+                      "$ref": "#/components/schemas/NotificationRule"
+                    }
+                  },
+                  "required": [
+                    "rule"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/outbox": {
+      "get": {
+        "operationId": "listNotificationOutbox",
+        "summary": "Recent deliveries and the dead-letter view",
+        "tags": [
+          "notifications"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "recent": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NotificationOutboxEntry"
+                      }
+                    },
+                    "deadLetters": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NotificationDeadLetter"
+                      }
+                    }
+                  },
+                  "required": [
+                    "recent",
+                    "deadLetters"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/outbox/{notificationId}/attempts": {
+      "get": {
+        "operationId": "listNotificationAttempts",
+        "summary": "The delivery-attempt history for one queued notification",
+        "tags": [
+          "notifications"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "notificationId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "attempts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "attempt": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "outcome": {
+                            "type": "string"
+                          },
+                          "refusalCode": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "httpStatus": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "detail": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "durationMs": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "nextAttemptAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "finishedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "attempt",
+                          "outcome",
+                          "refusalCode",
+                          "httpStatus",
+                          "detail",
+                          "durationMs",
+                          "nextAttemptAt",
+                          "finishedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "attempts"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/outbox/{notificationId}/retry": {
+      "post": {
+        "operationId": "retryNotification",
+        "summary": "Put a dead letter back on the delivery ladder",
+        "tags": [
+          "notifications"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "notificationId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "retried": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "retried"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "servers": [
@@ -14270,6 +20130,22 @@
     {
       "name": "export",
       "description": "The full-database bundle: export as a versioned, hash-checked JSONL stream, and import into a clean instance. Both need a step-up assertion."
+    },
+    {
+      "name": "budgets",
+      "description": "The envelope budget: periods, lines, assignments and rolls. A session is enough — every write here edits the user's own plan, never a credential."
+    },
+    {
+      "name": "recurring",
+      "description": "Subscriptions and bills: the candidate queue, confirmed streams, the forecast and safe-to-spend. A session is enough."
+    },
+    {
+      "name": "insights",
+      "description": "The advisory feed and the advisor registry: review an insight, and the three kill switches. Turning an advisor on/off or triggering a run needs a step-up assertion."
+    },
+    {
+      "name": "notifications",
+      "description": "Channels, rules and the delivery outbox. Attaching or destroying a channel needs a step-up assertion, the same policy as a connection's credential."
     }
   ]
 }

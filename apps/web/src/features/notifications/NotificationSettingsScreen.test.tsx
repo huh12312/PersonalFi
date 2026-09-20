@@ -2,9 +2,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { jsonResponse, stubFetchRoutes } from '../../test-support/api-test-utils.ts';
+import {
+  ensureApiClient,
+  jsonResponse,
+  stubFetchRoutes,
+} from '../../test-support/api-test-utils.ts';
 import { NotificationSettingsScreen } from './NotificationSettingsScreen.tsx';
 
 const CHANNEL = {
@@ -26,6 +30,10 @@ function renderScreen() {
 }
 
 describe('NotificationSettingsScreen', () => {
+  beforeEach(() => {
+    ensureApiClient();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -60,7 +68,7 @@ describe('NotificationSettingsScreen', () => {
         handle: () => jsonResponse({ rules: [] }),
       },
       {
-        match: '/api/notifications/channels/chan_1/test',
+        match: '/api/notifications/channels/chan_1/verify',
         method: 'POST',
         handle: () => {
           testedChannelId = 'chan_1';

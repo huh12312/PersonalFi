@@ -32,13 +32,17 @@ import { registerBuiltinAdvisors } from './modules.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
 import { accountRoutes } from './routes/accounts.ts';
 import { authRoutes } from './routes/auth.ts';
+import { budgetRoutes } from './routes/budgets.ts';
 import { categoryRoutes } from './routes/categories.ts';
 import { connectionRoutes } from './routes/connections.ts';
 import type { RouteDeps } from './routes/deps.ts';
 import { eventRoutes } from './routes/events.ts';
 import { exportRoutes } from './routes/export.ts';
 import { healthRoutes } from './routes/health.ts';
+import { insightRoutes } from './routes/insights.ts';
+import { notificationRoutes } from './routes/notifications.ts';
 import { plaidRoutes } from './routes/plaid.ts';
+import { recurringRoutes } from './routes/recurring.ts';
 import { reportRoutes } from './routes/reports.ts';
 import { ruleRoutes } from './routes/rules.ts';
 import { transactionRoutes } from './routes/transactions.ts';
@@ -239,6 +243,30 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
             'The full-database bundle: export as a versioned, hash-checked JSONL stream, and ' +
             'import into a clean instance. Both need a step-up assertion.',
         },
+        {
+          name: 'budgets',
+          description:
+            'The envelope budget: periods, lines, assignments and rolls. A session is enough — ' +
+            "every write here edits the user's own plan, never a credential.",
+        },
+        {
+          name: 'recurring',
+          description:
+            'Subscriptions and bills: the candidate queue, confirmed streams, the forecast and ' +
+            'safe-to-spend. A session is enough.',
+        },
+        {
+          name: 'insights',
+          description:
+            'The advisory feed and the advisor registry: review an insight, and the three kill ' +
+            'switches. Turning an advisor on/off or triggering a run needs a step-up assertion.',
+        },
+        {
+          name: 'notifications',
+          description:
+            'Channels, rules and the delivery outbox. Attaching or destroying a channel needs a ' +
+            "step-up assertion, the same policy as a connection's credential.",
+        },
       ],
     },
     transform: jsonSchemaTransform,
@@ -360,6 +388,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     database,
     pool,
     clock,
+    config,
     connections(): DomainRuntime {
       const secretBox = security.requireSecretBox();
       // Rebuild if the runtime was destroyed and re-initialised: holding an
@@ -387,6 +416,10 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(eventRoutes(deps));
   await app.register(reportRoutes(deps));
   await app.register(exportRoutes(deps, { secretsDir: config.env.SECRETS_DIR }));
+  await app.register(budgetRoutes(deps));
+  await app.register(recurringRoutes(deps));
+  await app.register(insightRoutes(deps));
+  await app.register(notificationRoutes(deps));
 
   /**
    * Install the shipped category taxonomy for every user (condition D-6, N-3).
