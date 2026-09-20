@@ -120,11 +120,36 @@ export interface UpsertScheduleInput {
  * module's feature flag is off, which is what "a disabled module registers no
  * consumers and no schedules" means in practice (08 §6.9).
  */
+/**
+ * The exact shape `schedules.name` accepts (0003_platform.sql). Dotted,
+ * lowercase, digits and underscores — so a per-user suffix must be the UUID
+ * with its hyphens replaced, never the raw UUID and never `kind:<id>`.
+ */
+export const SCHEDULE_NAME_PATTERN = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/;
+
+/**
+ * Refuse a schedule name the database would refuse, but here — with the name
+ * in the message — rather than as a CHECK-constraint violation inside a
+ * module's boot path. The Phase 2 cold boot (wp2.w-wiring.md) found a context
+ * registering `notifications.deliver:<uuid>`; every unit test passed because
+ * the fake scheduler never applied the constraint, and the real worker
+ * crash-looped from its first start. This guard makes that a unit-test failure.
+ */
+export function assertScheduleName(name: string): void {
+  if (!SCHEDULE_NAME_PATTERN.test(name)) {
+    throw new PlatformError(
+      'platform.schedule_name_invalid',
+      `schedule name ${JSON.stringify(name)} must match ${SCHEDULE_NAME_PATTERN} (lowercase, digits, underscores, dotted); a per-user suffix is the id with hyphens replaced by underscores`,
+    );
+  }
+}
+
 export async function upsertSchedule(
   executor: Executor,
   input: UpsertScheduleInput,
   clock: Clock = systemClock,
 ): Promise<string> {
+  assertScheduleName(input.name);
   const id = newId();
   const nextRunAt = nextCronOccurrence(input.cron, input.timezone, clock.now());
   const result = await executor.execute<{ id: string }>(sql`

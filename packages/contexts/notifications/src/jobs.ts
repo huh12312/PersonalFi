@@ -351,6 +351,19 @@ export async function closeDigestWindows(
  * and is what lets a `DAILY` cadence land shortly after local midnight rather
  * than at whatever hour the worker happened to start.
  */
+/**
+ * `schedules.name` is constrained to `^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`
+ * (0003_platform.sql). A UUID carries hyphens, and a colon is not in the
+ * alphabet at all, so the per-user suffix is the id with its hyphens turned
+ * into underscores after a dot. The Phase 2 cold boot (wp2.w-wiring.md) found
+ * the original `notifications.deliver:<uuid>` crash-looping the worker inside
+ * `resolveModules()` on every real install — a defect no unit test could see,
+ * because the fake scheduler never applied the constraint.
+ */
+export function scheduleNameFor(kind: 'deliver' | 'digest', userId: string): string {
+  return `notifications.${kind}.${userId.toLowerCase().replaceAll('-', '_')}`;
+}
+
 export async function registerNotificationSchedules(
   executor: Executor,
   input: { readonly userId: string; readonly timezone: string },
@@ -360,7 +373,7 @@ export async function registerNotificationSchedules(
     executor,
     {
       userId: input.userId,
-      name: `notifications.deliver:${input.userId}`,
+      name: scheduleNameFor('deliver', input.userId),
       cron: '*/5 * * * *',
       timezone: input.timezone,
       jobKind: DELIVER_JOB_KIND,
@@ -372,7 +385,7 @@ export async function registerNotificationSchedules(
     executor,
     {
       userId: input.userId,
-      name: `notifications.digest:${input.userId}`,
+      name: scheduleNameFor('digest', input.userId),
       cron: '5 * * * *',
       timezone: input.timezone,
       jobKind: DIGEST_JOB_KIND,

@@ -215,3 +215,36 @@ describeWithDb('scheduler', () => {
     expect(delaySeconds).toBeLessThanOrEqual(1_200);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Names are checked in code, not only by the CHECK constraint
+// ---------------------------------------------------------------------------
+//
+// wp2.w-wiring.md: a context registered `notifications.deliver:<uuid>`, every
+// unit test passed against a fake, and the real worker crash-looped from its
+// first boot. `upsertSchedule` now refuses such a name before touching the
+// database, so the failure is a unit-test failure with the name in it.
+describe('schedule names', () => {
+  it('refuses a name the database would refuse, before the insert', async () => {
+    const { assertScheduleName, SCHEDULE_NAME_PATTERN } = await import('../src/jobs/scheduler.ts');
+    for (const bad of [
+      'notifications.deliver:6f1d2c0e-1b2a-4c3d-8e9f-0a1b2c3d4e5f',
+      'Nightly',
+      'sync-all',
+      '.leading',
+      'trailing.',
+      'a..b',
+    ]) {
+      expect(() => assertScheduleName(bad), bad).toThrow(/schedule_name_invalid|must match/);
+    }
+    for (const good of [
+      'sync.nightly',
+      'notifications.deliver.6f1d2c0e_1b2a_4c3d_8e9f_0a1b2c3d4e5f',
+      'a',
+      'a1.b2_c3',
+    ]) {
+      expect(SCHEDULE_NAME_PATTERN.test(good), good).toBe(true);
+      expect(() => assertScheduleName(good), good).not.toThrow();
+    }
+  });
+});
