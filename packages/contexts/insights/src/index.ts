@@ -312,6 +312,62 @@ export {
   type RegistrationVerdict,
 } from './registry.ts';
 
+// --- The built-in catalogue (WP 2.7) ---------------------------------------
+
+/**
+ * Fourteen deterministic rules over 07 §3.3, plus the reasons the other nine in
+ * scope cannot be written from Phase 2 data. `createBuiltinRegistry()` is what
+ * replaces `createAdvisorRegistry([])` at the composition root; `defaultEnabled`
+ * on each entry is the wave decision (cash and subscriptions on, spending off)
+ * and is read once, when the `advisors` row is first written.
+ */
+export {
+  BUILTIN_CATALOGUE,
+  CATALOGUE_GAPS,
+  CATALOGUE_SCOPE,
+  advisorFor,
+  builtinAdvisors,
+  builtinRules,
+  createBuiltinRegistry,
+  type BuiltinCatalogueEntry,
+  type CatalogueGap,
+  type RuleWave,
+} from './advisors/catalogue.ts';
+
+export { BUILTIN_RULE_VERSION, builtinManifest, type ManifestInput } from './advisors/manifest.ts';
+
+export {
+  IMPACT_CEILING_MAJOR,
+  clampImpact,
+  contextOf,
+  type BuiltinRule,
+  type ImpactVerdict,
+  type RuleContext,
+  type RuleOutput,
+} from './advisors/support.ts';
+
+export {
+  ACTIONABILITY,
+  DISMISS_PENALTY,
+  URGENCY_MULTIPLIER,
+  actionabilityOf,
+  applyCatalogueBudget,
+  rankBuiltin,
+  rankableBuiltinOf,
+  urgencyOf,
+  type RankableBuiltin,
+  type RankableFeedRow,
+} from './advisors/ranking.ts';
+
+export {
+  BANNED_PHRASES,
+  lintAdviceCopy,
+  lintInsightCopy,
+  type CopyField,
+  type CopyRule,
+  type CopyViolation,
+} from './advisors/copy-lint.ts';
+
 // --- Events, consumer, jobs ------------------------------------------------
 
 export {
