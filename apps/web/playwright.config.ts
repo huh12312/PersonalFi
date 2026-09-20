@@ -60,7 +60,7 @@ export default defineConfig({
     {
       name: 'chromium',
       testMatch:
-        /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings)\.spec\.ts/,
+        /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:5183' },
     },
     {
