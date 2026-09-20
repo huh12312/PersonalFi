@@ -13,8 +13,8 @@ top of it: `SnapshotBuilder` with the 08 §4.2 scope catalogue, the advisor
 registry, the seven-step validation pipeline, `pending_review` persistence, the
 30/90/permanent dismissal ladder, the alert budget, and kill switches 1–3.
 
-Repo `/home/chris/Projects/PersonalFi`, branch `main`, tree at `58599b0` plus
-this work package. Node v26.8.1, pnpm, vitest 5, Postgres on `127.0.0.1:5433`.
+Repo `/home/chris/Projects/PersonalFi`, branch `main`, tree at `dba93bd` with a
+clean working tree. Node v26.8.1, pnpm, vitest 5, Postgres on `127.0.0.1:5433`.
 Every number below came from a command run against this tree.
 
 **This work package ships no advisors.** There is no rule catalogue in it:
@@ -413,6 +413,74 @@ failing.
 Each sabotage was applied to the source file, the single test was run by name,
 and the file was restored from a copy taken immediately before the edit.
 
+### Re-observed at `dba93bd`, independently
+
+The two load-bearing anti-fabrication controls were broken again at the landing
+commit, by a session that did not write them, to check that the table above is a
+record of something that still happens rather than of something that once did.
+Both were **red on the first try**; `git diff --quiet` was clean afterwards.
+
+**S1 — number traceability.** `untraceableNumerals` (`validate/numerals.ts`)
+made to return `[]` unconditionally, so no numeral is ever traced. The fixture
+body carries `$227.99` where the derivation computes `22788`:
+
+```
+$ pnpm exec vitest run --project insights \
+    -t 'an insight whose number is absent from the snapshot is rejected'
+
++       "summary_md": "At $18.99 a month, this subscription costs $227.99 a year.",
++       "title": "A monthly subscription adds up",
++       "type": "subscription.annual_cost",
++     },
++     "severity": "notable",
++     "status": "pending_review",
++   },
++ ]
+
+ ❯ test/no-fabricated-numbers.test.ts:86:29
+     84|     expect(broken.ok).toBe(true);
+     85|     if (!broken.ok) return;
+     86|     expect(broken.accepted).toEqual([]);
+       |                             ^
+
+ Test Files  1 failed | 6 skipped (7)
+      Tests  1 failed | 76 skipped (77)
+```
+
+The invented figure was **accepted** and reached `status: pending_review`. That
+is the whole failure mode the control exists for, and the test sees it.
+
+**S2 — evidence resolution.** Both `unknown_key` / `missing_path` returns in
+`resolveSourceRef` (`validate/evidence.ts:116,119`) replaced with
+`{ ok: true, value: 0 }`, so a ref into a scope we never sent resolves:
+
+```
+$ pnpm exec vitest run --project insights \
+    -t 'an evidence ref that does not resolve is rejected'
+
+ ❯ test/evidence-resolution.test.ts:85:37
+     83|       expect(outcome.ok, ref).toBe(true);
+     84|       if (!outcome.ok) continue;
+     85|       expect(outcome.accepted, ref).toEqual([]);
+       |                                     ^
+
+ Test Files  1 failed | 6 skipped (7)
+      Tests  1 failed | 76 skipped (77)
+```
+
+Note what the sabotage had to do to pass: it had to invent a _value_ (`0`) for a
+path that does not exist. There is no way to weaken this check that does not
+amount to fabricating data on the advisor's behalf, which is the argument for
+resolving against the emitted snapshot and never against the database.
+
+Restored:
+
+```
+$ git checkout -- packages/contexts/insights/src/validate/{numerals,evidence}.ts
+$ git diff --quiet && git status --porcelain
+  (no output — tree clean)
+```
+
 ---
 
 ## 5. The kill-switch matrix (08 §4.6)
@@ -598,6 +666,37 @@ Scratch databases: `personalfi_wp_ins_persist`, `personalfi_wp_ins_switches`,
 $ node scripts/check-schema-ownership.ts
 schema-ownership: ok — 95 table(s) claimed across 14 package(s), 65 defined.
 ```
+
+### The table list
+
+`packages/db/test/migrate.test.ts` carries the exact alphabetical list. This
+work package added its eight — `advisor_runs`, `advisors`, `insight_actions`,
+`insight_dismissals`, `insight_evidence`, `insight_feedback`, `insights`,
+`snapshot_grants` — beside WP 2.4's four (`delivery_attempts`,
+`notification_channels`, `notification_outbox`, `notification_rules`), each in
+its alphabetical slot rather than appended, with the per-migration attribution
+comment block above it. All twelve are present and the suite is green. The
+`db` project also asserts `user_id` on every one of the eight, no float column,
+and no naked `TIMESTAMP`.
+
+### The whole pipeline
+
+```
+$ just check          # typecheck → lint → check-proxy-routes → test
+
+typecheck exit=0
+lint exit=0
+check-proxy-routes: PASS — docker/Caddyfile routes exactly '/api/*' to the api …
+ Test Files  141 passed | 1 skipped (142)
+      Tests  1820 passed | 2 skipped (1822)
+ (apps/web) Test Files  15 passed (15)
+            Tests  85 passed (85)
+```
+
+Green in full, with nothing skipped that this work package owns. `just check` is
+not `just verify` — the gate standard (02 §5.7) is explicit that only `just
+verify`, run at the landing commit, predicts CI, and it needs docker and a
+network. That run is the orchestrator's.
 
 ---
 
