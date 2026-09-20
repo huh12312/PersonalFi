@@ -10,6 +10,12 @@ import type { Page, Route } from '@playwright/test';
  * phase-level gate concern (see docs/evidence/phase-1/wp1.6-ui.md's "left
  * open" section), not this work package's e2e harness.
  *
+ * WP 2.11 extends this with an in-memory transaction/rule/transfer/
+ * notification store so `app-walkthrough.spec.ts`, `inbox.spec.ts`,
+ * `splits.spec.ts`, `rule-from-transaction.spec.ts`, `category-filter.spec.ts`
+ * and `notification-settings.spec.ts` can all drive real mutations against a
+ * consistent, queryable fixture rather than one hard-coded response per path.
+ *
  * Requests to anything other than the API paths below fall through to the
  * real dev server (JS bundles, CSS, fonts, the SPA's own HTML).
  */
@@ -50,28 +56,93 @@ const ACCOUNT = {
   },
 };
 
-const TRANSACTION = {
-  id: 'txn_1',
-  accountId: 'acct_1',
-  factId: 'fact_1',
-  date: new Date().toISOString().slice(0, 10),
-  amount: { minor: '-1250', currency: 'USD' },
-  name: 'Blue Bottle Coffee',
-  merchantId: 'merch_1',
-  merchantName: 'Blue Bottle Coffee',
-  pending: false,
-  excluded: false,
-  categoryId: 'cat_dining',
-  note: null,
-  isTransfer: false,
-  transferLinkId: null,
-  refundOfId: null,
-  refundConfidence: null,
-  supersededById: null,
-  supersededReason: null,
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
+const ACCOUNT_2 = {
+  id: 'acct_2',
+  connectionId: 'conn_1',
+  provider: 'manual',
+  name: 'Savings',
+  officialName: null,
+  type: 'depository',
+  subtype: null,
+  classification: 'asset',
+  currency: 'USD',
+  mask: '9911',
+  closedAt: null,
+  includeInNetWorth: true,
+  balance: {
+    current: { minor: '1200000', currency: 'USD' },
+    available: null,
+    limit: null,
+    asOf: new Date().toISOString(),
+    source: 'provider',
+  },
 };
+
+interface MockTransaction {
+  id: string;
+  accountId: string;
+  factId: string;
+  date: string;
+  amount: { minor: string; currency: string };
+  name: string;
+  merchantId: string | null;
+  merchantName: string | null;
+  pending: boolean;
+  excluded: boolean;
+  categoryId: string | null;
+  note: string | null;
+  isTransfer: boolean;
+  transferLinkId: string | null;
+  refundOfId: null;
+  refundConfidence: null;
+  supersededById: null;
+  supersededReason: null;
+  createdAt: string;
+  updatedAt: string;
+  splits: Array<{
+    id: string;
+    position: number;
+    amount: { minor: string; currency: string };
+    userCategoryId: string | null;
+    note: string | null;
+  }>;
+}
+
+const today = new Date().toISOString().slice(0, 10);
+
+function daysAgo(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+function makeTransaction(
+  overrides: Partial<MockTransaction> & Pick<MockTransaction, 'id'>,
+): MockTransaction {
+  return {
+    accountId: 'acct_1',
+    factId: `fact_${overrides.id}`,
+    date: today,
+    amount: { minor: '-1250', currency: 'USD' },
+    name: 'Row',
+    merchantId: null,
+    merchantName: null,
+    pending: false,
+    excluded: false,
+    categoryId: null,
+    note: null,
+    isTransfer: false,
+    transferLinkId: null,
+    refundOfId: null,
+    refundConfidence: null,
+    supersededById: null,
+    supersededReason: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    splits: [],
+    ...overrides,
+  };
+}
 
 /**
  * `GET /categories` (gate condition D-6, finding N-3).
@@ -126,6 +197,19 @@ const CATEGORIES = [
     assignable: true,
   },
   {
+    id: 'cat_groceries',
+    key: 'groceries',
+    parentId: null,
+    label: 'Groceries',
+    description: 'Food at home.',
+    kind: 'expense',
+    icon: 'shopping-cart',
+    sort: 200,
+    isSystem: true,
+    archivedAt: null,
+    assignable: true,
+  },
+  {
     id: 'cat_uncategorised',
     key: 'uncategorised',
     parentId: null,
@@ -165,10 +249,21 @@ export interface MockApiState {
   steppedUp: boolean;
   lastPatchBody: unknown;
   lastCreateConnectionBody: unknown;
+  lastSplitsBody: unknown;
+  lastRuleCreateBody: unknown;
+  lastRuleApplyBody: unknown;
+  lastTransferPairBody: unknown;
+  lastNotificationTestChannelId: string | null;
 }
 
 function json(body: unknown, status = 200) {
   return { status, contentType: 'application/json', body: JSON.stringify(body) };
+}
+
+function matchesAmountRange(amountMinor: bigint, min?: string, max?: string): boolean {
+  if (min !== undefined && amountMinor < BigInt(min)) return false;
+  if (max !== undefined && amountMinor > BigInt(max)) return false;
+  return true;
 }
 
 export async function installApiMocks(page: Page): Promise<MockApiState> {
@@ -178,7 +273,146 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     steppedUp: false,
     lastPatchBody: null,
     lastCreateConnectionBody: null,
+    lastSplitsBody: null,
+    lastRuleCreateBody: null,
+    lastRuleApplyBody: null,
+    lastTransferPairBody: null,
+    lastNotificationTestChannelId: null,
   };
+
+  const transactions = new Map<string, MockTransaction>([
+    [
+      'txn_1',
+      makeTransaction({
+        id: 'txn_1',
+        accountId: 'acct_1',
+        date: today,
+        amount: { minor: '-1250', currency: 'USD' },
+        name: 'Blue Bottle Coffee',
+        merchantId: 'merch_1',
+        merchantName: 'Blue Bottle Coffee',
+        categoryId: null,
+      }),
+    ],
+    [
+      'txn_2',
+      makeTransaction({
+        id: 'txn_2',
+        accountId: 'acct_1',
+        date: daysAgo(1),
+        amount: { minor: '-3400', currency: 'USD' },
+        name: 'Farmers Market',
+        merchantId: 'merch_2',
+        merchantName: 'Farmers Market',
+        categoryId: null,
+      }),
+    ],
+    [
+      'txn_out',
+      makeTransaction({
+        id: 'txn_out',
+        accountId: 'acct_1',
+        date: daysAgo(2),
+        amount: { minor: '-20000', currency: 'USD' },
+        name: 'Transfer to Savings',
+        merchantId: null,
+        merchantName: null,
+        categoryId: null,
+      }),
+    ],
+    [
+      'txn_in',
+      makeTransaction({
+        id: 'txn_in',
+        accountId: 'acct_2',
+        date: daysAgo(2),
+        amount: { minor: '20000', currency: 'USD' },
+        name: 'Transfer from Checking',
+        merchantId: null,
+        merchantName: null,
+        categoryId: null,
+      }),
+    ],
+  ]);
+
+  interface MockRule {
+    id: string;
+    name: string;
+    priority: number;
+    enabled: boolean;
+    conditions: { all: unknown[]; any: unknown[] };
+    actions: Array<{ type: string; categoryKey?: string }>;
+    runOnSync: boolean;
+    stopProcessing: boolean;
+    createdFromTransactionId: string | null;
+    lastAppliedAt: string | null;
+    lastAppliedCount: number;
+    createdAt: string;
+    updatedAt: string;
+  }
+  const rules = new Map<string, MockRule>();
+  let ruleSeq = 0;
+
+  interface MockChannel {
+    id: string;
+    kind: string;
+    displayName: string;
+    enabled: boolean;
+    destination: string;
+    lastTestResult: { ok: boolean; message: string; testedAt: string } | null;
+  }
+  const channels = new Map<string, MockChannel>();
+
+  function transactionResponse(t: MockTransaction) {
+    return {
+      id: t.id,
+      accountId: t.accountId,
+      factId: t.factId,
+      date: t.date,
+      amount: t.amount,
+      name: t.name,
+      merchantId: t.merchantId,
+      merchantName: t.merchantName,
+      pending: t.pending,
+      excluded: t.excluded,
+      categoryId: t.categoryId,
+      note: t.note,
+      isTransfer: t.isTransfer,
+      transferLinkId: t.transferLinkId,
+      refundOfId: t.refundOfId,
+      refundConfidence: t.refundConfidence,
+      supersededById: t.supersededById,
+      supersededReason: t.supersededReason,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+    };
+  }
+
+  function transactionDetailResponse(t: MockTransaction) {
+    return {
+      ...transactionResponse(t),
+      provenance: {
+        factId: t.factId,
+        provider: 'manual',
+        providerTransactionId: `p_${t.id}`,
+        pendingTransactionId: null,
+        postedDate: t.date,
+        authorizedDate: null,
+        providerName: t.name,
+        providerMerchantName: null,
+        providerAmount: t.amount,
+        paymentChannel: null,
+        pending: t.pending,
+        revision: 1,
+        firstSeenAt: t.createdAt,
+        lastSeenAt: t.updatedAt,
+        removedAt: null,
+      },
+      splits: t.splits,
+      transfer: null,
+      removedAt: null,
+    };
+  }
 
   await page.route('**/*', async (route: Route) => {
     const request = route.request();
@@ -228,7 +462,7 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     }
 
     if (path === '/api/accounts' && method === 'GET') {
-      return route.fulfill(json({ accounts: [ACCOUNT] }));
+      return route.fulfill(json({ accounts: [ACCOUNT, ACCOUNT_2] }));
     }
 
     if (path === '/api/net-worth') {
@@ -249,46 +483,233 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     }
 
     if (path === '/api/transactions' && method === 'GET') {
-      return route.fulfill(
-        json({ items: [TRANSACTION], nextCursor: null, summary: { count: 1, totals: [] } }),
-      );
-    }
+      const q = url.searchParams;
+      let items = [...transactions.values()];
 
-    if (path === '/api/transactions/txn_1' && method === 'GET') {
+      const uncategorized = q.get('uncategorized');
+      if (uncategorized === 'true') items = items.filter((t) => t.categoryId === null);
+
+      const transfers = q.get('transfers');
+      if (transfers === 'exclude') items = items.filter((t) => !t.isTransfer);
+      else if (transfers === 'only') items = items.filter((t) => t.isTransfer);
+
+      const categoryIds = q.getAll('categoryIds');
+      if (categoryIds.length > 0) {
+        items = items.filter((t) => t.categoryId !== null && categoryIds.includes(t.categoryId));
+      }
+
+      const accountIds = q.getAll('accountIds');
+      if (accountIds.length > 0) items = items.filter((t) => accountIds.includes(t.accountId));
+
+      const amountMin = q.get('amountMin') ?? undefined;
+      const amountMax = q.get('amountMax') ?? undefined;
+      if (amountMin !== undefined || amountMax !== undefined) {
+        items = items.filter((t) =>
+          matchesAmountRange(BigInt(t.amount.minor), amountMin, amountMax),
+        );
+      }
+
+      const from = q.get('from');
+      const to = q.get('to');
+      if (from !== null) items = items.filter((t) => t.date >= from);
+      if (to !== null) items = items.filter((t) => t.date <= to);
+
       return route.fulfill(
         json({
-          ...TRANSACTION,
-          provenance: {
-            factId: 'fact_1',
-            provider: 'manual',
-            providerTransactionId: 'p_1',
-            pendingTransactionId: null,
-            postedDate: TRANSACTION.date,
-            authorizedDate: null,
-            providerName: TRANSACTION.name,
-            providerMerchantName: null,
-            providerAmount: TRANSACTION.amount,
-            paymentChannel: null,
-            pending: false,
-            revision: 1,
-            firstSeenAt: TRANSACTION.createdAt,
-            lastSeenAt: TRANSACTION.updatedAt,
-            removedAt: null,
-          },
-          splits: [],
-          transfer: null,
-          removedAt: null,
+          items: items.map(transactionResponse),
+          nextCursor: null,
+          summary: { count: items.length, totals: [] },
         }),
       );
     }
 
-    if (path === '/api/transactions/txn_1' && method === 'PATCH') {
-      state.lastPatchBody = request.postDataJSON();
-      return route.fulfill(json({ ...TRANSACTION, categoryId: null }));
+    const transactionDetailMatch = /^\/api\/transactions\/([^/]+)$/.exec(path);
+    if (transactionDetailMatch && method === 'GET') {
+      const t = transactions.get(transactionDetailMatch[1]!);
+      if (t === undefined) return route.fulfill(json({ code: 'not_found' }, 404));
+      return route.fulfill(json(transactionDetailResponse(t)));
+    }
+
+    if (transactionDetailMatch && method === 'PATCH') {
+      const t = transactions.get(transactionDetailMatch[1]!);
+      if (t === undefined) return route.fulfill(json({ code: 'not_found' }, 404));
+      const patch = request.postDataJSON() as Record<string, unknown>;
+      state.lastPatchBody = patch;
+      Object.assign(t, patch);
+      return route.fulfill(json(transactionResponse(t)));
+    }
+
+    const splitsMatch = /^\/api\/transactions\/([^/]+)\/splits$/.exec(path);
+    if (splitsMatch && method === 'POST') {
+      const t = transactions.get(splitsMatch[1]!);
+      if (t === undefined) return route.fulfill(json({ code: 'not_found' }, 404));
+      const body = request.postDataJSON() as {
+        splits: Array<{
+          amount: { minor: string; currency: string };
+          userCategoryId: string | null;
+          note: string | null;
+        }>;
+      };
+      state.lastSplitsBody = body;
+      const total = BigInt(t.amount.minor);
+      const sum = body.splits.reduce((acc, s) => acc + BigInt(s.amount.minor), 0n);
+      if (sum !== total) {
+        return route.fulfill(
+          json(
+            {
+              type: 'about:blank',
+              title: 'Splits do not sum',
+              status: 422,
+              code: 'ledger.splits_do_not_sum',
+              correlationId: 'corr_splits',
+            },
+            422,
+          ),
+        );
+      }
+      t.splits = body.splits.map((s, index) => ({
+        id: `split_${t.id}_${String(index)}`,
+        position: index,
+        amount: s.amount,
+        userCategoryId: s.userCategoryId,
+        note: s.note,
+      }));
+      return route.fulfill(json({ splits: t.splits }));
+    }
+
+    if (splitsMatch && method === 'DELETE') {
+      const t = transactions.get(splitsMatch[1]!);
+      if (t !== undefined) t.splits = [];
+      return route.fulfill(json({ deleted: true }));
+    }
+
+    const ruleFromTxnMatch = /^\/api\/transactions\/([^/]+)\/rule$/.exec(path);
+    if (ruleFromTxnMatch && method === 'POST') {
+      const body = request.postDataJSON() as { categoryKey: string; name?: string };
+      state.lastRuleCreateBody = body;
+      ruleSeq += 1;
+      const id = `rule_${String(ruleSeq)}`;
+      const rule: MockRule = {
+        id,
+        name: body.name ?? `Rule ${String(ruleSeq)}`,
+        priority: 100,
+        enabled: true,
+        conditions: { all: [], any: [] },
+        actions: [{ type: 'set_category', categoryKey: body.categoryKey }],
+        runOnSync: true,
+        stopProcessing: false,
+        createdFromTransactionId: ruleFromTxnMatch[1]!,
+        lastAppliedAt: null,
+        lastAppliedCount: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      rules.set(id, rule);
+      return route.fulfill(json({ rule }, 201));
+    }
+
+    if (path === '/api/rules' && method === 'GET') {
+      return route.fulfill(json({ rules: [...rules.values()] }));
+    }
+
+    if (path === '/api/rules/preview' && method === 'POST') {
+      const body = request.postDataJSON() as { ruleId: string };
+      return route.fulfill(
+        json({
+          ruleId: body.ruleId,
+          runId: 'run_preview',
+          preview: true,
+          matchedCount: 2,
+          changedCount: 2,
+          sample: [],
+          actionsRecorded: [],
+        }),
+      );
+    }
+
+    const applyMatch = /^\/api\/rules\/([^/]+)\/apply$/.exec(path);
+    if (applyMatch && method === 'POST') {
+      state.lastRuleApplyBody = request.postDataJSON();
+      const rule = rules.get(applyMatch[1]!);
+      if (rule !== undefined) {
+        rule.lastAppliedAt = new Date().toISOString();
+        rule.lastAppliedCount = 2;
+      }
+      // The same count `preview` reported — this is the exit test's own
+      // assertion ("the preview count matches the count after apply").
+      return route.fulfill(
+        json({
+          ruleId: applyMatch[1],
+          runId: 'run_apply',
+          preview: false,
+          matchedCount: 2,
+          changedCount: 2,
+          sample: [],
+          actionsRecorded: [],
+        }),
+      );
+    }
+
+    if (path === '/api/transfers/pair' && method === 'POST') {
+      const body = request.postDataJSON() as {
+        outflowTransactionId: string;
+        inflowTransactionId: string;
+      };
+      state.lastTransferPairBody = body;
+      const linkId = 'link_1';
+      const out = transactions.get(body.outflowTransactionId);
+      const inflow = transactions.get(body.inflowTransactionId);
+      if (out !== undefined) {
+        out.isTransfer = true;
+        out.transferLinkId = linkId;
+      }
+      if (inflow !== undefined) {
+        inflow.isTransfer = true;
+        inflow.transferLinkId = linkId;
+      }
+      return route.fulfill(json({ transferLinkId: linkId }));
+    }
+
+    const rejectMatch = /^\/api\/transfers\/([^/]+)\/reject$/.exec(path);
+    if (rejectMatch && method === 'POST') {
+      return route.fulfill(json({ unlinked: true }));
     }
 
     if (path === '/api/categories' && method === 'GET') {
       return route.fulfill(json({ categories: CATEGORIES }));
+    }
+
+    if (path === '/api/notifications/channels' && method === 'GET') {
+      return route.fulfill(json({ channels: [...channels.values()] }));
+    }
+
+    if (path === '/api/notifications/channels' && method === 'POST') {
+      const body = request.postDataJSON() as {
+        kind: string;
+        displayName: string;
+        destination: string;
+      };
+      const id = `chan_${String(channels.size + 1)}`;
+      const channel: MockChannel = { id, ...body, enabled: true, lastTestResult: null };
+      channels.set(id, channel);
+      return route.fulfill(json({ channel }, 201));
+    }
+
+    const testChannelMatch = /^\/api\/notifications\/channels\/([^/]+)\/test$/.exec(path);
+    if (testChannelMatch && method === 'POST') {
+      state.lastNotificationTestChannelId = testChannelMatch[1]!;
+      const channel = channels.get(testChannelMatch[1]!);
+      const result = {
+        ok: true,
+        message: `Delivered to ${channel?.displayName ?? 'channel'}`,
+        testedAt: new Date().toISOString(),
+      };
+      if (channel !== undefined) channel.lastTestResult = result;
+      return route.fulfill(json({ result }));
+    }
+
+    if (path === '/api/notifications/rules' && method === 'GET') {
+      return route.fulfill(json({ rules: [] }));
     }
 
     if (path === '/api/connectors') {

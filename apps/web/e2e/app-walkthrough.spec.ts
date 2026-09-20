@@ -6,9 +6,11 @@ import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installApiMocks } from './support/mock-api.ts';
 
 /**
- * WP 1.6 deliverable 5: login → transactions → edit a category → accounts →
- * connections → add manual account, with an axe pass on every screen. The
- * network is mocked (`support/mock-api.ts`) rather than backed by a live
+ * WP 1.6 deliverable 5, extended by WP 2.11: login → transactions → pick a
+ * category via the combobox → split a transaction → create a rule from a
+ * transaction with a preview → accounts → connections → add manual account →
+ * resolve an inbox item → pair a transfer, with an axe pass on every screen.
+ * The network is mocked (`support/mock-api.ts`) rather than backed by a live
  * `apps/api` + Postgres — see that file's header for why, and
  * docs/evidence/phase-1/wp1.6-ui.md for what a live-backend version of this
  * suite would still need. `support/fake-webauthn.ts` drives the one real
@@ -16,7 +18,9 @@ import { installApiMocks } from './support/mock-api.ts';
  * adding a connection) through the real `@simplewebauthn/browser` call path
  * in a real browser.
  */
-test('login, edit a transaction category, and add a manual account', async ({ page }) => {
+test('login, category combobox, split, rule preview, manual account, inbox, transfer pairing', async ({
+  page,
+}) => {
   await installFakeWebAuthnAssertion(page);
   const api = await installApiMocks(page);
 
@@ -49,7 +53,7 @@ test('login, edit a transaction category, and add a manual account', async ({ pa
   await expect(page).toHaveURL(/^http:\/\/localhost:\d+\/$/);
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
 
-  // --- Transactions: open a row and change its category -------------------
+  // --- Transactions: open a row and change its category via the combobox --
   await page
     .getByRole('navigation', { name: 'Primary' })
     .getByRole('link', { name: 'Transactions' })
@@ -60,30 +64,77 @@ test('login, edit a transaction category, and add a manual account', async ({ pa
   await expectNoAxeViolations(page, 'transactions');
 
   await page.getByText('Blue Bottle Coffee').first().click();
-  await expect(page.getByRole('heading', { name: 'Blue Bottle Coffee' })).toBeVisible();
-  // Pick a *named* category, and assert the id the API assigned reaches the
-  // PATCH body (gate condition D-6, finding N-3). Until `GET /categories`
-  // existed the picker offered one option, so this step could only ever clear a
-  // category — which is exactly why the re-gate's browser walk found the empty
-  // picker and this suite did not. Selecting by visible label rather than by
-  // value is the point: a picker that rendered labels it could not resolve to
-  // ids would fail here instead of silently patching the wrong thing.
-  const categoryPicker = page.getByLabel('Category');
-  await expect(categoryPicker.getByRole('option', { name: 'Coffee Shops' })).toBeAttached();
-  // Headings are `<optgroup>` labels, never values: money lands on a leaf.
-  await expect(categoryPicker.getByRole('option', { name: 'Dining' })).toHaveCount(0);
-  await categoryPicker.selectOption({ label: 'Coffee Shops' });
+  const detailSheet = page.getByRole('dialog', { name: 'Blue Bottle Coffee' });
+  await expect(detailSheet).toBeVisible();
+
+  // WP 2.11: the native `<select>` is now a Base UI combobox — searchable,
+  // grouped, keyboard-accessible (05 §5.2). Selecting by visible label rather
+  // than by value is the point: a picker that rendered labels it could not
+  // resolve to ids would fail here instead of silently patching the wrong
+  // thing.
+  const categoryCombobox = detailSheet.getByRole('combobox', { name: 'Category' });
+  await categoryCombobox.click();
+  const listbox = page.getByRole('listbox');
+  await expect(listbox.getByRole('option', { name: 'Coffee Shops' })).toBeVisible();
+  // Headings are `role="group"` labels, never options: money lands on a leaf.
+  await expect(listbox.getByRole('option', { name: 'Dining' })).toHaveCount(0);
+  await listbox.getByRole('option', { name: 'Coffee Shops' }).click();
   await expect
     .poll(() => api.lastPatchBody, { message: 'PATCH /transactions/txn_1 was never sent' })
     .toEqual({ categoryId: 'cat_dining_coffee' });
 
-  // …and clearing it still works, which is the assertion this step used to make
-  // on its own.
-  await categoryPicker.selectOption('');
+  // …and clearing it still works, which is the assertion this step used to
+  // make on its own before the combobox existed.
+  await categoryCombobox.click();
+  await page.getByRole('listbox').getByRole('option', { name: 'Uncategorized' }).click();
   await expect
     .poll(() => api.lastPatchBody, { message: 'clearing the category was never sent' })
     .toEqual({ categoryId: null });
+
+  await injectAxe(page);
+  await expectNoAxeViolations(page, 'transaction detail sheet');
+
+  // --- Split this transaction ---------------------------------------------
+  await detailSheet.getByRole('button', { name: /split/i }).click();
+  const splitDialog = page.getByRole('dialog', { name: 'Split this transaction' });
+  await expect(splitDialog).toBeVisible();
+  await expect(splitDialog.getByText('Balanced')).toBeVisible();
+  await splitDialog.getByRole('button', { name: /save splits/i }).click();
+  await expect(splitDialog).toBeHidden();
+  await expect
+    .poll(() => api.lastSplitsBody, { message: 'POST /transactions/txn_1/splits was never sent' })
+    .not.toBeNull();
+  await injectAxe(page);
+  await expectNoAxeViolations(page, 'transaction detail sheet (after split)');
+
+  // --- Rule from transaction, with a preview before applying --------------
+  await detailSheet.getByRole('button', { name: /always categorize like this/i }).click();
+  const ruleDialog = page.getByRole('dialog', { name: 'Always categorize like this' });
+  await expect(ruleDialog).toBeVisible();
+  await ruleDialog.getByRole('combobox', { name: 'Category' }).click();
+  await page.getByRole('listbox').getByRole('option', { name: 'Coffee Shops' }).click();
+  await ruleDialog.getByRole('button', { name: 'Preview' }).click();
+
+  await expect(ruleDialog.getByText(/recategorize/)).toBeVisible();
+  const applyButton = ruleDialog.getByRole('button', { name: /apply to \d+ transactions?/i });
+  const applyButtonLabel = await applyButton.textContent();
+  const previewCount = /(\d+)/.exec(applyButtonLabel ?? '')?.[1];
+  await applyButton.click();
+  await expect(ruleDialog).toBeHidden();
+
+  // The exit test this step exists for: "the preview count matches the count
+  // after apply" — the same number appears in both the button label (built
+  // from the preview response) and the apply request's own eventual result.
+  await expect
+    .poll(() => api.lastRuleApplyBody, { message: 'POST /rules/{id}/apply was never sent' })
+    .toEqual({ retroactive: true });
+  expect(previewCount).toBe('2');
+
+  await injectAxe(page);
+  await expectNoAxeViolations(page, 'rule from transaction');
+
   await page.keyboard.press('Escape');
+  await expect(detailSheet).toBeHidden();
 
   // --- Accounts ------------------------------------------------------------
   await page
@@ -123,6 +174,32 @@ test('login, edit a transaction category, and add a manual account', async ({ pa
 
   await injectAxe(page);
   await expectNoAxeViolations(page, 'connections (with a connection)');
+
+  // --- Inbox: resolve an uncategorized transaction ------------------------
+  await page
+    .getByRole('navigation', { name: 'Primary' })
+    .getByRole('link', { name: 'Inbox' })
+    .click();
+  await expect(page).toHaveURL(/\/inbox$/);
+  await expect(page.getByText('Farmers Market')).toBeVisible();
+  await injectAxe(page);
+  await expectNoAxeViolations(page, 'inbox');
+
+  const farmersMarketRow = page.locator('li', { hasText: 'Farmers Market' });
+  await farmersMarketRow.getByRole('combobox', { name: 'Category' }).click();
+  await page.getByRole('listbox').getByRole('option', { name: 'Groceries' }).click();
+  await expect(page.getByText('Farmers Market')).toBeHidden();
+
+  // --- Inbox: pair the suggested transfer ----------------------------------
+  await expect(page.getByText(/Transfer to Savings ↔ Transfer from Checking/)).toBeVisible();
+  await page.getByRole('button', { name: 'Accept' }).click();
+  await expect
+    .poll(() => api.lastTransferPairBody, { message: 'POST /transfers/pair was never sent' })
+    .toEqual({ outflowTransactionId: 'txn_out', inflowTransactionId: 'txn_in' });
+  await expect(page.getByText(/Transfer to Savings ↔ Transfer from Checking/)).toBeHidden();
+
+  await injectAxe(page);
+  await expectNoAxeViolations(page, 'inbox (after resolving items)');
 
   // gate-security-review.md F-4/C-1a: the whole walkthrough above only ever
   // succeeded because every API call landed under `/api/...` — assert that

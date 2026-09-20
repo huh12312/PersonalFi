@@ -17,6 +17,7 @@ import type { ListTransactionsData } from '../../api/generated/types.gen.ts';
  */
 export const transactionsSearchSchema = z.object({
   accounts: z.array(z.string()).optional(),
+  categoryIds: z.array(z.string()).optional(),
   from: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -48,6 +49,7 @@ export const DEFAULT_TRANSACTIONS_SEARCH: TransactionsSearch = {};
 export function hasActiveFilters(search: TransactionsSearch): boolean {
   return (
     (search.accounts?.length ?? 0) > 0 ||
+    (search.categoryIds?.length ?? 0) > 0 ||
     search.from !== undefined ||
     search.to !== undefined ||
     search.amountMin !== undefined ||
@@ -72,6 +74,9 @@ export function toTransactionsQuery(
   return {
     ...(search.accounts !== undefined && search.accounts.length > 0
       ? { accountIds: search.accounts }
+      : {}),
+    ...(search.categoryIds !== undefined && search.categoryIds.length > 0
+      ? { categoryIds: search.categoryIds }
       : {}),
     ...(search.from !== undefined ? { from: search.from } : {}),
     ...(search.to !== undefined ? { to: search.to } : {}),

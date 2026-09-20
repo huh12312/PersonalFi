@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: MIT
 import { Link } from '@tanstack/react-router';
-import { AlertTriangle, ArrowLeft } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { EmptyState } from '../../components/patterns/EmptyState.tsx';
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { Money } from '../../components/finance/Money.tsx';
+import { Button } from '../../components/ui/button.tsx';
 import { Switch } from '../../components/ui/switch.tsx';
 import { Label } from '../../components/ui/label.tsx';
 import { TransactionDetailSheet } from '../transactions/TransactionDetailSheet.tsx';
 import { TransactionsList } from '../transactions/TransactionsList.tsx';
 import { DEFAULT_TRANSACTIONS_SEARCH, type TransactionsSearch } from '../transactions/filters.ts';
 import { ACCOUNT_TYPE_ICON } from './account-icons.tsx';
+import { AddManualTransactionDialog } from './AddManualTransactionDialog.tsx';
+import { RecordBalanceDialog } from './RecordBalanceDialog.tsx';
 import { useAccountsLookup } from './useAccountsLookup.ts';
 import { useUpdateAccountMutation } from './useAccounts.ts';
 
@@ -25,6 +28,8 @@ export function AccountDetailScreen({ accountId }: AccountDetailScreenProps) {
   const updateAccount = useUpdateAccountMutation();
   const [openTransactionId, setOpenTransactionId] = useState<string | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [balanceDialogOpen, setBalanceDialogOpen] = useState(false);
+  const [transactionDialogOpen, setTransactionDialogOpen] = useState(false);
 
   const search: TransactionsSearch = useMemo(
     () => ({ ...DEFAULT_TRANSACTIONS_SEARCH, accounts: [accountId] }),
@@ -90,6 +95,27 @@ export function AccountDetailScreen({ accountId }: AccountDetailScreenProps) {
           ) : (
             <span className="text-small text-text-muted">No balance yet</span>
           )}
+          {account.provider === 'manual' && (
+            <div className="mt-1 flex justify-end gap-2">
+              <Button
+                variant="link"
+                size="sm"
+                className="px-0"
+                onClick={() => setBalanceDialogOpen(true)}
+              >
+                Record balance
+              </Button>
+              <Button
+                variant="link"
+                size="sm"
+                className="gap-1 px-0"
+                onClick={() => setTransactionDialogOpen(true)}
+              >
+                <Plus size={12} aria-hidden="true" />
+                Add transaction
+              </Button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -124,6 +150,21 @@ export function AccountDetailScreen({ accountId }: AccountDetailScreenProps) {
           if (!open) setOpenTransactionId(null);
         }}
       />
+
+      {account.provider === 'manual' && (
+        <>
+          <RecordBalanceDialog
+            account={account}
+            open={balanceDialogOpen}
+            onOpenChange={setBalanceDialogOpen}
+          />
+          <AddManualTransactionDialog
+            account={account}
+            open={transactionDialogOpen}
+            onOpenChange={setTransactionDialogOpen}
+          />
+        </>
+      )}
     </div>
   );
 }

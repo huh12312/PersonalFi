@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
-import { listCategoriesOptions } from '../../api/generated/@tanstack/react-query.gen.ts';
+import {
+  createCategoryMutation,
+  listCategoriesOptions,
+} from '../../api/generated/@tanstack/react-query.gen.ts';
 import type { Category } from '../../api/generated/types.gen.ts';
 
 /**
@@ -116,4 +119,21 @@ export function useCategories(): UseCategoriesResult {
     isLoading: query.isLoading,
     isError: query.isError,
   };
+}
+
+/**
+ * `POST /categories` (05 §5.2's "create new category" escape hatch, WP 2.5's
+ * carry-over route). Invalidates `GET /categories` so the new row — and any
+ * combobox reading `useCategories` — sees it on the very next render; there is
+ * no optimistic insert because the server assigns `id`/`key`/`sort`, all of
+ * which a picker needs to select the row it just created.
+ */
+export function useCreateCategoryMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    ...createCategoryMutation(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: listCategoriesOptions().queryKey });
+    },
+  });
 }

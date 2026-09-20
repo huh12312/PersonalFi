@@ -6,6 +6,7 @@ import type { Account } from '../../api/generated/types.gen.ts';
 import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Label } from '../../components/ui/label.tsx';
+import { CategoryFilterControl } from './CategoryFilterControl.tsx';
 import { hasActiveFilters, type TransactionsSearch } from './filters.ts';
 
 export interface TransactionsFilterBarProps {
@@ -16,13 +17,11 @@ export interface TransactionsFilterBarProps {
 }
 
 /**
- * Search + date/account/category filters (deliverable 1). "Category" is
- * represented here only as the "Uncategorized" toggle, and deliberately so even
- * now that `GET /categories` exists (gate condition D-6): filtering *by* a
- * category needs a `categoryId` parameter on `GET /transactions`, which the
- * contract does not have. Rendering a picker that could not narrow the list
- * would be a control that does nothing. Phase 2's reports work adds both halves
- * together.
+ * Search + date/account/category filters (deliverable 1; WP 2.11 adds the
+ * category filter itself). `GET /transactions` has always accepted
+ * `categoryIds` (plural — closeout-architecture.md §4's "no categoryId
+ * parameter" bullet was stale, corrected by WP 2.5); what was missing was
+ * this control, `CategoryFilterControl`.
  *
  * Search is debounced locally (250ms) so every keystroke doesn't re-fire the
  * keyset query; every other control commits immediately, since a `<select>`
@@ -119,6 +118,16 @@ export function TransactionsFilterBar({
             </option>
           ))}
         </select>
+      </div>
+
+      <div>
+        <Label id="transactions-category-label">Category</Label>
+        <div className="mt-1">
+          <CategoryFilterControl
+            value={search.categoryIds ?? []}
+            onChange={(categoryIds) => onChange({ categoryIds })}
+          />
+        </div>
       </div>
 
       <div>

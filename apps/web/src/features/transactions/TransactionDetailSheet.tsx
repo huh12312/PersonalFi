@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeftRight } from 'lucide-react';
+import { ArrowLeftRight, SplitSquareHorizontal, Tags } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import {
@@ -18,7 +18,10 @@ import {
 import { Label } from '../../components/ui/label.tsx';
 import { Money } from '../../components/finance/Money.tsx';
 import { formatDateOnly } from '../../lib/date.ts';
+import { RuleFromTransactionDialog } from '../rules/RuleFromTransactionDialog.tsx';
 import { CategoryPicker } from './CategoryPicker.tsx';
+import { SplitEditor } from './SplitEditor.tsx';
+import { TransferPairDialog } from './TransferPairDialog.tsx';
 import { useTransactionOverlayMutation } from './useTransactionOverlay.ts';
 
 export interface TransactionDetailSheetProps {
@@ -50,6 +53,9 @@ export function TransactionDetailSheet({
 
   const [note, setNote] = useState('');
   const [savedNote, setSavedNote] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [splitEditorOpen, setSplitEditorOpen] = useState(false);
+  const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
+  const [pairDialogOpen, setPairDialogOpen] = useState(false);
 
   useEffect(() => {
     // Re-seeds the editable draft whenever a *different* transaction's data
@@ -138,6 +144,18 @@ export function TransactionDetailSheet({
               </div>
             )}
 
+            {transaction.transfer === null && !transaction.isTransfer && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-3 gap-1.5"
+                onClick={() => setPairDialogOpen(true)}
+              >
+                <ArrowLeftRight size={14} aria-hidden="true" />
+                Pair as transfer
+              </Button>
+            )}
+
             <div className="mt-4 flex flex-col gap-1.5">
               <Label htmlFor="transaction-category">Category</Label>
               <CategoryPicker
@@ -145,7 +163,31 @@ export function TransactionDetailSheet({
                 value={transaction.categoryId}
                 onChange={handleCategoryChange}
                 disabled={overlay.isPending}
+                className="w-full"
               />
+              <Button
+                variant="link"
+                size="sm"
+                className="w-fit gap-1.5 px-0"
+                onClick={() => setRuleDialogOpen(true)}
+              >
+                <Tags size={14} aria-hidden="true" />
+                Always categorize like this
+              </Button>
+            </div>
+
+            <div className="mt-4 flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setSplitEditorOpen(true)}
+              >
+                <SplitSquareHorizontal size={14} aria-hidden="true" />
+                {transaction.splits.length > 0
+                  ? `${String(transaction.splits.length)} splits`
+                  : 'Split'}
+              </Button>
             </div>
 
             <div className="mt-4 flex flex-col gap-1.5">
@@ -164,6 +206,23 @@ export function TransactionDetailSheet({
                 {savedNote === 'saving' ? 'Saving…' : savedNote === 'saved' ? 'Saved' : ''}
               </span>
             </div>
+
+            <SplitEditor
+              transaction={transaction}
+              open={splitEditorOpen}
+              onOpenChange={setSplitEditorOpen}
+            />
+            <RuleFromTransactionDialog
+              transaction={transaction}
+              open={ruleDialogOpen}
+              onOpenChange={setRuleDialogOpen}
+            />
+            <TransferPairDialog
+              transaction={transaction}
+              accountName={accountName}
+              open={pairDialogOpen}
+              onOpenChange={setPairDialogOpen}
+            />
           </>
         )}
       </DialogContent>

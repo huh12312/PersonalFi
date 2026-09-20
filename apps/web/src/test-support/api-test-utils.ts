@@ -4,6 +4,7 @@ import { vi } from 'vitest';
 import { client } from '../api/generated/client.gen.ts';
 import { Sdk } from '../api/generated/index.ts';
 import { registerCsrfInterceptor } from '../api/client-runtime-config.ts';
+import type { Transaction, TransactionDetail } from '../api/generated/types.gen.ts';
 
 let initialized = false;
 
@@ -183,4 +184,69 @@ export function stubFetchRoutes(routes: FetchRoute[]): void {
       return route.handle({ url, request });
     }),
   );
+}
+
+/**
+ * A minimal, valid `Transaction` — every field the wire shape requires, none
+ * of the test's own concern defaulted away. Shared by WP 2.11's several new
+ * screens (the split editor, rule-from-transaction, transfer pairing, the
+ * inbox) so each test file states only the fields its own scenario cares
+ * about, the same idea as `TEST_CATEGORIES` above.
+ */
+export function buildTransaction(
+  overrides: Partial<Transaction> & Pick<Transaction, 'id'>,
+): Transaction {
+  return {
+    accountId: 'acct_1',
+    factId: `fact_${overrides.id}`,
+    date: '2026-06-01',
+    amount: { minor: '-1250', currency: 'USD' },
+    name: 'Blue Bottle Coffee',
+    merchantId: 'merch_1',
+    merchantName: 'Blue Bottle Coffee',
+    pending: false,
+    excluded: false,
+    categoryId: null,
+    note: null,
+    isTransfer: false,
+    transferLinkId: null,
+    refundOfId: null,
+    refundConfidence: null,
+    supersededById: null,
+    supersededReason: null,
+    createdAt: '2026-06-01T00:00:00.000Z',
+    updatedAt: '2026-06-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+/** The detail shape (`GET /transactions/{id}`) — `buildTransaction` plus `provenance`/`splits`/`transfer`/`removedAt`. */
+export function buildTransactionDetail(
+  overrides: Partial<TransactionDetail> & Pick<TransactionDetail, 'id'>,
+): TransactionDetail {
+  const base = buildTransaction(overrides);
+  return {
+    ...base,
+    provenance: {
+      factId: base.factId,
+      provider: 'manual',
+      providerTransactionId: `p_${overrides.id}`,
+      pendingTransactionId: null,
+      postedDate: base.date,
+      authorizedDate: null,
+      providerName: base.name,
+      providerMerchantName: null,
+      providerAmount: base.amount,
+      paymentChannel: null,
+      pending: base.pending,
+      revision: 1,
+      firstSeenAt: base.createdAt,
+      lastSeenAt: base.updatedAt,
+      removedAt: null,
+    },
+    splits: [],
+    transfer: null,
+    removedAt: null,
+    ...overrides,
+  };
 }

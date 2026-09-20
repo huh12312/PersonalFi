@@ -2,7 +2,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright config, scoped to `e2e/`. Four independent suites, two
+ * Playwright config, scoped to `e2e/`. Nine independent suites, two
  * `webServer`s:
  *
  *   - `smoke.spec.ts` (project `chromium`) boots the Vite dev server and
@@ -10,13 +10,19 @@ import { defineConfig, devices } from '@playwright/test';
  *     docker-compose stack (05-frontend-architecture.md §9 reserves the
  *     full demo-seeded-backend E2E suite for a later work package; this is
  *     WP 0.5's proof that the shell itself boots in a real browser).
- *   - `app-walkthrough.spec.ts` (project `chromium`, same dev server, WP 1.6)
- *     walks login → transactions → edit a category → accounts → connections
- *     → add a manual account, with an axe pass per screen. The network is
- *     mocked (`e2e/support/mock-api.ts`) rather than backed by a live
- *     `apps/api` + Postgres — see that file's header for why. Also asserts
- *     (gate-security-review.md F-4/C-1a) that every API call the app makes
- *     goes to `/api/...`.
+ *   - `app-walkthrough.spec.ts` (project `chromium`, same dev server, WP 1.6,
+ *     extended by WP 2.11) walks login → transactions → pick a category via
+ *     the combobox → split a transaction → create a rule from a transaction
+ *     with a preview → accounts → connections → add a manual account →
+ *     resolve an inbox item → pair a transfer, with an axe pass per screen.
+ *     The network is mocked (`e2e/support/mock-api.ts`) rather than backed by
+ *     a live `apps/api` + Postgres — see that file's header for why. Also
+ *     asserts (gate-security-review.md F-4/C-1a) that every API call the app
+ *     makes goes to `/api/...`.
+ *   - `inbox.spec.ts`, `splits.spec.ts`, `rule-from-transaction.spec.ts`,
+ *     `category-filter.spec.ts`, `notification-settings.spec.ts` (project
+ *     `chromium`, WP 2.11) each pin one exit test verbatim from
+ *     docs/plan/02-phase-2-dispatch.md §3, against the same mocked network.
  *   - `csp.spec.ts` (project `csp`, gate-remediation-web.md H-3/M-1) builds
  *     the app in `e2e-csp` mode and serves the result behind the *exact*
  *     production `Content-Security-Policy` header via
@@ -53,7 +59,8 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testMatch: /(smoke|app-walkthrough)\.spec\.ts/,
+      testMatch:
+        /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:5183' },
     },
     {

@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: MIT
 /**
- * `CategoryPicker` over `GET /categories` — the UI half of gate condition D-6.
+ * `CategoryPicker` over `GET /categories` (gate condition D-6) and
+ * `POST /categories` (WP 2.5's carry-over route, this WP's combobox).
  *
- * The defect these tests exist against was not a rendering bug: the picker was
- * *correct*, and offered one option, because there was no route to ask. So the
- * assertions here are about what a user can now reach — every assignable
- * category, under its parent, selectable, emitting the real id — and about the
- * two ways that can silently regress: a heading becoming selectable (money would
- * land on a grouping), and a value the list does not contain being dropped on
- * the floor (a blur would clear a real assignment).
+ * The defect the original suite guarded against was not a rendering bug: the
+ * picker was *correct*, and offered one option, because there was no route to
+ * ask. WP 2.11 replaces the native `<select>` with a Base UI combobox
+ * (searchable, grouped, keyboard-accessible); these tests assert the same
+ * guarantees the `<select>` version pinned — every assignable category
+ * reachable and selectable, emitting the real id, a heading never selectable,
+ * an unresolvable value never silently dropped — against the combobox's own
+ * ARIA shape (`role="combobox"` input, `role="listbox"` popup, `role="option"`
+ * items, `role="group"` per heading).
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -34,8 +37,11 @@ function renderPicker(props: Partial<Parameters<typeof CategoryPicker>[0]> = {})
   return { onChange };
 }
 
-function select(): HTMLSelectElement {
-  return screen.getByLabelText('Category') as HTMLSelectElement;
+async function openCombobox(user: ReturnType<typeof userEvent.setup>): Promise<HTMLInputElement> {
+  const input = (await screen.findByRole('combobox', { name: 'Category' })) as HTMLInputElement;
+  await user.click(input);
+  await screen.findByRole('listbox');
+  return input;
 }
 
 describe('CategoryPicker', () => {
@@ -51,40 +57,39 @@ describe('CategoryPicker', () => {
   it('groups children under their parent and never offers a heading', async () => {
     stubFetchRoutes([categoriesRoute()]);
     renderPicker();
+    const user = userEvent.setup();
 
-    await screen.findByRole('option', { name: 'Restaurants' });
+    await openCombobox(user);
 
-    // Headings become `<optgroup>` labels, which are not values. Asserted as
-    // "no option carries the heading's id" rather than "the label is absent",
-    // because the label is very much present — as a group.
-    const values = [...select().querySelectorAll('option')].map((option) => option.value);
-    expect(values).not.toContain('cat_dining');
-    expect(values).not.toContain('cat_transfers');
+    // Headings become group labels, which are not options. Asserted as "no
+    // option carries the heading's name" rather than "the label is absent" —
+    // the label is very much present, as a group's accessible name.
+    expect(screen.queryByRole('option', { name: 'Dining' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Transfers · transfer' })).not.toBeInTheDocument();
 
-    // Every assignable category the server sent is reachable, and the empty
-    // string — "Uncategorized" — is the null option.
+    // Every assignable category the server sent is reachable as an option,
+    // plus the synthetic "Uncategorized" row standing in for `null`.
     const assignable = TEST_CATEGORIES.filter((category) => category.assignable);
-    expect(values).toEqual(['', ...assignable.map((category) => category.id)]);
-    expect(screen.getByRole('option', { name: 'Uncategorized' })).toHaveValue('');
+    const optionNames = screen.getAllByRole('option').map((option) => option.textContent);
+    expect(optionNames).toEqual(['Uncategorized', ...assignable.map((category) => category.label)]);
 
     // Grouped parent → children, in the server's order.
-    const groups = [...select().querySelectorAll('optgroup')];
-    expect(groups.map((group) => group.label)).toEqual(['Dining', 'Transfers · transfer']);
-    expect([...groups[0]!.querySelectorAll('option')].map((option) => option.textContent)).toEqual([
-      'Restaurants',
-      'Coffee Shops',
-    ]);
+    const diningGroup = screen.getByRole('group', { name: 'Dining' });
+    expect(
+      within(diningGroup)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Restaurants', 'Coffee Shops']);
+    const transfersGroup = screen.getByRole('group', { name: 'Transfers · transfer' });
+    expect(
+      within(transfersGroup)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Internal Transfer']);
 
-    // The kind rides on the option, where a test and a Phase 2 feature can read
-    // it — a `<option>` renders as plain text, so a badge would not survive.
-    expect(screen.getByRole('option', { name: 'Internal Transfer' })).toHaveAttribute(
-      'data-kind',
-      'transfer',
-    );
-
-    // `uncategorised` is top-level and childless in the real taxonomy, so it has
-    // no heading to sit under and must still be offered.
-    expect(screen.getByRole('option', { name: 'Uncategorised' })).toHaveValue('cat_uncategorised');
+    // `uncategorised` is top-level and childless in the real taxonomy, so it
+    // sits in a headless group and must still be offered.
+    expect(screen.getByRole('option', { name: 'Uncategorised' })).toBeInTheDocument();
   });
 
   it('emits the category id the API assigned, not a label or a key', async () => {
@@ -92,8 +97,8 @@ describe('CategoryPicker', () => {
     const { onChange } = renderPicker();
     const user = userEvent.setup();
 
-    await screen.findByRole('option', { name: 'Coffee Shops' });
-    await user.selectOptions(select(), 'cat_dining_coffee');
+    await openCombobox(user);
+    await user.click(await screen.findByRole('option', { name: 'Coffee Shops' }));
 
     expect(onChange).toHaveBeenCalledWith('cat_dining_coffee');
   });
@@ -103,22 +108,21 @@ describe('CategoryPicker', () => {
     const { onChange } = renderPicker({ value: 'cat_dining_coffee' });
     const user = userEvent.setup();
 
-    await screen.findByRole('option', { name: 'Coffee Shops' });
-    await user.selectOptions(select(), '');
+    await openCombobox(user);
+    await user.click(screen.getByRole('option', { name: 'Uncategorized' }));
 
     expect(onChange).toHaveBeenCalledWith(null);
   });
 
   it('keeps a value the list does not contain rather than silently clearing it', async () => {
-    // An archived category, or a list that has not arrived. A `<select>` whose
-    // `value` matches no option renders as the first one — "Uncategorized" — and
-    // the next change event would write that back, clearing an assignment the
-    // user never touched.
+    // An archived category, or a list that has not arrived. Snapping the
+    // field to "Uncategorized" would mean the next selection silently clears
+    // an assignment the user never touched.
     stubFetchRoutes([categoriesRoute()]);
     renderPicker({ value: 'cat_archived_but_assigned' });
 
-    await screen.findByRole('option', { name: 'Coffee Shops' });
-    expect(select().value).toBe('cat_archived_but_assigned');
+    const input = await screen.findByRole('combobox', { name: 'Category' });
+    await waitFor(() => expect(input).toHaveValue('Current category'));
   });
 
   it('degrades to the null option when the categories request fails', async () => {
@@ -129,12 +133,17 @@ describe('CategoryPicker', () => {
       },
     ]);
     renderPicker();
+    const user = userEvent.setup();
 
-    await waitFor(() => {
-      expect(select().querySelectorAll('option')).toHaveLength(1);
-    });
-    // Still usable and still enabled: a failed list must not make the field look
-    // read-only.
-    expect(select()).not.toBeDisabled();
+    const input = await screen.findByRole('combobox', { name: 'Category' });
+    await waitFor(() => expect(input).toHaveValue('Uncategorized'));
+    // Still usable and still enabled: a failed list must not make the field
+    // look read-only.
+    expect(input).not.toBeDisabled();
+
+    await user.click(input);
+    await screen.findByRole('listbox');
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(screen.getByRole('option', { name: 'Uncategorized' })).toBeInTheDocument();
   });
 });

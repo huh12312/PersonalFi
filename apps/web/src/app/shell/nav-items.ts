@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import {
+  Inbox,
   Landmark,
   LayoutDashboard,
   Lightbulb,
@@ -21,6 +22,7 @@ import type { LucideIcon } from 'lucide-react';
  */
 export type NavPath =
   | '/'
+  | '/inbox'
   | '/transactions'
   | '/budget'
   | '/recurring'
@@ -53,6 +55,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Money',
     items: [
+      { to: '/inbox', label: 'Inbox', icon: Inbox },
       { to: '/transactions', label: 'Transactions', icon: Receipt },
       { to: '/budget', label: 'Budget', icon: PiggyBank },
       { to: '/recurring', label: 'Recurring', icon: Repeat },
@@ -82,6 +85,7 @@ export const BOTTOM_TABS: NavItem[] = [
 
 /** Everything not on the bottom bar, surfaced from the "More" sheet. */
 export const MORE_NAV_ITEMS: NavItem[] = [
+  { to: '/inbox', label: 'Inbox', icon: Inbox },
   { to: '/accounts', label: 'Accounts', icon: Landmark },
   { to: '/investments', label: 'Investments', icon: LineChart },
   { to: '/plan', label: 'Plan', icon: Target },

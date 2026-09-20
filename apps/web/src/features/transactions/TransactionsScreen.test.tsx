@@ -235,9 +235,9 @@ describe('TransactionsScreen', () => {
     // The re-gate could set a note here and *not* a category, because the picker
     // had one option; this asserts the real category id from `GET /categories`
     // reaches the same overlay endpoint.
-    const categoryField = await screen.findByLabelText('Category');
-    await screen.findByRole('option', { name: 'Coffee Shops' });
-    await user.selectOptions(categoryField, 'cat_dining_coffee');
+    const categoryField = await screen.findByRole('combobox', { name: 'Category' });
+    await user.click(categoryField);
+    await user.click(await screen.findByRole('option', { name: 'Coffee Shops' }));
 
     await waitFor(() => expect(patchedBody).toEqual({ categoryId: 'cat_dining_coffee' }));
   });
