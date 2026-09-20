@@ -59,18 +59,28 @@
   --money-neg-text: #b8391f;
   --money-neutral: #6b6a64;
 
-  /* Status (fixed, never themed) — except `--status-good` immediately below:
-     axe (apps/web/e2e/app-walkthrough.spec.ts) found `#0ca30c` on
-     `--bg-subtle` (a "Connected" badge, `Badge` variant `good`) at 2.96:1,
-     against WCAG AA's 4.5:1 — `--bg-subtle` is `#f1f1ee` in light mode but
-     `#202326` in dark mode, and the original green already cleared 4.5:1
-     against *that* (4.71:1), so a single fixed value can't satisfy both.
-     Darkened here for light mode only; the original value is restored for
-     dark mode below and under `prefers-color-scheme: dark`. */
+  /* Status (fixed, never themed) — except immediately below: axe
+     (apps/web/e2e/app-walkthrough.spec.ts) found `#0ca30c` on `--bg-subtle`
+     (a "Connected" badge, `Badge` variant `good`) at 2.96:1, against WCAG
+     AA's 4.5:1 — `--bg-subtle` is `#f1f1ee` in light mode but `#202326` in
+     dark mode, and the original green already cleared 4.5:1 against *that*
+     (4.71:1), so a single fixed value can't satisfy both. Darkened here for
+     light mode only; the original value is restored for dark mode below and
+     under `prefers-color-scheme: dark`. */
   --status-good: #0c7a0c;
-  --status-warning: #fab219;
-  --status-serious: #ec835a;
-  --status-critical: #d03b3b;
+  /* `warning`/`serious`/`critical` got the same treatment when
+     apps/web/e2e/recurring-insights.spec.ts (WP 2.10) was the first suite to
+     axe-scan a real page using the `Badge` variants that read these against
+     `--bg-subtle`: `warning` measured 1.62:1, `serious` 2.33:1 and
+     `critical` 4.24:1 in light mode — none clearing 4.5:1. `critical` also
+     failed in *dark* mode (3.29:1 against dark's `--bg-subtle`, unlike
+     `good`, whose original value happened to already clear dark mode), so
+     it gets its own dark-mode-only value below rather than a restored
+     original. `warning`/`serious` keep their original (already-compliant)
+     dark-mode values, restored the same way `good` is. */
+  --status-warning: #8e650e;
+  --status-serious: #a35a3e;
+  --status-critical: #c83939;
 
   /* Categorical series — fixed order, never cycled (§2.2) */
   --series-1: #2a78d6;
@@ -131,10 +141,16 @@
   --accent-contrast: #0b0b0b;
   --accent-wash: #132537;
 
-  /* The light-mode-only darkening above (`:root`'s `--status-good`) would
-     fail contrast against this theme's much darker `--bg-subtle` — restored
-     to the original, dark-mode-passing value. */
+  /* The light-mode-only darkening above (`:root`'s `--status-good`/
+     `--status-warning`/`--status-serious`) would fail contrast against this
+     theme's much darker `--bg-subtle` — restored to the original,
+     dark-mode-passing values. `--status-critical`'s *original* value also
+     failed here (3.29:1), so it gets a brighter, dark-mode-only value
+     instead of a restoration. */
   --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #da6464;
 
   --money-pos: #1ba277;
   --money-pos-text: #3ec49a;
@@ -182,6 +198,9 @@
     --accent-contrast: #0b0b0b;
     --accent-wash: #132537;
     --status-good: #0ca30c;
+    --status-warning: #fab219;
+    --status-serious: #ec835a;
+    --status-critical: #da6464;
     --money-pos: #1ba277;
     --money-pos-text: #3ec49a;
     --money-neg: #e8604a;

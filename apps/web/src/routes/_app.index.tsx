@@ -6,6 +6,7 @@ import { StatTile } from '../components/finance/StatTile.tsx';
 import { Card } from '../components/ui/card.tsx';
 import { NetWorthAreaChart } from '../charts/NetWorthAreaChart.tsx';
 import { Money } from '../components/finance/Money.tsx';
+import { TopInsightsWidget } from '../features/insights/TopInsightsWidget.tsx';
 
 export const Route = createFileRoute('/_app/')({
   component: DashboardRoute,
@@ -35,6 +36,7 @@ function DashboardRoute() {
         />
         <NetWorthAreaChart className="mt-4" />
       </Card>
+      <TopInsightsWidget />
     </div>
   );
 }

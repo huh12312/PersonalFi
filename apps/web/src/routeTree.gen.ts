@@ -22,6 +22,7 @@ import { Route as AppInsightsRouteImport } from './routes/_app.insights'
 import { Route as AppInvestmentsRouteImport } from './routes/_app.investments'
 import { Route as AppPlanRouteImport } from './routes/_app.plan'
 import { Route as AppRecurringRouteImport } from './routes/_app.recurring'
+import { Route as AppReportsRouteImport } from './routes/_app.reports'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppTransactionsRouteImport } from './routes/_app.transactions'
 import { Route as DevKitchenSinkRouteImport } from './routes/dev.kitchen-sink'
@@ -93,6 +94,11 @@ const AppRecurringRoute = AppRecurringRouteImport.update({
   path: '/recurring',
   getParentRoute: () => AppRoute,
 } as any)
+const AppReportsRoute = AppReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -137,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/investments': typeof AppInvestmentsRoute
   '/plan': typeof AppPlanRoute
   '/recurring': typeof AppRecurringRoute
+  '/reports': typeof AppReportsRoute
   '/settings': typeof AppSettingsRoute
   '/transactions': typeof AppTransactionsRoute
   '/dev/kitchen-sink': typeof DevKitchenSinkRoute
@@ -155,6 +162,7 @@ export interface FileRoutesByTo {
   '/investments': typeof AppInvestmentsRoute
   '/plan': typeof AppPlanRoute
   '/recurring': typeof AppRecurringRoute
+  '/reports': typeof AppReportsRoute
   '/settings': typeof AppSettingsRoute
   '/transactions': typeof AppTransactionsRoute
   '/dev/kitchen-sink': typeof DevKitchenSinkRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/_app/investments': typeof AppInvestmentsRoute
   '/_app/plan': typeof AppPlanRoute
   '/_app/recurring': typeof AppRecurringRoute
+  '/_app/reports': typeof AppReportsRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/transactions': typeof AppTransactionsRoute
   '/dev/kitchen-sink': typeof DevKitchenSinkRoute
@@ -200,6 +209,7 @@ export interface FileRouteTypes {
     | '/investments'
     | '/plan'
     | '/recurring'
+    | '/reports'
     | '/settings'
     | '/transactions'
     | '/dev/kitchen-sink'
@@ -218,6 +228,7 @@ export interface FileRouteTypes {
     | '/investments'
     | '/plan'
     | '/recurring'
+    | '/reports'
     | '/settings'
     | '/transactions'
     | '/dev/kitchen-sink'
@@ -239,6 +250,7 @@ export interface FileRouteTypes {
     | '/_app/investments'
     | '/_app/plan'
     | '/_app/recurring'
+    | '/_app/reports'
     | '/_app/settings'
     | '/_app/transactions'
     | '/dev/kitchen-sink'
@@ -350,6 +362,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRecurringRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/reports': {
+      id: '/_app/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AppReportsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings': {
       id: '/_app/settings'
       path: '/settings'
@@ -419,6 +438,7 @@ interface AppRouteChildren {
   AppInvestmentsRoute: typeof AppInvestmentsRoute
   AppPlanRoute: typeof AppPlanRoute
   AppRecurringRoute: typeof AppRecurringRoute
+  AppReportsRoute: typeof AppReportsRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppTransactionsRoute: typeof AppTransactionsRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -432,6 +452,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppInvestmentsRoute: AppInvestmentsRoute,
   AppPlanRoute: AppPlanRoute,
   AppRecurringRoute: AppRecurringRoute,
+  AppReportsRoute: AppReportsRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppTransactionsRoute: AppTransactionsRoute,
   AppIndexRoute: AppIndexRoute,

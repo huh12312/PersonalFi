@@ -48,23 +48,30 @@ colour pairs with a non-colour signal (`+`/`−`, a glyph, a label).
 Every `<Money>`/`<Percent>` render also carries an explicit `+`/`−` sign
 (`signDisplay`) — colour is a reinforcement, never the only signal (WCAG 1.4.1).
 
-## Status (fixed, never themed — except `--status-good`, see below)
+## Status (fixed, never themed — every entry below has a light/dark split)
 
 | Token               | Value                            | Meaning                                   |
 | ------------------- | -------------------------------- | ----------------------------------------- |
 | `--status-good`     | `#0c7a0c` light / `#0ca30c` dark | On track                                  |
-| `--status-warning`  | `#fab219`                        | Approaching a limit, needs attention soon |
-| `--status-serious`  | `#ec835a`                        | Needs action (reconnect, over budget)     |
-| `--status-critical` | `#d03b3b`                        | Failure, destructive confirmation         |
+| `--status-warning`  | `#8e650e` light / `#fab219` dark | Approaching a limit, needs attention soon |
+| `--status-serious`  | `#a35a3e` light / `#ec835a` dark | Needs action (reconnect, over budget)     |
+| `--status-critical` | `#c83939` light / `#da6464` dark | Failure, destructive confirmation         |
 
-`--status-good` is the one status colour with a light/dark split: axe
+`--status-good` was the first of these to get a light/dark split: axe
 (`apps/web/e2e/app-walkthrough.spec.ts`) found the original `#0ca30c` at
 2.96:1 against light mode's `--bg-subtle` (`#f1f1ee`) — under WCAG AA's
 4.5:1 — while it clears 4.71:1 against dark mode's `--bg-subtle`
-(`#202326`), so one fixed value can't serve both. `--status-warning` and
-`--status-serious` are visibly light colours that likely have the same
-problem against `--bg-subtle`/`--bg-page` and have not been audited or
-fixed here — left for a broader contrast pass (docs/evidence/phase-1/wp1.6-ui.md).
+(`#202326`), so one fixed value can't serve both. This doc used to flag
+`--status-warning`/`--status-serious` as "visibly light colours that likely
+have the same problem ... left for a broader contrast pass" — that pass
+happened when `apps/web/e2e/recurring-insights.spec.ts` (WP 2.10) became the
+first suite to axe-scan a real page using the `Badge` variants that read
+these tokens against `--bg-subtle`: `warning` measured 1.62:1, `serious`
+2.33:1 and `critical` 4.24:1 in light mode, all under 4.5:1. `critical` also
+failed in dark mode (3.29:1, unlike `good`'s original value, which happened
+to already clear it), so its dark value is a brighter replacement rather
+than a restored original; `warning`/`serious` keep their original
+(already-compliant) dark values.
 
 Every status carries a glyph (Lucide icon) alongside the colour — see `Badge`
 and `SyncStatusPill`.
