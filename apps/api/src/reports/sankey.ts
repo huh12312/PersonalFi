@@ -6,24 +6,27 @@
  * rather than one per month (unlike `spending-income.ts`): a Sankey diagram
  * shows *where the window's money went*, not a month-by-month breakdown, so
  * there is exactly one category bucket per category for the whole range.
- * Reusing the same netting function here, rather than re-summing the raw
+ * Reusing the same `computeActuals` call here, rather than re-summing the raw
  * rows, is what makes the merchant split agree with the category total for
- * free: `CategoryActivity.transactions` already **is** the post-netting,
+ * free: `LineActivity.transactions` already **is** the post-netting,
  * post-exclusion set — including a refund reassigned to the purchase's
  * category — so bucketing those same rows by merchant cannot disagree with
- * the category figure a caller drilled down from. (`netting.ts`'s header
- * explains why this is a port of `@ctx/budgeting`'s `computeActuals` rather
- * than a call into it.)
+ * the category figure a caller drilled down from. (Previously reached through
+ * `reports/netting.ts`, a hand-written port of `@ctx/budgeting`'s
+ * `computeActuals`; deleted now that `@ctx/budgeting` is a declared
+ * dependency of `apps/api` — `docs/evidence/phase-2/wp2.8-reports.md` §2.)
  */
 import { Money, type Money as MoneyType } from '@core/kernel';
+import { computeActuals } from '@ctx/budgeting';
 import type { LedgerDatabase } from '@ctx/ledger';
 import {
   groupByCurrency,
   loadReportAccounts,
   loadReportRows,
+  toBudgetAccounts,
+  toBudgetTransactions,
   type ReportWindow,
 } from './ledger-source.ts';
-import { computeCategoryActivity, totalOf } from './netting.ts';
 import type { ReportRow } from './types.ts';
 
 export const SANKEY_INCOME_NODE = 'income';
@@ -73,17 +76,21 @@ export async function computeSankey(
   const currencyAccounts = accounts.filter((account) => account.currency === currency);
 
   const categoryOfPurchase = new Map(currencyRows.map((row) => [row.id, row.categoryId] as const));
-  const byCategory = computeCategoryActivity({
-    transactions: currencyRows,
-    accounts: currencyAccounts,
+  const { byCategory } = computeActuals({
+    transactions: toBudgetTransactions(currencyRows, currencyAccounts),
+    accounts: toBudgetAccounts(currencyAccounts),
     categoryOfPurchase,
+    currency,
   });
 
   const nodes: SankeyNode[] = [{ id: SANKEY_INCOME_NODE, kind: 'income', refId: null }];
   const links: SankeyLink[] = [];
 
   for (const activity of byCategory.values()) {
-    const total = totalOf(activity, currency);
+    const total = Money.sum(
+      activity.transactions.map((transaction) => transaction.amount),
+      currency,
+    );
     if (!Money.isNegative(total)) {
       // Income-shaped or empty: not a spending flow. The income *total* is a
       // derived, presentation-only figure a caller can compute by summing the

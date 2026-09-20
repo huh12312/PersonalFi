@@ -3,13 +3,16 @@
  * Budget vs. actual, one period at a time.
  *
  * Reads `budget_periods`, `budget_lines` and `budget_line_actuals` directly by
- * SQL rather than going through `@ctx/budgeting`'s own `getPeriod` — see
- * `reports/netting.ts`'s header for the reason common to every file in this
- * directory that would otherwise import `@ctx/budgeting`: that package is not
- * yet a declared dependency of `apps/api` (master plan §4 item 8's dependency
- * batch, an orchestrator step between waves, had not landed at the time this
- * work package ran), and this work package's own rules forbid editing
- * `package.json` or the lockfile.
+ * SQL rather than going through `@ctx/budgeting`'s own `getPeriod`.
+ * `@ctx/budgeting` is now a declared dependency of `apps/api` (the
+ * orchestrator's dependency batch landed after this file was written — see
+ * `docs/evidence/phase-2/wp2.8-reports.md` §2 and `wp2.w-wiring.md`), which is
+ * what let `spending-income.ts` and `sankey.ts` drop their own hand-written
+ * port of `computeActuals` (`reports/netting.ts`, deleted). This file's own
+ * swap to `getPeriod` is a separate, not-yet-done open item — see below —
+ * rather than something this wiring batch redid: the two are different sizes
+ * of change, and `getPeriod` returns presentation extras (`neededThisPeriod`,
+ * `underfunded`, `toStayOnTrack`) this file does not need to duplicate to fix.
  *
  * This is **not** a table-ownership violation: `scripts/check-schema-ownership.ts`
  * exempts `apps/` from its "raw SQL must not reach into another package's

@@ -28,6 +28,7 @@ import { createGuards } from './auth/guards.ts';
 import { SecurityRuntime } from './auth/runtime.ts';
 import { createConnectorRegistry, createDomainRuntime, type DomainRuntime } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
+import { registerBuiltinAdvisors } from './modules.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
 import { accountRoutes } from './routes/accounts.ts';
 import { authRoutes } from './routes/auth.ts';
@@ -436,8 +437,26 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
         clock,
       });
       app.log.info({ ...result }, 'category taxonomy ensured');
+
+      // WP 2.7's catalogue, registered the same way as the taxonomy above and
+      // for the same reason: a pass every boot, so a rule added in a later
+      // release reaches a user created before it
+      // (docs/evidence/phase-2/wp2.7-advisor-catalog.md §8, "wherever the
+      // `advisors` rows are first written for a user"). Bookkeeping only —
+      // nothing runs from this call; see `registerBuiltinAdvisors`'s own doc.
+      if (primary !== null) {
+        await registerBuiltinAdvisors(database, {
+          userId: primary.id,
+          clock,
+          correlationId: newId(),
+        });
+        app.log.info({ userId: primary.id }, 'builtin advisor catalogue registered');
+      }
     } catch (error) {
-      app.log.warn({ err: error }, 'could not seed the category taxonomy; continuing');
+      app.log.warn(
+        { err: error },
+        'could not seed the category taxonomy or advisor catalogue; continuing',
+      );
     }
   });
 

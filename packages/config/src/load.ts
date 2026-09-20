@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { readFileSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { join } from 'node:path';
 import type { z } from 'zod';
 import { ConfigError, type ConfigProblem } from './errors.ts';
@@ -61,6 +62,19 @@ export interface PlaidConfig {
   readonly webhookUrl: string | null;
 }
 
+/**
+ * `@ctx/notifications`'s egress allow-list, resolved and validated at boot.
+ *
+ * A plain object rather than `EgressPolicy` itself: `packages/config` may
+ * import nothing but `@core/kernel` (the same rule that keeps `PlaidConfig`
+ * here as data rather than a `PlaidConnector`), so the actual policy is built
+ * by `createEgressPolicy` in `apps/api/src/domain.ts`, the composition root.
+ */
+export interface NotificationsConfig {
+  /** Lowercase hostnames. Empty ⇒ deny-all. Never a wildcard, never an IP literal. */
+  readonly allowedHosts: readonly string[];
+}
+
 export interface AppConfig {
   readonly env: PublicEnvironmentConfig;
   /** Every declared secret, boxed. `config.secrets.database_url?.reveal()`. */
@@ -73,6 +87,7 @@ export interface AppConfig {
   readonly allowedOrigins: readonly string[];
   /** `null` when Plaid is not configured (§ `resolvePlaid`). Never partially set. */
   readonly plaid: PlaidConfig | null;
+  readonly notifications: NotificationsConfig;
   readonly isProduction: boolean;
   readonly isTest: boolean;
 }
@@ -202,6 +217,11 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   problems.push(...webAuthnProblems(env.AUTH_RP_ID, allowedOrigins, isProduction));
   problems.push(...plaidRedirectUriProblems(env.PLAID_REDIRECT_URI, allowedOrigins));
 
+  const notificationsAllowedHostsResult = resolveNotificationsAllowedHosts(
+    env.NOTIFICATIONS_ALLOWED_HOSTS,
+  );
+  problems.push(...notificationsAllowedHostsResult.problems);
+
   // `SESSION_COOKIE_SECURE=false` exists only for a plain-HTTP local/integration
   // harness (apps/api/test/cookies.test.ts) — a session cookie without `Secure`
   // in production would ride along on plain HTTP the instant Caddy's TLS
@@ -236,6 +256,9 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     kek: Object.freeze({ params: Object.freeze(kekParams), floor: kekFloor }),
     allowedOrigins: Object.freeze(allowedOrigins),
     plaid,
+    notifications: Object.freeze({
+      allowedHosts: Object.freeze(notificationsAllowedHostsResult.hosts),
+    }),
     isProduction,
     isTest: env.NODE_ENV === 'test',
   });
@@ -443,6 +466,77 @@ function plaidRedirectUriProblems(
   }
 
   return problems;
+}
+
+/** A syntactically valid DNS hostname label sequence. No scheme, no port, no path. */
+const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/u;
+
+/**
+ * `NOTIFICATIONS_ALLOWED_HOSTS` (02-phase-2-dispatch.md §4 item 3;
+ * wp2.4-notifications.md §8): comma-separated destination hostnames
+ * `@ctx/notifications`'s egress guard may ever dial.
+ *
+ * Validated here — by hand, the same way `AUTH_ALLOWED_ORIGINS` is split by
+ * hand a few lines up — rather than left entirely to
+ * `@ctx/notifications`'s own `createEgressPolicy`, for two reasons. First,
+ * `packages/config` may import nothing but `@core/kernel`, so it cannot call
+ * that function to find out whether its own input is well-formed; a
+ * misconfigured allow-list should fail the same fail-fast boot check every
+ * other environment variable does, not surface as an unhandled `TypeError`
+ * the first time a notification tries to send. Second, `compose.yml`'s
+ * `${VAR:-}` convention (see `nullableUrlEnv`'s comment above) hands an
+ * operator who has not set this an **empty string**, which must mean "no
+ * hosts" — `createEgressPolicy`'s own `''.split(',')` would otherwise produce
+ * `['']`, one empty allow-list entry, and throw.
+ *
+ * The two refusals mirror `createEgressPolicy`'s own (`egress.ts`) exactly,
+ * because both exist for the same reason: an IP literal in the allow-list is a
+ * second door to the private-range refusal the egress guard exists to
+ * enforce, and a wildcard is one typo away from `*.attacker.example` matching
+ * — on a list with at most a handful of entries, spelling each one out costs
+ * nothing.
+ */
+function resolveNotificationsAllowedHosts(raw: string): {
+  readonly hosts: string[];
+  readonly problems: ConfigProblem[];
+} {
+  const problems: ConfigProblem[] = [];
+  const hosts: string[] = [];
+
+  for (const entry of raw.split(',')) {
+    const host = entry.trim().toLowerCase();
+    if (host.length === 0) continue;
+
+    if (host.includes('*')) {
+      problems.push({
+        key: 'NOTIFICATIONS_ALLOWED_HOSTS',
+        problem: `contains "${host}", a wildcard — wildcards are not supported here`,
+        hint: 'list each destination hostname explicitly, comma-separated, e.g. ntfy.example.ts.net',
+      });
+      continue;
+    }
+    if (isIP(host) !== 0) {
+      problems.push({
+        key: 'NOTIFICATIONS_ALLOWED_HOSTS',
+        problem: `contains "${host}", an IP literal — an allow-list entry must be a hostname`,
+        hint:
+          'a literal address would be a second door to the private-range refusal this allow-list ' +
+          'exists to enforce; use the hostname a certificate would be issued for instead',
+      });
+      continue;
+    }
+    if (!HOSTNAME_PATTERN.test(host)) {
+      problems.push({
+        key: 'NOTIFICATIONS_ALLOWED_HOSTS',
+        problem: `contains "${host}", which is not a syntactically valid hostname`,
+        hint: 'each entry must be a bare hostname, no scheme, no port, no path',
+      });
+      continue;
+    }
+    hosts.push(host);
+  }
+
+  return { hosts: [...new Set(hosts)], problems };
 }
 
 /**

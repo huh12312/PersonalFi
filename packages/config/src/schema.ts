@@ -219,6 +219,24 @@ export const environmentSchema = z.object({
    * flip the deployment into Production.
    */
   PLAID_ALLOW_PRODUCTION: z.stringbool().default(false),
+
+  // -------------------------------------------------------------- notifications
+  //
+  // `@ctx/notifications`'s egress allow-list (02-phase-2-dispatch.md §4 item 3;
+  // wp2.4-notifications.md §8): the destination hosts this deployment's
+  // channels may ever reach. Non-secret deployment shape, so it lives here
+  // rather than in the database with the rest of a channel's own configuration.
+  //
+  // Comma-separated, lowercase hostnames — never a wildcard, never an IP
+  // literal. Both are refused, in `load.ts`'s `resolveNotificationsAllowedHosts`
+  // rather than by `zod` alone, for the same reason `AUTH_ALLOWED_ORIGINS` is
+  // split by hand: the empty-string-vs-absent-key distinction `compose.yml`'s
+  // `${VAR:-}` convention produces needs to mean "no hosts", not "one empty
+  // host". Default empty ⇒ `createEgressPolicy({ allowedHosts: [] })`, which is
+  // `@ctx/notifications`'s own deny-all: a notification channel is the first
+  // outbound path a *user-supplied string* controls, and an operator who has
+  // not named a host has not consented to one.
+  NOTIFICATIONS_ALLOWED_HOSTS: z.string().default(''),
 });
 
 export type EnvironmentConfig = z.infer<typeof environmentSchema>;
@@ -360,6 +378,37 @@ export const SECRET_SPECS = [
       'write one of `sandbox` or `production` to ${SECRETS_DIR}/plaid_env (mode 0400). ' +
       'Defaults to `sandbox` when absent. `production` additionally needs ' +
       'PLAID_ALLOW_PRODUCTION=true (D16).',
+  },
+  {
+    /**
+     * `@ctx/insights`'s `InsightsSettings.tokenSecret` (wp2.6-insights.md §6,
+     * open item 5): the deployment secret merchant pseudonyms are keyed from,
+     * mixed with the user id inside `deriveTokenKey`. It must be stable for the
+     * life of the install — rotating it re-pseudonymises every merchant and
+     * orphans every `MERCHANT_…` reference already stored in an evidence row —
+     * so it gets the same file-only, never-an-env-var treatment as `master_key`
+     * rather than a value an operator might reasonably regenerate.
+     *
+     * **Optional, and deliberately not required for any role.** Unlike
+     * `master_key`, whose absence makes the whole application unusable, an
+     * install with no `advisor_token_secret` file has simply not opted into
+     * `module.insights` yet: `apps/api/src/modules.ts` feature-detects it
+     * exactly the way `domain.ts` feature-detects Plaid credentials, and skips
+     * registering the insights consumer/jobs/schedule (logging one line) rather
+     * than running with a secret nobody chose. A fallback derived from another
+     * secret was considered and rejected: it would silently start
+     * pseudonymising merchants today and then "rotate" the moment an operator
+     * later wrote a real file, which is the exact re-pseudonymisation failure
+     * this secret exists to avoid.
+     */
+    name: 'advisor_token_secret',
+    file: 'advisor_token_secret',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write a high-entropy secret to ${SECRETS_DIR}/advisor_token_secret (mode 0400) to enable ' +
+      'module.insights. Optional: with no file present, the API boots normally and the insights ' +
+      'consumer/jobs/schedule are simply not registered. Never rotate once set (wp2.6 §6).',
   },
 ] as const;
 

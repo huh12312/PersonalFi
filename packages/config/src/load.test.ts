@@ -642,6 +642,147 @@ describe('TRUST_PROXY (M-1)', () => {
 });
 
 /**
+ * `NOTIFICATIONS_ALLOWED_HOSTS` (02-phase-2-dispatch.md §4 item 3;
+ * wp2.4-notifications.md §8): `@ctx/notifications`'s egress allow-list, as
+ * deployment configuration. `config.notifications.allowedHosts` is what
+ * `apps/api/src/domain.ts`'s `createNotificationEgressPolicy` hands to
+ * `createEgressPolicy`.
+ */
+describe('NOTIFICATIONS_ALLOWED_HOSTS', () => {
+  it('defaults to empty — deny-all until an operator names a host', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+    expect(config.notifications.allowedHosts).toEqual([]);
+  });
+
+  it('parses a comma-separated list, lower-cased and trimmed', () => {
+    const config = loadConfig({
+      env: env({ NOTIFICATIONS_ALLOWED_HOSTS: ' Ntfy.Example.TS.net , smtp.example.com ' }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.notifications.allowedHosts).toEqual(['ntfy.example.ts.net', 'smtp.example.com']);
+  });
+
+  it('de-duplicates entries that only differ by case', () => {
+    const config = loadConfig({
+      env: env({ NOTIFICATIONS_ALLOWED_HOSTS: 'ntfy.example.ts.net,NTFY.EXAMPLE.TS.NET' }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.notifications.allowedHosts).toEqual(['ntfy.example.ts.net']);
+  });
+
+  it('rejects an IP literal — a second door to the private-range refusal', () => {
+    expect(() =>
+      loadConfig({
+        env: env({ NOTIFICATIONS_ALLOWED_HOSTS: '169.254.169.254' }),
+        readSecret: secretsFrom({}),
+      }),
+    ).toThrowError(ConfigError);
+
+    try {
+      loadConfig({
+        env: env({ NOTIFICATIONS_ALLOWED_HOSTS: '169.254.169.254' }),
+        readSecret: secretsFrom({}),
+      });
+    } catch (error) {
+      const problems = (error as ConfigError).problems;
+      expect(
+        problems.some(
+          (problem: ConfigProblem) =>
+            problem.key === 'NOTIFICATIONS_ALLOWED_HOSTS' && problem.problem.includes('IP literal'),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it('rejects an IPv6 literal too', () => {
+    expect(() =>
+      loadConfig({
+        env: env({ NOTIFICATIONS_ALLOWED_HOSTS: '::1' }),
+        readSecret: secretsFrom({}),
+      }),
+    ).toThrowError(ConfigError);
+  });
+
+  it('rejects a wildcard', () => {
+    expect(() =>
+      loadConfig({
+        env: env({ NOTIFICATIONS_ALLOWED_HOSTS: '*.example.com' }),
+        readSecret: secretsFrom({}),
+      }),
+    ).toThrowError(ConfigError);
+
+    try {
+      loadConfig({
+        env: env({ NOTIFICATIONS_ALLOWED_HOSTS: '*.example.com' }),
+        readSecret: secretsFrom({}),
+      });
+    } catch (error) {
+      const problems = (error as ConfigError).problems;
+      expect(
+        problems.some(
+          (problem: ConfigProblem) =>
+            problem.key === 'NOTIFICATIONS_ALLOWED_HOSTS' && problem.problem.includes('wildcard'),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it('rejects a syntactically invalid hostname', () => {
+    expect(() =>
+      loadConfig({
+        env: env({ NOTIFICATIONS_ALLOWED_HOSTS: 'not a host!' }),
+        readSecret: secretsFrom({}),
+      }),
+    ).toThrowError(ConfigError);
+  });
+
+  it('an empty string means no hosts, not one empty entry', () => {
+    const config = loadConfig({
+      env: env({ NOTIFICATIONS_ALLOWED_HOSTS: '' }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.notifications.allowedHosts).toEqual([]);
+  });
+});
+
+/**
+ * `ADVISOR_TOKEN_SECRET` (wp2.6-insights.md §6, open item 5): the file secret
+ * `@ctx/insights`'s `InsightsSettings.tokenSecret` is keyed from. File-only,
+ * like `master_key`, and optional: an install with no file present has simply
+ * not opted into `module.insights` yet.
+ */
+describe('advisor_token_secret (wp2.6 §6)', () => {
+  it('is absent by default — module.insights stays unwired, not crashed', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+    expect(config.secrets.advisor_token_secret).toBeUndefined();
+  });
+
+  it('is read from the secrets directory when present, and boxed', () => {
+    const config = loadConfig({
+      env: env(),
+      readSecret: secretsFrom({ advisor_token_secret: 'a-stable-install-secret' }),
+    });
+    expect(config.secrets.advisor_token_secret?.reveal()).toBe('a-stable-install-secret');
+  });
+
+  it('has no env-var fallback — file only, same posture as master_key', () => {
+    const config = loadConfig({
+      env: env({ ADVISOR_TOKEN_SECRET: 'should-not-be-read' }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.secrets.advisor_token_secret).toBeUndefined();
+  });
+
+  it('is required for no role — absence never fails boot', () => {
+    for (const role of ['api', 'worker', 'migrator', 'cli'] as const) {
+      expect(() =>
+        loadConfig({ env: env({ ROLE: role, ...PROD_AUTH }), readSecret: secretsFrom({}) }),
+      ).not.toThrow();
+    }
+  });
+});
+
+/**
  * gate-remediation-2.md finding 8: `SESSION_COOKIE_SECURE=false` exists only
  * for a plain-HTTP local/integration harness (apps/api/test/cookies.test.ts).
  * Left set in production, the session cookie would ride along on plain HTTP —

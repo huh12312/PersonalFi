@@ -8,25 +8,29 @@
  * biweekly or semimonthly — 07 §1.7 — and a report month must mean the same
  * thing whether or not budgeting is even turned on).
  *
- * Every cell is computed by `computeCategoryActivity` (`reports/netting.ts`,
- * a documented port of `@ctx/budgeting`'s `computeActuals` — see that file's
- * header for why) — the reuse WP 2.8 was told to make rather than re-deriving
- * "transfers excluded, refunds netted". `categoryOfPurchase` is built once,
- * over the **whole** requested window, and handed to every month's call: a
- * refund that posts in a later month than its purchase still nets into the
- * *refund's* month, against the *purchase's* category, exactly as
- * `actuals.ts`'s own header describes and exactly what `@ctx/budgeting`'s
+ * Every cell is computed by `@ctx/budgeting`'s real `computeActuals` — the
+ * reuse WP 2.8 was told to make rather than re-deriving "transfers excluded,
+ * refunds netted", now that `@ctx/budgeting` is a declared dependency of
+ * `apps/api` (the orchestrator's dependency batch;
+ * `docs/evidence/phase-2/wp2.8-reports.md` §2 recorded this exact swap as its
+ * open item — the netting.ts port it names has been deleted). `categoryOfPurchase`
+ * is built once, over the **whole** requested window, and handed to every
+ * month's call: a refund that posts in a later month than its purchase still
+ * nets into the *refund's* month, against the *purchase's* category, exactly
+ * as `actuals.ts`'s own header describes and exactly what `@ctx/budgeting`'s
  * multi-period caller does.
  */
 import { Money } from '@core/kernel';
+import { computeActuals } from '@ctx/budgeting';
 import type { LedgerDatabase } from '@ctx/ledger';
 import {
   groupByCurrency,
   loadReportAccounts,
   loadReportRows,
+  toBudgetAccounts,
+  toBudgetTransactions,
   type ReportWindow,
 } from './ledger-source.ts';
-import { computeCategoryActivity, totalOf } from './netting.ts';
 import type { CategoryMonthActivity, ReportRow } from './types.ts';
 
 function monthOf(date: string): string {
@@ -68,17 +72,21 @@ export async function computeCategoryMonthActivity(
     }
 
     for (const [month, monthRows] of byMonth) {
-      const byCategory = computeCategoryActivity({
-        transactions: monthRows,
-        accounts: currencyAccounts,
+      const { byCategory } = computeActuals({
+        transactions: toBudgetTransactions(monthRows, currencyAccounts),
+        accounts: toBudgetAccounts(currencyAccounts),
         categoryOfPurchase,
+        currency,
       });
       for (const activity of byCategory.values()) {
         results.push({
           month,
           categoryId: activity.categoryId,
           currency,
-          amount: totalOf(activity, currency),
+          amount: Money.sum(
+            activity.transactions.map((transaction) => transaction.amount),
+            currency,
+          ),
           transactionCount: activity.transactionCount,
           transferExcludedCount: activity.transferExcludedCount,
           refundNettedCount: activity.refundNettedCount,

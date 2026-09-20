@@ -238,6 +238,9 @@ importers:
       '@core/secretbox':
         specifier: workspace:*
         version: link:../../packages/secretbox
+      '@ctx/budgeting':
+        specifier: workspace:*
+        version: link:../../packages/contexts/budgeting
       '@ctx/categorization':
         specifier: workspace:*
         version: link:../../packages/contexts/categorization
@@ -247,9 +250,18 @@ importers:
       '@ctx/identity':
         specifier: workspace:*
         version: link:../../packages/contexts/identity
+      '@ctx/insights':
+        specifier: workspace:*
+        version: link:../../packages/contexts/insights
       '@ctx/ledger':
         specifier: workspace:*
         version: link:../../packages/contexts/ledger
+      '@ctx/notifications':
+        specifier: workspace:*
+        version: link:../../packages/contexts/notifications
+      '@ctx/recurring':
+        specifier: workspace:*
+        version: link:../../packages/contexts/recurring
       '@fastify/cookie':
         specifier: 11.1.2
         version: 11.1.2
@@ -673,6 +685,9 @@ importers:
       '@core/testkit':
         specifier: workspace:*
         version: link:../../testkit
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
 
   packages/contexts/integrations:
     dependencies:

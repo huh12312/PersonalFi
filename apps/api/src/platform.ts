@@ -79,6 +79,51 @@ export const MODULE_FLAGS: readonly FlagDefinition[] = Object.freeze([
     owner: 'categorization',
     removeWhen: 'never — a synced transaction with no way to gain a category is a worse default',
   }),
+  // The four below flipped `true` at this wave boundary
+  // (docs/evidence/phase-2/wp2.w-wiring.md): `apps/api/test/db/
+  // phase2-wiring.test.ts` proved each one's real `appModules()` registration
+  // — not a fake — against a real database, through the real HTTP sync path.
+  // Each still has its own, independent lock beneath the flag (an empty
+  // budget has no lines to post activity into; a channel needs a
+  // `verified_at`; an advisor needs a `snapshot_grants` row nobody has yet),
+  // so "the module is on" is not "the module does anything" for an install
+  // that has not also taken the per-feature step.
+  Object.freeze({
+    key: 'module.budgeting',
+    defaultEnabled: true,
+    owner: 'budgeting',
+    removeWhen:
+      'never — this is the kill switch for the envelope cascade, and 07 §1.9 ' +
+      'requires the app stay fully usable with the budget off (budget_mode = OFF)',
+  }),
+  Object.freeze({
+    key: 'module.recurring',
+    defaultEnabled: true,
+    owner: 'recurring',
+    removeWhen: 'never — this is the kill switch for subscription detection',
+  }),
+  Object.freeze({
+    key: 'module.notifications',
+    defaultEnabled: true,
+    owner: 'notifications',
+    removeWhen: 'never — this is the kill switch for every outbound message the app can send',
+  }),
+  Object.freeze({
+    key: 'module.insights',
+    // `true`, unlike the other three, is provably inert on a fresh install:
+    // `apps/api/src/modules.ts`'s `insightsModule` registers no consumer, job
+    // or schedule at all unless `advisor_token_secret` is present, and
+    // `compose.yml` does not yet mount that file (open item,
+    // docs/evidence/phase-2/wp2.w-wiring.md) — so this flag has no observable
+    // effect in the shipped stack today regardless of its value. `true` here
+    // is what "on" means the day that secret and its compose mount land,
+    // without a second code change to flip it.
+    defaultEnabled: true,
+    owner: 'insights',
+    removeWhen:
+      'never — off means no advisor runs, no consumer, no schedule, and a feed ' +
+      'that answers with an empty list',
+  }),
 ]);
 
 export interface Platform {

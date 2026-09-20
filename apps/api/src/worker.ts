@@ -38,7 +38,12 @@ import {
   type Scheduler,
 } from '@core/platform';
 import pino from 'pino';
-import { createConnectorRegistry, createDomainRuntime } from './domain.ts';
+import {
+  createConnectorRegistry,
+  createDomainRuntime,
+  createNotificationChannels,
+  createNotificationEgressPolicy,
+} from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { appModules } from './modules.ts';
 import { buildPlatform, resolveModules } from './platform.ts';
@@ -184,6 +189,17 @@ async function main(): Promise<void> {
                 secretBox,
               }).orchestrator,
               timezone: user.displayTimezone,
+              notificationChannels: createNotificationChannels(
+                createNotificationEgressPolicy(config),
+              ),
+              secretBox,
+              // wp2.6-insights.md §6 open item 5: absent until an operator
+              // writes `${SECRETS_DIR}/advisor_token_secret`; `module.insights`
+              // then registers no consumer, no job and no schedule (see
+              // `modules.ts`'s `insightsModule`).
+              ...(config.secrets.advisor_token_secret === undefined
+                ? {}
+                : { advisorTokenSecret: config.secrets.advisor_token_secret.reveal() }),
             }),
           );
     logger.info({ enabled: modules.enabled, disabled: modules.disabled }, 'modules resolved');

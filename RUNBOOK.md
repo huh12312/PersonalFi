@@ -134,6 +134,27 @@ chmod 444 secrets/plaid_client_id secrets/plaid_secret secrets/plaid_env
 #    `.env.example` for both. `@core/config` refuses to boot if the redirect
 #    URI is set but is not `https` or does not share an origin with
 #    `AUTH_ALLOWED_ORIGINS`.
+#
+# 7. Insights advisor token secret (optional — wp2.6-insights.md §6, open item
+#    5; docs/evidence/phase-2/wp2.w-wiring.md). `@ctx/insights` keys every
+#    merchant pseudonym it hands a `builtin`/`local_model` advisor from this
+#    value, mixed with the user id; rotating it re-pseudonymises every
+#    merchant and orphans every `MERCHANT_…` reference an evidence row already
+#    stored. File-only, same posture as `master_key` — never an env var, never
+#    read from `NOTIFICATIONS_ALLOWED_HOSTS`'s neighbourhood in `.env`.
+#      touch secrets/advisor_token_secret        # leave empty to stay opted out
+#      chmod 444 secrets/advisor_token_secret
+#    To actually enable `module.insights`, write a high-entropy value instead:
+#      openssl rand -hex 32 > secrets/advisor_token_secret
+#      chmod 444 secrets/advisor_token_secret
+#    **Open item.** `compose.yml`'s `api`/`worker` services do not yet mount
+#    this file as a Docker secret — that edit is out of this wiring batch's
+#    owned-files list (docs/evidence/phase-2/wp2.w-wiring.md records it). Until
+#    it is added, this file has no effect inside the compose stack even when
+#    present on the host; `apps/api/test/db/phase2-wiring.test.ts` proves the
+#    application-level wiring (the flag, the consumer, the job, the schedule)
+#    by constructing `ModuleWiringOptions` directly, the way every other
+#    module-wiring test in this suite already does.
 ```
 
 #### Secret file modes: 0444 by default, 0400 via `just harden-secrets`
@@ -221,6 +242,11 @@ also set `PLAID_ENABLED=true` (and, for an OAuth institution,
 `PLAID_REDIRECT_URI`) — see `.env.example`'s Plaid section and step 2, item 6,
 above. Leave both unset for a deployment with no Plaid secrets yet; the
 defaults (`PLAID_ENABLED=false`, no redirect URI) are correct for that case.
+
+`NOTIFICATIONS_ALLOWED_HOSTS` — leave unset (deny-all) until `module.notifications`
+is turned on and you know which ntfy topic host / SMTP relay it should be
+allowed to reach. Comma-separated, lowercase hostnames only — no wildcard, no
+IP literal; `@core/config` refuses to boot with either. See `.env.example`.
 
 ### 4. Bring the stack up
 

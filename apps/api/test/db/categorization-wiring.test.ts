@@ -27,6 +27,7 @@ import { DateOnly, money, newId, systemClock } from '@core/kernel';
 import { createConsumerPump, platformExecutor } from '@core/platform';
 import { manualTransaction } from '@connector/manual';
 import { categoryIdsByKey, seedSystemTaxonomy } from '@ctx/categorization';
+import { createEgressPolicy, createNtfyChannel, createSmtpChannel } from '@ctx/notifications';
 import { sql } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -129,11 +130,17 @@ describe.skipIf(NO_DATABASE)('categorization wiring (apps/api/src/modules.ts)', 
       registry: createConnectorRegistry(),
       secretBox: h.security.requireSecretBox(),
     });
+    const egressPolicy = createEgressPolicy({ allowedHosts: [] });
     const modules = appModules({
       database: h.database.db,
       orchestrator: runtime.orchestrator,
       timezone: 'UTC',
       clock: systemClock,
+      notificationChannels: {
+        ntfy: createNtfyChannel({ policy: egressPolicy }),
+        smtp: createSmtpChannel({ policy: egressPolicy }),
+      },
+      secretBox: h.security.requireSecretBox(),
     });
     const categorization = modules.find((module) => module.flagKey === 'module.categorization');
     expect(categorization).toBeDefined();

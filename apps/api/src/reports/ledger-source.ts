@@ -19,6 +19,7 @@
  * than a dependency on wiring that has not landed.
  */
 import type { DateOnly, Money } from '@core/kernel';
+import type { BudgetAccount, BudgetTransaction } from '@ctx/budgeting';
 import { listAccounts, listTransactions, type LedgerDatabase } from '@ctx/ledger';
 import type { AccountType } from '@ctx/ledger/schema';
 import type { ReportAccount, ReportAccountRole, ReportRow } from './types.ts';
@@ -115,6 +116,51 @@ export async function loadReportAccounts(
     id: account.id,
     role: roleOfAccountType(account.type),
     currency: account.currency.trim(),
+  }));
+}
+
+/**
+ * `ReportRow[]`/`ReportAccount[]` → `@ctx/budgeting`'s own
+ * `BudgetTransaction[]`/`BudgetAccount[]`, now that `@ctx/budgeting` is a
+ * declared dependency of `apps/api` (the dependency-batch item
+ * `docs/evidence/phase-2/wp2.8-reports.md` §2 recorded as its open item),
+ * so the reports directory calls the real `computeActuals` instead of the
+ * port `reports/netting.ts` used to reproduce by hand.
+ *
+ * `computeActuals` reads only `.role` off each `BudgetAccount`
+ * (`packages/contexts/budgeting/src/actuals.ts`); `type`, `workingBalance`
+ * and `closed` are set to values it never reads. `funding` on each
+ * `BudgetTransaction` is likewise only echoed onto the result's
+ * `EnvelopeTransaction.funding` — reports never read it back — but it is
+ * still derived correctly, from the same account-role map, rather than left
+ * as an arbitrary placeholder.
+ */
+export function toBudgetAccounts(accounts: readonly ReportAccount[]): BudgetAccount[] {
+  return accounts.map((account) => ({
+    id: account.id,
+    type: account.role.toLowerCase(),
+    role: account.role,
+    workingBalance: null,
+    closed: false,
+  }));
+}
+
+export function toBudgetTransactions(
+  rows: readonly ReportRow[],
+  accounts: readonly ReportAccount[],
+): BudgetTransaction[] {
+  const roleOf = new Map(accounts.map((account) => [account.id, account.role] as const));
+  return rows.map((row) => ({
+    id: row.id,
+    accountId: row.accountId,
+    budgetDate: row.date,
+    amount: row.amount,
+    categoryId: row.categoryId,
+    funding: roleOf.get(row.accountId) === 'CREDIT' ? 'CREDIT' : 'CASH',
+    transferLinkId: row.transferLinkId,
+    isTransfer: row.isTransfer,
+    refundOfId: row.refundOfId,
+    excluded: row.excluded,
   }));
 }
 

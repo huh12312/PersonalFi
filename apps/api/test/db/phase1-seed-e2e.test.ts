@@ -68,6 +68,7 @@ import { createConsumerPump, platformExecutor } from '@core/platform';
 import { generateDemoData } from '@core/seed';
 import { classificationOf } from '@ctx/ledger';
 import type { AccountType as LedgerAccountType } from '@ctx/ledger/schema';
+import { createEgressPolicy, createNtfyChannel, createSmtpChannel } from '@ctx/notifications';
 import {
   FLAT_TAXONOMY,
   isAssignableKey,
@@ -309,11 +310,17 @@ describe.skipIf(NO_DATABASE)('Phase 1 seed-based end-to-end proof', () => {
       registry: createConnectorRegistry(),
       secretBox: h.security.requireSecretBox(),
     });
+    const egressPolicy = createEgressPolicy({ allowedHosts: [] });
     const modules = appModules({
       database: h.database.db,
       orchestrator: runtime.orchestrator,
       timezone: 'UTC',
       clock: systemClock,
+      notificationChannels: {
+        ntfy: createNtfyChannel({ policy: egressPolicy }),
+        smtp: createSmtpChannel({ policy: egressPolicy }),
+      },
+      secretBox: h.security.requireSecretBox(),
     });
     const categorization = modules.find((m) => m.flagKey === 'module.categorization');
     const pump = createConsumerPump({
