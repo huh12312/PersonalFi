@@ -119,6 +119,18 @@ ${SECRETS_DIR}/age_recipients` (`node:child_process.spawn`, no new dependency), 
   recipients file `docker/backup/backup.sh` already writes against. A missing recipients file or a
   missing `age` binary on `PATH` is a 503 (`export.encryption_unavailable`), never a silent
   plaintext fallback.
+- **Encryption status — honest gap, not a claimed PASS.** Neither this dev host nor
+  `export-import.test.ts` has the `age` binary or a recipients file present, and no automated test
+  in this WP hits `?encrypt=true` (success or the 503 branch) — `grep -n encrypt
+apps/api/test/db/export-import.test.ts` returns nothing but this file's own header comment. The
+  code path (`encryptWithAge` in `reports/export/bundle.ts`, wired into `GET /export` in
+  `routes/export.ts`) exists, is typed, and is reviewable, but it is a **documented deferral, not a
+  sabotage-tested control**: nobody has watched `?encrypt=true` produce real `age` ciphertext, and
+  nobody has watched the missing-binary/missing-recipients-file branch return the 503 from a live
+  route rather than by inspection. Open item for whoever gates this: install `age`, drop a
+  recipients file at `${SECRETS_DIR}/age_recipients` in a test fixture, and add two cases — one
+  round-tripping `?encrypt=true` output through `age --decrypt`, one deleting the recipients file
+  and asserting the 503 — to `export-import.test.ts` or a route-level test.
 - **`user_id` is rewritten on import, not preserved.** Every user-scoped table's `user_id` column
   carries a real database foreign key to `users.id` (`@core/db`'s `userIdColumn()`: "the foreign
   key is declared in SQL" — Drizzle can't express a cross-context reference, so migrations declare
@@ -281,3 +293,6 @@ docker.
    trip) against `generateDemoData(1)` loaded via `@ctx/ledger`'s `loadSeedDataset` — the same
    ~50k-row, 24-month fixture named throughout Phase 1/2 docs as "Phase 1's 50k-row budget".
    WP 2.12's own perf-budget work is the place a full HTTP-level measurement belongs.
+6. **`?encrypt=true` is untested** (§4, "Encryption status") — no `age` binary or recipients file on
+   this machine, no automated test exercises either branch. Documented deferral, not a
+   sabotage-tested control.
