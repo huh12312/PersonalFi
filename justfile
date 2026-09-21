@@ -20,6 +20,14 @@ install:
 # through Phase 0 while CI was red at HEAD (the gate review's process finding),
 # so the two names now mean different things on purpose.
 check: typecheck lint check-proxy-routes test
+    # WP 2.12 (docs/plan/02-phase-2-dispatch.md §5 item 5): the mechanical
+    # version of "every new vitest project is in ci.yml the day it is
+    # created," which has now caught a real gap twice by hand (Phase 0's
+    # gate, then Phase 1's own quality pass) before this check existed.
+    # Static, no database, no build — same shape as check-proxy-routes above,
+    # kept inline here rather than as its own recipe since only this line is
+    # this work package's to edit.
+    node scripts/check-ci-projects.ts
 
 # gate-security-review.md F-4/C-1b: the control whose absence let F-4 ship —
 # nothing compared docker/Caddyfile's proxied prefixes to

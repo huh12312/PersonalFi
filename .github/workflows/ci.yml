@@ -60,6 +60,19 @@
 # <name> --filesOnly` (root config) or `pnpm --filter @app/web exec vitest
 # list --filesOnly` (web); Playwright projects via `pnpm --filter @app/web
 # exec playwright test --list`.
+#
+# WP 2.12: the map above is re-verified current as of Phase 2's 31 root
+# projects (8 Phase 0 + 10 Phase 1 + 13 Phase 2: recurring/-db,
+# budgeting/-db, notifications/-db, insights/-db, plus api/api-db which
+# predate Phase 2), and is no longer hand-verified only — `node
+# scripts/check-ci-projects.ts` (wired into `just check`'s body and this
+# file's own `lint` job, "every vitest project is covered by a CI job")
+# parses this exact map's two --project lists against vitest.config.ts and
+# fails on the Phase 0/Phase 1 shape (a project in neither list), the
+# reverse (a stale name in a list), or a project in the wrong job (db-shaped
+# vs not). It does not replace this comment — a human still has to say *why*
+# a project is where it is, which the check cannot know — only the "is
+# everything actually listed somewhere" half.
 name: CI
 
 on:
@@ -132,6 +145,17 @@ jobs:
       - name: proxy routes match the contract
         run: node scripts/check-proxy-routes.ts
 
+      # WP 2.12 (docs/plan/02-phase-2-dispatch.md §5 item 5): the mechanical
+      # check behind this file's own header comment above — parses every
+      # vitest.config.ts project name and both --project lists below, fails
+      # if a project is in neither list, in the wrong job (db-shaped vs not),
+      # or if a list names a project that no longer exists. Self-tests
+      # against fixtures first (`--self-test`, run unconditionally by the
+      # plain invocation too) so the check itself is never a control nobody
+      # has watched fail.
+      - name: every vitest project is covered by a CI job
+        run: node scripts/check-ci-projects.ts
+
   test:
     name: unit tests
     runs-on: ubuntu-latest
@@ -194,11 +218,22 @@ jobs:
       - run: npm install --global pnpm@12.4.1
       - run: pnpm install --frozen-lockfile
 
+      # The migrate CLI loads @core/config, and `master_key` is required for the
+      # api/worker/cli roles but not for `migrator` (packages/config/src/
+      # schema.ts). The first real CI run (2026-09-21) failed here with
+      # "secret:master_key: is missing" because no ROLE was set and the default
+      # is `api`. The compose migrator service has always run as ROLE=migrator;
+      # CI now does the same rather than minting a throwaway key it must never
+      # hold.
       - name: apply migrations to an empty database
         run: pnpm run migrate
+        env:
+          ROLE: migrator
 
       - name: applying twice is a no-op
         run: pnpm run migrate
+        env:
+          ROLE: migrator
 
       # Covers the advisory lock, transactional rollback, checksum drift, and the
       # node-postgres type parsers that money and quantity correctness rest on.
@@ -240,6 +275,15 @@ jobs:
           node-version-file: .node-version
       - run: npm install --global pnpm@12.4.1
       - run: pnpm install --frozen-lockfile
+
+      # apps/web/src/api/generated is gitignored (a per-install artifact). The
+      # `typecheck` and `build` scripts regenerate it themselves; `test` does
+      # not, and the first real CI run (2026-09-21, after the first push)
+      # failed 21 of 42 web suites on "Failed to resolve import
+      # ../api/generated/client.gen.ts". Locally this never showed because a
+      # developer has always run typecheck or build first.
+      - name: generate the OpenAPI client
+        run: pnpm --filter @app/web gen
 
       # The `web` vitest project: apps/web has its own vitest config (happy-dom
       # environment), separate from the root one, so it is never covered by
