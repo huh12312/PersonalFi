@@ -25,30 +25,14 @@
 0812909c22f76893bda25811c0326e42d4d3d113:packages/secretbox/test/secret-box.test.ts:plaid-api-token:25
 
 # ---------------------------------------------------------------------------
-# TRUE POSITIVE, remediated in the working tree and neutralised at the source.
-# These two are NOT false positives and must not be read as such.
-#
-# Commit c7846dc committed a live single-use bootstrap enrolment token into
-# docs/evidence/phase-0/wp0.2-summary.md (P0-10, gate §2.8). It is redacted at
-# HEAD. These entries exist only because the value is still reachable in history.
-#
-# Why a fingerprint rather than a rewrite: `git filter-repo` is not installed on
-# this machine, and rewriting 31 commits with `filter-branch` to scrub a token
-# that is already dead is a worse trade than recording why it is dead. There is
-# no remote — nothing has ever been pushed — so the history is local and can
-# still be rewritten cheaply if `filter-repo` is installed before first push.
-# That is the preferred endgame and is tracked in
-# docs/evidence/phase-0/gate-remediation-api.md.
-#
-# Why the token is dead, not merely expired: it was single-use, minted against
-# the scratch database `personalfi_wp02` on the dev Postgres, and it was never
-# redeemed (`registration_tokens.used_at IS NULL`, one row, expiring
-# 2026-09-12T18:42:07Z). That database was dropped WITH (FORCE) and recreated
-# empty during this remediation, so the row the token would have been validated
-# against no longer exists in any database anywhere. It never reached a
-# deployment, and it authenticated nothing beyond a throwaway local enrolment.
-c7846dc6282f6ae7156e56b36f47a8de14d969aa:docs/evidence/phase-0/wp0.2-summary.md:generic-api-key:96
-c7846dc6282f6ae7156e56b36f47a8de14d969aa:docs/evidence/phase-0/wp0.2-summary.md:generic-api-key:98
+# The c7846dc TRUE POSITIVE (a live single-use bootstrap enrolment token
+# committed into docs/evidence/phase-0/wp0.2-summary.md, P0-10) is no longer
+# allowlisted here because it no longer exists in history: on 2026-09-20,
+# before the first push to a remote, `git filter-repo --replace-text` replaced
+# the token in every commit. The old->new commit map is in
+# docs/plan/history-rewrite-2026-09-20.md and a pre-rewrite bundle is kept
+# outside the repo. scripts/check-history-rewrite-before-push.sh still asserts
+# the old commit and the token's fingerprint text are unreachable.
 
 # False positive: the hermetic FakePlaidApi passes the endpoint name
 # 'investments/holdings/get' as the second argument right after
@@ -56,4 +40,4 @@ c7846dc6282f6ae7156e56b36f47a8de14d969aa:docs/evidence/phase-0/wp0.2-summary.md:
 # string as the key. Verified by reading packages/connectors/plaid/test/fake.ts
 # at this commit — the value is a URL path, not a token; the fake never holds a
 # real access token (it mints synthetic `access-sandbox-…` strings).
-e6b654adacec494072b5ba03f77452458f738662:packages/connectors/plaid/test/fake.ts:generic-api-key:375
+581054cb3507cf43a2068f2101a18edeeb70a9d0:packages/connectors/plaid/test/fake.ts:generic-api-key:375
