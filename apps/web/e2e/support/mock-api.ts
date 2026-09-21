@@ -695,7 +695,18 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       return route.fulfill(json({ channel }, 201));
     }
 
-    const testChannelMatch = /^\/api\/notifications\/channels\/([^/]+)\/test$/.exec(path);
+    // `/verify`, not `/test`: `apps/api/src/routes/notifications.ts`'s real
+    // route (operationId `verifyNotificationChannel`) is what the generated
+    // SDK's `verifyNotificationChannel()` actually calls
+    // (`src/features/notifications/api-pending.ts`'s `sendTestNotification`)
+    // — the WP 2.11 stub's own guessed `/test` path this mock was originally
+    // written against never existed on the wire once WP 2.r's real route
+    // landed. Left unmatched, this fell through to `route.continue()`
+    // against the bare Vite dev server (no `/api` backend of its own), so
+    // `notification-settings.spec.ts`'s `page.waitForResponse` predicate for
+    // `/test$` never matched anything and timed out at 30s on every
+    // attempt — deterministic on any runner, not a CI-only flake.
+    const testChannelMatch = /^\/api\/notifications\/channels\/([^/]+)\/verify$/.exec(path);
     if (testChannelMatch && method === 'POST') {
       state.lastNotificationTestChannelId = testChannelMatch[1]!;
       const channel = channels.get(testChannelMatch[1]!);

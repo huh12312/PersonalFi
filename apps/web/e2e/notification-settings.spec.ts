@@ -35,7 +35,10 @@ test('a test send reports a real delivery result', async ({ page }) => {
 
   const [testResponse] = await Promise.all([
     page.waitForResponse((response) =>
-      /\/api\/notifications\/channels\/.+\/test$/.test(new URL(response.url()).pathname),
+      // `/verify` is the real route (operationId `verifyNotificationChannel`);
+      // `/test` was the WP 2.11 stub's guessed path and never existed on the
+      // wire, so this predicate matched nothing and timed out on every runner.
+      /\/api\/notifications\/channels\/.+\/verify$/.test(new URL(response.url()).pathname),
     ),
     page.getByRole('button', { name: 'Send test' }).click(),
   ]);
