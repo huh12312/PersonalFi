@@ -16,6 +16,7 @@ import {
   createEgressPolicy,
   createChannel,
   createFakeChannel,
+  enqueueNotification,
   verifyChannel,
 } from '@ctx/notifications';
 import { newId, systemClock } from '@core/kernel';
@@ -39,8 +40,8 @@ interface WireRule {
   readonly enabled: boolean;
 }
 
-async function seedEnabledChannel(h: ApiHarness, displayName: string): Promise<string> {
-  const context = { userId: h.userId, clock: systemClock, correlationId: 'wp-notif-seed' };
+async function seedChannelFor(h: ApiHarness, userId: string, displayName: string): Promise<string> {
+  const context = { userId, clock: systemClock, correlationId: 'wp-notif-seed' };
   const permissive = createEgressPolicy({ allowedHosts: ['notify.example.com'] });
   const channel = await createChannel(
     h.database.db,
@@ -52,7 +53,7 @@ async function seedEnabledChannel(h: ApiHarness, displayName: string): Promise<s
         scheme: 'https',
         host: 'notify.example.com',
         port: 443,
-        topic: 'wp-notif-test',
+        topic: `wp-notif-test-${newId().slice(0, 8)}`,
         accessToken: null,
       },
     },
@@ -69,6 +70,10 @@ async function seedEnabledChannel(h: ApiHarness, displayName: string): Promise<s
   );
   expect(verified.ok).toBe(true);
   return channel.id;
+}
+
+async function seedEnabledChannel(h: ApiHarness, displayName: string): Promise<string> {
+  return seedChannelFor(h, h.userId, displayName);
 }
 
 describe.skipIf(NO_DATABASE)('/notifications (WP 2.r)', () => {
@@ -293,5 +298,76 @@ describe.skipIf(NO_DATABASE)('/notifications (WP 2.r)', () => {
     expect(
       (mine.json() as { channels: WireChannel[] }).channels.some((c) => c.id === channelId),
     ).toBe(true);
+  });
+
+  /**
+   * WP 2.12 sabotage finding: `GET /notifications/outbox` (`routes/notifications.ts`)
+   * delegates straight to `@ctx/notifications`'s `listOutbox`, and nothing in
+   * this repo — not this route's own suite, not `packages/contexts/notifications/
+   * test/db/delivery.test.ts` (the only other caller of `listOutbox`, which
+   * only ever runs against a single-user scratch database) — ever put a
+   * *second* user's row in the outbox and asked whether the first user could
+   * see it. Dropping `listOutbox`'s `eq(notificationOutbox.userId, userId)`
+   * clause entirely (`src/read.ts`) left every existing test in this file
+   * green, including "lists the outbox (empty is a valid, structurally
+   * correct answer)" — because that test's own database had exactly one
+   * user's rows in it, so removing the filter changed nothing observable.
+   */
+  it("a notification queued for one user never appears in another's outbox", async () => {
+    const otherUserId = await h.database.createUser('Notifications Outbox Second Holder');
+    const otherSession = await h.issueSession({ userId: otherUserId, fresh: true });
+    const otherChannelId = await seedChannelFor(h, otherUserId, 'Second holder channel');
+
+    const context = { userId: h.userId, clock: systemClock, correlationId: newId() };
+    const otherContext = { userId: otherUserId, clock: systemClock, correlationId: newId() };
+
+    await enqueueNotification(h.database.db, context, {
+      channelId,
+      ruleId: null,
+      dedupeKey: `wp-notif-outbox-mine-${newId()}`,
+      groupKey: null,
+      groupWindow: null,
+      deliveryClass: 'PROMPT',
+      priority: 'normal',
+      title: 'Mine',
+      bodyMd: 'A notification belonging to the first holder.',
+      notBefore: new Date(),
+      heldReason: null,
+    });
+    await enqueueNotification(h.database.db, otherContext, {
+      channelId: otherChannelId,
+      ruleId: null,
+      dedupeKey: `wp-notif-outbox-theirs-${newId()}`,
+      groupKey: null,
+      groupWindow: null,
+      deliveryClass: 'PROMPT',
+      priority: 'normal',
+      title: 'Theirs',
+      bodyMd: 'A notification belonging to the second holder.',
+      notBefore: new Date(),
+      heldReason: null,
+    });
+
+    const mine = await h.request({
+      method: 'GET',
+      url: '/notifications/outbox',
+      session: h.stale,
+    });
+    expectStatus(mine, 200);
+    const mineTitles = (mine.json() as { recent: { title: string }[] }).recent.map((r) => r.title);
+    expect(mineTitles).toContain('Mine');
+    expect(mineTitles).not.toContain('Theirs');
+
+    const theirs = await h.request({
+      method: 'GET',
+      url: '/notifications/outbox',
+      session: otherSession,
+    });
+    expectStatus(theirs, 200);
+    const theirTitles = (theirs.json() as { recent: { title: string }[] }).recent.map(
+      (r) => r.title,
+    );
+    expect(theirTitles).toContain('Theirs');
+    expect(theirTitles).not.toContain('Mine');
   });
 });

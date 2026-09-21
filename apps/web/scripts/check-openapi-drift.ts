@@ -16,10 +16,30 @@
  * Run directly (Node 26 strips types, no build step — docs/CONVENTIONS.md):
  *   node scripts/check-openapi-drift.ts
  * or via `pnpm --filter @app/web gen:check`.
+ *
+ * WP 2.12 fix (docs/plan/02-phase-2-dispatch.md §2, wp1.6-ui.md §2): this used
+ * to generate into an OS temp directory (`mkdtemp(tmpdir())`). The
+ * `@hey-api/client-fetch` plugin's `runtimeConfigPath` option
+ * (`openapi-ts.shared.mjs`) is a path resolved relative to the process's
+ * `cwd()` into an absolute path, and hey-api then computes `client.gen.ts`'s
+ * import of it as a path *relative to the output directory*. An OS temp
+ * directory (`/tmp/personalfi-openapi-XXXXXX`) is nowhere near this repo, so
+ * that relative-path computation produced a nonsense import
+ * (`'../../home/chris/Projects/PersonalFi/apps/web/src/api/client-runtime-config.ts'`)
+ * that differed from the committed file's `'../client-runtime-config.ts'` on
+ * every single run, regardless of whether the contract had actually drifted —
+ * confirmed by hand: generating into the OS temp dir and into a sibling of
+ * `src/api/generated` from the *same* `openapi.json` produced byte-identical
+ * output except for that one import line. The fix is to generate into a
+ * throwaway directory that sits at the exact same depth in this tree as the
+ * real output (a sibling of `src/api/generated`, i.e. also directly under
+ * `src/api/`), so the relative path hey-api computes to
+ * `client-runtime-config.ts` is identical either way. `.gitignore` already
+ * ignores `src/api/generated`; the sibling is prefixed `.` and removed in a
+ * `finally` regardless of outcome, same as the old `tmpdir()`-based cleanup.
  */
 import { createClient } from '@hey-api/openapi-ts';
 import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -27,7 +47,8 @@ import { buildOpenApiConfig } from '../openapi-ts.shared.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = join(here, '..');
-const committedDir = join(webRoot, 'src', 'api', 'generated');
+const apiDir = join(webRoot, 'src', 'api');
+const committedDir = join(apiDir, 'generated');
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -52,7 +73,10 @@ async function listFilesRecursive(root: string): Promise<string[]> {
 }
 
 async function main(): Promise<void> {
-  const tempDir = await mkdtemp(join(tmpdir(), 'personalfi-openapi-'));
+  // A sibling of `committedDir` (both direct children of `src/api/`), never
+  // an OS temp directory — see the header comment for why the depth has to
+  // match exactly.
+  const tempDir = await mkdtemp(join(apiDir, '.openapi-drift-check-'));
   try {
     await createClient(buildOpenApiConfig(tempDir));
 

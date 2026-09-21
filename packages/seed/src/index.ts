@@ -14,3 +14,17 @@ export { writeJson } from './write-json.ts';
 export { computeStats, formatStats, type SeedStats } from './stats.ts';
 export { mulberry32, type Rng } from './prng.ts';
 export * from './types.ts';
+/**
+ * WP 2.12: standalone, additive scenario fixtures a Phase 2 engine can load
+ * on top of (never instead of) `generateDemoData`'s pinned default output —
+ * see `phase2-scenarios.ts`'s own header for why these are separate rather
+ * than folded into the main household.
+ */
+export {
+  generateCardMigration,
+  generateCreditOverspend,
+  generateDuplicateService,
+  type CardMigrationScenario,
+  type CreditOverspendScenario,
+  type DuplicateServiceScenario,
+} from './phase2-scenarios.ts';

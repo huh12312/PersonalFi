@@ -368,3 +368,57 @@ not filter by project and were never the gap). Re-verify the map any time a
 project is added, with `grep -oP "name: '[a-z0-9-]+'" vitest.config.ts | sort
 -u` against the `--project` flags in `ci.yml`'s `test` and `migration-test`
 jobs.
+
+**This is now mechanical, not just hand-verified.** WP 2.12
+(`docs/evidence/phase-2/wp2.12-quality.md` §2) added
+`scripts/check-ci-projects.ts`: parses both `--project` lists and
+`vitest.config.ts`'s project names, fails if a project is in neither list, in
+the wrong job (a `-db`/`db`-named project outside `migration-test`, or a
+non-db project missing from `test`), or if a list names a project that no
+longer exists. `--self-test` runs the same four rules against fixtures
+first, the `compose-hardening-check.sh --self-test` pattern extended to
+TypeScript. Wired into `just check`'s own body (after its declared
+dependencies run) and into `ci.yml`'s `lint` job, beside
+`check-proxy-routes`.
+
+## R-5: the merchant and provider-revision growth bound
+
+Phase 1's R-5 ("no bound on distinct merchants or on `transactions_provider`
+revisions; never promoted to a condition" — `docs/plan/02-phase-2-dispatch.md`
+§2) is `packages/contexts/ledger/test/growth-bound.test.ts` (WP 2.12): three
+real syncs of the identical ~50,040-transaction corpus
+(`generateDemoData(1, { monthCount: 1264 })` — `generateDemoData`'s existing
+`monthCount` option, no `@core/seed` code change needed, verified to
+`transactions.length === 50_040` before the test was written) through the
+real write path (`loadSeedDataset` → `applyProviderTransactions` →
+`resolveMerchants`), asserting `merchants` row count _and ids_ and
+`sum(transactions_provider.revision)` are unchanged after the second and
+third sync. Sabotage-tested (see the evidence doc §5): a random suffix on
+the merchant upsert's lookup key fragmented one 50k-row sync into 53
+merchants instead of 32, red on the first try.
+
+## Standalone Phase 2 scenario fixtures (`@core/seed`)
+
+`packages/seed/src/phase2-scenarios.ts` (WP 2.12) adds three deterministic,
+independently-tested fixtures a Phase 2 engine can load on top of —
+never instead of — `generateDemoData`'s pinned default output:
+`generateCardMigration`, `generateDuplicateService`,
+`generateCreditOverspend`. Each is its own `SeedAccount`/`SeedTransaction`
+set on its own RNG stream, precisely so `generateDemoData(1)`'s exact,
+widely-pinned counts (982 transactions, 32 merchants, 6 accounts) never move.
+See the module's own header comment for why a fourth scenario (quiet-hours
+notification) is deliberately not a `@core/seed` concept at all — it is a
+timing claim `@ctx/notifications`'s own test harness already owns, not a
+data shape this generator has vocabulary for.
+
+## Reports p95, over real HTTP
+
+`apps/api/test/db/phase2-reports-http-perf.test.ts` (WP 2.12) is the HTTP-
+level companion to `reports-aggregation.test.ts`'s in-process
+`computeCategoryMonthActivity` timing (WP 2.8): a real bound Fastify server
+(`ApiHarness.listen()`) and real `fetch()` calls (an actual TCP round trip,
+which `app.inject()` never opens) against `GET /reports/spending`, on the
+same 50,040-row seed `growth-bound.test.ts` uses. `reports-aggregation.test.ts`'s
+own comment claiming `generateDemoData(1)` is "~50k rows" is stale —
+`generateDemoData(1)` with no options is 982 transactions, checked directly —
+so this file asserts its own dataset's size rather than repeating the claim.

@@ -329,6 +329,81 @@ describe.skipIf(NO_DATABASE)('the budgeting actuals consumer', () => {
     expect(periodRow[0]?.incomeMinor).toBe(0n);
   }, 180_000);
 
+  /**
+   * WP 2.12 sabotage finding: the test above always posts its refund row with
+   * `categoryId: fun` — the *same* category the purchase already carries — so
+   * `resolveCategory`'s fallback path (`row.categoryId === null` -> look up
+   * `categoryOfPurchase.get(row.refundOfId)`) is never exercised. Deleting
+   * that fallback entirely (`resolveCategory` returning only `row.categoryId`)
+   * left the test above green — a control that could not observe its own
+   * absence, in the exact shape wp1.7-quality.md's read.ts/L6 finding warned
+   * about. This test posts a refund with **no category of its own** — the
+   * common real shape, since a provider's refund posting rarely repeats the
+   * original purchase's category — and asserts it still nets against the
+   * *purchase's* envelope via `categoryOfPurchase`, not the uncategorised one.
+   */
+  it("an uncategorised refund still nets into the purchase's own envelope", async () => {
+    await database.truncate();
+    const state = await scenario(database, { checkingMinor: 500_000n, cardMinor: 0n });
+    const { fun } = state.categories;
+    const { pump } = pumpFor(state);
+
+    const period = await openWithLines(state, d('2026-06-05'), [{ categoryId: fun, priority: 10 }]);
+    await settle(state, d('2026-06-01'));
+    await assign(database.db, state.context, {
+      budgetId: state.budget.id,
+      periodId: period.id,
+      lineId: (await lineFor(period.id, fun)).id,
+      assigned: usd(30_000n),
+    });
+    await settle(state, d('2026-06-01'));
+
+    const purchase = post(state, {
+      accountId: state.checking,
+      date: d('2026-06-07'),
+      minor: -10_000n,
+      categoryId: fun,
+    });
+    await publishUpserted(state, { from: '2026-06-01', to: '2026-06-30', ids: [purchase] });
+    expect(await pump.drain()).toBe(1);
+
+    // A $40 refund, posted with NO category of its own — the shape that only
+    // `categoryOfPurchase`'s fallback can resolve.
+    const refund = post(state, {
+      accountId: state.checking,
+      date: d('2026-06-12'),
+      minor: 4_000n,
+      categoryId: null,
+      refundOfId: purchase,
+    });
+    await publishUpserted(state, { from: '2026-06-01', to: '2026-06-30', ids: [refund] });
+    expect(await pump.drain()).toBe(1);
+
+    const funLine = await actualsFor((await lineFor(period.id, fun)).id);
+    // Netted into `fun`, the purchase's own envelope — not excluded (which
+    // would leave -10,000 unaffected by the refund) and not uncategorised
+    // (which would leave `fun` at -10,000 with -4,000 sitting on some other
+    // line's actuals instead).
+    expect(funLine?.activityMinor).toBe(-6_000n);
+    expect(funLine?.refundNettedCount).toBe(1);
+
+    // Every other line in the period must show zero activity: if the refund
+    // had missed `categoryOfPurchase`'s fallback and landed in the
+    // uncategorised bucket, `fun` would stay at -10,000 and some other
+    // `budget_line_actuals` row would carry the +4,000 instead — summing
+    // every line's activity for this period is what catches that shape
+    // without assuming where a null-category row would even persist.
+    const allLinesInPeriod = await database.db
+      .select({ id: budgetLines.id })
+      .from(budgetLines)
+      .where(eq(budgetLines.budgetPeriodId, period.id));
+    let totalActivityMinor = 0n;
+    for (const { id } of allLinesInPeriod) {
+      totalActivityMinor += (await actualsFor(id))?.activityMinor ?? 0n;
+    }
+    expect(totalActivityMinor).toBe(-6_000n);
+  }, 180_000);
+
   it('a late transaction dirties only the periods from its own forward', async () => {
     await database.truncate();
     const state = await scenario(database, { checkingMinor: 900_000n, cardMinor: 0n });

@@ -229,6 +229,27 @@ describe.skipIf(NO_DATABASE)('/insights and /advisors (WP 2.r)', () => {
     expectStatus(fresh, 200);
   });
 
+  /**
+   * WP 2.12 sabotage finding: the test below (503 on a missing
+   * advisor_token_secret) always drives `/advisors/run` with `h.fresh`, so no
+   * test in this file ever drove it with a stale session. Replacing
+   * `routes/insights.ts`'s `/advisors/run` handler's `requireFreshSession`
+   * with plain `requireSession` — dropping the step-up guard dispatch §3
+   * names for this exact route ("fresh for anything that changes what the
+   * system does unattended") — left every test in this file green. This is
+   * the missing case.
+   */
+  it('triggering a run needs a step-up assertion', async () => {
+    const stale = await h.request({
+      method: 'POST',
+      url: '/advisors/run',
+      session: h.stale,
+      body: { advisorId: CASH_ADVISOR_ID },
+    });
+    expect(stale.statusCode).toBe(403);
+    expect(problemOf(stale)['code']).toBe('step_up_required');
+  });
+
   it('triggering a run without an advisor_token_secret configured fails closed with 503, not a 500', async () => {
     const response = await h.request({
       method: 'POST',

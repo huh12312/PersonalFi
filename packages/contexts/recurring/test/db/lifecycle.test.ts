@@ -141,6 +141,79 @@ describe.skipIf(NO_DATABASE)('the recurring lifecycle', () => {
     expect(second.seriesArchived).toBe(1);
   });
 
+  /**
+   * WP 2.12 sabotage finding: the test above's second pass hands the detector
+   * an *empty* ledger, so the pinned merchant produces zero streams and
+   * `src/store.ts`'s `upsertSeries` — the function that actually carries the
+   * `existing.userConfirmed ? 'ACTIVE' : nextState` pin — is never called for
+   * it at all; only the separate archive-sweep path (for series the detector
+   * no longer mentions) is exercised. Sabotaging `upsertSeries`'s pin
+   * (`src/store.ts`) left the test above green. This test instead re-runs
+   * detection with the merchant's history *trimmed to two occurrences* — the
+   * shape of a shortened sync window, not a vanished merchant — which the
+   * confidence model (`src/confidence.ts`) genuinely caps at 0.70
+   * (`EARLY_DETECTION`), under `AUTO_CONFIRM_CONFIDENCE` (0.80). `upsertSeries`
+   * *is* called this time (the detector still proposes the stream), so this
+   * is the one test that actually exercises the pin inside the merge branch
+   * rather than the sweep.
+   */
+  it('a confirmed series is never demoted by a re-run that would only score a candidate', async () => {
+    await database.truncate();
+    const context = contextFor(database.userId, clockAt(EPOCH));
+
+    const fullHistory = monthlyRows({
+      merchantId: MERCHANT_PINNED,
+      accountId: ACCOUNT,
+      lastOn: LAST_ON,
+      count: 6,
+      minor: -1_599n,
+    });
+
+    const first = await runDetection(
+      database.db,
+      context,
+      { port: inMemoryLedgerPort(fullHistory) },
+      { timeZone: ZONE },
+    );
+    expect(first.seriesInserted).toBe(1);
+
+    const detected = await database.db
+      .select()
+      .from(recurringSeries)
+      .where(eq(recurringSeries.userId, database.userId));
+    const pinned = detected.find((row) => row.merchantId === MERCHANT_PINNED);
+    expect(pinned).toBeDefined();
+    if (pinned === undefined) return;
+
+    const confirmed = await confirmSeries(database.db, context, { seriesId: pinned.id });
+    expect(confirmed?.userConfirmed).toBe(true);
+    expect(confirmed?.state).toBe('ACTIVE');
+
+    // Trimmed to the *earliest* two occurrences only (same anchor date, same
+    // amount bucket, so this resolves to the same `streamKey` and therefore
+    // the same series row) — the merchant is still very much there, but this
+    // pass's own confidence, computed fresh from just those two points, is
+    // capped at 0.70 (EARLY_DETECTION) and typed CANDIDATE on its own.
+    const trimmedHistory = fullHistory.slice(0, 2);
+    const second = await runDetection(
+      database.db,
+      context,
+      { port: inMemoryLedgerPort(trimmedHistory) },
+      { timeZone: ZONE },
+    );
+    expect(second.streams, 'the detector still proposes something this pass').toBe(1);
+
+    const after = await database.db
+      .select()
+      .from(recurringSeries)
+      .where(eq(recurringSeries.id, pinned.id));
+    // The pin holds even though this pass's own evidence, taken alone, would
+    // not have cleared the auto-confirm bar.
+    expect(after[0]?.state).toBe('ACTIVE');
+    expect(after[0]?.userConfirmed).toBe(true);
+    expect(after[0]?.archivedAt).toBeNull();
+  });
+
   it('a rejected merchant never returns as a candidate', async () => {
     await database.truncate();
     const context = contextFor(database.userId, clockAt(EPOCH));
