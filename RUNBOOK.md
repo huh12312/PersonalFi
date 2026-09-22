@@ -254,6 +254,16 @@ is turned on and you know which ntfy topic host / SMTP relay it should be
 allowed to reach. Comma-separated, lowercase hostnames only — no wildcard, no
 IP literal; `@core/config` refuses to boot with either. See `.env.example`.
 
+**This list is a trust decision, not a formality (condition C-4,
+gate-security-review.md §4, finding G2-2).** Every notification body carries
+amounts and merchant names, so naming a host here means handing whoever
+controls that host every notification this deployment ever sends. The
+egress guard refuses a private, loopback or link-local address independently
+of this list and is not configurable to allow one — even `NOTIFICATIONS_ALLOWED_HOSTS=db`,
+tried during the Phase 2 gate walk, was refused `private_address` — so this
+setting can only ever widen reach to a **public** host, and only to one you
+actually operate or otherwise trust with that data.
+
 ### 4. Bring the stack up
 
 ```bash
@@ -326,6 +336,33 @@ port (P0-3), so the host has no route to Postgres by design. Running it on the
 host would fail with `getaddrinfo ENOTFOUND db`. With the stack down, the same
 recipe falls back to the host and the local dev database, which is what
 `just dev` wants.
+
+---
+
+## Export and import (condition C-4)
+
+`GET /export` (step-up required) downloads the whole database as a JSONL
+bundle. `?encrypt=true` pipes it through `age` first, encrypted to
+`secrets/age_recipients` — the same recipients file step 2, item 4 above
+already has you write for backups, so nothing new to create if backups are
+already configured. **The api image does not ship the `age` binary today**
+(`docker/api.Dockerfile` has no `age` package line); until it does,
+`?encrypt=true` answers `503 export.encryption_unavailable` naming exactly
+that, rather than silently downgrading to plaintext or hanging.
+`apps/api/test/db/export-encrypt.test.ts` (WP 3.13) proves the encrypted path
+decrypts to the same bundle on a host that does have `age` on `PATH`, so the
+one remaining step is a Dockerfile line (`apk add --no-cache age`, Alpine's
+main repository), not a design change.
+
+`POST /import` refuses to run against an instance that already has user
+data (`409 export.instance_not_empty`) — it is a same-schema restore, not a
+merge. The target instance still needs its own account holder **enrolled
+first** (step 7 above) before the import call, because every route the
+import needs — including `POST /import` itself — requires a session, and a
+freshly-migrated database has no user and therefore no session to authenticate
+with. This is not a defect (gate finding G2-6, gate-security-review.md §4):
+bring the target up, run `just bootstrap-user` and enrol a passkey exactly as
+you would for a first install, _then_ import.
 
 ---
 

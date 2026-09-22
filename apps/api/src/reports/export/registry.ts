@@ -175,6 +175,14 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
   ['locks', 'advisory locking state, not data.'],
   ['config_snapshots', 'boot-time configuration snapshots, not user data.'],
   // --- out of this WP's named scope (dispatch §3), not out of existence -------
+  // Phase 3 WP 3.1's securities master. These join the bundle in FK order
+  // (securities → security_identifiers/security_overlay) with the holdings and
+  // lots WP 3.7 exports; exporting the master without the positions that
+  // reference it would be half a fact. The manifest-completeness test below
+  // caught their arrival the day 0013 landed, which is what it is for.
+  ['securities', 'investments (WP 3.1); exported with holdings/lots by WP 3.7.'],
+  ['security_identifiers', 'investments (WP 3.1); exported with holdings/lots by WP 3.7.'],
+  ['security_overlay', 'investments (WP 3.1); exported with holdings/lots by WP 3.7.'],
   ['advisors', "insights (WP 2.6); not named in this WP's export scope."],
   ['advisor_runs', "insights (WP 2.6); not named in this WP's export scope."],
   ['insights', "insights (WP 2.6); not named in this WP's export scope."],

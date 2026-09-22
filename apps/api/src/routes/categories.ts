@@ -108,7 +108,7 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             'structure. Archived categories are omitted unless asked for — a picker must ' +
             'not offer a category the user retired, but a historic assignment still points ' +
             'at one. Categories are per user (decision D6), so this is never a shared list.\n\n' +
-            'Taxonomy is seeded once, at user creation, by `bootstrap-seed.ts`\'s ' +
+            "Taxonomy is seeded once, at user creation, by `bootstrap-seed.ts`'s " +
             '`seedUserState` (condition C-1, docs/evidence/phase-2/gate-security-review.md ' +
             '§5) — this route used to carry a D2-1 lazy repair for the gap that left; the ' +
             'repair is gone and this route is a plain read.',

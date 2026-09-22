@@ -340,17 +340,23 @@ part of the same Playwright run, not a separate report.
 
 ## 5. Left open, and the exact API need for each
 
-- **Low-confidence categorizations (inbox's third queue) has no data
-  source.** `GET /transactions` carries no categorisation-confidence field,
-  and WP 2.6's `pending_review` table (`packages/contexts/insights/**`) has
-  no REST route — confirmed absent by inspection, and by both WP 2.6's and
-  WP 2.4's own evidence files (§2 above). **Exact need**: either a
-  `categoryConfidence`/`categorySource` field on `GET /transactions`'s
-  response, or a dedicated route reading `pending_review` (most likely
-  `apps/api/src/routes/insights.ts`, already named in WP 2.6's own `Owns`
-  list but not built). The inbox section renders its own honest
-  "coming once the insights review queue has a route to read it from"
-  message rather than fabricating data or hiding the section.
+- ~~**Low-confidence categorizations (inbox's third queue) has no data
+  source.**~~ **Stale — closed by WP 3.13, verified rather than re-opened**
+  (03-phase-3-dispatch.md §2 flagged this claim as "stale as written" and
+  asked the carry-over to check before building anything). `GET
+/insights` (`apps/api/src/routes/insights.ts`) was built by WP 2.r
+  (`28b81f1`), after this claim was written and before WP 3.13 read it — so
+  the route this section says is missing already exists. What WP 3.13 found
+  actually missing was the _filter_ the inbox needs: `?statuses=pending_review`
+  alone 400'd (`fst_err_validation`, "expected array, received string"),
+  because the querystring schema only accepted a _repeated_ key
+  (`?statuses=a&statuses=b`), not the one-status form a client naturally
+  writes. Fixed (a `z.union([enum, array(enum)])` schema, normalised to an
+  array) and sabotage-tested red before the fix
+  (`apps/api/test/db/insights-pending-review.test.ts`,
+  docs/evidence/phase-3/wp3.13-carry-overs.md item 8). The `categoryConfidence`
+  alternative this section also named is not needed now that the filter
+  works.
 - **Notification settings' REST surface does not exist** — §2, `api-pending.ts`
   documents the exact paths it assumes and is built to swap cleanly once WP
   2.4 (or whichever package finishes wiring `apps/api/src/routes/notifications.ts`)

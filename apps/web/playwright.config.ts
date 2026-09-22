@@ -53,7 +53,16 @@ import { defineConfig, devices } from '@playwright/test';
  */
 const isCI = process.env['CI'] !== undefined;
 
-export default defineConfig({
+/**
+ * Test options this config sets and `e2e/cold-start.spec.ts` declares with
+ * `test.extend`. Typing `defineConfig` with them is what lets the `cold-start`
+ * project's `use` block carry a key Playwright does not know about.
+ */
+interface ColdStartOptions {
+  readonly coldStart: { readonly baseURL?: string; readonly registerURL?: string };
+}
+
+export default defineConfig<ColdStartOptions>({
   testDir: './e2e',
   fullyParallel: true,
   forbidOnly: isCI,
@@ -97,6 +106,19 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         ignoreHTTPSErrors: true,
+        // The spec may not read `process.env` (the repo-wide ban exempts
+        // `test/` and this config, not `e2e/`), so the two live-stack URLs are
+        // read here and handed to it as test options.
+        // Spread rather than assigned: under `exactOptionalPropertyTypes` an
+        // explicit `undefined` is not an absent optional.
+        coldStart: {
+          ...(process.env['COLD_START_BASE_URL'] === undefined
+            ? {}
+            : { baseURL: process.env['COLD_START_BASE_URL'] }),
+          ...(process.env['COLD_START_REGISTER_URL'] === undefined
+            ? {}
+            : { registerURL: process.env['COLD_START_REGISTER_URL'] }),
+        },
         launchOptions: {
           args: [
             `--host-resolver-rules=MAP ${new URL(process.env['COLD_START_BASE_URL'] ?? 'https://personalfi.lan').hostname} 127.0.0.1`,

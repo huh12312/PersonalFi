@@ -59,7 +59,10 @@ import { newId, type Clock } from '@core/kernel';
 import { platformExecutor, type FlagService } from '@core/platform';
 import { registerRetrainSchedule } from '@ctx/categorization';
 import { ensureTaxonomy } from '@ctx/categorization';
-import { BUILTIN_CATALOGUE, registerNightlySchedule as registerInsightsNightlySchedule } from '@ctx/insights';
+import {
+  BUILTIN_CATALOGUE,
+  registerNightlySchedule as registerInsightsNightlySchedule,
+} from '@ctx/insights';
 import { registerNotificationSchedules } from '@ctx/notifications';
 import { registerBuiltinAdvisors } from './modules.ts';
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { expect, test } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
 
 import { attachVirtualAuthenticator } from './support/cold-start-authenticator.ts';
 
@@ -56,13 +56,25 @@ import { attachVirtualAuthenticator } from './support/cold-start-authenticator.t
  * one from a code-review pass.
  */
 
-test.describe('cold-start CSRF (C-6)', () => {
-  const baseURL = process.env['COLD_START_BASE_URL'];
-  const registerURL = process.env['COLD_START_REGISTER_URL'];
+/**
+ * The live-stack URLs arrive as a test option set in `playwright.config.ts`'s
+ * `cold-start` project (the repo-wide `process.env` ban exempts the config,
+ * not `e2e/`). Absent means "no live stack" and each test skips itself.
+ */
+interface ColdStartOptions {
+  readonly coldStart: { readonly baseURL?: string; readonly registerURL?: string };
+}
 
+const test = base.extend<ColdStartOptions>({
+  coldStart: [{}, { option: true }],
+});
+
+test.describe('cold-start CSRF (C-6)', () => {
   test('a cold cookie jar is refused CSRF, and the same jar succeeds immediately after one priming GET', async ({
     browser,
+    coldStart,
   }) => {
+    const { baseURL } = coldStart;
     test.skip(baseURL === undefined, 'set COLD_START_BASE_URL to a live stack to run this test');
     const base = baseURL as string;
 
@@ -128,7 +140,9 @@ test.describe('cold-start CSRF (C-6)', () => {
 
   test('the first real browser visit to a freshly printed enrolment link enrols a passkey with no retry', async ({
     browser,
+    coldStart,
   }) => {
+    const { registerURL } = coldStart;
     test.skip(
       registerURL === undefined,
       'set COLD_START_REGISTER_URL to a fresh, unused just bootstrap-user link to run this test',

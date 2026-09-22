@@ -67,6 +67,18 @@ export interface ActionView {
 export interface InsightView {
   readonly id: string;
   readonly advisorId: string;
+  /**
+   * `advisors.version` at the moment this row was written — carried in the
+   * `insights` table since WP 2.6 (`upsertInsight`'s `advisorVersion`
+   * column) but absent from this read model until WP 3.13 closed the carry:
+   * "advisor_version absent from the evidence panel" (03-phase-3-dispatch.md
+   * §2, wp2.10-insights-ui.md §7). An advisor's rules can change between the
+   * run that proposed an insight and the day someone reviews it; without
+   * this field there is no way to tell whether "why did it say this" is
+   * asking about the code that is live today or a version that shipped
+   * three releases ago.
+   */
+  readonly advisorVersion: string;
   readonly key: string;
   readonly period: string;
   readonly type: string;
@@ -217,6 +229,7 @@ export async function listInsights(
     views.push({
       id: row.id,
       advisorId: row.advisorId,
+      advisorVersion: row.advisorVersion,
       key: row.key,
       period: row.period,
       type: row.type,

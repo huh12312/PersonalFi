@@ -38,6 +38,7 @@ import {
   isBudgetingError,
   listBudgets,
   listPeriods,
+  markDirtyFrom,
   openPeriod,
   recomputeDirty,
   rollPeriod,
@@ -438,6 +439,22 @@ export const budgetRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               )[0];
         if (row === undefined) throw new Error('budget_lines write returned no row');
 
+        // Condition C-5 (docs/evidence/phase-2/gate-security-review.md §5,
+        // G2-3): a line created (or re-opened) mid-period must mark its own
+        // period dirty *before* the recompute below, not merely mark the
+        // line's own `dirty` column (schema default `true`, set again in
+        // `patch` above for clarity). `recomputeDirty` only ever walks
+        // `budgetPeriods.dirty = true` rows (`dirtyPeriods`) — a line-level
+        // flag with no period-level one is invisible to it. Without this
+        // call, a period the ledger consumer had already cleaned (the common
+        // case: transactions synced, then a category budgeted afterwards)
+        // stays clean, `recomputeDirty` finds nothing to do, and the new
+        // envelope's `available`/`activity` never reflect transactions that
+        // posted before the line existed — exactly what the gate's reviewer
+        // observed by hand and had to force a recompute to fix.
+        await mapBudgetingErrors(() =>
+          markDirtyFrom(database, context, { budgetId: budget.id, date: period.startDate }),
+        );
         await mapBudgetingErrors(() =>
           recomputeDirty(database, context, { port: port() }, budget.id),
         );

@@ -43,7 +43,7 @@ import {
   type InsightsDependencies,
   type InsightView,
 } from '@ctx/insights';
-import { INSIGHT_STATUSES } from '@ctx/insights/schema';
+import { INSIGHT_STATUSES, type InsightStatus } from '@ctx/insights/schema';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
@@ -87,6 +87,17 @@ const insightSchema = z
   .object({
     id: z.uuid(),
     advisorId: z.string(),
+    /**
+     * WP 3.13 carry-over: absent from this route until now
+     * (03-phase-3-dispatch.md §2, "`advisor_version` absent from the
+     * evidence panel"). `advisors.version` at the moment this insight was
+     * written. camelCase, matching every other field on this response —
+     * `advisor_version` is the advisor *contract*'s own snake_case name
+     * (`@ctx/insights`'s `contract/response.ts`, a different wire format for
+     * a different audience), not a convention this HTTP surface otherwise
+     * follows.
+     */
+    advisorVersion: z.string(),
     key: z.string(),
     period: z.string(),
     type: z.string(),
@@ -115,6 +126,7 @@ function serialiseInsight(view: InsightView): z.infer<typeof insightSchema> {
   return {
     id: view.id,
     advisorId: view.advisorId,
+    advisorVersion: view.advisorVersion,
     key: view.key,
     period: view.period,
     type: view.type,
@@ -195,6 +207,27 @@ function dependenciesOf(deps: RouteDeps, timeZone: string): InsightsDependencies
   };
 }
 
+/**
+ * `?statuses=pending_review` — WP 3.13 carry-over (03-phase-3-dispatch.md §2,
+ * wp2.11-inbox-ui.md §5). The prior schema, `z.array(z.enum(INSIGHT_STATUSES))`,
+ * only ever validated a *repeated* querystring key (`?statuses=a&statuses=b`)
+ * — the one-status form an inbox actually needs, `?statuses=pending_review`,
+ * failed schema validation with a 400 (`fst_err_validation`, "expected array,
+ * received string"), because Fastify's querystring parser hands a bare
+ * single value through as a string, not a one-element array. `idList`
+ * (`../wire.ts`) already solves exactly this for `states`/`types`/
+ * `merchantIds` elsewhere; not reused here because those accept arbitrary
+ * strings and this one must fail closed on a status that is not one of the
+ * four enumerated values, which a plain `idList` (unvalidated beyond
+ * non-empty) does not do.
+ */
+const statusList = z
+  .union([z.enum(INSIGHT_STATUSES), z.array(z.enum(INSIGHT_STATUSES))])
+  .optional()
+  .transform((value): readonly InsightStatus[] | undefined =>
+    value === undefined ? undefined : Array.isArray(value) ? value : [value],
+  );
+
 export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
 
@@ -207,7 +240,7 @@ export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           summary: 'The advisory feed: pending review and already-reviewed, alert budget applied',
           tags: ['insights'],
           querystring: z.object({
-            statuses: z.array(z.enum(INSIGHT_STATUSES)).optional(),
+            statuses: statusList,
           }),
           response: {
             200: z.object({

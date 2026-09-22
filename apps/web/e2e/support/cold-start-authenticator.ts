@@ -18,7 +18,10 @@ import type { BrowserContext, Page } from '@playwright/test';
  * assertion, so a future extension of this file does not have to rediscover
  * it.
  */
-export async function attachVirtualAuthenticator(context: BrowserContext, page: Page): Promise<string> {
+export async function attachVirtualAuthenticator(
+  context: BrowserContext,
+  page: Page,
+): Promise<string> {
   const cdp = await context.newCDPSession(page);
   await cdp.send('WebAuthn.enable');
   const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {

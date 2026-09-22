@@ -138,6 +138,15 @@ export interface HarnessOptions {
    * here is the same seam `seedConnector` already uses.
    */
   readonly plaidConnector?: PlaidConnector;
+  /**
+   * Extra file secrets under `SECRETS_DIR`, name → contents. WP 3.13's
+   * `export-encrypt.test.ts` is the motivating caller: `?encrypt=true`
+   * (`routes/export.ts`) reads `age_recipients` from this directory, and
+   * there was previously no way for a test to put one there — every other
+   * suite either never exercises the encrypted branch or asserts only its
+   * absence (`AgeUnavailableError`, mapped to a 503).
+   */
+  readonly extraSecrets?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -171,7 +180,7 @@ function testConfig(secrets: TempSecrets, databaseUrl: string): AppConfig {
 export async function createApiHarness(options: HarnessOptions): Promise<ApiHarness> {
   const unique = newId().replaceAll('-', '').slice(-12);
   const database = await createTestDatabase(`personalfi_api_${options.suite}_${unique}`);
-  const secrets = createTempSecrets();
+  const secrets = createTempSecrets(options.extraSecrets ?? {});
 
   const manualStore = new ManualStore();
   const seedConnector = new SeedConnector({ pageSize: options.manualPageSize ?? 200 });
