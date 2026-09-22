@@ -1,0 +1,44 @@
+{
+  "BTC-USD": {
+    "trades": [
+      {
+        "trade_id": "9c8b7a60-0000-4000-8000-00000000t001",
+        "product_id": "BTC-USD",
+        "price": "63105.23",
+        "size": "0.00412000",
+        "time": "2026-09-22T11:59:41.000Z",
+        "side": "BUY"
+      }
+    ],
+    "best_bid": "63104.98",
+    "best_ask": "63105.44"
+  },
+  "ETH-USD": {
+    "trades": [
+      {
+        "trade_id": "9c8b7a60-0000-4000-8000-00000000t002",
+        "product_id": "ETH-USD",
+        "price": "2489.77",
+        "size": "1.20000000",
+        "time": "2026-09-22T11:59:52.000Z",
+        "side": "SELL"
+      }
+    ],
+    "best_bid": "2489.61",
+    "best_ask": "2489.90"
+  },
+  "USDC-USD": {
+    "trades": [
+      {
+        "trade_id": "9c8b7a60-0000-4000-8000-00000000t003",
+        "product_id": "USDC-USD",
+        "price": "1.0000",
+        "size": "500.00",
+        "time": "2026-09-22T11:58:00.000Z",
+        "side": "BUY"
+      }
+    ],
+    "best_bid": "0.9999",
+    "best_ask": "1.0001"
+  }
+}

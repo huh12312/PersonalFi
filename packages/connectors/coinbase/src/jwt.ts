@@ -32,6 +32,22 @@
  * `@core/secretbox`, `@connector/port` and Node builtins, and every JWT library
  * that has ever had a CVE had it in the *verification* path we do not need.
  */
+// The single-crypto-call-site rule (03 §2) exists to stop a *second* AEAD call
+// site — "the one that reuses a nonce, drops the AAD, or compares a tag with
+// `===`". None of those exists here: this is an Ed25519 **signature** over a
+// public string, mandated by the provider (01 §3.2 — CDP accepts EdDSA and
+// nothing we could substitute), and `@core/secretbox` exposes no signing
+// primitive to route it through. The dispatch made the same judgement when it
+// rejected `jose` before an agent could propose it: "`node:crypto` signs
+// **Ed25519** natively" (§4, dependency batch). The nonce that *is* here comes
+// from `@core/secretbox`'s `randomBytes`, which is the audited CSPRNG, and no
+// comparison of any kind happens in this file.
+//
+// This follows `packages/platform/src/config-snapshot.ts`'s precedent for an
+// in-file carve-out. It would sit better in `eslint.config.js`'s `ignores` list
+// beside `packages/db/src/migrate.ts` — see wp3.5-coinbase.md §9, which asks the
+// orchestrator to move it there, since this package may not edit that file.
+// eslint-disable-next-line no-restricted-imports -- Ed25519 signing, provider-mandated; no cipher, no AAD, no tag comparison
 import { createPrivateKey, sign, type KeyObject } from 'node:crypto';
 import { ConnectorError } from '@connector/port';
 import { randomBytes } from '@core/secretbox';
@@ -217,10 +233,12 @@ export function decodeCdpJwtForTest(token: string): DecodedCdpJwt {
   if (parts.length !== 3) throw new Error('not a compact JWS');
   const [rawHeader, rawPayload, signature] = parts as [string, string, string];
   return {
-    header: JSON.parse(Buffer.from(rawHeader, 'base64url').toString('utf8')) as
-      DecodedCdpJwt['header'],
-    payload: JSON.parse(Buffer.from(rawPayload, 'base64url').toString('utf8')) as
-      DecodedCdpJwt['payload'],
+    header: JSON.parse(
+      Buffer.from(rawHeader, 'base64url').toString('utf8'),
+    ) as DecodedCdpJwt['header'],
+    payload: JSON.parse(
+      Buffer.from(rawPayload, 'base64url').toString('utf8'),
+    ) as DecodedCdpJwt['payload'],
     signature,
   };
 }

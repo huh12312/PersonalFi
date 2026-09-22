@@ -1,0 +1,16 @@
+{
+  "portfolios": [
+    {
+      "uuid": "3a1b8c44-0000-4000-8000-0000000000p1",
+      "name": "Default",
+      "type": "DEFAULT",
+      "deleted": false
+    },
+    {
+      "uuid": "3a1b8c44-0000-4000-8000-0000000000p2",
+      "name": "Closed experiment",
+      "type": "CONSUMER",
+      "deleted": true
+    }
+  ]
+}

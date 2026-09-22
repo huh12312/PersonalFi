@@ -1,0 +1,37 @@
+{
+  "fills": [
+    {
+      "entry_id": "5a1f0d3c8b2e4f6a9c0d1e2f3a4b5c6d",
+      "trade_id": "1a2b3c4d-0000-4000-8000-00000000f001",
+      "order_id": "7e8f9a0b-0000-4000-8000-00000000o001",
+      "trade_time": "2026-09-10T15:04:05.123Z",
+      "trade_type": "FILL",
+      "price": "40000.00",
+      "size": "0.10000000",
+      "commission": "20.00",
+      "product_id": "BTC-USD",
+      "sequence_timestamp": "2026-09-10T15:04:05.456Z",
+      "liquidity_indicator": "TAKER",
+      "size_in_quote": false,
+      "side": "BUY",
+      "retail_portfolio_id": "3a1b8c44-0000-4000-8000-0000000000p1"
+    },
+    {
+      "entry_id": "6b2e1f4d9c3a5b7e0d1f2a3b4c5d6e7f",
+      "trade_id": "2b3c4d5e-0000-4000-8000-00000000f002",
+      "order_id": "8f9a0b1c-0000-4000-8000-00000000o002",
+      "trade_time": "2026-06-02T09:15:00.000Z",
+      "trade_type": "FILL",
+      "price": "2500.00",
+      "size": "2.00000000",
+      "commission": "12.50",
+      "product_id": "ETH-USD",
+      "sequence_timestamp": "2026-06-02T09:15:00.250Z",
+      "liquidity_indicator": "MAKER",
+      "size_in_quote": false,
+      "side": "BUY",
+      "retail_portfolio_id": "3a1b8c44-0000-4000-8000-0000000000p1"
+    }
+  ],
+  "cursor": ""
+}

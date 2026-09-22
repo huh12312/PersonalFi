@@ -55,6 +55,38 @@ export const COINBASE_READ_ONLY_PATHS = Object.freeze([
 
 export type CoinbaseReadOnlyPath = (typeof COINBASE_READ_ONLY_PATHS)[number];
 
+/**
+ * The quote currency every product is priced in. §6 Q3: USD base, currency-aware
+ * model. A `BTC-EUR` product would be a second FX hop we have no rate for.
+ */
+export const COINBASE_QUOTE_CURRENCY = 'USD';
+
+/** `BTC` → `BTC-USD`. The only product id this package ever constructs. */
+export function coinbaseProductIdOf(asset: string): string {
+  return `${asset.toUpperCase()}-${COINBASE_QUOTE_CURRENCY}`;
+}
+
+/**
+ * The one path with a placeholder, built in one place.
+ *
+ * The asset is constrained to what a Coinbase product id can contain before it
+ * reaches a URL. That is not decoration: a path is the thing the JWT's `uri`
+ * claim is signed over, and an unvalidated segment is how a `..` or a `?` turns
+ * one signed request into a different one.
+ */
+export function coinbaseTickerPath(productId: string): string {
+  if (!/^[A-Za-z0-9._-]{1,32}$/.test(productId)) {
+    throw new Error(`refusing to build a coinbase path from ${JSON.stringify(productId)}`);
+  }
+  return `${COINBASE_BROKERAGE_PREFIX}/products/${productId}/ticker`;
+}
+
+/** Per-request ceiling. A hung socket must not outlive the run's deadline. */
+export const COINBASE_REQUEST_TIMEOUT_MS = 20_000;
+
+/** Bound on any paging loop, so a provider that never says "done" fails loudly. */
+export const COINBASE_MAX_PAGES = 40;
+
 // ---------------------------------------------------------------------------
 // CDP JWT (01 §3.2). Explicitly **not** ES256.
 // ---------------------------------------------------------------------------
@@ -99,8 +131,7 @@ export const COINBASE_CREDENTIAL_NAMES = Object.freeze([CDP_KEY_NAME, CDP_PRIVAT
  * name box gets `invalid_input` instead of a signed request that leaks the key
  * material into a `kid` header field on the wire.
  */
-export const CDP_KEY_NAME_PATTERN =
-  /^organizations\/[0-9a-fA-F-]{36}\/apiKeys\/[0-9a-fA-F-]{36}$/;
+export const CDP_KEY_NAME_PATTERN = /^organizations\/[0-9a-fA-F-]{36}\/apiKeys\/[0-9a-fA-F-]{36}$/;
 
 // ---------------------------------------------------------------------------
 // Paging and window

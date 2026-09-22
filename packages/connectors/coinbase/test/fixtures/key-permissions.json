@@ -1,0 +1,9 @@
+{
+  "can_view": true,
+  "can_trade": false,
+  "can_transfer": false,
+  "can_receive": true,
+  "service_account_id": "",
+  "portfolio_uuid": "3a1b8c44-0000-4000-8000-0000000000p1",
+  "portfolio_type": "CONSUMER"
+}
