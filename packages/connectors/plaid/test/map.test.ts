@@ -465,8 +465,10 @@ describe('holdingFactOf', () => {
       providerAccountId: 'acct-brokerage-003',
       providerSecurityId: 'sec-vti-0001',
       // The strongest name Plaid gave, not the first one it listed: the fixture
-      // carries a CUSIP and a ticker, and the port's rank picks the CUSIP.
-      security: { kind: 'cusip', value: '922908769', chain: null, mic: null },
+      // carries a FIGI, an ISIN, a CUSIP and a MIC-qualified ticker, and
+      // `IDENTIFIER_RANK` picks the FIGI — the only globally unique, permanent,
+      // exchange-level name in the set (01 §5.5, `figi` added 2026-06-18).
+      security: { kind: 'figi', value: 'BBG000BDTF76', chain: null, mic: null },
       quantity: '62.5',
     });
     expect(fact.value.minor).toBe(1_677_500n);

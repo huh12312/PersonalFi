@@ -1,0 +1,493 @@
+{
+  "$comment": [
+    "07 §4.3 rung 2, LOCAL_SEED_TABLE: a hand-curated, in-repo, MIT-licensed table of common",
+    "ETFs and funds, keyed by ticker. It exists because rungs 3 and 4 (SEC EDGAR N-PORT, issuer",
+    "holdings CSVs) are network calls behind an egress allow-list and rung 5 (name heuristics) is",
+    "a guess; the overwhelming majority of a personal portfolio is a handful of broad index funds,",
+    "and answering those from a file is both exact and free.",
+    "",
+    "This is NOT the ~600-row table 07 §4.3 imagines. It is 48 rows, chosen as the funds most",
+    "likely to appear in a US personal portfolio, and the honest consequence is stated in",
+    "docs/evidence/phase-3/wp3.1-securities.md: the measured hit rate on the seed and the",
+    "resulting % unclassified. Growing it is a data edit that needs no code change, which is the",
+    "point of it being a file.",
+    "",
+    "expenseRatio is the issuer's published net ratio as a decimal string (0.000300 = 0.03%), as",
+    "of 2026-09. It feeds fee drag only, it is user-correctable through security_overlay, and it",
+    "is never a float: NUMERIC(9,6) all the way down (D3).",
+    "",
+    "components, where present, is the fund-of-funds look-through 07 §4.3 asks for — weights as",
+    "decimal strings, recursion capped at depth 3 with cycle detection, and a fund whose weights",
+    "miss 1.0 by more than 5% flagged rather than quietly bucketed."
+  ],
+  "version": "2026-09-22",
+  "license": "MIT",
+  "funds": [
+    {
+      "ticker": "VTI",
+      "name": "Vanguard Total Stock Market ETF",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000300"
+    },
+    {
+      "ticker": "VOO",
+      "name": "Vanguard S&P 500 ETF",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000300"
+    },
+    {
+      "ticker": "IVV",
+      "name": "iShares Core S&P 500 ETF",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000300"
+    },
+    {
+      "ticker": "SPY",
+      "name": "SPDR S&P 500 ETF Trust",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000945"
+    },
+    {
+      "ticker": "ITOT",
+      "name": "iShares Core S&P Total U.S. Stock Market ETF",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000300"
+    },
+    {
+      "ticker": "SCHB",
+      "name": "Schwab U.S. Broad Market ETF",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000300"
+    },
+    {
+      "ticker": "VTSAX",
+      "name": "Vanguard Total Stock Market Index Fund Admiral",
+      "type": "mutual_fund",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000400"
+    },
+    {
+      "ticker": "FXAIX",
+      "name": "Fidelity 500 Index Fund",
+      "type": "mutual_fund",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000150"
+    },
+    {
+      "ticker": "FZROX",
+      "name": "Fidelity ZERO Total Market Index Fund",
+      "type": "mutual_fund",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000000"
+    },
+    {
+      "ticker": "SWPPX",
+      "name": "Schwab S&P 500 Index Fund",
+      "type": "mutual_fund",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000200"
+    },
+    {
+      "ticker": "VB",
+      "name": "Vanguard Small-Cap ETF",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000500"
+    },
+    {
+      "ticker": "VO",
+      "name": "Vanguard Mid-Cap ETF",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000400"
+    },
+    {
+      "ticker": "VUG",
+      "name": "Vanguard Growth ETF",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000400"
+    },
+    {
+      "ticker": "VTV",
+      "name": "Vanguard Value ETF",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000400"
+    },
+    {
+      "ticker": "QQQ",
+      "name": "Invesco QQQ Trust",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.002000"
+    },
+    {
+      "ticker": "VXUS",
+      "name": "Vanguard Total International Stock ETF",
+      "type": "etf",
+      "assetClass": "INTL_DEV_EQUITY",
+      "region": "DEV_EX_US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000500"
+    },
+    {
+      "ticker": "VEA",
+      "name": "Vanguard FTSE Developed Markets ETF",
+      "type": "etf",
+      "assetClass": "INTL_DEV_EQUITY",
+      "region": "DEV_EX_US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000500"
+    },
+    {
+      "ticker": "IEFA",
+      "name": "iShares Core MSCI EAFE ETF",
+      "type": "etf",
+      "assetClass": "INTL_DEV_EQUITY",
+      "region": "DEV_EX_US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000700"
+    },
+    {
+      "ticker": "VTIAX",
+      "name": "Vanguard Total International Stock Index Fund Admiral",
+      "type": "mutual_fund",
+      "assetClass": "INTL_DEV_EQUITY",
+      "region": "DEV_EX_US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.001100"
+    },
+    {
+      "ticker": "VWO",
+      "name": "Vanguard FTSE Emerging Markets ETF",
+      "type": "etf",
+      "assetClass": "EM_EQUITY",
+      "region": "EM",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000700"
+    },
+    {
+      "ticker": "IEMG",
+      "name": "iShares Core MSCI Emerging Markets ETF",
+      "type": "etf",
+      "assetClass": "EM_EQUITY",
+      "region": "EM",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000900"
+    },
+    {
+      "ticker": "VT",
+      "name": "Vanguard Total World Stock ETF",
+      "type": "etf",
+      "assetClass": "US_EQUITY",
+      "region": "GLOBAL",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000600"
+    },
+    {
+      "ticker": "BND",
+      "name": "Vanguard Total Bond Market ETF",
+      "type": "etf",
+      "assetClass": "US_BOND",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000300"
+    },
+    {
+      "ticker": "AGG",
+      "name": "iShares Core U.S. Aggregate Bond ETF",
+      "type": "etf",
+      "assetClass": "US_BOND",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000300"
+    },
+    {
+      "ticker": "VBTLX",
+      "name": "Vanguard Total Bond Market Index Fund Admiral",
+      "type": "mutual_fund",
+      "assetClass": "US_BOND",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000500"
+    },
+    {
+      "ticker": "BNDX",
+      "name": "Vanguard Total International Bond ETF",
+      "type": "etf",
+      "assetClass": "INTL_BOND",
+      "region": "DEV_EX_US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000700"
+    },
+    {
+      "ticker": "VCIT",
+      "name": "Vanguard Intermediate-Term Corporate Bond ETF",
+      "type": "etf",
+      "assetClass": "US_BOND",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000400"
+    },
+    {
+      "ticker": "VGIT",
+      "name": "Vanguard Intermediate-Term Treasury ETF",
+      "type": "etf",
+      "assetClass": "US_BOND",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000400"
+    },
+    {
+      "ticker": "SHY",
+      "name": "iShares 1-3 Year Treasury Bond ETF",
+      "type": "etf",
+      "assetClass": "US_BOND",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.001500"
+    },
+    {
+      "ticker": "TLT",
+      "name": "iShares 20+ Year Treasury Bond ETF",
+      "type": "etf",
+      "assetClass": "US_BOND",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.001500"
+    },
+    {
+      "ticker": "TIP",
+      "name": "iShares TIPS Bond ETF",
+      "type": "etf",
+      "assetClass": "TIPS",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.001900"
+    },
+    {
+      "ticker": "VTIP",
+      "name": "Vanguard Short-Term Inflation-Protected Securities ETF",
+      "type": "etf",
+      "assetClass": "TIPS",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000300"
+    },
+    {
+      "ticker": "SCHP",
+      "name": "Schwab U.S. TIPS ETF",
+      "type": "etf",
+      "assetClass": "TIPS",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000300"
+    },
+    {
+      "ticker": "VNQ",
+      "name": "Vanguard Real Estate ETF",
+      "type": "etf",
+      "assetClass": "REAL_ESTATE",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.001300"
+    },
+    {
+      "ticker": "SCHH",
+      "name": "Schwab U.S. REIT ETF",
+      "type": "etf",
+      "assetClass": "REAL_ESTATE",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000700"
+    },
+    {
+      "ticker": "VNQI",
+      "name": "Vanguard Global ex-U.S. Real Estate ETF",
+      "type": "etf",
+      "assetClass": "REAL_ESTATE",
+      "region": "DEV_EX_US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.001200"
+    },
+    {
+      "ticker": "GLD",
+      "name": "SPDR Gold Shares",
+      "type": "etf",
+      "assetClass": "COMMODITY",
+      "region": "GLOBAL",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.004000"
+    },
+    {
+      "ticker": "IAU",
+      "name": "iShares Gold Trust",
+      "type": "etf",
+      "assetClass": "COMMODITY",
+      "region": "GLOBAL",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.002500"
+    },
+    {
+      "ticker": "DBC",
+      "name": "Invesco DB Commodity Index Tracking Fund",
+      "type": "etf",
+      "assetClass": "COMMODITY",
+      "region": "GLOBAL",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.008500"
+    },
+    {
+      "ticker": "VMFXX",
+      "name": "Vanguard Federal Money Market Fund",
+      "type": "mutual_fund",
+      "assetClass": "CASH",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.001100",
+      "isCashEquivalent": true
+    },
+    {
+      "ticker": "SPAXX",
+      "name": "Fidelity Government Money Market Fund",
+      "type": "mutual_fund",
+      "assetClass": "CASH",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.004200",
+      "isCashEquivalent": true
+    },
+    {
+      "ticker": "SWVXX",
+      "name": "Schwab Value Advantage Money Fund",
+      "type": "mutual_fund",
+      "assetClass": "CASH",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.003400",
+      "isCashEquivalent": true
+    },
+    {
+      "ticker": "SGOV",
+      "name": "iShares 0-3 Month Treasury Bond ETF",
+      "type": "etf",
+      "assetClass": "CASH",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000900",
+      "isCashEquivalent": true
+    },
+    {
+      "ticker": "AOR",
+      "name": "iShares Core Growth Allocation ETF",
+      "type": "etf",
+      "assetClass": "OTHER",
+      "region": "GLOBAL",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.001500",
+      "components": [
+        { "ticker": "ITOT", "weight": "0.420000" },
+        { "ticker": "IEFA", "weight": "0.180000" },
+        { "ticker": "IEMG", "weight": "0.060000" },
+        { "ticker": "AGG", "weight": "0.300000" },
+        { "ticker": "SGOV", "weight": "0.040000" }
+      ]
+    },
+    {
+      "ticker": "AOA",
+      "name": "iShares Core Aggressive Allocation ETF",
+      "type": "etf",
+      "assetClass": "OTHER",
+      "region": "GLOBAL",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.001500",
+      "components": [
+        { "ticker": "ITOT", "weight": "0.560000" },
+        { "ticker": "IEFA", "weight": "0.250000" },
+        { "ticker": "IEMG", "weight": "0.090000" },
+        { "ticker": "AGG", "weight": "0.100000" }
+      ]
+    },
+    {
+      "ticker": "AOM",
+      "name": "iShares Core Moderate Allocation ETF",
+      "type": "etf",
+      "assetClass": "OTHER",
+      "region": "GLOBAL",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.001500",
+      "components": [
+        { "ticker": "ITOT", "weight": "0.280000" },
+        { "ticker": "IEFA", "weight": "0.120000" },
+        { "ticker": "IEMG", "weight": "0.040000" },
+        { "ticker": "AGG", "weight": "0.500000" },
+        { "ticker": "SGOV", "weight": "0.060000" }
+      ]
+    },
+    {
+      "ticker": "VTTSX",
+      "name": "Vanguard Target Retirement 2060 Fund",
+      "type": "mutual_fund",
+      "assetClass": "OTHER",
+      "region": "GLOBAL",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000800",
+      "components": [
+        { "ticker": "VTSAX", "weight": "0.540000" },
+        { "ticker": "VTIAX", "weight": "0.360000" },
+        { "ticker": "VBTLX", "weight": "0.070000" },
+        { "ticker": "BNDX", "weight": "0.030000" }
+      ]
+    },
+    {
+      "ticker": "VBIAX",
+      "name": "Vanguard Balanced Index Fund Admiral",
+      "type": "mutual_fund",
+      "assetClass": "OTHER",
+      "region": "US",
+      "sector": "UNKNOWN",
+      "expenseRatio": "0.000700",
+      "components": [
+        { "ticker": "VTSAX", "weight": "0.600000" },
+        { "ticker": "VBTLX", "weight": "0.400000" }
+      ]
+    }
+  ]
+}

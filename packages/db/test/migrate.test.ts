@@ -191,6 +191,20 @@ describeWithDb('runMigrations', () => {
       //   without a recorded review), and insight_dismissals_permanent_is_earned
       //   (the 30/90/permanent ladder's third rung is reachable only at three
       //   dismissals — a snooze never advances the count).
+      // 0013_securities: the three @ctx/investments tables — securities,
+      //   security_identifiers, security_overlay. Two constraints carry the
+      //   load-bearing claims. `securities.identity_kind` is CHECKed against a
+      //   list with **no `proprietary` member**, so a row cannot exist because
+      //   a provider mentioned its own opaque id — D25's shape applied to
+      //   securities, and the reason an unresolvable identifier fails loudly
+      //   instead of minting a row. And `security_identifiers` has a UNIQUE
+      //   (user_id, identifier_key), so one name points at exactly one
+      //   security: two providers that agree on an ISIN cannot become two
+      //   rows even if the resolver's lookup were wrong. `security_overlay` is
+      //   04 §2.2's immutable-facts + mutable-overlay split applied to a
+      //   security's metadata — a provider re-sync rewrites `securities` and
+      //   cannot write here at all, which is what makes a user's asset-class
+      //   override durable.
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
@@ -244,7 +258,10 @@ describeWithDb('runMigrations', () => {
         'rules',
         'schedules',
         'schema_migrations',
+        'securities',
         'security_events',
+        'security_identifiers',
+        'security_overlay',
         'sessions',
         'snapshot_grants',
         'subscription_metadata',

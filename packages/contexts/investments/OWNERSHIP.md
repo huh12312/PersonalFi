@@ -12,6 +12,12 @@ a comment: a table defined outside its owning package, or claimed twice, fails C
 Tables listed here are _claimed_; most do not exist yet. Claiming early is the point
 — it is what makes a collision visible at design time instead of at migration time.
 
+`securities`, `security_identifiers` and `security_overlay` exist as of
+`0013_securities.sql` (WP 3.1). The rest are still claims: `holdings`,
+`holdings_snapshots`, `investment_transactions` and `cost_basis_lots` land in 0014
+(WP 3.2), and `prices`, `fx_rates`, `price_source_priority` and `wallet_addresses`
+in 0015/0016 (WP 3.4, WP 3.6).
+
 ## Depends on
 
 - Platform
@@ -22,6 +28,7 @@ Tables listed here are _claimed_; most do not exist yet. Claiming early is the p
 
 - `securities`
 - `security_identifiers`
+- `security_overlay`
 - `holdings`
 - `holdings_snapshots`
 - `investment_transactions`

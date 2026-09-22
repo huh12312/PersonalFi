@@ -36,7 +36,6 @@ import {
   quantity,
   type CurrencyCode,
   type DateOnly,
-  type Money,
 } from '@core/kernel';
 import { currencyOf, moneyOf, moneyOrNullOf, signedAmountOf, signedBalanceOf } from './amount.ts';
 import type {
@@ -413,9 +412,7 @@ export function investmentTransactionFactOf(
   // identify — the two are different facts and collapsing them would make an
   // unresolvable security look like a cash movement.
   const identifier =
-    transaction.security_id === null
-      ? null
-      : holdingSecurityOf(transaction.security_id, security);
+    transaction.security_id === null ? null : holdingSecurityOf(transaction.security_id, security);
   const date = dateOnlyOf(transaction.date, 'investment_transaction.date');
   const quantity = decimalStringOf(transaction.quantity, 'investment_transaction.quantity');
   const amount = signedAmountOf(transaction.amount, code, 'investment_transaction.amount');

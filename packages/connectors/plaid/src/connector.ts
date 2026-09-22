@@ -39,6 +39,7 @@ import {
   type ProviderAccountFact,
   type ProviderBalanceFact,
   type ProviderHoldingFact,
+  type ProviderInvestmentTransactionFact,
   type ProviderLiabilityFact,
   type ProviderTransactionFact,
   type SyncOptions,
@@ -432,11 +433,12 @@ export class PlaidConnector implements Connector {
   /**
    * Investment transactions, by date window.
    *
-   * Not a port method: 01 §5.5 — "There is no `/investments/transactions/sync`"
-   * — so there is no cursor, and the port's `syncTransactions` contract is a
-   * delta stream. The window is `min(historyDays, 730)` back from today, and
-   * idempotency is the caller's `investment_transaction_id` upsert, exactly as
-   * 01 §5.5 prescribes.
+   * Now an optional port method (WP 3.1), but deliberately **not** shaped like
+   * `syncTransactions`: 01 §5.5 — "There is no `/investments/transactions/sync`"
+   * — so there is no cursor and no `TransactionPage`, because a paging shape with
+   * nothing behind it hands the caller a `nextCursor` it must never persist. The
+   * window is `min(historyDays, 730)` back from today, and idempotency is the
+   * caller's `investment_transaction_id` upsert, exactly as 01 §5.5 prescribes.
    *
    * Paginates on `total_investment_transactions` with `options.offset`, because
    * the endpoint caps a response at 500 and silently truncating a brokerage's
@@ -445,7 +447,7 @@ export class PlaidConnector implements Connector {
   async syncInvestmentTransactions(
     handle: ConnectionHandle,
     options: SyncOptions,
-  ): Promise<readonly PlaidInvestmentTransactionFact[]> {
+  ): Promise<readonly ProviderInvestmentTransactionFact[]> {
     assertSupports(this.provider, this.capabilities(), 'investment_txns');
     const accessToken = this.#accessToken(handle);
     // UTC, deliberately: this is a request parameter bounding a provider's
@@ -455,7 +457,7 @@ export class PlaidConnector implements Connector {
     // zone down here would be.
     const today = todayIn(options.clock, 'UTC');
     const start = windowStart(this.capabilities(), options.historyDays, today) ?? today;
-    const facts: PlaidInvestmentTransactionFact[] = [];
+    const facts: ProviderInvestmentTransactionFact[] = [];
 
     for (let offset = 0; ;) {
       this.#assertBudget(options, 'investments/transactions/get');
