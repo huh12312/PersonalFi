@@ -31,7 +31,7 @@
 #     kernel, config, api, platform, testkit, seed, secretbox, identity,
 #     ledger, categorization, connector-port, connector-manual, connector-csv,
 #     connector-plaid, connections, recurring, budgeting, notifications,
-#     insights, investments (connector-coinbase joins when WP 3.5's package lands)
+#     insights, investments, connector-coinbase
 #   `migration-test` (Postgres 18 service, DATABASE_URL set):
 #     db, platform-db, secretbox-db, identity-db, api-db, testkit, ledger-db,
 #     categorization-db, connections-db, recurring-db, budgeting-db,
@@ -184,7 +184,7 @@ jobs:
             --project secretbox --project identity \
             --project ledger --project categorization \
             --project connector-port --project connector-manual \
-            --project connector-csv --project connector-plaid \
+            --project connector-csv --project connector-plaid --project connector-coinbase \
             --project connections --project recurring --project budgeting \
             --project notifications --project insights --project investments
 

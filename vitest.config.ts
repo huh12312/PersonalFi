@@ -210,6 +210,20 @@ export default defineConfig({
         },
       },
       {
+        // Phase 3 WP 3.5 (docs/plan/03-phase-3-dispatch.md §3): driven end to
+        // end by a hermetic FakeCoinbaseApi, like connector-plaid; its live
+        // smoke skips itself when the coinbase_* secret files are absent, which
+        // they are in CI. Registered only once the package existed — a vitest
+        // project whose root directory is missing breaks every run.
+        root: './packages/connectors/coinbase',
+        test: {
+          name: 'connector-coinbase',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+          testTimeout: 30_000,
+        },
+      },
+      {
         // Phase 3 WP 3.1/3.2/3.3: the resolver's merge rules, lot maths and
         // portfolio analytics are pure over Quantity + Money; they run here.
         root: './packages/contexts/investments',

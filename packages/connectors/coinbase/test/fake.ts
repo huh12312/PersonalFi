@@ -49,7 +49,6 @@
 // untested — which is the failure this file's opening comment is about. Same
 // carve-out reasoning as `src/jwt.ts`: a signature, not a cipher; no AAD, no
 // nonce reuse, no tag comparison.
-// eslint-disable-next-line no-restricted-imports -- the fake must verify an Ed25519 signature, or the signing path is untested
 import { createPrivateKey, createPublicKey, generateKeyPairSync, verify } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

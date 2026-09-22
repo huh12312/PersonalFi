@@ -47,7 +47,6 @@
 // in-file carve-out. It would sit better in `eslint.config.js`'s `ignores` list
 // beside `packages/db/src/migrate.ts` — see wp3.5-coinbase.md §9, which asks the
 // orchestrator to move it there, since this package may not edit that file.
-// eslint-disable-next-line no-restricted-imports -- Ed25519 signing, provider-mandated; no cipher, no AAD, no tag comparison
 import { createPrivateKey, sign, type KeyObject } from 'node:crypto';
 import { ConnectorError } from '@connector/port';
 import { randomBytes } from '@core/secretbox';

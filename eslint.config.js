@@ -152,9 +152,22 @@ export default tseslint.config(
   // AAD to get wrong — and it could not reach `@core/secretbox` in any case,
   // because `@core/secretbox` depends on `@core/db` and the import would be a
   // cycle.
+  //
+  // `packages/connectors/coinbase/src/jwt.ts` is the second forced carve-out
+  // (Phase 3 WP 3.5): Coinbase's CDP API mandates a per-request Ed25519 JWT,
+  // and Ed25519 *signing* is not a primitive `@core/secretbox` exposes or
+  // should — there is no cipher, no nonce reuse to get wrong and no tag to
+  // compare, only a signature over a uri-bound claim set. The key never leaves
+  // a per-request `KeyObject`. Its fake (`test/fake.ts`) needs `node:crypto`
+  // to *verify* that signature, or the signing path would be untested.
   {
     files: ['apps/**/*.ts', 'packages/**/*.ts'],
-    ignores: ['packages/secretbox/src/primitives.ts', 'packages/db/src/migrate.ts'],
+    ignores: [
+      'packages/secretbox/src/primitives.ts',
+      'packages/db/src/migrate.ts',
+      'packages/connectors/coinbase/src/jwt.ts',
+      'packages/connectors/coinbase/test/fake.ts',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
