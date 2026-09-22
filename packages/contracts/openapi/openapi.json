@@ -2034,6 +2034,9 @@
           "advisorId": {
             "type": "string"
           },
+          "advisorVersion": {
+            "type": "string"
+          },
           "key": {
             "type": "string"
           },
@@ -2232,6 +2235,7 @@
         "required": [
           "id",
           "advisorId",
+          "advisorVersion",
           "key",
           "period",
           "type",
@@ -6704,6 +6708,9 @@
           "advisorId": {
             "type": "string"
           },
+          "advisorVersion": {
+            "type": "string"
+          },
           "key": {
             "type": "string"
           },
@@ -6906,6 +6913,7 @@
         "required": [
           "id",
           "advisorId",
+          "advisorVersion",
           "key",
           "period",
           "type",
@@ -13440,7 +13448,7 @@
         "tags": [
           "categories"
         ],
-        "description": "Flat and ordered: a child follows its parent, and `parentId` carries the structure. Archived categories are omitted unless asked for — a picker must not offer a category the user retired, but a historic assignment still points at one. Categories are per user (decision D6), so this is never a shared list.\n\n**D2-1 lazy repair.** `ensureTaxonomy` also runs once here, idempotently, when this session's user has zero categories — the api's `onReady` pass only ever seeds users that already exist *at boot*, and `bootstrap-user` creates the account holder afterwards (docs/evidence/phase-1/gate-security-review.md §9.4). This route is what every screen that needs a category actually calls, so fixing the read here closes the gap for any user-creation path, present or future, without an api restart.",
+        "description": "Flat and ordered: a child follows its parent, and `parentId` carries the structure. Archived categories are omitted unless asked for — a picker must not offer a category the user retired, but a historic assignment still points at one. Categories are per user (decision D6), so this is never a shared list.\n\nTaxonomy is seeded once, at user creation, by `bootstrap-seed.ts`'s `seedUserState` (condition C-1, docs/evidence/phase-2/gate-security-review.md §5) — this route used to carry a D2-1 lazy repair for the gap that left; the repair is gone and this route is a plain read.",
         "parameters": [
           {
             "schema": {
@@ -18350,16 +18358,29 @@
         "parameters": [
           {
             "schema": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "pending_review",
-                  "accepted",
-                  "dismissed",
-                  "snoozed"
-                ]
-              }
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "pending_review",
+                    "accepted",
+                    "dismissed",
+                    "snoozed"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "pending_review",
+                      "accepted",
+                      "dismissed",
+                      "snoozed"
+                    ]
+                  }
+                }
+              ]
             },
             "in": "query",
             "name": "statuses",
