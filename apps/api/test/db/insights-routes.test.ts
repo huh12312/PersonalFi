@@ -162,6 +162,21 @@ describe.skipIf(NO_DATABASE)('/insights and /advisors (WP 2.r)', () => {
     expect(advisors.some((a) => a.advisorId === CASH_ADVISOR_ID)).toBe(true);
   });
 
+  it('a user created after boot gets the catalogue on first GET /advisors, with no restart (gate G2-1)', async () => {
+    // The Phase 2 gate's cold walk found zero advisors for a user bootstrapped
+    // after the api's onReady hook ran — the D2-1 shape again. The route now
+    // repairs this lazily, idempotently, only when the user has no rows.
+    const lateUserId = await h.database.createUser('Late Holder');
+    const late = await h.issueSession({ userId: lateUserId, fresh: false });
+    const first = await h.request({ method: 'GET', url: '/advisors', session: late });
+    expectStatus(first, 200);
+    const { advisors } = first.json() as { advisors: WireAdvisor[] };
+    expect(advisors.length).toBeGreaterThan(0);
+    expect(advisors.some((a) => a.advisorId === CASH_ADVISOR_ID)).toBe(true);
+    const second = await h.request({ method: 'GET', url: '/advisors', session: late });
+    expect((second.json() as { advisors: WireAdvisor[] }).advisors).toHaveLength(advisors.length);
+  });
+
   it('the feed carries the real insight the advisor proposed, with its evidence panel', async () => {
     const feed = await h.request({ method: 'GET', url: '/insights', session: h.stale });
     expectStatus(feed, 200);
