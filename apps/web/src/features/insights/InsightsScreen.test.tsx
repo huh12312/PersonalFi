@@ -26,6 +26,7 @@ function buildInsight(overrides: Partial<Insight> = {}): Insight {
   return {
     id: 'insight_1',
     advisorId: 'builtin.subscriptions.price_increase',
+    advisorVersion: '1.0.0',
     key: 'subscription.price_increase.merch_1.2026-06-01',
     period: '2026-06',
     type: 'subscription.price_increase',
