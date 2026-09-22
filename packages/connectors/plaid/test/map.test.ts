@@ -463,8 +463,10 @@ describe('holdingFactOf', () => {
     const fact = holdingFactOf(holdings[0] as Holding, SECURITIES, NOW);
     expect(fact).toMatchObject({
       providerAccountId: 'acct-brokerage-003',
-      securityId: 'sec-vti-0001',
-      symbol: 'VTI',
+      providerSecurityId: 'sec-vti-0001',
+      // The strongest name Plaid gave, not the first one it listed: the fixture
+      // carries a CUSIP and a ticker, and the port's rank picks the CUSIP.
+      security: { kind: 'cusip', value: '922908769', chain: null, mic: null },
       quantity: '62.5',
     });
     expect(fact.value.minor).toBe(1_677_500n);
@@ -483,13 +485,25 @@ describe('holdingFactOf', () => {
 
   it('keeps a sub-satoshi quantity as a decimal string, never as 1e-7', () => {
     const fact = holdingFactOf(holdings[2] as Holding, SECURITIES, NOW);
-    expect(fact.symbol).toBe('BTC');
+    expect(fact.security.value).toBe('BTC');
     expect(fact.quantity).toBe('0.0000001');
     expect(fact.costBasis).toBeNull();
   });
 
-  it('reports a null symbol for a security with no ticker rather than inventing one', () => {
-    expect(holdingFactOf(holdings[1] as Holding, SECURITIES, NOW).symbol).toBeNull();
+  it('falls back to a proprietary dead end for a security Plaid would not name', () => {
+    // WP 3.1. The cash-sweep fixture carries no ticker, CUSIP, ISIN or FIGI, so
+    // the only name available is Plaid's own `security_id` — and that is
+    // emitted as `proprietary`, which `@ctx/investments` refuses to treat as an
+    // identity. The position therefore surfaces as a resolution failure rather
+    // than minting an anonymous row nothing will ever merge with.
+    const fact = holdingFactOf(holdings[1] as Holding, SECURITIES, NOW);
+    expect(fact.security).toEqual({
+      kind: 'proprietary',
+      value: 'sec-cash-0002',
+      chain: null,
+      mic: null,
+    });
+    expect(fact.providerSecurityId).toBe('sec-cash-0002');
   });
 });
 
@@ -519,9 +533,28 @@ describe('investmentTransactionFactOf', () => {
 
   it('tolerates a cash movement with no security at all', () => {
     const fact = investmentTransactionFactOf(contribution!, SECURITIES);
-    expect(fact.securityId).toBeNull();
-    expect(fact.symbol).toBeNull();
+    expect(fact.security).toBeNull();
+    expect(fact.providerSecurityId).toBeNull();
     expect(fact.fees).toBeNull();
+  });
+
+  it('fingerprints every fact, because there is no cursor to dedupe with', () => {
+    // 01 §5.5: no `/investments/transactions/sync`. A re-run of the same date
+    // window is the normal case, not the exceptional one, so the fingerprint is
+    // load-bearing rather than belt-and-braces — and it must be stable across
+    // two mappings of the same row.
+    for (const transaction of INVESTMENTS.investment_transactions) {
+      const fact = investmentTransactionFactOf(transaction, SECURITIES);
+      expect(fact.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+      expect(investmentTransactionFactOf(transaction, SECURITIES).fingerprint).toBe(
+        fact.fingerprint,
+      );
+    }
+    // Two different transactions must not share one.
+    const fingerprints = INVESTMENTS.investment_transactions.map(
+      (transaction) => investmentTransactionFactOf(transaction, SECURITIES).fingerprint,
+    );
+    expect(new Set(fingerprints).size).toBe(fingerprints.length);
   });
 });
 

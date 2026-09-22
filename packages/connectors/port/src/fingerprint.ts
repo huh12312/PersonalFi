@@ -30,12 +30,22 @@
  */
 import type { DateOnly, Money } from '@core/kernel';
 import { sha256 } from '@core/secretbox';
+import type { SecurityIdentifier, SecurityIdentifierKind } from './facts.ts';
 
 // Written as an escape, not as a literal NUL byte: a source file containing a
 // raw NUL is treated as *binary* by git, which means it never appears in a
 // diff, never merges, and silently drops out of code review. The runtime value
 // is identical, so no fingerprint changes.
 const SEPARATOR = '\u0000';
+
+/**
+ * The inner separator, for a key that is itself one field of another key.
+ *
+ * Also written as an escape, and for the same reason as `SEPARATOR`: a source
+ * file containing a raw control byte is treated as *binary* by git, so it never
+ * appears in a diff and silently drops out of code review.
+ */
+const IDENTIFIER_SEPARATOR = '\u001f';
 
 /**
  * The descriptor, reduced to what two sightings of one purchase will agree on.
@@ -111,6 +121,133 @@ export function importedTransactionIdOf(input: ImportedIdInput): string {
     input.amount.currency,
     normaliseDescription(input.description),
     String(input.occurrence),
+  ]);
+}
+
+/**
+ * Identifier strength, strongest first. The port's half of the merge rule.
+ *
+ * It lives here because a *fingerprint* has to pick one identifier out of a set
+ * and two providers must pick the same one, which makes the order part of the
+ * canonical model rather than an implementation detail of whoever stores it.
+ * `@ctx/investments` states the same order as its resolution tiers and pins it
+ * with its own test; the boundary lint denies `packages/connectors/*` → `@ctx/*`
+ * (and `@ctx/investments` → `@connector/port`), so the two declarations are
+ * separate on purpose and each is pinned to the same literal list.
+ *
+ * Why this order:
+ *
+ *   * **figi** — globally unique, permanent, exchange-level, and issued by an
+ *     open standard rather than by a vendor. There is nothing stronger.
+ *   * **isin** — globally unique at the issue level, but blind to which venue a
+ *     line is held on, so it cannot separate dual listings.
+ *   * **cusip** — North America only, and licensed rather than open.
+ *   * **ticker** — ambiguous without a MIC and reused after delistings.
+ *   * **chain_contract** — exact for a token, but says nothing about a security.
+ *   * **proprietary** — a provider's own id. Never an identity anywhere.
+ *
+ * `chain_contract` ranks below `ticker` **only for fingerprint selection**,
+ * where the question is "which single name do two providers most likely share".
+ * It is not a claim that a contract address is weaker evidence than a ticker;
+ * `@ctx/investments` treats a chain+contract as exact for the asset it names.
+ */
+export const IDENTIFIER_RANK: readonly SecurityIdentifierKind[] = [
+  'figi',
+  'isin',
+  'cusip',
+  'ticker',
+  'chain_contract',
+  'proprietary',
+];
+
+/** The identifier two providers are most likely to agree on. `null` for an empty set. */
+export function strongestIdentifier(
+  identifiers: readonly SecurityIdentifier[],
+): SecurityIdentifier | null {
+  let best: SecurityIdentifier | null = null;
+  let bestRank = Number.POSITIVE_INFINITY;
+  for (const identifier of identifiers) {
+    const rank = IDENTIFIER_RANK.indexOf(identifier.kind);
+    if (rank < 0 || rank >= bestRank) continue;
+    best = identifier;
+    bestRank = rank;
+  }
+  return best;
+}
+
+/**
+ * The canonical serialisation of one identifier: `kind|value|chain|mic`.
+ *
+ * Case and surrounding whitespace are folded because providers are inconsistent
+ * about both — a contract address arrives checksummed from one wallet and
+ * lowercased from another, and they are the same address. Nothing else is
+ * touched: a ticker's punctuation (`BRK.B` vs `BRK-B`) is a real difference
+ * between venues and normalising it away would merge two securities.
+ *
+ * Joined with `U+001F` rather than the `U+0000` the money fingerprints use, so
+ * that an identifier key nested inside `investmentTransactionFingerprintOf`'s
+ * field list stays unambiguous at both levels without length prefixes.
+ */
+export function securityIdentifierKeyOf(identifier: SecurityIdentifier): string {
+  return [
+    identifier.kind,
+    identifier.value.trim().toLowerCase(),
+    (identifier.chain ?? '').trim().toLowerCase(),
+    (identifier.mic ?? '').trim().toUpperCase(),
+  ].join(IDENTIFIER_SEPARATOR);
+}
+
+/**
+ * The cross-provider dedupe key for a security.
+ *
+ * Over the strongest identifier only — see `ProviderSecurityFact.fingerprint`
+ * for why hashing the whole set would make the key a function of how chatty the
+ * provider is. A fact with no identifiers at all is a fact that cannot be
+ * deduplicated against anything, and saying so by throwing is better than
+ * minting a hash of the empty string that every such fact would then share.
+ */
+export function securityFingerprintOf(identifiers: readonly SecurityIdentifier[]): string {
+  const strongest = strongestIdentifier(identifiers);
+  if (strongest === null) {
+    throw new Error(
+      'securityFingerprintOf: a security fact carried no identifiers at all. An adapter that ' +
+        'cannot name a security must not emit a fact for it — a fingerprint over nothing would ' +
+        'collide with every other unnamed security.',
+    );
+  }
+  return digestOf([securityIdentifierKeyOf(strongest)]);
+}
+
+export interface InvestmentTransactionFingerprintInput {
+  readonly providerAccountId: string;
+  readonly date: DateOnly;
+  readonly amount: Money;
+  /** `null` for a cash sweep, a fee or a deposit — a real transaction with no security. */
+  readonly security: SecurityIdentifier | null;
+  /** Decimal string, signed. Part of the key: two same-day fills differ by size. */
+  readonly quantity: string;
+}
+
+/**
+ * The cross-provider dedupe key for an investment transaction.
+ *
+ * Deliberately *not* `fingerprintOf`: a bank transaction is identified by its
+ * descriptor, and an investment transaction's `name` is provider boilerplate
+ * ("BUY VANGUARD TOTAL STOCK MKT") that two providers will never spell alike.
+ * What they do agree on is the account, the day, the security, the quantity and
+ * the cash amount, so those are the fields. The security contributes its
+ * strongest identifier for the same reason `securityFingerprintOf` does.
+ */
+export function investmentTransactionFingerprintOf(
+  input: InvestmentTransactionFingerprintInput,
+): string {
+  return digestOf([
+    input.providerAccountId,
+    input.date,
+    input.amount.minor.toString(),
+    input.amount.currency,
+    input.security === null ? '' : securityIdentifierKeyOf(input.security),
+    input.quantity.trim(),
   ]);
 }
 

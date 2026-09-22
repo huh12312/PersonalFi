@@ -1,0 +1,16 @@
+{
+  "name": "@connector/coinbase",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./test": "./test/index.ts"
+  },
+  "dependencies": {
+    "@connector/port": "workspace:*",
+    "@core/kernel": "workspace:*",
+    "@core/secretbox": "workspace:*"
+  }
+}

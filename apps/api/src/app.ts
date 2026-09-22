@@ -11,7 +11,6 @@ import { createDatabase } from '@core/db';
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { newId, systemClock, type Clock } from '@core/kernel';
 import type { TransactionalExecutor } from '@core/platform';
-import { ensureTaxonomy } from '@ctx/categorization';
 import type { ConnectorRegistry } from '@ctx/connections';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import {
@@ -26,9 +25,10 @@ import type { CookiePolicy } from './auth/cookies.ts';
 import { assertCsrf, ensureCsrfCookie } from './auth/csrf.ts';
 import { createGuards } from './auth/guards.ts';
 import { SecurityRuntime } from './auth/runtime.ts';
+import { seedUserState } from './bootstrap-seed.ts';
 import { createConnectorRegistry, createDomainRuntime, type DomainRuntime } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
-import { registerBuiltinAdvisors } from './modules.ts';
+import { buildPlatform } from './platform.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
 import { accountRoutes } from './routes/accounts.ts';
 import { authRoutes } from './routes/auth.ts';
@@ -422,7 +422,22 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(notificationRoutes(deps));
 
   /**
-   * Install the shipped category taxonomy for every user (condition D-6, N-3).
+   * Idempotent repair pass for every user that already exists (condition D-6,
+   * N-3, and Phase 2's **C-1**).
+   *
+   * The root fix — seeding a brand-new user's taxonomy, advisor catalogue and
+   * schedules **at creation**, not at the next boot — is
+   * `./bootstrap-seed.ts`'s `seedUserState`, called from `bin/bootstrap-user.ts`
+   * the moment `createPrimary` returns. This hook is what that fix leaves
+   * behind on purpose: a pass every api boot, over whichever user already
+   * exists, so an *upgrade* — a release that adds a category, an advisor, or a
+   * schedule this file did not know to seed when this user was created —
+   * still reaches them. `seedUserState` is safe to call unconditionally here
+   * for the same reason `bootstrap-user.ts` calls it once: `ensureTaxonomy`
+   * and `registerBuiltinAdvisors` write nothing on a row that already matches,
+   * and `upsertSchedule`'s own `ON CONFLICT` never touches `enabled` or
+   * `next_run_at` — a restart cannot silently re-enable a schedule the user
+   * turned off, or reset one that is already pending.
    *
    * **Here rather than in a migration.** `categories` is `user_id`-scoped (D6),
    * and migrations run before any user exists — `just bootstrap-user` creates the
@@ -433,22 +448,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
    *
    * **Here rather than in `modules.ts` or in identity's user-creation path.**
    * `modules.ts` is the event-consumer registry and this is not a consumer;
-   * hanging it off `UserService.createPrimary` would put a categorization concern
-   * inside the identity context and — worse — would only ever run for users
-   * created *after* this release, leaving the one user who already exists with
-   * the empty picker the re-gate found. A pass every boot is what makes a
-   * category added in v0.3 appear for a user created in v0.1.
-   *
-   * **Here rather than inside `@ctx/categorization`.** The obvious shape was a
-   * `seedAllUsersTaxonomy` that read `users` itself, and the schema-ownership
-   * check refused it: `users` belongs to `@ctx/identity`. "Which users exist?" is
-   * a question only this file may ask — the composition root is the one place
-   * that knows about both contexts — so it asks identity's own `UserService`
-   * (`security.users()`, which is deliberately usable before the KEK exists) and
-   * hands the ids to `ensureTaxonomy`. `findPrimary` is today's whole answer
-   * because `createPrimary` refuses a second user outright; when identity grows
-   * a multi-user reader, this call site grows with it and `ensureTaxonomy`,
-   * which already takes a list, does not change at all.
+   * hanging it off `UserService.createPrimary` would put a categorization
+   * concern inside the identity context. "Which users exist?" is a question
+   * only this file may ask — the composition root is the one place that knows
+   * about every context involved — so it asks identity's own `UserService`
+   * (`security.users()`, which is deliberately usable before the KEK exists).
+   * `findPrimary` is today's whole answer because `createPrimary` refuses a
+   * second user outright.
    *
    * **`onReady` rather than inline.** `buildApp` is called by `emit-openapi` and
    * by the shell tests with no database behind it at all; an inline await would
@@ -459,37 +465,27 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
    * **Logged and survived, never fatal**, for the same reason `main.ts` treats
    * the config snapshot that way: a database that is up but not yet migrated
    * should get an API that can *say so* on `/ready`, not a crash loop that tells
-   * the operator nothing. The cost of the happy path is one pass over ~130 rows
-   * per user that almost always writes nothing.
+   * the operator nothing.
    */
   app.addHook('onReady', async () => {
     try {
       const primary = await security.users().findPrimary();
-      const result = await ensureTaxonomy(database, {
-        userIds: primary === null ? [] : [primary.id],
-        clock,
-      });
-      app.log.info({ ...result }, 'category taxonomy ensured');
+      if (primary === null) return;
 
-      // WP 2.7's catalogue, registered the same way as the taxonomy above and
-      // for the same reason: a pass every boot, so a rule added in a later
-      // release reaches a user created before it
-      // (docs/evidence/phase-2/wp2.7-advisor-catalog.md §8, "wherever the
-      // `advisors` rows are first written for a user"). Bookkeeping only —
-      // nothing runs from this call; see `registerBuiltinAdvisors`'s own doc.
-      if (primary !== null) {
-        await registerBuiltinAdvisors(database, {
-          userId: primary.id,
-          clock,
-          correlationId: newId(),
-        });
-        app.log.info({ userId: primary.id }, 'builtin advisor catalogue registered');
-      }
+      const platform = buildPlatform({ config, pool });
+      const seeded = await seedUserState(database, platform.flags, {
+        userId: primary.id,
+        timezone: primary.displayTimezone,
+        clock,
+        correlationId: newId(),
+        ...(config.secrets.advisor_token_secret === undefined
+          ? {}
+          : { advisorTokenSecret: config.secrets.advisor_token_secret.reveal() }),
+      });
+      await platform.flags.close();
+      app.log.info({ userId: primary.id, ...seeded }, 'per-user state ensured (C-1 repair pass)');
     } catch (error) {
-      app.log.warn(
-        { err: error },
-        'could not seed the category taxonomy or advisor catalogue; continuing',
-      );
+      app.log.warn({ err: error }, 'could not run the C-1 per-user repair pass; continuing');
     }
   });
 

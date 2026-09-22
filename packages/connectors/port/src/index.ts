@@ -19,13 +19,19 @@ export {
 
 export {
   PROVIDER_ACCOUNT_TYPES,
+  SECURITY_IDENTIFIER_KINDS,
+  securityIdentifierOf,
   type ProviderAccountFact,
   type ProviderAccountType,
   type ProviderBalanceFact,
   type ProviderCounterparty,
   type ProviderHoldingFact,
+  type ProviderInvestmentTransactionFact,
   type ProviderLiabilityFact,
+  type ProviderSecurityFact,
   type ProviderTransactionFact,
+  type SecurityIdentifier,
+  type SecurityIdentifierKind,
 } from './facts.ts';
 
 export {
@@ -63,12 +69,18 @@ export {
 } from './connector.ts';
 
 export {
+  IDENTIFIER_RANK,
   fingerprintOf,
   importedTransactionIdOf,
+  investmentTransactionFingerprintOf,
   normaliseDescription,
   occurrencesOf,
+  securityFingerprintOf,
+  securityIdentifierKeyOf,
+  strongestIdentifier,
   type FingerprintInput,
   type ImportedIdInput,
+  type InvestmentTransactionFingerprintInput,
 } from './fingerprint.ts';
 
 export { assertSupports, emptyPage, unsupported } from './helpers.ts';

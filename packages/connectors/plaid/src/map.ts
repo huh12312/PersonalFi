@@ -14,14 +14,21 @@
 import {
   ConnectorError,
   fingerprintOf,
+  investmentTransactionFingerprintOf,
+  securityFingerprintOf,
+  securityIdentifierOf,
+  strongestIdentifier,
   type Capability,
   type ProviderAccountFact,
   type ProviderAccountType,
   type ProviderBalanceFact,
   type ProviderCounterparty,
   type ProviderHoldingFact,
+  type ProviderInvestmentTransactionFact,
   type ProviderLiabilityFact,
+  type ProviderSecurityFact,
   type ProviderTransactionFact,
+  type SecurityIdentifier,
 } from '@connector/port';
 import {
   QUANTITY_SCALE,
@@ -255,6 +262,91 @@ function counterpartiesOf(transaction: Transaction): readonly ProviderCounterpar
   }));
 }
 
+/**
+ * Every name Plaid gave for one security, strongest first is *not* assumed —
+ * ordering is the port's job (`strongestIdentifier`), not this adapter's.
+ *
+ * Four of Plaid's `Security` fields are identifiers and one is a qualifier:
+ * `figi` (added 2026-06-18 per 01 §5.5), `isin`, `cusip`, `ticker_symbol`, and
+ * `market_identifier_code`, which qualifies the ticker and nothing else. A
+ * ticker is emitted with its MIC when Plaid supplies one and without when it
+ * does not; the resolver then refuses to treat an unqualified ticker as an
+ * identity, which is the whole reason the field is carried rather than dropped.
+ *
+ * **`sedol` is deliberately absent.** 01 §5.5: Plaid removed it in 2026.
+ *
+ * `security_id` is *not* in this list. It is Plaid's own opaque id — stable
+ * within one Item and meaningless outside it — and it travels as
+ * `providerSecurityId` so that it can be recorded as corroborating evidence and
+ * never as identity.
+ */
+export function securityIdentifiersOf(security: Security | null): readonly SecurityIdentifier[] {
+  if (security === null) return [];
+  const identifiers: SecurityIdentifier[] = [];
+  const push = (kind: SecurityIdentifier['kind'], value: unknown, mic?: string | null): void => {
+    if (typeof value !== 'string' || value.trim().length === 0) return;
+    identifiers.push(securityIdentifierOf(kind, value.trim(), { mic: mic ?? null }));
+  };
+
+  // `figi` is typed as optional on some SDK versions; read it defensively rather
+  // than pinning this file to one `plaid` minor.
+  push('figi', (security as { figi?: unknown }).figi);
+  push('isin', security.isin);
+  push('cusip', security.cusip);
+  push('ticker', security.ticker_symbol, security.market_identifier_code ?? null);
+  return identifiers;
+}
+
+/**
+ * The identifier a position is filed under.
+ *
+ * When Plaid gave no identifier at all — it happens for private placements and
+ * for some cash-sweep lines — the fallback is `proprietary` carrying Plaid's own
+ * `security_id`. That is deliberately a *dead end*: `@ctx/investments` never
+ * accepts a proprietary identifier as an identity, so the holding surfaces as a
+ * resolution failure the user can see instead of minting an anonymous
+ * `securities` row that will never merge with anything.
+ */
+function holdingSecurityOf(providerSecurityId: string, security: Security | null) {
+  return (
+    strongestIdentifier(securityIdentifiersOf(security)) ??
+    securityIdentifierOf('proprietary', providerSecurityId)
+  );
+}
+
+/** One Plaid `Security`, as the port's canonical security fact. */
+export function securityFactOf(security: Security): ProviderSecurityFact {
+  const identifiers = securityIdentifiersOf(security);
+  const closePriceAsOf = security.close_price_as_of ?? null;
+
+  return {
+    providerSecurityId: security.security_id,
+    identifiers:
+      identifiers.length > 0
+        ? identifiers
+        : [securityIdentifierOf('proprietary', security.security_id)],
+    name: security.name ?? null,
+    type: security.type === null || security.type === undefined ? null : String(security.type),
+    subtype: null,
+    currency: security.iso_currency_code ?? null,
+    isCashEquivalent: security.is_cash_equivalent ?? null,
+    closePrice:
+      security.close_price === null || security.close_price === undefined
+        ? null
+        : decimalStringOf(security.close_price, 'security.close_price'),
+    closePriceAsOf:
+      closePriceAsOf === null || closePriceAsOf.length === 0
+        ? null
+        : dateOnlyOf(closePriceAsOf, 'security.close_price_as_of'),
+    raw: security,
+    fingerprint: securityFingerprintOf(
+      identifiers.length > 0
+        ? identifiers
+        : [securityIdentifierOf('proprietary', security.security_id)],
+    ),
+  };
+}
+
 export function holdingFactOf(
   holding: Holding,
   securities: ReadonlyMap<string, Security>,
@@ -267,8 +359,8 @@ export function holdingFactOf(
 
   return {
     providerAccountId: holding.account_id,
-    securityId: holding.security_id,
-    symbol: security?.ticker_symbol ?? null,
+    security: holdingSecurityOf(holding.security_id, security),
+    providerSecurityId: holding.security_id,
     quantity: decimalStringOf(holding.quantity, 'holding.quantity'),
     // 01 §5.5: fill rates vary wildly and it is often *total* rather than
     // per-share. Carried as reported; Phase 3 prefers deriving from investment
@@ -286,38 +378,29 @@ export function holdingFactOf(
 }
 
 /**
- * An investment transaction, in the shape the port does **not** have.
+ * An investment transaction — now in the port's shape.
  *
- * There is no `ProviderInvestmentTransactionFact` in `@connector/port` and no
- * port method that returns one: 01 §5.5 notes there is no
- * `/investments/transactions/sync`, so these arrive by date window and are
- * idempotent on `investment_transaction_id`. Declared locally, and reported as a
- * port gap in the evidence doc, rather than smuggled through
- * `ProviderTransactionFact` — an investment transaction has a quantity, a price
- * and fees, and flattening it into a bank transaction would lose all three.
+ * This used to be `PlaidInvestmentTransactionFact`, declared here with a comment
+ * naming the gap: "There is no `ProviderInvestmentTransactionFact` in
+ * `@connector/port` and no port method that returns one." WP 3.1 closed it. The
+ * local type is gone rather than aliased, because an alias is how two shapes
+ * drift while continuing to type-check.
+ *
+ * What changed in the promotion, beyond the package it lives in:
+ *
+ *   * `securityId` + `symbol` (a Plaid id and a bare ticker) became
+ *     `security: SecurityIdentifier | null` + `providerSecurityId`. The pair it
+ *     replaced could not express "ETH on Ethereum" and could not tell `BHP` on
+ *     XASX from `BHP` on XNYS.
+ *   * `fingerprint` is now mandatory, as it is on every other fact (08 §2.5).
+ *     01 §5.5's "no `/investments/transactions/sync`" means the only protection
+ *     against a re-run of the same date window is idempotency, and the
+ *     fingerprint is what makes that hold across a provider id rotation too.
  */
-export interface PlaidInvestmentTransactionFact {
-  readonly providerAccountId: string;
-  readonly providerTransactionId: string;
-  readonly securityId: string | null;
-  readonly symbol: string | null;
-  readonly date: DateOnly;
-  readonly name: string;
-  readonly type: string;
-  readonly subtype: string;
-  /** Decimal string. Negative for a sale, as Plaid reports it. */
-  readonly quantity: string;
-  readonly price: string;
-  /** Sign-inverted like every other amount: negative = money left the account. */
-  readonly amount: Money;
-  readonly fees: Money | null;
-  readonly raw: unknown;
-}
-
 export function investmentTransactionFactOf(
   transaction: InvestmentTransaction,
   securities: ReadonlyMap<string, Security>,
-): PlaidInvestmentTransactionFact {
+): ProviderInvestmentTransactionFact {
   const code = currencyOf(
     transaction.iso_currency_code,
     transaction.unofficial_currency_code,
@@ -325,21 +408,39 @@ export function investmentTransactionFactOf(
   );
   const security =
     transaction.security_id === null ? null : (securities.get(transaction.security_id) ?? null);
+  // `null` when the transaction genuinely has no security (a cash sweep, a fee,
+  // a deposit) and a `proprietary` dead end when Plaid named one it would not
+  // identify — the two are different facts and collapsing them would make an
+  // unresolvable security look like a cash movement.
+  const identifier =
+    transaction.security_id === null
+      ? null
+      : holdingSecurityOf(transaction.security_id, security);
+  const date = dateOnlyOf(transaction.date, 'investment_transaction.date');
+  const quantity = decimalStringOf(transaction.quantity, 'investment_transaction.quantity');
+  const amount = signedAmountOf(transaction.amount, code, 'investment_transaction.amount');
 
   return {
     providerAccountId: transaction.account_id,
     providerTransactionId: transaction.investment_transaction_id,
-    securityId: transaction.security_id,
-    symbol: security?.ticker_symbol ?? null,
-    date: dateOnlyOf(transaction.date, 'investment_transaction.date'),
+    security: identifier,
+    providerSecurityId: transaction.security_id,
+    date,
     name: transaction.name,
     type: String(transaction.type),
     subtype: String(transaction.subtype),
-    quantity: decimalStringOf(transaction.quantity, 'investment_transaction.quantity'),
+    quantity,
     price: decimalStringOf(transaction.price, 'investment_transaction.price'),
-    amount: signedAmountOf(transaction.amount, code, 'investment_transaction.amount'),
+    amount,
     fees: moneyOrNullOf(transaction.fees, code, 'investment_transaction.fees'),
     raw: transaction,
+    fingerprint: investmentTransactionFingerprintOf({
+      providerAccountId: transaction.account_id,
+      date,
+      amount,
+      security: identifier,
+      quantity,
+    }),
   };
 }
 

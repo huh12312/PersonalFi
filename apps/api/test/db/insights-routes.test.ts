@@ -162,19 +162,24 @@ describe.skipIf(NO_DATABASE)('/insights and /advisors (WP 2.r)', () => {
     expect(advisors.some((a) => a.advisorId === CASH_ADVISOR_ID)).toBe(true);
   });
 
-  it('a user created after boot gets the catalogue on first GET /advisors, with no restart (gate G2-1)', async () => {
+  it('GET /advisors carries no lazy repair (condition C-1, gate finding G2-1 closed)', async () => {
     // The Phase 2 gate's cold walk found zero advisors for a user bootstrapped
-    // after the api's onReady hook ran — the D2-1 shape again. The route now
-    // repairs this lazily, idempotently, only when the user has no rows.
+    // after the api's onReady hook ran — the D2-1 shape again (G2-1). That was
+    // first patched with a lazy repair on this very route; condition C-1 in
+    // the same gate called two lazy repairs for one root cause a defect in
+    // its own right, and the root fix — `bootstrap-seed.ts`'s
+    // `seedUserState`, called once at user creation
+    // (`bin/bootstrap-user.ts`) — replaced it. A user inserted straight into
+    // `users`, bypassing that call site entirely, now reads back an empty
+    // catalogue rather than a lazily-repaired one.
+    // `phase3-cold-install.test.ts` is what proves the real path (create the
+    // user through `bootstrap-user`) has a full catalogue with no restart.
     const lateUserId = await h.database.createUser('Late Holder');
     const late = await h.issueSession({ userId: lateUserId, fresh: false });
-    const first = await h.request({ method: 'GET', url: '/advisors', session: late });
-    expectStatus(first, 200);
-    const { advisors } = first.json() as { advisors: WireAdvisor[] };
-    expect(advisors.length).toBeGreaterThan(0);
-    expect(advisors.some((a) => a.advisorId === CASH_ADVISOR_ID)).toBe(true);
-    const second = await h.request({ method: 'GET', url: '/advisors', session: late });
-    expect((second.json() as { advisors: WireAdvisor[] }).advisors).toHaveLength(advisors.length);
+    const response = await h.request({ method: 'GET', url: '/advisors', session: late });
+    expectStatus(response, 200);
+    const { advisors } = response.json() as { advisors: WireAdvisor[] };
+    expect(advisors).toHaveLength(0);
   });
 
   it('the feed carries the real insight the advisor proposed, with its evidence panel', async () => {

@@ -2,7 +2,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright config, scoped to `e2e/`. Nine independent suites, two
+ * Playwright config, scoped to `e2e/`. Ten independent suites, two
  * `webServer`s:
  *
  *   - `smoke.spec.ts` (project `chromium`) boots the Vite dev server and
@@ -39,6 +39,12 @@ import { defineConfig, devices } from '@playwright/test';
  *     and `csp-static-server.mjs` (deliberately: see that file's own header).
  *     No browser page, no `webServer` of its own — it manages its own Caddy
  *     container per test and talks to it with plain `fetch`.
+ * *   - `cold-start.spec.ts` (project `cold-start`, WP 3.13, C-6) reproduces
+ *     the Phase 2 gate's cold-start CSRF finding (G2-4) against a real
+ *     `docker compose down -v` stack with a real CDP virtual authenticator —
+ *     no mocks, no dev server. Self-skips unless `COLD_START_BASE_URL`/
+ *     `COLD_START_REGISTER_URL` name a live stack; see that file's header for
+ *     the exact sequence and the reproduction result.
  *
  * Playwright starts and tears down both `webServer`s regardless of which
  * project's tests are selected; running the full `playwright test` suite is
@@ -74,6 +80,29 @@ export default defineConfig({
       // `fetch`. Needs `docker` on PATH and a daemon it can talk to.
       name: 'csp-plaid',
       testMatch: /csp-plaid\.spec\.ts/,
+    },
+    {
+      // C-6 (docs/evidence/phase-2/gate-security-review.md §5). No
+      // `webServer`, same reason as `csp-plaid` above: this project talks to
+      // a real `docker compose` stack that `cold-start.spec.ts`'s own header
+      // explains how to stand up, not anything Playwright starts.
+      // `COLD_START_BASE_URL` (falls back to the compose default,
+      // `https://personalfi.lan`) is resolved with `--host-resolver-rules` so
+      // the suite needs no `/etc/hosts` entry, and `ignoreHTTPSErrors` stands
+      // in for `just trust-ca` so it needs no CA import either. Every test in
+      // `cold-start.spec.ts` self-skips when the stack env vars are absent,
+      // so this project is a no-op in `just check`/CI.
+      name: 'cold-start',
+      testMatch: /cold-start\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        ignoreHTTPSErrors: true,
+        launchOptions: {
+          args: [
+            `--host-resolver-rules=MAP ${new URL(process.env['COLD_START_BASE_URL'] ?? 'https://personalfi.lan').hostname} 127.0.0.1`,
+          ],
+        },
+      },
     },
   ],
   webServer: [

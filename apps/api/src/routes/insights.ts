@@ -51,7 +51,6 @@ import {
   createInsightsLedgerPort,
   createInsightsRecurringPort,
 } from '../domain.ts';
-import { registerBuiltinAdvisors } from '../modules.ts';
 import { AppError, problems } from '../problem.ts';
 import { isoInstant, moneyOrNull } from '../wire.ts';
 import type { RouteDeps } from './deps.ts';
@@ -348,21 +347,11 @@ export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
       async (request) => {
         const session = await guards.requireSession(request);
-        let rows = await advisorHealth(database, session.userId);
-        // Phase 2 gate finding G2-1, the D2-1 shape again: the catalogue is
-        // registered at api `onReady`, but on a cold install the account holder
-        // is bootstrapped *after* that hook, so the first user has zero
-        // advisors until somebody restarts the api. Same lazy repair the
-        // categories route carries for the taxonomy: idempotent, once, only
-        // when the user has no rows at all.
-        if (rows.length === 0) {
-          await registerBuiltinAdvisors(database, {
-            userId: session.userId,
-            clock,
-            correlationId: String(request.id),
-          });
-          rows = await advisorHealth(database, session.userId);
-        }
+        // No lazy repair (Phase 2 gate finding G2-1, condition C-1, closed):
+        // `bootstrap-seed.ts`'s `seedUserState` registers the catalogue at
+        // user creation, so an empty result here would mean the catalogue
+        // genuinely has no rows, not a cold-install gap.
+        const rows = await advisorHealth(database, session.userId);
         return {
           advisors: rows.map((row) => ({
             advisorId: row.advisorId,

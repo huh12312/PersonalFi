@@ -47,6 +47,14 @@
  * 11. `secrets/not-serialisable` — `JSON.stringify(handle)` contains no
  *     credential. P0-12, and the reason `ConnectionHandle.secret` is a closure.
  * 12. `disconnect/revokes` — after `disconnect`, the adapter refuses to sync.
+ * 13. `holdings/names a security` — a position identifies what it is a position
+ *     *in*, with a kind from `SECURITY_IDENTIFIER_KINDS` and a non-empty value,
+ *     and its quantity is a decimal string. WP 3.1: the port has carried
+ *     `ProviderHoldingFact` since Phase 1 and asserted nothing about it, so an
+ *     adapter could name a security by a bare provider id and nothing noticed.
+ * 14. `investment-txns/fingerprinted` — mandatory fingerprint, unique
+ *     `providerTransactionId` within one window (there is no cursor to dedupe
+ *     with — 01 §5.5), and quantity/price as decimal strings.
  */
 import type { Capability } from './capabilities.ts';
 import { supports } from './capabilities.ts';
@@ -58,7 +66,7 @@ import type {
   TransactionPage,
 } from './connector.ts';
 import { isConnectorError } from './errors.ts';
-import type { ProviderTransactionFact } from './facts.ts';
+import { SECURITY_IDENTIFIER_KINDS, type ProviderTransactionFact } from './facts.ts';
 
 export interface ConformanceCheck {
   readonly name: string;
@@ -170,6 +178,7 @@ export function connectorConformanceChecks(subject: ConformanceSubject): Conform
         for (const [capability, method] of [
           ['balances', 'syncBalances'],
           ['holdings', 'syncHoldings'],
+          ['investment_txns', 'syncInvestmentTransactions'],
           ['liabilities', 'syncLiabilities'],
         ] as const) {
           const implemented = typeof connector()[method] === 'function';
@@ -372,6 +381,101 @@ export function connectorConformanceChecks(subject: ConformanceSubject): Conform
             predecessor.pending,
             `${fact.providerTransactionId} claims to replace ${fact.pendingTransactionId}, which ` +
               'was never pending',
+          );
+        }
+      },
+    },
+
+    {
+      // WP 3.1. The investments datasets were on the port from Phase 1 but
+      // nothing asserted anything about their contents, so an adapter could
+      // return a position naming a security by a bare provider id and no check
+      // would notice — which is exactly how one asset becomes two `securities`
+      // rows, allocation double-counts it, and TWR is wrong for both halves.
+      name: 'holdings/every position names a security and carries a decimal quantity',
+      run: async () => {
+        if (!supports(capabilitiesOf(), 'holdings')) return;
+        const syncHoldings = connector().syncHoldings;
+        assert(
+          syncHoldings !== undefined,
+          'holdings is declared but syncHoldings is not implemented',
+        );
+
+        const holdings = await syncHoldings.call(connector(), subject.handle, subject.options);
+        for (const holding of holdings) {
+          assert(
+            holding.providerAccountId.length > 0,
+            'a holding does not say which account it belongs to',
+          );
+          assert(
+            SECURITY_IDENTIFIER_KINDS.includes(holding.security.kind),
+            `a holding names its security with an unknown identifier kind ` +
+              `'${String(holding.security.kind)}'`,
+          );
+          assert(
+            holding.security.value.trim().length > 0,
+            'a holding carries an empty security identifier value',
+          );
+          assert(
+            holding.security.kind !== 'chain_contract' || holding.security.chain !== null,
+            'a holding names a chain_contract with no chain; a contract address without its ' +
+              'chain is not an identifier — the same address exists on every EVM network',
+          );
+          // A float here is the D3 failure the whole quantity type exists to
+          // prevent: 18-decimal tokens do not survive IEEE-754, and the error
+          // compounds the moment quantity is multiplied by a price and summed.
+          assert(
+            typeof holding.quantity === 'string' && /^-?\d+(\.\d+)?$/.test(holding.quantity),
+            `a holding carries a non-decimal-string quantity (${String(holding.quantity)}); ` +
+              'Quantity is a decimal string, never a number',
+          );
+          assert(
+            typeof holding.value.minor === 'bigint' && holding.value.currency.length === 3,
+            'a holding carries a value that is not a (bigint minor, ISO currency) pair',
+          );
+        }
+      },
+    },
+
+    {
+      name: 'investment-txns/every fact is fingerprinted and never floats a price',
+      run: async () => {
+        if (!supports(capabilitiesOf(), 'investment_txns')) return;
+        const syncInvestments = connector().syncInvestmentTransactions;
+        assert(
+          syncInvestments !== undefined,
+          'investment_txns is declared but syncInvestmentTransactions is not implemented',
+        );
+
+        const facts = await syncInvestments.call(connector(), subject.handle, subject.options);
+        const ids = new Set<string>();
+        for (const fact of facts) {
+          assert(
+            /^[0-9a-f]{64}$/.test(fact.fingerprint),
+            `${fact.providerTransactionId} has no sha256 fingerprint; it is mandatory for every ` +
+              'adapter, including ones with stable ids (08 §2.5)',
+          );
+          // 01 §5.5: there is no `/investments/transactions/sync`, so the only
+          // thing standing between a re-run of the same date window and a
+          // duplicated position is this id being unique and stable.
+          assert(
+            !ids.has(fact.providerTransactionId),
+            `${fact.providerTransactionId} appeared twice in one window; it is the upsert key`,
+          );
+          ids.add(fact.providerTransactionId);
+          assert(
+            typeof fact.quantity === 'string' && typeof fact.price === 'string',
+            `${fact.providerTransactionId} carries a numeric quantity or price; both are decimal ` +
+              'strings, and a float price times a float quantity is how cost basis drifts',
+          );
+          assert(
+            typeof fact.amount.minor === 'bigint' && fact.amount.currency.length === 3,
+            `${fact.providerTransactionId} carries an amount that is not a Money pair`,
+          );
+          assert(
+            fact.security === null || fact.security.value.trim().length > 0,
+            `${fact.providerTransactionId} names a security with an empty value; use null for ` +
+              '"this transaction has no security", which a cash sweep or a fee genuinely has not',
           );
         }
       },

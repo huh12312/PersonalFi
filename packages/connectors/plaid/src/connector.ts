@@ -70,7 +70,6 @@ import {
   liabilityFactsOf,
   securitiesByIdOf,
   transactionFactOf,
-  type PlaidInvestmentTransactionFact,
 } from './map.ts';
 import {
   PLAID_ACCESS_TOKEN,

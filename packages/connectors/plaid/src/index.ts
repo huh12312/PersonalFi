@@ -67,8 +67,9 @@ export {
   investmentTransactionFactOf,
   liabilityFactsOf,
   securitiesByIdOf,
+  securityFactOf,
+  securityIdentifiersOf,
   transactionFactOf,
-  type PlaidInvestmentTransactionFact,
 } from './map.ts';
 
 export {

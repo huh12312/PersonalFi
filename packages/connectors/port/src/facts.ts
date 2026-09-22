@@ -134,17 +134,185 @@ export interface ProviderBalanceFact {
   readonly asOf: Date;
 }
 
+/**
+ * How a provider names a security (08 §2.5), **plus `figi` and `mic`**.
+ *
+ * 08 §2.5 states the union as
+ * `{ kind:'ticker'|'cusip'|'isin'|'chain_contract'|'proprietary', value, chain? }`
+ * and the five kinds below are that list verbatim. `figi` is a sixth, and `mic`
+ * a second qualifier, for the same reason `MUTATION_DURING_PAGINATION` is
+ * "08's table plus one" in `errors.ts`: 08 was written before Plaid's `Security`
+ * object carried either. 01 §5.5 records `figi` **added 2026-06-18** alongside
+ * `market_identifier_code`, and both are load-bearing here —
+ *
+ *   * a FIGI is the only globally unique, permanent, exchange-level identifier
+ *     a provider hands us, so it is the strongest evidence of identity there is;
+ *   * a bare ticker is **not** an identity. `BHP` is a different security on
+ *     XNYS, XASX and XLON. Without a MIC a ticker can only ever corroborate.
+ *
+ * 01 §5.5 also records that **`sedol` was removed in 2026**; it is deliberately
+ * absent and must not be re-added.
+ *
+ * `chain` and `mic` are mandatory-but-nullable rather than optional. An adapter
+ * that has no MIC has to say so, which is the difference between "this ticker is
+ * unqualified" and "somebody forgot the field".
+ */
+export const SECURITY_IDENTIFIER_KINDS = [
+  'figi',
+  'isin',
+  'cusip',
+  'ticker',
+  'chain_contract',
+  'proprietary',
+] as const;
+
+export type SecurityIdentifierKind = (typeof SECURITY_IDENTIFIER_KINDS)[number];
+
+export interface SecurityIdentifier {
+  readonly kind: SecurityIdentifierKind;
+  /**
+   * The identifier itself: `BBG000BPH459`, `US9229087690`, `VTI`, a contract
+   * address, or a provider's own opaque id when `kind` is `proprietary`.
+   */
+  readonly value: string;
+  /** `chain_contract` only: `ethereum`, `bitcoin`, `solana`. `null` otherwise. */
+  readonly chain: string | null;
+  /** `ticker` only: the ISO-10383 MIC (`XNAS`, `XNYS`). `null` when unqualified. */
+  readonly mic: string | null;
+}
+
+/** Build a `SecurityIdentifier` without writing two `null`s at every call site. */
+export function securityIdentifierOf(
+  kind: SecurityIdentifierKind,
+  value: string,
+  qualifiers: { readonly chain?: string | null; readonly mic?: string | null } = {},
+): SecurityIdentifier {
+  return {
+    kind,
+    value,
+    chain: qualifiers.chain ?? null,
+    mic: qualifiers.mic ?? null,
+  };
+}
+
+/**
+ * One security as a provider describes it.
+ *
+ * The shape exists so an adapter can hand over **every** name it was given at
+ * once, rather than one at a time. That is not a convenience: `@ctx/investments`
+ * resolves a security by walking identifier tiers strongest-first and taking the
+ * first one that hits a row it already has, and it can only do that if it sees
+ * the whole set. A brokerage that reports a CUSIP *and* a ticker for the same
+ * position is how that position joins the row a crypto wallet already created.
+ *
+ * `providerSecurityId` — a Plaid `security_id`, a Coinbase `product_id` — is
+ * carried as **evidence and never as identity** (the D25 shape, applied to
+ * securities). It is stable within one provider and meaningless across two, so
+ * it belongs in `security_identifiers` with `kind = 'proprietary'` and nowhere
+ * near an identity column. An adapter that puts it in `identifiers` as anything
+ * other than `proprietary` is stating something it cannot know.
+ */
+export interface ProviderSecurityFact {
+  /** The provider's own opaque id. Evidence, never identity. */
+  readonly providerSecurityId: string;
+  /** Every name the provider gave, strongest or weakest, in any order. */
+  readonly identifiers: readonly SecurityIdentifier[];
+  readonly name: string | null;
+  /** Provider vocabulary (`equity`, `etf`, `cryptocurrency`). Unconstrained. */
+  readonly type: string | null;
+  readonly subtype: string | null;
+  readonly currency: string | null;
+  /** Plaid's `is_cash_equivalent`. `null` when the provider does not say. */
+  readonly isCashEquivalent: boolean | null;
+  /** A decimal string, never a float. `null` when unpriced. */
+  readonly closePrice: string | null;
+  readonly closePriceAsOf: DateOnly | null;
+  readonly raw: unknown;
+  /**
+   * `securityFingerprintOf(identifiers)` — mandatory, like every other fact's.
+   *
+   * Hashed over the *strongest* identifier rather than over all of them, so two
+   * providers that agree on an ISIN fingerprint alike even though one of them
+   * also volunteered a ticker. Hashing the whole set would make the fingerprint
+   * a function of how chatty the provider is, which is the opposite of a
+   * cross-provider dedupe key.
+   */
+  readonly fingerprint: string;
+}
+
 /** A position. Phase 3 wires these to `@ctx/investments`; the port carries them now. */
 export interface ProviderHoldingFact {
   readonly providerAccountId: string;
-  readonly securityId: string;
-  readonly symbol: string | null;
+  /**
+   * What this is a position *in*.
+   *
+   * Was `securityId: string` + `symbol: string | null` through Phase 1 — the
+   * provider's opaque id and an unqualified ticker, which between them cannot
+   * express "ETH on Ethereum" and cannot distinguish `BHP` on XASX from `BHP` on
+   * XNYS. Both failure modes end the same way: two `securities` rows for one
+   * asset, allocation double-counting it and TWR wrong for both halves.
+   */
+  readonly security: SecurityIdentifier;
+  /** The provider's opaque id for the security. Evidence, never identity. */
+  readonly providerSecurityId: string;
   /** `@core/kernel`'s `Quantity` wire form: a decimal string, never a float. */
   readonly quantity: string;
   readonly costBasis: Money | null;
   readonly value: Money;
   readonly asOf: Date;
   readonly raw: unknown;
+}
+
+/**
+ * A buy, a sell, a dividend, a transfer in kind.
+ *
+ * Promoted out of `packages/connectors/plaid/src/map.ts`, where it lived as
+ * `PlaidInvestmentTransactionFact` with a comment naming this promotion as the
+ * gap. Two things forced it up here rather than leaving it Plaid-local:
+ *
+ *  1. **It is not Plaid-shaped.** Coinbase fills (WP 3.5) and a brokerage CSV
+ *     produce the same four facts — a security, a signed quantity, a unit price
+ *     and a fee — and a second adapter is the moment a "local type" becomes a
+ *     de-facto contract nobody wrote down.
+ *  2. **It cannot be smuggled through `ProviderTransactionFact`.** An investment
+ *     transaction has a quantity, a price and a fee; flattening it into a bank
+ *     transaction loses all three, and cost basis cannot be rebuilt from what is
+ *     left. 04 §5.5 is explicit that an unknown basis must report `unavailable`
+ *     rather than gain-from-zero, and a lossy fact is how it silently becomes
+ *     the latter.
+ *
+ * **There is no cursor.** 01 §5.5: "There is no `/investments/transactions/sync`".
+ * These arrive by date window and are idempotent on `providerTransactionId`,
+ * which is why `syncInvestmentTransactions` returns an array rather than a
+ * `TransactionPage` — a paging shape with no cursor behind it would be a lie the
+ * conformance suite would then have to make exceptions for.
+ */
+export interface ProviderInvestmentTransactionFact {
+  readonly providerAccountId: string;
+  /** Plaid's `investment_transaction_id`. The idempotency key. */
+  readonly providerTransactionId: string;
+  /**
+   * The security traded, or `null` — a cash sweep, a fee and a deposit are all
+   * real investment transactions with no security behind them.
+   */
+  readonly security: SecurityIdentifier | null;
+  /** The provider's opaque security id. Evidence, never identity. */
+  readonly providerSecurityId: string | null;
+  readonly date: DateOnly;
+  readonly name: string;
+  /** Provider vocabulary: `buy`, `sell`, `cash`, `fee`, `transfer`. */
+  readonly type: string;
+  readonly subtype: string;
+  /** Decimal string. Negative for a sale, as every provider reports it. */
+  readonly quantity: string;
+  /** Unit price, decimal string. Never a float: this gets multiplied and summed. */
+  readonly price: string;
+  /** House sign convention: negative = money left the account. */
+  readonly amount: Money;
+  readonly fees: Money | null;
+  readonly raw: unknown;
+  /** `investmentTransactionFingerprintOf(...)`. Mandatory, like every other fact's. */
+  readonly fingerprint: string;
 }
 
 /** Loan and card terms. Phase 3 consumes these; the port carries them now. */

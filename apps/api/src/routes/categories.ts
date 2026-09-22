@@ -34,7 +34,6 @@
 import {
   archiveCategory,
   createCategory,
-  ensureTaxonomy,
   listCategories,
   renameCategory,
   type UserCategory,
@@ -109,13 +108,10 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             'structure. Archived categories are omitted unless asked for — a picker must ' +
             'not offer a category the user retired, but a historic assignment still points ' +
             'at one. Categories are per user (decision D6), so this is never a shared list.\n\n' +
-            '**D2-1 lazy repair.** `ensureTaxonomy` also runs once here, idempotently, when ' +
-            "this session's user has zero categories — the api's `onReady` pass only ever " +
-            'seeds users that already exist *at boot*, and `bootstrap-user` creates the ' +
-            'account holder afterwards (docs/evidence/phase-1/gate-security-review.md §9.4). ' +
-            'This route is what every screen that needs a category actually calls, so fixing ' +
-            'the read here closes the gap for any user-creation path, present or future, ' +
-            'without an api restart.',
+            'Taxonomy is seeded once, at user creation, by `bootstrap-seed.ts`\'s ' +
+            '`seedUserState` (condition C-1, docs/evidence/phase-2/gate-security-review.md ' +
+            '§5) — this route used to carry a D2-1 lazy repair for the gap that left; the ' +
+            'repair is gone and this route is a plain read.',
           tags: ['categories'],
           querystring: z.object({
             includeArchived: booleanQuery.describe(
@@ -139,19 +135,11 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         // parent/child shape and the ordering tiebreak exists so two categories
         // sharing a `sort` come back stably. A second query here would be a
         // second answer to "what categories are there?".
-        let categories = await listCategories(database, session.userId, query);
-        if (categories.length === 0) {
-          // D2-1 (gate-security-review.md §9.4). `ensureTaxonomy` is idempotent
-          // (ON CONFLICT DO UPDATE, and the SET list never touches a row's
-          // `archived_at`), so re-running it against a user who genuinely
-          // archived every category re-inserts nothing — `categoriesInserted`
-          // comes back 0 and the second read is skipped, rather than paying a
-          // wasted round trip on the common, already-seeded case.
-          const seeded = await ensureTaxonomy(database, { userIds: [session.userId], clock });
-          if (seeded.categoriesInserted > 0) {
-            categories = await listCategories(database, session.userId, query);
-          }
-        }
+        //
+        // No lazy repair: `bootstrap-seed.ts`'s `seedUserState` seeds the
+        // taxonomy at user creation (C-1), so an empty result here means the
+        // user genuinely archived every category, not a cold-install gap.
+        const categories = await listCategories(database, session.userId, query);
         return { categories: categories.map(serialiseCategory) };
       },
     );

@@ -32,7 +32,6 @@ import { loadConfig, ConfigError, describeKek } from '@core/config';
 import { systemClock } from '@core/kernel';
 import { createDatabase, createPool } from '@core/db';
 import { SecretBox, isSecretBoxError } from '@core/secretbox';
-import { ensureTaxonomy } from '@ctx/categorization';
 import {
   assertIanaZone,
   isAuthError,
@@ -40,6 +39,8 @@ import {
   REGISTRATION_TOKEN_TTL_SECONDS,
   UserService,
 } from '@ctx/identity';
+import { seedUserState } from '../bootstrap-seed.ts';
+import { buildPlatform } from '../platform.ts';
 
 function out(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -113,19 +114,30 @@ try {
     out(`user created      ${user.displayName} (${user.id})`);
     out(`time zone         ${user.displayTimezone}`);
 
-    // D2-1 (docs/evidence/phase-1/gate-security-review.md §9.4): seed the
-    // taxonomy for *this* user right now, rather than leaving it to the api's
-    // `onReady` pass — which only runs at boot and therefore only ever saw
-    // this user on the *next* restart. `GET /categories`'s own lazy repair
-    // (`routes/categories.ts`) covers every other user-creation path there
-    // will ever be; this is the one for the account holder this command just
-    // made. Idempotent, so running it again on a `reissue` (existing user)
-    // costs one query and inserts nothing.
-    const result = await ensureTaxonomy(createDatabase(pool), {
-      userIds: [user.id],
+    // C-1 (docs/evidence/phase-2/gate-security-review.md §5): this is the one
+    // composition-root call — `apps/api/src/bootstrap-seed.ts` — that seeds
+    // everything a brand-new user needs (taxonomy, WP 2.7's advisor
+    // catalogue, and the categorization/notifications/insights schedules)
+    // right now, rather than leaving any of it to the api's `onReady` pass
+    // (which only runs at boot, so a user created after `up` saw none of it
+    // until a restart — G2-1) or to a route's own lazy repair (deleted; see
+    // `routes/categories.ts` and `routes/insights.ts`). Idempotent throughout,
+    // so running it again on a `reissue` (existing user) inserts nothing new.
+    const platform = buildPlatform({ config, pool });
+    const seeded = await seedUserState(createDatabase(pool), platform.flags, {
+      userId: user.id,
+      timezone: user.displayTimezone,
       clock: systemClock,
+      ...(config.secrets.advisor_token_secret === undefined
+        ? {}
+        : { advisorTokenSecret: config.secrets.advisor_token_secret.reveal() }),
     });
-    out(`taxonomy          ${String(result.categoriesInserted)} categories seeded`);
+    out(`taxonomy          ${String(seeded.categoriesInserted)} categories seeded`);
+    out(`advisors          ${String(seeded.advisorsRegistered)} manifests registered`);
+    out(
+      `schedules         ${seeded.schedulesRegistered.length > 0 ? seeded.schedulesRegistered.join(', ') : '(none — modules disabled)'}`,
+    );
+    await platform.flags.close();
   } else {
     out(`user              ${user.displayName} (${user.id})`);
   }

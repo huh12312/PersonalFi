@@ -43,6 +43,7 @@ import type {
   ProviderAccountFact,
   ProviderBalanceFact,
   ProviderHoldingFact,
+  ProviderInvestmentTransactionFact,
   ProviderLiabilityFact,
   ProviderTransactionFact,
 } from './facts.ts';
@@ -207,11 +208,35 @@ export interface Connector {
     options: SyncOptions,
   ): Promise<readonly ProviderBalanceFact[]>;
 
-  /** Only when `holdings` is declared; otherwise raise `unsupported`. */
+  /**
+   * Only when `holdings` is declared; otherwise raise `unsupported`.
+   *
+   * Optional on the interface **and** capability-gated at runtime, and the two
+   * are not the same check. Optional means "a bank adapter does not have to
+   * write this method at all"; the gate means an adapter that *did* write it but
+   * did not declare `holdings` must throw `DATA_UNAVAILABLE` rather than return
+   * `[]` — see `helpers.ts`. `capabilities/declared` asserts both.
+   */
   syncHoldings?(
     handle: ConnectionHandle,
     options: SyncOptions,
   ): Promise<readonly ProviderHoldingFact[]>;
+
+  /**
+   * Only when `investment_txns` is declared; otherwise raise `unsupported`.
+   *
+   * An array rather than a `TransactionPage` because **there is no cursor**:
+   * 01 §5.5 records that Plaid has no `/investments/transactions/sync`, so this
+   * is a date window (`SyncOptions.historyDays`, clamped by `windowStart`) and
+   * an idempotent upsert on `providerTransactionId`. Giving it a paging shape
+   * with nothing behind it would put a `nextCursor` in the caller's hands that
+   * it must never persist, which is precisely the mistake the cursor contract's
+   * rule 2 exists to prevent.
+   */
+  syncInvestmentTransactions?(
+    handle: ConnectionHandle,
+    options: SyncOptions,
+  ): Promise<readonly ProviderInvestmentTransactionFact[]>;
 
   /** Only when `liabilities` is declared; otherwise raise `unsupported`. */
   syncLiabilities?(
