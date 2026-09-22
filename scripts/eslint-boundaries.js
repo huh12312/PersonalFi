@@ -287,6 +287,20 @@ const LAYERS = [
       'provider the port exists to make replaceable.',
   },
   {
+    // Phase 3 WP 3.5 (docs/plan/03-phase-3-dispatch.md §4 shared files). The
+    // Coinbase Advanced Trade v3 client is Node's own `fetch` plus an Ed25519
+    // JWT from `node:crypto`, so no provider SDK is allow-listed — the adapter
+    // may reach the port, the kernel, secretbox's sha256 and nothing else.
+    name: 'connector-coinbase',
+    prefix: 'packages/connectors/coinbase/',
+    allow: ['@core/kernel', '@core/secretbox', '@connector/port', ...UNIVERSAL],
+    allowNodeBuiltins: true,
+    why:
+      'The Coinbase adapter maps v3 brokerage shapes to canonical ones and returns them. ' +
+      'It holds a CDP private key only long enough to sign one request, and it may not ' +
+      'take a dependency on anything that could persist or log it.',
+  },
+  {
     // WP 1.2. One package per provider adapter, plus `port` — the interface they
     // implement and the canonical fact shapes they produce.
     //

@@ -210,6 +210,28 @@ export default defineConfig({
         },
       },
       {
+        // Phase 3 WP 3.1/3.2/3.3: the resolver's merge rules, lot maths and
+        // portfolio analytics are pure over Quantity + Money; they run here.
+        root: './packages/contexts/investments',
+        test: {
+          name: 'investments',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        // One security_id per real security across identifier kinds, holdings
+        // snapshots and lot persistence are claims about Postgres.
+        root: './packages/contexts/investments',
+        test: {
+          name: 'investments-db',
+          include: ['test/db/**/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 30_000,
+        },
+      },
+      {
         // `@ctx/connections`, minus the database. The conformance suite lives
         // here — it needs three real adapters and no Postgres, which is exactly
         // the shape of a unit project.
