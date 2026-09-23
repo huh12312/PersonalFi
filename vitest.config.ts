@@ -283,6 +283,30 @@ export default defineConfig({
         },
       },
       {
+        // Phase 3 WP 3.8 opens exactly one table of the Phase 4 planning
+        // context (`net_worth_daily`). The pure parts — the four-boolean
+        // aggregate, FX on the aggregate, interpolation policy — run here.
+        root: './packages/contexts/planning',
+        test: {
+          name: 'planning',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        // The seal ('a past date is byte-identical after a second snapshot
+        // run'), the calendar spine and the hand-computed reconciliation are
+        // claims about Postgres.
+        root: './packages/contexts/planning',
+        test: {
+          name: 'planning-db',
+          include: ['test/db/**/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 30_000,
+        },
+      },
+      {
         // `@ctx/connections`, minus the database. The conformance suite lives
         // here — it needs three real adapters and no Postgres, which is exactly
         // the shape of a unit project.

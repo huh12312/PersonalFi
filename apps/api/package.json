@@ -33,6 +33,7 @@
     "@ctx/investments": "workspace:*",
     "@ctx/ledger": "workspace:*",
     "@ctx/notifications": "workspace:*",
+    "@ctx/planning": "workspace:*",
     "@ctx/recurring": "workspace:*",
     "@fastify/cookie": "11.1.2",
     "@fastify/swagger": "9.8.1",

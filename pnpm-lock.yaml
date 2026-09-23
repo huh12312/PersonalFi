@@ -271,6 +271,9 @@ importers:
       '@ctx/notifications':
         specifier: workspace:*
         version: link:../../packages/contexts/notifications
+      '@ctx/planning':
+        specifier: workspace:*
+        version: link:../../packages/contexts/planning
       '@ctx/recurring':
         specifier: workspace:*
         version: link:../../packages/contexts/recurring

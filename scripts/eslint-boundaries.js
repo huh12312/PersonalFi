@@ -524,6 +524,38 @@ const LAYERS = [
       'dev-only, used only from test/.',
   },
   {
+    // Phase 3 WP 3.8 / Phase 4 (docs/plan/03-phase-3-dispatch.md §4 shared
+    // files, item 2). Planning is the one context that *reads* two others:
+    // 08 §1.6 draws its arrows down — planning → investments → ledger — and
+    // the net-worth snapshotter is the sole writer of `net_worth_daily` over
+    // holdings, prices and balances it does not own. It reads them through
+    // the `HoldingsReader`/`PriceReader`/`FxReader` ports those contexts
+    // export, never their tables (schema-ownership lint still applies), and
+    // no arrow ever points back up: neither ledger nor investments may name
+    // `@ctx/planning`, which the generic rule below enforces for them.
+    name: 'planning',
+    prefix: 'packages/contexts/planning/',
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      '@core/contracts',
+      '@core/platform',
+      '@core/secretbox',
+      '@core/testkit',
+      '@core/seed',
+      '@ctx/ledger',
+      '@ctx/investments',
+      'drizzle-orm',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'Planning sits above ledger and investments (08 §1.6: arrows point down) and may ' +
+      'read their exported ports; nothing reads planning back. @core/testkit and ' +
+      '@core/seed are dev-only, used only from test/.',
+  },
+  {
     name: 'context',
     prefix: 'packages/contexts/',
     allow: [
