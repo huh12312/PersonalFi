@@ -183,6 +183,35 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
   ['securities', 'investments (WP 3.1); exported with holdings/lots by WP 3.7.'],
   ['security_identifiers', 'investments (WP 3.1); exported with holdings/lots by WP 3.7.'],
   ['security_overlay', 'investments (WP 3.1); exported with holdings/lots by WP 3.7.'],
+  // Phase 3 WP 3.2's positions and lots — the "holdings/lots" the three rows
+  // above are waiting for. They join the bundle together, in FK order, when
+  // WP 3.7 wires the investments export; until then the manifest test names
+  // them here so a reviewer sees the gap rather than the test hiding it.
+  ['holdings', 'investments (WP 3.2); exported with securities by WP 3.7.'],
+  ['holdings_snapshots', 'investments (WP 3.2); exported with securities by WP 3.7.'],
+  ['investment_transactions', 'investments (WP 3.2); exported with securities by WP 3.7.'],
+  ['cost_basis_lots', 'investments (WP 3.2); exported with securities by WP 3.7.'],
+  [
+    'basis_method_elections',
+    'investments (WP 3.2); the sticky AVERAGE_COST election is user state; exported by WP 3.7.',
+  ],
+  // Phase 3 WP 3.4's market data. `prices`/`fx_rates` are provider facts,
+  // re-fetchable and — under Tiingo's personal tier — not redistributable
+  // (wp3.4-market-data.md §4), so a bundle must not carry them; a restored
+  // instance refills them on its next 03:45 refresh. `price_source_priority`
+  // is the user's own ladder and is exported with the WP 3.7 batch.
+  // `market_data_runs` is excluded for good: importing another deployment's
+  // run history would seed this install's rate budget with calls it never made.
+  [
+    'prices',
+    "market data (WP 3.4); provider facts, re-fetched on the next refresh; Tiingo's ToS forbids redistribution.",
+  ],
+  ['fx_rates', 'market data (WP 3.4); provider facts, re-fetched on the next refresh.'],
+  ['price_source_priority', 'investments (WP 3.4); the user-edited ladder; exported by WP 3.7.'],
+  [
+    'market_data_runs',
+    "market data (WP 3.4); another deployment's run history would seed this one's rate budget with calls it never made.",
+  ],
   ['advisors', "insights (WP 2.6); not named in this WP's export scope."],
   ['advisor_runs', "insights (WP 2.6); not named in this WP's export scope."],
   ['insights', "insights (WP 2.6); not named in this WP's export scope."],
