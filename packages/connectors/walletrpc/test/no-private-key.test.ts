@@ -10,7 +10,7 @@
 import { base58check } from '@scure/base';
 import { describe, expect, it } from 'vitest';
 import { isConnectorError, type ConnectorError } from '@connector/port';
-import { sha256 } from '../src/btc/sha256.ts';
+import { sha256 } from '@core/secretbox';
 import { assertNoPrivateMaterial, classifyPrivateMaterial } from '../src/guard.ts';
 
 const BASE58CHECK = base58check(sha256);

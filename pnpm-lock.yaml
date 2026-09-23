@@ -576,9 +576,9 @@ importers:
       '@core/kernel':
         specifier: workspace:*
         version: link:../../kernel
-      '@noble/hashes':
-        specifier: 2.4.0
-        version: 2.4.0
+      '@core/secretbox':
+        specifier: workspace:*
+        version: link:../../secretbox
       '@scure/base':
         specifier: 2.4.0
         version: 2.4.0

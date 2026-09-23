@@ -56,14 +56,41 @@ Address encoding (`src/btc/address.ts`) implements all three schemes from `HASH1
 | BIP49 (ypub) | `3...`       | `base58check(0x05 \|\| hash160(0x00 0x14 \|\| hash160(pubkey)))` |
 | BIP84 (zpub) | `bc1...`     | `bech32('bc', 0 \|\| toWords(hash160(pubkey)))`                  |
 
-**Neither `@core/secretbox`'s `sha256` nor RIPEMD-160 could be imported** — the former is not a
-declared dependency of this package's `package.json` (which this work package may not edit) and does
-not resolve under pnpm's isolated `node_modules`; the latter is exported by nothing on the dependency
-list at all. Both are vendored from their public specifications (`src/btc/sha256.ts`,
-`src/btc/ripemd160.ts`) and checked against **their own published test vectors** independently of the
-BTC address test, in `src/btc/sha256.test.ts` and `src/btc/ripemd160.test.ts` — FIPS 180-4's `''`/`'abc'`/
-the two-block 448-bit vector for SHA-256, and RIPEMD-160's own `''`/`'abc'`/`'message digest'`/the
-alphabet/a two-block vector, 9 tests total, all green.
+**Update:** the original write-up here recorded that neither `@core/secretbox`'s `sha256` nor
+RIPEMD-160 could be imported — `@noble/hashes` was not a declared dependency of this package's
+`package.json` and did not resolve under pnpm's isolated `node_modules` — and vendored both from their
+public specifications (`src/btc/sha256.ts`, `src/btc/ripemd160.ts`), checked against their own published
+test vectors in `src/btc/sha256.test.ts`/`src/btc/ripemd160.test.ts` (9 tests total). That premise no
+longer holds: `@noble/hashes@2.4.0` is now a declared, installed dependency of this package (also what
+`@scure/bip32` and `@core/secretbox` use), and `scripts/eslint-boundaries.js`'s `connector-walletrpc`
+layer allows it. The hand-rolled files and their tests are deleted; `src/btc/hash160.ts` now composes
+`sha256` from `@noble/hashes/sha2.js` and `ripemd160` from `@noble/hashes/legacy.js` directly (`address.ts`
+and `guard.ts` import `sha256` from the same subpath for `base58check`'s checksum). A finance app has no
+business carrying its own hash primitives once one audited implementation is already on the dependency
+graph. The BIP84 published-vector walk below (`test/derive.test.ts`) is unchanged and still green,
+proving derivation is byte-identical under the swap.
+
+**Open finding, discovered while making this change, carried to the orchestrator rather than worked
+around:** `eslint.config.js` has a codebase-wide `no-restricted-imports` rule (predating this package,
+landed at WP 0.2 alongside `@core/secretbox` itself) restricting `@noble/hashes` (and `@noble/ciphers`,
+`hash-wasm`) to exactly one file, `packages/secretbox/src/primitives.ts` — "the single audited crypto
+call site... Reach it through `@core/secretbox`." The `connector-walletrpc` boundary layer's
+`@noble/hashes` allow-list entry governs only import _direction_ (`personalfi/layer-imports`); it does
+not, and cannot, override this second, stricter rule, which applies to every file in every package
+except that one chokepoint. Direct imports of `@noble/hashes/sha2.js`/`@noble/hashes/legacy.js` — used
+here per this work item's instructions, and the only way to resolve `@noble/hashes` from this package
+today — therefore still trip 5 `no-restricted-imports` errors (§9). `@core/secretbox` already re-exports
+`sha256` for exactly this "packages that legitimately need them" case, but two things block routing
+through it without touching files outside this package: (1) `@core/secretbox` is not a declared
+dependency of `packages/connectors/walletrpc/package.json` (unlike `packages/connectors/coinbase`, which
+does declare it) and so does not resolve under pnpm's isolated `node_modules`; (2) `@core/secretbox`
+exports `sha256` but not `ripemd160` — nothing in this codebase's audited chokepoint currently produces a
+RIPEMD-160 digest. The complete, chokepoint-respecting fix is two changes outside this package's ownership:
+add `@core/secretbox` to `packages/connectors/walletrpc/package.json`'s dependencies, and add a `ripemd160`
+export to `packages/secretbox/src/{primitives,index}.ts` mirroring the existing `sha256` one — then have
+`hash160.ts`/`address.ts`/`guard.ts` import both from `@core/secretbox` instead of `@noble/hashes`
+directly. Neither edit was made here (out of this task's file scope: no `package.json` edits, no files
+outside `packages/connectors/walletrpc/**` and this evidence doc).
 
 ### The walk, against BIP84's own published test vector
 
@@ -276,8 +303,6 @@ eslint packages/connectors/walletrpc` currently reports exactly 5 violations, al
 
 | Suite                 | File                          | Count  |
 | --------------------- | ----------------------------- | ------ |
-| `connector-walletrpc` | `src/btc/ripemd160.test.ts`   | 5      |
-| `connector-walletrpc` | `src/btc/sha256.test.ts`      | 4      |
 | `connector-walletrpc` | `test/derive.test.ts`         | 4      |
 | `connector-walletrpc` | `test/no-private-key.test.ts` | 10     |
 | `connector-walletrpc` | `test/connector.test.ts`      | 8      |
@@ -285,18 +310,24 @@ eslint packages/connectors/walletrpc` currently reports exactly 5 violations, al
 | `connector-walletrpc` | `test/egress.test.ts`         | 6      |
 | `connector-walletrpc` | `test/unpriced.test.ts`       | 3      |
 | `connector-walletrpc` | `test/one-security.test.ts`   | 4      |
-| **Total**             |                               | **58** |
+| **Total**             |                               | **49** |
+
+`src/btc/sha256.test.ts` and `src/btc/ripemd160.test.ts` (9 tests) are gone along with the hand-rolled
+implementations they guarded (§2 update) — SHA-256 and RIPEMD-160 are now `@noble/hashes` calls, covered
+transitively by every BTC address/derivation test in this table.
 
 ```
-$ pnpm exec vitest run --project connector-walletrpc --project db
- Test Files  10 passed (10)
-      Tests  68 passed (68)
+$ pnpm exec vitest run --project connector-walletrpc
+ Test Files  7 passed (7)
+      Tests  49 passed (49)
 
 $ pnpm exec tsc -b --noEmit
 (clean — no output)
 
 $ pnpm exec eslint packages/connectors/walletrpc
-5 problems, all @scure/bip32 / @scure/base boundary-lint violations — see §8 item 1.
+5 problems (5 errors), all `no-restricted-imports` on `@noble/hashes/sha2.js` / `@noble/hashes/legacy.js`
+in `src/btc/hash160.ts`, `src/btc/address.ts`, `src/guard.ts`, `test/no-private-key.test.ts` — see the
+note below.
 
 $ node scripts/check-schema-ownership.ts
 schema-ownership: ok — 98 table(s) claimed across 14 package(s), 77 defined.
@@ -316,9 +347,11 @@ matching the style of every other migration's entry there. No new `describe`/`it
 ## 10. Files touched
 
 - `packages/connectors/walletrpc/src/**` (new: `provider.ts`, `guard.ts`, `connect-input.ts`,
-  `connector.ts`, `store.ts`, `units.ts`, `index.ts`, `btc/{scheme,derive,address,hash160,sha256,
-ripemd160}.ts` (+ `.test.ts` for `sha256`/`ripemd160`), `eth/{address,etherscan,api-key}.ts`).
-  `src/index.ts` replaced the placeholder.
+  `connector.ts`, `store.ts`, `units.ts`, `index.ts`, `btc/{scheme,derive,address,hash160}.ts`,
+  `eth/{address,etherscan,api-key}.ts`). `src/index.ts` replaced the placeholder. `btc/sha256.ts`,
+  `btc/ripemd160.ts` and their `.test.ts` files were added at WP 3.6 and later deleted once
+  `@noble/hashes` became a resolvable dependency (§2 update); `hash160.ts` now imports `sha256`/
+  `ripemd160` from it directly.
 - `packages/connectors/walletrpc/test/**` (new: `fake.ts`, `harness.ts`, `derive.test.ts`,
   `no-private-key.test.ts`, `connector.test.ts`, `conformance.test.ts`, `egress.test.ts`,
   `unpriced.test.ts`, `one-security.test.ts`).
@@ -329,6 +362,11 @@ ripemd160}.ts` (+ `.test.ts` for `sha256`/`ripemd160`), `eth/{address,etherscan,
 
 ## 11. Open
 
+- **New:** 5 `no-restricted-imports` errors from the codebase-wide crypto chokepoint rule (§2 update) —
+  `@core/secretbox` needs a declared-dependency line in this package's `package.json` and a `ripemd160`
+  export alongside its existing `sha256`, so `hash160.ts`/`address.ts`/`guard.ts` can reach both hashes
+  through the one audited call site instead of importing `@noble/hashes` directly. Neither edit is in
+  this package or this evidence doc's ownership.
 - The `connector-walletrpc` boundary-lint layer (§8 item 1) — required before CI's `just verify` can
   be green on this package; `just verify` was not run as part of this work package (out of scope per
   the dispatch's per-agent verification list, which names `vitest`, `tsc`, `eslint` directly).
@@ -337,3 +375,15 @@ ripemd160}.ts` (+ `.test.ts` for `sha256`/`ripemd160`), `eth/{address,etherscan,
   dispatch's "no network in tests" rule. The gate's browser walk is what converts the BIP84 vector
   match and the egress design from a well-founded implementation into an observed one, the same
   posture WP 3.5 recorded for its own live smoke.
+
+## 12. Resolution of the hash-chokepoint finding (orchestrator, 2026-09-23)
+
+The §2 update and §11 finding are resolved as they prescribed, by the two edits outside this
+package's scope: `ripemd160` is now exported from `@core/secretbox` (`packages/secretbox/src/primitives.ts`,
+re-exported from `index.ts`, documented as having exactly one caller), and `@core/secretbox` is a declared
+dependency of this package while `@noble/hashes` is not. `hash160.ts`, `address.ts`, `guard.ts` and
+`test/no-private-key.test.ts` import `sha256`/`ripemd160` from `@core/secretbox`; the
+`connector-walletrpc` boundary layer no longer lists `@noble/hashes`. `grep -rn noble packages/connectors/walletrpc/{src,test}`
+finds only a comment. Checks after the change: `eslint packages/secretbox packages/connectors/walletrpc` 0
+problems; `tsc -b --noEmit` clean; `connector-walletrpc` + `secretbox` projects 82/82 green (the BIP84
+published-vector test still passes, so derivation is byte-identical through the chokepoint).

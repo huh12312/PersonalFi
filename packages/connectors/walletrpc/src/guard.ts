@@ -44,7 +44,7 @@
  * address either way.
  */
 import { base58check } from '@scure/base';
-import { sha256 } from './btc/sha256.ts';
+import { sha256 } from '@core/secretbox';
 import { ConnectorError } from '@connector/port';
 
 const BASE58CHECK = base58check(sha256);

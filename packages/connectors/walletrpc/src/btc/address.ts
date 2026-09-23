@@ -16,7 +16,7 @@
  * `docs/evidence/phase-3/wp3.6-walletrpc.md` for the grep that proves it.
  */
 import { base58check, bech32 } from '@scure/base';
-import { sha256 } from './sha256.ts';
+import { sha256 } from '@core/secretbox';
 import { hash160 } from './hash160.ts';
 
 const BASE58CHECK = base58check(sha256);

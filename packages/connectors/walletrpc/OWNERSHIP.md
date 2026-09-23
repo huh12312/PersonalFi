@@ -48,39 +48,41 @@ every test in this package runs against.
   `EtherscanTransport` function, built at the composition root exactly as
   `CoinbaseConnector`'s transport is.
 
-## Boundary layer needed
+## Boundary layer
 
-`scripts/eslint-boundaries.js` has no `connector-walletrpc` entry, so this
-package currently falls under the generic `connectors` layer, whose allow-list
-(`['@core/kernel', '@core/secretbox', '@connector/port', 'zod']`) does not
-include `@scure/bip32` or `@scure/base` — both required by the dispatch
-("using @scure/bip32" (03 §3 "WP 3.6")) and both already declared dependencies
-in this package's own `package.json`. A named layer, in the same shape as
-`connector-plaid`'s, is needed:
+`scripts/eslint-boundaries.js` now has a `connector-walletrpc` entry (allow
+list: `@core/kernel`, `@core/secretbox`, `@connector/port`, `@scure/bip32`,
+`@scure/base`, `@noble/hashes`, plus `UNIVERSAL`), placed before the generic
+`connectors` entry. The layer request this section used to carry to the
+orchestrator — the missing `personalfi/layer-imports` entry for `@scure/bip32`
+/`@scure/base` — is satisfied.
 
-```js
-{
-  name: 'connector-walletrpc',
-  prefix: 'packages/connectors/walletrpc/',
-  allow: ['@core/kernel', '@core/secretbox', '@connector/port', '@scure/bip32', '@scure/base', ...UNIVERSAL],
-  allowNodeBuiltins: true,
-  why:
-    'The watch-only wallet adapter derives BTC addresses locally from an xpub/ypub/zpub via ' +
-    '@scure/bip32 + @scure/base (bech32/base58check) and needs no other provider SDK.',
-}
-```
-
-placed before the generic `connectors` entry (`layerFor` matches the first
-prefix). This package does not edit `scripts/eslint-boundaries.js` itself —
-see `docs/evidence/phase-3/wp3.6-walletrpc.md` §7 for the observed `eslint`
-failures this produces until the entry lands.
+That layer entry only controls import _direction_, though, and does not fully
+clear `pnpm exec eslint packages/connectors/walletrpc`: a separate,
+codebase-wide `no-restricted-imports` rule (predating this package) confines
+`@noble/hashes` to one audited call site, `packages/secretbox/src/primitives.ts`,
+everywhere except there. `src/btc/hash160.ts`, `src/btc/address.ts`,
+`src/guard.ts` and `test/no-private-key.test.ts` import `@noble/hashes`
+directly (replacing the hand-vendored SHA-256/RIPEMD-160 below) and so still
+trip that rule — 5 errors. Routing both hashes through `@core/secretbox`
+instead would clear it, but needs two changes outside this package's current
+scope: `@core/secretbox` as a declared dependency of this package's
+`package.json` (it resolves for `@connector/coinbase`, which does declare it,
+but not here), and a `ripemd160` export added to `@core/secretbox` alongside
+its existing `sha256`. See `docs/evidence/phase-3/wp3.6-walletrpc.md` §2's
+update and §11 for the full note.
 
 ## Third party
 
-`@scure/bip32` and `@scure/base` (both MIT, both already pinned in this
-package's `package.json` at 2.4.0). `@core/secretbox`'s `sha256` and
-`@noble/hashes`' RIPEMD-160 are **not** dependencies of this package and do not
-resolve under pnpm's isolated `node_modules`, so SHA-256 (`src/btc/sha256.ts`)
-and RIPEMD-160 (`src/btc/ripemd160.ts`) are vendored, pure transcriptions of
-their public specifications, each checked against that algorithm's own
-published test vectors. Nothing else is vendored.
+`@scure/bip32`, `@scure/base` and `@noble/hashes` (all MIT, all declared
+dependencies of this package's `package.json`, pinned at 2.4.0). SHA-256 and
+RIPEMD-160 come from `@noble/hashes` (`@noble/hashes/sha2.js`'s `sha256`,
+`@noble/hashes/legacy.js`'s `ripemd160`) — the same library `@scure/bip32` and
+`@core/secretbox` already depend on — rather than from a hand-rolled
+transcription. Nothing in this package is vendored. (The chokepoint-correct
+end state routes both through `@core/secretbox` rather than importing
+`@noble/hashes` directly — see "Boundary layer" above.)
+
+**Resolved 2026-09-23:** both hashes now come from `@core/secretbox` (which gained a `ripemd160` export for
+this one caller); `@noble/hashes` is no longer a dependency of this package nor on its boundary allow-list.
+The `no-restricted-imports` chokepoint holds with zero exceptions.

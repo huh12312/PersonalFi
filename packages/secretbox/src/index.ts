@@ -49,7 +49,8 @@ export type { SecretBoxQueryable, EncryptionKeyRow, KeyKind } from './store.ts';
 
 /**
  * Primitives re-exported for the packages that legitimately need them — session
- * token hashing in `@ctx/identity`, the double-submit CSRF token in `apps/api`.
+ * token hashing in `@ctx/identity`, the double-submit CSRF token in `apps/api`,
+ * Bitcoin's HASH160 in `@connector/walletrpc` (the only `ripemd160` caller).
  *
  * They are *here* rather than imported from `@noble/hashes` at the call site so
  * that "which code touches a primitive?" has one answer: this package's surface.
@@ -59,6 +60,7 @@ export type { SecretBoxQueryable, EncryptionKeyRow, KeyKind } from './store.ts';
 export {
   randomBytes,
   sha256,
+  ripemd160,
   constantTimeEqual,
   argon2idEncoded,
   argon2idVerify,

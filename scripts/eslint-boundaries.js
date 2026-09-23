@@ -304,9 +304,10 @@ const LAYERS = [
     // Phase 3 WP 3.6 (docs/plan/03-phase-3-dispatch.md §4 shared files, item 9).
     // The watch-only wallet adapter derives BTC addresses from an xpub locally,
     // which needs BIP32 public derivation (`@scure/bip32`), base58/bech32
-    // (`@scure/base`) and SHA-256 + RIPEMD-160 (`@noble/hashes`, which
-    // `@scure/bip32` and `@core/secretbox` already pull in — one audited hash
-    // implementation in the tree, never a hand-vendored one). Public-key
+    // (`@scure/base`) and SHA-256 + RIPEMD-160 — both through `@core/secretbox`,
+    // the single audited crypto call site (`no-restricted-imports` confines
+    // `@noble/hashes` to `packages/secretbox/src/primitives.ts`; `ripemd160`
+    // was added to secretbox's surface for this one caller). Public-key
     // derivation only: the package has no signing path, and the eslint
     // `node:crypto` restriction still applies here as everywhere.
     name: 'connector-walletrpc',
@@ -317,7 +318,6 @@ const LAYERS = [
       '@connector/port',
       '@scure/bip32',
       '@scure/base',
-      '@noble/hashes',
       ...UNIVERSAL,
     ],
     allowNodeBuiltins: true,

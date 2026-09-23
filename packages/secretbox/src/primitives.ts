@@ -36,6 +36,7 @@
  */
 import { randomBytes as nodeRandomBytes, timingSafeEqual } from 'node:crypto';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
+import { ripemd160 as nobleRipemd160 } from '@noble/hashes/legacy.js';
 import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
 import { argon2id, argon2Verify } from 'hash-wasm';
 
@@ -70,6 +71,17 @@ export function randomNonce(): Uint8Array {
 
 export function sha256(data: Uint8Array): Uint8Array {
   return nobleSha256(data);
+}
+
+/**
+ * RIPEMD-160, for exactly one caller: `@connector/walletrpc`'s Bitcoin
+ * `HASH160 = RIPEMD160(SHA256(x))` address derivation (WP 3.6). It lives in
+ * `@noble/hashes`' `legacy` module for a reason — it is not a hash to reach for
+ * anywhere else in this app — and it is exported from here rather than imported
+ * at the call site so the single-crypto-call-site rule keeps one answer.
+ */
+export function ripemd160(data: Uint8Array): Uint8Array {
+  return nobleRipemd160(data);
 }
 
 /**

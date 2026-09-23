@@ -11,7 +11,7 @@
   "dependencies": {
     "@connector/port": "workspace:*",
     "@core/kernel": "workspace:*",
-    "@noble/hashes": "2.4.0",
+    "@core/secretbox": "workspace:*",
     "@scure/base": "2.4.0",
     "@scure/bip32": "2.4.0"
   }
