@@ -461,6 +461,69 @@ const LAYERS = [
       'from test/.',
   },
   {
+    // Phase 3 WP 3.1/3.2/3.3 (docs/plan/03-phase-3-dispatch.md §4 shared files).
+    // Investments consumes provider *facts* — `ProviderSecurityFact`,
+    // `ProviderHoldingFact`, `ProviderInvestmentTransactionFact` — whose types
+    // are declared in `@connector/port`, for the same reason `connections` is
+    // allowed it: the port is not a context (owns no table, holds no handle)
+    // and sits below every context that reads it. Nothing here imports a
+    // connector *adapter*; the facts arrive through `@ctx/connections`' sync.
+    // Absent on purpose: `@ctx/ledger`. Accounts and balances reach this
+    // context through a `LedgerPort`-style adapter wired in apps/api/src/domain.ts
+    // (08 §1.6 — arrows point down), never by import.
+    name: 'investments',
+    prefix: 'packages/contexts/investments/',
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      '@core/contracts',
+      '@core/platform',
+      '@core/secretbox',
+      '@core/testkit',
+      '@core/seed',
+      '@connector/port',
+      'drizzle-orm',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'Investments is a context: it depends on the kernel, on infrastructure and on the ' +
+      "connector port's fact types, and on no other context. Accounts arrive through an " +
+      'injected port from the composition root. @core/testkit and @core/seed are dev-only, ' +
+      'used only from test/.',
+  },
+  {
+    // Phase 3 WP 3.4 (docs/plan/03-phase-3-dispatch.md §4 shared files).
+    // Market data: outbound HTTP to exactly four provider hosts, every byte of
+    // it through `@core/platform`'s egress policy + transport (moved there from
+    // notifications in 6ad393c so this context reuses rather than reimplements
+    // the allow-list — dispatch §5). No third-party HTTP client, no `fetch` of
+    // its own. 08 §1.3 #11: this context must never reach Ledger, Connections
+    // or Identity — the generic rule already denies every `@ctx/*` import, and
+    // this entry keeps that denial while naming it.
+    name: 'integrations',
+    prefix: 'packages/contexts/integrations/',
+    allow: [
+      '@core/kernel',
+      '@core/config',
+      '@core/db',
+      '@core/contracts',
+      '@core/platform',
+      '@core/secretbox',
+      '@core/testkit',
+      '@core/seed',
+      'drizzle-orm',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'Integrations is a context: it depends on the kernel and on infrastructure, and on ' +
+      'no other context — 08 §1.3 #11 forbids it reaching Ledger, Connections or Identity. ' +
+      'Its only network path is @core/platform egress. @core/testkit and @core/seed are ' +
+      'dev-only, used only from test/.',
+  },
+  {
     name: 'context',
     prefix: 'packages/contexts/',
     allow: [
