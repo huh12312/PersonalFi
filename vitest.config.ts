@@ -246,6 +246,31 @@ export default defineConfig({
         },
       },
       {
+        // Phase 3 WP 3.4: the PriceSource port, its four provider adapters
+        // (Tiingo, FRED, CoinGecko, OpenFIGI), rate-limit budgets and the
+        // egress matrix — all against fakes and a local listener, never the
+        // network. The live smokes skip without a key.
+        root: './packages/contexts/integrations',
+        test: {
+          name: 'integrations',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        // Price/FX persistence, `price_source_priority` and the raw-column
+        // custody read ('the raw column contains no plaintext API key') are
+        // claims about Postgres.
+        root: './packages/contexts/integrations',
+        test: {
+          name: 'integrations-db',
+          include: ['test/db/**/*.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          testTimeout: 30_000,
+        },
+      },
+      {
         // `@ctx/connections`, minus the database. The conformance suite lives
         // here — it needs three real adapters and no Postgres, which is exactly
         // the shape of a unit project.
