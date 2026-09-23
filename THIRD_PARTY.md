@@ -5,7 +5,7 @@
 # Third-Party Notices
 
 PersonalFi is MIT-licensed. This file lists the runtime (production) dependency tree —
-`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:cabdbf8e826b4a01.
+`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:0d8c30a982946043.
 devDependencies (build tooling, test frameworks) are not distributed and are not listed
 here; see `licenses.policy.yaml` for the policy that governs both.
 
@@ -90,6 +90,7 @@ part of PersonalFi’s dependency tree and are not listed here.
 - `@levischuck/tiny-cbor`@0.2.11 — https://github.com/levischuck/tiny-cbor#readme
 - `@lukeed/ms`@2.0.2 — https://github.com/lukeed/ms#readme
 - `@noble/ciphers`@2.4.0 — https://paulmillr.com/noble/
+- `@noble/curves`@2.4.0 — https://paulmillr.com/noble/
 - `@noble/hashes`@2.4.0 — https://paulmillr.com/noble/
 - `@peculiar/asn1-android`@2.9.4 — https://github.com/PeculiarVentures/asn1-schema/tree/master/packages/android#readme
 - `@peculiar/asn1-cms`@2.9.4 — https://github.com/PeculiarVentures/asn1-schema/tree/master/packages/cms#readme
@@ -121,6 +122,8 @@ part of PersonalFi’s dependency tree and are not listed here.
 - `@radix-ui/react-use-controllable-state`@1.2.6 — https://radix-ui.com/primitives
 - `@radix-ui/react-use-effect-event`@0.0.5 — https://radix-ui.com/primitives
 - `@radix-ui/react-use-layout-effect`@1.1.4 — https://radix-ui.com/primitives
+- `@scure/base`@2.4.0 — https://paulmillr.com/noble/#scure
+- `@scure/bip32`@2.4.0 — https://paulmillr.com/noble/#scure
 - `@simplewebauthn/browser`@14.0.0 — https://github.com/MasterKale/SimpleWebAuthn/tree/master/packages/browser#readme
 - `@simplewebauthn/server`@14.0.0 — https://github.com/MasterKale/SimpleWebAuthn/tree/master/packages/server#readme
 - `@standard-schema/utils`@0.3.0 — https://github.com/standard-schema/standard-schema#readme

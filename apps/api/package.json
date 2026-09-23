@@ -15,7 +15,9 @@
   "dependencies": {
     "@connector/csv": "workspace:*",
     "@connector/manual": "workspace:*",
+    "@connector/coinbase": "workspace:*",
     "@connector/plaid": "workspace:*",
+    "@connector/walletrpc": "workspace:*",
     "@core/config": "workspace:*",
     "@core/contracts": "workspace:*",
     "@core/db": "workspace:*",
@@ -27,6 +29,8 @@
     "@ctx/connections": "workspace:*",
     "@ctx/identity": "workspace:*",
     "@ctx/insights": "workspace:*",
+    "@ctx/integrations": "workspace:*",
+    "@ctx/investments": "workspace:*",
     "@ctx/ledger": "workspace:*",
     "@ctx/notifications": "workspace:*",
     "@ctx/recurring": "workspace:*",

@@ -224,6 +224,18 @@ export default defineConfig({
         },
       },
       {
+        // Phase 3 WP 3.6: the watch-only wallet connector. xpub derivation is
+        // local (published BIP32/84 vectors), balances come from fake Esplora /
+        // Etherscan servers; nothing here touches the network.
+        root: './packages/connectors/walletrpc',
+        test: {
+          name: 'connector-walletrpc',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+          testTimeout: 30_000,
+        },
+      },
+      {
         // Phase 3 WP 3.1/3.2/3.3: the resolver's merge rules, lot maths and
         // portfolio analytics are pure over Quantity + Money; they run here.
         root: './packages/contexts/investments',

@@ -211,6 +211,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@connector/coinbase':
+        specifier: workspace:*
+        version: link:../../packages/connectors/coinbase
       '@connector/csv':
         specifier: workspace:*
         version: link:../../packages/connectors/csv
@@ -220,6 +223,9 @@ importers:
       '@connector/plaid':
         specifier: workspace:*
         version: link:../../packages/connectors/plaid
+      '@connector/walletrpc':
+        specifier: workspace:*
+        version: link:../../packages/connectors/walletrpc
       '@core/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -253,6 +259,12 @@ importers:
       '@ctx/insights':
         specifier: workspace:*
         version: link:../../packages/contexts/insights
+      '@ctx/integrations':
+        specifier: workspace:*
+        version: link:../../packages/contexts/integrations
+      '@ctx/investments':
+        specifier: workspace:*
+        version: link:../../packages/contexts/investments
       '@ctx/ledger':
         specifier: workspace:*
         version: link:../../packages/contexts/ledger
@@ -552,6 +564,21 @@ importers:
       '@core/secretbox':
         specifier: workspace:*
         version: link:../../secretbox
+
+  packages/connectors/walletrpc:
+    dependencies:
+      '@connector/port':
+        specifier: workspace:*
+        version: link:../port
+      '@core/kernel':
+        specifier: workspace:*
+        version: link:../../kernel
+      '@scure/base':
+        specifier: 2.4.0
+        version: 2.4.0
+      '@scure/bip32':
+        specifier: 2.4.0
+        version: 2.4.0
 
   packages/contexts/budgeting:
     dependencies:
@@ -2246,6 +2273,10 @@ packages:
     resolution: {integrity: sha512-AnjFn0Jv92laAkvMrghlFZq4qQCIN/4DxFV/eooqtC2YTjB7kBeLMS2T9KJX4Dn+ZVXLOwK0lSgqDtx9gvxtiw==}
     engines: {node: '>= 20.19.0'}
 
+  '@noble/curves@2.4.0':
+    resolution: {integrity: sha512-P4/62zrgfH33CneE3Dn4WhJVA22YUU0eR51wKIan4NVRvwsA0YnPTwWGpNbpuacSujmSFLvyzpyuR30+fbq2Ew==}
+    engines: {node: '>= 20.19.0'}
+
   '@noble/hashes@2.4.0':
     resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
     engines: {node: '>= 20.19.0'}
@@ -2759,6 +2790,12 @@ packages:
     resolution: {integrity: sha512-at8QVep6S3h5Y6gSbdGU06bRY5WJkf6WUduM9YtvYMbYhB1MOFfUgc6kehitQXzOtMSaT70q7f9ydPhpqu821w==}
     cpu: [x64]
     os: [win32]
+
+  '@scure/base@2.4.0':
+    resolution: {integrity: sha512-thZ1TuJwFwBblOhgsjDKvvGirBxNp+wSvY/DR6tJBJOTDhdAAcHJ8Vbr2eFnqaxeca4+t0i9KBf+uHYGWwZORg==}
+
+  '@scure/bip32@2.4.0':
+    resolution: {integrity: sha512-i3DS0CptAocyvqE4n3SUkpzeQK4vJMFwWLofTwRiiKo2aWojBOfyMCgfKw9HVpO6fSY5AK86sHS/Uzn8kK9Few==}
 
   '@simplewebauthn/browser@14.0.0':
     resolution: {integrity: sha512-1odWVqeEBTl7lJ9zMKLEsmTlnyrDO5iRcTvfMKKk1WThUnp/i8JJdffdj2icP+tty159s4PgwE3BiMoEW9NFow==}
@@ -7197,6 +7234,10 @@ snapshots:
 
   '@noble/ciphers@2.4.0': {}
 
+  '@noble/curves@2.4.0':
+    dependencies:
+      '@noble/hashes': 2.4.0
+
   '@noble/hashes@2.4.0': {}
 
   '@oxc-project/types@0.148.0': {}
@@ -7608,6 +7649,14 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.63.1':
     optional: true
+
+  '@scure/base@2.4.0': {}
+
+  '@scure/bip32@2.4.0':
+    dependencies:
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
+      '@scure/base': 2.4.0
 
   '@simplewebauthn/browser@14.0.0': {}
 
