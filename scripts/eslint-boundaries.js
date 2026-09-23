@@ -301,6 +301,32 @@ const LAYERS = [
       'take a dependency on anything that could persist or log it.',
   },
   {
+    // Phase 3 WP 3.6 (docs/plan/03-phase-3-dispatch.md §4 shared files, item 9).
+    // The watch-only wallet adapter derives BTC addresses from an xpub locally,
+    // which needs BIP32 public derivation (`@scure/bip32`), base58/bech32
+    // (`@scure/base`) and SHA-256 + RIPEMD-160 (`@noble/hashes`, which
+    // `@scure/bip32` and `@core/secretbox` already pull in — one audited hash
+    // implementation in the tree, never a hand-vendored one). Public-key
+    // derivation only: the package has no signing path, and the eslint
+    // `node:crypto` restriction still applies here as everywhere.
+    name: 'connector-walletrpc',
+    prefix: 'packages/connectors/walletrpc/',
+    allow: [
+      '@core/kernel',
+      '@core/secretbox',
+      '@connector/port',
+      '@scure/bip32',
+      '@scure/base',
+      '@noble/hashes',
+      ...UNIVERSAL,
+    ],
+    allowNodeBuiltins: true,
+    why:
+      'The wallet adapter maps chain balances to canonical facts. It may derive public ' +
+      'addresses (BIP32/base58/bech32/hashes) and reach nothing that could hold, sign ' +
+      'with, or persist a private key — there is none.',
+  },
+  {
     // WP 1.2. One package per provider adapter, plus `port` — the interface they
     // implement and the canonical fact shapes they produce.
     //

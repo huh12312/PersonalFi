@@ -261,6 +261,24 @@ describeWithDb('runMigrations', () => {
       //   the STALE verdict is computed. No column in any of the four holds an
       //   API key — provider keys are file secrets (D5) and never reach the
       //   database at all.
+      // 0016_wallet_addresses: one @ctx/investments table — wallet_addresses.
+      //   Claimed at WP 3.1 ("wallet_addresses lands in 0016 (WP 3.6) and is
+      //   still a claim") and landed here: one watch-only Bitcoin
+      //   xpub/ypub/zpub or Ethereum address per connection, plus BTC
+      //   gap-limit scan state. `WalletRpcConnector`
+      //   (`packages/connectors/walletrpc`) holds no database handle at all —
+      //   an adapter never writes to the database — so it is not this table's
+      //   owner despite landing its migration; its own OWNERSHIP.md says so
+      //   explicitly. No column holds key material: `descriptor` is public
+      //   (an xpub or a `0x…` address), and the connector's own refusal seam
+      //   (`src/guard.ts`) is what keeps a private key from ever reaching it.
+      //   Two constraints carry the load-bearing claims.
+      //   `wallet_addresses_bitcoin_has_a_derivation_scheme` requires exactly
+      //   one of {bitcoin + a scheme, ethereum + no scheme} — there is no
+      //   derivation on the Ethereum side at all (08 §2.6: "by address").
+      //   `wallet_addresses_ethereum_has_no_scan_state` keeps the BIP44
+      //   gap-limit horizon columns meaningless for a chain with no address
+      //   chain to scan.
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
@@ -337,6 +355,7 @@ describeWithDb('runMigrations', () => {
         'transactions_provider',
         'transfer_links',
         'users',
+        'wallet_addresses',
         'webauthn_challenges',
         'webauthn_credentials',
       ]);
