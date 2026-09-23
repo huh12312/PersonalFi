@@ -1,16 +1,44 @@
 // SPDX-License-Identifier: MIT
 /**
- * The egress guard. **This is the security surface of WP 2.4.**
+ * The egress guard. **This is the security surface of WP 2.4 and WP 3.4.**
  *
  * 02-phase-2-dispatch.md §5: "Notification channels are egress — the first
  * outbound path in the app that a *user-supplied string* controls. An SSRF
  * here reaches `db:5432` and the container metadata endpoint."
  *
- * Every outbound byte this context sends passes through `guardDestination` and
- * then through a transport that was handed an already-validated IP address. No
- * other file in the package opens a socket, and the adapters
- * (`adapters/ntfy.ts`, `adapters/smtp.ts`) cannot reach the network except
- * through what this file returns.
+ * Every outbound byte a context sends passes through `guardDestination` and
+ * then through a transport that was handed an already-validated IP address.
+ * `@ctx/notifications`' adapters (`adapters/ntfy.ts`, `adapters/smtp.ts`) and
+ * `@ctx/integrations`' market-data adapters (Tiingo, FRED, CoinGecko,
+ * OpenFIGI) cannot reach the network except through what this file returns.
+ *
+ * ## Why it lives in `@core/platform` rather than in `@ctx/notifications`
+ *
+ * It was written here first, in WP 2.4, as `@ctx/notifications/src/egress.ts`.
+ * WP 3.4 is the second egress surface — market data, on a 03:45 schedule with
+ * no human present — and 03-phase-3-dispatch.md §5 is explicit that the
+ * allow-list machinery must be "**reused, not reimplemented**", with an exit
+ * test (`test/shared-allowlist.test.ts` → 'the price egress guard is the
+ * notifications module, not a copy of it') that fails if the second context
+ * forks it. 03 §5.2's lesson, stated plainly: *the second implementation of an
+ * allow-list is where the hole is.*
+ *
+ * `personalfi/layer-imports` denies `@ctx/integrations` -> `@ctx/notifications`
+ * — contexts never import each other — so "reuse" and "no cross-context
+ * import" have exactly one intersection: the module moves down a layer, to the
+ * substrate both contexts already depend on. This is a **move**, not a copy:
+ * `git log --follow` on this file reaches WP 2.4, and
+ * `@ctx/notifications/src/egress.ts` is now a re-export of these symbols and
+ * contains no logic at all. There is one implementation of the nine refusals in
+ * the tree and `grep -rn 'classifyIpv4' packages/` finds it once.
+ *
+ * The one generalisation the move required: `scheme` is typed `string` here
+ * rather than `@ctx/notifications`' three-member `ChannelScheme`. A policy's
+ * `allowedSchemes` is still a closed list supplied by its owner — notifications
+ * passes `['https', 'smtps', 'smtp+starttls']`, market data passes `['https']`
+ * — and `checkDestination` refuses anything outside it, so nothing is loosened;
+ * what changed is only that the substrate does not know a channel scheme from a
+ * provider scheme, which is exactly what a substrate should not know.
  *
  * ## The nine refusals, and why each one exists
  *
@@ -55,7 +83,6 @@
  */
 import { isIP } from 'node:net';
 import { promises as dns } from 'node:dns';
-import type { ChannelScheme } from '../schema/index.ts';
 
 // ---------------------------------------------------------------------------
 // Vocabulary
@@ -90,7 +117,7 @@ export type AddressClass =
   | 'documentation';
 
 export interface Destination {
-  readonly scheme: ChannelScheme;
+  readonly scheme: string;
   /** Lowercased, trailing dot stripped, never an IP literal. */
   readonly host: string;
   readonly port: number;
@@ -129,7 +156,7 @@ export function isEgressRefusedError(error: unknown): error is EgressRefusedErro
 export interface EgressPolicy {
   /** Exact hostnames, lowercased. No wildcards, no IPs, no suffix matching. */
   readonly allowedHosts: readonly string[];
-  readonly allowedSchemes: readonly ChannelScheme[];
+  readonly allowedSchemes: readonly string[];
   readonly allowedPorts: readonly number[];
   readonly maxResponseBytes: number;
   readonly timeoutMs: number;
@@ -137,7 +164,7 @@ export interface EgressPolicy {
 
 export interface EgressPolicyInput {
   readonly allowedHosts?: readonly string[];
-  readonly allowedSchemes?: readonly ChannelScheme[];
+  readonly allowedSchemes?: readonly string[];
   readonly allowedPorts?: readonly number[];
   readonly maxResponseBytes?: number;
   readonly timeoutMs?: number;
@@ -339,7 +366,7 @@ export const systemResolver: Resolver = async (host) => {
 };
 
 export interface DestinationInput {
-  readonly scheme: ChannelScheme;
+  readonly scheme: string;
   readonly host: string;
   readonly port: number;
   readonly path?: string;

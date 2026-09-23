@@ -156,4 +156,56 @@ export {
   type AdvisoryLease,
 } from './locks.ts';
 export { CHANNEL, createNotifyListener, type Channel, type NotifyListener } from './notify.ts';
+
+// ---------------------------------------------------------------------------
+// Egress
+// ---------------------------------------------------------------------------
+//
+// The outbound-request guard and the transport that honours it. Written in WP
+// 2.4 inside `@ctx/notifications`, moved here (not copied — `git log --follow`
+// reaches WP 2.4) in WP 3.4 so the *second* egress surface, market data, reuses
+// it rather than reimplementing it: 03-phase-3-dispatch.md §5 requires exactly
+// that, and `personalfi/layer-imports` denies a context->context import, so the
+// only place two contexts can share a module is the layer below both.
+//
+// It sits in `@core/platform` for the same reason the outbox does: it is
+// substrate that must know nothing about who is calling it. It reaches no
+// database and holds no state, so importing it costs a caller nothing.
+export {
+  createEgressPolicy,
+  checkDestination,
+  checkUrl,
+  guardDestination,
+  guardUrl,
+  classifyAddress,
+  classifyStatus,
+  isPublicAddress,
+  looksLikeIpLiteral,
+  normaliseHost,
+  assertHeaderValueSafe,
+  systemResolver,
+  EgressRefusedError,
+  isEgressRefusedError,
+  DENY_ALL_POLICY,
+  DEFAULT_ALLOWED_PORTS,
+  DEFAULT_MAX_RESPONSE_BYTES,
+  DEFAULT_TIMEOUT_MS,
+  REFUSAL_CODES,
+  type AddressClass,
+  type Destination,
+  type DestinationInput,
+  type EgressDecision,
+  type EgressPolicy,
+  type EgressPolicyInput,
+  type RefusalCode,
+  type Resolver,
+  type StatusVerdict,
+} from './egress/policy.ts';
+export {
+  createNodeTransport,
+  type HttpTransport,
+  type TransportRequest,
+  type TransportResponse,
+} from './egress/transport.ts';
+
 export * from './schema/index.ts';

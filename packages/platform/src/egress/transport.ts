@@ -33,7 +33,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import type { LookupFunction } from 'node:net';
-import { EgressRefusedError, assertHeaderValueSafe, type Destination } from './egress.ts';
+import { EgressRefusedError, assertHeaderValueSafe, type Destination } from './policy.ts';
 
 export interface TransportRequest {
   readonly destination: Destination;
