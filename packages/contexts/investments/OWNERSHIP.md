@@ -15,8 +15,11 @@ Tables listed here are _claimed_; most do not exist yet. Claiming early is the p
 `securities`, `security_identifiers` and `security_overlay` exist as of
 `0013_securities.sql` (WP 3.1). The rest are still claims: `holdings`,
 `holdings_snapshots`, `investment_transactions` and `cost_basis_lots` land in 0014
-(WP 3.2), and `prices`, `fx_rates`, `price_source_priority` and `wallet_addresses`
-in 0015/0016 (WP 3.4, WP 3.6).
+(WP 3.2). `prices`, `fx_rates` and `price_source_priority` exist as of
+`0015_market_data.sql` (WP 3.4) — this context owns and reads them, while
+`@ctx/integrations` owns the *fetching* and hands rows across through an
+injected writer port (08 §1.3 #7). `wallet_addresses` lands in 0016 (WP 3.6) and
+is still a claim.
 
 ## Depends on
 

@@ -205,6 +205,62 @@ describeWithDb('runMigrations', () => {
       //   security's metadata — a provider re-sync rewrites `securities` and
       //   cannot write here at all, which is what makes a user's asset-class
       //   override durable.
+      // 0014_lots: the five WP 3.2 @ctx/investments tables — basis_method_elections,
+      //   cost_basis_lots, holdings, holdings_snapshots, investment_transactions.
+      //   `holdings` is what the institution *asserts*; `cost_basis_lots` is what
+      //   we *computed* from `investment_transactions`, and keeping the two apart
+      //   is what stops a re-sync silently rewriting a realised gain. Five
+      //   constraints carry the load-bearing claims.
+      //   `cost_basis_lots_unknown_basis_is_declared_estimated` and
+      //   `cost_basis_lots_estimated_basis_carries_a_warning` are 04 §5.5 and
+      //   07 §6.2 made structural: an unknown basis is NULL with
+      //   `basis_source = 'ESTIMATED'` and a non-empty `basis_warning`, so a
+      //   BROKER lot claiming a zero basis it never received cannot be inserted
+      //   at all — which is the difference between "unavailable" and a
+      //   fabricated 100% gain. `cost_basis_lots_remaining_within_quantity`
+      //   bounds `quantity_remaining` above where its column CHECK bounds it
+      //   below, so `'quantity_remaining is never negative'` is a property of
+      //   Postgres and not only of the matcher.
+      //   `cost_basis_lots_holding_period_starts_no_later_than_open` is the
+      //   whole reason `holding_period_start_date` is a second column: a wash
+      //   sale tacks the replaced lot's period on, which moves the start
+      //   *earlier* than `open_date` and never later (07 §4.4, IRC §1091). And
+      //   `investment_transactions_provider_key_idx`, UNIQUE on (user_id,
+      //   account_id, provider, provider_transaction_id), is what makes a
+      //   re-fetched date window harmless — 01 §5.5 records that there is no
+      //   `/investments/transactions/sync`, so there is a window and an upsert
+      //   and deliberately no cursor column.
+      //   One trigger, `basis_method_elections_average_cost_is_sticky`, raises
+      //   23514 with that constraint name when an AVERAGE_COST election is
+      //   changed: 07 §4.4's stickiness enforced on every write path rather
+      //   than in a dropdown. It is BEFORE UPDATE only, because a DELETE
+      //   trigger would break the `users` cascade.
+      //   None of the five carries a foreign key into another context's
+      //   schema: `account_id` is an opaque UUID exactly as
+      //   `recurring_series.merchant_id` is, which is what makes "the lot
+      //   engine never creates an account" structural. `security_id` is a real
+      //   foreign key because `securities` is this context's own table.
+      // 0015_market_data: three @ctx/investments tables — fx_rates, prices,
+      //   price_source_priority — plus market_data_runs, which is
+      //   @ctx/integrations'. The split is 08 §1.3 #7: Investments publishes
+      //   `PriceReader`/`FxReader` so it owns the data; Integrations does the
+      //   fetching so it owns the record of a fetch, and rows cross that seam
+      //   through an injected writer port rather than a table handle.
+      //   Three constraints carry the load-bearing claims.
+      //   `prices_source_is_an_observation` has **no `last_known` member**, so
+      //   a carry-forward can only ever be a read-time label — 07 §6.1's "never
+      //   recompute history from today's price", made structural.
+      //   `fx_rates_is_a_real_pair` refuses `base_currency = quote_currency`,
+      //   so the one legitimate 1.0 (USD->USD) is answered by `FxReader`
+      //   without a row and no stored 1.0 can ever be mistaken for a fetched
+      //   rate (D4, 08 §6.6: "never a silent 1.0"). And
+      //   `price_source_priority_override_is_first` pins a user override to
+      //   rung 1, because an override that is not first is not an override.
+      //   Staleness is deliberately *not* a stored boolean: 07 §6.1's rule is
+      //   about the clock at read time, so `prices.observed_at` is stored and
+      //   the STALE verdict is computed. No column in any of the four holds an
+      //   API key — provider keys are file secrets (D5) and never reach the
+      //   database at all.
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
@@ -212,6 +268,7 @@ describeWithDb('runMigrations', () => {
         'advisors',
         'auth_attempts',
         'auth_lockouts',
+        'basis_method_elections',
         'budget_alerts_state',
         'budget_line_actuals',
         'budget_lines',
@@ -225,19 +282,25 @@ describeWithDb('runMigrations', () => {
         'connection_accounts',
         'connection_staged_facts',
         'connections',
+        'cost_basis_lots',
         'delivery_attempts',
         'domain_events',
         'encryption_keys',
         'event_consumer_offsets',
         'feature_flags',
+        'fx_rates',
+        'holdings',
+        'holdings_snapshots',
         'insight_actions',
         'insight_dismissals',
         'insight_evidence',
         'insight_feedback',
         'insights',
+        'investment_transactions',
         'job_runs',
         'jobs',
         'ledger_dedup_keys',
+        'market_data_runs',
         'mcc_codes',
         'merchant_profiles',
         'merchants',
@@ -245,6 +308,8 @@ describeWithDb('runMigrations', () => {
         'notification_outbox',
         'notification_rules',
         'price_change_events',
+        'price_source_priority',
+        'prices',
         'processed_events',
         'provider_category_map',
         'recovery_codes',
