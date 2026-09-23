@@ -500,6 +500,38 @@ createNodeTransport(), keys })`; assign `createOpenFigiMapper` to
 8. **vitest/CI** — the `integrations` and `integrations-db` projects already
    exist in `vitest.config.ts`. CI must run `integrations-db` with a database,
    and must **not** set `MARKET_DATA_LIVE_SMOKE`.
+9. **`apps/api/src/reports/export/registry.ts` — the one remaining `just check`
+   failure, and it belongs to neither WP 3.4 nor WP 3.2.** WP 2.8's export
+   registry asserts that _every user-scoped table_ appears in the export
+   manifest, and migrations 0014 and 0015 together added nine that do not:
+
+   | Table                                                                                                    | Migration | WP      |
+   | -------------------------------------------------------------------------------------------------------- | --------- | ------- |
+   | `basis_method_elections`, `cost_basis_lots`, `holdings`, `holdings_snapshots`, `investment_transactions` | 0014      | 3.2     |
+   | `prices`, `fx_rates`, `price_source_priority`, `market_data_runs`                                        | 0015      | **3.4** |
+
+   `apps/api/test/db/export-import.test.ts` → `'every user-scoped table appears
+in the manifest'` is red with exactly those nine. Neither finishing agent
+   owns `apps/api`, so neither fixed it; it is a shared-file task of the same
+   kind as the vitest-project and boundary-layer entries the orchestrator has
+   already applied this wave.
+
+   **Decisions the registry entries require, which is why this is not a
+   mechanical add.** Three of the four WP 3.4 tables are ordinary user data and
+   should export and re-import like any other. `market_data_runs` is different
+   and should be considered for **exclusion**: it is an operational audit
+   ledger, it is the durable spend the rate budgets hydrate from, and importing
+   another deployment's run history would seed this install's Tiingo budget
+   with calls it never made — which is the precise failure the budget exists to
+   prevent. It also carries `error_message`, which is redacted but is still
+   provider-authored text. Recommend `prices`, `fx_rates` and
+   `price_source_priority` in the manifest; `market_data_runs` excluded with the
+   reason recorded, the same way any other deliberately-unexported table is.
+
+   One further constraint on import ordering: `prices` and `fx_rates` are
+   `NUMERIC(20,10)` and must round-trip as **decimal strings**, never through a
+   float (D3). `prices.security_id` also references `securities`, so it must
+   import after 0013's tables.
 
 ---
 
