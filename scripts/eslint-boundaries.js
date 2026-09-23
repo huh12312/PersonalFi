@@ -722,7 +722,23 @@ const rule = {
       // Its own package name: harmless, and how a test file refers to its subject.
       if (packageRoot !== null && pkg === contextName) return;
 
-      if (pkg.startsWith('@ctx/') && pkg !== contextName) {
+      // A context importing another context is refused *unless its own layer
+      // names that context on its allow-list*.
+      //
+      // The `!allowed.includes(pkg)` clause is what makes a layer's `allow`
+      // entry reachable at all. Without it this branch fires first and returns,
+      // so `@ctx/...` on an allow-list is dead configuration — which is what
+      // commit 3a7ccf8 ("planning boundary layer — may read @ctx/ledger and
+      // @ctx/investments ports; 08 §1.6 arrows point down") hit: the layer was
+      // added, documented in its own `why`, and could never take effect.
+      //
+      // This does not weaken the rule for anybody else. `planning` is the only
+      // layer that names a context, and it is the only one 08 §1.6 draws an
+      // arrow *from* — planning → investments → ledger, pointing down, with
+      // nothing pointing back. Every other context still gets the blanket
+      // refusal, and `@ctx/planning` itself is named by no layer, so neither
+      // ledger nor investments can import it.
+      if (pkg.startsWith('@ctx/') && pkg !== contextName && !allowed.includes(pkg)) {
         context.report({
           node: specifierNode,
           messageId: 'crossContext',

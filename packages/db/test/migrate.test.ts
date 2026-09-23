@@ -279,6 +279,31 @@ describeWithDb('runMigrations', () => {
       //   `wallet_addresses_ethereum_has_no_scan_state` keeps the BIP44
       //   gap-limit horizon columns meaningless for a chain with no address
       //   chain to scan.
+      // 0017_net_worth_daily: one @ctx/planning table — net_worth_daily. The
+      //   first table of a Phase 4 context, opened a phase early because
+      //   08 §1.3 #8 names Planning's snapshotter its sole writer and the rule
+      //   the table exists to enforce ("a past day is a snapshot, not a
+      //   recomputation") is a planning rule that neither Ledger nor
+      //   Investments is in a position to enforce. Every input arrives through
+      //   an injected port — BalancesReader, HoldingsReader, PriceReader,
+      //   FxReader — so no SQL in `packages/contexts/planning/` names another
+      //   context's table, which is what `lint:schema-ownership` checks.
+      //   Three mechanisms carry the load-bearing claims.
+      //   `net_worth_daily_sealed_rows_are_immutable` is a BEFORE UPDATE
+      //   trigger raising 23514 whenever OLD.sealed_at IS NOT NULL — the one
+      //   guard that survives a writer nobody has written yet, and BEFORE
+      //   UPDATE only so the `users` ON DELETE CASCADE still works (the
+      //   0014_lots.sql precedent). `net_worth_daily_one_open_day_idx`, a
+      //   partial UNIQUE on (user_id, as_of_date) WHERE sealed_at IS NULL,
+      //   makes "the row the writer may touch" unambiguous. And
+      //   `net_worth_breakdown_is_well_formed` — an IMMUTABLE function so a
+      //   CHECK can reach a set-returning per-element rule — refuses a
+      //   breakdown entry missing D4's fxRate/fxRateDate pair or any of
+      //   07 §4.1's four booleans, and requires nativeMinor/baseMinor to be
+      //   JSON *strings* because a JSON number rounds a BIGINT past 2^53.
+      //   There is deliberately no `fx_rate_missing` column and no default: a
+      //   missing rate is FxRateUnavailable and the day is not written for
+      //   that account, never a silent 1.0 (08 §6.6).
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
@@ -322,6 +347,7 @@ describeWithDb('runMigrations', () => {
         'mcc_codes',
         'merchant_profiles',
         'merchants',
+        'net_worth_daily',
         'notification_channels',
         'notification_outbox',
         'notification_rules',

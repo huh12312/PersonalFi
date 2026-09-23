@@ -133,6 +133,87 @@
 -- weekend.
 
 -- ---------------------------------------------------------------------------
+-- The breakdown's shape, as a function so a CHECK can use it
+-- ---------------------------------------------------------------------------
+--
+-- Declared *before* the table because `net_worth_daily`'s CHECK calls it and
+-- Postgres resolves that dependency as the table is created. (Phrased that way
+-- deliberately: `scripts/check-schema-ownership.ts` scans this file for
+-- `CREATE TABLE <name>` and the obvious wording of that sentence makes it
+-- believe the migration creates a table called `time`.) A CHECK cannot
+-- contain a subquery and `jsonb_array_elements` is set-returning, so the
+-- per-element rule has to live behind a function call. It is IMMUTABLE and
+-- PARALLEL SAFE and reads nothing outside its argument, which is what makes
+-- that legitimate rather than the usual "a function in a CHECK can lie" trap:
+-- there is no table it could consult and later disagree with.
+--
+-- What it refuses, entry by entry:
+--
+--   accountId     a JSON string. The account this contribution came from, so a
+--                 total can be audited back to its parts.
+--   currency      the account's own ISO code, upper-case. Not the base
+--                 currency: that is the row's `base_currency`.
+--   nativeMinor   BIGINT minor units in `currency`, as a JSON **string**.
+--   baseMinor     the same amount in the row's `base_currency`, also a string.
+--                 Both signed: a liability's contribution is negative.
+--   fxRate        the historical rate that produced `baseMinor` from
+--                 `nativeMinor`, as a decimal string (D4). Never a JSON
+--                 number, for the same reason the amounts are not.
+--   fxRateDate    the date that rate was observed. A rate with no date is a
+--                 rate that cannot be checked, which is the same as no rate.
+--   onBudget, inNetWorth, isLiquid, isInvestable
+--                 07 §4.1's four booleans **as they were on the day**, each
+--                 stored independently. All four required and all four
+--                 booleans: a missing flag would let a denominator be guessed
+--                 at read time, which is exactly the conflation 07 §4.1 warns
+--                 about.
+--
+-- The string rule on the amounts is D3 dressed as serialisation: a JSON number
+-- cannot hold a BIGINT past 2^53 without silently rounding, so the one place
+-- the amount leaves the BIGINT columns is the one place it could quietly lose
+-- precision. `investments.RealizedGainRecorded` applies the same rule to its
+-- payload.
+--
+-- USD -> USD is not an exception: it stores fxRate '1' with the day as its
+-- date, because the identity conversion is a conversion whose rate is known.
+-- That is not the "silent 1.0" of 08 §6.6 — the silent 1.0 is a *missing*
+-- rate, and a missing rate never reaches this table at all: `FxReader` throws
+-- `FxRateUnavailable` and the account is not written.
+
+CREATE FUNCTION net_worth_breakdown_is_well_formed(breakdown JSONB)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+  SELECT jsonb_typeof(breakdown) = 'array'
+     AND NOT EXISTS (
+       SELECT 1
+       FROM jsonb_array_elements(breakdown) AS entry
+       WHERE jsonb_typeof(entry) IS DISTINCT FROM 'object'
+          OR jsonb_typeof(entry -> 'accountId') IS DISTINCT FROM 'string'
+          OR btrim(entry ->> 'accountId') = ''
+          OR jsonb_typeof(entry -> 'currency') IS DISTINCT FROM 'string'
+          OR entry ->> 'currency' !~ '^[A-Z]{3}$'
+          OR jsonb_typeof(entry -> 'nativeMinor') IS DISTINCT FROM 'string'
+          OR entry ->> 'nativeMinor' !~ '^-?[0-9]+$'
+          OR jsonb_typeof(entry -> 'baseMinor') IS DISTINCT FROM 'string'
+          OR entry ->> 'baseMinor' !~ '^-?[0-9]+$'
+          OR jsonb_typeof(entry -> 'fxRate') IS DISTINCT FROM 'string'
+          OR entry ->> 'fxRate' !~ '^[0-9]+(\.[0-9]+)?$'
+          OR jsonb_typeof(entry -> 'fxRateDate') IS DISTINCT FROM 'string'
+          OR entry ->> 'fxRateDate' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          OR jsonb_typeof(entry -> 'onBudget') IS DISTINCT FROM 'boolean'
+          OR jsonb_typeof(entry -> 'inNetWorth') IS DISTINCT FROM 'boolean'
+          OR jsonb_typeof(entry -> 'isLiquid') IS DISTINCT FROM 'boolean'
+          OR jsonb_typeof(entry -> 'isInvestable') IS DISTINCT FROM 'boolean'
+     );
+$$;
+
+COMMENT ON FUNCTION net_worth_breakdown_is_well_formed(JSONB) IS
+  'D4 and 07 §4.1 as a CHECK: every net_worth_daily.breakdown entry carries accountId, currency, nativeMinor, baseMinor (both JSON strings, never numbers), the fxRate/fxRateDate pair that produced the second from the first, and all four account booleans as they were that day.';
+
+-- ---------------------------------------------------------------------------
 -- net_worth_daily
 -- ---------------------------------------------------------------------------
 
@@ -153,12 +234,23 @@ CREATE TABLE net_worth_daily (
   -- that changes base currency must not silently restate its own history.
   base_currency      CHAR(3)     NOT NULL CHECK (base_currency ~ '^[A-Z]{3}$'),
 
-  -- All BIGINT minor units in `base_currency` (D3). Assets may be negative
-  -- (an overdrawn checking account is still an asset account); liabilities are
-  -- a magnitude, so a card you owe $420 on stores 42000 here and -42000 in the
-  -- breakdown's `baseMinor`, which is the account's signed contribution.
+  -- All BIGINT minor units in `base_currency` (D3). `liabilities_minor` is a
+  -- magnitude in the ordinary case: a card you owe $420 on stores 42000 here
+  -- and -42000 in the breakdown's `baseMinor`, which is the account's signed
+  -- contribution.
+  --
+  -- Neither side is constrained to a sign, and that is deliberate. An
+  -- overdrawn checking account is still an *asset account*, so `assets_minor`
+  -- may be negative; by exactly the same rule an overpaid credit card is still
+  -- a *liability account*, so `liabilities_minor` may be negative too. Which
+  -- side an account counts on is its classification's business, never its
+  -- balance's — a `CHECK (liabilities_minor >= 0)` would look like prudence and
+  -- would in fact force the writer to move an overpaid card's credit into
+  -- `assets_minor`, so the totals and the breakdown would describe different
+  -- account rosters and no total could be audited back to its parts. The
+  -- identity below is what actually has to hold, and it holds either way.
   assets_minor       BIGINT      NOT NULL,
-  liabilities_minor  BIGINT      NOT NULL CHECK (liabilities_minor >= 0),
+  liabilities_minor  BIGINT      NOT NULL,
   net_worth_minor    BIGINT      NOT NULL,
 
   -- 07 §4.1's other three denominators, each summed over its own boolean and
@@ -173,7 +265,7 @@ CREATE TABLE net_worth_daily (
   -- would be a second, worse reason the numbers could move).
   breakdown          JSONB       NOT NULL,
 
-  -- 04 §5.4 and 08 §3.5. `observed` = every account had a real observation;
+  -- 04 §5.4 and 08 §3.5. `observed` = every account had a genuine observation;
   -- `interpolated` = at least one account was reconstructed; `corrected` = this
   -- revision replaces a sealed row and says why.
   source             TEXT        NOT NULL CHECK (source IN ('observed', 'interpolated', 'corrected')),
@@ -261,29 +353,13 @@ COMMENT ON COLUMN net_worth_daily.sealed_at IS
 COMMENT ON COLUMN net_worth_daily.breakdown IS
   'One JSON object per account: the four booleans of 07 §4.1 as they were that day, plus D4''s native amount, base amount, fxRate and fxRateDate. Minor units are JSON strings, never numbers.';
 COMMENT ON COLUMN net_worth_daily.liabilities_minor IS
-  'A magnitude, always >= 0. The breakdown carries each account''s signed contribution; this is the liability side''s absolute total.';
+  'The liability side, negated so that net = assets - liabilities: normally a positive magnitude, negative in the one honest case where the liability accounts net to a credit (an overpaid card). The breakdown carries each account''s signed contribution.';
 COMMENT ON COLUMN net_worth_daily.stale_price IS
-  '08 §3.7: the day sealed on a last-known price because the refresh could not reach a provider. The day is still real; the price is labelled.';
+  '08 §3.7: the day sealed on a last-known price because the refresh could not reach a provider. The day is still genuine; the price is labelled.';
 COMMENT ON COLUMN net_worth_daily.source IS
   '04 §5.4: observed | interpolated (at least one account reconstructed) | corrected (this revision replaces a sealed one).';
 COMMENT ON COLUMN net_worth_daily.supersedes_id IS
   'The revision this one corrects. Set if and only if source = ''corrected''.';
-
--- ---------------------------------------------------------------------------
--- The breakdown's shape, as a function so a CHECK can use it
--- ---------------------------------------------------------------------------
---
--- Declared before the table because the CHECK references it. A CHECK cannot
--- contain a subquery and `jsonb_array_elements` is set-returning, so the
--- per-element rule has to live behind an IMMUTABLE function call. It is
--- IMMUTABLE and PARALLEL SAFE and reads nothing outside its argument, which is
--- what makes that legitimate rather than the usual "a function in a CHECK can
--- lie" trap.
-
--- (The function itself is created above the table by the statement below; the
--- migration runner applies this file as one transaction, and Postgres resolves
--- the CHECK's dependency at CREATE TABLE time, so the order in the file is
--- what matters.)
 
 -- ---------------------------------------------------------------------------
 -- The seal

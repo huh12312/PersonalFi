@@ -1,0 +1,222 @@
+{
+  "$comment": [
+    "The §5 exit criterion's hand computation, committed as a fixture.",
+    "",
+    "Every number under `expected` was worked out with a calculator from the numbers",
+    "under `world`, by hand, before `computeNetWorth` was run against it — which is the",
+    "only thing that makes it a check on the engine rather than a snapshot of whatever",
+    "the engine happened to produce. `expected.lines` shows each account's arithmetic as",
+    "a string so a reader can re-do it; docs/evidence/phase-3/wp3.8-net-worth.md §2 sets",
+    "it beside the query result line for line.",
+    "",
+    "The roster covers every account class the policy table names — cash, credit, loan,",
+    "investment, manual_asset — plus the two cases the criterion calls out by name (a",
+    "manual asset and a liability), a non-USD account so D4's conversion is exercised",
+    "rather than assumed, and one account that is liquid but NOT in net worth, which is",
+    "what makes the four booleans demonstrably four."
+  ],
+  "asOfDate": "2026-06-15",
+  "baseCurrency": "USD",
+  "world": {
+    "accounts": [
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000001",
+        "name": "Everyday Checking",
+        "kind": "cash",
+        "side": "asset",
+        "currency": "USD",
+        "flags": { "onBudget": true, "inNetWorth": true, "isLiquid": true, "isInvestable": false }
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000002",
+        "name": "Savings (CAD)",
+        "kind": "cash",
+        "side": "asset",
+        "currency": "CAD",
+        "flags": { "onBudget": true, "inNetWorth": true, "isLiquid": true, "isInvestable": false }
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000003",
+        "name": "Rewards Card",
+        "kind": "credit",
+        "side": "liability",
+        "currency": "USD",
+        "flags": { "onBudget": true, "inNetWorth": true, "isLiquid": false, "isInvestable": false }
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000004",
+        "name": "Mortgage",
+        "kind": "loan",
+        "side": "liability",
+        "currency": "USD",
+        "flags": { "onBudget": false, "inNetWorth": true, "isLiquid": false, "isInvestable": false }
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000005",
+        "name": "Brokerage",
+        "kind": "investment",
+        "side": "asset",
+        "currency": "USD",
+        "flags": { "onBudget": false, "inNetWorth": true, "isLiquid": false, "isInvestable": true }
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000006",
+        "name": "The house",
+        "kind": "manual_asset",
+        "side": "asset",
+        "currency": "USD",
+        "flags": { "onBudget": false, "inNetWorth": true, "isLiquid": false, "isInvestable": false }
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000007",
+        "name": "Side-business cash (excluded)",
+        "kind": "cash",
+        "side": "asset",
+        "currency": "USD",
+        "flags": { "onBudget": false, "inNetWorth": false, "isLiquid": true, "isInvestable": false }
+      }
+    ],
+    "balances": [
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000001",
+        "date": "2026-06-15",
+        "currentMinor": "423517",
+        "currency": "USD"
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000002",
+        "date": "2026-06-15",
+        "currentMinor": "1000000",
+        "currency": "CAD"
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000003",
+        "date": "2026-06-15",
+        "currentMinor": "-142000",
+        "currency": "USD"
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000004",
+        "date": "2026-06-15",
+        "currentMinor": "-28450000",
+        "currency": "USD"
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000006",
+        "date": "2026-06-15",
+        "currentMinor": "42000000",
+        "currency": "USD"
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000007",
+        "date": "2026-06-15",
+        "currentMinor": "50000",
+        "currency": "USD"
+      }
+    ],
+    "holdings": [
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000005",
+        "securityId": "5e000000-0000-4000-8000-0000000000f1",
+        "quantity": "12.5",
+        "asOfDate": "2026-06-15"
+      },
+      {
+        "accountId": "a1000000-0000-4000-8000-000000000005",
+        "securityId": "5e000000-0000-4000-8000-0000000000b1",
+        "quantity": "0.05",
+        "asOfDate": "2026-06-15"
+      }
+    ],
+    "prices": [
+      {
+        "securityId": "5e000000-0000-4000-8000-0000000000f1",
+        "date": "2026-06-15",
+        "close": "268.40",
+        "currency": "USD",
+        "staleness": "FRESH",
+        "rung": "tiingo"
+      },
+      {
+        "securityId": "5e000000-0000-4000-8000-0000000000b1",
+        "date": "2026-06-15",
+        "close": "61200.00",
+        "currency": "USD",
+        "staleness": "FRESH",
+        "rung": "coingecko"
+      }
+    ],
+    "fxRates": [
+      {
+        "from": "CAD",
+        "to": "USD",
+        "date": "2026-06-15",
+        "rate": "0.7350",
+        "rateDate": "2026-06-12",
+        "source": "fred"
+      }
+    ]
+  },
+  "expected": {
+    "lines": [
+      {
+        "account": "Everyday Checking",
+        "workedByHand": "423517 USD x 1 = 423517",
+        "baseMinor": "423517",
+        "countsToward": ["assets", "liquid", "onBudget"]
+      },
+      {
+        "account": "Savings (CAD)",
+        "workedByHand": "1000000 CAD x 0.7350 = 735000",
+        "baseMinor": "735000",
+        "countsToward": ["assets", "liquid", "onBudget"]
+      },
+      {
+        "account": "Rewards Card",
+        "workedByHand": "-142000 USD x 1 = -142000",
+        "baseMinor": "-142000",
+        "countsToward": ["liabilities", "onBudget"]
+      },
+      {
+        "account": "Mortgage",
+        "workedByHand": "-28450000 USD x 1 = -28450000",
+        "baseMinor": "-28450000",
+        "countsToward": ["liabilities"]
+      },
+      {
+        "account": "Brokerage",
+        "workedByHand": "12.5 x 268.40 = 3355.00 -> 335500; 0.05 x 61200.00 = 3060.00 -> 306000; sum 641500",
+        "baseMinor": "641500",
+        "countsToward": ["assets", "investable"]
+      },
+      {
+        "account": "The house",
+        "workedByHand": "42000000 USD x 1 = 42000000",
+        "baseMinor": "42000000",
+        "countsToward": ["assets"]
+      },
+      {
+        "account": "Side-business cash (excluded)",
+        "workedByHand": "50000 USD x 1 = 50000",
+        "baseMinor": "50000",
+        "countsToward": ["liquid"]
+      }
+    ],
+    "assetsWorkedByHand": "423517 + 735000 + 641500 + 42000000 = 43800017",
+    "assetsMinor": "43800017",
+    "liabilitiesWorkedByHand": "-(-142000 + -28450000) = 28592000",
+    "liabilitiesMinor": "28592000",
+    "netWorthWorkedByHand": "43800017 - 28592000 = 15208017",
+    "netWorthMinor": "15208017",
+    "liquidWorkedByHand": "423517 + 735000 + 50000 = 1208517",
+    "liquidMinor": "1208517",
+    "investableWorkedByHand": "641500",
+    "investableMinor": "641500",
+    "onBudgetWorkedByHand": "423517 + 735000 + -142000 = 1016517",
+    "onBudgetMinor": "1016517",
+    "source": "observed",
+    "stalePrice": false,
+    "accountsCounted": 7,
+    "accountsUnvalued": 0
+  }
+}
