@@ -161,6 +161,54 @@ secrets:
   # schedule until an operator writes a real value here.
   advisor_token_secret:
     file: ./secrets/advisor_token_secret
+  # --------------------------------------------------------------- market data
+  #
+  # WP 3.4's four provider API keys (docs/evidence/phase-3/wp3.4-market-data.md
+  # §6 and §9 item 1; docs/evidence/phase-3/wp3.w-wiring.md). File-only for the
+  # same reason as the `plaid_*` pair above — 01 §1.10 / D5, an env var is
+  # readable by every dependency in-process and survives into `docker inspect`,
+  # `/proc/<pid>/environ`, child processes and crash dumps — and a third-party
+  # API key is a credential whether or not it can move money.
+  #
+  # Attached to `api` and `worker` only. **`migrator` must not receive them**:
+  # it applies DDL, has no `PriceSource` and will never dial a provider, so
+  # handing it four credentials would widen their blast radius to a one-shot
+  # container for nothing. `proxy` and `backup` are out for the same reason
+  # they are out of the `plaid_*` list.
+  #
+  # All four are optional in the strong sense: every adapter answers
+  # `skipped_no_key` without its key and the app boots normally (03 §6 —
+  # "Phase 3 completes with zero keys — it just cannot prove freshness").
+  # Compose has no optional-secret model, so RUNBOOK.md has the operator create
+  # these **empty**; `packages/config/src/load.ts` treats a zero-length file
+  # exactly as a missing one, so an empty placeholder is indistinguishable from
+  # no file at all to `@core/config`.
+  tiingo_api_key:
+    file: ./secrets/tiingo_api_key
+  # FRED has no header auth, so this key necessarily travels in the query
+  # string of every request. `@ctx/integrations` redacts every provider-authored
+  # string before it is logged or stored in `market_data_runs` for exactly that
+  # reason (wp3.4-market-data.md §6).
+  fred_api_key:
+    file: ./secrets/fred_api_key
+  coingecko_api_key:
+    file: ./secrets/coingecko_api_key
+  openfigi_api_key:
+    file: ./secrets/openfigi_api_key
+  # ------------------------------------------------------------------ coinbase
+  #
+  # WP 3.5's CDP credential pair (docs/evidence/phase-3/wp3.5-coinbase.md §8.1).
+  # `coinbase_key_name` is the JWT's `kid` and `sub`; `coinbase_private_key` is
+  # the **Ed25519** signing key (EdDSA — ES256 is Plaid's *webhook* algorithm,
+  # and 01 §3.2 warns against cargo-culting between the two).
+  #
+  # Same api+worker-only posture, and the same optional-means-empty-placeholder
+  # convention: with neither present the connector is not registered at all, so
+  # an install that does not use Coinbase boots exactly as it did before.
+  coinbase_key_name:
+    file: ./secrets/coinbase_key_name
+  coinbase_private_key:
+    file: ./secrets/coinbase_private_key
 
 services:
   proxy:
@@ -268,8 +316,24 @@ services:
       # keep the two in agreement; see `.env.example`.
       PLAID_ENABLED: ${PLAID_ENABLED:-false}
       PLAID_REDIRECT_URI: ${PLAID_REDIRECT_URI:-}
+    # WP 3.4's four market-data keys and WP 3.5's CDP pair join the list here
+    # and on `worker` — and on neither `migrator` nor `proxy` nor `backup`.
+    # Kept in step with `just harden-secrets`, in the same edit (N-1).
     secrets:
-      [database_url, master_key, plaid_client_id, plaid_secret, plaid_env, advisor_token_secret]
+      [
+        database_url,
+        master_key,
+        plaid_client_id,
+        plaid_secret,
+        plaid_env,
+        advisor_token_secret,
+        tiingo_api_key,
+        fred_api_key,
+        coingecko_api_key,
+        openfigi_api_key,
+        coinbase_key_name,
+        coinbase_private_key,
+      ]
     networks: [frontend, backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
     user: '10001:10001'
@@ -339,8 +403,24 @@ services:
       # is avoided by construction: one env var, read by both.
       JOB_POLL_INTERVAL_MS: ${JOB_POLL_INTERVAL_MS:-5000}
       SCHEDULER_INTERVAL_MS: ${SCHEDULER_INTERVAL_MS:-30000}
+    # WP 3.4's four market-data keys and WP 3.5's CDP pair join the list here
+    # and on `worker` — and on neither `migrator` nor `proxy` nor `backup`.
+    # Kept in step with `just harden-secrets`, in the same edit (N-1).
     secrets:
-      [database_url, master_key, plaid_client_id, plaid_secret, plaid_env, advisor_token_secret]
+      [
+        database_url,
+        master_key,
+        plaid_client_id,
+        plaid_secret,
+        plaid_env,
+        advisor_token_secret,
+        tiingo_api_key,
+        fred_api_key,
+        coingecko_api_key,
+        openfigi_api_key,
+        coinbase_key_name,
+        coinbase_private_key,
+      ]
     networks: [backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
     user: '10001:10001'

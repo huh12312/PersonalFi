@@ -576,6 +576,9 @@ importers:
       '@core/kernel':
         specifier: workspace:*
         version: link:../../kernel
+      '@noble/hashes':
+        specifier: 2.4.0
+        version: 2.4.0
       '@scure/base':
         specifier: 2.4.0
         version: 2.4.0
@@ -739,9 +742,15 @@ importers:
       '@core/kernel':
         specifier: workspace:*
         version: link:../../kernel
+      '@core/platform':
+        specifier: workspace:*
+        version: link:../../platform
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+      zod:
+        specifier: 4.5.4
+        version: 4.5.4
 
   packages/contexts/investments:
     dependencies:
@@ -844,15 +853,40 @@ importers:
 
   packages/contexts/planning:
     dependencies:
+      '@core/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
       '@core/db':
         specifier: workspace:*
         version: link:../../db
       '@core/kernel':
         specifier: workspace:*
         version: link:../../kernel
+      '@core/platform':
+        specifier: workspace:*
+        version: link:../../platform
+      '@ctx/investments':
+        specifier: workspace:*
+        version: link:../investments
+      '@ctx/ledger':
+        specifier: workspace:*
+        version: link:../ledger
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+      zod:
+        specifier: 4.5.4
+        version: 4.5.4
+    devDependencies:
+      '@core/seed':
+        specifier: workspace:*
+        version: link:../../seed
+      '@core/testkit':
+        specifier: workspace:*
+        version: link:../../testkit
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
 
   packages/contexts/recurring:
     dependencies:

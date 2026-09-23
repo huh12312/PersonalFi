@@ -237,6 +237,40 @@ export const environmentSchema = z.object({
   // outbound path a *user-supplied string* controls, and an operator who has
   // not named a host has not consented to one.
   NOTIFICATIONS_ALLOWED_HOSTS: z.string().default(''),
+
+  // --------------------------------------------------------------- market data
+  //
+  // `@ctx/integrations`'s egress allow-list (03-phase-3-dispatch.md §4 item 8;
+  // wp3.4-market-data.md §9 item 3). Same hand-validation as
+  // `NOTIFICATIONS_ALLOWED_HOSTS` above — comma-separated lowercase hostnames,
+  // never a wildcard, never an IP literal, empty-string-vs-absent both meaning
+  // "no override" — but the *default* is the opposite way round, and the
+  // difference is the point.
+  //
+  // A notification channel dials a host a **user-supplied string** names, so an
+  // operator who has named no host has consented to none and the default is
+  // deny-all. A market-data adapter dials a host **the code** names:
+  // `MARKET_DATA_ALLOWED_HOSTS` in `packages/contexts/integrations/src/egress.ts`
+  // is `api.tiingo.com`, `api.stlouisfed.org`, `api.coingecko.com`,
+  // `api.openfigi.com` and nothing else, one host per adapter, checked in
+  // `policyFor(provider)` so a buggy Tiingo adapter cannot reach CoinGecko let
+  // alone `db:5432`. So an empty value here means "use the four the code
+  // knows", not "deny everything", and a non-empty value can only **narrow**
+  // that set: `resolveAllowedHosts` validates the syntax and
+  // `createMarketDataEgressPolicy` intersects rather than replaces. An env var
+  // that could widen an egress allow-list would be a way to point a price
+  // fetcher at an arbitrary host by editing a `.env` file, which is exactly the
+  // property the allow-list exists to deny.
+  MARKET_DATA_ALLOWED_HOSTS: z.string().default(''),
+
+  // -------------------------------------------------------------------- crypto
+  //
+  // The same shape and the same narrowing semantics, for the crypto connectors:
+  // `api.coinbase.com` (WP 3.5), `blockstream.info` and `api.etherscan.io`
+  // (WP 3.6's watch-only wallets). Declared here in the config batch with the
+  // market-data list it is a sibling of, so a deployment has one place to
+  // narrow every outbound host this application may ever dial.
+  CRYPTO_ALLOWED_HOSTS: z.string().default(''),
 });
 
 export type EnvironmentConfig = z.infer<typeof environmentSchema>;
@@ -481,6 +515,48 @@ export const SECRET_SPECS = [
       'Optional: with no key present the OpenFIGI mapper returns `skipped_no_key` and the app boots ' +
       'normally (03 §6 — Phase 3 completes with zero keys); OpenFIGI also answers anonymously at ' +
       '10 jobs per batch instead of 100. Request a key at https://www.openfigi.com/api.',
+  },
+
+  // --------------------------------------------------------------- coinbase
+  //
+  // `@connector/coinbase`'s CDP credential pair (wp3.5-coinbase.md §8.1). D5
+  // again: file only, no `envFallback` on either, for the same reason
+  // `plaid_client_id` has none.
+  //
+  // **Both optional, required for no role, and feature-detected rather than
+  // flagged** — with neither file present the Coinbase connector is simply not
+  // registered by `apps/api/src/domain.ts`'s `createConnectorRegistry`, exactly
+  // as Plaid is not. Neither is ever passed to a constructor: unlike Plaid's
+  // client, which takes its client id and secret once, every Coinbase request
+  // reads the sealed pair back out of the `ConnectionHandle`, so these two
+  // decide only *whether* to register.
+  //
+  // The private key is **Ed25519** (EdDSA), which is the one thing to get
+  // right here: ES256 is Plaid's *webhook* algorithm and 01 §3.2 warns against
+  // cargo-culting between the two. `@connector/coinbase` refuses an ECDSA key
+  // by name rather than failing later with a signature the service rejects.
+  {
+    name: 'coinbase_key_name',
+    file: 'coinbase_key_name',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write the CDP API key name — `organizations/{org_uuid}/apiKeys/{key_uuid}` — to ' +
+      '${SECRETS_DIR}/coinbase_key_name (mode 0400). It is the JWT `kid` and `sub`. Optional: ' +
+      'with no key name (or no private key) present, the API boots without the Coinbase ' +
+      'connector registered. Coinbase Developer Platform → API keys.',
+  },
+  {
+    name: 'coinbase_private_key',
+    file: 'coinbase_private_key',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write the CDP Ed25519 private key to ${SECRETS_DIR}/coinbase_private_key (mode 0400), ' +
+      'either as a PKCS#8 PEM or as the portal’s base64(seed‖public) form. It must be ' +
+      'Ed25519 — an ECDSA key is refused by name (wp3.5-coinbase.md §8.1). Optional, same ' +
+      'posture as coinbase_key_name. Create the key with the `view` permission only: the ' +
+      'connector asserts `key_permissions` at startup and refuses a key that can trade.',
   },
 ] as const;
 

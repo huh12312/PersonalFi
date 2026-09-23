@@ -56,7 +56,7 @@
  */
 import type { Database } from '@core/db';
 import { newId, type Clock } from '@core/kernel';
-import { platformExecutor, type FlagService } from '@core/platform';
+import { platformExecutor, upsertSchedule, type FlagService } from '@core/platform';
 import { registerRetrainSchedule } from '@ctx/categorization';
 import { ensureTaxonomy } from '@ctx/categorization';
 import {
@@ -64,7 +64,13 @@ import {
   registerNightlySchedule as registerInsightsNightlySchedule,
 } from '@ctx/insights';
 import { registerNotificationSchedules } from '@ctx/notifications';
-import { registerBuiltinAdvisors } from './modules.ts';
+import { seedPriceSourcePriority } from './domain.ts';
+import {
+  PRICE_REFRESH_CRON,
+  PRICE_REFRESH_JOB_KIND,
+  PRICE_REFRESH_SCHEDULE_NAME,
+  registerBuiltinAdvisors,
+} from './modules.ts';
 
 export interface SeedUserStateOptions {
   readonly userId: string;
@@ -87,6 +93,13 @@ export interface SeedUserStateResult {
   readonly advisorsRegistered: number;
   /** Which schedule families were actually registered — omits any whose module flag was off. */
   readonly schedulesRegistered: readonly string[];
+  /**
+   * `price_source_priority` rows offered from `DEFAULT_LADDERS`
+   * (wp3.4-market-data.md §9 item 6). Rows *offered*, not inserted: the insert
+   * is `onConflictDoNothing`, so a repair pass over an existing user reports
+   * the same number and inserts none of them.
+   */
+  readonly priceLadderRows: number;
 }
 
 /**
@@ -120,6 +133,17 @@ export async function seedUserState(
     correlationId,
   });
 
+  // 07 §6.1's price-source ladder, as rows, per security kind. Seeded
+  // **unconditionally**, in the taxonomy/advisor half of this function rather
+  // than the schedule half, and the distinction matters: like a category
+  // nobody can be assigned yet, a priority row with no price to order is inert
+  // bookkeeping, and it is the *settings* surface for a feature the user may
+  // turn on later. Gating it on `module.integrations` would mean an operator
+  // who enables that flag six months from now has a Settings screen with an
+  // empty ladder until the next restart — which is exactly the class of gap
+  // condition C-1 exists to close.
+  const priceLadderRows = await seedPriceSourcePriority(database, options.userId);
+
   const schedulesRegistered: string[] = [];
 
   if (await flags.isEnabled(options.userId, 'module.categorization')) {
@@ -152,9 +176,40 @@ export async function seedUserState(
     schedulesRegistered.push('insights.nightly');
   }
 
+  // `integrations.price_refresh` (03:45 local). Flag-gated like the three
+  // above, for `upsertSchedule`'s own stated reason: `scheduler.tick` enqueues
+  // any due row with no flag check of its own, so a schedule for a disabled
+  // module enqueues a job with no registered handler to run it — five
+  // attempts and a dead row, every night.
+  //
+  // Unlike the insights schedule above there is **no secret to feature-detect**
+  // on. An install with no provider API key still wants this row: the refresh
+  // runs, `createMarketDataRuntime` has registered no source for a key that is
+  // absent, and the run records honestly that it asked nobody. Withholding the
+  // schedule until a key appears would mean the first key an operator writes
+  // does nothing until the next restart.
+  if (await flags.isEnabled(options.userId, 'module.integrations')) {
+    await upsertSchedule(
+      platformExecutor(database),
+      {
+        userId: options.userId,
+        name: PRICE_REFRESH_SCHEDULE_NAME,
+        cron: PRICE_REFRESH_CRON,
+        timezone: options.timezone,
+        jobKind: PRICE_REFRESH_JOB_KIND,
+        jobPayload: {},
+        enabled: true,
+        jitterSeconds: 900,
+      },
+      options.clock,
+    );
+    schedulesRegistered.push(PRICE_REFRESH_SCHEDULE_NAME);
+  }
+
   return {
     categoriesInserted: taxonomy.categoriesInserted,
     advisorsRegistered: BUILTIN_CATALOGUE.length,
     schedulesRegistered,
+    priceLadderRows,
   };
 }

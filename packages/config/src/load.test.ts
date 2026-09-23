@@ -747,6 +747,205 @@ describe('NOTIFICATIONS_ALLOWED_HOSTS', () => {
 });
 
 /**
+ * `MARKET_DATA_ALLOWED_HOSTS` and `CRYPTO_ALLOWED_HOSTS`
+ * (03-phase-3-dispatch.md §4 item 8; wp3.4-market-data.md §9 item 3).
+ *
+ * The same hand-validation as `NOTIFICATIONS_ALLOWED_HOSTS` above, asserted
+ * independently rather than by trusting that they share `resolveAllowedHosts`.
+ * They do share it today; a future edit that gives one of the three its own
+ * copy — the exact drift `NOTIFICATIONS_ALLOWED_HOSTS` was written by hand to
+ * avoid in the first place — has to break a test, not just a code reading.
+ *
+ * The one deliberate behavioural difference from notifications is asserted at
+ * the bottom of each block: an empty value here means *no override*, and
+ * `apps/api/src/domain.ts` then uses `@ctx/integrations`' own four-host list.
+ * Empty can never widen anything, because widening is not an operation this
+ * variable has.
+ */
+describe.each([
+  {
+    key: 'MARKET_DATA_ALLOWED_HOSTS' as const,
+    read: (config: ReturnType<typeof loadConfig>) => config.marketData.allowedHosts,
+    good: ' Api.Tiingo.com , api.coingecko.com ',
+    expected: ['api.tiingo.com', 'api.coingecko.com'],
+    duplicate: 'api.tiingo.com,API.TIINGO.COM',
+    deduped: ['api.tiingo.com'],
+  },
+  {
+    key: 'CRYPTO_ALLOWED_HOSTS' as const,
+    read: (config: ReturnType<typeof loadConfig>) => config.crypto.allowedHosts,
+    good: ' Api.Coinbase.com , blockstream.info ',
+    expected: ['api.coinbase.com', 'blockstream.info'],
+    duplicate: 'api.coinbase.com,API.COINBASE.COM',
+    deduped: ['api.coinbase.com'],
+  },
+])('$key', ({ key, read, good, expected, duplicate, deduped }) => {
+  it('defaults to empty — no narrowing of the list the code itself carries', () => {
+    expect(read(loadConfig({ env: env(), readSecret: secretsFrom({}) }))).toEqual([]);
+  });
+
+  it('parses a comma-separated list, lower-cased and trimmed', () => {
+    const config = loadConfig({ env: env({ [key]: good }), readSecret: secretsFrom({}) });
+    expect(read(config)).toEqual(expected);
+  });
+
+  it('de-duplicates entries that only differ by case', () => {
+    const config = loadConfig({ env: env({ [key]: duplicate }), readSecret: secretsFrom({}) });
+    expect(read(config)).toEqual(deduped);
+  });
+
+  it('rejects an IP literal — a second door to the private-range refusal', () => {
+    expect(() =>
+      loadConfig({ env: env({ [key]: '169.254.169.254' }), readSecret: secretsFrom({}) }),
+    ).toThrowError(ConfigError);
+
+    try {
+      loadConfig({ env: env({ [key]: '169.254.169.254' }), readSecret: secretsFrom({}) });
+      expect.unreachable('an IP literal must be refused');
+    } catch (error) {
+      const problems = (error as ConfigError).problems;
+      expect(
+        problems.some(
+          (problem: ConfigProblem) => problem.key === key && problem.problem.includes('IP literal'),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it('rejects an IPv6 literal too', () => {
+    expect(() =>
+      loadConfig({ env: env({ [key]: '::1' }), readSecret: secretsFrom({}) }),
+    ).toThrowError(ConfigError);
+  });
+
+  it('rejects a wildcard', () => {
+    try {
+      loadConfig({ env: env({ [key]: '*.example.com' }), readSecret: secretsFrom({}) });
+      expect.unreachable('a wildcard must be refused');
+    } catch (error) {
+      const problems = (error as ConfigError).problems;
+      expect(
+        problems.some(
+          (problem: ConfigProblem) => problem.key === key && problem.problem.includes('wildcard'),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it('rejects a syntactically invalid hostname', () => {
+    expect(() =>
+      loadConfig({ env: env({ [key]: 'not a host!' }), readSecret: secretsFrom({}) }),
+    ).toThrowError(ConfigError);
+  });
+
+  it('an empty string means no override, not one empty entry', () => {
+    const config = loadConfig({ env: env({ [key]: '' }), readSecret: secretsFrom({}) });
+    expect(read(config)).toEqual([]);
+  });
+
+  it('names itself in the problem, so an operator knows which variable to fix', () => {
+    try {
+      loadConfig({ env: env({ [key]: '*.evil.example' }), readSecret: secretsFrom({}) });
+      expect.unreachable('a wildcard must be refused');
+    } catch (error) {
+      const keys = (error as ConfigError).problems.map((problem: ConfigProblem) => problem.key);
+      expect(keys).toContain(key);
+      // The generalisation must not have re-pointed one list's problems at
+      // another's variable name.
+      expect(keys).not.toContain('NOTIFICATIONS_ALLOWED_HOSTS');
+    }
+  });
+});
+
+/**
+ * `coinbase_key_name` / `coinbase_private_key` (wp3.5-coinbase.md §8.1).
+ *
+ * Feature-detected exactly as the Plaid pair is, and — the half that earns
+ * `resolveCoinbase` its existence — present-but-partial is a boot problem
+ * rather than a connector that registers and then cannot sign anything.
+ */
+describe('coinbase secrets', () => {
+  const KEY_NAME =
+    'organizations/11111111-1111-1111-1111-111111111111/apiKeys/22222222-2222-2222-2222-222222222222';
+  const PRIVATE_KEY = 'ZmFrZS1lZDI1NTE5LXNlZWQtZm9yLXRlc3Rpbmctb25seS1ub3QtYS1yZWFsLWtleQ==';
+
+  it('is null when neither file is present — the ordinary unconfigured install', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+    expect(config.coinbase).toBeNull();
+  });
+
+  it('is configured when both files are present', () => {
+    const config = loadConfig({
+      env: env(),
+      readSecret: secretsFrom({
+        coinbase_key_name: KEY_NAME,
+        coinbase_private_key: PRIVATE_KEY,
+      }),
+    });
+    expect(config.coinbase).toEqual({ configured: true });
+  });
+
+  it('carries no credential on the config object — only the fact of opting in', () => {
+    const config = loadConfig({
+      env: env(),
+      readSecret: secretsFrom({
+        coinbase_key_name: KEY_NAME,
+        coinbase_private_key: PRIVATE_KEY,
+      }),
+    });
+    // The signing key must not be reachable through `config.coinbase`; the
+    // connector reads it from the sealed `ConnectionHandle` per request.
+    expect(Object.keys(config.coinbase ?? {})).toEqual(['configured']);
+    expect(JSON.stringify(config.coinbase)).not.toContain(PRIVATE_KEY);
+  });
+
+  it('refuses a key name with no private key', () => {
+    try {
+      loadConfig({ env: env(), readSecret: secretsFrom({ coinbase_key_name: KEY_NAME }) });
+      expect.unreachable('half a CDP credential must be refused');
+    } catch (error) {
+      const problems = (error as ConfigError).problems;
+      expect(
+        problems.some((problem: ConfigProblem) => problem.key === 'secret:coinbase_private_key'),
+      ).toBe(true);
+    }
+  });
+
+  it('refuses a private key with no key name', () => {
+    try {
+      loadConfig({ env: env(), readSecret: secretsFrom({ coinbase_private_key: PRIVATE_KEY }) });
+      expect.unreachable('half a CDP credential must be refused');
+    } catch (error) {
+      const problems = (error as ConfigError).problems;
+      expect(
+        problems.some((problem: ConfigProblem) => problem.key === 'secret:coinbase_key_name'),
+      ).toBe(true);
+    }
+  });
+
+  it('never echoes the private key into a boot problem', () => {
+    try {
+      loadConfig({ env: env(), readSecret: secretsFrom({ coinbase_private_key: PRIVATE_KEY }) });
+      expect.unreachable('half a CDP credential must be refused');
+    } catch (error) {
+      const rendered = (error as ConfigError).problems
+        .map((problem: ConfigProblem) => `${problem.key} ${problem.problem} ${problem.hint}`)
+        .join('\n');
+      expect(rendered).not.toContain(PRIVATE_KEY);
+    }
+  });
+
+  it('both secrets are file-only — neither declares an env fallback', () => {
+    for (const name of ['coinbase_key_name', 'coinbase_private_key'] as const) {
+      const spec = SECRET_SPECS.find((candidate) => candidate.name === name);
+      expect(spec, `${name} must be declared in SECRET_SPECS`).toBeDefined();
+      expect(spec?.envFallback).toBeUndefined();
+      expect(spec?.requiredForRoles).toEqual([]);
+    }
+  });
+});
+
+/**
  * `ADVISOR_TOKEN_SECRET` (wp2.6-insights.md §6, open item 5): the file secret
  * `@ctx/insights`'s `InsightsSettings.tokenSecret` is keyed from. File-only,
  * like `master_key`, and optional: an install with no file present has simply

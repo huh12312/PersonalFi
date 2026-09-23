@@ -75,6 +75,42 @@ export interface NotificationsConfig {
   readonly allowedHosts: readonly string[];
 }
 
+/**
+ * `@ctx/integrations`'s egress allow-list, and `@connector/coinbase`'s, as
+ * deployment configuration.
+ *
+ * Same "data, not a policy object" rule as `NotificationsConfig` above —
+ * `packages/config` may import nothing but `@core/kernel`, so the actual
+ * `EgressPolicy` is built in `apps/api/src/domain.ts`.
+ *
+ * **Empty means "do not narrow", not "deny all"**, which is the one way these
+ * differ from `NotificationsConfig`. The authoritative list for each is in the
+ * code that dials (`@ctx/integrations`'s `MARKET_DATA_ALLOWED_HOSTS`,
+ * `@connector/coinbase`'s own host), and a value here can only intersect with
+ * it. An operator can therefore switch a price source off by narrowing this
+ * list, but cannot point one at a host the code does not already name.
+ */
+export interface AllowedHostsConfig {
+  /** Lowercase hostnames. Empty ⇒ no override. Never a wildcard, never an IP literal. */
+  readonly allowedHosts: readonly string[];
+}
+
+/**
+ * Coinbase, feature-detected — or absent.
+ *
+ * `AppConfig.coinbase` is `null` whenever `coinbase_key_name` or
+ * `coinbase_private_key` is missing, exactly as `plaid` is. Unlike
+ * `PlaidConfig` it carries **no credential at all**: the connector reads the
+ * sealed pair from each `ConnectionHandle` per request (wp3.5-coinbase.md
+ * §8.3), so the only thing the composition root needs from configuration is
+ * whether the operator has opted in. Carrying the bytes here anyway would put
+ * a CDP private key in a long-lived process-wide object for no caller.
+ */
+export interface CoinbaseConfig {
+  /** Always `true` when the object exists; present so the type is not empty. */
+  readonly configured: true;
+}
+
 export interface AppConfig {
   readonly env: PublicEnvironmentConfig;
   /** Every declared secret, boxed. `config.secrets.database_url?.reveal()`. */
@@ -87,7 +123,13 @@ export interface AppConfig {
   readonly allowedOrigins: readonly string[];
   /** `null` when Plaid is not configured (§ `resolvePlaid`). Never partially set. */
   readonly plaid: PlaidConfig | null;
+  /** `null` when neither Coinbase secret file is present (§ `resolveCoinbase`). */
+  readonly coinbase: CoinbaseConfig | null;
   readonly notifications: NotificationsConfig;
+  /** `MARKET_DATA_ALLOWED_HOSTS`, validated. Empty ⇒ the code's own list stands. */
+  readonly marketData: AllowedHostsConfig;
+  /** `CRYPTO_ALLOWED_HOSTS`, validated. Empty ⇒ the code's own list stands. */
+  readonly crypto: AllowedHostsConfig;
   readonly isProduction: boolean;
   readonly isTest: boolean;
 }
@@ -217,10 +259,26 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   problems.push(...webAuthnProblems(env.AUTH_RP_ID, allowedOrigins, isProduction));
   problems.push(...plaidRedirectUriProblems(env.PLAID_REDIRECT_URI, allowedOrigins));
 
-  const notificationsAllowedHostsResult = resolveNotificationsAllowedHosts(
+  const notificationsAllowedHostsResult = resolveAllowedHosts(
+    'NOTIFICATIONS_ALLOWED_HOSTS',
     env.NOTIFICATIONS_ALLOWED_HOSTS,
+    'ntfy.example.ts.net',
   );
   problems.push(...notificationsAllowedHostsResult.problems);
+
+  const marketDataAllowedHostsResult = resolveAllowedHosts(
+    'MARKET_DATA_ALLOWED_HOSTS',
+    env.MARKET_DATA_ALLOWED_HOSTS,
+    'api.tiingo.com',
+  );
+  problems.push(...marketDataAllowedHostsResult.problems);
+
+  const cryptoAllowedHostsResult = resolveAllowedHosts(
+    'CRYPTO_ALLOWED_HOSTS',
+    env.CRYPTO_ALLOWED_HOSTS,
+    'api.coinbase.com',
+  );
+  problems.push(...cryptoAllowedHostsResult.problems);
 
   // `SESSION_COOKIE_SECURE=false` exists only for a plain-HTTP local/integration
   // harness (apps/api/test/cookies.test.ts) — a session cookie without `Secure`
@@ -243,6 +301,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   // boot problem in one shot, matching "boot fails fast and prints every problem
   // at once" — not as a second exception a moment later.
   const plaid = resolvePlaid(secrets, env, problems);
+  const coinbase = resolveCoinbase(secrets, problems);
 
   if (problems.length > 0) throw new ConfigError(problems);
   if (databaseUrl === undefined) throw new ConfigError(problems); // unreachable; narrows the type
@@ -256,9 +315,14 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     kek: Object.freeze({ params: Object.freeze(kekParams), floor: kekFloor }),
     allowedOrigins: Object.freeze(allowedOrigins),
     plaid,
+    coinbase,
     notifications: Object.freeze({
       allowedHosts: Object.freeze(notificationsAllowedHostsResult.hosts),
     }),
+    marketData: Object.freeze({
+      allowedHosts: Object.freeze(marketDataAllowedHostsResult.hosts),
+    }),
+    crypto: Object.freeze({ allowedHosts: Object.freeze(cryptoAllowedHostsResult.hosts) }),
     isProduction,
     isTest: env.NODE_ENV === 'test',
   });
@@ -472,9 +536,18 @@ function plaidRedirectUriProblems(
 const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/u;
 
 /**
+ * A comma-separated egress allow-list, validated the same way for all three of
  * `NOTIFICATIONS_ALLOWED_HOSTS` (02-phase-2-dispatch.md §4 item 3;
- * wp2.4-notifications.md §8): comma-separated destination hostnames
- * `@ctx/notifications`'s egress guard may ever dial.
+ * wp2.4-notifications.md §8), `MARKET_DATA_ALLOWED_HOSTS` and
+ * `CRYPTO_ALLOWED_HOSTS` (03-phase-3-dispatch.md §4 item 8).
+ *
+ * One function rather than three, and the `key` parameter is why: the three
+ * lists differ only in which variable they came from and what a *good* entry
+ * looks like in the hint, and three copies of these twenty lines is how the
+ * second one ends up missing the IPv6 case. What the three do **not** share is
+ * what an empty value means — deny-all for notifications, "no narrowing of the
+ * code's own list" for the other two — and that difference is resolved by the
+ * caller, in `loadConfig`, not here.
  *
  * Validated here — by hand, the same way `AUTH_ALLOWED_ORIGINS` is split by
  * hand a few lines up — rather than left entirely to
@@ -496,7 +569,11 @@ const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a
  * — on a list with at most a handful of entries, spelling each one out costs
  * nothing.
  */
-function resolveNotificationsAllowedHosts(raw: string): {
+function resolveAllowedHosts(
+  key: 'NOTIFICATIONS_ALLOWED_HOSTS' | 'MARKET_DATA_ALLOWED_HOSTS' | 'CRYPTO_ALLOWED_HOSTS',
+  raw: string,
+  example: string,
+): {
   readonly hosts: string[];
   readonly problems: ConfigProblem[];
 } {
@@ -509,15 +586,15 @@ function resolveNotificationsAllowedHosts(raw: string): {
 
     if (host.includes('*')) {
       problems.push({
-        key: 'NOTIFICATIONS_ALLOWED_HOSTS',
+        key,
         problem: `contains "${host}", a wildcard — wildcards are not supported here`,
-        hint: 'list each destination hostname explicitly, comma-separated, e.g. ntfy.example.ts.net',
+        hint: `list each destination hostname explicitly, comma-separated, e.g. ${example}`,
       });
       continue;
     }
     if (isIP(host) !== 0) {
       problems.push({
-        key: 'NOTIFICATIONS_ALLOWED_HOSTS',
+        key,
         problem: `contains "${host}", an IP literal — an allow-list entry must be a hostname`,
         hint:
           'a literal address would be a second door to the private-range refusal this allow-list ' +
@@ -527,7 +604,7 @@ function resolveNotificationsAllowedHosts(raw: string): {
     }
     if (!HOSTNAME_PATTERN.test(host)) {
       problems.push({
-        key: 'NOTIFICATIONS_ALLOWED_HOSTS',
+        key,
         problem: `contains "${host}", which is not a syntactically valid hostname`,
         hint: 'each entry must be a bare hostname, no scheme, no port, no path',
       });
@@ -645,6 +722,52 @@ function resolvePlaid(
     redirectUri: env.PLAID_REDIRECT_URI,
     webhookUrl: env.PLAID_WEBHOOK_URL,
   };
+}
+
+/**
+ * Feature-detect `coinbase_key_name` / `coinbase_private_key`, the same way
+ * `resolvePlaid` feature-detects its pair — including the present-but-partial
+ * case, which is the half that earns this function its existence.
+ *
+ * Neither value is returned. `CoinbaseConfig` carries only `configured: true`
+ * because `apps/api/src/domain.ts` needs nothing else: the connector signs
+ * every request from the credential sealed into the `ConnectionHandle`, not
+ * from a process-wide copy (wp3.5-coinbase.md §8.3). The bytes are still read
+ * here — `config.secrets.coinbase_private_key` exists like any other declared
+ * secret — but nothing in the composition root has a reason to reach for them,
+ * and a `Redacted<string>` that no caller wants is a copy of a signing key
+ * kept alive for the life of the process for nobody.
+ *
+ * **No validation of the key's *shape* happens here, deliberately.** Whether
+ * the private key is a well-formed Ed25519 PKCS#8 PEM (and specifically not an
+ * ECDSA key) is `@connector/coinbase`'s own check, at the point of use, where
+ * it can say so in the connector's error vocabulary; `packages/config` may
+ * import nothing but `@core/kernel` and has no way to parse a key. What boot
+ * catches is the operator error `resolvePlaid` catches: one file written and
+ * the other forgotten.
+ */
+function resolveCoinbase(
+  secrets: Partial<Record<SecretName, Redacted<string>>>,
+  problems: ConfigProblem[],
+): CoinbaseConfig | null {
+  const keyName = secrets.coinbase_key_name;
+  const privateKey = secrets.coinbase_private_key;
+
+  if (keyName === undefined && privateKey === undefined) return null;
+  if (keyName === undefined || privateKey === undefined) {
+    const missing = keyName === undefined ? 'coinbase_key_name' : 'coinbase_private_key';
+    const present = keyName === undefined ? 'coinbase_private_key' : 'coinbase_key_name';
+    problems.push({
+      key: `secret:${missing}`,
+      problem:
+        `is missing, but secret:${present} is present — a CDP JWT needs both the key name ` +
+        '(its `kid` and `sub`) and the private key that signs it',
+      hint: `write the other half to \${SECRETS_DIR}/${missing} (mode 0400), or remove both to leave Coinbase unconfigured`,
+    });
+    return null;
+  }
+
+  return { configured: true };
 }
 
 function kekFloorProblems(

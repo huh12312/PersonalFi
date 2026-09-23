@@ -72,8 +72,22 @@ import {
   type NotificationsDatabase,
 } from '@ctx/notifications';
 import { RECURRING_EVENTS, createRecurringConsumer, type RecurringDatabase } from '@ctx/recurring';
+import {
+  INVESTMENTS_EVENTS,
+  createLotConsumer,
+  drizzleLotStore,
+  outboxOf as investmentsOutboxOf,
+  type InvestmentsDatabase,
+} from '@ctx/investments';
+import {
+  INTEGRATIONS_EVENTS,
+  createPriceRefreshJob,
+  type MarketDataRunRecorder,
+  type MarketDataWriter,
+  type RefreshPlan,
+} from '@ctx/integrations';
 import { systemClock, type Clock } from '@core/kernel';
-import { platformExecutor } from '@core/platform';
+import { defineJob, platformExecutor, upsertSchedule } from '@core/platform';
 import type { SecretBox } from '@core/secretbox';
 import {
   createBudgetingLedgerPort,
@@ -82,7 +96,10 @@ import {
   createInsightsLedgerPort,
   createInsightsRecurringPort,
   createRecurringLedgerPort,
+  assertDrizzleTransaction,
+  type MarketDataRuntime,
 } from './domain.ts';
+import type { InvestmentSyncPort } from '@ctx/investments';
 import type { ModuleRegistration } from './platform.ts';
 
 export interface ModuleWiringOptions {
@@ -99,7 +116,8 @@ export interface ModuleWiringOptions {
     BudgetingDatabase &
     RecurringDatabase &
     NotificationsDatabase &
-    InsightsDatabase;
+    InsightsDatabase &
+    InvestmentsDatabase;
   readonly orchestrator: SyncOrchestrator;
   /**
    * The account holder's display timezone.
@@ -134,7 +152,70 @@ export interface ModuleWiringOptions {
    * tokenising with one value and "rotate" the moment a real file appears.
    */
   readonly advisorTokenSecret?: string;
+  /**
+   * `@ctx/investments`' `InvestmentSyncPort`, built by
+   * `createInvestmentSyncPort(database)` in `domain.ts` — it reads
+   * `@ctx/connections`' sync bookkeeping and `@ctx/ledger`'s accounts, neither
+   * of which the lot engine may import.
+   *
+   * Required rather than optional: unlike a provider API key, there is no
+   * deployment in which this is legitimately absent. Making it optional would
+   * only create a way for a caller to half-register `module.investments`.
+   */
+  readonly investmentSyncPort: InvestmentSyncPort;
+  /**
+   * What `module.integrations` needs to actually fetch a price:
+   * `createMarketDataRuntime(...)`'s sources (none when no key file is
+   * present), the writer onto `@ctx/investments`' `prices`/`fx_rates`, and the
+   * `market_data_runs` recorder. All three built in `domain.ts`.
+   *
+   * **Optional, and its absence is the feature-detection.** `undefined` means
+   * the caller has no market-data wiring to give — the shape `app.ts` is in,
+   * since only the worker runs jobs — and `module.integrations` then registers
+   * its events and nothing else, exactly the way `insightsModule` handles an
+   * absent `advisor_token_secret`. A *present* runtime with an empty `sources`
+   * array is a different thing and registers normally: that is the zero-key
+   * install, where the refresh runs and honestly finds nothing to ask.
+   */
+  readonly marketData?: MarketDataWiringOptions;
 }
+
+/** The three `module.integrations` collaborators `domain.ts` builds. */
+export interface MarketDataWiringOptions {
+  readonly runtime: MarketDataRuntime;
+  readonly writer: MarketDataWriter;
+  readonly recorder: MarketDataRunRecorder;
+  /**
+   * What to refresh. Supplied by the caller because `createPriceRefreshJob`
+   * deliberately does not query holdings — it prices what it is handed.
+   *
+   * Returns an empty plan today: `holdings` is populated by WP 3.7's provider
+   * legs (see `createInvestmentSyncPort`'s note in `domain.ts`), so there is
+   * nothing to price yet and the honest plan is the empty one. The job still
+   * runs, still records a `market_data_runs` row and still proves the schedule
+   * fires — which is precisely what the Phase 3 gate's cold walk has to
+   * observe, and what it could not observe if the schedule were withheld until
+   * there were prices to fetch.
+   */
+  readonly planFor?: (userId: string, asOfDate: string) => Promise<RefreshPlan>;
+}
+
+/**
+ * `integrations.price_refresh` — the job kind and the schedule name.
+ *
+ * One string for both, and it **must** match `SCHEDULE_NAME_PATTERN`
+ * (`^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`). That is not a style note: the Phase 2
+ * cold boot found `@ctx/notifications` registering `notifications.deliver:<uuid>`,
+ * every unit test green because the fake scheduler never applied the CHECK
+ * constraint, and the real worker crash-looping from its first start
+ * (wp2.w-wiring.md). `assertScheduleName` now makes that a unit-test failure,
+ * and `apps/api/test/phase3-registration.test.ts` asserts this constant
+ * against the pattern directly so the name cannot drift without a red test.
+ */
+export const PRICE_REFRESH_JOB_KIND = 'integrations.price_refresh';
+export const PRICE_REFRESH_SCHEDULE_NAME = 'integrations.price_refresh';
+/** 03:45 **local** (08 §3.7) — after the 03:15 nightly sync has had time to land. */
+export const PRICE_REFRESH_CRON = '45 3 * * *';
 
 /**
  * Connections the nightly fan-out should touch: everything `listSyncableConnections`
@@ -297,7 +378,149 @@ export function appModules(options: ModuleWiringOptions): readonly ModuleRegistr
       },
     },
     insightsModule(database, options, clock),
+    {
+      flagKey: 'module.investments',
+      events: INVESTMENTS_EVENTS,
+      // Consumes `connections.SyncRunCompleted`. Lots are rebuilt from the full
+      // transaction history for each touched (account, security) pair and
+      // written with `onConflictDoUpdate`, so a re-delivered run writes the
+      // same rows and emits nothing (wp3.2-lots.md §6). No jobs and no
+      // schedules: nothing here is time-driven.
+      //
+      // `storeFor`/`outboxFor` are **factories over the pump's transaction**,
+      // not instances, and that is the whole reason the port takes them that
+      // way: `ConsumerContext.tx` is the transaction the receipt and the offset
+      // advance are written in, so building the store and the outbox from it
+      // is what makes "a `LotsUpdated` never survives a rolled-back derivation"
+      // structural rather than a habit. Same shape as `securityResolverFor` in
+      // `domain.ts`.
+      consumers: [
+        createLotConsumer({
+          // `drizzleLotStore` wants a full `Database`; the pump hands a bare
+          // `Executor`. The cast is the same one `@core/platform`'s
+          // `platformExecutor` and `@ctx/investments`' own `outboxOf` make at
+          // this exact boundary (store.ts:55-61) — every query the store issues
+          // goes through `execute`, which the transaction does provide.
+          // `assertDrizzleTransaction` recovers the real Drizzle handle the
+          // pump's transaction is carrying and fails by name if the pump was
+          // built with an executor that narrowed it away — see
+          // `drizzleTransactionalExecutor` in `domain.ts` for why that is a
+          // composition-root decision and not a cast.
+          storeFor: (context) => drizzleLotStore(assertDrizzleTransaction(context.tx), clock),
+          outboxFor: (context) =>
+            investmentsOutboxOf(assertDrizzleTransaction(context.tx) as InvestmentsDatabase),
+          port: options.investmentSyncPort,
+          clock,
+        }),
+      ],
+    },
+    integrationsModule(options, clock),
   ];
+}
+
+/**
+ * `module.integrations` — the 03:45 price refresh, its job handler and its
+ * schedule row.
+ *
+ * Built separately from the array literal for the same reason `insightsModule`
+ * is: it is conditional on more than its flag. `options.marketData` absent
+ * means the caller has no market-data wiring to give — `app.ts` is in exactly
+ * that position, because it runs no jobs — and this then registers the two
+ * events and nothing else. Registering a *handler* in a process with no job
+ * runner would be harmless; registering a *schedule* would not, because
+ * `scheduler.tick` enqueues any due row and a job with no registered handler
+ * is a row that retries five times and dies.
+ *
+ * ## Two things this function is careful about
+ *
+ * **The job is constructed inside the handler, not here.**
+ * `createPriceRefreshJob` takes `userId`, `outbox` and `correlationId`, all of
+ * which are per-invocation; building it once at wiring time would pin one
+ * user's id and one correlation id into every future run.
+ *
+ * **The outbox is the job's own transaction.** `PricesUpdated` and
+ * `PriceSourceUnavailable` are appended in it, so a refresh whose write fails
+ * does not leave behind an event claiming prices moved.
+ */
+function integrationsModule(options: ModuleWiringOptions, clock: Clock): ModuleRegistration {
+  const marketData = options.marketData;
+  if (marketData === undefined) {
+    return { flagKey: 'module.integrations', events: INTEGRATIONS_EVENTS };
+  }
+
+  const database = options.database;
+  const planFor =
+    marketData.planFor ??
+    // The honest empty plan. WP 3.7's real planner will read the user's
+    // holdings and route each one's `securities.type` through
+    // `@ctx/integrations`' `PROVIDER_FOR_KIND` to the source that prices it;
+    // until those holdings exist there is nothing to plan, and an invented
+    // subject would be a request to a provider on behalf of a position nobody
+    // holds.
+    (async (_userId: string, asOfDate: string): Promise<RefreshPlan> => ({
+      asOfDate,
+      securities: [],
+      fxPairs: [],
+    }));
+
+  return {
+    flagKey: 'module.integrations',
+    events: INTEGRATIONS_EVENTS,
+    // No consumer. `@ctx/integrations` reacts to nothing: it is driven by the
+    // clock and by an explicit refresh, and it may not read another context's
+    // events any more than it may read their tables (08 §1.3 #11).
+    jobs: [
+      defineJob(PRICE_REFRESH_JOB_KIND, async (_payload, context) => {
+        const asOfDate = clock.now().toISOString().slice(0, 10);
+        const plan = await planFor(context.userId, asOfDate);
+        // One transaction for the whole refresh: the rows and the events that
+        // announce them commit together or not at all.
+        await database.transaction(async (tx) => {
+          const job = createPriceRefreshJob({
+            userId: context.userId,
+            sources: marketData.runtime.sources,
+            writer: marketData.writer,
+            recorder: marketData.recorder,
+            outbox: { execute: (query) => tx.execute(query) as never },
+            correlationId: context.correlationId,
+            clock,
+            keys: marketData.runtime.keys,
+          });
+          const result = await job.run(plan);
+          context.logger.info(
+            {
+              asOfDate: result.asOfDate,
+              priceRowsWritten: result.priceRowsWritten,
+              fxRowsWritten: result.fxRowsWritten,
+              securitiesPriced: result.securitiesPriced.length,
+              securitiesUnpriced: result.securitiesUnpriced.length,
+              unavailable: result.unavailable.map((entry) => entry.reason),
+              sources: marketData.runtime.sources.map((source) => source.provider),
+            },
+            'price refresh complete',
+          );
+        });
+      }),
+    ],
+    schedules: async (userId: string): Promise<void> => {
+      await upsertSchedule(
+        platformExecutor(database),
+        {
+          userId,
+          name: PRICE_REFRESH_SCHEDULE_NAME,
+          cron: PRICE_REFRESH_CRON,
+          timezone: options.timezone,
+          jobKind: PRICE_REFRESH_JOB_KIND,
+          jobPayload: {},
+          enabled: true,
+          // Fifteen minutes, so this install does not dial four providers at
+          // exactly 03:45:00 the way every other install would.
+          jitterSeconds: 900,
+        },
+        clock,
+      );
+    },
+  };
 }
 
 /**

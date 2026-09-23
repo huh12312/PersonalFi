@@ -41,8 +41,14 @@ import pino from 'pino';
 import {
   createConnectorRegistry,
   createDomainRuntime,
+  createInvestmentSyncPort,
+  createMarketDataRunRecorder,
+  createMarketDataRuntime,
+  createMarketDataWriter,
   createNotificationChannels,
+  drizzleTransactionalExecutor,
   createNotificationEgressPolicy,
+  hydrateMarketDataBudgets,
 } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { appModules } from './modules.ts';
@@ -158,6 +164,35 @@ async function main(): Promise<void> {
     }
 
     const database = createDatabase(pool);
+
+    // WP 3.4 (docs/evidence/phase-3/wp3.w-wiring.md). Built once per process,
+    // in the worker only: the API runs no job runner and no scheduler, so a
+    // market-data runtime there would be four adapters nobody can invoke —
+    // and four API keys held in a process that is directly reachable from the
+    // network, which is the opposite of what `SECRETS_DIR` is for.
+    const marketDataRuntime = createMarketDataRuntime({
+      secrets: config.secrets,
+      allowedHosts: config.marketData.allowedHosts,
+      clock: systemClock,
+      logger,
+    });
+    // Prime each provider's budget from `market_data_runs` so a restart does
+    // not reset the day's spend (wp3.4-market-data.md §9 item 4). Best-effort
+    // on purpose: an empty budget is exactly the behaviour before this line
+    // existed, so a read failure must not stop the worker booting.
+    try {
+      const hydrated = await hydrateMarketDataBudgets(database, userId, marketDataRuntime.budgets);
+      logger.info(
+        { providers: [...marketDataRuntime.budgets.keys()], spends: hydrated },
+        'market-data rate budgets hydrated from market_data_runs',
+      );
+    } catch (error) {
+      logger.warn(
+        { err: error },
+        'could not hydrate market-data rate budgets; starting from an empty budget',
+      );
+    }
+
     const modules =
       secretBox === null
         ? { consumers: [], jobs: [], enabled: [], disabled: ['module.connections'] }
@@ -183,6 +218,11 @@ async function main(): Promise<void> {
                 // line can use them.
                 registry: createConnectorRegistry({
                   plaid: config.plaid,
+                  // WP 3.5, and the N-5 reasoning above applies unchanged: the
+                  // worker is the only process that runs a scheduled sync, so
+                  // a Coinbase connection linked through the API would never
+                  // sync if this registry omitted the connector.
+                  coinbase: config.coinbase,
                   clock: systemClock,
                   logger,
                 }),
@@ -200,6 +240,18 @@ async function main(): Promise<void> {
               ...(config.secrets.advisor_token_secret === undefined
                 ? {}
                 : { advisorTokenSecret: config.secrets.advisor_token_secret.reveal() }),
+              // WP 3.2 — the port the lot consumer reads accounts and sync
+              // bookkeeping through. Always supplied: unlike a provider key
+              // there is no deployment in which it is legitimately absent.
+              investmentSyncPort: createInvestmentSyncPort(database),
+              // WP 3.4 — supplied here and *not* in `app.ts`, which is what
+              // makes `module.integrations` register its schedule in the one
+              // process that has a scheduler to fire it.
+              marketData: {
+                runtime: marketDataRuntime,
+                writer: createMarketDataWriter(database),
+                recorder: createMarketDataRunRecorder(database),
+              },
             }),
           );
     logger.info({ enabled: modules.enabled, disabled: modules.disabled }, 'modules resolved');
@@ -207,7 +259,10 @@ async function main(): Promise<void> {
     if (modules.consumers.length > 0) {
       pump = createConsumerPump({
         pool,
-        db: platform.db,
+        // Not `platform.db`: `platformExecutor` narrows the transaction to
+        // `execute` alone, and WP 3.2's lot consumer builds a Drizzle store
+        // over the pump's transaction. See `drizzleTransactionalExecutor`.
+        db: drizzleTransactionalExecutor(database),
         consumers: modules.consumers,
         logger,
         metrics: platform.metrics,

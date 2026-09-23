@@ -11,6 +11,8 @@
   "dependencies": {
     "@core/db": "workspace:*",
     "@core/kernel": "workspace:*",
-    "drizzle-orm": "0.45.2"
+    "@core/platform": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "zod": "4.5.4"
   }
 }

@@ -37,6 +37,18 @@ const EXPECTED_DEFAULTS: Readonly<Record<string, boolean>> = Object.freeze({
   // mounted — `true` is what "on" means the day that secret lands, without a
   // second code change (platform.ts's own comment on this entry).
   'module.insights': true,
+  // Phase 3's two (docs/evidence/phase-3/wp3.w-wiring.md). Flipped `true` at
+  // the Wave A′ boundary once `apps/api/test/db/phase3-wiring.test.ts` proved
+  // the real `appModules()` registration green against a real database.
+  //
+  // `module.investments` is inert on an install with no investment accounts:
+  // the lot consumer derives from `InvestmentSyncPort.factsForRun`, which is
+  // empty until WP 3.7's provider legs land, and a derivation over no facts
+  // writes nothing. `module.integrations` is not inert — it registers the
+  // 03:45 job and schedule — but is safe at `true` because a provider with no
+  // key file gets no adapter at all, so the refresh runs and asks nobody.
+  'module.investments': true,
+  'module.integrations': true,
 });
 
 describe('module kill-switch defaults are pinned (WP 3.13 carry-over)', () => {

@@ -124,6 +124,49 @@ export const MODULE_FLAGS: readonly FlagDefinition[] = Object.freeze([
       'never — off means no advisor runs, no consumer, no schedule, and a feed ' +
       'that answers with an empty list',
   }),
+  // The two below are Phase 3's (03-phase-3-dispatch.md §4 item 3). Both
+  // landed `defaultEnabled: false` and were flipped `true` at this wave
+  // boundary once `apps/api/test/db/phase3-wiring.test.ts` proved the real
+  // `appModules()` registration green against a real database — the same bar
+  // the four Phase 2 flags above were held to, and the same reason the
+  // dispatch reserves the flip for the orchestrator rather than the work
+  // package: a context can prove its own engine, and only the composition
+  // root can prove it is wired. Both were flipped; see
+  // docs/evidence/phase-3/wp3.w-wiring.md for what proved each one.
+  Object.freeze({
+    key: 'module.investments',
+    // Provably inert on an install with no investment accounts, in the strong
+    // sense: the lot consumer reacts to `connections.SyncRunCompleted` and
+    // derives from the facts `createInvestmentSyncPort(...).factsForRun`
+    // returns, which today is always empty (WP 3.7 owns the provider legs that
+    // persist them — see that function's doc). `runLotSync` over no facts
+    // touches no holding, opens no lot and appends no event. `true` here is
+    // what "on" means the day 3.7 lands, without a second code change, and it
+    // buys one thing now: the consumer's offset advances over history from
+    // first boot, so 3.7's first run is not also a full replay of every sync
+    // run ever recorded.
+    defaultEnabled: true,
+    owner: 'investments',
+    removeWhen:
+      'never — this is the kill switch for cost-basis derivation, and a lot ' +
+      'engine that cannot be switched off is one that cannot be paused while a ' +
+      'basis-affecting bug is fixed',
+  }),
+  Object.freeze({
+    key: 'module.integrations',
+    // Not inert, and deliberately so: on, this registers the
+    // `integrations.price_refresh` job handler and the 03:45 schedule. What
+    // makes `true` safe on an install with no API keys is one layer down —
+    // `createMarketDataRuntime` (domain.ts) registers no `PriceSource` for a
+    // provider whose key file is absent, so the refresh runs, consults nothing,
+    // writes nothing and records a run with zero requests. 03 §6: "Phase 3
+    // completes with zero keys — it just cannot prove freshness."
+    defaultEnabled: true,
+    owner: 'integrations',
+    removeWhen:
+      'never — this is the kill switch for every outbound market-data call, and ' +
+      'the only one that stops a provider being dialled without deleting its key',
+  }),
 ]);
 
 export interface Platform {

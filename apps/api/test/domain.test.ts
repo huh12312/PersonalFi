@@ -23,6 +23,13 @@ const PLAID_CONFIG: PlaidConfig = {
   webhookUrl: null,
 };
 
+/** Only the lines `createConnectorRegistry` emitted about Plaid. */
+function plaidLines(
+  lines: ReturnType<typeof recordingLogger>['lines'],
+): ReturnType<typeof recordingLogger>['lines'] {
+  return lines.filter((line) => line.obj['provider'] === 'plaid');
+}
+
 describe('createConnectorRegistry — plaid (wp1.3b)', () => {
   it('does not register plaid when config.plaid is null (feature-detect)', () => {
     const logger = recordingLogger();
@@ -31,9 +38,14 @@ describe('createConnectorRegistry — plaid (wp1.3b)', () => {
     expect(registry.has('plaid')).toBe(false);
     expect(registry.manifests().map((m) => m.provider)).not.toContain('plaid');
 
-    expect(logger.lines).toHaveLength(1);
-    expect(logger.lines[0]?.level).toBe('info');
-    expect(logger.lines[0]?.msg).toMatch(/not configured/);
+    // Two lines now, not one: WP 3.5 added a Coinbase feature-detection line
+    // of the same shape. Filtered by provider rather than loosened to
+    // `toBeGreaterThan(0)` — the count is what proves exactly one line is
+    // emitted per provider, and a loose assertion would not notice a
+    // registration that logged twice.
+    expect(plaidLines(logger.lines)).toHaveLength(1);
+    expect(plaidLines(logger.lines)[0]?.level).toBe('info');
+    expect(plaidLines(logger.lines)[0]?.msg).toMatch(/not configured/);
   });
 
   it('registers plaid when config.plaid is present, and never logs the secret', () => {
@@ -43,9 +55,9 @@ describe('createConnectorRegistry — plaid (wp1.3b)', () => {
     expect(registry.has('plaid')).toBe(true);
     expect(registry.manifests().map((m) => m.provider)).toContain('plaid');
 
-    expect(logger.lines).toHaveLength(1);
-    expect(logger.lines[0]?.level).toBe('info');
-    expect(logger.lines[0]?.msg).toMatch(/registered/);
+    expect(plaidLines(logger.lines)).toHaveLength(1);
+    expect(plaidLines(logger.lines)[0]?.level).toBe('info');
+    expect(plaidLines(logger.lines)[0]?.msg).toMatch(/registered/);
     const serialisedLog = JSON.stringify(logger.lines);
     expect(serialisedLog).not.toContain(PLAID_CONFIG.clientId.reveal());
     expect(serialisedLog).not.toContain(PLAID_CONFIG.secret.reveal());

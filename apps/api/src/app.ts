@@ -380,7 +380,15 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   const database = createDatabase(pool);
   const registry =
     options.connectorRegistry ??
-    createConnectorRegistry({ plaid: config.plaid, clock, logger: app.log });
+    createConnectorRegistry({
+      plaid: config.plaid,
+      // WP 3.5. The API needs the adapter registered too, not only the worker:
+      // `registry.manifests()` is what the "Add a connection" screen renders
+      // from, and the link ceremony (`POST /connections`) runs inline here.
+      coinbase: config.coinbase,
+      clock,
+      logger: app.log,
+    });
   let domain: DomainRuntime | null = null;
 
   const deps: RouteDeps = {

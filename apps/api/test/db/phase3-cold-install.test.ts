@@ -55,7 +55,9 @@ import {
   type ApiHarness,
 } from '../helpers/api-harness.ts';
 import { seedUserState } from '../../src/bootstrap-seed.ts';
+import { PRICE_REFRESH_JOB_KIND, PRICE_REFRESH_SCHEDULE_NAME } from '../../src/modules.ts';
 import { MODULE_FLAGS } from '../../src/platform.ts';
+import { DEFAULT_LADDERS, ladderRows } from '@ctx/investments';
 
 interface WireCategory {
   readonly key: string;
@@ -119,8 +121,49 @@ describe.skipIf(NO_DATABASE)(
       expect(seeded.categoriesInserted).toBe(FLAT_TAXONOMY.length);
       expect(seeded.advisorsRegistered).toBe(BUILTIN_CATALOGUE.length);
       expect(seeded.schedulesRegistered).toEqual(
-        expect.arrayContaining(['categorization.retrain_weekly', 'insights.nightly']),
+        expect.arrayContaining([
+          'categorization.retrain_weekly',
+          'insights.nightly',
+          // Phase 3 (docs/evidence/phase-3/wp3.w-wiring.md). Unlike the
+          // insights one this has no secret to feature-detect on: an install
+          // with no provider key still wants the row, because the refresh
+          // runs, finds no source registered and records that honestly.
+          PRICE_REFRESH_SCHEDULE_NAME,
+        ]),
       );
+
+      // `price_source_priority` — 07 §6.1's ladder as rows, per security kind
+      // (wp3.4-market-data.md §9 item 6). This is the Phase 3 half of the same
+      // C-1 claim the taxonomy and the advisor catalogue make: a user created
+      // *after* boot has it, with no restart and no lazy repair at a read
+      // route. Seeded unconditionally, so it does not move if
+      // `module.integrations` is switched off.
+      const expectedLadderRows = Object.entries(DEFAULT_LADDERS).flatMap(([kind, ladder]) =>
+        ladderRows(user.id, kind, ladder),
+      );
+      expect(seeded.priceLadderRows).toBe(expectedLadderRows.length);
+
+      const ladder = await h.database.db.execute<{
+        security_kind: string;
+        rung: number;
+        source: string;
+      }>(sql`
+        SELECT security_kind, rung, source
+          FROM price_source_priority
+         WHERE user_id = ${user.id}::uuid
+         ORDER BY security_kind, rung
+      `);
+      expect(ladder.rows).toHaveLength(expectedLadderRows.length);
+      expect(new Set(ladder.rows.map((row) => row.security_kind))).toEqual(
+        new Set(Object.keys(DEFAULT_LADDERS)),
+      );
+      // The two rungs `0015_market_data.sql` pins by CHECK: a user override
+      // that is not first is not an override, and a carry-forward that is not
+      // last would shadow a real quote with a stale one.
+      for (const row of ladder.rows) {
+        if (row.source === 'user_override') expect(row.rung).toBe(1);
+        if (row.source === 'last_known') expect(row.rung).toBe(99);
+      }
 
       // No restart between the seeding above and the reads below — same
       // `h.app`, same process, no second `app.ready()`.
@@ -158,6 +201,7 @@ describe.skipIf(NO_DATABASE)(
       expect(jobKinds).toContain(DELIVER_JOB_KIND);
       expect(jobKinds).toContain(DIGEST_JOB_KIND);
       expect(jobKinds).toContain(RUN_ALL_JOB_KIND);
+      expect(jobKinds).toContain(PRICE_REFRESH_JOB_KIND);
     });
   },
 );

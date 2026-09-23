@@ -78,7 +78,11 @@ import {
 import { sql } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createConnectorRegistry, createDomainRuntime } from '../../src/domain.ts';
+import {
+  createConnectorRegistry,
+  createDomainRuntime,
+  createInvestmentSyncPort,
+} from '../../src/domain.ts';
 import { appModules } from '../../src/modules.ts';
 import {
   createApiHarness,
@@ -321,6 +325,7 @@ describe.skipIf(NO_DATABASE)('Phase 1 seed-based end-to-end proof', () => {
         smtp: createSmtpChannel({ policy: egressPolicy }),
       },
       secretBox: h.security.requireSecretBox(),
+      investmentSyncPort: createInvestmentSyncPort(h.database.db),
     });
     const categorization = modules.find((m) => m.flagKey === 'module.categorization');
     const pump = createConsumerPump({

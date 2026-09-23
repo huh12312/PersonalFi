@@ -66,6 +66,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createConnectorRegistry,
   createDomainRuntime,
+  createInvestmentSyncPort,
   createInsightsBudgetPort,
   createInsightsLedgerPort,
   createInsightsRecurringPort,
@@ -302,6 +303,7 @@ describe.skipIf(NO_DATABASE)(
           smtp: createSmtpChannel({ policy: denyAllPolicy }),
         },
         secretBox: h.security.requireSecretBox(),
+        investmentSyncPort: createInvestmentSyncPort(h.database.db),
         advisorTokenSecret: 'phase2-wiring-test-secret',
       });
 
