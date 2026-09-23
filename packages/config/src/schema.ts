@@ -410,6 +410,78 @@ export const SECRET_SPECS = [
       'module.insights. Optional: with no file present, the API boots normally and the insights ' +
       'consumer/jobs/schedule are simply not registered. Never rotate once set (wp2.6 §6).',
   },
+
+  // ----------------------------------------------------------- market data
+  //
+  // Per-provider credentials for `@ctx/integrations`'s `PriceSource` adapters
+  // (03-phase-3-dispatch.md WP 3.4): Tiingo for equity/ETF EOD, FRED for macro,
+  // FX and the market rate, CoinGecko Demo for crypto, OpenFIGI for
+  // symbol→FIGI mapping.
+  //
+  // **File only, no `envFallback` on any of the four**, for exactly the reason
+  // `plaid_client_id` has none (01 §1.10): an environment variable is readable
+  // by every dependency in-process and survives into `docker inspect`,
+  // `/proc/<pid>/environ`, child processes and crash dumps. A third-party API
+  // key is a credential whether or not it can move money.
+  //
+  // **All four optional, required for no role.** Every market-data adapter
+  // degrades honestly without its key — it returns `skipped_no_key` rather than
+  // guessing a price, the holding keeps its staleness flag, and the API boots
+  // normally — so a deployment with none of them configured is an ordinary one,
+  // not a misconfiguration. 03 §6 item 1: "Phase 3 completes with zero keys —
+  // it just cannot prove freshness."
+  //
+  // One asymmetry worth stating here rather than leaving to be discovered:
+  // **FRED has no header auth**, so `fred_api_key` necessarily travels in the
+  // query string of every request (`?api_key=…`). That is why `@ctx/integrations`
+  // redacts provider request/response strings before logging or storing them — a
+  // URL is the one place one of these keys can reach a log line or a cached row
+  // by accident.
+  {
+    name: 'tiingo_api_key',
+    file: 'tiingo_api_key',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write the Tiingo API token to ${SECRETS_DIR}/tiingo_api_key (mode 0400). ' +
+      'Optional: with no key present the Tiingo adapter returns `skipped_no_key` and the app boots ' +
+      'normally (03 §6 — Phase 3 completes with zero keys). Get one from your tiingo.com account ' +
+      'page (API → Token).',
+  },
+  {
+    name: 'fred_api_key',
+    file: 'fred_api_key',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write the FRED API key to ${SECRETS_DIR}/fred_api_key (mode 0400). ' +
+      'Optional: with no key present the FRED adapter returns `skipped_no_key` and the app boots ' +
+      'normally (03 §6 — Phase 3 completes with zero keys). Request one at ' +
+      'https://fred.stlouisfed.org/docs/api/api_key.html. FRED has no header auth, so this key ' +
+      'travels in the query string — never log a raw FRED URL.',
+  },
+  {
+    name: 'coingecko_api_key',
+    file: 'coingecko_api_key',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write the CoinGecko Demo plan key to ${SECRETS_DIR}/coingecko_api_key (mode 0400). ' +
+      'Optional: with no key present the CoinGecko adapter returns `skipped_no_key` and the app ' +
+      'boots normally (03 §6 — Phase 3 completes with zero keys). Create one in the CoinGecko ' +
+      'developer dashboard (Demo plan).',
+  },
+  {
+    name: 'openfigi_api_key',
+    file: 'openfigi_api_key',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write the OpenFIGI API key to ${SECRETS_DIR}/openfigi_api_key (mode 0400). ' +
+      'Optional: with no key present the OpenFIGI mapper returns `skipped_no_key` and the app boots ' +
+      'normally (03 §6 — Phase 3 completes with zero keys); OpenFIGI also answers anonymously at ' +
+      '10 jobs per batch instead of 100. Request a key at https://www.openfigi.com/api.',
+  },
 ] as const;
 
 export type SecretName = (typeof SECRET_SPECS)[number]['name'];

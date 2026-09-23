@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { ConfigError, type ConfigProblem } from './errors.ts';
 import { describeConfig, loadConfig } from './load.ts';
 import { REDACTED_MARKER, isRedacted, redact } from './redacted.ts';
+import { SECRET_SPECS } from './schema.ts';
 
 const VALID_URL = 'postgres://app:hunter2@db:5432/personalfi';
 
@@ -779,6 +780,119 @@ describe('advisor_token_secret (wp2.6 §6)', () => {
         loadConfig({ env: env({ ROLE: role, ...PROD_AUTH }), readSecret: secretsFrom({}) }),
       ).not.toThrow();
     }
+  });
+});
+
+/**
+ * Market-data provider keys (WP 3.4): `tiingo_api_key`, `fred_api_key`,
+ * `coingecko_api_key`, `openfigi_api_key`.
+ *
+ * Two claims the adapters are built on, pinned here so neither can quietly
+ * stop being true:
+ *
+ *  - **Optional for every role.** 03 §6 item 1 — "Phase 3 completes with zero
+ *    keys — it just cannot prove freshness." A key that became required would
+ *    turn a deployment that has simply not signed up for Tiingo into a box that
+ *    refuses to boot.
+ *  - **Never from the environment.** File-only, same posture as
+ *    `plaid_client_id` (01 §1.10): an env-var escape hatch is the leak surface
+ *    (`docker inspect`, `/proc/<pid>/environ`, crash dumps) the file secret
+ *    exists to avoid. `gate-secret-custody.test.ts` asserts this generically
+ *    over every file-only secret; these cases name the four so a deletion from
+ *    `SECRET_SPECS` fails loudly rather than shrinking that gate's input.
+ */
+describe('market-data provider API keys (WP 3.4)', () => {
+  const MARKET_DATA_SECRETS = [
+    'tiingo_api_key',
+    'fred_api_key',
+    'coingecko_api_key',
+    'openfigi_api_key',
+  ] as const;
+
+  /** Distinctive enough that finding one anywhere in the config means something. */
+  const KEY_VALUES: Record<(typeof MARKET_DATA_SECRETS)[number], string> = {
+    tiingo_api_key: 'pfi-test-tiingo-key-0a1b-do-not-use',
+    fred_api_key: 'pfi-test-fred-key-2c3d-do-not-use',
+    coingecko_api_key: 'pfi-test-coingecko-key-4e5f-do-not-use',
+    openfigi_api_key: 'pfi-test-openfigi-key-6a7b-do-not-use',
+  };
+
+  it('declares all four as optional, file-only secrets', () => {
+    for (const name of MARKET_DATA_SECRETS) {
+      const spec = SECRET_SPECS.find((candidate) => candidate.name === name);
+      expect(spec, `${name} must be declared in SECRET_SPECS`).toBeDefined();
+      expect(spec?.requiredForRoles, `${name} must be required for no role`).toEqual([]);
+      expect(spec?.envFallback, `${name} must have no env fallback`).toBeUndefined();
+      expect(spec?.file).toBe(name);
+    }
+  });
+
+  it('boots every role with no market-data key present at all', () => {
+    // The zero-key deployment 03 §6 calls the default: no Tiingo account, no
+    // FRED registration, and every container still starts.
+    for (const role of ['api', 'worker', 'migrator', 'cli'] as const) {
+      const config = loadConfig({
+        env: env({ ROLE: role, ...PROD_AUTH }),
+        readSecret: secretsFrom({}),
+      });
+      for (const name of MARKET_DATA_SECRETS) {
+        expect(config.secrets[name], `${name} must be absent with no file`).toBeUndefined();
+      }
+    }
+  });
+
+  it('exposes each key when its file is present, and only that one', () => {
+    for (const name of MARKET_DATA_SECRETS) {
+      const config = loadConfig({
+        env: env(),
+        readSecret: secretsFrom({ [name]: KEY_VALUES[name] }),
+      });
+      expect(config.secrets[name]?.reveal()).toBe(KEY_VALUES[name]);
+      for (const other of MARKET_DATA_SECRETS) {
+        if (other === name) continue;
+        expect(config.secrets[other], `${other} must stay absent`).toBeUndefined();
+      }
+    }
+  });
+
+  it('is never read from an environment variable', () => {
+    // The escape hatch that must not exist: the obvious upper-cased name, plus
+    // the provider-prefixed spelling a compose file would reach for.
+    const planted: Record<string, string> = {};
+    for (const name of MARKET_DATA_SECRETS) {
+      planted[name.toUpperCase()] = KEY_VALUES[name];
+      planted[name.toUpperCase().replace('_API_KEY', '_KEY')] = KEY_VALUES[name];
+    }
+
+    const config = loadConfig({ env: env(planted), readSecret: secretsFrom({}) });
+
+    const serialised = JSON.stringify(config);
+    for (const name of MARKET_DATA_SECRETS) {
+      expect(config.secrets[name], `${name} must not come from the environment`).toBeUndefined();
+      expect(serialised).not.toContain(KEY_VALUES[name]);
+      expect(JSON.stringify(describeConfig(config))).not.toContain(KEY_VALUES[name]);
+    }
+  });
+
+  it('keeps every key out of anything serialisable, by name only', () => {
+    const config = loadConfig({
+      env: env(),
+      readSecret: secretsFrom({ ...KEY_VALUES }),
+    });
+
+    const serialised = JSON.stringify(config);
+    const described = JSON.stringify(describeConfig(config));
+    for (const name of MARKET_DATA_SECRETS) {
+      expect(serialised).not.toContain(KEY_VALUES[name]);
+      expect(described).not.toContain(KEY_VALUES[name]);
+    }
+    // Presence stays answerable from a boot log line without the log line
+    // carrying the keys — the same contract `describeConfig` keeps for Plaid.
+    expect(describeConfig(config)['secretsPresent']).toEqual([
+      'database_url',
+      'master_key',
+      ...MARKET_DATA_SECRETS,
+    ]);
   });
 });
 

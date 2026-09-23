@@ -157,7 +157,9 @@ export interface PriceSource {
   /** Whether a key is configured. `false` ⇒ every call answers `skipped_no_key`. */
   readonly hasKey: boolean;
   /** What this source has spent against its published budget, for the settings screen. */
-  budget(now: Date): readonly { readonly label: string; readonly used: number; readonly limit: number }[];
+  budget(
+    now: Date,
+  ): readonly { readonly label: string; readonly used: number; readonly limit: number }[];
 
   price(request: PriceRequest): Promise<SourceOutcome<PriceQuote>>;
   fxRate(from: string, to: string, date: string): Promise<SourceOutcome<FxQuote>>;

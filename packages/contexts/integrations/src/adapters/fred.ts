@@ -124,7 +124,7 @@ export function createFredSource(options: FredOptions): FredSource {
   ): Promise<SourceOutcome<{ readonly date: string; readonly value: string }>> {
     if (!isIsoDate(date)) return { kind: 'error', detail: `${date} is not a YYYY-MM-DD date` };
 
-    const call = await callJson(context, {
+    const call = await callJson(context, () => ({
       method: 'GET',
       path: '/fred/series/observations',
       query: {
@@ -134,7 +134,7 @@ export function createFredSource(options: FredOptions): FredSource {
         observation_start: date,
         observation_end: date,
       },
-    });
+    }));
     if (!call.ok) return call.outcome;
 
     const rows = arrayOf(recordOf(call.body)?.['observations']);

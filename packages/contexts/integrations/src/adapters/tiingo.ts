@@ -92,18 +92,19 @@ export function createTiingoPriceSource(options: TiingoOptions): PriceSource {
       if (request.currency !== 'USD') {
         return {
           kind: 'no_data',
-          detail: `tiingo quotes in USD; ${request.currency} would require an FX conversion, ` +
+          detail:
+            `tiingo quotes in USD; ${request.currency} would require an FX conversion, ` +
             'which belongs in fx_rates with its own date (D4)',
         };
       }
 
       const symbol = encodeURIComponent(request.subject.symbol.toLowerCase());
-      const call = await callJson(context, {
+      const call = await callJson(context, () => ({
         method: 'GET',
         path: `/tiingo/daily/${symbol}/prices`,
         query: { startDate: request.date, endDate: request.date, format: 'json' },
         headers: { authorization: `Token ${options.key.reveal()}` },
-      });
+      }));
       if (!call.ok) return call.outcome;
 
       const bars = arrayOf(call.body);
@@ -151,12 +152,12 @@ export function createTiingoPriceSource(options: TiingoOptions): PriceSource {
     },
 
     async search(symbol: string): Promise<SourceOutcome<readonly SearchHit[]>> {
-      const call = await callJson(context, {
+      const call = await callJson(context, () => ({
         method: 'GET',
         path: '/tiingo/utilities/search',
         query: { query: symbol },
         headers: { authorization: `Token ${options.key.reveal()}` },
-      });
+      }));
       if (!call.ok) return call.outcome;
       const rows = arrayOf(call.body);
       if (rows === null) return { kind: 'error', detail: 'tiingo search answered no array' };

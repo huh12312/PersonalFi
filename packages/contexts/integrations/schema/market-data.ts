@@ -11,12 +11,7 @@
  * This file is the query surface, not the DDL: the `CHECK` constraints live in
  * the migration.
  */
-import {
-  createdAtColumn,
-  idColumn,
-  instantColumn,
-  userIdColumn,
-} from '@core/db';
+import { createdAtColumn, idColumn, instantColumn, userIdColumn } from '@core/db';
 import { integer, pgTable, text } from 'drizzle-orm/pg-core';
 
 /** Every provider this context may speak to. One host each; see `src/egress.ts`. */

@@ -50,11 +50,7 @@
  * adapter has somewhere to put it; `MARKET_DATA_ALLOWED_HOSTS` does not include
  * it, so an opt-in that was never opted into cannot reach the network.
  */
-import {
-  createEgressPolicy,
-  type EgressPolicy,
-  type EgressPolicyInput,
-} from '@core/platform';
+import { createEgressPolicy, type EgressPolicy, type EgressPolicyInput } from '@core/platform';
 import type { MarketDataProvider } from '../schema/index.ts';
 
 /**

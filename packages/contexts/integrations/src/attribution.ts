@@ -77,7 +77,7 @@ export const ATTRIBUTIONS: Readonly<Record<MarketDataProvider, Attribution>> = O
     surfaces: Object.freeze(['any_price' as const, 'settings' as const]),
     clause:
       'CoinGecko Demo (free tier): "Attribution required even on free tier — must display ' +
-      '\'Data provided by CoinGecko\' with logo + hyperlink" (01 §3.6, citing CoinGecko\'s ' +
+      "'Data provided by CoinGecko' with logo + hyperlink\" (01 §3.6, citing CoinGecko's " +
       'Attribution Guide). 01 §3.6: "a hard license condition, not a courtesy".',
     redistribution: 'permitted_with_attribution' as const,
   }),

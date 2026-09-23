@@ -89,7 +89,9 @@ export interface OpenFigiOptions {
 
 export interface OpenFigiMapper extends FigiMapper {
   /** What this adapter has spent against 25,000 jobs/minute. */
-  budget(now: Date): readonly { readonly label: string; readonly used: number; readonly limit: number }[];
+  budget(
+    now: Date,
+  ): readonly { readonly label: string; readonly used: number; readonly limit: number }[];
   /** Every batch actually sent, for the evidence ledger. */
   readonly requestCount: () => number;
 }
@@ -124,17 +126,17 @@ export function createOpenFigiMapper(options: OpenFigiOptions): OpenFigiMapper {
     );
 
     requests += 1;
-    const call = await callJson(context, {
-        method: 'POST',
-        path: '/v3/mapping',
-        headers: {
-          'content-type': 'application/json',
-          ...(options.key.present ? { 'x-openfigi-apikey': options.key.reveal() } : {}),
-        },
-        body,
-        // Billed in jobs, not requests (01 §4.1: "25,000 mapping jobs/min").
-        cost: batch.length,
-    });
+    const call = await callJson(context, () => ({
+      method: 'POST',
+      path: '/v3/mapping',
+      headers: {
+        'content-type': 'application/json',
+        ...(options.key.present ? { 'x-openfigi-apikey': options.key.reveal() } : {}),
+      },
+      body,
+      // Billed in jobs, not requests (01 §4.1: "25,000 mapping jobs/min").
+      cost: batch.length,
+    }));
 
     if (!call.ok) {
       // One error per job, so the caller's positional contract holds even when

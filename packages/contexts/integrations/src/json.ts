@@ -80,9 +80,7 @@ export function parseDecimalJson(text: string): unknown {
       return typeof source === 'string' ? source : String(value);
     } as never);
   } catch (error) {
-    throw new MalformedProviderResponse(
-      error instanceof Error ? error.message : 'not valid JSON',
-    );
+    throw new MalformedProviderResponse(error instanceof Error ? error.message : 'not valid JSON');
   }
   assertBounded(parsed);
   return parsed;

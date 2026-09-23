@@ -212,7 +212,9 @@ function buildUrl(provider: MarketDataProvider, request: ProviderRequest): strin
   return `${baseUrlFor(provider)}${path}${search === '' ? '' : `?${search}`}`;
 }
 
-function buildHeaders(requested: Partial<Readonly<Record<HeaderName, string>>>): Record<string, string> {
+function buildHeaders(
+  requested: Partial<Readonly<Record<HeaderName, string>>>,
+): Record<string, string> {
   const headers: Record<string, string> = {
     accept: 'application/json',
     'user-agent': USER_AGENT,

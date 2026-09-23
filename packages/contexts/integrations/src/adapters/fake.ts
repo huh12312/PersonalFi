@@ -19,7 +19,7 @@
  * an allow-list in it to begin with.
  */
 import type { HttpTransport, TransportRequest, TransportResponse } from '@core/platform';
-import type { MarketDataProvider } from '../schema/index.ts';
+import type { MarketDataProvider } from '../../schema/index.ts';
 import { ATTRIBUTIONS } from '../attribution.ts';
 import { createRateBudget, type RateWindow } from '../rate-limit.ts';
 import type {
@@ -96,7 +96,11 @@ export interface FakePriceSourceOptions {
 export interface FakePriceSource extends PriceSource {
   /** Every price request, in order. */
   readonly priceCalls: readonly PriceRequest[];
-  readonly fxCalls: readonly { readonly from: string; readonly to: string; readonly date: string }[];
+  readonly fxCalls: readonly {
+    readonly from: string;
+    readonly to: string;
+    readonly date: string;
+  }[];
 }
 
 /** The key `FakePriceSourceOptions.prices` is written in. */

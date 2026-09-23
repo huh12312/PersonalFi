@@ -54,16 +54,33 @@ export type CallResult =
   | { readonly ok: true; readonly body: unknown }
   | { readonly ok: false; readonly outcome: SourceOutcome<never> };
 
-export async function callJson(
-  context: CallContext,
-  request: ProviderRequest,
-): Promise<CallResult> {
+/**
+ * The request, or a function that builds one.
+ *
+ * **Always pass a function when the request embeds a credential.** Building the
+ * request calls `key.reveal()`, and `reveal()` on an absent key *throws* — by
+ * design, so that a missing key can never be silently sent as `Token ` or
+ * `api_key=`. An eagerly-built request therefore throws before the key check
+ * below can turn the absence into `skipped_no_key`, which would crash the 03:45
+ * refresh on an install that simply has not configured that provider.
+ *
+ * Making the request lazy is what keeps dispatch §6 — *"every adapter degrades
+ * to 'no price, stale flag, visible' without its key, so Phase 3 completes with
+ * zero keys"* — a property of this function rather than of each adapter
+ * remembering to check first. `test/rate-limit.test.ts` → 'a missing key spends
+ * nothing and dials nothing' covers all four adapters.
+ */
+export type RequestSpec = ProviderRequest | (() => ProviderRequest);
+
+export async function callJson(context: CallContext, spec: RequestSpec): Promise<CallResult> {
   const { client, key, budget, now } = context;
 
+  // Before anything is built. `reveal()` must not be reached on an absent key.
   if (!key.present && context.requiresKey !== false) {
     return { ok: false, outcome: { kind: 'skipped_no_key' } };
   }
 
+  const request = typeof spec === 'function' ? spec() : spec;
   const cost = request.cost ?? 1;
   const verdict = budget.check(cost, now());
   if (!verdict.ok) {
@@ -109,7 +126,9 @@ function outcomeOf(response: ProviderResponse): SourceOutcome<never> {
 /** Parse a body, turning a malformed response into an `error` outcome rather than a throw. */
 export function parseBody(
   body: string,
-): { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly outcome: SourceOutcome<never> } {
+):
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false; readonly outcome: SourceOutcome<never> } {
   try {
     return { ok: true, value: parseDecimalJson(body) };
   } catch (error) {

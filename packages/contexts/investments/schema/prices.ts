@@ -99,7 +99,9 @@ export const prices = pgTable(
     createdAt: createdAtColumn(),
     updatedAt: updatedAtColumn(),
   },
-  (table) => [unique().on(table.userId, table.securityId, table.priceDate, table.source, table.currency)],
+  (table) => [
+    unique().on(table.userId, table.securityId, table.priceDate, table.source, table.currency),
+  ],
 );
 
 export type PriceRow = typeof prices.$inferSelect;

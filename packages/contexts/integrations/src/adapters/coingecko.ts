@@ -129,12 +129,12 @@ export function createCoinGeckoPriceSource(options: CoinGeckoOptions): PriceSour
         return { kind: 'error', detail: `${request.date} is not a YYYY-MM-DD date` };
       }
 
-      const call = await callJson(context, {
+      const call = await callJson(context, () => ({
         method: 'GET',
         path: `/api/v3/coins/${encodeURIComponent(coinId)}/history`,
         query: { date: coinGeckoDate(request.date), localization: 'false' },
         headers: { 'x-cg-demo-api-key': options.key.reveal() },
-      });
+      }));
       if (!call.ok) return call.outcome;
 
       const marketData = recordOf(recordOf(call.body)?.['market_data']);
@@ -180,12 +180,12 @@ export function createCoinGeckoPriceSource(options: CoinGeckoOptions): PriceSour
     },
 
     async search(symbol: string): Promise<SourceOutcome<readonly SearchHit[]>> {
-      const call = await callJson(context, {
+      const call = await callJson(context, () => ({
         method: 'GET',
         path: '/api/v3/search',
         query: { query: symbol },
         headers: { 'x-cg-demo-api-key': options.key.reveal() },
-      });
+      }));
       if (!call.ok) return call.outcome;
       const coins = recordOf(call.body)?.['coins'];
       const rows = Array.isArray(coins) ? coins : [];
