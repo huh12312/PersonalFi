@@ -1,0 +1,45 @@
+# Expected slices for packages/contexts/investments/test/fixtures/allocation-portfolio.csv.
+# value  = SUMIF(<dimension>, key, expected_market_value)
+# weight = value / total, evaluated at 18 dp and reported at the Ratio scale of 10 dp,
+#          half-even at each step — the same two roundings the engine performs, stated so the
+#          fixture pins the rounding policy and not just the arithmetic.
+# The `portfolio,TOTAL` row is the denominator; `as_of_now` excludes the STALE holding (h-10)
+# from BOTH the numerator and the denominator, which is why the two totals differ by $2,050.00.
+basis,dimension,key,expected_value,expected_weight
+last_known,portfolio,TOTAL,176499.60,1.0000000000
+last_known,asset_class,US_EQUITY,76300.80,0.4323001299
+last_known,asset_class,US_BOND,34632.00,0.1962157421
+last_known,asset_class,CRYPTO,19870.60,0.1125815583
+last_known,asset_class,INTL_DEV_EQUITY,19055.38,0.1079627376
+last_known,asset_class,CASH,12500.00,0.0708216902
+last_known,asset_class,REAL_ESTATE,5539.80,0.0313870400
+last_known,asset_class,EM_EQUITY,5521.02,0.0312806375
+last_known,asset_class,UNCLASSIFIED,3080.00,0.0174504645
+last_known,region,US,128972.60,0.7307246022
+last_known,region,GLOBAL,19870.60,0.1125815583
+last_known,region,DEV_EX_US,19055.38,0.1079627376
+last_known,region,EM,5521.02,0.0312806375
+last_known,region,UNKNOWN,3080.00,0.0174504645
+last_known,sector,Diversified,112892.40,0.6396184467
+last_known,sector,UNKNOWN,35450.60,0.2008537130
+last_known,sector,Information Technology,20566.80,0.1165260431
+last_known,sector,Real Estate,5539.80,0.0313870400
+last_known,sector,Industrials,2050.00,0.0116147572
+as_of_now,portfolio,TOTAL,174449.60,1.0000000000
+as_of_now,asset_class,US_EQUITY,74250.80,0.4256289496
+as_of_now,asset_class,US_BOND,34632.00,0.1985215214
+as_of_now,asset_class,CRYPTO,19870.60,0.1139045317
+as_of_now,asset_class,INTL_DEV_EQUITY,19055.38,0.1092314342
+as_of_now,asset_class,CASH,12500.00,0.0716539333
+as_of_now,asset_class,REAL_ESTATE,5539.80,0.0317558768
+as_of_now,asset_class,EM_EQUITY,5521.02,0.0316482239
+as_of_now,asset_class,UNCLASSIFIED,3080.00,0.0176555292
+as_of_now,region,US,126922.60,0.7275602810
+as_of_now,region,GLOBAL,19870.60,0.1139045317
+as_of_now,region,DEV_EX_US,19055.38,0.1092314342
+as_of_now,region,EM,5521.02,0.0316482239
+as_of_now,region,UNKNOWN,3080.00,0.0176555292
+as_of_now,sector,Diversified,112892.40,0.6471347598
+as_of_now,sector,UNKNOWN,35450.60,0.2032139942
+as_of_now,sector,Information Technology,20566.80,0.1178953692
+as_of_now,sector,Real Estate,5539.80,0.0317558768

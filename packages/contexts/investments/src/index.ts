@@ -345,3 +345,29 @@ export {
   type PriceStore,
   type UserPriceOverride,
 } from './prices.ts';
+
+// ---------------------------------------------------------------------------
+// WP 3.3 — portfolio analytics (pure; no tables, no I/O, no clock)
+// ---------------------------------------------------------------------------
+//
+// TWR by sub-period linking with Modified Dietz as the flagged `approximate`
+// fallback; MWR by XIRR with Newton plus bisection and a typed `n/a`;
+// allocation, drift, fee drag, concentration and idle cash. Four rules travel
+// with the surface, because every consumer inherits them:
+//
+//   * a TWR, an MWR and a dollar gain are **three different shapes**, so no
+//     response object can pair a return with a dollar amount or benchmark a
+//     money-weighted return (07 §4.2, enforced by `tsc`);
+//   * **nothing annualises a period under one year** — `annualized` is `null`
+//     with `annualizationWithheld` saying why;
+//   * **`unclassifiedPct` is returned beside every** allocation, drift, fee and
+//     concentration number, present even when zero (07 §4.3, normative);
+//   * **`unavailable` and `STALE` propagate**: a missing basis makes a gain
+//     unavailable rather than zero, and a price older than 24 hours leaves an
+//     "as of now" allocation named in `excluded` rather than counted stale.
+//
+// Ratios are decimal strings at a stated scale (`Ratio`, `Points`), never
+// `number`; money stays `Money`. See `src/analytics/types.ts` for the decision
+// and `docs/evidence/phase-3/wp3.3-analytics.md` for the worked numbers.
+
+export * from './analytics/index.ts';

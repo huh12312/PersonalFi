@@ -1,0 +1,31 @@
+# PersonalFi — WP 3.3 allocation spreadsheet check (docs/plan/03-phase-3-dispatch.md §5:
+# "allocation matches a spreadsheet check"). Authored for this work package; there was no
+# committed spreadsheet before it. The expectations below were computed with an independent
+# decimal implementation (Python `decimal`, ROUND_HALF_EVEN), NOT with the TypeScript engine
+# they pin, and the transcript is in docs/evidence/phase-3/wp3.3-analytics.md §4.
+#
+# Formulas, exactly as a spreadsheet would hold them (row 2 = the first data row):
+#   expected_market_value = ROUND(quantity * price, 2)          -- banker's rounding, once, at the boundary
+#   total(last_known)     = SUM(expected_market_value)          -- every priced holding, CASH INCLUDED
+#   total(as_of_now)      = SUMIF(staleness, "FRESH", expected_market_value)
+#   weight(key)           = SUMIF(<dimension>, key, expected_market_value) / total
+#   unclassified_pct      = weight("UNCLASSIFIED")  [asset_class] / weight("UNKNOWN") [region, sector]
+#
+# Deliberate contents: a fractional crypto quantity (18 dp), a cash position that MUST sit in the
+# denominator, an UNCLASSIFIED holding so unclassified_pct is non-zero, one STALE price that leaves
+# an as-of-now answer (07 §6.1), one security held in two accounts, and two holdings with no
+# expense ratio (BTC, CASH) which are a LOWER BOUND on fee drag, never a zero.
+#
+# Empty cost_basis = the basis is unknown. It is not zero; it makes the portfolio gain unavailable.
+holding_id,account_id,security_id,symbol,asset_class,region,sector,quantity,price,expense_ratio,is_cash_equivalent,is_investable,staleness,cost_basis,expected_market_value
+h-01,acct-taxable,sec-vti,VTI,US_EQUITY,US,Diversified,152.345600,268.42,0.0003,false,true,FRESH,32150.00,40892.61
+h-02,acct-taxable,sec-vxus,VXUS,INTL_DEV_EQUITY,DEV_EX_US,Diversified,310.500000,61.37,0.0008,false,true,FRESH,17800.25,19055.38
+h-03,acct-ira,sec-bnd,BND,US_BOND,US,Diversified,480.000000,72.15,0.0003,false,true,FRESH,35990.40,34632.00
+h-04,acct-ira,sec-vwo,VWO,EM_EQUITY,EM,Diversified,125.250000,44.08,0.0008,false,true,FRESH,5012.75,5521.02
+h-05,acct-taxable,sec-aapl,AAPL,US_EQUITY,US,Information Technology,90.000000,228.52,0,false,true,FRESH,9004.50,20566.80
+h-06,acct-crypto,sec-btc,BTC,CRYPTO,GLOBAL,UNKNOWN,0.314159260,63250.10,,false,true,FRESH,,19870.60
+h-07,acct-taxable,sec-usd-cash,CASH,CASH,US,UNKNOWN,12500.000000,1.00,,true,true,FRESH,12500.00,12500.00
+h-08,acct-ira,sec-vnq,VNQ,REAL_ESTATE,US,Real Estate,60.000000,92.33,0.0012,false,true,FRESH,5100.00,5539.80
+h-09,acct-taxable,sec-xyzq,XYZQ,UNCLASSIFIED,UNKNOWN,UNKNOWN,200.000000,15.40,,false,true,FRESH,3400.00,3080.00
+h-10,acct-taxable,sec-oldco,OLDCO,US_EQUITY,US,Industrials,40.000000,51.25,0,false,true,STALE,1800.00,2050.00
+h-11,acct-ira,sec-vti,VTI,US_EQUITY,US,Diversified,47.654400,268.42,0.0003,false,true,FRESH,11200.00,12791.39
