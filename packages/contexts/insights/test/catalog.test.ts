@@ -188,8 +188,12 @@ describe('the built-in catalogue', () => {
         expect(entry.disabledReason, entry.ruleId).not.toBeNull();
       }
     }
+    // Eight enabled is still Phase 2's cash-and-subscriptions wave. Twenty-three
+    // off: WP 2.7's six spending rules plus WP 3.10's seventeen, which are off
+    // both because 07 §7.4 releases them later and because the scopes they read
+    // have no reader behind them yet.
     expect(BUILTIN_CATALOGUE.filter((entry) => entry.defaultEnabled).length).toBe(8);
-    expect(BUILTIN_CATALOGUE.filter((entry) => !entry.defaultEnabled).length).toBe(6);
+    expect(BUILTIN_CATALOGUE.filter((entry) => !entry.defaultEnabled).length).toBe(23);
   });
 
   it('claims impact only where the manifest says it does', async () => {

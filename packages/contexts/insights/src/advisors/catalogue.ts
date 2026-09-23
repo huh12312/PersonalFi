@@ -38,21 +38,47 @@
 import type { AdvisorRequest } from '../contract/request.ts';
 import { ADVISOR_CONTRACT_MAJOR } from '../contract/version.ts';
 import { AdvisorRegistry, type Advisor } from '../registry.ts';
+import { CRYPTO_RULES } from './builtin/crypto/index.ts';
+import { DEBT_RULES } from './builtin/debt/index.ts';
+import { INVESTING_RULES } from './builtin/investing/index.ts';
 import { CASH_RULES } from './rules-cash.ts';
 import { SPENDING_RULES } from './rules-spending.ts';
 import { SUBSCRIPTION_RULES } from './rules-subscriptions.ts';
 import { contextOf, type BuiltinRule } from './support.ts';
 
-/** 07 §7.4's release waves, as far as Phase 2 has rules for them. */
-export type RuleWave = 'cash_and_subscriptions' | 'spending';
+/**
+ * 07 §7.4's release waves.
+ *
+ * *"release rules in waves (week 1: cash + subscriptions; week 2: debt; week 3:
+ * investing; week 4: retirement) so the first run isn't overwhelming."* WP 3.10
+ * adds the middle three; retirement waits for Phase 4's planning context.
+ * Crypto is its own wave rather than folded into investing, because a
+ * deployment with no crypto has nothing to release and one with crypto gets
+ * X1 — a P0 — which should not be queued behind six investing rules.
+ */
+export type RuleWave = 'cash_and_subscriptions' | 'spending' | 'debt' | 'investing' | 'crypto';
+
+/**
+ * 07 §3.3's priority column, carried as data.
+ *
+ * Recorded per rule so "which of these is P0" is a field rather than a
+ * re-reading of a research document, and so the evidence table and the alert
+ * budget can be checked against the same source. **`priority` is 07's; the
+ * emitted `severity` is this catalogue's**, and where they disagree the
+ * evidence doc says which and why — 07 counts eighteen P0s and says in the same
+ * breath that eighteen is too many to show at once.
+ */
+export type RulePriority = 'P0' | 'P1' | 'P2' | 'P3';
 
 export interface BuiltinCatalogueEntry {
-  /** The 07 §3.3 identifier this implements. `U2`, `C4`, `S10`. */
+  /** The 07 §3.3 identifier this implements. `U2`, `C4`, `S10`, `I4`, `X1`. */
   readonly ruleId: string;
   readonly advisorId: string;
   readonly rule: BuiltinRule;
   readonly advisor: Advisor;
   readonly wave: RuleWave;
+  /** 07 §3.3's own priority for this rule. Not the severity it emits. */
+  readonly priority: RulePriority;
   /** What a composition root passes to `registerAdvisor` on first write. */
   readonly defaultEnabled: boolean;
   /** Why it is off, when it is. `null` when it ships on. */
@@ -70,10 +96,34 @@ const WAVE_TWO_REASON =
   'Wave two. 07 §7.4 releases cash and subscriptions first so a first run is not a wall of red; ' +
   'this rule is built and proven on the seed and needs only its enable flag.';
 
+/**
+ * Why the three WP 3.10 waves ship off.
+ *
+ * Two reasons, and the second is the load-bearing one. 07 §7.4's schedule puts
+ * debt in week two and investing in week three, which is reason enough on its
+ * own. But these rules also read four scopes that **no reader fills yet** —
+ * `holdings.aggregate`, `holdings.detail`, `liabilities.terms` and
+ * `market.rates` all carry `sourcedInPhase2: false`, so `SnapshotBuilder`
+ * emits no block for them and every rule here would return nothing. Shipping
+ * them enabled would be shipping a wave of silence and calling it a release.
+ * Turning one on is a single `advisors.enabled` update once §7 of the evidence
+ * doc's builder additions land.
+ */
+const WAVE_THREE_REASON =
+  'Wave three. 07 §7.4 releases debt, then investing; and the scopes these rules read have no ' +
+  'reader behind them until the SnapshotBuilder additions land, so an enabled rule would ' +
+  'return nothing rather than something.';
+
+function reasonFor(wave: RuleWave, defaultEnabled: boolean): string | null {
+  if (defaultEnabled) return null;
+  return wave === 'spending' ? WAVE_TWO_REASON : WAVE_THREE_REASON;
+}
+
 function entry(
   ruleId: string,
   rule: BuiltinRule,
   wave: RuleWave,
+  priority: RulePriority,
   defaultEnabled: boolean,
 ): BuiltinCatalogueEntry {
   return {
@@ -82,8 +132,9 @@ function entry(
     rule,
     advisor: advisorFor(rule),
     wave,
+    priority,
     defaultEnabled,
-    disabledReason: defaultEnabled ? null : WAVE_TWO_REASON,
+    disabledReason: reasonFor(wave, defaultEnabled),
   };
 }
 
@@ -91,6 +142,11 @@ const [duplicateService, priceIncrease, shareOfIncome] = SUBSCRIPTION_RULES;
 const [emergencyFund, idleCash, largeBill, shortfall, yieldSpreadRule] = CASH_RULES;
 const [annualBills, categoryCreep, duplicateCharge, fees, negativeMonth, uncategorised] =
   SPENDING_RULES;
+// Each family exports in 07 §3.3 order; see the `index.ts` beside each.
+const [drift, expenseRatio, brokerageCash, concentration, employerStock, lossLot] = INVESTING_RULES;
+const [payoffOrder, rateAboveMarket, minimumOnly, promoEnding, principalAgainst, missedPayment] =
+  DEBT_RULES;
+const [cryptoShare, cryptoCustody, idleStablecoins, cryptoLoss, cryptoBasis] = CRYPTO_RULES;
 
 function required(rule: BuiltinRule | undefined, id: string): BuiltinRule {
   if (rule === undefined) throw new Error(`catalogue is missing the rule for ${id}`);
@@ -104,21 +160,58 @@ function required(rule: BuiltinRule | undefined, id: string): BuiltinRule {
  * ships registered and off.
  */
 export const BUILTIN_CATALOGUE: readonly BuiltinCatalogueEntry[] = Object.freeze([
-  entry('U2', required(priceIncrease, 'U2'), 'cash_and_subscriptions', true),
-  entry('U3', required(duplicateService, 'U3'), 'cash_and_subscriptions', true),
-  entry('U7', required(shareOfIncome, 'U7'), 'cash_and_subscriptions', true),
-  entry('C1', required(idleCash, 'C1'), 'cash_and_subscriptions', true),
-  entry('C2', required(yieldSpreadRule, 'C2'), 'cash_and_subscriptions', true),
-  entry('C3', required(shortfall, 'C3'), 'cash_and_subscriptions', true),
-  entry('C4', required(emergencyFund, 'C4'), 'cash_and_subscriptions', true),
-  entry('C7', required(largeBill, 'C7'), 'cash_and_subscriptions', true),
-  entry('S2', required(categoryCreep, 'S2'), 'spending', false),
-  entry('S3', required(uncategorised, 'S3'), 'spending', false),
-  entry('S6', required(duplicateCharge, 'S6'), 'spending', false),
-  entry('S7', required(fees, 'S7'), 'spending', false),
-  entry('S9', required(negativeMonth, 'S9'), 'spending', false),
-  entry('S10', required(annualBills, 'S10'), 'spending', false),
+  entry('U2', required(priceIncrease, 'U2'), 'cash_and_subscriptions', 'P1', true),
+  entry('U3', required(duplicateService, 'U3'), 'cash_and_subscriptions', 'P1', true),
+  entry('U7', required(shareOfIncome, 'U7'), 'cash_and_subscriptions', 'P2', true),
+  entry('C1', required(idleCash, 'C1'), 'cash_and_subscriptions', 'P0', true),
+  entry('C2', required(yieldSpreadRule, 'C2'), 'cash_and_subscriptions', 'P1', true),
+  entry('C3', required(shortfall, 'C3'), 'cash_and_subscriptions', 'P0', true),
+  entry('C4', required(emergencyFund, 'C4'), 'cash_and_subscriptions', 'P1', true),
+  entry('C7', required(largeBill, 'C7'), 'cash_and_subscriptions', 'P1', true),
+  entry('S2', required(categoryCreep, 'S2'), 'spending', 'P2', false),
+  entry('S3', required(uncategorised, 'S3'), 'spending', 'P1', false),
+  entry('S6', required(duplicateCharge, 'S6'), 'spending', 'P0', false),
+  entry('S7', required(fees, 'S7'), 'spending', 'P1', false),
+  entry('S9', required(negativeMonth, 'S9'), 'spending', 'P1', false),
+  entry('S10', required(annualBills, 'S10'), 'spending', 'P1', false),
+  // --- WP 3.10, debt (07 §7.4's week two) --------------------------------
+  entry('D1', required(payoffOrder, 'D1'), 'debt', 'P0', false),
+  entry('D2', required(rateAboveMarket, 'D2'), 'debt', 'P1', false),
+  entry('D3', required(minimumOnly, 'D3'), 'debt', 'P0', false),
+  entry('D4', required(promoEnding, 'D4'), 'debt', 'P0', false),
+  entry('D5', required(principalAgainst, 'D5'), 'debt', 'P2', false),
+  entry('D6', required(missedPayment, 'D6'), 'debt', 'P0', false),
+  // --- WP 3.10, investing (week three) -----------------------------------
+  entry('I1', required(drift, 'I1'), 'investing', 'P1', false),
+  entry('I2', required(expenseRatio, 'I2'), 'investing', 'P0', false),
+  entry('I3', required(brokerageCash, 'I3'), 'investing', 'P1', false),
+  entry('I4', required(concentration, 'I4'), 'investing', 'P0', false),
+  entry('I5', required(employerStock, 'I5'), 'investing', 'P0', false),
+  entry('I6', required(lossLot, 'I6'), 'investing', 'P0', false),
+  // --- WP 3.10, crypto ---------------------------------------------------
+  entry('X1', required(cryptoShare, 'X1'), 'crypto', 'P0', false),
+  entry('X2', required(cryptoCustody, 'X2'), 'crypto', 'P1', false),
+  entry('X3', required(idleStablecoins, 'X3'), 'crypto', 'P1', false),
+  entry('X5', required(cryptoLoss, 'X5'), 'crypto', 'P1', false),
+  entry('X6', required(cryptoBasis, 'X6'), 'crypto', 'P1', false),
 ]);
+
+/**
+ * The rules this work package emits at `urgent`, the severity that means P0 on
+ * the wire.
+ *
+ * 03-phase-3-dispatch.md §3: *"I4, I5, I10 and X1 are P0."* Three of those four
+ * ship and are here; **I10 is a gap** — an HSA headroom rule needs an HDHP
+ * enrolment flag and contributions to date, and no scope in this work package's
+ * brief carries either. That conflict is recorded rather than papered over.
+ *
+ * The narrower list is also the reason D1, D3, D4, D6, I2 and I6 emit below
+ * `urgent` despite 07 §3.3 marking them P0: 07 itself counts eighteen P0s and
+ * says in the same paragraph that eighteen is a wall of red. The dispatch
+ * picked four; this catalogue ships the three of them that exist and records
+ * the rest as P0-in-07, shipped lower, in the evidence doc.
+ */
+export const WP_3_10_P0_RULE_IDS: readonly string[] = Object.freeze(['I4', 'I5', 'X1']);
 
 /**
  * The rules in WP 2.7's scope that Phase 2 data cannot support, and why.
@@ -162,20 +255,66 @@ export const CATALOGUE_GAPS: readonly CatalogueGap[] = Object.freeze([
     ruleId: 'U8',
     summary: 'Subscriptions charged to a card that carries a balance.',
     reason:
-      'Needs a card APR and revolving balance. `cash.summary` covers depository accounts only; ' +
-      'no Phase 2 scope carries an APR, a credit limit, or a statement balance.',
+      'Unblocked by WP 3.10 and not yet written. `liabilities.terms` now carries the APR and ' +
+      'the revolving balance this needed; what remains is joining a recurring stream to the ' +
+      'card it is charged to, which no scope expresses — `recurring.list` has no account side.',
   },
   {
     ruleId: 'C5',
     summary: 'Credit utilisation above 30% on a statement date.',
-    reason: 'Needs a credit limit and a statement date. Neither exists in any Phase 2 scope.',
+    reason:
+      'Unblocked by WP 3.10 and not yet written. `liabilities.terms` carries `credit_limit` ' +
+      'and `statement_balance`, which is the whole of what this needed; it is a cash-family ' +
+      'rule and WP 3.10’s brief was the investing, debt and crypto families.',
   },
   {
     ruleId: 'C6',
     summary: 'Carrying a revolving balance while holding spare cash.',
     reason:
-      'Needs an APR and a revolving balance, as U8 does. The cash half is available; the debt ' +
-      'half is not, and half of this rule is worse than none of it.',
+      'Unblocked by WP 3.10 and not yet written. Both halves now exist — `cash.summary` for ' +
+      'the cash and `liabilities.terms` for the APR and balance. D5 covers the adjacent case ' +
+      '(a comfortable cushion against a loan rate); C6 is the revolving one and is owed.',
+  },
+  // --- WP 3.10's own gaps. Each names a field, never an effort. -----------
+  {
+    ruleId: 'I7',
+    summary: 'A purchase that may wash out a loss realised nearby in time.',
+    reason:
+      'Needs disposals — a sale, its date and the loss it realised — which no scope carries, ' +
+      'and needs them across *every* account including IRAs. 07 §4.4 calls that cross-account ' +
+      'scan "the trap most software misses"; a rule seeing some accounts would produce ' +
+      'confident false negatives, which is worse than the gap.',
+  },
+  {
+    ruleId: 'I8',
+    summary: 'A 401(k) deferral pace that will miss the employer match.',
+    reason:
+      'Needs year-to-date payroll deferrals and the plan’s match formula. No scope carries a ' +
+      'contribution, and a match threshold is a term of a document nobody has given this app.',
+  },
+  {
+    ruleId: 'I9',
+    summary: 'IRA contribution room left with the window still open.',
+    reason:
+      'Needs contributions to date against the annual limit, and a MAGI test to know whether ' +
+      'the contribution is even permitted. No scope carries either, and the limit itself is a ' +
+      'statutory constant that would be an untraceable numeral if printed.',
+  },
+  {
+    ruleId: 'I10',
+    summary: 'HSA contribution room left, with an HDHP in force.',
+    reason:
+      'Needs an HDHP enrolment flag and contributions to date. Neither exists in any scope in ' +
+      'WP 3.10’s brief. **The dispatch marks I10 P0**; it is recorded here as a gap rather ' +
+      'than written over data that is not there, and the conflict is stated in the evidence.',
+  },
+  {
+    ruleId: 'X4',
+    summary: 'Staking receipts with no income basis recorded against them.',
+    reason:
+      'Needs an inflow *event* — a receipt, its date, and its value at receipt. Every scope in ' +
+      'this brief describes a position rather than a movement: `holdings.detail` can say a lot ' +
+      'exists and cannot say it arrived as a reward rather than a purchase, which is the rule.',
   },
   {
     ruleId: 'S1',
@@ -193,7 +332,15 @@ export const CATALOGUE_GAPS: readonly CatalogueGap[] = Object.freeze([
   },
 ]);
 
-/** Every rule id WP 2.7 was asked to cover: 02 §3's U1–U8, C1–C7, S-subset. */
+/**
+ * Every rule id this repository has been asked to cover so far.
+ *
+ * WP 2.7's 02 §3 set — U1–U8, C1–C7, the S-subset — plus WP 3.10's: the debt
+ * family D1–D6, investing I1–I10 and crypto X1–X6 from 03-phase-3-dispatch.md
+ * §3. `catalog.test.ts` asserts every id here is in exactly one of
+ * `BUILTIN_CATALOGUE` and `CATALOGUE_GAPS`, which is what stops the catalogue
+ * quietly shrinking — and what makes a gap a decision rather than an omission.
+ */
 export const CATALOGUE_SCOPE: readonly string[] = Object.freeze([
   'U1',
   'U2',
@@ -218,7 +365,63 @@ export const CATALOGUE_SCOPE: readonly string[] = Object.freeze([
   'S7',
   'S9',
   'S10',
+  'D1',
+  'D2',
+  'D3',
+  'D4',
+  'D5',
+  'D6',
+  'I1',
+  'I2',
+  'I3',
+  'I4',
+  'I5',
+  'I6',
+  'I7',
+  'I8',
+  'I9',
+  'I10',
+  'X1',
+  'X2',
+  'X3',
+  'X4',
+  'X5',
+  'X6',
 ]);
+
+/** The rule ids WP 3.10 was asked for: the whole of the I, D and X families. */
+export const WP_3_10_SCOPE: readonly string[] = Object.freeze([
+  'I1',
+  'I2',
+  'I3',
+  'I4',
+  'I5',
+  'I6',
+  'I7',
+  'I8',
+  'I9',
+  'I10',
+  'D1',
+  'D2',
+  'D3',
+  'D4',
+  'D5',
+  'D6',
+  'X1',
+  'X2',
+  'X3',
+  'X4',
+  'X5',
+  'X6',
+]);
+
+/** The WP 3.10 waves, so a test or an evidence table can select them. */
+export const WP_3_10_WAVES: readonly RuleWave[] = Object.freeze(['debt', 'investing', 'crypto']);
+
+/** Every entry this work package added, in catalogue order. */
+export function wp310Catalogue(): readonly BuiltinCatalogueEntry[] {
+  return BUILTIN_CATALOGUE.filter((item) => WP_3_10_WAVES.includes(item.wave));
+}
 
 export function builtinRules(): readonly BuiltinRule[] {
   return BUILTIN_CATALOGUE.map((item) => item.rule);

@@ -39,6 +39,7 @@ import {
 import { deriveTokenKey } from '../../src/snapshot/tokens.ts';
 import { ADVISOR_SCOPES } from '../../src/contract/scopes.ts';
 import type { AdvisorSnapshot } from '../../src/contract/snapshot.ts';
+import { noisyAggregateBlocks, portfolioBlocks } from '../fixtures/portfolio.ts';
 
 export const TODAY = '2026-09-19';
 export const USD = 'USD';
@@ -573,7 +574,30 @@ export async function seedSnapshot(
     baseCurrency: USD,
     tokenKey: deriveTokenKey('wp-2-7-seed', USER_ID),
   });
-  return built.snapshot;
+  // WP 3.10. The builder has no branch for the portfolio scopes yet — they are
+  // `sourcedInPhase2: false` and `#blockFor` returns `null` for each — so the
+  // blocks are merged from in-package fixtures that were parsed by the
+  // published schema first. `test/fixtures/portfolio.ts` explains the trade and
+  // what deletes this branch.
+  //
+  // **`drift` only.** `control` and `tight` keep no portfolio at all, which is
+  // what makes the control half of `advisor-golden.test.ts` mean something for
+  // the I, D and X families: a rule that fired on a person with no holdings
+  // would pass "it fires" and be useless.
+  if (seedCase !== 'drift') return built.snapshot;
+  return { ...built.snapshot, ...portfolioBlocks(scopes) };
+}
+
+/**
+ * The `drift` case with the unclassified share past 07 §4.3's ceiling.
+ *
+ * Everything else is identical, so the only thing that can explain I1 going
+ * quiet between `seedSnapshot('drift')` and this is the suppression itself.
+ * `test/i1-suppression.test.ts` is built on that pair.
+ */
+export async function noisySeedSnapshot(): Promise<AdvisorSnapshot> {
+  const snapshot = await seedSnapshot('drift');
+  return { ...snapshot, ...noisyAggregateBlocks() };
 }
 
 /** No budget exists in any case, so every rule degrades without one (07 §3). */

@@ -274,38 +274,323 @@ export const TransactionsRawSchema = z.strictObject({
 });
 
 // ---------------------------------------------------------------------------
-// The blocks Phase 3/4 will fill
+// holdings.aggregate, holdings.detail — WP 3.10
 // ---------------------------------------------------------------------------
 
+/**
+ * A quantity. A decimal *string*, never a JSON number.
+ *
+ * D3 is irreversible and the Phase 3 risk table is blunt about why: portfolio
+ * math multiplies quantity by price and then sums, so a float's error compounds
+ * where nobody looks. `NUMERIC(38,18)` on the way in, a string on the wire.
+ */
+const quantityString = z.string().regex(/^-?\d+(\.\d+)?$/, 'decimal string, never a float');
+
+const assetClass = z.string().min(1).max(32);
+const symbol = z.string().min(1).max(16);
+
+/**
+ * How the account holding a position is taxed. A *class*, never the account.
+ *
+ * I6 needs "is this lot in a taxable account" and I12 needs "are bonds in the
+ * wrong one". Neither needs to know which account, and 08 §4.2 is explicit that
+ * `holdings.detail` carries no account id. So the tax treatment crosses on its
+ * own, which is the whole of what the rules reason about.
+ */
+export const ACCOUNT_TAX_TREATMENTS = ['taxable', 'tax_deferred', 'tax_free', 'unknown'] as const;
+export type AccountTaxTreatment = (typeof ACCOUNT_TAX_TREATMENTS)[number];
+
+/**
+ * `holdings.aggregate` — weights and pre-triggered aggregates, nothing per-account.
+ *
+ * Structurally a projection of WP 3.3's analytics *output*: `AllocationReport`
+ * (`slices` → `by_asset_class`, `unclassifiedPct` → `unclassified_pct`),
+ * `ConcentrationReport` (`investableTotal`, `positions` → `top_positions`),
+ * `DriftReport` (`targets` → `target_allocation`) and `IdleCashReport`
+ * (`idleTotal`, `floor`, `minDays` → `idle_cash`). Mirrored rather than
+ * imported: `@ctx/insights` may not reach into `@ctx/investments` — the
+ * boundary lint forbids it — and an advisor reads the snapshot, never a context.
+ *
+ * `unclassified_pct` is not optional and not nullable. 07 §4.3 requires it
+ * "beside every allocation chart and drift number", and it is the input to I1's
+ * self-suppression: a drift claim over a portfolio that is 18% unclassified is
+ * noise, and a rule that could not see the coverage would state it anyway.
+ */
 export const HoldingsAggregateSchema = z.strictObject({
   as_of: dateOnly,
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  /** 07 §4.1's `is_investable` base. Not net worth, not total holdings. */
+  investable_total: MoneyJsonSchema,
+  /** 07 §4.3's mandatory number. Present even when it is zero. */
+  unclassified_pct: unitInterval,
   by_asset_class: z
-    .array(z.strictObject({ asset_class: z.string().min(1).max(32), weight: unitInterval }))
+    .array(
+      z.strictObject({
+        asset_class: assetClass,
+        weight: unitInterval,
+        value: MoneyJsonSchema,
+      }),
+    )
     .max(32),
+  /**
+   * Top-N by weight. `value` rides with `weight` rather than being reconstructed
+   * from `weight × investable_total`: that product is a float times a money
+   * figure, which is the arithmetic D3 exists to keep out of a money path.
+   */
   top_positions: z
-    .array(z.strictObject({ symbol: z.string().min(1).max(16), weight: unitInterval }))
+    .array(
+      z.strictObject({
+        symbol,
+        weight: unitInterval,
+        value: MoneyJsonSchema,
+        asset_class: assetClass,
+        /** I5. The user's own tag — this app never infers an employer. */
+        employer_stock: z.boolean(),
+        is_crypto: z.boolean(),
+      }),
+    )
     .max(32),
+  /**
+   * Empty when the user has not set one. §8 Q9 and the dispatch both say an
+   * unset target never becomes an implied 60/40, so I1 withholds on an empty
+   * list rather than inventing a benchmark to drift from.
+   */
   target_allocation: z
-    .array(z.strictObject({ asset_class: z.string().min(1).max(32), weight: unitInterval }))
+    .array(z.strictObject({ asset_class: assetClass, weight: unitInterval }))
     .max(32),
   account_type_mix: z.record(z.string().max(32), unitInterval),
+  /**
+   * `IdleCashReport`, aggregated. Per-account rows would be account linkage,
+   * which this scope does not carry, so the `max($1,000, 2% of account)`
+   * threshold is applied by the builder and only the qualifying total crosses.
+   */
+  idle_cash: z
+    .strictObject({
+      total: MoneyJsonSchema,
+      /** The `$1,000` floor, reported rather than implied, so I3 can cite it. */
+      floor: MoneyJsonSchema,
+      /** Days the *least* long-idle qualifying balance has been sitting. */
+      min_days: z.number().int().nonnegative(),
+      longest_idle_days: z.number().int().nonnegative(),
+    })
+    .optional(),
+  /** X2. A split of crypto value by custody, with no wallet or venue named. */
+  crypto_custody: z
+    .strictObject({
+      exchange_value: MoneyJsonSchema,
+      self_custody_value: MoneyJsonSchema,
+      unknown_value: MoneyJsonSchema,
+    })
+    .optional(),
+});
+
+/**
+ * One tax lot. An **age**, never an open date.
+ *
+ * A lot's open date is a timestamp of a decision the user made; the age in days
+ * is what I6, I18 and X5 actually test against. The coarser field answers every
+ * question the catalogue asks and fingerprints nothing.
+ */
+const LotSchema = z.strictObject({
+  opened_days: z.number().int().nonnegative(),
+  quantity: quantityString,
+  cost_basis: MoneyJsonSchema.nullable(),
+  market_value: MoneyJsonSchema,
+  /** `null` exactly when `cost_basis` is: an unknown basis is not a zero one. */
+  unrealized: MoneyJsonSchema.nullable(),
+  long_term: z.boolean(),
 });
 
 export const HoldingsDetailSchema = z.strictObject({
   as_of: dateOnly,
+  currency: z.string().regex(/^[A-Z]{3}$/),
   positions: z
     .array(
       z.strictObject({
-        symbol: z.string().min(1).max(16),
-        quantity: z.string().regex(/^-?\d+(\.\d+)?$/, 'decimal string, never a float'),
-        cost_basis: MoneyJsonSchema,
+        symbol,
+        asset_class: assetClass,
+        account_type: z.enum(ACCOUNT_TAX_TREATMENTS),
+        quantity: quantityString,
+        /**
+         * `null` when no basis is recorded — X6's whole subject, and the field
+         * WP 3.11 renders as "unavailable" rather than "$0.00". A missing basis
+         * that crossed as zero would make every unrealised gain wrong by the
+         * whole position.
+         */
+        cost_basis: MoneyJsonSchema.nullable(),
         market_value: MoneyJsonSchema,
-        unrealized: MoneyJsonSchema,
+        unrealized: MoneyJsonSchema.nullable(),
         oldest_lot_days: z.number().int().nonnegative(),
+        /** `cost_basis !== null`, stated so X6's trigger is a field, not a `!==`. */
+        basis_known: z.boolean(),
+        is_crypto: z.boolean(),
+        /** X3. A stablecoin is a cash-like holding that is not insured cash. */
+        is_stablecoin: z.boolean(),
+        employer_stock: z.boolean(),
+        /** `FeeRow.expenseRatio`. A ratio: 0.0014 is 0.14%. `null` when unknown. */
+        expense_ratio: unitInterval.nullable(),
+        /** What a comparable index fund charges, when one is known. I2's `alt`. */
+        peer_expense_ratio: unitInterval.nullable(),
+        /**
+         * `FeeRow.annualCost` — `market_value × expense_ratio`, rounded once,
+         * half-even, upstream. Carried rather than derived so the one
+         * `money × ratio` multiplication happens in the context that owns the
+         * rounding mode, not in a rule.
+         */
+        annual_fee_cost: MoneyJsonSchema.nullable(),
+        /** `FeeRow.high` — 07 I2's trigger, evaluated once upstream. */
+        high_fee: z.boolean(),
+        lots: z.array(LotSchema).max(32),
       }),
     )
     .max(256),
 });
+
+// ---------------------------------------------------------------------------
+// liabilities.terms — WP 3.10
+// ---------------------------------------------------------------------------
+
+export const LIABILITY_KINDS = [
+  'credit_card',
+  'student_loan',
+  'mortgage',
+  'auto_loan',
+  'personal_loan',
+  'line_of_credit',
+  'other',
+] as const;
+export type LiabilityKind = (typeof LIABILITY_KINDS)[number];
+
+/**
+ * `liabilities.terms` — the APR / limit / statement-balance block.
+ *
+ * WP 2.7 listed U8, C5, C6 and the whole D family as unwritable, and every one
+ * of those reasons named the same three missing fields. This is them.
+ *
+ * `liability_ref` is an opaque token from the same tokeniser that mints
+ * `cash_summary.accounts[].account_ref`, so an insight key is stable across
+ * runs without the advisor holding anything that means something outside this
+ * snapshot. It is not an account id and resolving it is the app's job.
+ *
+ * Every term is nullable except the balance and the kind, because a liability
+ * arriving from an aggregator routinely has no APR, no limit and no statement —
+ * and a rule that cannot see a term must withhold rather than assume one. D2
+ * and D4 both gate on a non-null APR for exactly that reason.
+ */
+export const LiabilitiesTermsSchema = z.strictObject({
+  as_of: dateOnly,
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  liabilities: z
+    .array(
+      z.strictObject({
+        liability_ref: opaqueRef,
+        kind: z.enum(LIABILITY_KINDS),
+        /** A ratio: 0.2399 is 23.99% APR. `null` when the provider gave none. */
+        apr: unitInterval.nullable(),
+        /** A promotional rate in force now, typically 0. `null` when there is none. */
+        promo_apr: unitInterval.nullable(),
+        /** When the promotional rate ends and `apr` takes over. D4's trigger. */
+        promo_apr_end_date: dateOnly.nullable(),
+        credit_limit: MoneyJsonSchema.nullable(),
+        /** What the last statement reported. C5's utilisation numerator. */
+        statement_balance: MoneyJsonSchema.nullable(),
+        /** Always present: a liability with no balance is not a liability. */
+        current_balance: MoneyJsonSchema,
+        minimum_payment: MoneyJsonSchema.nullable(),
+        payment_due_date: dateOnly.nullable(),
+        last_payment_date: dateOnly.nullable(),
+        last_payment_amount: MoneyJsonSchema.nullable(),
+        /**
+         * How many of the recent months were paid at the minimum only. D3's
+         * "3+ months" trigger, counted by the reader that holds the payment
+         * history; `null` when there is not enough history to count.
+         */
+        minimum_only_months: z.number().int().min(0).max(120).nullable(),
+      }),
+    )
+    .max(64),
+});
+
+// ---------------------------------------------------------------------------
+// market.rates — WP 3.10
+// ---------------------------------------------------------------------------
+
+/**
+ * What a rate is *for*. Named, because a rule must not pick a series by string.
+ *
+ * C1 and C2 want what cash could earn; D2 wants what comparable borrowing
+ * costs; X3 wants what a bank or T-bill would pay on an idle stablecoin. A rule
+ * selecting `'DGS3MO'` by literal would break the day the deployment tracked
+ * `'TB3MS'` instead, and would also be a series id hardcoded in a rule — the
+ * cousin of the hardcoded 4%.
+ */
+export const MARKET_RATE_KINDS = [
+  'short_term_risk_free',
+  'ten_year_treasury',
+  'savings_apy',
+  'credit_card_apr',
+  'mortgage_30y',
+  'other',
+] as const;
+export type MarketRateKind = (typeof MARKET_RATE_KINDS)[number];
+
+/**
+ * `market.rates` — a dated, attributed, FRED-sourced rate.
+ *
+ * The scope WP 2.7 said it needed and did not have. `rules-cash.ts` recorded
+ * the shape of the fix precisely: *"a new snapshot field and one more ref, not
+ * a constant in this file."* This is the field.
+ *
+ * Three properties make the figure defensible rather than merely present:
+ *
+ *   * **`observation_date`.** A rate with no date behind it is an assumption.
+ *     The date is the answer to "as of when?" and it is what makes `stale`
+ *     computable rather than a judgement.
+ *   * **`rate` is a ratio, not the series' own units.** FRED publishes
+ *     `DGS3MO` in percent — `4.25` means 4.25% — and the builder divides. This
+ *     is the one reinterpretation the snapshot performs on a provider value,
+ *     and it is here rather than in a rule because the alternative is every
+ *     consumer dividing by 100 and one of them forgetting. `units` records
+ *     what the builder converted *from* so the conversion is auditable.
+ *   * **`attribution`.** 01 §4.3 makes the exact sentence a licence condition
+ *     (WP 3.4 §4). It rides with the data because a surface cannot render an
+ *     obligation it was never told about, and a rule that prints a rate is such
+ *     a surface.
+ */
+export const MarketRatesSchema = z.strictObject({
+  as_of: dateOnly,
+  /**
+   * The exact sentence the licence requires, verbatim, ® included. Not a
+   * template and not a paraphrase — a paraphrase of a licence condition is a
+   * new licence condition.
+   */
+  attribution: z.string().min(1).max(320),
+  attribution_url: z.string().max(2048).nullable(),
+  rates: z
+    .array(
+      z.strictObject({
+        /** The FRED series id, e.g. `DGS3MO`. Evidence, not identity. */
+        series_id: z
+          .string()
+          .min(1)
+          .max(32)
+          .regex(/^[A-Za-z0-9_-]+$/),
+        kind: z.enum(MARKET_RATE_KINDS),
+        observation_date: dateOnly,
+        /** A ratio. `0.0425` is 4.25% a year. */
+        rate: unitInterval,
+        /** The units the provider published, before conversion. Audit trail. */
+        units: z.string().min(1).max(48),
+        /** Computed by the builder against its own freshness ladder, never stored. */
+        stale: z.boolean(),
+      }),
+    )
+    .max(16),
+});
+
+// ---------------------------------------------------------------------------
+// The blocks Phase 4 will fill
+// ---------------------------------------------------------------------------
 
 export const GoalsListSchema = z.strictObject({
   goals: z
@@ -363,6 +648,8 @@ export const AdvisorSnapshotSchema = z
     market_watchlist: MarketWatchlistSchema.optional(),
     holdings_aggregate: HoldingsAggregateSchema.optional(),
     holdings_detail: HoldingsDetailSchema.optional(),
+    liabilities_terms: LiabilitiesTermsSchema.optional(),
+    market_rates: MarketRatesSchema.optional(),
     transactions_summary: TransactionsSummarySchema.optional(),
     transactions_raw: TransactionsRawSchema.optional(),
     institutions_names: InstitutionsNamesSchema.optional(),

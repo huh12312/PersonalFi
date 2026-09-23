@@ -46,6 +46,13 @@ export const ADVISOR_SCOPES = [
   'transactions.summary',
   'transactions.raw',
   'institutions.names',
+  // WP 3.10. Appended rather than inserted in sensitivity order: this array is
+  // the *wire enum*, and the published `request.schema.json` reproduces it
+  // positionally. Appending keeps the diff in the contract artefact to two
+  // added members; `SCOPE_CATALOGUE` below is where sensitivity order lives and
+  // is what a manifest review sorts by.
+  'liabilities.terms',
+  'market.rates',
 ] as const;
 
 export type AdvisorScope = (typeof ADVISOR_SCOPES)[number];
@@ -92,6 +99,15 @@ export interface ScopeDefinition {
    * emits **no key**, exactly like an ungranted one — a snapshot must never
    * contain a block the builder could not actually fill, because an advisor
    * cannot tell "empty" from "none" and would happily reason about zero.
+   *
+   * **WP 3.10 note.** The name says Phase 2 and the meaning is "is there a
+   * reader behind it *today*". WP 3.10 adds the investing, debt and crypto
+   * rules and the scope rows they read, but it does not own `snapshot/
+   * builder.ts` or its ports, so `holdings.aggregate`, `holdings.detail`,
+   * `liabilities.terms` and `market.rates` stay `false` until the reader
+   * additions in §7 of `docs/evidence/phase-3/wp3.10-advisor-catalog-v2.md`
+   * land. `false` is the honest state: the builder's `#blockFor` has no branch
+   * for them, so a `true` here would promise a block nothing can fill.
    */
   readonly sourcedInPhase2: boolean;
 }
@@ -117,6 +133,32 @@ function minimisation(overrides: Partial<ScopeMinimisation>): ScopeMinimisation 
  * minimisation rule can be bypassed without editing a reviewed file.
  */
 export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
+  Object.freeze({
+    // WP 3.10, and the least sensitive row in the table by a distance: it
+    // carries no fact about the user at all. It is here because C1, C2, D2 and
+    // X3 each need a *market* rate, and WP 2.7 recorded why they could not have
+    // one — "a hardcoded 4% would be a numeral nothing could account for". A
+    // dated FRED observation is an answer to that; a constant in a source file
+    // is not. The attribution string rides with the figure because 01 §4.3
+    // makes it a licence condition, and a UI cannot render an obligation it was
+    // never told about (WP 3.4 §4).
+    scope: 'market.rates',
+    sensitivity: 1,
+    key: 'market_rates',
+    yields:
+      'One row per FRED series the deployment tracks: the series id, the observation date, the ' +
+      'rate as a ratio, its units, and whether the observation is stale. Plus the exact ' +
+      'attribution sentence and the link it must carry.',
+    drops:
+      'Nothing of the user’s — there is nothing of theirs in it. What it deliberately ' +
+      'does not carry is an *undated* or unattributed rate: a rate with no observation date ' +
+      'behind it is an assumption wearing a measurement’s clothes.',
+    externalAllowed: true,
+    requiresPerRunConsent: false,
+    minimisation: minimisation({}),
+    // @ctx/integrations lands the reader; the builder branch is owed (§7).
+    sourcedInPhase2: false,
+  }),
   Object.freeze({
     scope: 'networth.summary',
     sensitivity: 1,
@@ -220,20 +262,53 @@ export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
     scope: 'holdings.aggregate',
     sensitivity: 5,
     key: 'holdings_aggregate',
-    yields: 'Per-asset-class weights, top-N positions by symbol and weight, account-type mix.',
-    drops: 'Quantities, cost basis and account linkage — those need `holdings.detail`.',
+    yields:
+      'Per-asset-class weights and values, top-N positions by symbol and weight, the target ' +
+      'allocation, the account-type mix, `unclassified_pct`, and two pre-triggered aggregates: ' +
+      'idle brokerage cash and the exchange/self-custody split of crypto.',
+    drops:
+      'Quantities, cost basis and account linkage — those need `holdings.detail`, and no ' +
+      'account id appears in either. `idle_cash` is an aggregate precisely so that a per-account ' +
+      'threshold can be applied without a per-account row crossing.',
     externalAllowed: true,
     requiresPerRunConsent: false,
     minimisation: minimisation({}),
-    // @ctx/investments lands in Phase 3.
+    // @ctx/investments lands in Phase 3; the builder branch is owed (§7).
     sourcedInPhase2: false,
   }),
   Object.freeze({
     scope: 'holdings.detail',
     sensitivity: 6,
     key: 'holdings_detail',
-    yields: 'Quantity, cost basis, lot ages and unrealised P&L per position.',
-    drops: 'Account ids and institution names, still.',
+    yields:
+      'Per position: quantity, cost basis, market value, unrealised P&L, lot ages and per-lot ' +
+      'gain or loss, the account’s tax treatment, the expense ratio and its comparable, and ' +
+      'whether a cost basis is recorded at all.',
+    drops:
+      'Account ids and institution names, still. The tax treatment crosses as a *class* — ' +
+      '`taxable`, `tax_deferred`, `tax_free` — which is what I6 and I12 reason about, and not ' +
+      'as the account that has it. A lot crosses as an age in days, never as an open date.',
+    externalAllowed: true,
+    requiresPerRunConsent: false,
+    minimisation: minimisation({}),
+    sourcedInPhase2: false,
+  }),
+  Object.freeze({
+    // WP 3.10. One block unblocks the whole D family at once, plus U8, C5 and
+    // C6, which WP 2.7 recorded as unwritable for the want of exactly these
+    // three fields: an APR, a credit limit and a statement balance.
+    scope: 'liabilities.terms',
+    sensitivity: 6,
+    key: 'liabilities_terms',
+    yields:
+      'Per liability: its kind, APR, any promotional APR and when it ends, credit limit, ' +
+      'statement and current balance, minimum payment, the next due date, when it was last paid ' +
+      'and how many recent months were paid at the minimum only.',
+    drops:
+      'Account ids, provider ids, institution names, card masks and the lender’s name. A ' +
+      'liability is identified by an opaque `liability_ref` minted by the same tokeniser that ' +
+      'mints `account_ref` in `cash.summary`, so an insight can key on it stably without the ' +
+      'advisor ever holding an identifier that means anything outside this snapshot.',
     externalAllowed: true,
     requiresPerRunConsent: false,
     minimisation: minimisation({}),

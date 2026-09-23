@@ -70,9 +70,12 @@ const GOLDEN: readonly Golden[] = [
     ruleId: 'C1',
     seedCase: 'drift',
     keys: ['cash.idle_above_cushion'],
+    // WP 3.10: the sentence C1 has been withholding since Phase 2. The rate is
+    // a dated FRED observation from `market.rates`, not a constant.
     summary:
       'About $21,701.67 more than three months of recent spending is held in cash, ' +
-      'earning 0.81% across those accounts.',
+      'earning 0.81% across those accounts. A published rate for cash was 4.25% ' +
+      'on 2026-09-15.',
     severity: 'notable',
     annualized: null,
   },
@@ -80,9 +83,13 @@ const GOLDEN: readonly Golden[] = [
     ruleId: 'C2',
     seedCase: 'drift',
     keys: ['cash.yield_spread.acct-checking'],
+    // WP 3.10: the benchmark is now the published rate rather than the best
+    // account the user already holds. The arithmetic and the key are unchanged;
+    // with no `market.rates` block the rule falls back to the Phase 2 sentence.
     summary:
-      'One account holds $21,235.00 at 0%, while another of your own earns 4.25%. ' +
-      'At the higher rate that balance would have earned about $902.49 over a year.',
+      'One account holds $21,235.00 at 0%, while a published rate was 4.25% on ' +
+      '2026-09-15. At that rate the same balance would have earned about $902.49 ' +
+      'over a year.',
     severity: 'warning',
     annualized: '90249',
   },
@@ -171,6 +178,207 @@ const GOLDEN: readonly Golden[] = [
     summary:
       'About $7,650.00 of yearly and half-yearly bills fall due in the next three months, ' +
       'which is large next to a normal month of spending.',
+    severity: 'notable',
+    annualized: null,
+  },
+  // --- WP 3.10. Every summary below is the exact sentence the rule emits on
+  // the `drift` case; the control case has no portfolio, liabilities or rates
+  // block at all, so each of these is also asserted silent there. 07 §7.2's
+  // banned list is what makes writing them out in full worth the space: a
+  // reviewer sees 'would have earned' become 'will earn' in a diff. ------
+  {
+    ruleId: 'D1',
+    seedCase: 'drift',
+    keys: ['debt.payoff_order'],
+    summary:
+      'The highest rate you carry is 23.99%, on a credit card balance of $4,820.00. The ' +
+      'smallest balance is $3,100.00, on a credit card at 18.99%. Clearing the highest rate ' +
+      'first costs less in interest overall; clearing the smallest first closes an account ' +
+      'sooner, which some people find easier to keep up.',
+    severity: 'notable',
+    annualized: null,
+  },
+  {
+    ruleId: 'D2',
+    seedCase: 'drift',
+    keys: ['debt.rate_above_market.LIAB_a1b2c3d4e5f6', 'debt.rate_above_market.LIAB_c3d4e5f6a1b2'],
+    summary:
+      'A credit card balance of $4,820.00 carries 23.99%, while the TERMCBCCALLNS series was ' +
+      '21.24% on 2026-09-01. On this balance the difference is about $132.55 a year. Any ' +
+      'transfer or refinance fee comes out of that, and this app does not know what one would ' +
+      'be.',
+    severity: 'warning',
+    annualized: '13255',
+  },
+  {
+    ruleId: 'D3',
+    seedCase: 'drift',
+    keys: ['debt.minimum_only.LIAB_a1b2c3d4e5f6'],
+    summary:
+      'The last 5 payments on a credit card went out at the minimum, against a balance of ' +
+      '$4,820.00 carrying 23.99% with a minimum of $145.00. A minimum is sized to keep the ' +
+      'account current, not to clear the balance.',
+    severity: 'warning',
+    annualized: null,
+  },
+  {
+    ruleId: 'D4',
+    seedCase: 'drift',
+    keys: ['debt.promo_ending.LIAB_b2c3d4e5f6a1'],
+    summary:
+      'The promotional rate on a credit card ends on 2026-11-20 with $3,100.00 still owing. ' +
+      'At that point the balance carries 18.99%, which is about $588.69 a year on what is ' +
+      'left of it.',
+    severity: 'warning',
+    annualized: '58869',
+  },
+  {
+    ruleId: 'D5',
+    seedCase: 'drift',
+    keys: [
+      'debt.principal_against_market.LIAB_a1b2c3d4e5f6',
+      'debt.principal_against_market.LIAB_b2c3d4e5f6a1',
+      'debt.principal_against_market.LIAB_c3d4e5f6a1b2',
+    ],
+    summary:
+      'You hold $26,235.00 in cash, about 6.9 months of recent spending, while a credit card ' +
+      'balance of $4,820.00 carries 23.99% \u2014 roughly $1,156.32 of interest over a year at ' +
+      'that rate. Principal put against that balance earns the rate itself, with certainty. ' +
+      'What the same money might do in markets is not a figure this app holds, and it is not ' +
+      'going to estimate one.',
+    severity: 'notable',
+    annualized: null,
+  },
+  {
+    ruleId: 'D6',
+    seedCase: 'drift',
+    keys: ['debt.missed_payment.LIAB_a1b2c3d4e5f6'],
+    summary:
+      'A credit card carrying $4,820.00 was due on 2026-09-10, and the most recent payment it ' +
+      'can see is from 2026-08-08. A late payment costs a fee and, separately and for longer, ' +
+      'a mark on your credit file.',
+    severity: 'warning',
+    annualized: null,
+  },
+  {
+    ruleId: 'I1',
+    seedCase: 'drift',
+    keys: ['investing.drift.US_EQUITY', 'investing.drift.US_BOND', 'investing.drift.CRYPTO'],
+    summary:
+      'US_EQUITY is 45% of the portfolio against a 52% target \u2014 7.0pp below it. With 2% of ' +
+      'the portfolio unclassified, that gap is measured over what could be classified and no ' +
+      'further.',
+    severity: 'notable',
+    annualized: null,
+  },
+  {
+    ruleId: 'I2',
+    seedCase: 'drift',
+    keys: ['investing.expense_ratio.OLDFUND'],
+    summary:
+      'OLDFUND charges 0.89% a year \u2014 about $311.50 on $35,000.00. Comparable index funds ' +
+      'charge about 0.04%, a difference of roughly $297.50 a year on this position. It is ' +
+      'held in an account where a change realises nothing, so the fee is the whole of what it ' +
+      'costs.',
+    severity: 'warning',
+    annualized: '29750',
+  },
+  {
+    ruleId: 'I3',
+    seedCase: 'drift',
+    keys: ['investing.idle_cash'],
+    summary:
+      '$12,000.00 of brokerage cash is above the $1,000.00 floor, unearmarked, and the ' +
+      'longest-standing part of it has been there 47 days.',
+    severity: 'warning',
+    annualized: null,
+  },
+  {
+    ruleId: 'I4',
+    seedCase: 'drift',
+    keys: ['investing.concentration.VTI'],
+    summary:
+      'VTI is 26% of investable assets \u2014 $130,000.00 of $500,000.00. A bad year for this one ' +
+      'holding moves that share of the portfolio on its own, whatever the rest of it does. ' +
+      'Reducing it inside a taxable account would realise about $32,000.00 of gains, and the ' +
+      'tax on that depends on your bracket and on how long each lot has been held.',
+    severity: 'urgent',
+    annualized: null,
+  },
+  {
+    ruleId: 'I5',
+    seedCase: 'drift',
+    keys: ['investing.employer_stock.ACME'],
+    summary:
+      'ACME is 12% of investable assets \u2014 $60,000.00 \u2014 and you have it tagged as your ' +
+      'employer. The year those shares fall is also the year the bonus does, and possibly the ' +
+      'year the job does. What reducing the position would cost is not stated here: this app ' +
+      'cannot see taxable lots carrying a gain for it.',
+    severity: 'urgent',
+    annualized: null,
+  },
+  {
+    ruleId: 'I6',
+    seedCase: 'drift',
+    keys: ['investing.loss_lot.ACME.0'],
+    summary:
+      'One ACME lot, opened 520 days ago and now long-term, is worth $35,000.00 and is ' +
+      '$10,500.00 below its cost. Realising a loss in a taxable account can offset gains ' +
+      'elsewhere, within limits this app does not know for you.',
+    severity: 'notable',
+    annualized: null,
+  },
+  {
+    ruleId: 'X1',
+    seedCase: 'drift',
+    keys: ['crypto.net_worth_share'],
+    summary:
+      'Crypto is worth $100,000.00 against a net worth of $530,700.00, and 20% of the ' +
+      'portfolio. If it fell by half from where it is today, about $50,000.00 would go with ' +
+      'it. That is a stress applied to the position you hold now, not a forecast of anything.',
+    severity: 'urgent',
+    annualized: null,
+  },
+  {
+    ruleId: 'X2',
+    seedCase: 'drift',
+    keys: ['crypto.exchange_custody'],
+    summary:
+      '$60,000.00 of crypto sits with an exchange against $40,000.00 in self-custody. An ' +
+      'exchange balance is a claim on a company rather than a coin you control, and that ' +
+      'distinction only matters on the day the company has a problem.',
+    severity: 'notable',
+    annualized: null,
+  },
+  {
+    ruleId: 'X3',
+    seedCase: 'drift',
+    keys: ['crypto.idle_stablecoins.USDC'],
+    summary:
+      '$20,000.00 sits in USDC. A published short-term rate was 5.12% on 2026-09-18, which on ' +
+      'that amount is about $1,024.00 over a year. The balance is also not covered by deposit ' +
+      'insurance, and the peg is a promise rather than a guarantee.',
+    severity: 'notable',
+    annualized: '102400',
+  },
+  {
+    ruleId: 'X5',
+    seedCase: 'drift',
+    keys: ['crypto.loss_lot.BTC.0'],
+    summary:
+      'One BTC lot, opened 730 days ago, is worth $80,000.00 and is $12,000.00 below its ' +
+      'cost.',
+    severity: 'notable',
+    annualized: null,
+  },
+  {
+    ruleId: 'X6',
+    seedCase: 'drift',
+    keys: ['crypto.missing_basis.USDC'],
+    summary:
+      '$20,000.00 of USDC has no recorded cost basis. Basis is now expected to be tracked per ' +
+      'wallet rather than pooled across all of them, and a reconstruction gets harder every ' +
+      'year it is left \u2014 exchanges close, and their export files go with them.',
     severity: 'notable',
     annualized: null,
   },
