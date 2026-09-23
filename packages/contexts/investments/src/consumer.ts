@@ -38,8 +38,16 @@
  *     second pass produces identical rows.
  *
  * Delivering the event twice therefore produces the same rows and appends no
- * second event — `test/db/lots.test.ts` asserts exactly that, comparing whole
- * rows and the `domain_events` count.
+ * second event — `test/db/consumer.test.ts` asserts exactly that, comparing
+ * whole rows and the `domain_events` count.
+ *
+ * "Appends no second event" is not free: every emit site compares the state it
+ * computed against the state that was already stored and stays silent when
+ * they match (`lotsAreUnchanged`, and `upsertHolding`'s `changed` flag, which
+ * Postgres answers with an `IS DISTINCT FROM` guard on the `DO UPDATE`). The
+ * one deliberate exception is a Rev. Rul. 2008-5 wash sale, which adjusts no
+ * lot and therefore leaves no state to remember it by; it is re-announced, and
+ * the reason is written at the emit site.
  *
  * ## Failure posture
  *
@@ -57,10 +65,7 @@ import {
   type DateOnly as DateOnlyType,
   type Money as MoneyType,
 } from '@core/kernel';
-import type {
-  ProviderHoldingFact,
-  ProviderInvestmentTransactionFact,
-} from '@connector/port';
+import type { ProviderHoldingFact, ProviderInvestmentTransactionFact } from '@connector/port';
 import {
   appendEvent,
   registerConsumer,
@@ -272,17 +277,18 @@ export async function runLotSync(
   for (const scope of scopes.values()) {
     const existing = await store.listOpenLots(input.userId, scope.accountId, scope.securityId);
     let lots: readonly Lot[] = existing;
-    const method = await store.basisMethodFor(
-      input.userId,
-      scope.accountId,
-      scope.securityId,
-    );
+    const method = await store.basisMethodFor(input.userId, scope.accountId, scope.securityId);
+
+    // Events this scope wants to emit, held back until we know the scope
+    // actually changed. A re-delivered sync run recomputes the same lots from
+    // the same stored transactions, so nothing changes and nothing is
+    // announced — see this file's "Idempotence" header.
+    const pendingScopeEvents: Parameters<typeof appendEvent>[1][] = [];
 
     const ordered = stored
       .filter(
         (transaction) =>
-          transaction.accountId === scope.accountId &&
-          transaction.securityId === scope.securityId,
+          transaction.accountId === scope.accountId && transaction.securityId === scope.securityId,
       )
       .sort((a, b) => DateOnly.compare(a.tradeDate, b.tradeDate));
 
@@ -365,8 +371,7 @@ export async function runLotSync(
           .sort((a, b) => DateOnly.compare(a, b))[0];
         if (earliest !== undefined) soldHoldingPeriodStart.set(transaction.id, earliest);
 
-        await appendEvent(
-          outbox,
+        pendingScopeEvents.push(
           RealizedGainRecorded.create(
             {
               accountId: scope.accountId,
@@ -396,7 +401,16 @@ export async function runLotSync(
       }
     }
 
+    // The whole point of the comparison: a re-delivered run recomputes the
+    // identical lots, so it writes nothing and says nothing. Without this, a
+    // Plaid account that re-fetches the same date window every night would
+    // wake every downstream consumer every night with "your lots changed".
+    if (lotsAreUnchanged(existing, lots)) continue;
+
     await store.saveLots(input.userId, lots);
+    for (const event of pendingScopeEvents) {
+      await appendEvent(outbox, event);
+    }
     await appendEvent(
       outbox,
       LotsUpdated.create(
@@ -427,13 +441,53 @@ export async function runLotSync(
     // opened. 07 §4.4's trap.
     acquisitions: await allAcquisitionsFor(dependencies, input.userId, disposals, acquisitions),
     soldHoldingPeriodStart,
-    config: dependencies.washSaleConfig,
+    // Spread conditionally rather than passing `config: dependencies.washSaleConfig`:
+    // under `exactOptionalPropertyTypes` an explicit `undefined` is not an absent
+    // optional, and absent is what makes `scanForPossibleWashSales` fall back to
+    // `DEFAULT_WASH_SALE_CONFIG` by its own documented rule rather than by ours.
+    ...(dependencies.washSaleConfig === undefined ? {} : { config: dependencies.washSaleConfig }),
     isDigitalAsset: (securityId) => digitalAssets.get(securityId) === true,
   });
 
+  // Grouped by security and applied **all at once**, not one flag at a time:
+  // `applyWashSales` sets each named lot's adjustment to the total of the flags
+  // it is named in, so feeding it one flag per call would make the last flag
+  // win and lose the rest. Loading the security's lots once is also one query
+  // instead of one per flag.
+  const washSalesBySecurity = new Map<string, PossibleWashSale[]>();
   for (const flag of washSales) {
-    const affected = await dependencies.store.listLotsForSecurity(input.userId, flag.securityId);
-    await dependencies.store.saveLots(input.userId, applyWashSales(affected, [flag]));
+    const existing = washSalesBySecurity.get(flag.securityId);
+    if (existing === undefined) washSalesBySecurity.set(flag.securityId, [flag]);
+    else existing.push(flag);
+  }
+
+  // Which replacement lots this run actually moved. On a re-delivered run the
+  // adjustment is already in place, `applyWashSales` is a no-op by
+  // construction, this set is empty and no event is appended — which is the
+  // idempotence promise at the top of this file.
+  const newlyAdjustedLotIds = new Set<string>();
+  for (const [securityId, flagsForSecurity] of washSalesBySecurity) {
+    const affected = await dependencies.store.listLotsForSecurity(input.userId, securityId);
+    const adjusted = applyWashSales(affected, flagsForSecurity);
+    const before = new Map(affected.map((lot) => [lot.id, lotFingerprint(lot)]));
+    for (const lot of adjusted) {
+      if (before.get(lot.id) !== lotFingerprint(lot)) newlyAdjustedLotIds.add(lot.id);
+    }
+    if (newlyAdjustedLotIds.size > 0) {
+      await dependencies.store.saveLots(input.userId, adjusted);
+    }
+  }
+
+  for (const flag of washSales) {
+    // A Rev. Rul. 2008-5 flag adjusts no lot — the loss is permanently lost
+    // rather than deferred — so there is no lot state that could record "this
+    // was already announced", and it is re-announced on every run. That is the
+    // deliberate trade: the outbox is at-least-once and every consumer is
+    // obliged to be idempotent, and the alternative is never telling the user
+    // about the one wash sale that actually costs them the whole deduction.
+    if (!newlyAdjustedLotIds.has(flag.replacementLotId) && !flag.basisAdjustmentIsPermanentlyLost) {
+      continue;
+    }
     await appendEvent(
       outbox,
       PossibleWashSaleFlagged.create(
@@ -458,22 +512,35 @@ export async function runLotSync(
   }
 
   // ---- 5. the positions themselves --------------------------------------
-  const byAccount = new Map<string, { securityIds: string[]; unavailable: number }>();
+  const byAccount = new Map<
+    string,
+    { securityIds: string[]; unavailable: number; changed: boolean }
+  >();
   for (const resolved of facts.holdings) {
     const holding = holdingOf(resolved.fact, {
       accountId: resolved.accountId,
       securityId: resolved.securityId,
       asOfDate: facts.asOfDate,
     });
-    await store.upsertHolding(input.userId, holding, { id: newId() });
+    const { changed } = await store.upsertHolding(input.userId, holding, { id: newId() });
+    // The snapshot is written either way: it is one row per calendar day and
+    // re-writing today's identical row is what makes a mid-day re-sync a
+    // revision rather than a duplicate.
     await store.recordHoldingSnapshot(input.userId, holding);
-    const entry = byAccount.get(resolved.accountId) ?? { securityIds: [], unavailable: 0 };
+    const entry = byAccount.get(resolved.accountId) ?? {
+      securityIds: [],
+      unavailable: 0,
+      changed: false,
+    };
     entry.securityIds.push(resolved.securityId);
     if (holding.costBasis === null) entry.unavailable += 1;
+    entry.changed ||= changed;
     byAccount.set(resolved.accountId, entry);
   }
 
   for (const [accountId, entry] of byAccount) {
+    // Nothing in this account's positions moved, so there is nothing to say.
+    if (!entry.changed) continue;
     await appendEvent(
       outbox,
       HoldingsUpdated.create(
@@ -540,11 +607,7 @@ async function carrySelfTransfers(
     );
     if (match === undefined) continue;
 
-    const sourceLots = await dependencies.store.listOpenLots(
-      userId,
-      out.accountId,
-      out.securityId,
-    );
+    const sourceLots = await dependencies.store.listOpenLots(userId, out.accountId, out.securityId);
     const { lots } = carryLotsOnTransfer(sourceLots, {
       fromAccountId: out.accountId,
       toAccountId: match.accountId,
@@ -601,13 +664,42 @@ async function allAcquisitionsFor(
  * is "we cannot say" — not "no". A `false` there would silently suppress a
  * warning the user is entitled to.
  */
+/**
+ * A lot's whole state as one comparable string.
+ *
+ * Used to answer "did this run change anything?" without a deep-equality
+ * helper and without comparing object identity, which would always say yes
+ * because every pass rebuilds the objects. Every field the engine can move is
+ * in here; the ones it cannot (account, security, currency, source) are not,
+ * because a change in those would be a different lot.
+ */
+function lotFingerprint(lot: Lot): string {
+  return [
+    lot.id,
+    Quantity.toDatabaseString(lot.quantity),
+    Quantity.toDatabaseString(lot.quantityRemaining),
+    lot.basis === null ? 'null' : lot.basis.minor.toString(),
+    lot.basisConsumed.minor.toString(),
+    lot.openDate,
+    lot.holdingPeriodStartDate,
+    lot.basisSource,
+    lot.acquisitionType,
+    lot.washSaleAdjustment.minor.toString(),
+  ].join('|');
+}
+
+/** Whether two sets of lots are the same lots in the same state, order-independently. */
+function lotsAreUnchanged(before: readonly Lot[], after: readonly Lot[]): boolean {
+  if (before.length !== after.length) return false;
+  const left = before.map(lotFingerprint).sort();
+  const right = after.map(lotFingerprint).sort();
+  return left.every((value, index) => value === right[index]);
+}
+
 function totalGainOf(result: DisposalResult): MoneyType | null {
   const { shortTerm, longTerm, currency } = result.realized;
   if (shortTerm.status !== 'available' || longTerm.status !== 'available') return null;
-  return Money.add(
-    Money.add(Money.zero(currency), shortTerm.amount),
-    longTerm.amount,
-  );
+  return Money.add(Money.add(Money.zero(currency), shortTerm.amount), longTerm.amount);
 }
 
 export interface LotConsumerOptions {
@@ -644,8 +736,16 @@ export function createLotConsumer(dependencies: {
           port: dependencies.port,
           clock: dependencies.clock,
           outbox: dependencies.outboxFor(context),
-          washSaleConfig: dependencies.options?.washSaleConfig,
-          minorScale: dependencies.options?.minorScale,
+          // Conditional spreads, not `?.` reads: `exactOptionalPropertyTypes`
+          // distinguishes an absent option from one explicitly set to
+          // `undefined`, and `runLotSync` owns both defaults (FIFO-side wash
+          // config, minor scale 2).
+          ...(dependencies.options?.washSaleConfig === undefined
+            ? {}
+            : { washSaleConfig: dependencies.options.washSaleConfig }),
+          ...(dependencies.options?.minorScale === undefined
+            ? {}
+            : { minorScale: dependencies.options.minorScale }),
         },
         {
           userId: event.userId,

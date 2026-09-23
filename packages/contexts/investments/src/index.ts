@@ -294,3 +294,54 @@ export {
   type SecurityResolverOptions,
   type UnresolvedSecurity,
 } from './resolver.ts';
+
+// ---------------------------------------------------------------------------
+// WP 3.4 — prices and FX (migration 0015)
+// ---------------------------------------------------------------------------
+//
+// The two readers 08 §1.3 #7 names, and the rules that make their answers
+// trustworthy. `@ctx/integrations` fetches the numbers; these tables and these
+// readers are this context's, and rows cross that seam through an injected
+// writer rather than through a table handle.
+//
+// The two rules worth knowing before calling either:
+//
+//   * `FxReader.rate` **throws** `FxRateUnavailable` rather than returning a
+//     rate it does not have. D4 and 08 §6.6: a silent 1.0 is plausible,
+//     invisible and wrong by the whole spread. The only 1.0 in the system is
+//     the identity, answered structurally without reading a row.
+//   * `PriceReader.price` computes 07 §6.1's staleness against the clock at
+//     *read* time rather than trusting a stored boolean, and returns
+//     `includeInAsOfNowDeltas: false` for a price older than 24 hours.
+
+export {
+  FxRateUnavailable,
+  createFxReader,
+  drizzleFxStore,
+  inMemoryFxStore,
+  invert,
+  isFxRateUnavailable,
+  type FxRate,
+  type FxRateRecord,
+  type FxReader,
+  type FxReaderOptions,
+  type FxStore,
+} from './fx.ts';
+
+export {
+  DEFAULT_LADDERS,
+  PRICE_STALE_AFTER_MS,
+  createPriceReader,
+  drizzlePriceStore,
+  inMemoryPriceStore,
+  ladderRows,
+  priceStalenessOf,
+  recordUserPriceOverride,
+  type PricePoint,
+  type PriceReader,
+  type PriceReaderOptions,
+  type PriceRecord,
+  type PriceStaleness,
+  type PriceStore,
+  type UserPriceOverride,
+} from './prices.ts';

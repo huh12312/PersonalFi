@@ -172,10 +172,7 @@ export interface ScanInput {
  * that had to construct a whole scan to check day 31 would be testing five
  * things at once.
  */
-export function isInsideWashSaleWindow(
-  sale: DateOnlyType,
-  replacement: DateOnlyType,
-): boolean {
+export function isInsideWashSaleWindow(sale: DateOnlyType, replacement: DateOnlyType): boolean {
   const offset = DateOnly.differenceInDays(sale, replacement);
   return Math.abs(offset) <= WASH_SALE_WINDOW_DAYS;
 }
@@ -223,9 +220,7 @@ export function scanForPossibleWashSales(input: ScanInput): readonly PossibleWas
     for (const acquisition of candidates) {
       if (Quantity.compare(unreplaced, Quantity.zero) <= 0) break;
       const take =
-        Quantity.compare(acquisition.quantity, unreplaced) <= 0
-          ? acquisition.quantity
-          : unreplaced;
+        Quantity.compare(acquisition.quantity, unreplaced) <= 0 ? acquisition.quantity : unreplaced;
       matched.push({ acquisition, quantity: take });
       unreplaced = Quantity.subtract(unreplaced, take);
     }
@@ -238,8 +233,7 @@ export function scanForPossibleWashSales(input: ScanInput): readonly PossibleWas
       quantityWeight(unreplaced),
     ];
     const shares = Money.allocate(loss, weights);
-    const tacked =
-      input.soldHoldingPeriodStart.get(disposal.id) ?? disposal.date;
+    const tacked = input.soldHoldingPeriodStart.get(disposal.id) ?? disposal.date;
 
     matched.forEach((entry, index) => {
       const disallowed = shares[index];
@@ -284,28 +278,81 @@ export function scanForPossibleWashSales(input: ScanInput): readonly PossibleWas
  * say so.
  */
 export function applyWashSaleToLot(lot: Lot, flag: PossibleWashSale): Lot {
-  if (lot.id !== flag.replacementLotId) return lot;
-  if (lot.basis === null) return lot;
-  if (flag.basisAdjustmentIsPermanentlyLost) return lot;
-  return {
-    ...lot,
-    basis: Money.add(lot.basis, flag.disallowedLoss),
-    washSaleAdjustment: Money.add(lot.washSaleAdjustment, flag.disallowedLoss),
-    holdingPeriodStartDate: DateOnly.min(
-      lot.holdingPeriodStartDate,
-      flag.tackedHoldingPeriodStartDate,
-    ),
-  };
+  return applyWashSales([lot], [flag])[0] ?? lot;
 }
 
-/** Apply every flag to whichever lot it names. Order-independent by construction. */
+/**
+ * Apply every flag to whichever lot it names — **by setting, not by adding**.
+ *
+ * The distinction is the difference between a correct tax number and one that
+ * grows every time a sync runs. The scan is a pure function of the stored
+ * transaction history, so a re-delivered sync run regenerates exactly the same
+ * flags; an implementation that did `basis = basis + disallowedLoss` would
+ * therefore add the same disallowed loss again on every single sync, and the
+ * replacement lot's basis would drift upward forever. Nothing would error, and
+ * the only symptom would be a shrinking capital gain.
+ *
+ * So the adjustment is recomputed from scratch each time. `basis_minor` already
+ * *includes* the adjustment and `wash_sale_adjustment_minor` records how much
+ * of it is adjustment, which means the unadjusted basis is recoverable:
+ *
+ *     base      = basis − washSaleAdjustment
+ *     adjustment = Σ disallowed losses this lot is named in
+ *     basis'     = base + adjustment
+ *
+ * Running that twice with the same flags gives the same answer, which is what
+ * makes the consumer idempotent. `test/db/consumer.test.ts` asserts it against
+ * a real database by syncing the same run twice and comparing whole rows.
+ *
+ * Only lots that a flag actually names are touched. A lot the caller did not
+ * pass a flag for keeps whatever adjustment it already had, so handing this
+ * function a partial flag set cannot silently erase an unrelated lot's history.
+ *
+ * Two lots are still left alone entirely, for the reasons the single-flag
+ * version documented: one with an unknown basis (there is no number to add a
+ * disallowed loss to, and inventing one is the laundering 04 §5.5 forbids —
+ * `cost_basis_lots_wash_adjustment_needs_a_basis` says the same in SQL), and a
+ * Rev. Rul. 2008-5 replacement inside an IRA, where the loss is permanently
+ * lost rather than deferred and the flag carries
+ * `basisAdjustmentIsPermanentlyLost` so the UI can say so.
+ */
 export function applyWashSales(
   lots: readonly Lot[],
   flags: readonly PossibleWashSale[],
 ): readonly Lot[] {
-  let next = lots;
+  const byLot = new Map<string, PossibleWashSale[]>();
   for (const flag of flags) {
-    next = next.map((lot) => applyWashSaleToLot(lot, flag));
+    if (flag.basisAdjustmentIsPermanentlyLost) continue;
+    const existing = byLot.get(flag.replacementLotId);
+    if (existing === undefined) byLot.set(flag.replacementLotId, [flag]);
+    else existing.push(flag);
   }
-  return next;
+
+  return lots.map((lot) => {
+    const applicable = byLot.get(lot.id);
+    if (applicable === undefined || applicable.length === 0) return lot;
+    if (lot.basis === null) return lot;
+
+    const adjustment = Money.sum(
+      applicable.map((flag) => flag.disallowedLoss),
+      lot.currency,
+    );
+    const base = Money.subtract(lot.basis, lot.washSaleAdjustment);
+    // `min` over every tacked period: the holding period only ever moves
+    // earlier, so this is idempotent on its own.
+    let holdingPeriodStartDate = lot.holdingPeriodStartDate;
+    for (const flag of applicable) {
+      holdingPeriodStartDate = DateOnly.min(
+        holdingPeriodStartDate,
+        flag.tackedHoldingPeriodStartDate,
+      );
+    }
+
+    return {
+      ...lot,
+      basis: Money.add(base, adjustment),
+      washSaleAdjustment: adjustment,
+      holdingPeriodStartDate,
+    };
+  });
 }

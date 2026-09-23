@@ -48,19 +48,10 @@ import {
   type Money as MoneyType,
   type Quantity as QuantityType,
 } from '@core/kernel';
-import {
-  remainingBasisOf,
-  isOpen,
-  type Lot,
-  UNKNOWN_BASIS_WARNING,
-} from './lots.ts';
+import { remainingBasisOf, isOpen, type Lot, UNKNOWN_BASIS_WARNING } from './lots.ts';
 
 /** Why a gain could not be stated. Codes, so a UI can branch without parsing prose. */
-export const UNAVAILABLE_REASONS = [
-  'basis_unknown',
-  'price_unknown',
-  'currency_mismatch',
-] as const;
+export const UNAVAILABLE_REASONS = ['basis_unknown', 'price_unknown', 'currency_mismatch'] as const;
 export type UnavailableReason = (typeof UNAVAILABLE_REASONS)[number];
 
 /**
@@ -111,11 +102,7 @@ export const PRICE_UNKNOWN_WARNING =
  * float. `minorUnitScale` comes from the currency rather than being assumed to
  * be 2, which is the JPY bug 04 §2.3 names.
  */
-export function marketValueOf(
-  quantity: QuantityType,
-  price: LotPrice,
-  scale: number,
-): MoneyType {
+export function marketValueOf(quantity: QuantityType, price: LotPrice, scale: number): MoneyType {
   const gross = Quantity.multiply(quantity, price.amount);
   const shifted = Quantity.multiply(gross, '1' + '0'.repeat(scale));
   // One rounding, at the boundary into minor units, and it is explicit and
@@ -158,10 +145,12 @@ function compareDigits(a: string, b: string): -1 | 0 | 1 {
 export function costBasisOf(
   lots: readonly Lot[],
   currency: CurrencyCode,
-): { readonly status: 'available'; readonly amount: MoneyType } | {
-  readonly status: 'unavailable';
-  readonly lotIds: readonly string[];
-} {
+):
+  | { readonly status: 'available'; readonly amount: MoneyType }
+  | {
+      readonly status: 'unavailable';
+      readonly lotIds: readonly string[];
+    } {
   const open = lots.filter(isOpen);
   const unknown = open.filter((lot) => lot.basis === null).map((lot) => lot.id);
   if (unknown.length > 0) return { status: 'unavailable', lotIds: unknown };
@@ -247,5 +236,8 @@ export function unrealizedGainOf(
  * half of `unavailable`, and the half a boolean `known` flag would flatten.
  */
 export function lotsWithoutBasis(lots: readonly Lot[]): readonly string[] {
-  return lots.filter(isOpen).filter((lot) => lot.basis === null).map((lot) => lot.id);
+  return lots
+    .filter(isOpen)
+    .filter((lot) => lot.basis === null)
+    .map((lot) => lot.id);
 }

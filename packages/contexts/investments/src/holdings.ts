@@ -42,10 +42,7 @@ import {
   type Money as MoneyType,
   type Quantity as QuantityType,
 } from '@core/kernel';
-import type {
-  ProviderHoldingFact,
-  ProviderInvestmentTransactionFact,
-} from '@connector/port';
+import type { ProviderHoldingFact, ProviderInvestmentTransactionFact } from '@connector/port';
 import type {
   AcquisitionType,
   BasisSource,
@@ -150,10 +147,7 @@ export function normaliseTransactionType(
  * `ESTIMATED` lot with a warning. There is no path from "the provider said
  * nothing" to "the provider said zero".
  */
-export function basisSourceFor(
-  source: TransactionSource,
-  basis: MoneyType | null,
-): BasisSource {
+export function basisSourceFor(source: TransactionSource, basis: MoneyType | null): BasisSource {
   if (basis === null) return 'ESTIMATED';
   switch (source) {
     case 'BROKER':
@@ -256,7 +250,15 @@ export function basisForAcquisition(
     // purchase's basis is what left, plus the fee that also left.
     return Money.add(Money.absolute(transaction.amount), Money.absolute(transaction.fees));
   }
-  if (transaction.price !== null) {
+  // A *zero* price is not a price. Providers report `0` for a movement they
+  // have no price for at least as often as for one that was genuinely free, and
+  // `quantity × 0` would hand back a confident $0.00 basis — the gain-from-zero
+  // fabrication 04 §5.5 forbids, arriving through a multiplication instead of
+  // through a coalesce. Falling through to `null` makes it an `ESTIMATED` lot
+  // with a visible warning, which is the honest answer for both cases; a
+  // genuinely worthless airdrop can still be pinned at $0 by a `USER` basis,
+  // deliberately, by the one person entitled to assert it.
+  if (transaction.price !== null && !Quantity.isZero(transaction.price)) {
     return valueOf(quantity, transaction.price, transaction.amount.currency, scale);
   }
   return null;
@@ -273,10 +275,7 @@ function valueOf(
   currency: CurrencyCode,
   scale: number,
 ): MoneyType {
-  const shifted = Quantity.multiply(
-    Quantity.multiply(quantity, price),
-    '1' + '0'.repeat(scale),
-  );
+  const shifted = Quantity.multiply(Quantity.multiply(quantity, price), '1' + '0'.repeat(scale));
   const text = Quantity.toDatabaseString(shifted);
   const [whole = '0'] = text.split('.');
   return Money.of(BigInt(whole), currency);
@@ -311,7 +310,11 @@ export interface Holding {
  */
 export function holdingOf(
   fact: ProviderHoldingFact,
-  options: { readonly accountId: string; readonly securityId: string; readonly asOfDate: DateOnlyType },
+  options: {
+    readonly accountId: string;
+    readonly securityId: string;
+    readonly asOfDate: DateOnlyType;
+  },
 ): Holding {
   return {
     accountId: options.accountId,

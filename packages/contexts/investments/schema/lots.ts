@@ -136,11 +136,7 @@ export const basisMethodElections = pgTable(
     updatedAt: updatedAtColumn(),
   },
   (table) => [
-    unique('basis_method_elections_scope_uniq').on(
-      table.userId,
-      table.accountId,
-      table.securityId,
-    ),
+    unique('basis_method_elections_scope_uniq').on(table.userId, table.accountId, table.securityId),
   ],
 );
 

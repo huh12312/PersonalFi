@@ -13,11 +13,18 @@ Tables listed here are _claimed_; most do not exist yet. Claiming early is the p
 — it is what makes a collision visible at design time instead of at migration time.
 
 `securities`, `security_identifiers` and `security_overlay` exist as of
-`0013_securities.sql` (WP 3.1). The rest are still claims: `holdings`,
-`holdings_snapshots`, `investment_transactions` and `cost_basis_lots` land in 0014
-(WP 3.2). `prices`, `fx_rates` and `price_source_priority` exist as of
+`0013_securities.sql` (WP 3.1). `holdings`, `holdings_snapshots`,
+`investment_transactions`, `cost_basis_lots` and `basis_method_elections` exist as
+of `0014_lots.sql` (WP 3.2). `basis_method_elections` is the smallest of the five
+and the least obvious: it is one row per account × security recording the elected
+cost-basis method, and it is a _table_ rather than a column on `holdings` because
+an election outlives every position it was made about — a user who sells out of a
+fund entirely and buys back in is still bound by an `AVERAGE_COST` election made
+years earlier (07 §4.4, "sticky per security per account"). A column on `holdings`
+would be deleted with the holding and the stickiness would silently lapse.
+`prices`, `fx_rates` and `price_source_priority` exist as of
 `0015_market_data.sql` (WP 3.4) — this context owns and reads them, while
-`@ctx/integrations` owns the *fetching* and hands rows across through an
+`@ctx/integrations` owns the _fetching_ and hands rows across through an
 injected writer port (08 §1.3 #7). `wallet_addresses` lands in 0016 (WP 3.6) and
 is still a claim.
 
@@ -36,6 +43,7 @@ is still a claim.
 - `holdings_snapshots`
 - `investment_transactions`
 - `cost_basis_lots`
+- `basis_method_elections`
 - `prices`
 - `fx_rates`
 - `wallet_addresses`

@@ -53,12 +53,16 @@ import type { Holding, InvestmentTransaction } from './holdings.ts';
 import { DEFAULT_BASIS_METHOD, type Lot } from './lots.ts';
 
 export class LotConstraintError extends Error {
-  constructor(
-    readonly constraint: string,
-    message: string,
-  ) {
+  // A declared field and an assignment rather than a TypeScript parameter
+  // property: the repo compiles with `erasableSyntaxOnly`, so every construct
+  // has to survive type stripping with no emit. Same shape as `LotError` in
+  // `src/lots.ts`.
+  readonly constraint: string;
+
+  constructor(constraint: string, message: string) {
     super(message);
     this.name = 'LotConstraintError';
+    this.constraint = constraint;
   }
 }
 
@@ -68,8 +72,19 @@ export interface UpsertResult {
 }
 
 export interface LotStore {
-  /** Current position, per account × security. Idempotent on that key. */
-  upsertHolding(userId: string, holding: Holding, options: UpsertHoldingOptions): Promise<void>;
+  /**
+   * Current position, per account × security. Idempotent on that key.
+   *
+   * Returns whether the row actually moved, so the consumer can stay quiet on
+   * a re-delivered sync run instead of announcing a change that did not
+   * happen. "Did it move?" is answered by Postgres rather than by a read
+   * followed by a comparison, which would be two round trips and a race.
+   */
+  upsertHolding(
+    userId: string,
+    holding: Holding,
+    options: UpsertHoldingOptions,
+  ): Promise<{ readonly changed: boolean }>;
   /** One row per calendar day, so a past allocation is a read. */
   recordHoldingSnapshot(userId: string, holding: Holding): Promise<void>;
   /** Idempotent on the provider natural key. 01 §5.5: a window and an upsert, no cursor. */
@@ -144,7 +159,10 @@ export function lotFromRow(row: CostBasisLotRow): Lot {
  */
 export function assertLotIsWellFormed(lot: Lot): void {
   if (Quantity.compare(lot.quantity, Quantity.zero) <= 0) {
-    throw new LotConstraintError('cost_basis_lots_quantity_check', 'a lot needs a positive quantity');
+    throw new LotConstraintError(
+      'cost_basis_lots_quantity_check',
+      'a lot needs a positive quantity',
+    );
   }
   if (Quantity.compare(lot.quantityRemaining, Quantity.zero) < 0) {
     throw new LotConstraintError(
@@ -223,7 +241,19 @@ export function inMemoryLotStore(): InMemoryLotStore {
     elections,
 
     async upsertHolding(userId, holding) {
-      holdingRows.set(scopeKey(userId, holding.accountId, holding.securityId), holding);
+      const key = scopeKey(userId, holding.accountId, holding.securityId);
+      const existing = holdingRows.get(key);
+      holdingRows.set(key, holding);
+      // The same comparison the SQL `setWhere` makes, so the fake and the real
+      // store agree about what "changed" means.
+      const changed =
+        existing === undefined ||
+        !Quantity.equals(existing.quantity, holding.quantity) ||
+        existing.institutionValue.minor !== holding.institutionValue.minor ||
+        existing.institutionValue.currency !== holding.institutionValue.currency ||
+        (existing.costBasis?.minor ?? null) !== (holding.costBasis?.minor ?? null) ||
+        existing.asOfDate !== holding.asOfDate;
+      return { changed };
     },
     async recordHoldingSnapshot(userId, holding) {
       snapshots.set(
@@ -234,7 +264,10 @@ export function inMemoryLotStore(): InMemoryLotStore {
     async upsertInvestmentTransaction(userId, transaction) {
       const key = `${userId}${transaction.accountId}${transaction.provider}${transaction.providerTransactionId}`;
       const existing = transactions.get(key);
-      transactions.set(key, existing === undefined ? transaction : { ...transaction, id: existing.id });
+      transactions.set(
+        key,
+        existing === undefined ? transaction : { ...transaction, id: existing.id },
+      );
       return { id: existing?.id ?? transaction.id, inserted: existing === undefined };
     },
     async listOpenLots(userId, accountId, securityId) {
@@ -293,7 +326,7 @@ export function drizzleLotStore(db: Database, clock: Clock): LotStore {
                 Quantity.toDatabaseString(holding.quantity),
               ),
             );
-      await db
+      const touched = await db
         .insert(holdings)
         .values({
           id: options.id,
@@ -306,7 +339,8 @@ export function drizzleLotStore(db: Database, clock: Clock): LotStore {
           costBasisMinor: holding.costBasis?.minor ?? null,
           costBasisPerUnit: perUnit,
           costBasisIsUserSupplied: false,
-          costBasisSource: options.costBasisSource ?? (holding.costBasis === null ? null : 'BROKER'),
+          costBasisSource:
+            options.costBasisSource ?? (holding.costBasis === null ? null : 'BROKER'),
           asOfDate: holding.asOfDate,
           createdAt: now(),
           updatedAt: now(),
@@ -326,7 +360,22 @@ export function drizzleLotStore(db: Database, clock: Clock): LotStore {
             asOfDate: holding.asOfDate,
             updatedAt: now(),
           },
-        });
+          // `DO UPDATE` only when something actually differs, so `RETURNING`
+          // is empty on a no-op re-sync and the caller can tell. `IS DISTINCT
+          // FROM` rather than `<>` because a NULL cost basis is the common
+          // case here and `NULL <> NULL` is NULL, which would read as "no
+          // change" for one row and "changed" for the next.
+          setWhere: sql`
+            ${holdings.quantity} IS DISTINCT FROM excluded.quantity
+            OR ${holdings.institutionValueMinor} IS DISTINCT FROM excluded.institution_value_minor
+            OR ${holdings.currency} IS DISTINCT FROM excluded.currency
+            OR ${holdings.asOfDate} IS DISTINCT FROM excluded.as_of_date
+            OR (NOT ${holdings.costBasisIsUserSupplied}
+                AND ${holdings.costBasisMinor} IS DISTINCT FROM excluded.cost_basis_minor)
+          `,
+        })
+        .returning({ id: holdings.id });
+      return { changed: touched.length > 0 };
     },
 
     async recordHoldingSnapshot(userId, holding) {

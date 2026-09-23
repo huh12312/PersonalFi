@@ -464,10 +464,7 @@ export interface DisposalResult {
  * throwing would abandon the part we *can* attribute. `unmatchedQuantity` is
  * the honest report.
  */
-export function matchDisposal(
-  lots: readonly Lot[],
-  request: DisposalRequest,
-): DisposalResult {
+export function matchDisposal(lots: readonly Lot[], request: DisposalRequest): DisposalResult {
   const method = request.method ?? DEFAULT_BASIS_METHOD;
   const currency = request.proceeds.currency;
   const fees = request.fees ?? Money.zero(currency);
@@ -480,7 +477,15 @@ export function matchDisposal(
   const eligible = lots.filter(
     (lot) => lot.accountId === request.accountId && lot.securityId === request.securityId,
   );
-  const queue = orderLotsFor(eligible, { method, specificLotIds: request.specificLotIds });
+  // The spread is conditional rather than `specificLotIds: request.specificLotIds`
+  // because the repo compiles with `exactOptionalPropertyTypes`: an explicit
+  // `undefined` is not the same as an absent optional property, and the
+  // distinction is worth keeping — "the caller named no lots" and "the caller
+  // named the empty list" are different requests for SPECIFIC_ID.
+  const queue = orderLotsFor(eligible, {
+    method,
+    ...(request.specificLotIds === undefined ? {} : { specificLotIds: request.specificLotIds }),
+  });
 
   if (method === 'SPECIFIC_ID') {
     const available = new Set(eligible.filter(isOpen).map((lot) => lot.id));
@@ -514,8 +519,7 @@ export function matchDisposal(
   for (const lot of queue) {
     if (Quantity.compare(remainingToMatch, Quantity.zero) <= 0) break;
     const available = lot.quantityRemaining;
-    const take =
-      Quantity.compare(available, remainingToMatch) <= 0 ? available : remainingToMatch;
+    const take = Quantity.compare(available, remainingToMatch) <= 0 ? available : remainingToMatch;
     if (Quantity.compare(take, Quantity.zero) <= 0) continue;
 
     const basis =
@@ -555,9 +559,7 @@ export function matchDisposal(
     const proceeds = proceedShares[index] ?? Money.zero(currency);
     const feeShare = feeShares[index] ?? Money.zero(currency);
     const gain =
-      slice.basis === null
-        ? null
-        : Money.subtract(Money.subtract(proceeds, slice.basis), feeShare);
+      slice.basis === null ? null : Money.subtract(Money.subtract(proceeds, slice.basis), feeShare);
     if (slice.basis === null) {
       warnings.push({
         code: 'basis_unknown',
