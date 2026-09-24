@@ -11,6 +11,7 @@
     "@core/kernel": "workspace:*"
   },
   "devDependencies": {
+    "@ctx/investments": "workspace:*",
     "fast-check": "4.9.0"
   }
 }

@@ -79,8 +79,27 @@ export default defineConfig({
         },
       },
       {
+        // WP 3.14 added `test/` to the include: the investments ground-truth
+        // suite lives in `packages/seed/test/` (the path the Phase 3 dispatch
+        // §3 names for it) rather than beside the generator in `src/`, because
+        // it drives another package's engine over this package's output and is
+        // not part of the generator itself.
         root: './packages/seed',
-        test: { name: 'seed', include: ['src/**/*.test.ts'], environment: 'node' },
+        test: {
+          name: 'seed',
+          include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        // WP 3.14. The repo's checked-in repo checks (`check-ci-projects.ts`,
+        // `check-numeric-boundaries.ts`, ...) are TypeScript with exported pure
+        // functions and their own `--self-test`; this project is where the
+        // vitest half of that lives, so a check's rules can be driven over
+        // fixture *strings* as well as over the real tree. No Postgres, no
+        // build — it reads checked-in files only.
+        root: './',
+        test: { name: 'scripts', include: ['scripts/**/*.test.ts'], environment: 'node' },
       },
       {
         root: './packages/secretbox',

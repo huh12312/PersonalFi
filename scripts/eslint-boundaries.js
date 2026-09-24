@@ -110,7 +110,13 @@ const LAYERS = [
   {
     name: 'seed',
     prefix: 'packages/seed/',
-    allow: ['@core/kernel', ...UNIVERSAL],
+    // `@ctx/investments` is dev-only (a `devDependency`), used only from
+    // `test/`: WP 3.14's ground-truth suite drives that context's pure lot,
+    // basis, wash-sale and allocation engines over this package's generated
+    // dataset and compares the result to the lots the generator declared. No
+    // file under `src/` imports it — the generator declares its ground truth
+    // as literals precisely so the seed never depends on the engine it grades.
+    allow: ['@core/kernel', '@ctx/investments', ...UNIVERSAL],
     allowNodeBuiltins: true,
     why:
       'The demo-seed generator is a pure function of a seed integer. It produces typed ' +

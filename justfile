@@ -123,9 +123,12 @@ trivyignore-check:
 typecheck:
     pnpm run typecheck
 
-# ESLint (including the import-boundary rule), the schema-ownership check, and formatting.
+# ESLint (including the import-boundary rule), the schema-ownership check, formatting,
+# and 08 §6.5's numeric-boundary rule (WP 3.14: no `number` at a money or quantity
+# boundary; self-tests against scripts/fixtures/numeric-*.ts before it reads the tree).
 lint:
     pnpm run lint
+    node scripts/check-numeric-boundaries.ts
 
 format:
     pnpm run format

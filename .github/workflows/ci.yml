@@ -32,7 +32,11 @@
 #     ledger, categorization, connector-port, connector-manual, connector-csv,
 #     connector-plaid, connections, recurring, budgeting, notifications,
 #     insights, investments, integrations, planning, connector-coinbase,
-#     connector-walletrpc
+#     connector-walletrpc, scripts
+#
+#   `scripts` (WP 3.14) is the repo-checks project: it is rooted at the repo
+#   root rather than at a package and runs scripts/**/*.test.ts. It reads
+#   checked-in files only — no Postgres, no build — so it belongs in `test`.
 #   `migration-test` (Postgres 18 service, DATABASE_URL set):
 #     db, platform-db, secretbox-db, identity-db, api-db, testkit, ledger-db,
 #     categorization-db, connections-db, recurring-db, budgeting-db,
@@ -158,6 +162,16 @@ jobs:
       - name: every vitest project is covered by a CI job
         run: node scripts/check-ci-projects.ts
 
+      # WP 3.14 (docs/plan/03-phase-3-dispatch.md §3): 08 §6.5's rule — no
+      # `number` in an identifier matching /amount|balance|price|value|cost|
+      # quantity/ — over packages/** and apps/api/src/**, plus `toFixed` on a
+      # magnitude (the Phase 1 `toFixed(18)` bug). Self-tests against
+      # scripts/fixtures/numeric-{bad,good}.ts before it reads the tree, same
+      # shape as the two checks above. The vitest half runs in the `test` job's
+      # `scripts` project.
+      - name: no float at a money or quantity boundary
+        run: node scripts/check-numeric-boundaries.ts
+
   test:
     name: unit tests
     runs-on: ubuntu-latest
@@ -189,7 +203,7 @@ jobs:
             --project connector-walletrpc \
             --project connections --project recurring --project budgeting \
             --project notifications --project insights --project investments \
-            --project integrations --project planning
+            --project integrations --project planning --project scripts
 
   migration-test:
     name: migration test (postgres 18)

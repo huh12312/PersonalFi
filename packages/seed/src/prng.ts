@@ -75,11 +75,33 @@ export function shuffle<T>(rng: Rng, items: readonly T[]): T[] {
   return copy;
 }
 
-/** A decimal amount string with `decimals` places, uniform over `[min, max]`. */
+/**
+ * A decimal amount string with `decimals` places, uniform over `[min, max]`.
+ *
+ * The draw is the same one it always was — one `rng()` call, scaled and
+ * rounded to `decimals` places — but the *string* is built from the rounded
+ * integer rather than by dividing back down and calling `toFixed` on the
+ * float. Same bytes out (`Math.round(x·10^d)` is exactly the numerator
+ * `toFixed(d)` would have printed); no float crosses the boundary where the
+ * amount becomes text. 08 §6.5 and the WP 3.14 numeric-boundary check, which
+ * caught this line: `toFixed` on a float is how Phase 1 got seventeen digits
+ * of garbage out of `268.4`, and the fact that this call site passes `2` today
+ * is a property of its callers, not of this function.
+ */
 export function randomDecimal(rng: Rng, min: number, max: number, decimals = 2): string {
   const scale = 10 ** decimals;
-  const value = Math.round(randomFloat(rng, min, max) * scale) / scale;
-  return value.toFixed(decimals);
+  const minorUnits = BigInt(Math.round(randomFloat(rng, min, max) * scale));
+  return formatScaledInteger(minorUnits, decimals);
+}
+
+/** `-12345n, 2` -> `'-123.45'`. Exact, and no float anywhere in the path. */
+export function formatScaledInteger(minorUnits: bigint, decimals: number): string {
+  if (decimals === 0) return minorUnits.toString();
+  const negative = minorUnits < 0n;
+  const digits = (negative ? -minorUnits : minorUnits).toString().padStart(decimals + 1, '0');
+  const whole = digits.slice(0, digits.length - decimals);
+  const fraction = digits.slice(digits.length - decimals);
+  return `${negative ? '-' : ''}${whole}.${fraction}`;
 }
 
 const HEX = '0123456789abcdef';

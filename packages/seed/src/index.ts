@@ -28,3 +28,12 @@ export {
   type CreditOverspendScenario,
   type DuplicateServiceScenario,
 } from './phase2-scenarios.ts';
+/**
+ * WP 3.14: the investments dataset, additive in exactly the same way and for
+ * the same reason — securities, holdings, lots **with the ground truth a basis
+ * engine is graded against**, investment transactions, a price series, an FX
+ * series with one deliberate gap, a non-USD account, a manual asset and a
+ * liability. See `phase3-investments.ts`'s header for why it is not folded
+ * into `generateDemoData`.
+ */
+export * from './phase3-investments.ts';

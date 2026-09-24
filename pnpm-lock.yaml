@@ -1009,6 +1009,9 @@ importers:
         specifier: workspace:*
         version: link:../kernel
     devDependencies:
+      '@ctx/investments':
+        specifier: workspace:*
+        version: link:../contexts/investments
       fast-check:
         specifier: 4.9.0
         version: 4.9.0
