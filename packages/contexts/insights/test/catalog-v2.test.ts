@@ -157,10 +157,17 @@ describe('the WP 3.10 catalogue', () => {
     expect(missing).toEqual(['I7', 'I8', 'I9', 'I10', 'X4']);
   });
 
-  it('ships every new rule registered and off, with a reason', () => {
+  /**
+   * WP 3.10 shipped these seventeen off because four of their scopes had no
+   * reader. WP 3.10a landed the readers, so the assertion inverts: each ships
+   * **on**, with no reason, because there is no longer one to give. The
+   * manifest properties beside it are unchanged and still checked — enabling a
+   * rule must not have quietly changed what it is allowed to do.
+   */
+  it('ships every new rule enabled, its reader having landed', () => {
     for (const entry of NEW_RULES) {
-      expect(entry.defaultEnabled, entry.ruleId).toBe(false);
-      expect(entry.disabledReason, entry.ruleId).not.toBeNull();
+      expect(entry.defaultEnabled, entry.ruleId).toBe(true);
+      expect(entry.disabledReason, entry.ruleId).toBeNull();
       expect(entry.rule.manifest.kind, entry.ruleId).toBe('builtin');
       expect(entry.rule.manifest.capabilities.deterministic, entry.ruleId).toBe(true);
       // A built-in has no network path, so an `open_url` could never reach a

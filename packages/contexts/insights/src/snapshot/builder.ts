@@ -26,11 +26,32 @@
  *   2. **Did the user grant it?** The caller's `grantedScopes`, which comes from
  *      `snapshot_grants`.
  *   3. **Is there anything behind it in this phase?** `sourcedInPhase2`.
- *      `@ctx/investments` is Phase 3 and `@ctx/planning` is Phase 4, so
- *      `holdings.*`, `goals.list`, `risk.profile` and `market.watchlist` have no
- *      source. A granted-but-unsourced scope emits **no key**, exactly like an
+ *      `@ctx/planning` is Phase 4, so `goals.list`, `risk.profile` and
+ *      `market.watchlist` have no source; `institutions.names` has none by
+ *      choice. A granted-but-unsourced scope emits **no key**, exactly like an
  *      ungranted one — never an empty block, because an advisor cannot tell
- *      "empty" from "none" and would happily reason about zero.
+ *      "empty" from "none" and would happily reason about zero. WP 3.10a moved
+ *      `holdings.aggregate`, `holdings.detail`, `liabilities.terms` and
+ *      `market.rates` out of that set by landing the four arms below.
+ *
+ * ## The four Phase 3 arms, and the three reinterpretations they are allowed
+ *
+ * `#holdingsAggregate`, `#holdingsDetail`, `#liabilitiesTerms` and
+ * `#marketRates` implement `wp3.10-advisor-catalog-v2.md` §7.1. Three rules in
+ * them are load-bearing enough to state here rather than only at the call site:
+ *
+ *   * **A `securityId` never crosses.** The ports carry one (the analytics
+ *     reports are keyed by security); these arms emit `symbol` and drop it, and
+ *     a position with no symbol is dropped entirely rather than crossing as an
+ *     id-shaped string. A row that cannot be named cannot be cited either.
+ *   * **A target class absent from the portfolio is emitted at weight zero.**
+ *     Omitting it makes I1 skip a real drift of the whole target weight,
+ *     because it cannot cite a ref that does not resolve — the one known
+ *     behavioural gap in I1, closed here rather than in the rule.
+ *   * **`percent → ratio` happens exactly once, and fails closed.** FRED
+ *     publishes in percent; a series whose units are not percent-per-annum is
+ *     **refused**, not converted. This is the only reinterpretation the
+ *     snapshot performs on a provider value.
  *
  * ## Minimisation is read from the catalogue, not written here
  *
@@ -63,7 +84,7 @@ import {
   type AmountBucket,
   type MoneyJson,
 } from '../contract/snapshot.ts';
-import type { SnapshotPorts } from './ports.ts';
+import { PERCENT_PER_ANNUM, type InsightsHoldings, type SnapshotPorts } from './ports.ts';
 import { createTokeniser, inputDigest, type Tokeniser } from './tokens.ts';
 
 /** How much history each block asks for. Every one is a cap, never a target. */
@@ -74,7 +95,27 @@ export const SNAPSHOT_WINDOWS = Object.freeze({
   topMerchants: 32,
   rawTransactionDays: 90,
   rawTransactionRows: 2000,
+  /** §7.1: `ConcentrationReport.positions`, top 32 by weight. */
+  topPositions: 32,
+  /** The schema's own ceilings, restated so the slice and the cap are one number. */
+  assetClasses: 32,
+  detailPositions: 256,
+  lotsPerPosition: 32,
+  liabilities: 64,
+  marketRates: 16,
 });
+
+/**
+ * How old an observation may be before `market.rates` calls it stale.
+ *
+ * WP 3.4 §5.1's ladder for prices, at the granularity a snapshot has: strictly
+ * more than 24 h is STALE and exactly 24 h is FRESH, *"which leaves a price
+ * taken at yesterday's close still fresh at today's"*. One day, measured
+ * between `observedOn` and `asOf` — the builder never reads a clock (08 §4.1),
+ * so the composition root resolves the provider's answer into the holder's own
+ * zone and this compares two dates.
+ */
+export const MARKET_RATE_FRESH_DAYS = 1;
 
 export interface BuildSnapshotInput {
   readonly userId: string;
@@ -161,6 +202,49 @@ function ratio(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
+/**
+ * `"4.25"` → `0.0425`. A decimal *point shift*, not a division.
+ *
+ * The one reinterpretation the snapshot performs on a provider value (§7.1), so
+ * it is exact rather than merely close: shifting the point in the string and
+ * parsing once gives the nearest double to `0.0425`, which round-trips through
+ * `String()` as `"0.0425"`. `Number(text) / 100` does not — it is two
+ * roundings, and `23.99 / 100` prints as `0.23990000000000002`, which is the
+ * kind of figure a reviewer cannot tell from a bug.
+ *
+ * `null` for anything that is not a plain decimal literal, and `null` for a
+ * result outside `[0,1]`. A rate above 100% or below zero is refused rather
+ * than clamped: `unitInterval` would silently turn a 150% APR into 100%, which
+ * is a wrong number with no error, and a clamp is exactly the "plausible-looking
+ * rate" §7.1 says must fail closed.
+ */
+export function percentStringToRatio(text: string): number | null {
+  if (!/^-?\d+(\.\d+)?$/u.test(text)) return null;
+  const negative = text.startsWith('-');
+  const digits = negative ? text.slice(1) : text;
+  const [whole = '0', fraction = ''] = digits.split('.');
+  // Shift left two places: the last two integer digits become the leading
+  // fraction digits. Padding first makes `"4.25"` and `"0.04"` one code path.
+  const padded = whole.padStart(3, '0');
+  const shifted = `${padded.slice(0, -2)}.${padded.slice(-2)}${fraction}`;
+  const value = Number(`${negative ? '-' : ''}${shifted}`);
+  if (!Number.isFinite(value) || value < 0 || value > 1) return null;
+  return value;
+}
+
+/**
+ * What one `build()` has already read.
+ *
+ * `holdings.aggregate` and `holdings.detail` are two grants over one valuation.
+ * Reading twice would double the price lookups and — worse — could answer twice
+ * differently if a refresh landed between them, putting a `by_asset_class`
+ * weight and a `positions[]` market value in the same snapshot that do not
+ * reconcile. One promise, awaited twice.
+ */
+interface BuildMemo {
+  holdings?: Promise<InsightsHoldings | null>;
+}
+
 // ---------------------------------------------------------------------------
 // The builder
 // ---------------------------------------------------------------------------
@@ -201,11 +285,12 @@ export class SnapshotBuilder {
 
     const snapshot: Record<string, unknown> = {};
     const emitted: AdvisorScope[] = [];
+    const memo: BuildMemo = {};
 
     for (const scope of grantedScopes) {
       const definition = scopeDefinition(scope);
       if (!definition.sourcedInPhase2) continue;
-      const block = await this.#blockFor(scope, input, tokeniser, grantedScopes);
+      const block = await this.#blockFor(scope, input, tokeniser, grantedScopes, memo);
       if (block === null) continue;
       snapshot[definition.key] = block;
       emitted.push(scope);
@@ -232,6 +317,7 @@ export class SnapshotBuilder {
     input: BuildSnapshotInput,
     tokeniser: Tokeniser,
     granted: readonly AdvisorScope[],
+    memo: BuildMemo,
   ): Promise<unknown> {
     switch (scope) {
       case 'networth.summary':
@@ -244,6 +330,14 @@ export class SnapshotBuilder {
         return this.#budgets(input, tokeniser);
       case 'recurring.list':
         return this.#recurring(input, tokeniser);
+      case 'holdings.aggregate':
+        return this.#holdingsAggregate(input, memo);
+      case 'holdings.detail':
+        return this.#holdingsDetail(input, memo);
+      case 'liabilities.terms':
+        return this.#liabilitiesTerms(input, tokeniser);
+      case 'market.rates':
+        return this.#marketRates(input);
       case 'transactions.summary':
         return this.#transactionSummary(input, tokeniser);
       case 'transactions.raw':
@@ -508,6 +602,275 @@ export class SnapshotBuilder {
         amount_bucket: bucketOf(row.amount),
         direction: row.amount.minor < 0n ? 'outflow' : 'inflow',
       })),
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // WP 3.10a — the four Phase 3 arms (wp3.10-advisor-catalog-v2.md §7.1)
+  // -------------------------------------------------------------------------
+
+  /** One valuation per `build()`. See `BuildMemo`. */
+  #holdingsOnce(input: BuildSnapshotInput, memo: BuildMemo): Promise<InsightsHoldings | null> {
+    memo.holdings ??= this.#ports.investments.holdings({
+      userId: input.userId,
+      asOf: input.today,
+    });
+    return memo.holdings;
+  }
+
+  /**
+   * `holdings.aggregate` — weights, and nothing per account.
+   *
+   * Two §7.1 duties are implemented here and nowhere else:
+   *
+   *   * **`securityId` and `holdingCount` are dropped**, and `symbol` is the
+   *     only name a position crosses under. A position with no ticker is
+   *     dropped whole rather than given a placeholder: the schema's `symbol` is
+   *     `min(1)`, an advisor cannot cite what it cannot name, and a synthesised
+   *     `"UNKNOWN"` would collide every unnamed holding into one row.
+   *   * **A target asset class absent from the portfolio is emitted at weight
+   *     zero.** Without the row, I1 cannot cite a `by_asset_class` ref for a
+   *     class the holder targets and owns none of, so it skips a drift of the
+   *     entire target weight — the largest drift there is. The zero-weight row
+   *     is the fix, and it belongs here rather than in the rule because a
+   *     second rule reading the same block would otherwise need the same
+   *     special case.
+   */
+  async #holdingsAggregate(input: BuildSnapshotInput, memo: BuildMemo): Promise<unknown> {
+    const holdings = await this.#holdingsOnce(input, memo);
+    if (holdings === null) return null;
+    const { aggregate } = holdings;
+
+    const present = new Set(aggregate.byAssetClass.map((slice) => slice.assetClass));
+    const zeroWeightTargets = aggregate.targets
+      .filter((target) => !present.has(target.assetClass))
+      .map((target) => ({
+        asset_class: target.assetClass,
+        weight: 0,
+        value: { minor: '0', currency: holdings.currency },
+      }));
+
+    const byAssetClass = [
+      ...aggregate.byAssetClass.map((slice) => ({
+        asset_class: slice.assetClass,
+        weight: ratio(slice.weight),
+        value: moneyJson(slice.value),
+      })),
+      ...zeroWeightTargets,
+    ].slice(0, SNAPSHOT_WINDOWS.assetClasses);
+
+    return {
+      as_of: input.today,
+      currency: holdings.currency,
+      investable_total: moneyJson(aggregate.investableTotal),
+      // Required, never omitted (07 §4.3): it is I1's own self-suppression
+      // input, and a rule that could not see the coverage would state a drift
+      // over a portfolio that is 18% unclassified anyway.
+      unclassified_pct: ratio(aggregate.unclassifiedPct),
+      by_asset_class: byAssetClass,
+      top_positions: aggregate.positions
+        .filter((position) => position.symbol !== null)
+        .slice(0, SNAPSHOT_WINDOWS.topPositions)
+        .map((position) => ({
+          symbol: position.symbol as string,
+          weight: ratio(position.weight),
+          value: moneyJson(position.value),
+          asset_class: position.assetClass,
+          employer_stock: position.employerStock,
+          is_crypto: position.isCrypto,
+        })),
+      // Empty when unset. §8 Q9: an unset target never becomes an implied
+      // 60/40, so I1 withholds on an empty list rather than inventing a
+      // benchmark to drift from.
+      target_allocation: aggregate.targets
+        .slice(0, SNAPSHOT_WINDOWS.assetClasses)
+        .map((target) => ({
+          asset_class: target.assetClass,
+          weight: ratio(target.weight),
+        })),
+      account_type_mix: Object.fromEntries(
+        Object.entries(aggregate.accountTypeMix).map(([key, weight]) => [key, ratio(weight)]),
+      ),
+      // Spread rather than `: undefined`. Both blocks are `.optional()` and the
+      // rule the whole snapshot rests on is that absence means "none" — an
+      // explicit `undefined` key is absent to `JSON.stringify` and present to
+      // `Object.keys`, which is two answers to one question.
+      ...(aggregate.idleCash === null
+        ? {}
+        : {
+            idle_cash: {
+              total: moneyJson(aggregate.idleCash.total),
+              floor: moneyJson(aggregate.idleCash.floor),
+              min_days: aggregate.idleCash.minDays,
+              longest_idle_days: aggregate.idleCash.longestIdleDays,
+            },
+          }),
+      ...(aggregate.cryptoCustody === null
+        ? {}
+        : {
+            crypto_custody: {
+              exchange_value: moneyJson(aggregate.cryptoCustody.exchangeValue),
+              self_custody_value: moneyJson(aggregate.cryptoCustody.selfCustodyValue),
+              unknown_value: moneyJson(aggregate.cryptoCustody.unknownValue),
+            },
+          }),
+    };
+  }
+
+  /**
+   * `holdings.detail` — one row per position, as ages and classes.
+   *
+   * Everything that would identify *where* a position sits is already absent
+   * from the port type; what this arm owns is the pair of rules that cannot be
+   * expressed as an absent field:
+   *
+   *   * **`cost_basis` and `unrealized` are `null` together.** An unknown basis
+   *     is not a zero one (04 §5.5) — a zero would make the unrealised gain
+   *     wrong by the whole position, and X6's entire subject is the difference.
+   *   * **A lot crosses as an age**, never as an open date. The port converts,
+   *     because the subtraction needs the date; this arm is where a future
+   *     `opened_date` would have to be added to leak one, and there is nowhere
+   *     in the schema to put it.
+   */
+  async #holdingsDetail(input: BuildSnapshotInput, memo: BuildMemo): Promise<unknown> {
+    const holdings = await this.#holdingsOnce(input, memo);
+    if (holdings === null) return null;
+    if (holdings.positions.length === 0) return null;
+
+    const named = holdings.positions.filter((position) => position.symbol !== null);
+    if (named.length === 0) return null;
+
+    return {
+      as_of: input.today,
+      currency: holdings.currency,
+      positions: named.slice(0, SNAPSHOT_WINDOWS.detailPositions).map((position) => {
+        // Stated once, here, rather than trusted of the adapter: the pairing is
+        // the contract's own invariant and a port that broke it would otherwise
+        // produce a schema-valid block claiming a gain over an unknown basis.
+        const basisKnown = position.costBasis !== null;
+        return {
+          symbol: position.symbol as string,
+          asset_class: position.assetClass,
+          account_type: position.accountType,
+          quantity: position.quantity,
+          cost_basis: position.costBasis === null ? null : moneyJson(position.costBasis),
+          market_value: moneyJson(position.marketValue),
+          unrealized:
+            !basisKnown || position.unrealized === null ? null : moneyJson(position.unrealized),
+          oldest_lot_days: position.oldestLotDays,
+          basis_known: basisKnown,
+          is_crypto: position.isCrypto,
+          is_stablecoin: position.isStablecoin,
+          employer_stock: position.employerStock,
+          expense_ratio: position.expenseRatio === null ? null : ratio(position.expenseRatio),
+          peer_expense_ratio:
+            position.peerExpenseRatio === null ? null : ratio(position.peerExpenseRatio),
+          annual_fee_cost:
+            position.annualFeeCost === null ? null : moneyJson(position.annualFeeCost),
+          high_fee: position.highFee,
+          lots: position.lots.slice(0, SNAPSHOT_WINDOWS.lotsPerPosition).map((lot) => ({
+            opened_days: lot.openedDays,
+            quantity: lot.quantity,
+            cost_basis: lot.costBasis === null ? null : moneyJson(lot.costBasis),
+            market_value: moneyJson(lot.marketValue),
+            unrealized:
+              lot.costBasis === null || lot.unrealized === null ? null : moneyJson(lot.unrealized),
+            long_term: lot.longTerm,
+          })),
+        };
+      }),
+    };
+  }
+
+  /**
+   * `liabilities.terms` — the APR / limit / statement block the D family needed.
+   *
+   * `liability_ref` is minted by the existing tokeniser, in the `liability`
+   * domain, which is always pseudonymised for every advisor kind — see
+   * `tokens.ts`' header for why this block and not `cash.summary`.
+   */
+  async #liabilitiesTerms(input: BuildSnapshotInput, tokeniser: Tokeniser): Promise<unknown> {
+    const read = await this.#ports.investments.liabilities({
+      userId: input.userId,
+      asOf: input.today,
+    });
+    if (read === null || read.liabilities.length === 0) return null;
+
+    return {
+      as_of: input.today,
+      currency: read.currency,
+      liabilities: read.liabilities.slice(0, SNAPSHOT_WINDOWS.liabilities).map((liability) => ({
+        liability_ref: tokeniser.ref('liability', liability.id),
+        kind: liability.kind,
+        apr: liability.apr === null ? null : ratio(liability.apr),
+        promo_apr: liability.promoApr === null ? null : ratio(liability.promoApr),
+        promo_apr_end_date: liability.promoAprEndDate,
+        credit_limit: liability.creditLimit === null ? null : moneyJson(liability.creditLimit),
+        statement_balance:
+          liability.statementBalance === null ? null : moneyJson(liability.statementBalance),
+        current_balance: moneyJson(liability.currentBalance),
+        minimum_payment:
+          liability.minimumPayment === null ? null : moneyJson(liability.minimumPayment),
+        payment_due_date: liability.paymentDueDate,
+        last_payment_date: liability.lastPaymentDate,
+        last_payment_amount:
+          liability.lastPaymentAmount === null ? null : moneyJson(liability.lastPaymentAmount),
+        minimum_only_months: liability.minimumOnlyMonths,
+      })),
+    };
+  }
+
+  /**
+   * `market.rates` — a dated, attributed, converted rate.
+   *
+   * The three duties §7.1 gives the builder and no rule:
+   *
+   *   1. **Convert to a ratio and record what was converted from**, refusing
+   *      any series whose units are not percent-per-annum. A basis-point or
+   *      index series turned into a "rate" is a plausible-looking number with
+   *      nothing behind it, so the refusal drops the row — and a block whose
+   *      every row was refused emits no key at all rather than an empty
+   *      `rates: []`, which an advisor would read as "the market pays nothing".
+   *   2. **Compute `stale`**, never read it. See `MARKET_RATE_FRESH_DAYS`.
+   *   3. **Carry the attribution verbatim.** 01 §4.3 makes the sentence a
+   *      licence condition and a paraphrase of a licence condition is a new
+   *      licence condition, so it is copied, not templated. A block with no
+   *      attribution emits no key: a rate a surface cannot lawfully print is
+   *      worse than no rate.
+   */
+  async #marketRates(input: BuildSnapshotInput): Promise<unknown> {
+    const read = await this.#ports.marketData.rates({
+      userId: input.userId,
+      asOf: input.today,
+    });
+    if (read === null) return null;
+    if (read.attribution.length === 0) return null;
+
+    const rates: unknown[] = [];
+    for (const observation of read.observations) {
+      if (observation.units !== PERCENT_PER_ANNUM) continue;
+      const rate = percentStringToRatio(observation.value);
+      if (rate === null) continue;
+      rates.push({
+        series_id: observation.seriesId,
+        kind: observation.kind,
+        observation_date: observation.observationDate,
+        rate,
+        // What we converted *from*, so the conversion is auditable rather than
+        // inferable from the size of the number.
+        units: observation.units,
+        stale:
+          DateOnly.differenceInDays(observation.observedOn, input.today) > MARKET_RATE_FRESH_DAYS,
+      });
+      if (rates.length >= SNAPSHOT_WINDOWS.marketRates) break;
+    }
+    if (rates.length === 0) return null;
+
+    return {
+      as_of: input.today,
+      attribution: read.attribution,
+      attribution_url: read.attributionUrl,
+      rates,
     };
   }
 }

@@ -97,22 +97,38 @@ const WAVE_TWO_REASON =
   'this rule is built and proven on the seed and needs only its enable flag.';
 
 /**
- * Why the three WP 3.10 waves ship off.
+ * Why the three WP 3.10 waves shipped off, and why they ship **on** now.
  *
- * Two reasons, and the second is the load-bearing one. 07 §7.4's schedule puts
- * debt in week two and investing in week three, which is reason enough on its
- * own. But these rules also read four scopes that **no reader fills yet** —
- * `holdings.aggregate`, `holdings.detail`, `liabilities.terms` and
- * `market.rates` all carry `sourcedInPhase2: false`, so `SnapshotBuilder`
- * emits no block for them and every rule here would return nothing. Shipping
- * them enabled would be shipping a wave of silence and calling it a release.
- * Turning one on is a single `advisors.enabled` update once §7 of the evidence
- * doc's builder additions land.
+ * WP 3.10 gave two reasons, and the second was the load-bearing one: these
+ * rules read four scopes that no reader filled — `holdings.aggregate`,
+ * `holdings.detail`, `liabilities.terms` and `market.rates` all carried
+ * `sourcedInPhase2: false`, so `SnapshotBuilder` emitted no block for them and
+ * every rule here would have returned nothing. Shipping them enabled would have
+ * been shipping a wave of silence and calling it a release.
+ *
+ * **WP 3.10a landed all four readers** (`docs/evidence/phase-3/
+ * wp3.10a-snapshot-readers.md`), and every scope the D, I and X families
+ * declare — the four above plus `networth.summary`, `cash.summary` and
+ * `cashflow.monthly` — is now sourced. The load-bearing reason is gone, so the
+ * seventeen ship enabled. 07 §7.4's week-two/week-three schedule was the weaker
+ * reason and is an *operator's* pacing decision, not a property of the code: a
+ * deployment that wants the original stagger switches rules off through
+ * `advisors.enabled` (kill switch 2), which needs no deploy and which a restart
+ * never undoes — `registerAdvisor`'s conflict branch deliberately does not
+ * touch `enabled`. Defaulting to off for a schedule instead would leave the
+ * only *checkable* claim in this file — "off because nothing can fill it" —
+ * false while still being asserted.
+ *
+ * The alert budget absorbs the whole catalogue at once: `wp3.10-advisor-
+ * catalog-v2.md` §4 ran all thirty-three proposals through `rank()` and the
+ * ceiling, and `alert-budget-wave.test.ts` pins it — 5 on the dashboard, 20 in
+ * the list, the rest held in overflow rather than deleted. That is what makes
+ * "release them all" a presentation decision rather than a wall of red.
  */
 const WAVE_THREE_REASON =
-  'Wave three. 07 §7.4 releases debt, then investing; and the scopes these rules read have no ' +
-  'reader behind them until the SnapshotBuilder additions land, so an enabled rule would ' +
-  'return nothing rather than something.';
+  'Wave three. 07 §7.4 releases debt, then investing, then crypto. Every scope these rules read ' +
+  'has a reader behind it since WP 3.10a, so this is a pacing decision an operator can make ' +
+  'through advisors.enabled and not a statement that the rule would return nothing.';
 
 function reasonFor(wave: RuleWave, defaultEnabled: boolean): string | null {
   if (defaultEnabled) return null;
@@ -156,8 +172,13 @@ function required(rule: BuiltinRule | undefined, id: string): BuiltinRule {
 /**
  * Every implemented rule, in 07 order within each family.
  *
- * Wave one — cash and subscriptions — ships enabled. Wave two — spending —
- * ships registered and off.
+ * Wave one — cash and subscriptions — ships enabled, and since WP 3.10a so do
+ * debt, investing and crypto: every scope they read has a reader. **Spending is
+ * the one wave still off**, and for a reason that has nothing to do with
+ * readers — `transactions.raw` and `transactions.summary` have been sourced
+ * since Phase 2. S2–S10 are a deliberate wave-two hold (`WAVE_TWO_REASON`), so
+ * "off" in this file means exactly one thing today: somebody chose to stagger
+ * it, not that it would return nothing.
  */
 export const BUILTIN_CATALOGUE: readonly BuiltinCatalogueEntry[] = Object.freeze([
   entry('U2', required(priceIncrease, 'U2'), 'cash_and_subscriptions', 'P1', true),
@@ -174,26 +195,30 @@ export const BUILTIN_CATALOGUE: readonly BuiltinCatalogueEntry[] = Object.freeze
   entry('S7', required(fees, 'S7'), 'spending', 'P1', false),
   entry('S9', required(negativeMonth, 'S9'), 'spending', 'P1', false),
   entry('S10', required(annualBills, 'S10'), 'spending', 'P1', false),
-  // --- WP 3.10, debt (07 §7.4's week two) --------------------------------
-  entry('D1', required(payoffOrder, 'D1'), 'debt', 'P0', false),
-  entry('D2', required(rateAboveMarket, 'D2'), 'debt', 'P1', false),
-  entry('D3', required(minimumOnly, 'D3'), 'debt', 'P0', false),
-  entry('D4', required(promoEnding, 'D4'), 'debt', 'P0', false),
-  entry('D5', required(principalAgainst, 'D5'), 'debt', 'P2', false),
-  entry('D6', required(missedPayment, 'D6'), 'debt', 'P0', false),
-  // --- WP 3.10, investing (week three) -----------------------------------
-  entry('I1', required(drift, 'I1'), 'investing', 'P1', false),
-  entry('I2', required(expenseRatio, 'I2'), 'investing', 'P0', false),
-  entry('I3', required(brokerageCash, 'I3'), 'investing', 'P1', false),
-  entry('I4', required(concentration, 'I4'), 'investing', 'P0', false),
-  entry('I5', required(employerStock, 'I5'), 'investing', 'P0', false),
-  entry('I6', required(lossLot, 'I6'), 'investing', 'P0', false),
-  // --- WP 3.10, crypto ---------------------------------------------------
-  entry('X1', required(cryptoShare, 'X1'), 'crypto', 'P0', false),
-  entry('X2', required(cryptoCustody, 'X2'), 'crypto', 'P1', false),
-  entry('X3', required(idleStablecoins, 'X3'), 'crypto', 'P1', false),
-  entry('X5', required(cryptoLoss, 'X5'), 'crypto', 'P1', false),
-  entry('X6', required(cryptoBasis, 'X6'), 'crypto', 'P1', false),
+  // --- WP 3.10, debt. Enabled by WP 3.10a: `liabilities.terms` (all six) and
+  //     `market.rates` (D2) now have readers; D5 also reads `cash.summary` and
+  //     `cashflow.monthly`, sourced since Phase 2.
+  entry('D1', required(payoffOrder, 'D1'), 'debt', 'P0', true),
+  entry('D2', required(rateAboveMarket, 'D2'), 'debt', 'P1', true),
+  entry('D3', required(minimumOnly, 'D3'), 'debt', 'P0', true),
+  entry('D4', required(promoEnding, 'D4'), 'debt', 'P0', true),
+  entry('D5', required(principalAgainst, 'D5'), 'debt', 'P2', true),
+  entry('D6', required(missedPayment, 'D6'), 'debt', 'P0', true),
+  // --- WP 3.10, investing. Enabled by WP 3.10a: `holdings.aggregate` and
+  //     `holdings.detail` now have readers.
+  entry('I1', required(drift, 'I1'), 'investing', 'P1', true),
+  entry('I2', required(expenseRatio, 'I2'), 'investing', 'P0', true),
+  entry('I3', required(brokerageCash, 'I3'), 'investing', 'P1', true),
+  entry('I4', required(concentration, 'I4'), 'investing', 'P0', true),
+  entry('I5', required(employerStock, 'I5'), 'investing', 'P0', true),
+  entry('I6', required(lossLot, 'I6'), 'investing', 'P0', true),
+  // --- WP 3.10, crypto. Enabled by WP 3.10a: `holdings.aggregate` and
+  //     `holdings.detail`; X3 also reads `market.rates`.
+  entry('X1', required(cryptoShare, 'X1'), 'crypto', 'P0', true),
+  entry('X2', required(cryptoCustody, 'X2'), 'crypto', 'P1', true),
+  entry('X3', required(idleStablecoins, 'X3'), 'crypto', 'P1', true),
+  entry('X5', required(cryptoLoss, 'X5'), 'crypto', 'P1', true),
+  entry('X6', required(cryptoBasis, 'X6'), 'crypto', 'P1', true),
 ]);
 
 /**

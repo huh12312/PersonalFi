@@ -384,39 +384,53 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
 });
 
 /**
- * WP 3.9. The claim WP 3.10 left as an owed item, as a test.
+ * WP 3.9 wrote this test as a standing claim. WP 3.10a made the claim change,
+ * and this is the test re-derived rather than relaxed.
  *
- * `docs/evidence/phase-3/wp3.10-advisor-catalog-v2.md` §7.1 ships seventeen
- * rules "registered and off", for two reasons — 07 §7.4's release schedule, and
- * the fact that four of the scopes they read have **no reader behind them**.
- * That second reason is a claim about this repository's wiring, and until now
- * nothing checked it. The failure it guards against is silent in the worst way:
- * `SnapshotBuilder#blockFor` returns `null` for an unsourced scope, so a rule
- * enabled against one produces **no insight at all** rather than an error, and
- * the release looks like a quiet week rather than a broken one.
+ * `docs/evidence/phase-3/wp3.10-advisor-catalog-v2.md` §7.1 shipped seventeen
+ * rules "registered and off" for two reasons — 07 §7.4's release schedule, and
+ * the fact that four of the scopes they read had **no reader behind them**.
+ * That second reason is a claim about this repository's wiring, and it is the
+ * one this test checks. The failure it guards against is silent in the worst
+ * way: `SnapshotBuilder#blockFor` returns `null` for an unsourced scope, so a
+ * rule enabled against one produces **no insight at all** rather than an error,
+ * and the release looks like a quiet week rather than a broken one.
  *
- * ## What writing this test found
+ * `wp3.10a-snapshot-readers.md` landed those four readers — the two ports, the
+ * four `#blockFor` arms and the four `sourcedInPhase2` flips — so the expected
+ * sets here **shrink**, in both directions. The unsourced set is now exactly the
+ * four whose source context does not exist, and the reviewed-exception list is
+ * now empty. Neither was loosened to match the code: each was re-derived from
+ * what is actually wired, and each still fails if a flag is reverted, if a fifth
+ * unsourced scope appears, or if a reader is deleted.
+ *
+ * ## What writing this test found, kept because it is still true
  *
  * `requires_scopes` is a **grant** list, not a list of hard requirements. Two
- * rules that ship *enabled* — C1 and C2 — declare `market.rates` and are
- * correct to: `rules-cash.ts` reads `snapshot.market_rates?.rates ?? []` and
- * falls back to "the best rate you already hold", which is byte-identical to
- * what Phase 2 shipped. So "an enabled rule may not read an unsourced scope" is
- * *too strong*, and asserting it would have forced a wrong fix. What is
- * assertable, and is what this test says, is that the list of enabled rules
- * doing so is **exactly the reviewed one** — a new rule joining it fails here
- * until somebody reads its fallback and adds it deliberately.
+ * rules that shipped *enabled* — C1 and C2 — declared `market.rates` while it
+ * had no reader, and were correct to: `rules-cash.ts` reads
+ * `snapshot.market_rates?.rates ?? []` and falls back to "the best rate you
+ * already hold". So "an enabled rule may not read an unsourced scope" is *too
+ * strong*, and asserting it would have forced a wrong fix. What is assertable,
+ * and is what this test says, is that the list of enabled rules doing so is
+ * **exactly the reviewed one**. That list is empty today only because
+ * `market.rates` gained a reader — not because the rule was removed.
  */
-describe('advisor scopes and their readers (WP 3.9)', () => {
+describe('advisor scopes and their readers (WP 3.9, closed by WP 3.10a)', () => {
   /**
-   * The four blocks `wp3.10-advisor-catalog-v2.md` §7.1 owes, and the reason WP
-   * 3.9 could not land them: `SnapshotPorts`, `SnapshotBuilder#blockFor` and
-   * `contract/scopes.ts` are all `packages/contexts/insights/src/**`, which WP
-   * 3.9's brief forbids it from editing, and there is no snapshot builder in
-   * `apps/api` to put them in instead. `docs/evidence/phase-3/wp3.9-routes.md`
-   * §7 states the exact additions and the seam they stop at.
+   * The four blocks `wp3.10-advisor-catalog-v2.md` §7.1 owed, **landed by WP
+   * 3.10a**: `InvestmentsPort.holdings`, `InvestmentsPort.liabilities` and
+   * `MarketDataPort.rates` in `snapshot/ports.ts`, the `#holdingsAggregate`,
+   * `#holdingsDetail`, `#liabilitiesTerms` and `#marketRates` arms in
+   * `snapshot/builder.ts`, and the four flag flips in `contract/scopes.ts` — all
+   * in one change, because an arm without a flag is dead code and a flag without
+   * an arm is a silent no-key.
+   *
+   * Listed rather than deleted, and asserted **sourced** below: reverting any
+   * one of the four flips fails here by name, which is the direction that
+   * matters now that the readers exist.
    */
-  const OWED_READERS = [
+  const LANDED_IN_WP_3_10A = [
     'holdings.aggregate',
     'holdings.detail',
     'liabilities.terms',
@@ -441,15 +455,20 @@ describe('advisor scopes and their readers (WP 3.9)', () => {
    * Rules that ship **on** while declaring a scope with no reader, each
    * reviewed and each with a fallback that is not silence.
    *
-   * Both are `rules-cash.ts`'s: with a published FRED rate they benchmark
-   * against the world, and without one they benchmark against the best account
-   * the user already holds — the Phase 2 behaviour, unchanged. A rule added to
-   * this list without that property would ship a wave of silence.
+   * **Empty since WP 3.10a, and emptied by a reader rather than by an edit to
+   * this list.** It held C1 and C2, both `rules-cash.ts`', whose only unsourced
+   * scope was `market.rates`; that scope now has `#marketRates` behind it, so
+   * neither rule qualifies any more. Their fallback is untouched and still
+   * exercised — `market_rates` is absent whenever the process has no FRED source
+   * (`app.ts`' on-demand run: see the port wiring in `routes/insights.ts`), so
+   * "the best rate you already hold" remains a live path, not dead code.
+   *
+   * An empty expectation is still a live tripwire: a rule that ships enabled
+   * against `goals.list`, `risk.profile`, `market.watchlist` or
+   * `institutions.names` fails here until somebody reads its fallback and adds
+   * it deliberately.
    */
-  const DEGRADES_WITHOUT_ITS_READER = [
-    'builtin.cash.idle_above_cushion',
-    'builtin.cash.yield_spread',
-  ];
+  const DEGRADES_WITHOUT_ITS_READER: readonly string[] = [];
 
   it('every advisor scope has a reader', () => {
     const byScope = new Map(SCOPE_CATALOGUE.map((definition) => [definition.scope, definition]));
@@ -461,24 +480,41 @@ describe('advisor scopes and their readers (WP 3.9)', () => {
     }
     expect(SCOPE_CATALOGUE).toHaveLength(ADVISOR_SCOPES.length);
 
-    // 2. The set of scopes with no reader is exactly the four §7.1 owes — in
-    //    both directions. Adding a fifth unsourced scope fails here; so does
-    //    landing a reader without flipping its `sourcedInPhase2` flag in the
-    //    same commit, which would leave the builder with a dead arm.
+    // 2. The set of scopes with no reader is now exactly the four whose source
+    //    context does not exist — in both directions. Adding a fifth unsourced
+    //    scope fails here; so does landing a reader without flipping its
+    //    `sourcedInPhase2` flag in the same commit, which would leave the
+    //    builder with a dead arm.
     const unsourced = SCOPE_CATALOGUE.filter((definition) => !definition.sourcedInPhase2)
       .map((definition) => definition.scope as string)
       .sort();
     expect(
       unsourced,
-      'the scopes with no reader must be exactly the four wp3.10 §7.1 owes plus the four whose ' +
-        'source context does not exist yet',
-    ).toEqual([...OWED_READERS, ...NOT_YET_MODELLED].sort());
+      'the scopes with no reader must be exactly the four whose source context does not exist ' +
+        'yet; wp3.10 §7.1’s four landed in WP 3.10a',
+    ).toEqual([...NOT_YET_MODELLED].sort());
 
-    // 3. And every *other* scope claims a reader, which is what makes the
+    // 3. The four WP 3.10a landed are asserted *sourced* by name. This is the
+    //    direction that matters now: reverting one flag — or deleting an arm
+    //    and the flag with it — names the scope that regressed instead of
+    //    silently shrinking the snapshot.
+    const landed = SCOPE_CATALOGUE.filter((definition) =>
+      LANDED_IN_WP_3_10A.includes(definition.scope),
+    );
+    expect(landed.map((definition) => definition.scope as string).sort()).toEqual(
+      [...LANDED_IN_WP_3_10A].sort(),
+    );
+    for (const definition of landed) {
+      expect(
+        definition.sourcedInPhase2,
+        `${definition.scope} lost the reader WP 3.10a landed`,
+      ).toBe(true);
+    }
+
+    // 4. And every *other* scope claims a reader, which is what makes the
     //    catalogue's `sourcedInPhase2` a statement about this repository rather
     //    than a field nobody maintains.
     for (const definition of SCOPE_CATALOGUE) {
-      if (OWED_READERS.includes(definition.scope)) continue;
       if (NOT_YET_MODELLED.includes(definition.scope)) continue;
       expect(definition.sourcedInPhase2, `${definition.scope} lost its reader`).toBe(true);
     }
@@ -511,5 +547,60 @@ describe('advisor scopes and their readers (WP 3.9)', () => {
       'a rule that ships enabled while reading a scope with no reader needs a fallback that is ' +
         'not silence; add it to DEGRADES_WITHOUT_ITS_READER only after reading that fallback',
     ).toEqual([...DEGRADES_WITHOUT_ITS_READER].sort());
+  });
+
+  /**
+   * A reader is only half of a scope. The other half is a **grant**, and a
+   * grant is a row in `snapshot_grants` whose `scope` column is constrained by
+   * a `CHECK` enumerating every legal value.
+   *
+   * WP 3.10a found that enumeration is out of date: migration
+   * `0012_insights.sql` lists Phase 2's thirteen scopes, and WP 3.10 added
+   * `liabilities.terms` and `market.rates` to `SCOPE_CATALOGUE` without one.
+   * `grantScopes` therefore fails with a `23514` check violation for either —
+   * observed from a real database by `apps/api/test/db/phase3-advisors.test.ts`,
+   * which is what turned this from a reading of the SQL into a fact.
+   *
+   * It is **owed a migration in `packages/db`**, which WP 3.10a does not own.
+   * Recorded here as an exact expected set rather than left to be rediscovered:
+   * landing the migration turns this red and deletes the list, and adding a
+   * sixteenth scope without one turns it red naming the scope.
+   */
+  const UNGRANTABLE_UNTIL_MIGRATED = ['liabilities.terms', 'market.rates'];
+
+  it('every advisor scope can actually be granted, or is a recorded migration gap', () => {
+    const migration = readFileSync(
+      join(import.meta.dirname, '../../../packages/db/migrations/0012_insights.sql'),
+      'utf8',
+    );
+    // The `scope IN ( ... )` list on `snapshot_grants`, read out of the
+    // migration itself rather than restated here — a copy would agree with
+    // itself forever.
+    const check =
+      /CREATE TABLE snapshot_grants[\s\S]*?scope\s+TEXT\s+NOT NULL CHECK \(scope IN \(([\s\S]*?)\)\)/u.exec(
+        migration,
+      );
+    expect(check, 'the snapshot_grants scope CHECK could not be located').not.toBeNull();
+    const grantable = new Set(
+      [...(check?.[1] ?? '').matchAll(/'([a-z_.]+)'/gu)].map((match) => match[1] as string),
+    );
+    expect(grantable.size, 'the CHECK list parsed as empty').toBeGreaterThan(0);
+
+    const ungrantable = ADVISOR_SCOPES.filter((scope) => !grantable.has(scope as string)).sort();
+    expect(
+      ungrantable,
+      'a scope the database will not store a grant for is a scope no advisor can ever read; ' +
+        'land the migration in packages/db rather than widening this list',
+    ).toEqual([...UNGRANTABLE_UNTIL_MIGRATED].sort());
+
+    // And the constraint must not have drifted the other way either: a value
+    // the database accepts but the catalogue has never heard of would be a
+    // grant nothing could honour.
+    for (const scope of grantable) {
+      expect(
+        (ADVISOR_SCOPES as readonly string[]).includes(scope),
+        `${scope} is grantable in SQL but is not an advisor scope`,
+      ).toBe(true);
+    }
   });
 });

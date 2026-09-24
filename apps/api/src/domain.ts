@@ -70,7 +70,18 @@ import {
 } from '@connector/plaid';
 import type { AppConfig, CoinbaseConfig, PlaidConfig, Redacted } from '@core/config';
 import type { Database } from '@core/db';
-import { DateOnly, Money, newId, systemClock, type Clock } from '@core/kernel';
+import {
+  DateOnly,
+  Money,
+  Quantity,
+  currency as toCurrency,
+  minorUnitScale,
+  newId,
+  systemClock,
+  type Clock,
+  type Money as MoneyType,
+  type Quantity as QuantityType,
+} from '@core/kernel';
 import {
   appendEvent,
   classifyStatus,
@@ -91,6 +102,7 @@ import {
   createCsvStagingStore,
   createManualStagingStore,
   investmentFactsForRun,
+  liabilityTermsFor,
   type LedgerWriter,
   type RegisteredConnector,
   type RunInvestmentFacts,
@@ -103,15 +115,24 @@ import {
   type BudgetingDatabase,
   type LedgerPort as BudgetingLedgerPort,
 } from '@ctx/budgeting';
+import { PERCENT_PER_ANNUM, percentStringToRatio } from '@ctx/insights';
 import type {
+  AccountTaxTreatment,
   BudgetPort as InsightsBudgetPort,
   CashAccountType,
   InsightsAccount,
   InsightsBudgetLine,
   InsightsBudgetPeriod,
+  InsightsLiability,
+  InsightsMarketRateObservation,
+  InsightsPosition,
   InsightsRecurringStream,
   InsightsTransaction,
+  InvestmentsPort as InsightsInvestmentsPort,
   LedgerPort as InsightsLedgerPort,
+  LiabilityKind,
+  MarketDataPort as InsightsMarketDataPort,
+  MarketRateKind,
   MonthlyCashflowRow,
   RecurringPort as InsightsRecurringPort,
 } from '@ctx/insights';
@@ -168,12 +189,20 @@ import {
 } from '@ctx/planning';
 import {
   DEFAULT_LADDERS,
+  LONG_TERM_HOLDING_DAYS,
+  allocationOf,
+  concentrationOf,
   createFxReader,
   createPriceReader,
   createSecurityResolver,
   drizzleFxStore,
+  drizzleLotStore,
   drizzlePriceStore,
   drizzleSecurityStore,
+  feeDragOf,
+  marketValueOf,
+  ratioOfMoney,
+  valueHoldings,
   ladderRows,
   outboxOf as investmentsOutboxOf,
   type FigiMapper,
@@ -182,6 +211,7 @@ import {
   type ResolvedHoldingFact,
   type ResolvedTransactionFact,
   type SecurityResolver,
+  type ValuationOptions,
 } from '@ctx/investments';
 import {
   FX_ROW_SOURCES,
@@ -194,7 +224,9 @@ import {
   type PriceRowSource,
 } from '@ctx/investments/schema';
 import {
+  ATTRIBUTIONS,
   COINGECKO_WINDOWS,
+  FRED_MACRO_SERIES,
   FRED_WINDOWS,
   OPENFIGI_WINDOWS,
   TIINGO_WINDOWS,
@@ -209,6 +241,7 @@ import {
   missingKey,
   policyFor,
   type ApiKey,
+  type FredSource,
   type MarketDataProvider,
   type MarketDataRunRecorder,
   type MarketDataWriter,
@@ -217,6 +250,17 @@ import {
 } from '@ctx/integrations';
 import { marketDataRuns } from '@ctx/integrations/schema';
 import { and, eq, gte, sql, type SQL } from 'drizzle-orm';
+// The readers WP 3.9's routes use, imported rather than re-implemented: see the
+// header over `createInsightsInvestmentsPort`. Type-only in the other
+// direction (`routes/investments.ts` imports only `type RouteDeps` from
+// `routes/deps.ts`, which is erased), so this adds no runtime cycle.
+import {
+  BASE_CURRENCY,
+  priceHoldings,
+  priceReaderFor,
+  readHoldings,
+  type HoldingRead,
+} from './routes/investments.ts';
 
 /**
  * `@ctx/ledger`, as `@ctx/connections` asked for it.
@@ -799,6 +843,584 @@ export function createInsightsRecurringPort(database: RecurringDatabase): Insigh
         };
       });
       return result;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// WP 3.10a — the two Phase 3 insights ports
+// ---------------------------------------------------------------------------
+//
+// `wp3.10-advisor-catalog-v2.md` §7.1 specified these and neither WP 3.9 nor
+// WP 3.10 could own them: the port interfaces are `@ctx/insights`' and the
+// readers are `@ctx/investments`', `@ctx/ledger`'s, `@ctx/connections`' and
+// `@ctx/integrations`'. This file is the only place all five are in scope at
+// once, which is the whole reason a composition root exists.
+//
+// **They read exactly what WP 3.9's routes read.** `readHoldings`,
+// `priceReaderFor` and `priceHoldings` are imported from `routes/investments.ts`
+// rather than re-implemented, so `GET /investments/holdings` and
+// `holdings.aggregate` cannot disagree about what the account holder owns. A
+// second valuation path is the failure wp3.9-routes.md's own header warns
+// about — "a valuation engine that agreed with the first one right up until it
+// did not".
+
+/**
+ * The stablecoin tickers X3 reasons about.
+ *
+ * A reviewed list rather than an inference: "is this a dollar-pegged token?" is
+ * a *classification*, and the honest home for it is `@ctx/investments`'
+ * `classify.ts` beside `is_cash_equivalent`. It is here because that context is
+ * not this work package's, and it is a list of tickers rather than a heuristic
+ * on the name because `USDC.e` and `USD Coin` and a fund called "Dollar Income"
+ * are three different things and only an enumeration tells them apart.
+ *
+ * **Carried for the orchestrator:** move this to `classify.ts` and give
+ * `securities` an `is_stablecoin` column derived the same way `is_cash_equivalent`
+ * is, so a user override can reach it.
+ */
+export const STABLECOIN_SYMBOLS: ReadonlySet<string> = new Set([
+  'USDC',
+  'USDT',
+  'DAI',
+  'PYUSD',
+  'BUSD',
+  'TUSD',
+  'USDP',
+  'GUSD',
+  'FDUSD',
+  'USDE',
+  'LUSD',
+  'FRAX',
+]);
+
+/**
+ * An account's tax treatment, from `@ctx/ledger`'s provider `subtype` string.
+ *
+ * The same best-effort text match `cashAccountTypeOf` above does, and for the
+ * same reason: `@ctx/ledger` has no closed enum for `subtype` because it is
+ * long, provider-specific and changes without notice. What is different is the
+ * **direction of the default**: anything unrecognised is `'unknown'`, never
+ * `'taxable'`. I6 only proposes harvesting a loss in a taxable account, and a
+ * mis-defaulted IRA would make it propose a trade with no tax effect at all —
+ * so the guess that costs nothing is the one this returns.
+ */
+function accountTaxTreatmentOf(account: AccountSummary): AccountTaxTreatment {
+  const subtype = (account.subtype ?? '').toLowerCase().replaceAll(/[^a-z0-9]/gu, '');
+  if (subtype.includes('roth') || subtype.includes('hsa') || subtype.includes('529')) {
+    return 'tax_free';
+  }
+  if (
+    subtype.includes('401k') ||
+    subtype.includes('403b') ||
+    subtype.includes('457b') ||
+    subtype.includes('ira') ||
+    subtype.includes('sep') ||
+    subtype.includes('simple') ||
+    subtype.includes('pension') ||
+    subtype.includes('retirement')
+  ) {
+    return 'tax_deferred';
+  }
+  if (subtype.includes('brokerage') || subtype.includes('taxable')) return 'taxable';
+  // A crypto account is taxable by default: there is no tax-advantaged wrapper
+  // for a self-custody wallet, and treating one as `unknown` would silence X5.
+  if (account.type === 'crypto') return 'taxable';
+  return 'unknown';
+}
+
+/** `'0.0003'` (a decimal string) → `0.0003`. `null` stays `null`. */
+function ratioNumberOrNull(text: string | null): number | null {
+  if (text === null) return null;
+  const value = Number(text);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+}
+
+/** Which custody class an account's crypto sits in. X2's three-way split. */
+type CustodyClass = 'exchange' | 'self_custody' | 'unknown';
+
+/**
+ * `@ctx/insights`' read-only view of the portfolio and its liabilities.
+ *
+ * Both methods answer `null` rather than an empty block when there is nothing
+ * to say, because the builder turns `null` into **no key** and an advisor
+ * cannot tell an empty portfolio from no portfolio.
+ *
+ * Three figures this port deliberately does **not** produce, each because the
+ * data does not exist rather than because it was hard:
+ *
+ *   * **`idleCash` is always `null`.** `idleCash(...)` is pure over a supplied
+ *     `idleDays` — "an input, not a guess", says its own doc — and nothing in
+ *     this repository holds how long a brokerage cash balance has been sitting.
+ *     Inventing a dwell time would make I3 fire on a balance that arrived
+ *     yesterday.
+ *   * **`targets` is always `[]`.** There is no `allocation_targets` table
+ *     (wp3.9-routes.md §8 item 1) and §8 Q9 forbids an implied 60/40, so I1
+ *     withholds rather than drifting from a benchmark nobody set.
+ *   * **`employerStock` is always `false`.** 07 I5 is explicit that the flag is
+ *     *the user's own tag* and that this app never infers an employer; no
+ *     column carries one, and deriving it from a ticker matching an employer
+ *     name would be exactly the inference the rule forbids.
+ *
+ * Each is why its rule ships off in `BUILTIN_CATALOGUE`, with the field named
+ * in `disabledReason` rather than the effort.
+ */
+export function createInsightsInvestmentsPort(
+  database: Database,
+  clock: Clock,
+): InsightsInvestmentsPort {
+  const lotStore = drizzleLotStore(database, clock);
+
+  /**
+   * `last_known`, not `as_of_now`.
+   *
+   * `as_of_now` *excludes* a stale-priced holding from the valuation, which is
+   * right for a delta and wrong for a snapshot: an advisor would see a
+   * portfolio silently missing whichever positions had not refreshed, and
+   * reason about the concentration of what remained. 07 §6.1 bars a stale price
+   * from a delta, not from a level, and WP 3.8's net-worth snapshot seals with
+   * the same choice.
+   */
+  const options = (): ValuationOptions => ({
+    currency: BASE_CURRENCY,
+    scale: minorUnitScale(BASE_CURRENCY),
+    basis: 'last_known',
+  });
+
+  /** Account id → its tax treatment and custody class, in one read. */
+  const accountFacts = async (
+    userId: string,
+  ): Promise<
+    ReadonlyMap<string, { readonly treatment: AccountTaxTreatment; readonly custody: CustodyClass }>
+  > => {
+    const accounts = await listAccounts(database, { userId, includeClosed: true });
+    // Which connections hold a watch-only wallet address. A connection with one
+    // is self-custody by construction: we hold an address and no keys, which is
+    // the definition of the holder keeping custody. Everything else that came
+    // from a provider is an exchange or a broker, and a manual account is
+    // `unknown` because the holder never told us either way.
+    const selfCustodied = await database.execute<{ connection_id: string }>(sql`
+      SELECT DISTINCT w.connection_id
+        FROM wallet_addresses w
+       WHERE w.user_id = ${userId}::uuid
+    `);
+    const wallets = new Set(selfCustodied.rows.map((row) => row.connection_id));
+    return new Map(
+      accounts.map((account) => [
+        account.id,
+        {
+          treatment: accountTaxTreatmentOf(account),
+          custody:
+            account.connectionId === null
+              ? ('unknown' as const)
+              : wallets.has(account.connectionId)
+                ? ('self_custody' as const)
+                : ('exchange' as const),
+        },
+      ]),
+    );
+  };
+
+  return {
+    async holdings(input) {
+      const reads = await readHoldings(database, input.userId, null);
+      if (reads.length === 0) return null;
+
+      const kinds = new Map<string, string>(
+        reads.map((read) => [read.securityId, read.securityType]),
+      );
+      const portfolio = await priceHoldings(
+        reads,
+        priceReaderFor(database, input.userId, clock, kinds),
+        input.asOf,
+      );
+      const valuation = options();
+      const set = valueHoldings(portfolio.holdings, valuation);
+      if (set.valued.length === 0) return null;
+
+      const allocation = allocationOf('asset_class', set, valuation);
+      const concentration = concentrationOf(set, valuation);
+      const fees = feeDragOf(set, valuation);
+      const facts = await accountFacts(input.userId);
+      const readById = new Map(reads.map((read) => [read.holdingId, read]));
+
+      // --- account_type_mix: value by tax treatment ÷ total ------------------
+      const byTreatment = new Map<string, MoneyType>();
+      for (const entry of set.valued) {
+        const treatment = facts.get(entry.holding.accountId)?.treatment ?? 'unknown';
+        byTreatment.set(
+          treatment,
+          Money.add(byTreatment.get(treatment) ?? Money.zero(BASE_CURRENCY), entry.marketValue),
+        );
+      }
+      const accountTypeMix: Record<string, number> = {};
+      if (!Money.isZero(set.total)) {
+        for (const [treatment, value] of byTreatment) {
+          accountTypeMix[treatment] = Number(ratioOfMoney(value, set.total));
+        }
+      }
+
+      // --- crypto_custody: CRYPTO value by custody class ---------------------
+      const custody: Record<CustodyClass, MoneyType> = {
+        exchange: Money.zero(BASE_CURRENCY),
+        self_custody: Money.zero(BASE_CURRENCY),
+        unknown: Money.zero(BASE_CURRENCY),
+      };
+      let anyCrypto = false;
+      for (const entry of set.valued) {
+        if (entry.holding.assetClass !== 'CRYPTO') continue;
+        anyCrypto = true;
+        const key = facts.get(entry.holding.accountId)?.custody ?? 'unknown';
+        custody[key] = Money.add(custody[key], entry.marketValue);
+      }
+
+      // --- holdings.detail: one row per (security, tax treatment) ------------
+      //
+      // Not per security alone. The same ETF in a taxable account and in an IRA
+      // is two positions, because I6 only proposes harvesting a *taxable* loss
+      // and a merged row would make a tax-deferred one look harvestable.
+      interface Group {
+        readonly read: HoldingRead;
+        readonly treatment: AccountTaxTreatment;
+        readonly accountIds: Set<string>;
+        quantity: QuantityType;
+        marketValue: MoneyType;
+        costBasis: MoneyType;
+        basisUnknown: boolean;
+        annualFeeCost: MoneyType | null;
+        highFee: boolean;
+      }
+      const feeByHolding = new Map(fees.rows.map((row) => [row.holdingId, row]));
+      const groups = new Map<string, Group>();
+      for (const entry of set.valued) {
+        const read = readById.get(entry.holding.holdingId);
+        if (read === undefined) continue;
+        const treatment = facts.get(entry.holding.accountId)?.treatment ?? 'unknown';
+        const key = `${read.securityId}|${treatment}`;
+        const group = groups.get(key) ?? {
+          read,
+          treatment,
+          accountIds: new Set<string>(),
+          quantity: Quantity.zero,
+          marketValue: Money.zero(BASE_CURRENCY),
+          costBasis: Money.zero(BASE_CURRENCY),
+          basisUnknown: false,
+          annualFeeCost: null,
+          highFee: false,
+        };
+        group.accountIds.add(entry.holding.accountId);
+        group.quantity = Quantity.add(group.quantity, entry.holding.quantity);
+        group.marketValue = Money.add(group.marketValue, entry.marketValue);
+        // One unknown basis poisons the sum. 04 §5.5: an unknown basis is not a
+        // zero one, and a partial total is a number that looks whole.
+        if (read.costBasis === null) group.basisUnknown = true;
+        else group.costBasis = Money.add(group.costBasis, read.costBasis);
+        const fee = feeByHolding.get(entry.holding.holdingId);
+        if (fee !== undefined) {
+          group.annualFeeCost = Money.add(
+            group.annualFeeCost ?? Money.zero(BASE_CURRENCY),
+            fee.annualCost,
+          );
+          group.highFee = group.highFee || fee.high;
+        }
+        groups.set(key, group);
+      }
+
+      const asOf = DateOnly.parse(input.asOf);
+      const positions: InsightsPosition[] = [];
+      for (const group of groups.values()) {
+        const point = portfolio.points.get(
+          [...set.valued].find((entry) => entry.holding.securityId === group.read.securityId)
+            ?.holding.holdingId ?? '',
+        );
+        const lots = (await lotStore.listLotsForSecurity(input.userId, group.read.securityId))
+          .filter((lot) => group.accountIds.has(lot.accountId))
+          .filter((lot) => !Quantity.isZero(lot.quantityRemaining));
+        const basisKnown = !group.basisUnknown;
+        const costBasis = basisKnown ? group.costBasis : null;
+        positions.push({
+          securityId: group.read.securityId,
+          symbol: group.read.symbol,
+          assetClass: group.read.assetClass,
+          accountType: group.treatment,
+          quantity: Quantity.toDatabaseString(group.quantity),
+          costBasis,
+          marketValue: group.marketValue,
+          unrealized: costBasis === null ? null : Money.subtract(group.marketValue, costBasis),
+          oldestLotDays: lots.reduce(
+            (oldest, lot) => Math.max(oldest, DateOnly.differenceInDays(lot.openDate, asOf)),
+            0,
+          ),
+          isCrypto: group.read.assetClass === 'CRYPTO',
+          isStablecoin:
+            group.read.symbol !== null && STABLECOIN_SYMBOLS.has(group.read.symbol.toUpperCase()),
+          // 07 I5: the holder's own tag, and there is no column for one. See
+          // this function's header.
+          employerStock: false,
+          expenseRatio: ratioNumberOrNull(group.read.expenseRatio),
+          // No comparable-fund table exists in any Phase 3 source, so I2 fires
+          // on the absolute `high_fee` trigger and never on the relative one.
+          peerExpenseRatio: null,
+          annualFeeCost: group.annualFeeCost,
+          highFee: group.highFee,
+          lots: lots.map((lot) => {
+            const remainingBasis =
+              lot.basis === null ? null : Money.subtract(lot.basis, lot.basisConsumed);
+            const marketValue =
+              point === null || point === undefined
+                ? Money.zero(BASE_CURRENCY)
+                : marketValueOf(
+                    lot.quantityRemaining,
+                    { amount: Quantity.of(point.close), currency: toCurrency(point.currency) },
+                    minorUnitScale(BASE_CURRENCY),
+                  );
+            return {
+              // An age, never the date. The subtraction happens here because it
+              // needs the date, and the date stops here.
+              openedDays: DateOnly.differenceInDays(lot.openDate, asOf),
+              quantity: Quantity.toDatabaseString(lot.quantityRemaining),
+              costBasis: remainingBasis,
+              marketValue,
+              unrealized:
+                remainingBasis === null ? null : Money.subtract(marketValue, remainingBasis),
+              longTerm:
+                DateOnly.differenceInDays(lot.holdingPeriodStartDate, asOf) >=
+                LONG_TERM_HOLDING_DAYS,
+            };
+          }),
+        });
+      }
+
+      return {
+        currency: BASE_CURRENCY,
+        aggregate: {
+          investableTotal: concentration.investableTotal,
+          unclassifiedPct: Number(allocation.unclassifiedPct),
+          byAssetClass: allocation.slices.map((slice) => ({
+            assetClass: slice.key,
+            value: slice.value,
+            weight: Number(slice.weight),
+          })),
+          positions: concentration.positions.map((position) => ({
+            securityId: position.securityId,
+            symbol: position.symbol,
+            value: position.value,
+            weight: Number(position.weight),
+            assetClass:
+              readById.get(
+                set.valued.find((entry) => entry.holding.securityId === position.securityId)
+                  ?.holding.holdingId ?? '',
+              )?.assetClass ?? 'UNCLASSIFIED',
+            employerStock: false,
+            isCrypto:
+              set.valued.find((entry) => entry.holding.securityId === position.securityId)?.holding
+                .assetClass === 'CRYPTO',
+          })),
+          targets: [],
+          accountTypeMix,
+          idleCash: null,
+          cryptoCustody: anyCrypto
+            ? {
+                exchangeValue: custody.exchange,
+                selfCustodyValue: custody.self_custody,
+                unknownValue: custody.unknown,
+              }
+            : null,
+        },
+        positions,
+      };
+    },
+
+    async liabilities(input) {
+      const accounts = (await listAccounts(database, { userId: input.userId })).filter(
+        (account) => account.classification === 'liability' && account.closedAt === null,
+      );
+      if (accounts.length === 0) return null;
+
+      // WP 3.7's published reader (migration 0018). **Read what it lands, never
+      // a fake**: an account with no terms row is still a liability — it has a
+      // balance — and it crosses with every term `null`, which is the state D2
+      // and D4 gate on. A fabricated APR would be the one number in this block
+      // nobody could trace.
+      const terms = new Map(
+        (await liabilityTermsFor(database, input.userId)).map((row) => [row.accountId, row]),
+      );
+
+      const rows: InsightsLiability[] = accounts.map((account) => {
+        const term = terms.get(account.id) ?? null;
+        const balance = account.balance?.current ?? Money.zero(account.currency);
+        return {
+          id: account.id,
+          kind: liabilityKindOf(account),
+          // `connection_sync_facts.apr` is a percentage as an exact decimal
+          // (`NUMERIC(9,6)`; "4.25% is not $4.25", says 0018). The snapshot
+          // carries a ratio, and `percentStringToRatio` is the same conversion
+          // `market.rates` uses — one implementation, one place to get it wrong.
+          apr:
+            term?.apr === null || term?.apr === undefined ? null : percentStringToRatio(term.apr),
+          // Not persisted by any leg. WP 3.7's `LiabilityTerms` carries an APR,
+          // a statement balance, a minimum payment and a due date, and nothing
+          // else; D4 and D6 therefore ship off with the field named.
+          promoApr: null,
+          promoAprEndDate: null,
+          creditLimit: null,
+          statementBalance: term?.statementBalance ?? null,
+          // A liability's balance is negative in the ledger's sign convention
+          // (it counts against net worth). The block states what is *owed*, as
+          // a positive figure, because every rule that reads it multiplies by a
+          // rate and a negative would flip the sign of the cost.
+          currentBalance: Money.absolute(balance),
+          minimumPayment: term?.minimumPayment ?? null,
+          paymentDueDate: term?.nextPaymentDue ?? null,
+          lastPaymentDate: null,
+          lastPaymentAmount: null,
+          minimumOnlyMonths: null,
+        };
+      });
+      return { currency: BASE_CURRENCY, liabilities: rows };
+    },
+  };
+}
+
+/**
+ * `@ctx/ledger`'s account type and subtype, as one of the seven liability kinds.
+ *
+ * `type` first because it is a closed CHECK and `subtype` is provider free
+ * text: a `credit` account is a card whatever the provider called the subtype,
+ * and only a `loan` needs the text to say which kind of loan it is.
+ */
+function liabilityKindOf(account: AccountSummary): LiabilityKind {
+  const subtype = (account.subtype ?? '').toLowerCase();
+  if (account.type === 'credit') {
+    return subtype.includes('line of credit') || subtype.includes('heloc')
+      ? 'line_of_credit'
+      : 'credit_card';
+  }
+  if (subtype.includes('student')) return 'student_loan';
+  if (subtype.includes('mortgage') || subtype.includes('home')) return 'mortgage';
+  if (subtype.includes('auto') || subtype.includes('car')) return 'auto_loan';
+  if (subtype.includes('line of credit') || subtype.includes('heloc')) return 'line_of_credit';
+  if (account.type === 'loan') return 'personal_loan';
+  return 'other';
+}
+
+/**
+ * The FRED series this deployment tracks, and what each one *is*.
+ *
+ * Three columns and every one of them load-bearing:
+ *
+ *   * **`kind` is the join key.** A rule selects `short_term_risk_free`, never
+ *     `'DGS3MO'`. WP 3.10's schema comment says why: a rule naming the series
+ *     would break the day a deployment tracked `TB3MS` instead, and would also
+ *     be a series id hardcoded in a rule — the cousin of the hardcoded 4%.
+ *   * **`units` is declared, not fetched.** FRED's `/series/observations`
+ *     endpoint returns a value and a date and no units at all; the units are a
+ *     property of the *series*, which is a fact about the world that belongs in
+ *     a reviewed table rather than in a second API call whose answer would be
+ *     cached anyway.
+ *   * **A non-percent series is allowed in this table on purpose.** `CPIAUCSL`
+ *     is an index and `SnapshotBuilder` refuses it (§7.1 duty 1). Listing it
+ *     here is what keeps that refusal exercised against a real series id rather
+ *     than only against a test fixture.
+ */
+export const TRACKED_MACRO_SERIES: readonly {
+  readonly seriesId: string;
+  readonly kind: MarketRateKind;
+  readonly units: string;
+}[] = Object.freeze([
+  Object.freeze({
+    seriesId: FRED_MACRO_SERIES.treasury3m,
+    kind: 'short_term_risk_free' as const,
+    units: PERCENT_PER_ANNUM,
+  }),
+  Object.freeze({
+    seriesId: FRED_MACRO_SERIES.treasury10y,
+    kind: 'ten_year_treasury' as const,
+    units: PERCENT_PER_ANNUM,
+  }),
+  // National rate on savings deposits. C1 and C2's "what could this cash earn?"
+  Object.freeze({ seriesId: 'SNDR', kind: 'savings_apy' as const, units: PERCENT_PER_ANNUM }),
+  // Commercial bank interest rate on credit card plans, all accounts. D2's card half.
+  Object.freeze({
+    seriesId: 'TERMCBCCALLNS',
+    kind: 'credit_card_apr' as const,
+    units: PERCENT_PER_ANNUM,
+  }),
+  Object.freeze({
+    seriesId: 'MORTGAGE30US',
+    kind: 'mortgage_30y' as const,
+    units: PERCENT_PER_ANNUM,
+  }),
+]);
+
+/** How far back `macro()` will walk for an observation. See the port below. */
+const MACRO_LOOKBACK_DAYS = 10;
+
+/**
+ * `@ctx/insights`' read-only view of the published market rates.
+ *
+ * `source` is `undefined` whenever no FRED key is configured — **feature
+ * detection, never a fallback figure**. WP 2.7 is explicit that "a hardcoded 4%
+ * would be a numeral nothing could account for", so no key means no block, and
+ * C1, C2 and X3 fall back to the best rate the account holder already holds,
+ * byte-identically to Phase 2. D2 simply withholds.
+ *
+ * **Why this walks back a few days.** FRED publishes daily series on business
+ * days only, and `/series/observations` windowed to a single date answers
+ * `no_data` for a Sunday. Asking only for `asOf` would leave the whole block
+ * absent every weekend. So it walks back up to ten days for the most recent
+ * observation, reports **that** observation's own date in `observation_date`,
+ * and lets `SnapshotBuilder` decide staleness from when the provider *answered*
+ * rather than from when the market last printed — a Treasury series is not
+ * stale on a Monday morning.
+ */
+export function createInsightsMarketDataPort(options: {
+  /** `createMarketDataRuntime(...)`'s FRED source, or `undefined` with no key. */
+  readonly source: FredSource | undefined;
+  readonly series?: readonly {
+    readonly seriesId: string;
+    readonly kind: MarketRateKind;
+    readonly units: string;
+  }[];
+}): InsightsMarketDataPort {
+  const source = options.source;
+  const series = options.series ?? TRACKED_MACRO_SERIES;
+  return {
+    async rates(input) {
+      if (source === undefined || !source.hasKey) return null;
+
+      const observations: InsightsMarketRateObservation[] = [];
+      for (const tracked of series) {
+        let observation: InsightsMarketRateObservation | null = null;
+        for (let back = 0; back <= MACRO_LOOKBACK_DAYS; back += 1) {
+          const date = DateOnly.addDays(input.asOf, -back);
+          const outcome = await source.macro(tracked.seriesId, date);
+          if (outcome.kind !== 'ok') continue;
+          observation = {
+            seriesId: tracked.seriesId,
+            kind: tracked.kind,
+            observationDate: DateOnly.parse(outcome.value.date),
+            value: outcome.value.value,
+            units: tracked.units,
+            // When the provider answered, which for a live call is now — and
+            // `asOf` is the holder's own today, already resolved into their
+            // zone by the caller. `SnapshotBuilder` compares the two.
+            observedOn: input.asOf,
+          };
+          break;
+        }
+        if (observation !== null) observations.push(observation);
+      }
+      if (observations.length === 0) return null;
+
+      // Verbatim, ® included. 01 §4.3 makes the sentence a licence condition
+      // and a paraphrase of a licence condition is a new licence condition, so
+      // this is the context's own constant and never a string literal here.
+      return {
+        attribution: ATTRIBUTIONS.fred.text,
+        attributionUrl: ATTRIBUTIONS.fred.linkUrl,
+        observations,
+      };
     },
   };
 }

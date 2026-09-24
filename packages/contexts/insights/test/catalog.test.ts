@@ -178,22 +178,29 @@ describe('the built-in catalogue', () => {
     }
   });
 
-  it('releases cash and subscriptions first, with spending registered and off', () => {
+  /**
+   * WP 3.10a moved the line. It used to sit between wave one and everything
+   * else; it now sits between **spending** and everything else, because the
+   * only wave still off is the one held back for pacing rather than for a
+   * missing reader.
+   */
+  it('ships every wave with a reader enabled, leaving only spending off', () => {
     for (const entry of BUILTIN_CATALOGUE) {
-      if (entry.wave === 'cash_and_subscriptions') {
-        expect(entry.defaultEnabled, entry.ruleId).toBe(true);
-        expect(entry.disabledReason, entry.ruleId).toBeNull();
-      } else {
+      if (entry.wave === 'spending') {
         expect(entry.defaultEnabled, entry.ruleId).toBe(false);
         expect(entry.disabledReason, entry.ruleId).not.toBeNull();
+      } else {
+        expect(entry.defaultEnabled, entry.ruleId).toBe(true);
+        expect(entry.disabledReason, entry.ruleId).toBeNull();
       }
     }
-    // Eight enabled is still Phase 2's cash-and-subscriptions wave. Twenty-three
-    // off: WP 2.7's six spending rules plus WP 3.10's seventeen, which are off
-    // both because 07 §7.4 releases them later and because the scopes they read
-    // have no reader behind them yet.
-    expect(BUILTIN_CATALOGUE.filter((entry) => entry.defaultEnabled).length).toBe(8);
-    expect(BUILTIN_CATALOGUE.filter((entry) => !entry.defaultEnabled).length).toBe(23);
+    // Twenty-five enabled: Phase 2's eight cash-and-subscriptions rules plus WP
+    // 3.10's seventeen, switched on by WP 3.10a once `holdings.aggregate`,
+    // `holdings.detail`, `liabilities.terms` and `market.rates` gained readers.
+    // Six off: WP 2.7's spending rules, held by 07 §7.4's wave two alone — every
+    // scope they read has been sourced since Phase 2.
+    expect(BUILTIN_CATALOGUE.filter((entry) => entry.defaultEnabled).length).toBe(25);
+    expect(BUILTIN_CATALOGUE.filter((entry) => !entry.defaultEnabled).length).toBe(6);
   });
 
   it('claims impact only where the manifest says it does', async () => {

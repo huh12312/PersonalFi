@@ -137,25 +137,21 @@ describe('scope minimisation', () => {
     }
   });
 
-  it('every new scope row states what it drops, and the portfolio four are unsourced', () => {
-    // `networth.summary` is a Phase 2 scope with a real reader behind it; the
-    // other four are WP 3.10's and have none yet.
-    const unsourced = new Set([
-      'holdings.aggregate',
-      'holdings.detail',
-      'liabilities.terms',
-      'market.rates',
-    ]);
+  it('every new scope row states what it drops, and all five now have a reader', () => {
+    // WP 3.10 shipped the portfolio four as `sourcedInPhase2: false` because
+    // `#blockFor` had no branch for them. WP 3.10a landed the four arms and
+    // flipped the four flags in the same change, so the assertion that was
+    // "these four are unsourced" is now its opposite — and it is the same
+    // claim either way: the flag states whether a reader exists *today*, and a
+    // flag that disagreed with the builder would be the silent no-key this
+    // whole line of tests exists to catch.
     for (const scope of Object.keys(PORTFOLIO_SCOPE_KEYS)) {
       const definition = SCOPE_CATALOGUE.find((row) => row.scope === scope);
       expect(definition, scope).toBeDefined();
       if (definition === undefined) continue;
       expect(definition.drops.length, scope).toBeGreaterThan(40);
       expect(definition.yields.length, scope).toBeGreaterThan(20);
-      // `SnapshotBuilder` has no branch for any of these, so a `true` here
-      // would promise a block nothing can fill. The evidence doc's §7 is what
-      // flips them.
-      expect(definition.sourcedInPhase2, scope).toBe(!unsourced.has(scope));
+      expect(definition.sourcedInPhase2, scope).toBe(true);
     }
   });
 

@@ -69,6 +69,8 @@ import {
   createInvestmentSyncPort,
   createInsightsBudgetPort,
   createInsightsLedgerPort,
+  createInsightsInvestmentsPort,
+  createInsightsMarketDataPort,
   createInsightsRecurringPort,
 } from '../../src/domain.ts';
 import { appModules, registerBuiltinAdvisors } from '../../src/modules.ts';
@@ -419,6 +421,13 @@ describe.skipIf(NO_DATABASE)(
           ledger: createInsightsLedgerPort(h.database.db, systemClock),
           budget: createInsightsBudgetPort(h.database.db),
           recurring: createInsightsRecurringPort(h.database.db),
+          // WP 3.10a made `SnapshotPorts` five. The real ports, not fakes: this
+          // suite has a real database, and a fake here would be a claim about a
+          // fake. Both answer `null` for a holder with no portfolio, which is
+          // this fixture, so no block is added and every assertion below is
+          // unchanged.
+          investments: createInsightsInvestmentsPort(h.database.db, systemClock),
+          marketData: createInsightsMarketDataPort({ source: undefined }),
         },
         settings: {
           advisorsEnabled: true,

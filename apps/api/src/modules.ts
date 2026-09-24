@@ -93,8 +93,10 @@ import {
 import {
   INTEGRATIONS_EVENTS,
   createPriceRefreshJob,
+  type FredSource,
   type MarketDataRunRecorder,
   type MarketDataWriter,
+  type PriceSource,
   type RefreshPlan,
 } from '@ctx/integrations';
 import { systemClock, type Clock } from '@core/kernel';
@@ -104,7 +106,9 @@ import {
   createBudgetingLedgerPort,
   createCategorizationLedgerPort,
   createInsightsBudgetPort,
+  createInsightsInvestmentsPort,
   createInsightsLedgerPort,
+  createInsightsMarketDataPort,
   createInsightsRecurringPort,
   createRecurringLedgerPort,
   assertDrizzleTransaction,
@@ -690,6 +694,21 @@ function integrationsModule(options: ModuleWiringOptions, clock: Clock): ModuleR
  * route exists — WP 2.6 §6's carried item), so registering the full catalogue
  * here is inert until both of those are true for a user.
  */
+/**
+ * The one source in a market-data runtime that can answer `macro()`.
+ *
+ * A structural check (`capabilities.macro` plus the method) rather than
+ * `provider === 'fred'`, so a second macro source added later is found by this
+ * function rather than by whoever remembers to edit it. `undefined` when the
+ * runtime is absent or holds no macro source, which is the no-key install.
+ */
+function fredSourceOf(sources: readonly PriceSource[] | undefined): FredSource | undefined {
+  return sources?.find(
+    (source): source is FredSource =>
+      source.capabilities.macro && typeof (source as FredSource).macro === 'function',
+  );
+}
+
 function insightsModule(
   database: ModuleWiringOptions['database'],
   options: ModuleWiringOptions,
@@ -706,6 +725,21 @@ function insightsModule(
       ledger: createInsightsLedgerPort(database, clock),
       budget: createInsightsBudgetPort(database),
       recurring: createInsightsRecurringPort(database),
+      // WP 3.10a. `holdings.aggregate`, `holdings.detail` and
+      // `liabilities.terms` need only a database handle and read the same
+      // readers WP 3.9's routes do.
+      investments: createInsightsInvestmentsPort(database, clock),
+      // `market.rates` needs a *source*, and there is only one in the
+      // deployment: `createMarketDataRuntime(...)`'s FRED adapter, which
+      // exists only when a key file does. `undefined` here is the same
+      // feature-detection `integrationsModule` above performs, one level in —
+      // and it is why an on-demand run in the API process (`app.ts` supplies no
+      // market-data wiring, because it runs no jobs) emits no `market_rates`
+      // block while the nightly run in the worker does. Recorded rather than
+      // hidden: see `wp3.10a-snapshot-readers.md` §6.
+      marketData: createInsightsMarketDataPort({
+        source: fredSourceOf(options.marketData?.runtime.sources),
+      }),
     },
     settings: {
       // Kill switch 1 (`ADVISORS_ENABLED`) has no config key yet — open item;

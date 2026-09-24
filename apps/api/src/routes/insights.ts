@@ -48,7 +48,9 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
   createInsightsBudgetPort,
+  createInsightsInvestmentsPort,
   createInsightsLedgerPort,
+  createInsightsMarketDataPort,
   createInsightsRecurringPort,
 } from '../domain.ts';
 import { AppError, problems } from '../problem.ts';
@@ -196,6 +198,16 @@ function dependenciesOf(deps: RouteDeps, timeZone: string): InsightsDependencies
       ledger: createInsightsLedgerPort(deps.database, deps.clock),
       budget: createInsightsBudgetPort(deps.database),
       recurring: createInsightsRecurringPort(deps.database),
+      // WP 3.10a. The portfolio ports need only a database handle. The market
+      // rates port needs a FRED source, and this process has none: `app.ts`
+      // builds no `MarketDataRuntime` because the API runs no jobs and must
+      // not declare the 03:45 schedule row (`modules.ts`' `integrationsModule`
+      // and `phase3-registration.test.ts` both turn on that). So an on-demand
+      // run emits no `market_rates` block and the nightly run in the worker
+      // does — a real asymmetry, named in `wp3.10a-snapshot-readers.md` §6
+      // rather than papered over with a rate this process did not read.
+      investments: createInsightsInvestmentsPort(deps.database, deps.clock),
+      marketData: createInsightsMarketDataPort({ source: undefined }),
     },
     settings: {
       advisorsEnabled: true,

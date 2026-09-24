@@ -28,7 +28,9 @@ import type { AdvisorRequest } from '../../src/contract/request.ts';
 import { SnapshotBuilder } from '../../src/snapshot/builder.ts';
 import {
   inMemoryBudgetPort,
+  inMemoryInvestmentsPort,
   inMemoryLedgerPort,
+  inMemoryMarketDataPort,
   inMemoryRecurringPort,
   type FakeLedgerData,
   type InsightsRecurringStream,
@@ -538,18 +540,33 @@ function portsFor(seedCase: SeedCase): SnapshotPorts {
         ledger: inMemoryLedgerPort(DRIFT_LEDGER),
         budget: inMemoryBudgetPort(null),
         recurring: inMemoryRecurringPort(DRIFT_STREAMS),
+        // WP 3.10a landed the four portfolio arms, and these seeds still carry
+        // no portfolio *through the ports*: see `seedSnapshot` below for the
+        // one thing that is still merged and the exact reason it is.
+        investments: inMemoryInvestmentsPort({}),
+        marketData: inMemoryMarketDataPort(null),
       };
     case 'tight':
       return {
         ledger: inMemoryLedgerPort(TIGHT_LEDGER),
         budget: inMemoryBudgetPort(null),
         recurring: inMemoryRecurringPort(TIGHT_STREAMS),
+        // WP 3.10a landed the four portfolio arms, and these seeds still carry
+        // no portfolio *through the ports*: see `seedSnapshot` below for the
+        // one thing that is still merged and the exact reason it is.
+        investments: inMemoryInvestmentsPort({}),
+        marketData: inMemoryMarketDataPort(null),
       };
     default:
       return {
         ledger: inMemoryLedgerPort(CONTROL_LEDGER),
         budget: inMemoryBudgetPort(null),
         recurring: inMemoryRecurringPort(CONTROL_STREAMS),
+        // WP 3.10a landed the four portfolio arms, and these seeds still carry
+        // no portfolio *through the ports*: see `seedSnapshot` below for the
+        // one thing that is still merged and the exact reason it is.
+        investments: inMemoryInvestmentsPort({}),
+        marketData: inMemoryMarketDataPort(null),
       };
   }
 }
@@ -574,11 +591,21 @@ export async function seedSnapshot(
     baseCurrency: USD,
     tokenKey: deriveTokenKey('wp-2-7-seed', USER_ID),
   });
-  // WP 3.10. The builder has no branch for the portfolio scopes yet — they are
-  // `sourcedInPhase2: false` and `#blockFor` returns `null` for each — so the
-  // blocks are merged from in-package fixtures that were parsed by the
-  // published schema first. `test/fixtures/portfolio.ts` explains the trade and
-  // what deletes this branch.
+  // WP 3.10a landed the four arms, so this merge is no longer *load-bearing
+  // for the builder* — it is load-bearing for these three seeds, which carry no
+  // portfolio through their ports. §7.1 step 3 asks for the merge to be deleted
+  // and the blocks produced by `SnapshotBuilder`; three of the four can move
+  // today and `liabilities.terms` cannot, which is why none has yet:
+  // `advisor-golden.test.ts` pins insight keys containing the fixture's
+  // `LIAB_a1b2c3d4e5f6` literals, and a builder-minted `liability_ref` is an
+  // HMAC of an account id this fixture does not have. Moving the block means
+  // re-pinning every D-family golden in the same change — owed, named here, and
+  // deliberately not folded into WP 3.10a's diff.
+  //
+  // What replaced the merge as the *proof* is `test/snapshot-arms.test.ts`,
+  // which drives each arm through the real builder over the real port types,
+  // and `apps/api/test/db/phase3-advisors.test.ts`, which drives all four over
+  // a real database.
   //
   // **`drift` only.** `control` and `tight` keep no portfolio at all, which is
   // what makes the control half of `advisor-golden.test.ts` mean something for

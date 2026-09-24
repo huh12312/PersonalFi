@@ -38,7 +38,9 @@ import type { InsightsDependencies, InsightsSettings } from '../../src/service.t
 import type { SnapshotPorts } from '../../src/snapshot/ports.ts';
 import {
   inMemoryBudgetPort,
+  inMemoryInvestmentsPort,
   inMemoryLedgerPort,
+  inMemoryMarketDataPort,
   inMemoryRecurringPort,
 } from '../../src/snapshot/ports.ts';
 import { baseInsight, baseManifest, responseFor, stubAdvisor } from '../fixtures.ts';
@@ -98,6 +100,11 @@ export function portsFor(): SnapshotPorts {
     }),
     budget: inMemoryBudgetPort(null),
     recurring: inMemoryRecurringPort([]),
+    // Deliberately empty, for the same reason the balance is zero: a
+    // persistence suite should never have to reason about which of its own
+    // portfolio figures a numeral check happened to match.
+    investments: inMemoryInvestmentsPort({}),
+    marketData: inMemoryMarketDataPort(null),
   };
 }
 

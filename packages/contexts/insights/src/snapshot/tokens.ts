@@ -31,6 +31,7 @@
  * | Ref | `builtin` / `local_model` | `external` |
  * | --- | --- | --- |
  * | merchant | token | token |
+ * | liability | token | token |
  * | account, category, budget line, series, transaction | the uuid | token |
  *
  * Merchants are tokenised **always** — that is what D22 says and it is the one
@@ -39,6 +40,21 @@
  * back to them and a token it would have to reverse is a token with a reversal
  * table. For an `external` advisor nothing is a uuid, because a uuid is a
  * durable handle into an account the advisor is not supposed to have one for.
+ *
+ * **`liability` is the second always-tokenised domain, and it is the scope row
+ * that says so.** `liabilities.terms`' `drops` column (WP 3.10,
+ * `contract/scopes.ts`) begins *"Account ids, provider ids, institution names,
+ * card masks and the lender's name"* — `cash.summary`'s does not. A liability
+ * is identified by the account it sits on, so `ref('account', id)` would put
+ * that account id into a block whose reviewed policy row says it carries none,
+ * for every in-process advisor. `LIAB_<12 hex>` is therefore minted for every
+ * kind, which is also the shape `wp3.10-advisor-catalog-v2.md` §3 renders and
+ * `test/scope-minimization.test.ts` asserts (`/^LIAB_[0-9a-f]{12}$/`).
+ *
+ * §7.1 asks that this share "one construction and one re-pseudonymisation cost"
+ * with `account_ref`, and it does: it is the same keyed digest over
+ * `{ key, domain, id }`, differing only in the domain — so the `@core/secretbox`
+ * migration below moves both at once, and neither can drift from the other.
  *
  * `builder.ts` is the only caller, which is what keeps that table a table and
  * not an `if` in six places.
@@ -86,11 +102,19 @@ import { canonicalJson, configHash } from '@core/platform';
 
 /** What a token stands for. Different domains never collide into each other. */
 export type TokenDomain =
-  'merchant' | 'account' | 'category' | 'budget_line' | 'series' | 'transaction' | 'institution';
+  | 'merchant'
+  | 'account'
+  | 'liability'
+  | 'category'
+  | 'budget_line'
+  | 'series'
+  | 'transaction'
+  | 'institution';
 
 const PREFIX: Record<TokenDomain, string> = {
   merchant: 'MERCHANT',
   account: 'ACCT',
+  liability: 'LIAB',
   category: 'CAT',
   budget_line: 'LINE',
   series: 'SERIES',
@@ -98,13 +122,25 @@ const PREFIX: Record<TokenDomain, string> = {
   institution: 'INST',
 };
 
+/**
+ * The domains that are a pseudonym for every advisor kind, not only `external`.
+ *
+ * A set rather than two `if`s, so "which refs never cross as a uuid?" has one
+ * answer and adding a third is a one-line, reviewed diff in the file whose
+ * header table already lists them.
+ */
+const ALWAYS_TOKENISED: ReadonlySet<TokenDomain> = new Set<TokenDomain>(['merchant', 'liability']);
+
 /** Hex characters kept from the HMAC. 48 bits; see the header. */
 const TOKEN_HEX = 12;
 
 export interface Tokeniser {
   /** Always tokenised, for every advisor kind. D22. */
   merchant(id: string): string;
-  /** A uuid for an in-process advisor, a token for an external one. */
+  /**
+   * A uuid for an in-process advisor, a token for an external one — except for
+   * the `ALWAYS_TOKENISED` domains, which are a token for both.
+   */
   ref(domain: TokenDomain, id: string): string;
 }
 
@@ -144,7 +180,7 @@ export function createTokeniser(options: TokeniserOptions): Tokeniser {
       return token('merchant', id);
     },
     ref(domain, id) {
-      if (domain === 'merchant') return token('merchant', id);
+      if (ALWAYS_TOKENISED.has(domain)) return token(domain, id);
       return options.tokeniseEverything ? token(domain, id) : id;
     },
   };

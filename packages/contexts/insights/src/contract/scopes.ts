@@ -100,14 +100,21 @@ export interface ScopeDefinition {
    * contain a block the builder could not actually fill, because an advisor
    * cannot tell "empty" from "none" and would happily reason about zero.
    *
-   * **WP 3.10 note.** The name says Phase 2 and the meaning is "is there a
-   * reader behind it *today*". WP 3.10 adds the investing, debt and crypto
-   * rules and the scope rows they read, but it does not own `snapshot/
-   * builder.ts` or its ports, so `holdings.aggregate`, `holdings.detail`,
-   * `liabilities.terms` and `market.rates` stay `false` until the reader
-   * additions in §7 of `docs/evidence/phase-3/wp3.10-advisor-catalog-v2.md`
-   * land. `false` is the honest state: the builder's `#blockFor` has no branch
-   * for them, so a `true` here would promise a block nothing can fill.
+   * **WP 3.10 note, closed by WP 3.10a.** The name says Phase 2 and the meaning
+   * is "is there a reader behind it *today*". WP 3.10 added the investing, debt
+   * and crypto rules and the scope rows they read but did not own `snapshot/`,
+   * so `holdings.aggregate`, `holdings.detail`, `liabilities.terms` and
+   * `market.rates` shipped `false`. WP 3.10a landed the four `#blockFor` arms
+   * and the two ports behind them (`docs/evidence/phase-3/
+   * wp3.10a-snapshot-readers.md`), and flipped the four flags **in the same
+   * change** — an arm without a flag is dead code and a flag without an arm is
+   * a silent no-key, so the two may never be split across commits.
+   *
+   * The four that remain `false` are the four whose source context does not
+   * exist: `goals.list` and `risk.profile` are `@ctx/planning`'s and Phase 4's,
+   * `market.watchlist` has no model at all, and `institutions.names` is a
+   * deliberate refusal — 08 §4.2 gives it the highest sensitivity in the table
+   * and nothing has needed it.
    */
   readonly sourcedInPhase2: boolean;
 }
@@ -156,8 +163,9 @@ export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
     externalAllowed: true,
     requiresPerRunConsent: false,
     minimisation: minimisation({}),
-    // @ctx/integrations lands the reader; the builder branch is owed (§7).
-    sourcedInPhase2: false,
+    // WP 3.10a: `#marketRates` reads `@ctx/integrations`' FRED source through
+    // `MarketDataPort`, converts percent→ratio and computes `stale`.
+    sourcedInPhase2: true,
   }),
   Object.freeze({
     scope: 'networth.summary',
@@ -273,8 +281,9 @@ export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
     externalAllowed: true,
     requiresPerRunConsent: false,
     minimisation: minimisation({}),
-    // @ctx/investments lands in Phase 3; the builder branch is owed (§7).
-    sourcedInPhase2: false,
+    // WP 3.10a: `#holdingsAggregate` reads WP 3.3's analytics through
+    // `InvestmentsPort.holdings`.
+    sourcedInPhase2: true,
   }),
   Object.freeze({
     scope: 'holdings.detail',
@@ -291,7 +300,8 @@ export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
     externalAllowed: true,
     requiresPerRunConsent: false,
     minimisation: minimisation({}),
-    sourcedInPhase2: false,
+    // WP 3.10a: `#holdingsDetail`, over the same one valuation as the aggregate.
+    sourcedInPhase2: true,
   }),
   Object.freeze({
     // WP 3.10. One block unblocks the whole D family at once, plus U8, C5 and
@@ -312,7 +322,9 @@ export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
     externalAllowed: true,
     requiresPerRunConsent: false,
     minimisation: minimisation({}),
-    sourcedInPhase2: false,
+    // WP 3.10a: `#liabilitiesTerms`, over `@ctx/ledger`'s liability accounts and
+    // whatever WP 3.7's `connection_sync_facts` persisted for them.
+    sourcedInPhase2: true,
   }),
   Object.freeze({
     scope: 'transactions.summary',

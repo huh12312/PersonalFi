@@ -21,9 +21,15 @@ import { SCOPE_CATALOGUE, scopesPermittedForKind } from '../src/contract/scopes.
 import { AdvisorSnapshotSchema } from '../src/contract/snapshot.ts';
 import { SnapshotBuilder, bucketOf, roundToMultiple } from '../src/snapshot/builder.ts';
 import {
+  PERCENT_PER_ANNUM,
   inMemoryBudgetPort,
+  inMemoryInvestmentsPort,
   inMemoryLedgerPort,
+  inMemoryMarketDataPort,
   inMemoryRecurringPort,
+  type InsightsHoldings,
+  type InsightsLiabilities,
+  type InsightsMarketRates,
   type SnapshotPorts,
 } from '../src/snapshot/ports.ts';
 import { deriveTokenKey } from '../src/snapshot/tokens.ts';
@@ -31,6 +37,214 @@ import { deriveTokenKey } from '../src/snapshot/tokens.ts';
 const TODAY = DateOnly.parse('2026-09-19');
 const usd = (minor: bigint) => Money.of(minor, 'USD');
 const TOKEN_KEY = deriveTokenKey('test-secret', '01930000-0000-7000-8000-000000000001');
+
+// ---------------------------------------------------------------------------
+// WP 3.10a — the Phase 3 port fixtures
+// ---------------------------------------------------------------------------
+
+/**
+ * One portfolio, carrying every shape the two holdings arms have to handle.
+ *
+ * `US_BOND` is in `targets` and **not** in `byAssetClass`: the holder targets
+ * 25% bonds and owns none, which is the case §7.1 says must cross as a
+ * zero-weight row rather than be omitted.
+ *
+ * `sec-3` has no symbol, so it must not appear in either block — a position an
+ * advisor cannot name is a position it cannot cite.
+ */
+const HOLDINGS: InsightsHoldings = {
+  currency: 'USD',
+  aggregate: {
+    investableTotal: usd(1_000_000n),
+    unclassifiedPct: 0.02,
+    byAssetClass: [
+      { assetClass: 'US_EQUITY', value: usd(700_000n), weight: 0.7 },
+      { assetClass: 'CRYPTO', value: usd(280_000n), weight: 0.28 },
+      { assetClass: 'UNCLASSIFIED', value: usd(20_000n), weight: 0.02 },
+    ],
+    positions: [
+      {
+        securityId: 'sec-1',
+        symbol: 'VTI',
+        value: usd(700_000n),
+        weight: 0.7,
+        assetClass: 'US_EQUITY',
+        employerStock: false,
+        isCrypto: false,
+      },
+      {
+        securityId: 'sec-2',
+        symbol: 'BTC',
+        value: usd(280_000n),
+        weight: 0.28,
+        assetClass: 'CRYPTO',
+        employerStock: false,
+        isCrypto: true,
+      },
+      {
+        securityId: 'sec-3',
+        symbol: null,
+        value: usd(20_000n),
+        weight: 0.02,
+        assetClass: 'UNCLASSIFIED',
+        employerStock: false,
+        isCrypto: false,
+      },
+    ],
+    targets: [
+      { assetClass: 'US_EQUITY', weight: 0.6 },
+      { assetClass: 'US_BOND', weight: 0.25 },
+    ],
+    accountTypeMix: { taxable: 0.72, tax_deferred: 0.28 },
+    idleCash: {
+      total: usd(1_200_000n),
+      floor: usd(100_000n),
+      minDays: 14,
+      longestIdleDays: 47,
+    },
+    cryptoCustody: {
+      exchangeValue: usd(180_000n),
+      selfCustodyValue: usd(100_000n),
+      unknownValue: usd(0n),
+    },
+  },
+  positions: [
+    {
+      securityId: 'sec-1',
+      symbol: 'VTI',
+      assetClass: 'US_EQUITY',
+      accountType: 'taxable',
+      quantity: '25.000000000000000000',
+      costBasis: usd(500_000n),
+      marketValue: usd(700_000n),
+      unrealized: usd(200_000n),
+      oldestLotDays: 800,
+      isCrypto: false,
+      isStablecoin: false,
+      employerStock: false,
+      expenseRatio: 0.0003,
+      peerExpenseRatio: 0.0003,
+      annualFeeCost: usd(210n),
+      highFee: false,
+      lots: [
+        {
+          openedDays: 800,
+          quantity: '25.000000000000000000',
+          costBasis: usd(500_000n),
+          marketValue: usd(700_000n),
+          unrealized: usd(200_000n),
+          longTerm: true,
+        },
+      ],
+    },
+    {
+      // No basis. `cost_basis` and `unrealized` must be null *together*.
+      securityId: 'sec-2',
+      symbol: 'BTC',
+      assetClass: 'CRYPTO',
+      accountType: 'taxable',
+      quantity: '0.500000000000000000',
+      costBasis: null,
+      marketValue: usd(280_000n),
+      unrealized: null,
+      oldestLotDays: 120,
+      isCrypto: true,
+      isStablecoin: false,
+      employerStock: false,
+      expenseRatio: null,
+      peerExpenseRatio: null,
+      annualFeeCost: null,
+      highFee: false,
+      lots: [
+        {
+          openedDays: 120,
+          quantity: '0.500000000000000000',
+          costBasis: null,
+          marketValue: usd(280_000n),
+          unrealized: null,
+          longTerm: false,
+        },
+      ],
+    },
+    {
+      securityId: 'sec-3',
+      symbol: null,
+      assetClass: 'UNCLASSIFIED',
+      accountType: 'unknown',
+      quantity: '1.000000000000000000',
+      costBasis: null,
+      marketValue: usd(20_000n),
+      unrealized: null,
+      oldestLotDays: 10,
+      isCrypto: false,
+      isStablecoin: false,
+      employerStock: false,
+      expenseRatio: null,
+      peerExpenseRatio: null,
+      annualFeeCost: null,
+      highFee: false,
+      lots: [],
+    },
+  ],
+};
+
+const LIABILITIES: InsightsLiabilities = {
+  currency: 'USD',
+  liabilities: [
+    {
+      id: 'acct-card',
+      kind: 'credit_card',
+      apr: 0.2399,
+      promoApr: null,
+      promoAprEndDate: null,
+      creditLimit: usd(1_500_000n),
+      statementBalance: usd(482_000n),
+      currentBalance: usd(482_000n),
+      minimumPayment: usd(14_500n),
+      paymentDueDate: DateOnly.parse('2026-10-05'),
+      lastPaymentDate: DateOnly.parse('2026-09-05'),
+      lastPaymentAmount: usd(14_500n),
+      minimumOnlyMonths: null,
+    },
+  ],
+};
+
+const FRED_ATTRIBUTION =
+  'This product uses the FRED\u00ae API but is not endorsed or certified by the ' +
+  'Federal Reserve Bank of St. Louis.';
+
+const RATES: InsightsMarketRates = {
+  attribution: FRED_ATTRIBUTION,
+  attributionUrl: 'https://fred.stlouisfed.org/docs/api/terms_of_use.html',
+  observations: [
+    {
+      seriesId: 'DGS3MO',
+      kind: 'short_term_risk_free',
+      observationDate: DateOnly.parse('2026-09-18'),
+      value: '5.12',
+      units: PERCENT_PER_ANNUM,
+      observedOn: DateOnly.parse('2026-09-19'),
+    },
+    {
+      // Observed three days ago: strictly more than one day, so stale.
+      seriesId: 'MORTGAGE30US',
+      kind: 'mortgage_30y',
+      observationDate: DateOnly.parse('2026-09-12'),
+      value: '6.34',
+      units: PERCENT_PER_ANNUM,
+      observedOn: DateOnly.parse('2026-09-16'),
+    },
+    {
+      // An index, not a rate. Refused rather than converted (§7.1 duty 1).
+      seriesId: 'CPIAUCSL',
+      kind: 'other',
+      observationDate: DateOnly.parse('2026-09-01'),
+      value: '318.4',
+      units: 'index_1982_1984_100',
+      observedOn: DateOnly.parse('2026-09-19'),
+    },
+  ],
+};
 
 /** Every Phase-2-sourced block has real data behind it, so absence is a choice. */
 function fullPorts(): SnapshotPorts {
@@ -128,6 +342,15 @@ function fullPorts(): SnapshotPorts {
         priceChanges: [],
       },
     ]),
+    // WP 3.10a. The four Phase 3 scopes get real data here for the same reason
+    // the Phase 2 ones do: this suite's whole argument is that a *missing* key
+    // is a decision, and a block that could not have been filled proves
+    // nothing about the decision not to fill it.
+    investments: inMemoryInvestmentsPort({
+      holdings: HOLDINGS,
+      liabilities: LIABILITIES,
+    }),
+    marketData: inMemoryMarketDataPort(RATES),
   };
 }
 
@@ -174,15 +397,21 @@ describe('snapshot scopes', () => {
   });
 
   it('a granted scope with no source behind it yields no key either', async () => {
-    // `holdings.aggregate` is Phase 3's. A granted-but-unsourced scope must be
-    // indistinguishable from an ungranted one, because an empty block is a
-    // block an advisor will reason about.
-    const built = await build('builtin', ['holdings.aggregate', 'goals.list', 'cash.summary']);
+    // `goals.list` and `risk.profile` are `@ctx/planning`'s and Phase 4's. A
+    // granted-but-unsourced scope must be indistinguishable from an ungranted
+    // one, because an empty block is a block an advisor will reason about.
+    //
+    // This used to be `holdings.aggregate`'s test. WP 3.10a gave that scope a
+    // reader, so the example moved to a scope that still has none rather than
+    // the assertion being deleted — the property is about the *mechanism*, and
+    // it would stop being tested the moment every scope in the example had a
+    // source.
+    const built = await build('builtin', ['risk.profile', 'goals.list', 'cash.summary']);
     expect(Object.keys(built.snapshot)).toEqual(['cash_summary']);
     expect(built.emittedScopes).toEqual(['cash.summary']);
     // The *grant* still names them: the user did grant them, and the request
     // should not pretend otherwise.
-    expect(built.grantedScopes).toContain('holdings.aggregate');
+    expect(built.grantedScopes).toContain('goals.list');
   });
 
   it('a merchant is always tokenised, for every advisor kind', async () => {

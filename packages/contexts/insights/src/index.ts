@@ -84,18 +84,28 @@ export {
 } from './contract/scopes.ts';
 
 export {
+  ACCOUNT_TAX_TREATMENTS,
   AMOUNT_BUCKETS,
   AdvisorSnapshotSchema,
   BudgetsStatusSchema,
   CashSummarySchema,
   CashflowMonthlySchema,
+  HoldingsAggregateSchema,
+  HoldingsDetailSchema,
+  LIABILITY_KINDS,
+  LiabilitiesTermsSchema,
+  MARKET_RATE_KINDS,
+  MarketRatesSchema,
   MoneyJsonSchema,
   NetWorthSummarySchema,
   RecurringListSchema,
   TransactionsRawSchema,
   TransactionsSummarySchema,
+  type AccountTaxTreatment,
   type AdvisorSnapshot,
   type AmountBucket,
+  type LiabilityKind,
+  type MarketRateKind,
   type MoneyJson,
 } from './contract/snapshot.ts';
 
@@ -215,10 +225,12 @@ export {
 // --- The snapshot ----------------------------------------------------------
 
 export {
+  MARKET_RATE_FRESH_DAYS,
   SNAPSHOT_WINDOWS,
   SnapshotBuilder,
   bucketOf,
   monthOf,
+  percentStringToRatio,
   roundToMultiple,
   type BuildSnapshotInput,
   type BuiltSnapshot,
@@ -234,28 +246,47 @@ export {
 
 /**
  * The read ports. `apps/api/src/domain.ts` implements them over `@ctx/ledger`,
- * `@ctx/budgeting` and `@ctx/recurring`; nothing in this package imports those
- * contexts (the boundary lint enforces it). None of the three has a write
- * method, which is what makes "an advisor proposes and never acts" structural
- * at the data layer as well as at the contract.
+ * `@ctx/budgeting`, `@ctx/recurring`, `@ctx/investments` and
+ * `@ctx/integrations`; nothing in this package imports those contexts (the
+ * boundary lint enforces it). None of the five has a write method, which is
+ * what makes "an advisor proposes and never acts" structural at the data layer
+ * as well as at the contract.
  */
 export {
   CASH_ACCOUNT_TYPES,
+  PERCENT_PER_ANNUM,
   emptyPorts,
   inMemoryBudgetPort,
+  inMemoryInvestmentsPort,
   inMemoryLedgerPort,
+  inMemoryMarketDataPort,
   inMemoryRecurringPort,
   type BudgetPort,
   type CashAccountType,
   type CategorySpendRow,
   type FakeLedgerData,
   type InsightsAccount,
+  type InsightsAllocationTarget,
+  type InsightsAssetClassSlice,
   type InsightsBudgetLine,
   type InsightsBudgetPeriod,
+  type InsightsCryptoCustody,
+  type InsightsHoldings,
+  type InsightsHoldingsAggregate,
+  type InsightsIdleCash,
+  type InsightsLiabilities,
+  type InsightsLiability,
+  type InsightsLot,
+  type InsightsMarketRateObservation,
+  type InsightsMarketRates,
+  type InsightsPosition,
   type InsightsPriceChange,
   type InsightsRecurringStream,
+  type InsightsSecurityPosition,
   type InsightsTransaction,
+  type InvestmentsPort,
   type LedgerPort,
+  type MarketDataPort,
   type MerchantSpendRow,
   type MonthlyCashflowRow,
   type RecurringPort,
