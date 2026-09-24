@@ -55,7 +55,12 @@ import {
   type ApiHarness,
 } from '../helpers/api-harness.ts';
 import { seedUserState } from '../../src/bootstrap-seed.ts';
-import { PRICE_REFRESH_JOB_KIND, PRICE_REFRESH_SCHEDULE_NAME } from '../../src/modules.ts';
+import {
+  NET_WORTH_SNAPSHOT_JOB_KIND,
+  NET_WORTH_SNAPSHOT_SCHEDULE_NAME,
+  PRICE_REFRESH_JOB_KIND,
+  PRICE_REFRESH_SCHEDULE_NAME,
+} from '../../src/modules.ts';
 import { MODULE_FLAGS } from '../../src/platform.ts';
 import { DEFAULT_LADDERS, ladderRows } from '@ctx/investments';
 
@@ -129,6 +134,13 @@ describe.skipIf(NO_DATABASE)(
           // with no provider key still wants the row, because the refresh
           // runs, finds no source registered and records that honestly.
           PRICE_REFRESH_SCHEDULE_NAME,
+          // WP 3.8 (04:00 local), the same claim one schedule later: a holder
+          // created after boot gets the net-worth cadence with no restart. Like
+          // the price refresh and unlike the insights one, there is no secret
+          // to feature-detect on — a holder with no accounts still wants the
+          // row, because the snapshotter computes an honest day from whatever
+          // the ledger holds.
+          NET_WORTH_SNAPSHOT_SCHEDULE_NAME,
         ]),
       );
 
@@ -202,6 +214,7 @@ describe.skipIf(NO_DATABASE)(
       expect(jobKinds).toContain(DIGEST_JOB_KIND);
       expect(jobKinds).toContain(RUN_ALL_JOB_KIND);
       expect(jobKinds).toContain(PRICE_REFRESH_JOB_KIND);
+      expect(jobKinds).toContain(NET_WORTH_SNAPSHOT_JOB_KIND);
     });
   },
 );

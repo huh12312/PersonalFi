@@ -209,6 +209,18 @@ secrets:
     file: ./secrets/coinbase_key_name
   coinbase_private_key:
     file: ./secrets/coinbase_private_key
+  # ----------------------------------------------------------------- walletrpc
+  #
+  # WP 3.6's Etherscan v2 key (docs/evidence/phase-3/wp3.6-walletrpc.md §8
+  # item 2). Same api+worker-only posture and the same empty-placeholder
+  # convention, but optional in a stronger sense than any secret above it: the
+  # watch-only wallet connector is registered either way, and its Bitcoin leg —
+  # local xpub/ypub/zpub derivation against Blockstream Esplora — needs no key
+  # at all. Only the Ethereum leg does, because Etherscan v2 requires one even
+  # at the free tier, and `@connector/walletrpc` refuses **by name**
+  # (`CONFIG_ERROR`, naming this file) rather than dialling without it.
+  etherscan_api_key:
+    file: ./secrets/etherscan_api_key
 
 services:
   proxy:
@@ -333,6 +345,7 @@ services:
         openfigi_api_key,
         coinbase_key_name,
         coinbase_private_key,
+        etherscan_api_key,
       ]
     networks: [frontend, backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
@@ -420,6 +433,7 @@ services:
         openfigi_api_key,
         coinbase_key_name,
         coinbase_private_key,
+        etherscan_api_key,
       ]
     networks: [backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']

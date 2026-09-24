@@ -739,15 +739,15 @@ harden-secrets:
     # list rotting again the way the image-prune delete set and the
     # Caddyfile's proxied prefixes both rotted before it.
     #
-    # Phase 3 (docs/evidence/phase-3/wp3.w-wiring.md) adds six more to the same
-    # 10001 group, all on api+worker and none on migrator: WP 3.4's four
-    # market-data provider keys and WP 3.5's CDP pair. Added here in the same
-    # edit that adds them to compose.yml, which is the whole lesson of N-1 —
-    # the plaid_* secrets were mounted for a release before anyone noticed this
-    # list had not grown with them.
+    # Phase 3 (docs/evidence/phase-3/wp3.w-wiring.md) adds seven more to the
+    # same 10001 group, all on api+worker and none on migrator: WP 3.4's four
+    # market-data provider keys, WP 3.5's CDP pair and WP 3.6's Etherscan key.
+    # Added here in the same edit that adds them to compose.yml, which is the
+    # whole lesson of N-1 — the plaid_* secrets were mounted for a release
+    # before anyone noticed this list had not grown with them.
     for f in database_url master_key plaid_client_id plaid_secret plaid_env advisor_token_secret \
              tiingo_api_key fred_api_key coingecko_api_key openfigi_api_key \
-             coinbase_key_name coinbase_private_key; do
+             coinbase_key_name coinbase_private_key etherscan_api_key; do
       [[ -e "$f" ]] || continue
       sudo chown 10001:10001 "$f" && sudo chmod 0400 "$f"
     done

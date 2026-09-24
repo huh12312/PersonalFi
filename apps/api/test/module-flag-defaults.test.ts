@@ -49,6 +49,16 @@ const EXPECTED_DEFAULTS: Readonly<Record<string, boolean>> = Object.freeze({
   // key file gets no adapter at all, so the refresh runs and asks nobody.
   'module.investments': true,
   'module.integrations': true,
+  // WP 3.8, flipped at the same boundary and on the same evidence:
+  // `phase3-wiring.test.ts` drove the real `createNetWorthConsumer` through the
+  // real pump and landed the real `planning.net_worth_snapshot` schedule row
+  // through the real `upsertSchedule`. Safe at `true` on a fresh install
+  // because the consumer's handler is an UPDATE — it marks nothing when there
+  // is no open day — and the 04:00 job computes a day from whatever the ledger
+  // and investments actually hold, which for a holder with no accounts is
+  // nothing. It never writes a placeholder row, because a zero that means "not
+  // computed yet" is the exact lie WP 3.8 exists to refuse.
+  'module.planning': true,
 });
 
 describe('module kill-switch defaults are pinned (WP 3.13 carry-over)', () => {

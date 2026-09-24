@@ -64,8 +64,10 @@ import {
   registerNightlySchedule as registerInsightsNightlySchedule,
 } from '@ctx/insights';
 import { registerNotificationSchedules } from '@ctx/notifications';
+import { registerNetWorthSnapshotSchedule } from '@ctx/planning';
 import { seedPriceSourcePriority } from './domain.ts';
 import {
+  NET_WORTH_SNAPSHOT_SCHEDULE_NAME,
   PRICE_REFRESH_CRON,
   PRICE_REFRESH_JOB_KIND,
   PRICE_REFRESH_SCHEDULE_NAME,
@@ -204,6 +206,25 @@ export async function seedUserState(
       options.clock,
     );
     schedulesRegistered.push(PRICE_REFRESH_SCHEDULE_NAME);
+  }
+
+  // `planning.net_worth_snapshot` (04:00 local). Flag-gated for the same
+  // reason as the four above, and with the same absence of anything to
+  // feature-detect on as `integrations.price_refresh`: a holder with no
+  // accounts still wants the row, because the snapshotter computes an honest
+  // day from whatever the ledger holds, and withholding the schedule until
+  // there were accounts would mean the first account a user links produces no
+  // net-worth point until the next restart — condition C-1's whole lesson.
+  //
+  // Registered **after** the price refresh, in the order the two actually fire
+  // (03:45, then 04:00), so this list reads like the night does.
+  if (await flags.isEnabled(options.userId, 'module.planning')) {
+    await registerNetWorthSnapshotSchedule(
+      database,
+      { userId: options.userId, timezone: options.timezone },
+      options.clock,
+    );
+    schedulesRegistered.push(NET_WORTH_SNAPSHOT_SCHEDULE_NAME);
   }
 
   return {

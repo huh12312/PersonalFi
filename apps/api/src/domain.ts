@@ -73,8 +73,14 @@ import type { Database } from '@core/db';
 import { DateOnly, Money, newId, systemClock, type Clock } from '@core/kernel';
 import {
   appendEvent,
+  classifyStatus,
+  createEgressPolicy,
   createNodeTransport,
+  guardUrl,
+  systemResolver,
+  type EgressPolicy,
   type Executor,
+  type HttpTransport,
   type PlatformLogger,
   type TransactionalExecutor,
 } from '@core/platform';
@@ -107,13 +113,7 @@ import type {
   MonthlyCashflowRow,
   RecurringPort as InsightsRecurringPort,
 } from '@ctx/insights';
-import {
-  createEgressPolicy,
-  createNtfyChannel,
-  createSmtpChannel,
-  type ChannelRegistry,
-  type EgressPolicy,
-} from '@ctx/notifications';
+import { createNtfyChannel, createSmtpChannel, type ChannelRegistry } from '@ctx/notifications';
 import {
   listSeries,
   periodsPerYear,
@@ -140,8 +140,37 @@ import {
   fetchTransport,
 } from '@connector/coinbase';
 import {
+  ESPLORA_HOST,
+  ETHERSCAN_HOST,
+  WALLETRPC_MANIFEST,
+  WALLETRPC_PROVIDER,
+  WalletRpcConnector,
+  etherscanApiKeyOf,
+  missingEtherscanApiKey,
+  type EsploraTransport,
+  type EtherscanApiKey,
+  type EtherscanTransport,
+  type WalletAddressRecord,
+  type WalletAddressStore,
+} from '@connector/walletrpc';
+import {
+  defaultFlagsFor,
+  type AccountKind as PlanningAccountKind,
+  type BalanceObservation as PlanningBalanceObservation,
+  type BalancesReader as PlanningBalancesReader,
+  type HoldingObservation as PlanningHoldingObservation,
+  type HoldingsReader as PlanningHoldingsReader,
+  type PlanningAccount,
+  type PlanningExecutor,
+  type SnapshotPorts,
+} from '@ctx/planning';
+import {
   DEFAULT_LADDERS,
+  createFxReader,
+  createPriceReader,
   createSecurityResolver,
+  drizzleFxStore,
+  drizzlePriceStore,
   drizzleSecurityStore,
   ladderRows,
   outboxOf as investmentsOutboxOf,
@@ -167,6 +196,7 @@ import {
   FRED_WINDOWS,
   OPENFIGI_WINDOWS,
   TIINGO_WINDOWS,
+  USER_AGENT,
   apiKeyOf,
   createCoinGeckoPriceSource,
   createFredSource,
@@ -1462,6 +1492,637 @@ export async function seedPriceSourcePriority(database: Database, userId: string
   return rows.length;
 }
 
+// ---------------------------------------------------------------------------
+// WP 3.8 — `@ctx/planning`'s four snapshot ports
+// ---------------------------------------------------------------------------
+//
+// `docs/evidence/phase-3/wp3.8-net-worth.md` §8 names this as the one new
+// `domain.ts` export, and the reason it belongs here rather than anywhere else
+// is the whole point of the port: `net_worth_daily` lives in `@ctx/planning`
+// and **every one of its inputs belongs to somebody else** — the account
+// roster and its balances are `@ctx/ledger`'s, holdings and prices and FX
+// rates are `@ctx/investments`'. `pnpm lint:schema-ownership` refuses any SQL
+// in `packages/contexts/planning` that names `accounts`, `holdings`, `prices`
+// or `fx_rates`, so this file is the only place the four can be satisfied.
+
+/** What `planningPortsFor` needs that an executor cannot carry. */
+export interface PlanningPortOptions {
+  /**
+   * The account holder. Bound here rather than passed per call because two of
+   * the four ports — `PriceReader.price` and `FxReader.rate` — take no
+   * `userId` argument at all (they are `@ctx/investments`' readers, assigned
+   * straight through with no adapter), so the id has to be closed over
+   * somewhere and this is the only place that knows it.
+   */
+  readonly userId: string;
+  /**
+   * The holder's IANA zone. `account_balances.as_of` is a `timestamptz`, and
+   * "the freshest observation on or before 2026-06-15" is a question about a
+   * **local calendar day** (08 §3.5) — the same reason every schedule in this
+   * application is registered with a timezone rather than in UTC. A reader
+   * that truncated `as_of` in UTC would put a 21:00-local observation on the
+   * next day for every holder west of Greenwich.
+   */
+  readonly timeZone: string;
+  readonly clock?: Clock;
+}
+
+/**
+ * 07 §4.1's class table, as the mapping from `@ctx/ledger`'s `AccountType` to
+ * `@ctx/planning`'s `AccountKind`.
+ *
+ * Two mappings here are decisions rather than transcription and are stated
+ * rather than left to be discovered:
+ *
+ *   * **`crypto` → `investment`.** 07 §4.1's `isInvestable` is what separates
+ *     "money I could spend this week" from "a position I would have to sell",
+ *     and selling BTC to buy groceries is the same operation as selling VTI to
+ *     buy groceries. Mapping it to `cash` would count a volatile position in
+ *     the liquid total, which is the number the emergency-fund rules divide by.
+ *   * **`manual` splits on `classification`.** A manual *asset* (a paid-off
+ *     car, a savings bond) is `manual_asset`; a manual *liability* (a loan
+ *     from a relative) is `loan`. Both are in net worth and neither is
+ *     on-budget, so the two arms produce identical flags today — the split is
+ *     there so that the day `@ctx/ledger` grows real `is_liquid` /
+ *     `is_investable` columns, the thing being replaced is a classification
+ *     and not a coin flip.
+ */
+function planningKindOf(account: AccountSummary): PlanningAccountKind {
+  switch (account.type) {
+    case 'depository':
+      return 'cash';
+    case 'credit':
+      return 'credit';
+    case 'loan':
+      return 'loan';
+    case 'investment':
+      return 'investment';
+    case 'crypto':
+      return 'investment';
+    case 'manual':
+      return account.classification === 'liability' ? 'loan' : 'manual_asset';
+  }
+}
+
+/**
+ * The set of accounts `@ctx/budgeting` has been told to leave out of the
+ * budget — `budgets.off_budget_account_ids` (0009_budgeting.sql), which says in
+ * as many words that adding an `on_budget` column to `accounts` would be
+ * Budgeting writing Ledger's table.
+ *
+ * The union across every budget, not the first one's: an account that any
+ * budget excludes is not on-budget, and taking `budgets[0]` would make the
+ * answer depend on `created_at` ordering the day a second budget exists.
+ */
+async function offBudgetAccountIds(
+  executor: PlanningExecutor,
+  userId: string,
+): Promise<ReadonlySet<string>> {
+  const rows = await listBudgets(executor, { userId });
+  const ids = new Set<string>();
+  for (const budget of rows) {
+    for (const accountId of budget.offBudgetAccountIds) ids.add(accountId);
+  }
+  return ids;
+}
+
+/**
+ * `@ctx/planning`'s `BalancesReader`, over `@ctx/ledger`.
+ *
+ * `accounts()` deliberately ignores its `asOf` argument for the roster and
+ * carries `closedAt` instead: `accounts` is not a versioned table, so there is
+ * no honest way to answer "which accounts existed on 2025-03-04" — and
+ * `@ctx/planning`'s `computeNetWorth` already refuses to count an account from
+ * the day it closed, which is the only time-dependence the snapshot needs. An
+ * adapter that filtered here *and* let the aggregate filter would be two
+ * copies of one rule.
+ */
+function createPlanningBalancesReader(
+  executor: PlanningExecutor,
+  options: PlanningPortOptions,
+): PlanningBalancesReader {
+  const zone = options.timeZone;
+  return {
+    async accounts(userId: string, _asOf: string): Promise<readonly PlanningAccount[]> {
+      const [rows, offBudget] = await Promise.all([
+        listAccounts(executor, { userId, includeClosed: true }),
+        offBudgetAccountIds(executor, userId),
+      ]);
+      return rows.map((account) => {
+        const kind = planningKindOf(account);
+        const flags = defaultFlagsFor(kind, account.includeInNetWorth);
+        return {
+          accountId: account.id,
+          name: account.name,
+          kind,
+          // Never inferred from the sign of a balance (`AccountSide`'s own
+          // doc): an overpaid credit card is still a liability account.
+          side: account.classification,
+          currency: account.currency,
+          flags: {
+            ...flags,
+            // The one flag with a real source of truth. `defaultFlagsFor` says
+            // what 07 §4.1's class table implies; the user's own exclusion list
+            // outranks it, and only ever in the `false` direction.
+            onBudget: flags.onBudget && !offBudget.has(account.id),
+          },
+          closedAt: account.closedAt,
+        };
+      });
+    },
+
+    async balanceOnOrBefore(
+      userId: string,
+      accountId: string,
+      date: string,
+    ): Promise<PlanningBalanceObservation | null> {
+      const result = await executor.execute<{
+        current_minor: bigint | string;
+        currency: string;
+        source: 'provider' | 'manual' | 'derived';
+        local_date: string;
+      }>(sql`
+        SELECT current_minor,
+               currency,
+               source,
+               to_char((as_of AT TIME ZONE ${zone})::date, 'YYYY-MM-DD') AS local_date
+          FROM account_balances
+         WHERE user_id = ${userId}::uuid
+           AND account_id = ${accountId}::uuid
+           AND (as_of AT TIME ZONE ${zone})::date <= ${date}::date
+         ORDER BY as_of DESC
+         LIMIT 1
+      `);
+      const row = result.rows[0];
+      if (row === undefined) return null;
+      return {
+        accountId,
+        date: row.local_date,
+        currentMinor: BigInt(row.current_minor),
+        currency: row.currency,
+        source: row.source,
+      };
+    },
+
+    async transactionsTotalOn(userId: string, accountId: string, date: string): Promise<bigint> {
+      // 04 §5.4's `balance(d-1) = balance(d) - Σ txns(d)`, and therefore the
+      // sum of what *actually moved*, not of what a report would count:
+      //
+      //   * `user_excluded` rows are **included**. Excluding a transaction from
+      //     the budget does not un-spend the money, and subtracting a smaller
+      //     sum would reconstruct a balance the bank never held.
+      //   * transfers are **included**, for the same reason: a transfer leaves
+      //     one account and lands in another, and both balances moved.
+      //   * superseded and provider-removed rows are **excluded**: a duplicate
+      //     that `@ctx/ledger` marked superseded never moved money twice, and a
+      //     `removed_at` row is a provider tombstone.
+      //
+      // The sign convention is the ledger's house one (negative = outflow),
+      // which is already what this port's contract asks for.
+      const result = await executor.execute<{ total: string }>(sql`
+        SELECT COALESCE(SUM(effective_amount_minor), 0)::text AS total
+          FROM transactions
+         WHERE user_id = ${userId}::uuid
+           AND account_id = ${accountId}::uuid
+           AND effective_date = ${date}::date
+           AND superseded_by_id IS NULL
+           AND removed_at IS NULL
+      `);
+      return BigInt(result.rows[0]?.total ?? '0');
+    },
+  };
+}
+
+/**
+ * `@ctx/planning`'s `HoldingsReader`, over `@ctx/investments`.
+ *
+ * Both methods read the **union** of `holdings` (the current position, one row
+ * per account/security) and `holdings_snapshots` (the per-day history). Reading
+ * only the snapshots would leave today unanswerable on an install whose first
+ * sync has landed but whose first snapshot has not; reading only `holdings`
+ * would make `bracketingObservations` structurally impossible, and a reader
+ * that can only answer "the latest on or before" is exactly the one 04 §5.4
+ * warns about — it carries a stale share count forward through a month of
+ * contributions and calls the result observed.
+ */
+function createPlanningHoldingsReader(executor: PlanningExecutor): PlanningHoldingsReader {
+  const observations = (userId: string, accountId: string): SQL => sql`
+    SELECT security_id, quantity, as_of_date
+      FROM holdings_snapshots
+     WHERE user_id = ${userId}::uuid AND account_id = ${accountId}::uuid
+    UNION ALL
+    SELECT security_id, quantity, as_of_date
+      FROM holdings
+     WHERE user_id = ${userId}::uuid AND account_id = ${accountId}::uuid
+  `;
+
+  const rowOf = (
+    accountId: string,
+    row: { security_id: string; quantity: string; as_of_date: string },
+  ): PlanningHoldingObservation => ({
+    accountId,
+    securityId: row.security_id,
+    // An exact decimal string, never a `number` (D3): a share count is not an
+    // integer and 0.1 + 0.2 is not 0.3.
+    quantity: String(row.quantity),
+    asOfDate: row.as_of_date,
+  });
+
+  return {
+    async positionsOnOrBefore(userId, accountId, date) {
+      const result = await executor.execute<{
+        security_id: string;
+        quantity: string;
+        as_of_date: string;
+      }>(sql`
+        SELECT DISTINCT ON (security_id) security_id, quantity, as_of_date
+          FROM (${observations(userId, accountId)}) AS o
+         WHERE as_of_date <= ${date}::date
+         ORDER BY security_id, as_of_date DESC
+      `);
+      return result.rows.map((row) => rowOf(accountId, row));
+    },
+
+    async bracketingObservations(userId, accountId, securityId, date) {
+      const result = await executor.execute<{
+        security_id: string;
+        quantity: string;
+        as_of_date: string;
+        side: 'before' | 'after';
+      }>(sql`
+        WITH o AS (${observations(userId, accountId)})
+        (SELECT security_id, quantity, as_of_date, 'before' AS side
+           FROM o
+          WHERE security_id = ${securityId}::uuid AND as_of_date <= ${date}::date
+          ORDER BY as_of_date DESC
+          LIMIT 1)
+        UNION ALL
+        (SELECT security_id, quantity, as_of_date, 'after' AS side
+           FROM o
+          WHERE security_id = ${securityId}::uuid AND as_of_date > ${date}::date
+          ORDER BY as_of_date ASC
+          LIMIT 1)
+      `);
+      const before = result.rows.find((row) => row.side === 'before');
+      const after = result.rows.find((row) => row.side === 'after');
+      return {
+        before: before === undefined ? null : rowOf(accountId, before),
+        after: after === undefined ? null : rowOf(accountId, after),
+      };
+    },
+  };
+}
+
+/**
+ * The four ports the net-worth snapshotter reads its world through.
+ *
+ * Built **per transaction**, not once per process: `SnapshotJobDependencies.
+ * portsFor` receives the job's own Drizzle transaction and `runSnapshot` is
+ * wrapped in `database.transaction(...)` inside `netWorthSnapshotJobHandler`,
+ * so the seals, the open day's row, every read they were computed from and
+ * `planning.NetWorthSnapshotTaken` are one atomic fact. Same shape, and the
+ * same reason, as `securityResolverFor` above.
+ *
+ * `prices` and `fx` are `@ctx/investments`' own readers **assigned straight
+ * through with no adapter**. `@ctx/planning` declares `PriceReader` and
+ * `FxReader` as deliberate structural mirrors (`ports.ts`'s own doc), and this
+ * assignment is where TypeScript checks the two halves still fit — the same
+ * build-time check `createMarketDataRuntime`'s `FigiMapper` assignment is.
+ */
+export function planningPortsFor(
+  executor: PlanningExecutor,
+  options: PlanningPortOptions,
+): SnapshotPorts {
+  const clock = options.clock ?? systemClock;
+  return {
+    balances: createPlanningBalancesReader(executor, options),
+    holdings: createPlanningHoldingsReader(executor),
+    prices: createPriceReader({
+      store: drizzlePriceStore(executor),
+      userId: options.userId,
+      // Which ladder answers is chosen by the security's own classification.
+      // `other` for a security that has vanished is the honest default:
+      // `DEFAULT_LADDERS['other']` still tries `user_override` and
+      // `last_known`, so a missing row degrades to "no price", never to a
+      // wrong one.
+      kindOf: async (securityId: string): Promise<string> => {
+        const rows = await executor
+          .select({ type: securities.type })
+          .from(securities)
+          .where(eq(securities.id, securityId))
+          .limit(1);
+        return rows[0]?.type ?? 'other';
+      },
+      clock,
+    }),
+    fx: createFxReader({ store: drizzleFxStore(executor), userId: options.userId, clock }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// WP 3.6 — `@connector/walletrpc`'s store and its two egress transports
+// ---------------------------------------------------------------------------
+
+/**
+ * `@connector/walletrpc`'s `WalletAddressStore`, over `wallet_addresses`
+ * (migration 0016) — the injected seam `docs/evidence/phase-3/wp3.6-walletrpc.md`
+ * §8 item 4 asks the composition root for, bound exactly as `@connector/csv`'s
+ * `DurableStore` is bound by `attachDurableStaging`.
+ *
+ * ## Why every method resolves through `connections`
+ *
+ * The interface is keyed by `providerConnectionId` — the connector's own id,
+ * which for this adapter is a `newId()` minted inside `connect()`. The table is
+ * keyed by `connection_id`, a foreign key into **our** `connections.id`. The
+ * join between the two is `connections.(provider, provider_connection_id)`,
+ * which is exactly the natural key `createConnection` writes and
+ * `findByProviderKey` already reads, so resolving through it here means the
+ * row is findable from **any** process — which is the whole property D-5 bought
+ * for CSV and Manual, and the one this connector needs more than either of
+ * them, because `wallet_rpc` is not in `PROCESS_LOCAL_PROVIDERS`: the api links
+ * the wallet and the *worker* syncs it.
+ *
+ * ## The ordering defect this binding surfaced, and what is done about it
+ *
+ * `createConnection` (`@ctx/connections`) calls `connector.connect()` **before**
+ * it inserts the `connections` row, and does both inside one transaction. So at
+ * the moment `WalletRpcConnector.connect()` calls `put()`, there is no
+ * `connections.id` to reference and no row this store (which holds a
+ * pool-backed handle, not that transaction) could see even if there were. `put`
+ * therefore cannot be the durable write on a **first** link, and pretending
+ * otherwise would produce a connection whose first sync answers "this
+ * connection has no wallet on record" from the worker — N-7's shape exactly.
+ *
+ * What this store does instead is state the two halves honestly:
+ *
+ *   * `put` upserts when the connection resolves — which is the **re-link**
+ *     path, where the row already exists and a changed descriptor or label must
+ *     land — and otherwise records the descriptor in a request-scoped pending
+ *     map and returns.
+ *   * `persistPending(providerConnectionId, { connectionId, userId })` is what
+ *     the link route calls once `createConnection` has returned an id, in the
+ *     same process and the same request that staged it. That is the durable
+ *     write on a first link.
+ *
+ * Named in `docs/evidence/phase-3/wp3.w-wiring.md` §10 as owed to WP 3.6: the
+ * clean fix is for `WalletAddressStore.put` to carry the connection identity
+ * (or for the connector to flush from a `ConnectionHandle` the way
+ * `CsvImportConnector` does), which is a `packages/connectors/**` change this
+ * batch may not make.
+ */
+export interface DurableWalletAddressStore extends WalletAddressStore {
+  /**
+   * Write the descriptor staged by `connect()` now that the connection has an
+   * id. Idempotent: calling it for a `providerConnectionId` with nothing
+   * pending is a no-op, which is what a re-link (already written by `put`)
+   * produces.
+   */
+  persistPending(
+    providerConnectionId: string,
+    input: { readonly connectionId: string; readonly userId: string },
+  ): Promise<boolean>;
+}
+
+interface WalletConnectionRow extends Record<string, unknown> {
+  id: string;
+  user_id: string;
+}
+
+export function createWalletAddressStore(database: Database): DurableWalletAddressStore {
+  /** Staged by `connect()`, drained by `persistPending`. Never a cache: `get` does not read it. */
+  const pending = new Map<string, WalletAddressRecord>();
+
+  const connectionFor = async (
+    providerConnectionId: string,
+  ): Promise<WalletConnectionRow | null> => {
+    const result = await database.execute<WalletConnectionRow>(sql`
+      SELECT id, user_id
+        FROM connections
+       WHERE provider = ${WALLETRPC_PROVIDER}
+         AND provider_connection_id = ${providerConnectionId}
+       LIMIT 1
+    `);
+    return result.rows[0] ?? null;
+  };
+
+  const write = async (
+    connectionId: string,
+    userId: string,
+    record: WalletAddressRecord,
+  ): Promise<void> => {
+    await database.execute(sql`
+      INSERT INTO wallet_addresses (
+        id, user_id, connection_id, chain, descriptor, derivation_scheme, label,
+        external_highest_used_index, internal_highest_used_index
+      ) VALUES (
+        ${newId()}::uuid, ${userId}::uuid, ${connectionId}::uuid, ${record.chain},
+        ${record.descriptor}, ${record.derivationScheme}, ${record.label},
+        ${record.scanState.externalHighestUsedIndex}, ${record.scanState.internalHighestUsedIndex}
+      )
+      ON CONFLICT (connection_id) DO UPDATE SET
+        chain = excluded.chain,
+        descriptor = excluded.descriptor,
+        derivation_scheme = excluded.derivation_scheme,
+        label = excluded.label,
+        updated_at = now()
+    `);
+  };
+
+  return {
+    async get(providerConnectionId: string): Promise<WalletAddressRecord | null> {
+      const result = await database.execute<{
+        chain: 'bitcoin' | 'ethereum';
+        descriptor: string;
+        derivation_scheme: 'bip44' | 'bip49' | 'bip84' | null;
+        label: string;
+        external_highest_used_index: number | null;
+        internal_highest_used_index: number | null;
+      }>(sql`
+        SELECT w.chain,
+               w.descriptor,
+               w.derivation_scheme,
+               w.label,
+               w.external_highest_used_index,
+               w.internal_highest_used_index
+          FROM wallet_addresses w
+          JOIN connections c ON c.id = w.connection_id
+         WHERE c.provider = ${WALLETRPC_PROVIDER}
+           AND c.provider_connection_id = ${providerConnectionId}
+         LIMIT 1
+      `);
+      const row = result.rows[0];
+      if (row === undefined) return null;
+      return {
+        providerConnectionId,
+        chain: row.chain,
+        descriptor: row.descriptor,
+        derivationScheme: row.derivation_scheme,
+        label: row.label,
+        scanState: {
+          externalHighestUsedIndex: row.external_highest_used_index,
+          internalHighestUsedIndex: row.internal_highest_used_index,
+        },
+      };
+    },
+
+    async put(record: WalletAddressRecord): Promise<void> {
+      const connection = await connectionFor(record.providerConnectionId);
+      if (connection === null) {
+        // First link: `createConnection` has not inserted the row yet. See this
+        // function's header.
+        pending.set(record.providerConnectionId, record);
+        return;
+      }
+      await write(connection.id, connection.user_id, record);
+    },
+
+    async persistPending(providerConnectionId, input): Promise<boolean> {
+      const record = pending.get(providerConnectionId);
+      if (record === undefined) return false;
+      pending.delete(providerConnectionId);
+      await write(input.connectionId, input.userId, record);
+      return true;
+    },
+
+    async updateScanState(providerConnectionId: string, scanState): Promise<void> {
+      // Scan state only, never the descriptor: a gap-limit horizon moves every
+      // sync and the descriptor is the thing the user actually linked.
+      await database.execute(sql`
+        UPDATE wallet_addresses AS w
+           SET external_highest_used_index = ${scanState.externalHighestUsedIndex},
+               internal_highest_used_index = ${scanState.internalHighestUsedIndex},
+               updated_at = now()
+          FROM connections c
+         WHERE c.id = w.connection_id
+           AND c.provider = ${WALLETRPC_PROVIDER}
+           AND c.provider_connection_id = ${providerConnectionId}
+      `);
+    },
+
+    async delete(providerConnectionId: string): Promise<void> {
+      pending.delete(providerConnectionId);
+      await database.execute(sql`
+        DELETE FROM wallet_addresses AS w
+         USING connections c
+         WHERE c.id = w.connection_id
+           AND c.provider = ${WALLETRPC_PROVIDER}
+           AND c.provider_connection_id = ${providerConnectionId}
+      `);
+    },
+  };
+}
+
+/**
+ * The two crypto hosts, and the policy each adapter is allowed.
+ *
+ * One host per transport, exactly as `policyFor(provider)` gives the market-data
+ * adapters one host each: a bug in the Esplora leg cannot reach
+ * `api.etherscan.io`, let alone `db:5432`. `CRYPTO_ALLOWED_HOSTS` can only
+ * **narrow** this — it is intersected, never substituted — for the reason
+ * `.env.example` spells out: an environment variable that could widen an egress
+ * allow-list is a way to repoint a balance fetcher by editing a file.
+ *
+ * `@connector/walletrpc` deliberately does not import `@core/platform` (its
+ * boundary layer forbids it), which is why the guard lives here and the
+ * connector takes a function. Its own contribution is narrower and just as
+ * load-bearing: `ESPLORA_HOST` and `ETHERSCAN_HOST` are source-code constants,
+ * never parameters, so no xpub, address or label a user types can become the
+ * destination host.
+ */
+function cryptoPolicyFor(host: string, narrowing: readonly string[]): EgressPolicy {
+  const allowedHosts = narrowing.length === 0 || narrowing.includes(host) ? [host] : [];
+  return createEgressPolicy({
+    allowedHosts,
+    allowedSchemes: ['https'],
+    allowedPorts: [443],
+    timeoutMs: 15_000,
+    maxResponseBytes: 256 * 1024,
+  });
+}
+
+/**
+ * Run one guarded GET and hand back a parsed body.
+ *
+ * The same four properties `@ctx/integrations`' `createProviderClient` composes,
+ * because they are what make the egress claim mean anything: `guardUrl` before
+ * the connect, the transport connecting to the address the guard validated
+ * rather than re-resolving the name, `classifyStatus` turning a 3xx into a
+ * refusal we never follow, and a closed header vocabulary.
+ */
+async function cryptoGet(
+  transport: HttpTransport,
+  policy: EgressPolicy,
+  url: string,
+): Promise<{ status: number; body: unknown }> {
+  const decision = await guardUrl(url, policy, systemResolver);
+  if (!decision.ok) {
+    throw new Error(`crypto egress refused: ${decision.code} (${decision.detail})`);
+  }
+  const response = await transport({
+    destination: decision.destination,
+    method: 'GET',
+    headers: { accept: 'application/json', 'user-agent': CRYPTO_USER_AGENT },
+    timeoutMs: policy.timeoutMs,
+    maxResponseBytes: policy.maxResponseBytes,
+    secure: true,
+  });
+  const verdict = classifyStatus(response.status);
+  if (verdict.kind === 'refused') {
+    // A 3xx. Recorded, never followed: an allow-listed host must not be able to
+    // launder a request to an internal one.
+    throw new Error(`crypto egress refused: ${verdict.code}`);
+  }
+  let body: unknown = null;
+  try {
+    body = JSON.parse(response.body);
+  } catch {
+    // Left `null`. Both clients check `status` first and then refuse a body
+    // that is not an object by name (`MALFORMED_RESPONSE`), which is a better
+    // message than a JSON parse error would be.
+  }
+  return { status: response.status, body };
+}
+
+/** Same identifier the market-data client sends; contains no user or host data. */
+const CRYPTO_USER_AGENT = USER_AGENT;
+
+/** Everything `@connector/walletrpc` needs from this process, built once. */
+export interface WalletRpcRuntime {
+  readonly store: DurableWalletAddressStore;
+  readonly esploraTransport: EsploraTransport;
+  readonly etherscanTransport: EtherscanTransport;
+  readonly etherscanApiKey: EtherscanApiKey;
+}
+
+export function createWalletRpcRuntime(options: {
+  readonly database: Database;
+  /** `config.crypto.allowedHosts`. Empty ⇒ no narrowing of the code's own two. */
+  readonly allowedHosts: readonly string[];
+  /** `config.secrets.etherscan_api_key`. Absent is an ordinary install (BTC-only). */
+  readonly etherscanApiKey?: Redacted<string> | undefined;
+}): WalletRpcRuntime {
+  const transport = createNodeTransport();
+  const esploraPolicy = cryptoPolicyFor(ESPLORA_HOST, options.allowedHosts);
+  const etherscanPolicy = cryptoPolicyFor(ETHERSCAN_HOST, options.allowedHosts);
+
+  return {
+    store: createWalletAddressStore(options.database),
+    esploraTransport: async (request) => {
+      const url = `https://${ESPLORA_HOST}${request.path}`;
+      return cryptoGet(transport, esploraPolicy, url);
+    },
+    etherscanTransport: async (request) => {
+      const search = new URLSearchParams(request.query).toString();
+      const url = `https://${ETHERSCAN_HOST}${request.path}?${search}`;
+      return cryptoGet(transport, etherscanPolicy, url);
+    },
+    etherscanApiKey:
+      options.etherscanApiKey === undefined
+        ? missingEtherscanApiKey()
+        : etherscanApiKeyOf(options.etherscanApiKey.reveal()),
+  };
+}
+
 /**
  * Adapters whose primary read/write path is an in-process buffer rather than
  * a remote API — `ManualConnector`'s `ManualStore`, `CsvImportConnector`'s own
@@ -1510,6 +2171,20 @@ export interface ConnectorRegistryOptions {
    * copy (wp3.5-coinbase.md §8.3). This decides only *whether* to register.
    */
   readonly coinbase?: CoinbaseConfig | null;
+  /**
+   * WP 3.6's watch-only wallet adapter, built by `createWalletRpcRuntime`.
+   *
+   * **Unlike Plaid and Coinbase there is nothing to feature-detect**, and the
+   * asymmetry is the point: this connector needs no credential at all to be
+   * useful. Its Bitcoin leg derives addresses locally from an xpub/ypub/zpub
+   * and reads a public block explorer; only the Ethereum leg needs
+   * `etherscan_api_key`, and it refuses **by name** at the moment a balance is
+   * asked for rather than being withheld from the registry. So absence here
+   * means only "this caller has no database handle to bind the store to" — the
+   * shape `app.ts` was in before it had one — never "the operator has not
+   * configured it".
+   */
+  readonly walletRpc?: WalletRpcRuntime | null;
   /** Threaded to `PlaidConnector` for `ConnectorHealth.checkedAt` (wp1.3-plaid.md §8 item 2). */
   readonly clock?: Clock;
   /** One info line at registration, naming the environment and nothing secret. */
@@ -1591,6 +2266,42 @@ export function createConnectorRegistry(options: ConnectorRegistryOptions = {}):
     // time against `key_permissions`, not here: this line records that an
     // adapter exists, and says nothing about what the key may do.
     logger?.info({ provider: COINBASE_PROVIDER }, 'coinbase configured; connector registered');
+  }
+
+  // WP 3.6. Registered whenever a runtime is supplied — see
+  // `ConnectorRegistryOptions.walletRpc` for why this is not a credential
+  // feature-detection like the two blocks above. The two transports are
+  // `@core/platform`'s egress guard with one host each; the connector
+  // deliberately imports none of that (its boundary layer forbids it) and takes
+  // a function instead.
+  const walletRpc = options.walletRpc ?? null;
+  if (walletRpc === null) {
+    logger?.info(
+      { provider: WALLETRPC_PROVIDER },
+      'walletrpc runtime not supplied; connector not registered',
+    );
+  } else {
+    registry.register({
+      connector: new WalletRpcConnector({
+        store: walletRpc.store,
+        esploraTransport: walletRpc.esploraTransport,
+        etherscanTransport: walletRpc.etherscanTransport,
+        etherscanApiKey: walletRpc.etherscanApiKey,
+        clock: options.clock ?? systemClock,
+        ...(logger === undefined ? {} : { logger }),
+      }),
+      manifest: WALLETRPC_MANIFEST,
+    });
+    logger?.info(
+      {
+        provider: WALLETRPC_PROVIDER,
+        hosts: [ESPLORA_HOST, ETHERSCAN_HOST],
+        // The fact of presence, never the key. An install with no key still
+        // gets the connector; only its ETH leg refuses.
+        etherscanKey: walletRpc.etherscanApiKey.present ? 'present' : 'absent',
+      },
+      'walletrpc connector registered',
+    );
   }
 
   for (const entry of options.extra ?? []) registry.register(entry);

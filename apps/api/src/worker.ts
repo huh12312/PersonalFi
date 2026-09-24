@@ -46,13 +46,89 @@ import {
   createMarketDataRuntime,
   createMarketDataWriter,
   createNotificationChannels,
+  createWalletRpcRuntime,
   drizzleTransactionalExecutor,
   createNotificationEgressPolicy,
   hydrateMarketDataBudgets,
 } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { appModules } from './modules.ts';
-import { buildPlatform, resolveModules } from './platform.ts';
+import { MODULE_FLAGS, buildPlatform, resolveModules } from './platform.ts';
+
+/**
+ * Connections this process **pins for its whole life** before it does one
+ * unit of work — and therefore the number `DATABASE_POOL_MAX` must be *over
+ * and above*, not inclusive of.
+ *
+ * ## The defect this exists to close (found by the Phase 3 cold walk)
+ *
+ * Three of the worker's connections are `LISTEN` sockets
+ * (`personalfi_feature_flags`, `personalfi_domain_events`, `personalfi_jobs`)
+ * and are checked out until shutdown. Two more are session-scoped advisory
+ * leases — the scheduler leader and the job reaper leader — and
+ * `tryAcquireAdvisoryLease` holds the `pg.PoolClient` for the lifetime of the
+ * lease, because that is what makes "this process is the scheduler until it
+ * dies" true (`packages/platform/src/locks.ts`). And `createConsumerPump`
+ * takes **one lease, and therefore one pinned connection, per consumer**
+ * (`pump.ts`'s `leases` map, released only in `stop()`), so that two workers
+ * cannot run the same consumer.
+ *
+ * That makes the worker's floor `5 + consumers`, which is not a number
+ * `DATABASE_POOL_MAX` was ever meant to include: an operator reading
+ * "DATABASE_POOL_MAX=10" reasonably expects ten connections *for queries*.
+ *
+ * On the Phase 3 cold walk it went over. Observed, on a fresh volume with an
+ * account holder and seven consumers registered: all ten pool connections
+ * checked out and **idle**, `pg_stat_activity` showing three `LISTEN`s, two
+ * `pg_try_advisory_lock($1::bigint)` and five
+ * `pg_try_advisory_lock($1::int, $2::int)`; `worker ready` never logged
+ * because `outboxHealth` was queued on an eleventh connection that could never
+ * arrive; every job-runner poll and scheduler tick queued behind it; the
+ * process alive at 0% CPU in `epoll_wait` with no crash, no restart and no
+ * error line anywhere. The only thing that reported it was D-3's liveness
+ * healthcheck — `job-runner heartbeat missing or stale (age=71335ms
+ * max=15000ms)` — which is precisely the failure mode N-4 added it for, and
+ * this is the first time it has caught one in the shipped image.
+ *
+ * It is a **self-inflicted deadlock, not a load problem**: the pool is not
+ * busy, it is pinned. Adding a consumer is a pool-sizing change, and nothing
+ * said so.
+ *
+ * ## Why a constant here rather than a bigger default
+ *
+ * Raising `DATABASE_POOL_MAX` would work and would be wrong: it changes what
+ * the *api* gets too (`app.ts` runs no pump, no scheduler and no leases, so
+ * its ten really are ten), and it leaves the arithmetic implicit — the next
+ * consumer would silently eat the margin again. Here the reservation is named,
+ * derived from `MODULE_FLAGS` so it grows with the module list by
+ * construction, and checked out loud at boot by `assertPoolCoversLeases`
+ * below.
+ */
+const WORKER_PINNED_CONNECTIONS =
+  /* LISTEN: feature flags, domain events, jobs */ 3 +
+  /* leader leases: scheduler, job reaper */ 2 +
+  /* at most one consumer lease per module */ MODULE_FLAGS.length;
+
+/**
+ * Say so, by name, if the arithmetic above ever stops holding.
+ *
+ * A pool that cannot cover its own pinned connections does not fail — it
+ * *hangs*, silently, with every loop queued on `pool.connect()`. So this is
+ * checked at the one moment the real number is known (after `resolveModules`
+ * has decided which consumers exist) and logged as an error naming both sides,
+ * rather than left to be rediscovered from an idle `pg_stat_activity`.
+ */
+function assertPoolCoversLeases(logger: pino.Logger, poolMax: number, consumerCount: number): void {
+  const pinned = 3 + 2 + consumerCount;
+  if (poolMax > pinned) return;
+  logger.error(
+    { poolMax, pinned, consumerCount },
+    "the database pool cannot cover this process's pinned connections (3 LISTEN + 2 leader " +
+      'leases + one lease per consumer). Every job-runner poll and scheduler tick will queue on ' +
+      'pool.connect() forever and nothing will log an error. Raise DATABASE_POOL_MAX or reduce ' +
+      'the number of registered consumers.',
+  );
+}
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -60,7 +136,8 @@ async function main(): Promise<void> {
 
   const pool = createPool({
     databaseUrl: config.databaseUrl.reveal(),
-    max: config.env.DATABASE_POOL_MAX,
+    // **Not** `DATABASE_POOL_MAX` on its own — see `WORKER_PINNED_CONNECTIONS`.
+    max: config.env.DATABASE_POOL_MAX + WORKER_PINNED_CONNECTIONS,
     statementTimeoutMs: config.env.DATABASE_STATEMENT_TIMEOUT_MS,
     applicationName: 'personalfi-worker',
   });
@@ -201,6 +278,10 @@ async function main(): Promise<void> {
             userId,
             appModules({
               database,
+              // D6: one holder. `module.planning` binds `@ctx/investments`'
+              // price and FX readers to it, and refuses by name if a job
+              // arrives for another (see `modules.ts`'s `planningModule`).
+              userId,
               orchestrator: createDomainRuntime({
                 database,
                 clock: systemClock,
@@ -218,6 +299,17 @@ async function main(): Promise<void> {
                 // line can use them.
                 registry: createConnectorRegistry({
                   plaid: config.plaid,
+                  // WP 3.6, and the N-5 reasoning below applies to this one
+                  // harder than to any other adapter: `wallet_rpc` is *not* in
+                  // `PROCESS_LOCAL_PROVIDERS`, so every wallet sync runs here
+                  // and nowhere else. A registry that omitted it would leave a
+                  // linked wallet with no connector, five failed attempts and a
+                  // dead job every night.
+                  walletRpc: createWalletRpcRuntime({
+                    database,
+                    allowedHosts: config.crypto.allowedHosts,
+                    etherscanApiKey: config.secrets.etherscan_api_key,
+                  }),
                   // WP 3.5, and the N-5 reasoning above applies unchanged: the
                   // worker is the only process that runs a scheduled sync, so
                   // a Coinbase connection linked through the API would never
@@ -255,6 +347,11 @@ async function main(): Promise<void> {
             }),
           );
     logger.info({ enabled: modules.enabled, disabled: modules.disabled }, 'modules resolved');
+    assertPoolCoversLeases(
+      logger,
+      config.env.DATABASE_POOL_MAX + WORKER_PINNED_CONNECTIONS,
+      modules.consumers.length,
+    );
 
     if (modules.consumers.length > 0) {
       pump = createConsumerPump({

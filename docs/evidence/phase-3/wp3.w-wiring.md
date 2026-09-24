@@ -10,18 +10,20 @@ orchestrator. Same shape and same format as
 
 ## 1. Flags, and their final defaults
 
-Both landed `defaultEnabled: false` and were flipped `true` at the end of the batch, in that order,
-with `apps/api/test/db/phase3-wiring.test.ts` green in between. The flip is the whole reason the
+All three landed `defaultEnabled: false` and were flipped `true`, in that order, with
+`apps/api/test/db/phase3-wiring.test.ts` green in between each time. The flip is the whole reason the
 dispatch reserves this work for the orchestrator: a context can prove its own engine, and only the
-composition root can prove it is wired.
+composition root can prove it is wired. `module.planning` is WP 3.8's and landed after the snapshot;
+it was flipped last, once the planning half of that file was green (6 tests, up from 4).
 
-| Flag                  | Landed  | Final      | What made the flip defensible                                                                                                                                                                                                                                                                                                                                                                |
-| --------------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `module.investments`  | `false` | **`true`** | `phase3-wiring.test.ts` drove a real `connections.SyncRunCompleted` through the real pump into `@ctx/investments`' lot consumer, which opened a real lot and appended a real `investments.LotsUpdated`. Inert on an install with no investment accounts: `InvestmentSyncPort.factsForRun` returns no facts until WP 3.7's provider legs land, and a derivation over no facts writes nothing. |
-| `module.integrations` | `false` | **`true`** | Same file: the `integrations.price_refresh` job registers, the schedule row lands through the real `upsertSchedule`, and `createMarketDataRuntime` on a zero-key install registers **no** `PriceSource` at all — so the refresh runs, asks nobody and records that honestly. 03 §6: "Phase 3 completes with zero keys."                                                                      |
+| Flag                  | Landed  | Final      | What made the flip defensible                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `module.investments`  | `false` | **`true`** | `phase3-wiring.test.ts` drove a real `connections.SyncRunCompleted` through the real pump into `@ctx/investments`' lot consumer, which opened a real lot and appended a real `investments.LotsUpdated`. Inert on an install with no investment accounts: `InvestmentSyncPort.factsForRun` returns no facts until WP 3.7's provider legs land, and a derivation over no facts writes nothing.                                                                                                                                                                                                                                                                                                                                                                         |
+| `module.integrations` | `false` | **`true`** | Same file: the `integrations.price_refresh` job registers, the schedule row lands through the real `upsertSchedule`, and `createMarketDataRuntime` on a zero-key install registers **no** `PriceSource` at all — so the refresh runs, asks nobody and records that honestly. 03 §6: "Phase 3 completes with zero keys."                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `module.planning`     | `false` | **`true`** | Same file, added this run: a real `ledger.BalanceRecorded` — written by the real `recordBalance` — reaches `planning.net_worth@v1` through the real pump built with `drizzleTransactionalExecutor`, with `event_consumer_offsets.failed_error` **null** afterwards, which is the only way to know `executorFor: (c) => assertDrizzleTransaction(c.tx)` is satisfied; and the `planning.net_worth_snapshot` row lands through the real `registerNetWorthSnapshotSchedule` with cron `0 4 * * *`. Inert on a fresh install: the consumer's handler is an UPDATE (`markDirty`) that marks nothing when no open day exists, and the 04:00 job computes a day from whatever the ledger holds — for a holder with no accounts, nothing. It never writes a placeholder row. |
 
-`apps/api/test/module-flag-defaults.test.ts` pins both, and its "nothing undocumented sneaked in"
-assertion means a third Phase 3 flag cannot appear without a line there and in `RUNBOOK.md`.
+`apps/api/test/module-flag-defaults.test.ts` pins all three, and its "nothing undocumented sneaked
+in" assertion means a fourth Phase 3 flag cannot appear without a line there.
 
 ---
 
@@ -42,6 +44,27 @@ assertion means a third Phase 3 flag cannot appear without a line there and in `
 | `apps/api/src/bootstrap-seed.ts`                 | `seedPriceSourcePriority` (unconditional) and the `integrations.price_refresh` schedule (flag-gated). `SeedUserStateResult.priceLadderRows` added.                                                                                                                                       |
 | `apps/api/src/worker.ts`                         | Builds the market-data runtime, hydrates its budgets from `market_data_runs`, passes `investmentSyncPort` + `marketData` to `appModules`, adds `coinbase: config.coinbase` to the registry, and builds the pump with `drizzleTransactionalExecutor(database)` rather than `platform.db`. |
 | `apps/api/src/app.ts`                            | `createConnectorRegistry({ …, coinbase: config.coinbase, … })` — the API needs the manifest for the "Add a connection" screen and runs the link ceremony inline.                                                                                                                         |
+
+### Composition root — added after the snapshot (this run)
+
+| File                                                 | What changed                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/api/src/platform.ts` (`MODULE_FLAGS`)          | `module.planning`, with its own `owner`/`removeWhen` and the reasoning for why `true` is inert on a fresh install.                                                                                                                                                                                                       |
+| `apps/api/src/modules.ts` (`planningModule`)         | `PLANNING_EVENTS`, `createNetWorthConsumer` (with `executorFor` over the pump's Drizzle transaction), `netWorthSnapshotJobHandler` and `registerNetWorthSnapshotSchedule`. The job registration is **wrapped**: a job whose `context.userId` is not the holder these modules were built for is refused by name — see §3. |
+| `apps/api/src/modules.ts` (`ModuleWiringOptions`)    | `userId` (required) and `baseCurrency` (optional, `USD`); `database` gains `PlanningDatabase`. `NET_WORTH_SNAPSHOT_{CRON,JOB_KIND,SCHEDULE_NAME}` and `NET_WORTH_CONSUMER_NAME` are re-exported from `@ctx/planning` rather than restated, so the names that reach a CHECK constraint have one definition.               |
+| `apps/api/src/domain.ts` (`planningPortsFor`)        | The four snapshot ports — see §3.                                                                                                                                                                                                                                                                                        |
+| `apps/api/src/domain.ts` (`createWalletRpcRuntime`)  | WP 3.6's Postgres `WalletAddressStore` over `wallet_addresses`, and the two egress transports — see §3.                                                                                                                                                                                                                  |
+| `apps/api/src/domain.ts` (`createConnectorRegistry`) | The `walletRpc` option and the `WALLETRPC_PROVIDER`/`WALLETRPC_MANIFEST` registration. Deliberately **not** a credential feature-detection like Plaid's and Coinbase's: this connector is useful with no key at all.                                                                                                     |
+| `apps/api/src/bootstrap-seed.ts`                     | The `planning.net_worth_snapshot` schedule, flag-gated, registered after the price refresh so the list reads in the order the night runs.                                                                                                                                                                                |
+| `apps/api/src/worker.ts`                             | `userId` passed to `appModules`; the walletrpc runtime passed to `createConnectorRegistry`; **`WORKER_PINNED_CONNECTIONS` and `assertPoolCoversLeases`** — the cold walk's own finding, §9.2.                                                                                                                            |
+| `apps/api/src/app.ts`                                | The walletrpc runtime, bound to the `database` built one line above it.                                                                                                                                                                                                                                                  |
+| `apps/api/src/reports/export/registry.ts`            | `wallet_addresses` and `net_worth_daily` declared as deferred, each with its reason. The manifest-completeness test caught their arrival the day 0016/0017 landed, which is what it is for — the second time this phase.                                                                                                 |
+| `packages/config/src/schema.ts`                      | `etherscan_api_key` in `SECRET_SPECS` (file-only, no `envFallback`, required for no role).                                                                                                                                                                                                                               |
+| `compose.yml`                                        | `etherscan_api_key` declared, and added to **api and worker only**. `migrator` still has `secrets: [database_url]`.                                                                                                                                                                                                      |
+| `justfile` (`harden-secrets`)                        | The 10001-owned loop grows from twelve files to thirteen, in the same edit — N-1's lesson, again.                                                                                                                                                                                                                        |
+| `.env.example`                                       | `etherscan_api_key` documented with what it does and does not gate; the `CRYPTO_ALLOWED_HOSTS` note gains a narrowing example.                                                                                                                                                                                           |
+| `RUNBOOK.md` ("Create secrets")                      | **Step 8**, the one the previous agent could not write: all seven optional Phase 3 secret files created empty, with what each buys and what happens without it. Closes §10 item 3.                                                                                                                                       |
+| `apps/api/test/regate-worker-boot.test.ts`           | A source assertion re-gating §9.2's pool-sizing defect.                                                                                                                                                                                                                                                                  |
 
 ### Config and secrets
 
@@ -86,6 +109,77 @@ context imports another.
 | `seedPriceSourcePriority(database, userId)`                               | `ladderRows(DEFAULT_LADDERS)` → `price_source_priority`, `onConflictDoNothing` so a repair pass never undoes a user's reordering.                                                                                                                                                                                                   |
 | `drizzleTransactionalExecutor(database)` + `assertDrizzleTransaction(tx)` | The defect this batch found — see §4.                                                                                                                                                                                                                                                                                               |
 | `createConnectorRegistry({ …, coinbase })`                                | WP 3.5's connector, feature-detected on `config.coinbase`. No credential is passed to the constructor: every request reads the sealed pair from the `ConnectionHandle`.                                                                                                                                                             |
+| `planningPortsFor(executor, { userId, timeZone, clock })`                 | **New this run.** `@ctx/planning` ← `@ctx/ledger` (`accounts`, `account_balances`, `transactions`), `@ctx/investments` (`holdings`, `holdings_snapshots`, `prices`, `fx_rates`) and `@ctx/budgeting` (`budgets.off_budget_account_ids`). Built per transaction — see §3.1.                                                          |
+| `createWalletRpcRuntime({ database, allowedHosts, etherscanApiKey })`     | **New this run.** WP 3.6's `WalletAddressStore` over `wallet_addresses`, plus one `@core/platform`-guarded transport per host — see §3.2.                                                                                                                                                                                           |
+
+---
+
+### 3.1 `planningPortsFor`, and the decisions inside it
+
+**`prices` and `fx` are assigned straight through, with no adapter.** `@ctx/planning` declares
+`PriceReader` and `FxReader` as deliberate structural mirrors of `@ctx/investments`' readers
+(`ports.ts`'s own doc), so this assignment is where TypeScript checks the two halves still fit — the
+same build-time check `createMarketDataRuntime`'s `FigiMapper` assignment is.
+
+**`onBudget` is the one flag with a second source of truth.** `defaultFlagsFor(kind, inNetWorth)`
+states 07 §4.1's class table; `budgets.off_budget_account_ids` overrides it, and only ever towards
+`false`. The union across every budget rather than `budgets[0]`, so the answer does not depend on
+`created_at` ordering the day a second budget exists. `isLiquid` and `isInvestable` still have no
+column anywhere (wp3.8-net-worth.md §7 records the gap); `planningKindOf` is where the two mappings
+that are decisions rather than transcription live — `crypto → investment`, because selling BTC to buy
+groceries is not what 07 §4.1 means by liquid, and `manual` splitting on `classification`.
+
+**`accounts()` ignores its `asOf` and carries `closedAt` instead.** `accounts` is not a versioned
+table, so "which accounts existed on 2025-03-04" has no honest answer from it — and `computeNetWorth`
+already refuses to count an account from the day it closed. Filtering here _and_ there would be two
+copies of one rule.
+
+**`transactionsTotalOn` sums what moved, not what a report would count.** `user_excluded` rows and
+transfers are **included** — excluding a transaction from the budget does not un-spend the money, and
+subtracting a smaller sum reconstructs a balance the bank never held; superseded and
+provider-removed rows are excluded.
+
+**Local days, not UTC days.** `account_balances.as_of` is a `timestamptz` and
+`balanceOnOrBefore(userId, accountId, date)` is a question about a local calendar day (08 §3.5), so
+the reader compares `(as_of AT TIME ZONE <holder's zone>)::date`. Truncating in UTC would move a
+21:00-local observation onto the next day for every holder west of Greenwich.
+
+**One holder, checked rather than assumed.** `SnapshotJobDependencies.portsFor` receives the job's
+transaction and no user id, so `planningPortsFor` closes over `ModuleWiringOptions.userId` (D6 — the
+same assumption `secretBoxFor: () => options.secretBox` already makes). That is not left to a
+comment: `planningModule` wraps the job registration and refuses, **by name**, a job whose
+`context.userId` differs. Without it, user B's net worth would be computed from user A's prices and
+A's ladder — a wrong number, no error, and invisible in every test that has one user. Asserted in
+`phase3-registration.test.ts`. The clean fix is `@ctx/planning`'s: §10 item 7.
+
+### 3.2 `createWalletRpcRuntime`, and the ordering defect it surfaced
+
+The store resolves every call through `connections.(provider, provider_connection_id)` — the natural
+key `createConnection` writes and `findByProviderKey` already reads — so a wallet linked by the api
+is findable by the **worker**. That matters more here than for CSV or Manual: `wallet_rpc` is not in
+`PROCESS_LOCAL_PROVIDERS`, so every wallet sync runs in the worker and nowhere else.
+
+The two transports are `@core/platform`'s `guardUrl` + `createNodeTransport` + `classifyStatus`, with
+**one host each**, https/:443 only, no redirect followed, a bounded body — and `CRYPTO_ALLOWED_HOSTS`
+able only to narrow. `@connector/walletrpc` imports none of that (its boundary layer forbids it) and
+takes a function instead; its own contribution is that `ESPLORA_HOST` and `ETHERSCAN_HOST` are
+source-code constants, so no xpub, address or label a user types can become the destination host.
+
+**The defect, named rather than worked around.** `createConnection` calls `connector.connect()`
+**before** it inserts the `connections` row, and does both inside one transaction. So at the moment
+`WalletRpcConnector.connect()` calls `store.put()` there is no `connections.id` for
+`wallet_addresses.connection_id` to reference, and no row this pool-backed store could see if there
+were. `put` therefore upserts only when the connection resolves — the **re-link** path, where a
+changed descriptor or label must land — and otherwise stages the record for
+`persistPending(providerConnectionId, { connectionId, userId })`.
+
+**`persistPending` has no caller yet.** Wiring it belongs with WP 3.6's link ceremony in
+`routes/connections.ts`, and the clean fix is a `packages/connectors/**` change this batch may not
+make: `WalletAddressStore.put` should carry the connection identity, or the connector should flush
+from a `ConnectionHandle` the way `CsvImportConnector` does. Until one of the two lands, **a first
+link of a watch-only wallet will not persist its descriptor** — §10 item 8. The registry entry, the
+manifest, the egress binding and the secret are all real and proven on the cold walk; the link
+ceremony is the seam left open, and it is left open loudly.
 
 ---
 
@@ -173,82 +267,155 @@ handler and a schedule; it adds no handler to `apps/api/src/routes/`. `just open
 
 ---
 
-## 9. Cold walk — **BLOCKED, and it found a real defect**
+## 9. Cold walk — **completed**
+
+The section this batch owed. Run twice: once as the previous agent left it (which is what found the
+integrations manifest defect, kept below because the finding is the record), and once to completion
+after that defect and the one _this_ run found were both fixed.
 
 ```
-docker compose down -v          # clean
+docker compose down -v          # clean: volumes removed, not just containers
 docker compose up -d --build    # image rebuilt from this working tree
 ```
 
-**What went right.** `db` healthy; `migrator` exited 0 with `migrations complete: 16 applied, 0
-already present`, including `0013_securities`, `0014_lots`, `0015_market_data` and
-`0016_wallet_addresses` against a genuinely empty volume; all nine Phase 3 tables present
-(`securities`, `holdings`, `holdings_snapshots`, `investment_transactions`, `cost_basis_lots`,
-`prices`, `fx_rates`, `price_source_priority`, `market_data_runs`).
+### 9.1 First pass — the undeclared-dependency defect (fixed before the second)
 
-**What went wrong.** `api` and `worker` both crash-loop, with the entrypoint's own diagnosis
+`db` healthy; `migrator` exited 0 with `migrations complete: 16 applied, 0 already present`, including
+`0013_securities`, `0014_lots`, `0015_market_data` and `0016_wallet_addresses` against a genuinely
+empty volume. `api` and `worker` then both crash-looped, with the entrypoint's own diagnosis
 (redacted only of container ids):
 
 ```
 api-1  | entrypoint: ROLE=api target "./apps/api/src/main.ts" exists, but something it imports does not resolve.
 api-1  |   Cannot find package '@core/platform' imported from /app/packages/contexts/integrations/src/events.ts
-api-1  |   This usually means the image build pruned a workspace package that is in the
-api-1  |   production dependency closure. Check api.Dockerfile's deploy stage.
-worker-1  | entrypoint: ROLE=worker target "./apps/api/src/worker.ts" exists, but something it imports does not resolve.
-worker-1  |   Cannot find package '@core/platform' imported from /app/packages/contexts/integrations/src/events.ts
 ```
 
-**Cause — not the Dockerfile.** `packages/contexts/integrations/package.json` declares three
-dependencies (`@core/db`, `@core/kernel`, `drizzle-orm`) and its source imports **five**. Two are
-undeclared:
-
-| Imported by                                                           | Undeclared dependency |
-| --------------------------------------------------------------------- | --------------------- |
-| `src/events.ts`, `src/egress.ts`, `src/http.ts`, `src/market-data.ts` | `@core/platform`      |
-| `src/events.ts`, `schema/market-data.ts`                              | `zod`                 |
-
-This is invisible in development because pnpm hoists both into the workspace **root**
-`node_modules`, and Node's resolution walks up and finds them there. The production image is
+**Cause — not the Dockerfile.** `packages/contexts/integrations/package.json` declared three
+dependencies and its source imported five; `@core/platform` and `zod` were undeclared. Invisible in
+development, because pnpm hoists both into the workspace root `node_modules` and Node's resolution
+walks up to find them. The production image is
 `pnpm install --frozen-lockfile --prod --filter-prod=@app/api...`, which materialises only each
-project's declared closure — so the walk-up finds nothing and the first import of
-`@ctx/integrations` fails. Exactly the failure mode `docker/api.Dockerfile`'s header documents twice
-already (`@ctx/identity` in Phase 0, `packages/connectors` in Phase 1); this is the third instance
-and the first caused by a _manifest_ rather than by the prune.
+project's declared closure, so the walk-up finds nothing. Third instance of the failure mode
+`docker/api.Dockerfile`'s header documents, and the first caused by a _manifest_ rather than by the
+prune. Declared in `123c767`; an audit of every package in `apps/api`'s closure found no other
+undeclared runtime import.
 
-An audit of every package in `apps/api`'s closure found no other undeclared runtime import.
+### 9.2 Second pass — the defect the cold walk exists to find
 
-**The exact fix, which this batch may not make** (`packages/contexts/**` is outside its allowed paths,
-and so are `package.json` and the lockfile). In `packages/contexts/integrations/package.json`:
+With the manifests fixed, `api` and `worker` both start. And then the worker does nothing, for ever,
+without crashing.
 
-```json
-  "dependencies": {
-    "@core/db": "workspace:*",
-    "@core/kernel": "workspace:*",
-    "@core/platform": "workspace:*",
-    "drizzle-orm": "0.45.2",
-    "zod": "4.5.4"
-  },
+**Observed**, on a fresh volume with an account holder and seven registered consumers:
+
+- all ten pool connections checked out and **idle**, `pg_stat_activity` showing exactly
+  `3 × LISTEN` (`personalfi_feature_flags`, `personalfi_domain_events`, `personalfi_jobs`),
+  `2 × pg_try_advisory_lock($1::bigint)` and `5 × pg_try_advisory_lock($1::int, $2::int)`;
+- `worker ready` **never logged** — `main()` was queued inside `outboxHealth` on an eleventh
+  connection that could never arrive;
+- `job-runner.heartbeat` and `scheduler.heartbeat` both frozen ~14 s after boot and never touched
+  again;
+- the process alive at **0 % CPU**, `/proc/7/wchan = do_epoll_wait`, `RestartCount=0`, no error line
+  anywhere in the log, no crash and no restart.
+
+**Cause.** The worker pins a connection per `LISTEN` channel (3), per leader lease (scheduler, job
+reaper — `tryAcquireAdvisoryLease` holds the `pg.PoolClient` for the life of the lease, which is what
+makes "this process is the scheduler until it dies" true) and **per registered consumer**
+(`createConsumerPump`'s `leases` map, released only in `stop()`). That is `5 + consumers`, pinned
+before the process does one unit of work — and `DATABASE_POOL_MAX=10` was being read as the _whole_
+pool rather than as the working headroom. Seven consumers means twelve pinned against ten: a
+self-inflicted deadlock, not a load problem. The pool is not busy, it is pinned.
+
+**Attribution, measured rather than assumed.** Disabling `module.planning` through a real
+`feature_flags` row and restarting left the worker with six consumers — and `worker ready` still never
+logged, the heartbeats still froze, and `pg_stat_activity` still showed 10/10. So this is **not**
+WP 3.8's consumer: the margin had already gone. It disappeared when the sixth consumer
+(`investments.lots@v1`, snapshot `123c767`) landed on an install that also has
+`advisor_token_secret` present — five Phase 2 consumers plus one is `5 + 6 = 11 > 10`. Nothing said
+that adding a consumer is a pool-sizing change.
+
+**Fix, inside the composition root's remit** (`apps/api/src/worker.ts`):
+`WORKER_PINNED_CONNECTIONS = 3 + 2 + MODULE_FLAGS.length`, added to `DATABASE_POOL_MAX` when the
+worker builds its pool — so the operator's number means what an operator reads it to mean
+(connections available for queries) and the reservation grows with the module list by construction.
+`assertPoolCoversLeases` then re-checks the arithmetic at the one moment the real consumer count is
+known, and logs an error **naming both sides**, because a pool that cannot cover its pinned
+connections does not fail, it hangs.
+
+**What noticed, and what did not.** No test did. No log line did. `docker compose ps` said
+`healthy` for the first thirty seconds. The only thing that caught it was D-3's liveness healthcheck —
+`job-runner heartbeat missing or stale (age=71335ms max=15000ms)` — which is exactly the failure mode
+N-4 added it for, and this is the first time it has caught one in the shipped image. Re-gated as a
+source assertion in `apps/api/test/regate-worker-boot.test.ts`.
+
+### 9.3 Third pass — the cold walk, completed
+
+`docker compose down -v && docker compose up -d --build`, fresh volume, with both fixes in place.
+
+| Observation                     | Result                                                                                                                                                                                                                                             |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `migrator`                      | exit **0**, `migrations complete: **17 applied, 0 already present**`, ending `applied 0016_wallet_addresses in 9ms` / `applied 0017_net_worth_daily in 14ms`                                                                                       |
+| `api`                           | `running (healthy)`, `RestartCount=0`, up > 60 s with no crash-loop                                                                                                                                                                                |
+| `worker`                        | `running (healthy)`, `RestartCount=0`, up > 60 s; `worker ready` logged **12 s** after start                                                                                                                                                       |
+| api connector registration      | `plaid configured; connector registered` (this box has Sandbox key files), `coinbase not configured; connector not registered`, and `walletrpc connector registered` with `hosts:["blockstream.info","api.etherscan.io"]`, `etherscanKey:"absent"` |
+| worker market-data registration | four `… not configured; price source not registered` lines — the zero-key install `module.integrations: true` depends on                                                                                                                           |
+| enabled modules                 | `["module.ledger","module.connections","module.categorization","module.budgeting","module.recurring","module.notifications","module.insights","module.investments","module.integrations","module.planning"]`, `disabled: []`                       |
+| registered consumers            | `["categorization.assignments@v1","budgeting.actuals@v1","recurring.detection@v1","notifications.rules@v1","insights.advisors@v1","investments.lots@v1","planning.net_worth@v1"]`                                                                  |
+| registered job kinds            | `[…,"integrations.price_refresh","planning.net_worth_snapshot"]` — both Phase 3 jobs present                                                                                                                                                       |
+| liveness                        | `job-runner.heartbeat age_ms=154`, `scheduler.heartbeat age_ms=10208` — both fresh, i.e. both loops turning                                                                                                                                        |
+
+**`just bootstrap-user name="Cold Walk Holder" timezone="America/New_York"`** (enrolment token
+deliberately not recorded here — it is single-use, stored only as a SHA-256 digest, and printed once):
+
+```
+user created      Cold Walk Holder (<uuid>)
+time zone         America/New_York
+taxonomy          153 categories seeded
+advisors          31 manifests registered
+schedules         categorization.retrain_weekly, notifications.deliver, notifications.digest,
+                  insights.nightly, integrations.price_refresh, planning.net_worth_snapshot
+key custody       unlocked · argon2id m=1048576 KiB t=4 p=4 · 5024 ms · KEK generation 1
 ```
 
-`@core/platform` and `zod` are the two added lines; the versions match `@ctx/investments`'
-`package.json` exactly, so no new third-party version enters the tree and `THIRD_PARTY.md` does not
-move. It needs one `pnpm install` afterwards — `--frozen-lockfile` in the image build will refuse a
-manifest the lockfile does not match — and then `docker compose down -v && docker compose up -d
---build` re-run to complete this section.
+Both Phase 3 schedules are seeded **at user creation**, with no restart — condition C-1's claim,
+observed rather than asserted against a test database. (31 advisor manifests, not 14: the concurrent
+WP 3.10 catalogue expansion was in the working tree this image was built from. Attributed, not this
+batch's.)
 
-**Therefore not yet observed on the cold path, and owed to the Phase 3 gate:**
+**`docker compose exec db psql` — `schedules` for the new holder:**
 
-- the api booting with `module.investments` and `module.integrations` in its enabled list;
-- the worker registering `integrations.price_refresh` **without a crash-loop** (the Phase 2 lesson);
-- the `schedules` row for `integrations.price_refresh` existing after `just bootstrap-user`;
-- the `price_source_priority` rows for a user created after boot.
+```
+categorization.retrain_weekly | categorization.retrain       | 0 4 * * 0  | America/New_York | t | 1800 | 2026-09-27 08:00:00+00
+connections.nightly_sync      | connections.sync_all         | 15 3 * * * | America/New_York | t | 1200 | 2026-09-24 07:15:00+00
+insights.nightly              | insights.run_all             | 15 4 * * * | America/New_York | t |  180 | 2026-09-24 08:15:00+00
+integrations.price_refresh    | integrations.price_refresh   | 45 3 * * * | America/New_York | t |  900 | 2026-09-24 07:45:00+00
+notifications.deliver.<uuid>  | notifications.deliver        | */5 * * * *| America/New_York | t |   30 | 2026-09-24 00:10:00+00
+notifications.digest.<uuid>   | notifications.digest         | 5 * * * *  | America/New_York | t |   60 | 2026-09-24 01:05:00+00
+planning.net_worth_snapshot   | planning.net_worth_snapshot  | 0 4 * * *  | America/New_York | t |  600 | 2026-09-24 08:00:00+00
+```
 
-All four are asserted against a real database by `phase3-wiring.test.ts` and
-`phase3-cold-install.test.ts`, which is _not_ the same thing as observing them in the shipped image,
-and this section should not be read as if it were.
+The two numbers worth reading twice: `integrations.price_refresh` next runs at **07:45 UTC** and
+`planning.net_worth_snapshot` at **08:00 UTC**, which are 03:45 and 04:00 in `America/New_York`. The
+cron is resolved in the holder's zone, not the container's — which is the assertion that would have
+failed if either had been registered in UTC (08 §3.7).
 
-The stack was left `docker compose down` (volumes preserved) and the six placeholder secret files
-removed, so `check-secret-ownership` stays green.
+**`price_source_priority` for the new holder: 24 rows**, across all seven security kinds
+(`bond` 3, `cash` 2, `crypto` 4, `equity` 4, `etf` 4, `mutual_fund` 4, `other` 3), every kind's rungs
+running from 1 to 99 — the two values `0015_market_data.sql` pins by CHECK (`user_override` first,
+`last_known` last).
+
+### 9.4 One thing the cold walk shows that is not a defect of this batch
+
+On a genuinely cold install the worker starts **before** any account holder exists, logs
+`no account holder yet; the worker will idle until one is enrolled`, and does not re-check. So
+`just bootstrap-user` must be followed by a worker restart before the modules resolve for that
+holder. That is `worker.ts`'s stated behaviour ("come back after a restart rather than
+crash-looping") and it is why the RUNBOOK's first-install order matters; it is recorded here because
+it is the reason this walk restarts the worker after step 7, not because it changed.
+
+### 9.5 Teardown
+
+`docker compose down` (volumes preserved) and the seven placeholder secret files removed, so
+`just check-secret-ownership` stays green on a working tree that has no real provider keys.
 
 ---
 
@@ -257,14 +424,31 @@ removed, so `check-secret-ownership` stays green.
 1. **`ConsumerContext` should carry a database handle** (§4). A `@core/platform` change this wave may
    not make; `assertDrizzleTransaction` is the interim guard.
 2. **`factsForRun` is empty until WP 3.7** (§5). Named, not worked around.
-3. **The six new secret files must exist before `docker compose up`.** Compose has no optional-secret
-   model. `RUNBOOK.md` "Create secrets" needs a step for them; **`RUNBOOK.md` is outside this batch's
-   allowed paths**, so it is recorded here and in `.env.example` instead.
-4. **`just harden-secrets` needs `sudo`** and could not be run non-interactively in this environment.
-   The recipe is updated and correct; running it is an operator step.
-5. **`gate-image-closure.test.ts` fails against a stale `personalfi/api:dev`** until the image is
-   rebuilt — the dependency batch added four workspace projects to `apps/api`'s runtime closure. The
-   cold walk's `--build` is what clears it.
-6. **`MARKET_DATA_ALLOWED_HOSTS` narrows by _host_, not by provider name.** An operator switching one
-   source off has to know which host belongs to which provider; `.env.example` lists all four. A
-   provider-name form would be friendlier and is a Phase 9 polish item, not a correctness gap.
+3. ~~**The six new secret files must exist before `docker compose up`.**~~ **Closed.** `RUNBOOK.md`
+   "Create secrets" step 8 now creates all **seven** (the six plus WP 3.6's `etherscan_api_key`),
+   empty, with what each one buys.
+4. **`just harden-secrets` needs `sudo`** and could not be run non-interactively here. The recipe is
+   updated and correct — `check-secret-ownership` derives `etherscan_api_key`'s expected owner from
+   `compose.yml` with no edit of its own, which is the property D-4 bought — but running it is an
+   operator step.
+5. ~~**`gate-image-closure.test.ts` fails against a stale `personalfi/api:dev`.**~~ **Closed.** The
+   cold walk's `--build` cleared it; `--project api` is 72/72 green.
+6. **`MARKET_DATA_ALLOWED_HOSTS` narrows by _host_, not by provider name.** Unchanged; a Phase 9
+   polish item, not a correctness gap. The same is now true of `CRYPTO_ALLOWED_HOSTS`.
+7. **`SnapshotJobDependencies.portsFor` should take the job's `userId`** (§3.1). Until it does, the
+   composition root binds one holder and `planningModule` refuses a job for any other by name. A
+   `@ctx/planning` change, which this batch may not make.
+8. **`WalletAddressStore.put` cannot persist on a first link** (§3.2), because `createConnection`
+   calls `connect()` before it inserts the `connections` row. `persistPending` exists and is
+   unwired; the real fix is either a `routes/connections.ts` call at the end of the link ceremony or
+   a `@connector/walletrpc` change so `put` carries the connection identity. **A watch-only wallet
+   cannot be linked end to end until one of the two lands** — the registry entry, egress binding and
+   secret are proven, the link ceremony is not.
+9. **`net_worth_daily` and `wallet_addresses` are deferred from the export bundle, not excluded**
+   (§2). `net_worth_daily` in particular carries correction provenance a recomputation cannot
+   rebuild, so it belongs in a bundle with its revision ladder intact — WP 3.7's batch.
+10. **`packages/contexts/insights/**` was being edited concurrently (WP 3.10) while this ran.**
+    `pnpm lint:schema-ownership` is red on
+    `packages/contexts/insights/src/advisors/builtin/crypto/positions.ts` — _"raw SQL references
+    `securities`, which is owned by `@ctx/investments`"_ — and the advisor catalogue is 31 manifests
+    rather than 14. Both are that work package's, attributed here and deliberately untouched.

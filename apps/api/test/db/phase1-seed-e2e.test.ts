@@ -317,6 +317,7 @@ describe.skipIf(NO_DATABASE)('Phase 1 seed-based end-to-end proof', () => {
     const egressPolicy = createEgressPolicy({ allowedHosts: [] });
     const modules = appModules({
       database: h.database.db,
+      userId: h.userId,
       orchestrator: runtime.orchestrator,
       timezone: 'UTC',
       clock: systemClock,

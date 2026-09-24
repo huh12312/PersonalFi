@@ -161,6 +161,59 @@ chmod 444 secrets/advisor_token_secret
 #    covers the three `plaid_*` secrets):
 openssl rand -hex 32 > secrets/advisor_token_secret
 chmod 444 secrets/advisor_token_secret
+
+# 8. Phase 3's seven provider keys (all optional — 03 §6: "Phase 3 completes
+#    with zero keys; it just cannot prove freshness"). `compose.yml` declares
+#    all seven as file secrets on `api` and `worker` only — never `migrator`,
+#    which applies DDL and will never dial a provider — and Compose has no
+#    optional-secret model, so like the plaid_* trio and advisor_token_secret
+#    above they are created **empty** unconditionally. `packages/config` treats
+#    a zero-length file exactly as a missing one, so seven empty files boot
+#    exactly as seven absent ones would.
+touch secrets/tiingo_api_key secrets/fred_api_key secrets/coingecko_api_key \
+      secrets/openfigi_api_key secrets/coinbase_key_name \
+      secrets/coinbase_private_key secrets/etherscan_api_key
+chmod 444 secrets/tiingo_api_key secrets/fred_api_key secrets/coingecko_api_key \
+          secrets/openfigi_api_key secrets/coinbase_key_name \
+          secrets/coinbase_private_key secrets/etherscan_api_key
+#
+#    What each one buys, and what happens without it:
+#
+#      tiingo_api_key        equity/ETF/fund EOD closes. Absent -> that adapter
+#                            is not registered at all; the 03:45 refresh runs,
+#                            asks nobody, and records that honestly.
+#      fred_api_key          macro series and FX. FRED has NO header auth, so
+#                            this key travels in every request's query string —
+#                            which is why @ctx/integrations redacts every
+#                            provider-authored string before logging it or
+#                            storing it in market_data_runs.
+#      coingecko_api_key     crypto prices (Demo plan).
+#      openfigi_api_key      symbol -> FIGI mapping. Also answers anonymously,
+#                            at 10 jobs per batch instead of 100, so absence
+#                            here degrades rather than disables.
+#      coinbase_key_name     the CDP API key name, `organizations/{org}/apiKeys/
+#                            {key}`. All-or-nothing with the next one.
+#      coinbase_private_key  the CDP **Ed25519** key (EdDSA — ES256 is Plaid's
+#                            *webhook* algorithm; 01 §3.2 warns against
+#                            cargo-culting between the two). Create the CDP key
+#                            with the `view` permission only: the connector
+#                            asserts `key_permissions` at startup and refuses a
+#                            key that can trade.
+#      etherscan_api_key     the watch-only wallet connector's ETHEREUM leg
+#                            only. Its BITCOIN leg needs no key — addresses are
+#                            derived locally from the xpub/ypub/zpub and
+#                            Blockstream Esplora is unauthenticated — so with
+#                            no file here the connector is still registered and
+#                            BTC wallets work; an ETH balance request refuses
+#                            by name (CONFIG_ERROR naming this file) rather
+#                            than dialling.
+#
+#    To enable any of them, write the real value and re-run `just
+#    harden-secrets` (it covers all seven):
+#      echo -n '<token>' > secrets/tiingo_api_key
+#
+#    `CRYPTO_ALLOWED_HOSTS` and `MARKET_DATA_ALLOWED_HOSTS` in `.env` can only
+#    NARROW which hosts these adapters may reach; neither can add one.
 ```
 
 #### Secret file modes: 0444 by default, 0400 via `just harden-secrets`

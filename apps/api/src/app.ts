@@ -26,7 +26,12 @@ import { assertCsrf, ensureCsrfCookie } from './auth/csrf.ts';
 import { createGuards } from './auth/guards.ts';
 import { SecurityRuntime } from './auth/runtime.ts';
 import { seedUserState } from './bootstrap-seed.ts';
-import { createConnectorRegistry, createDomainRuntime, type DomainRuntime } from './domain.ts';
+import {
+  createConnectorRegistry,
+  createDomainRuntime,
+  createWalletRpcRuntime,
+  type DomainRuntime,
+} from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { buildPlatform } from './platform.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
@@ -386,6 +391,18 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       // `registry.manifests()` is what the "Add a connection" screen renders
       // from, and the link ceremony (`POST /connections`) runs inline here.
       coinbase: config.coinbase,
+      // WP 3.6. The link ceremony for a watch-only wallet runs inline here —
+      // `parseConnectInput` refuses private material at this seam, before
+      // anything parses, stores, logs or sends it — so the API needs the
+      // adapter and its store even though every *sync* happens in the worker.
+      // `database` is available at this point (it is built one line up), which
+      // is what lets the store be bound here rather than in
+      // `createDomainRuntime` the way CSV's and Manual's are.
+      walletRpc: createWalletRpcRuntime({
+        database,
+        allowedHosts: config.crypto.allowedHosts,
+        etherscanApiKey: config.secrets.etherscan_api_key,
+      }),
       clock,
       logger: app.log,
     });

@@ -212,6 +212,30 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'market_data_runs',
     "market data (WP 3.4); another deployment's run history would seed this one's rate budget with calls it never made.",
   ],
+  // Phase 3 WP 3.6's watch-only wallet descriptors (migration 0016). An
+  // xpub/ypub/zpub is **not** a credential — it is public information a block
+  // explorer would show anyone, and there is no key material column here to
+  // leak (08 §2.6) — so the reason this is deferred rather than excluded is
+  // ordinary: the row is meaningless without the `connections` row its
+  // `connection_id` references, and `connections` is itself not in this WP's
+  // export scope. The two travel together or not at all.
+  [
+    'wallet_addresses',
+    'investments (WP 3.6); a wallet descriptor is meaningless without its connections row, which this WP does not export either.',
+  ],
+  // Phase 3 WP 3.8's net-worth read model (migration 0017). Derived, in the
+  // strict sense: every row is recomputable from `accounts`, `account_balances`,
+  // `holdings`, `prices` and `fx_rates`. Deferred rather than excluded for one
+  // reason that is not derivability — a **sealed** row is a historical
+  // assertion (08 §3.5) made against prices that may no longer be fetchable,
+  // and corrections carry `supersedes_id`/`correction_reason` provenance a
+  // recomputation cannot reconstruct. So this belongs in a bundle eventually,
+  // with its revision ladder intact, and dropping it silently would lose
+  // exactly the part that cannot be rebuilt.
+  [
+    'net_worth_daily',
+    'planning (WP 3.8); sealed rows are historical assertions with correction provenance a recomputation cannot rebuild — exported with the investments batch, not dropped.',
+  ],
   ['advisors', "insights (WP 2.6); not named in this WP's export scope."],
   ['advisor_runs', "insights (WP 2.6); not named in this WP's export scope."],
   ['insights', "insights (WP 2.6); not named in this WP's export scope."],

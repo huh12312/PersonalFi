@@ -148,6 +148,38 @@ describe('nightly fan-out (re-gate N-7, closed by decision D-5)', () => {
     ).toBe(false);
   });
 
+  it('sizes its pool above the connections it pins, so a new consumer cannot deadlock it (Phase 3 cold walk)', () => {
+    // The Phase 3 cold walk's own finding, as a test. The worker pins one
+    // connection per LISTEN channel (3), one per leader lease (scheduler, job
+    // reaper) and **one per registered consumer** — `createConsumerPump` holds
+    // each consumer's advisory lease, and therefore its `pg.PoolClient`, until
+    // `stop()`. With `DATABASE_POOL_MAX=10` and seven consumers that is 12
+    // pinned against a pool of 10: every job-runner poll and scheduler tick
+    // queued on `pool.connect()` forever, `worker ready` never logged, no
+    // error, no restart, 0% CPU. Only D-3's liveness healthcheck noticed.
+    //
+    // Asserted against the source for the same reason N-4 and N-5 are: the
+    // defect is what the composition root says, and reproducing it needs a
+    // database, a KEK and an account holder.
+    const worker = repoFile('apps/api/src/worker.ts');
+    const poolCall = /createPool\(\{[\s\S]*?\}\)/.exec(worker)?.[0] ?? '';
+    expect(poolCall, 'apps/api/src/worker.ts must build a pool').not.toBe('');
+    expect(
+      /max:\s*config\.env\.DATABASE_POOL_MAX\s*\+\s*WORKER_PINNED_CONNECTIONS/.test(poolCall),
+      'the worker sizes its pool at DATABASE_POOL_MAX alone. That number is what an operator ' +
+        'expects to have available for queries, and the worker pins 3 LISTEN + 2 leader leases ' +
+        '+ one lease per consumer before it runs anything — so the pool must be ' +
+        'DATABASE_POOL_MAX *plus* that reservation, or the process deadlocks on itself with no ' +
+        'error (Phase 3 cold walk; docs/evidence/phase-3/wp3.w-wiring.md §9).',
+    ).toBe(true);
+    expect(
+      worker.includes('assertPoolCoversLeases'),
+      'the boot-time check that says so by name is gone; a pool that cannot cover its pinned ' +
+        'connections hangs rather than failing, so the only remaining signal would be an idle ' +
+        'pg_stat_activity.',
+    ).toBe(true);
+  });
+
   it('keeps the process-local providers named — routes/connections.ts still uses the set for inline-vs-queued sync', () => {
     for (const provider of ['manual', 'file_import', 'seed']) {
       expect(

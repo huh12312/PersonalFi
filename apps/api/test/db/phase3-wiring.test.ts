@@ -64,10 +64,18 @@ import {
   createMarketDataRuntime,
   createMarketDataWriter,
   drizzleTransactionalExecutor,
+  planningPortsFor,
   securityResolverFor,
   assertDrizzleTransaction,
 } from '../../src/domain.ts';
-import { PRICE_REFRESH_JOB_KIND, appModules } from '../../src/modules.ts';
+import {
+  NET_WORTH_CONSUMER_NAME,
+  NET_WORTH_SNAPSHOT_CRON,
+  NET_WORTH_SNAPSHOT_JOB_KIND,
+  PRICE_REFRESH_JOB_KIND,
+  appModules,
+} from '../../src/modules.ts';
+import { recordBalance } from '@ctx/ledger';
 import {
   createApiHarness,
   linkManual,
@@ -171,6 +179,7 @@ describe.skipIf(NO_DATABASE)(
       });
       const modules = appModules({
         database: h.database.db,
+        userId: h.userId,
         orchestrator: runtime.orchestrator,
         timezone: 'UTC',
         clock: systemClock,
@@ -353,6 +362,197 @@ describe.skipIf(NO_DATABASE)(
       expect(facts.holdings).toEqual([]);
       expect(facts.transactions).toEqual([]);
     });
+
+    it('module.planning: a real ledger.BalanceRecorded reaches the net-worth consumer through the real pump, and the 04:00 schedule lands', async () => {
+      // WP 3.8's half of the flag flip, and it asserts the two things
+      // `module.planning: true` is actually a claim about:
+      //
+      //   a. the consumer is *delivered* a real event through the real pump
+      //      built with `drizzleTransactionalExecutor` — which is the only way
+      //      to know `executorFor: (c) => assertDrizzleTransaction(c.tx)` is
+      //      satisfied, because `markDirty` is written against Drizzle's query
+      //      builder and `platformExecutor` would narrow the handle away;
+      //   b. the schedule row lands through the real `upsertSchedule`, with the
+      //      cron the job actually needs.
+      //
+      // Nothing here stubs the consumer, the pump or the scheduler.
+      const logger = pino({ level: 'silent' });
+      const denyAll = createEgressPolicy({ allowedHosts: [] });
+      const runtime = createDomainRuntime({
+        database: h.database.db,
+        clock: systemClock,
+        logger,
+        registry: createConnectorRegistry(),
+        secretBox: h.security.requireSecretBox(),
+      });
+      const modules = appModules({
+        database: h.database.db,
+        userId: h.userId,
+        orchestrator: runtime.orchestrator,
+        timezone: 'UTC',
+        clock: systemClock,
+        notificationChannels: {
+          ntfy: createNtfyChannel({ policy: denyAll }),
+          smtp: createSmtpChannel({ policy: denyAll }),
+        },
+        secretBox: h.security.requireSecretBox(),
+        investmentSyncPort: createInvestmentSyncPort(h.database.db),
+      });
+      const planning = modules.find((module) => module.flagKey === 'module.planning');
+      expect(planning?.consumers ?? []).toHaveLength(1);
+
+      // --- (b) the schedule row, through the real upsert ------------------
+      await planning?.schedules?.(h.userId);
+      const scheduled = await h.database.db.execute<{ job_kind: string; cron: string }>(
+        sql`SELECT job_kind, cron FROM schedules
+             WHERE user_id = ${h.userId}::uuid AND name = ${NET_WORTH_SNAPSHOT_JOB_KIND}`,
+      );
+      expect(scheduled.rows).toHaveLength(1);
+      expect(scheduled.rows[0]?.job_kind).toBe(NET_WORTH_SNAPSHOT_JOB_KIND);
+      expect(scheduled.rows[0]?.cron).toBe(NET_WORTH_SNAPSHOT_CRON);
+
+      // --- (a) a real ledger.BalanceRecorded, through the real pump -------
+      const accountRows = await h.database.db.execute<{ id: string; currency: string }>(
+        sql`SELECT id, currency FROM accounts WHERE user_id = ${h.userId}::uuid ORDER BY created_at LIMIT 1`,
+      );
+      const accountId = accountRows.rows[0]?.id;
+      expect(accountId, 'the manual link above must have created an account').toBeDefined();
+      if (accountId === undefined) return;
+
+      await recordBalance(
+        h.database.db,
+        {
+          userId: h.userId,
+          accountId,
+          current: money(123_45n, accountRows.rows[0]?.currency ?? 'USD'),
+          available: null,
+          limit: null,
+          asOf: new Date('2026-06-15T12:00:00Z'),
+          source: 'manual',
+        },
+        { clock: systemClock, correlationId: newId() },
+      );
+
+      const pump = createConsumerPump({
+        pool: h.database.pool,
+        db: drizzleTransactionalExecutor(h.database.db),
+        clock: systemClock,
+        logger,
+        consumers: [...(planning?.consumers ?? [])],
+      });
+      await pump.drain();
+
+      const offset = await h.database.db.execute<{ last_seq: string; failed_error: string | null }>(
+        sql`SELECT last_seq, failed_error FROM event_consumer_offsets
+             WHERE consumer_name = ${NET_WORTH_CONSUMER_NAME}`,
+      );
+      expect(offset.rows).toHaveLength(1);
+      // The offset exists *and* nothing is recorded in `failed_error`. That
+      // second half is the whole assertion: before
+      // `drizzleTransactionalExecutor`, a consumer written against the query
+      // builder failed here with `db.update is not a function` and the only
+      // trace was this column (wp3.w-wiring.md §4).
+      expect(offset.rows[0]?.failed_error).toBeNull();
+      expect(BigInt(offset.rows[0]?.last_seq ?? '0')).toBeGreaterThan(0n);
+    }, 120_000);
+
+    it("planningPortsFor answers over the real ledger, and budgeting's exclusion list outranks the class default", async () => {
+      // The four ports, over real rows. `onBudget` is the one flag with a
+      // second source of truth — `budgets.off_budget_account_ids`, which
+      // 0009_budgeting.sql says exists precisely so Budgeting does not write an
+      // `on_budget` column into Ledger's table — so it is the one worth driving
+      // in both directions.
+      const ports = planningPortsFor(h.database.db, {
+        userId: h.userId,
+        timeZone: 'UTC',
+        clock: systemClock,
+      });
+
+      const before = await ports.balances.accounts(h.userId, '2026-06-15');
+      expect(before.length).toBeGreaterThan(0);
+      const cash = before.find((account) => account.kind === 'cash');
+      if (cash !== undefined) {
+        // 07 §4.1: cash is on-budget, liquid and not investable.
+        expect(cash.flags).toEqual({
+          onBudget: true,
+          inNetWorth: true,
+          isLiquid: true,
+          isInvestable: false,
+        });
+      }
+      const brokerage = before.find((account) => account.kind === 'investment');
+      expect(brokerage, 'the manual link above created an investment account').toBeDefined();
+      // An investment account is investable and **not** liquid: selling a
+      // position to buy groceries is not what 07 §4.1 means by liquid.
+      expect(brokerage?.flags.isInvestable).toBe(true);
+      expect(brokerage?.flags.isLiquid).toBe(false);
+      expect(brokerage?.side).toBe('asset');
+
+      // Now exclude one account from the budget and read again.
+      const target = before[0];
+      expect(target).toBeDefined();
+      if (target === undefined) return;
+      await h.database.db.execute(sql`
+        INSERT INTO budgets (id, user_id, name, currency, timezone, off_budget_account_ids)
+        VALUES (${newId()}::uuid, ${h.userId}::uuid, 'p3wire planning budget', 'USD', 'UTC',
+                ${JSON.stringify([target.accountId])}::jsonb)
+      `);
+      const after = await ports.balances.accounts(h.userId, '2026-06-15');
+      expect(after.find((account) => account.accountId === target.accountId)?.flags.onBudget).toBe(
+        false,
+      );
+      // And only in the `false` direction: an account the list does not name
+      // keeps whatever 07 §4.1's class table said.
+      for (const account of after) {
+        if (account.accountId === target.accountId) continue;
+        const original = before.find((row) => row.accountId === account.accountId);
+        expect(account.flags.onBudget).toBe(original?.flags.onBudget);
+      }
+
+      // The balance the test above recorded, read back as a local-day
+      // observation rather than a `timestamptz`.
+      const observation = await ports.balances.balanceOnOrBefore(
+        h.userId,
+        target.accountId,
+        '2026-06-16',
+      );
+      if (observation !== null) {
+        expect(observation.date).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
+        expect(typeof observation.currentMinor).toBe('bigint');
+      }
+
+      // A day with nothing posted sums to zero — not `null`, and not a throw:
+      // 04 §5.4's backfill subtracts this number unconditionally.
+      expect(
+        await ports.balances.transactionsTotalOn(h.userId, target.accountId, '1999-01-01'),
+      ).toBe(0n);
+
+      // No holdings snapshot exists for a brand-new account, and the honest
+      // answer is an empty list on both sides of the bracket rather than an
+      // invented quantity.
+      expect(
+        await ports.holdings.positionsOnOrBefore(h.userId, target.accountId, '2026-06-15'),
+      ).toEqual([]);
+      expect(
+        await ports.holdings.bracketingObservations(
+          h.userId,
+          target.accountId,
+          newId(),
+          '2026-06-15',
+        ),
+      ).toEqual({ before: null, after: null });
+
+      // D4 and 08 §6.6: the identity is the only 1.0 this system produces, and
+      // it is labelled rather than inferred.
+      const identity = await ports.fx.rate('USD', 'USD', '2026-06-15');
+      expect(identity.rate).toBe('1');
+      expect(identity.source).toBe('identity');
+      // A pair nobody has ever observed throws rather than answering a
+      // plausible par — the asymmetry with `PriceReader` that D4 exists for.
+      await expect(ports.fx.rate('USD', 'JPY', '2026-06-15')).rejects.toThrow();
+      // A security nobody has priced is an ordinary `null`, not a throw.
+      expect(await ports.prices.price(newId(), '2026-06-15', 'USD')).toBeNull();
+    }, 120_000);
 
     it('isRetirementAccount reads the provider subtype, and an unrecognised one is not a retirement account', async () => {
       const real = createInvestmentSyncPort(h.database.db);

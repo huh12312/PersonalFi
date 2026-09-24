@@ -19,6 +19,9 @@
  * | `module.recurring`      | 5      | `recurring.detection@v1`           | —                                              | —                   |
  * | `module.notifications`  | 3      | `notifications.render@v1`          | `notifications.deliver`, `notifications.digest` | weekly digest       |
  * | `module.insights`       | 7      | `insights.dispatch@v1`             | `insights.run`, `insights.run_all`             | nightly (04:15)     |
+ * | `module.investments`    | 5      | `investments.lots@v1`              | —                                              | —                   |
+ * | `module.integrations`   | 2      | —                                   | `integrations.price_refresh`                   | daily (03:45)       |
+ * | `module.planning`       | 1      | `planning.net_worth@v1`            | `planning.net_worth_snapshot`                  | daily (04:00)       |
  *
  * The Ledger registers **no consumer**, deliberately. It is the writer: it
  * states facts and reacts to none. Categorization is the first module here that
@@ -73,6 +76,14 @@ import {
 } from '@ctx/notifications';
 import { RECURRING_EVENTS, createRecurringConsumer, type RecurringDatabase } from '@ctx/recurring';
 import {
+  PLANNING_EVENTS,
+  SNAPSHOT_JOB_KIND,
+  createNetWorthConsumer,
+  netWorthSnapshotJobHandler,
+  registerNetWorthSnapshotSchedule,
+  type PlanningDatabase,
+} from '@ctx/planning';
+import {
   INVESTMENTS_EVENTS,
   createLotConsumer,
   drizzleLotStore,
@@ -97,6 +108,7 @@ import {
   createInsightsRecurringPort,
   createRecurringLedgerPort,
   assertDrizzleTransaction,
+  planningPortsFor,
   type MarketDataRuntime,
 } from './domain.ts';
 import type { InvestmentSyncPort } from '@ctx/investments';
@@ -117,8 +129,29 @@ export interface ModuleWiringOptions {
     RecurringDatabase &
     NotificationsDatabase &
     InsightsDatabase &
-    InvestmentsDatabase;
+    InvestmentsDatabase &
+    PlanningDatabase;
   readonly orchestrator: SyncOrchestrator;
+  /**
+   * The account holder these modules are being built for — the same id
+   * `resolveModules(platform, userId, …)` is called with.
+   *
+   * Only `module.planning` reads it, and only because two of the four ports
+   * `@ctx/planning` reads its world through (`PriceReader`, `FxReader`) take no
+   * `userId` argument: they are `@ctx/investments`' readers, assigned straight
+   * through with no adapter, and bind the holder at construction.
+   * `SnapshotJobDependencies.portsFor` receives the job's transaction and
+   * nothing else, so the id has to be closed over here.
+   *
+   * **This deployment has one holder (D6)** — the same assumption
+   * `module.notifications`'s `secretBoxFor: () => options.secretBox` already
+   * makes one screen up — and `planningModule` refuses **by name** if a job
+   * ever arrives for a different user, so the assumption is checked rather
+   * than merely documented. `docs/evidence/phase-3/wp3.w-wiring.md` §10 records
+   * the clean fix, which is `@ctx/planning`'s to make: `portsFor` should take
+   * `(executor, userId)`.
+   */
+  readonly userId: string;
   /**
    * The account holder's display timezone.
    *
@@ -178,6 +211,15 @@ export interface ModuleWiringOptions {
    * install, where the refresh runs and honestly finds nothing to ask.
    */
   readonly marketData?: MarketDataWiringOptions;
+  /**
+   * The currency `net_worth_daily.base_currency` is stated in. Defaults to
+   * `USD`, and has no config key yet for the same reason `insightsModule`'s
+   * `baseCurrency` does not (wp2.6-insights.md §6 open item 3): every seed and
+   * every account in this deployment is USD today. It is a parameter rather
+   * than a literal so the day that stops being true there is one place to
+   * change and a test can drive a non-USD holder through the real wiring.
+   */
+  readonly baseCurrency?: string;
 }
 
 /** The three `module.integrations` collaborators `domain.ts` builds. */
@@ -216,6 +258,23 @@ export const PRICE_REFRESH_JOB_KIND = 'integrations.price_refresh';
 export const PRICE_REFRESH_SCHEDULE_NAME = 'integrations.price_refresh';
 /** 03:45 **local** (08 §3.7) — after the 03:15 nightly sync has had time to land. */
 export const PRICE_REFRESH_CRON = '45 3 * * *';
+
+/**
+ * `planning.net_worth_snapshot` — WP 3.8's 04:00 job and schedule.
+ *
+ * Re-exported from `@ctx/planning` rather than restated, for the reason
+ * `phase3-registration.test.ts` exists: the names that reach a CHECK constraint
+ * must have exactly one definition. 04:00 **local** is after the 03:15 nightly
+ * sync and the 03:45 price refresh, and comfortably past 08 §3.5's 02:00 seal
+ * boundary, so the day this seals is a day whose balances and prices have
+ * already landed.
+ */
+export {
+  SNAPSHOT_CRON as NET_WORTH_SNAPSHOT_CRON,
+  SNAPSHOT_JOB_KIND as NET_WORTH_SNAPSHOT_JOB_KIND,
+  SNAPSHOT_SCHEDULE_NAME as NET_WORTH_SNAPSHOT_SCHEDULE_NAME,
+  NET_WORTH_CONSUMER_NAME,
+} from '@ctx/planning';
 
 /**
  * Connections the nightly fan-out should touch: everything `listSyncableConnections`
@@ -415,7 +474,91 @@ export function appModules(options: ModuleWiringOptions): readonly ModuleRegistr
       ],
     },
     integrationsModule(options, clock),
+    planningModule(options, clock),
   ];
+}
+
+/**
+ * `module.planning` — WP 3.8's net-worth snapshot.
+ *
+ * The first module in this list that registers **all three** of a consumer, a
+ * job and a schedule, and the division of labour between them is the design:
+ *
+ *   * the **consumer** (`planning.net_worth@v1`) marks the open day `dirty`
+ *     when a balance, a holding or a price lands, and does no arithmetic. One
+ *     nightly sync produces one `ledger.BalanceRecorded` per account;
+ *     recomputing inside each delivery would run the whole aggregate — every
+ *     account, every holding, an FX lookup each — a dozen times in ninety
+ *     seconds to produce a row only the last run's value survives in;
+ *   * the **job** does that work once, at 04:00 local;
+ *   * the **schedule** is what fires it.
+ *
+ * ## Two things this function is careful about
+ *
+ * **`executorFor` hands the consumer the pump's Drizzle transaction.**
+ * `markDirty` is written against the query builder, and `ConsumerContext.tx` is
+ * not a Drizzle handle unless the pump was built with
+ * `drizzleTransactionalExecutor` — see `domain.ts` and wp3.w-wiring.md §4.
+ * `assertDrizzleTransaction` fails **by name** if it was not, rather than as a
+ * `db.select is not a function` recorded in `failed_error` where nobody looks.
+ *
+ * **The job is refused if it arrives for another holder.** `portsFor` receives
+ * the job's transaction and no user id, so `planningPortsFor` closes over
+ * `options.userId` (D6: one holder). That assumption is checked here rather
+ * than trusted: a job whose `context.userId` differs would otherwise compute
+ * one user's net worth from another user's prices, which is the class of bug
+ * that is invisible in every test that has one user.
+ */
+function planningModule(options: ModuleWiringOptions, clock: Clock): ModuleRegistration {
+  const database = options.database;
+  const baseCurrency = options.baseCurrency ?? 'USD';
+  const snapshot = netWorthSnapshotJobHandler({
+    database,
+    portsFor: (executor) =>
+      planningPortsFor(executor, {
+        userId: options.userId,
+        timeZone: options.timezone,
+        clock,
+      }),
+    timeZone: options.timezone,
+    baseCurrency,
+  });
+
+  return {
+    flagKey: 'module.planning',
+    events: PLANNING_EVENTS,
+    consumers: [
+      createNetWorthConsumer({
+        database,
+        options: { timeZone: options.timezone },
+        executorFor: (context) => assertDrizzleTransaction(context.tx),
+      }),
+    ],
+    jobs: [
+      {
+        ...snapshot,
+        handler: async (payload, context) => {
+          if (context.userId !== options.userId) {
+            throw new Error(
+              `${SNAPSHOT_JOB_KIND} was enqueued for a user these modules were not built for ` +
+                "(apps/api/src/modules.ts binds @ctx/planning's price and FX readers to one " +
+                'holder — D6). Rebuild appModules() for that user, or give ' +
+                "SnapshotJobDependencies.portsFor the job's own userId " +
+                '(docs/evidence/phase-3/wp3.w-wiring.md §10).',
+            );
+          }
+          await snapshot.handler(payload, context);
+        },
+      },
+    ],
+    schedules: async (userId: string): Promise<void> => {
+      await registerNetWorthSnapshotSchedule(
+        database,
+        { userId, timezone: options.timezone },
+        clock,
+      );
+    },
+  };
 }
 
 /**

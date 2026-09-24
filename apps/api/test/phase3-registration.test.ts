@@ -41,8 +41,13 @@ import {
   LOTS_CONSUMED_EVENT_TYPES,
   LOTS_CONSUMER_NAME,
 } from '@ctx/investments';
+import { NET_WORTH_CONSUMED_EVENT_TYPES, PLANNING_EVENTS } from '@ctx/planning';
 import { describe, expect, it } from 'vitest';
 import {
+  NET_WORTH_CONSUMER_NAME,
+  NET_WORTH_SNAPSHOT_CRON,
+  NET_WORTH_SNAPSHOT_JOB_KIND,
+  NET_WORTH_SNAPSHOT_SCHEDULE_NAME,
   PRICE_REFRESH_CRON,
   PRICE_REFRESH_JOB_KIND,
   PRICE_REFRESH_SCHEDULE_NAME,
@@ -79,6 +84,8 @@ function wiringOptions(
         return Promise.resolve({ rows: [] });
       },
     } as unknown as ModuleWiringOptions['database'],
+    // D6's one holder, which `module.planning` binds its price/FX readers to.
+    userId: 'user-1',
     orchestrator: {
       jobHandler: () => ({ kind: 'connections.sync', handler: noop }),
       registerNightlySchedule: async () => undefined,
@@ -156,7 +163,9 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     // and this file has none — which is the point: what is being asserted is
     // that `resolveModules` registers *these* events, not that the whole
     // application boots (`apps/api/test/db/phase3-wiring.test.ts` does that).
-    const platform = platformWithFlagsOn(new Set(['module.investments', 'module.integrations']));
+    const platform = platformWithFlagsOn(
+      new Set(['module.investments', 'module.integrations', 'module.planning']),
+    );
     const executed: unknown[] = [];
     const resolved = await resolveModules(
       platform,
@@ -166,15 +175,20 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
 
     // `resolveModules` ran the schedule declaration, not merely collected it —
     // one `upsertSchedule` reached the executor.
-    expect(resolved.enabled).toEqual(['module.investments', 'module.integrations']);
+    expect(resolved.enabled).toEqual([
+      'module.investments',
+      'module.integrations',
+      'module.planning',
+    ]);
     expect(executed.length).toBeGreaterThan(0);
 
-    const declared = [...INVESTMENTS_EVENTS, ...INTEGRATIONS_EVENTS];
-    // Five from investments, two from integrations. Pinned so that an event
-    // *added* to a context without a line here is a failure rather than a
-    // silently unregistered type.
+    const declared = [...INVESTMENTS_EVENTS, ...INTEGRATIONS_EVENTS, ...PLANNING_EVENTS];
+    // Five from investments, two from integrations, one from planning. Pinned
+    // so that an event *added* to a context without a line here is a failure
+    // rather than a silently unregistered type.
     expect(INVESTMENTS_EVENTS).toHaveLength(5);
     expect(INTEGRATIONS_EVENTS).toHaveLength(2);
+    expect(PLANNING_EVENTS).toHaveLength(1);
 
     for (const definition of declared) {
       expect(
@@ -271,6 +285,70 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     expect(integrations?.consumers ?? []).toHaveLength(0);
   });
 
+  it('module.planning registers the net-worth consumer, the 04:00 job and its schedule', () => {
+    const planning = appModules(wiringOptions()).find(
+      (module) => module.flagKey === 'module.planning',
+    );
+    expect(planning).toBeDefined();
+    expect(planning?.events).toEqual(PLANNING_EVENTS);
+
+    const consumers = planning?.consumers ?? [];
+    expect(consumers).toHaveLength(1);
+    const consumer = consumers[0] as RegisteredConsumer;
+    expect(consumer.name).toBe(NET_WORTH_CONSUMER_NAME);
+    // Three producers, none of which `@ctx/planning` may import: the filter is
+    // strings for exactly that reason (`consumer.ts`'s own doc).
+    expect(consumer.filter).toEqual([...NET_WORTH_CONSUMED_EVENT_TYPES]);
+    expect(consumer.filter).toContain('ledger.BalanceRecorded');
+    expect(consumer.filter).toContain('investments.HoldingsUpdated');
+    expect(consumer.filter).toContain('integrations.PricesUpdated');
+
+    expect((planning?.jobs ?? []).map((job) => job.kind)).toEqual([NET_WORTH_SNAPSHOT_JOB_KIND]);
+    // One snapshot in flight at a time — preserved through the composition
+    // root's own wrapper, which is the thing that could silently drop it.
+    expect(planning?.jobs?.[0]?.concurrency).toBe(1);
+    expect(planning?.schedules).toBeDefined();
+  });
+
+  it('the net-worth job kind, schedule name and cron are the documented ones', () => {
+    expect(NET_WORTH_SNAPSHOT_JOB_KIND).toBe('planning.net_worth_snapshot');
+    expect(NET_WORTH_SNAPSHOT_SCHEDULE_NAME).toBe('planning.net_worth_snapshot');
+    // 04:00 local — after the 03:15 sync and the 03:45 refresh (08 §3.7).
+    expect(NET_WORTH_SNAPSHOT_CRON).toBe('0 4 * * *');
+    expect(NET_WORTH_CONSUMER_NAME).toBe('planning.net_worth@v1');
+
+    const { scheduleName, jobKind, eventType } = platformNamePatterns();
+    expect(scheduleName.test(NET_WORTH_SNAPSHOT_SCHEDULE_NAME)).toBe(true);
+    expect(jobKind.test(NET_WORTH_SNAPSHOT_JOB_KIND)).toBe(true);
+    for (const definition of PLANNING_EVENTS) {
+      expect(eventType.test(definition.type), `${definition.type} would fail the CHECK`).toBe(true);
+      expect(definition.type.startsWith('planning.')).toBe(true);
+    }
+  });
+
+  it('the net-worth job refuses, by name, a job enqueued for another holder', async () => {
+    // D6: `appModules` binds `@ctx/planning`'s price and FX readers to one
+    // holder, because `SnapshotJobDependencies.portsFor` receives the job's
+    // transaction and no user id. Without this guard a job for user B would
+    // compute B's net worth from A's prices and A's ladder — a wrong number
+    // with no error, and invisible in every test that has one user.
+    const planning = appModules(wiringOptions()).find(
+      (module) => module.flagKey === 'module.planning',
+    );
+    const handler = planning?.jobs?.[0]?.handler;
+    expect(handler).toBeDefined();
+    if (handler === undefined) return;
+
+    await expect(
+      handler({}, {
+        userId: 'a-different-holder',
+        correlationId: 'c',
+        clock: systemClock,
+        logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+      } as never),
+    ).rejects.toThrow(/was enqueued for a user these modules were not built for/u);
+  });
+
   it('a flag that is off contributes no event, no consumer, no job and no schedule', async () => {
     // WP 3.14's claim (the 2.13 pattern): "off" is structural, not a runtime
     // check inside each handler. `schedules` is the one that matters most —
@@ -296,8 +374,9 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     expect(resolved.enabled).toHaveLength(0);
     expect(resolved.disabled).toContain('module.investments');
     expect(resolved.disabled).toContain('module.integrations');
+    expect(resolved.disabled).toContain('module.planning');
     expect(schedulesCalled).toBe(0);
-    for (const definition of [...INVESTMENTS_EVENTS, ...INTEGRATIONS_EVENTS]) {
+    for (const definition of [...INVESTMENTS_EVENTS, ...INTEGRATIONS_EVENTS, ...PLANNING_EVENTS]) {
       expect(platform.registry.get(definition.type)).toBeUndefined();
     }
   });

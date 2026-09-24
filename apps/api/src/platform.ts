@@ -167,6 +167,34 @@ export const MODULE_FLAGS: readonly FlagDefinition[] = Object.freeze([
       'never — this is the kill switch for every outbound market-data call, and ' +
       'the only one that stops a provider being dialled without deleting its key',
   }),
+  Object.freeze({
+    key: 'module.planning',
+    // WP 3.8, landed after the two above and held to the same bar: `false`
+    // until `apps/api/test/db/phase3-wiring.test.ts` drove the real
+    // `appModules()` registration — the real consumer through the real pump,
+    // and the real `planning.net_worth_snapshot` schedule through the real
+    // `upsertSchedule` — green against a real database.
+    //
+    // Safe at `true` on a fresh install for a reason that is structural rather
+    // than a hope: `createNetWorthConsumer`'s handler is an UPDATE
+    // (`markDirty`), so on an install with no `net_worth_daily` row it marks
+    // nothing and says so, and the 04:00 job computes a day from whatever
+    // `@ctx/ledger` and `@ctx/investments` actually hold — which, for a holder
+    // with no accounts, is nothing at all. The one thing it must **not** do is
+    // invent a point: a zero that means "not computed yet" is exactly the lie
+    // WP 3.8 exists to refuse, and `upsertOpenDay` is only ever reached with a
+    // computed snapshot.
+    //
+    // Flipped `true` once `phase3-wiring.test.ts` → 'module.planning: a real
+    // ledger.BalanceRecorded reaches the net-worth consumer through the real
+    // pump, and the 04:00 schedule lands' was green (6 passed).
+    defaultEnabled: true,
+    owner: 'planning',
+    removeWhen:
+      'never — this is the kill switch for the net-worth read model, and a ' +
+      'snapshotter that cannot be switched off is one that cannot be paused ' +
+      'while a sealed row is corrected',
+  }),
 ]);
 
 export interface Platform {

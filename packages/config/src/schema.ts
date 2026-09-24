@@ -558,6 +558,33 @@ export const SECRET_SPECS = [
       'posture as coinbase_key_name. Create the key with the `view` permission only: the ' +
       'connector asserts `key_permissions` at startup and refuses a key that can trade.',
   },
+
+  // -------------------------------------------------------------- walletrpc
+  //
+  // `@connector/walletrpc`'s Etherscan v2 key (wp3.6-walletrpc.md §8 item 2).
+  // D5 again: file only, no `envFallback`, for the reason `plaid_client_id`
+  // has none.
+  //
+  // **Optional, required for no role, and optional in a stronger sense than
+  // the market-data four**: this connector is registered and works without it.
+  // The Bitcoin leg derives addresses locally from an xpub/ypub/zpub and reads
+  // Blockstream Esplora, which needs no key at all. Only the Ethereum leg does,
+  // because Etherscan v2 requires a key even at the free tier — and
+  // `createEtherscanClient` raises `CONFIG_ERROR`/`invalid_input` **naming this
+  // secret** rather than dialling without one. So an install that watches only
+  // Bitcoin never needs this file, and one that adds an Ethereum address is
+  // told exactly which file to write rather than getting an opaque 403.
+  {
+    name: 'etherscan_api_key',
+    file: 'etherscan_api_key',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write the Etherscan v2 API key to ${SECRETS_DIR}/etherscan_api_key (mode 0400). ' +
+      'Optional: the watch-only wallet connector is registered either way and its Bitcoin leg ' +
+      'needs no key; only the Ethereum leg does, and it refuses by name rather than dialling ' +
+      'without one. Free tier: 5 calls/sec, 100,000/day. Create one at https://etherscan.io/myapikey.',
+  },
 ] as const;
 
 export type SecretName = (typeof SECRET_SPECS)[number]['name'];

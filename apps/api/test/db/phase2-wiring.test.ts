@@ -295,6 +295,7 @@ describe.skipIf(NO_DATABASE)(
       const denyAllPolicy = createEgressPolicy({ allowedHosts: [] });
       const modules = appModules({
         database: h.database.db,
+        userId: h.userId,
         orchestrator: runtime.orchestrator,
         timezone: 'UTC',
         clock: systemClock,
