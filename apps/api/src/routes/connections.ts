@@ -43,6 +43,7 @@ import {
   type ImportFileInput,
 } from '@connector/csv';
 import { PLAID_PROVIDER } from '@connector/plaid';
+import { WALLETRPC_PROVIDER } from '@connector/walletrpc';
 import {
   capabilitiesSchema,
   connectionAccountSchema,
@@ -327,6 +328,55 @@ export async function linkConnection(
       return { ...created, syncJobId: job.jobId };
     }),
   );
+
+  /**
+   * WP 3.9, closing `wp3.w-wiring.md` §10 item 8.
+   *
+   * `@ctx/connections`' `createConnection` calls `connector.connect()` **before**
+   * it inserts the `connections` row, inside one transaction. So when
+   * `WalletRpcConnector.connect()` calls `WalletAddressStore.put()`, there is no
+   * `connections.id` for `wallet_addresses.connection_id` to reference and no
+   * row the pool-backed store could see even if there were. `put` therefore
+   * stages the descriptor in a request-scoped map and returns; **this** is the
+   * durable write, in the same process and the same request that staged it, and
+   * only once the transaction above has committed an id.
+   *
+   * Without it a watch-only wallet links, reports accounts, and then answers
+   * *"this connection has no wallet on record"* from the worker on its first
+   * sync — the N-7 shape, and the reason §10 item 8 says a watch-only wallet
+   * "cannot be linked end to end" until one of two fixes lands. This is the
+   * route-side one; the cleaner `@connector/walletrpc` change (so `put` carries
+   * the connection identity) stays open and is still worth making.
+   *
+   * Outside the transaction deliberately: it is a second statement that must
+   * not be able to roll the link back, and it is idempotent — a re-link wrote
+   * through `put` already and there is nothing pending to drain, so this is a
+   * no-op and says so by returning `false`.
+   */
+  if (body.provider === WALLETRPC_PROVIDER && deps.walletRpc !== null) {
+    // `createConnection` returns the *our-side* id; the store is keyed by the
+    // connector's own `providerConnectionId`, which is the natural key the row
+    // was just written with. Read back rather than thread a new return field
+    // through `@ctx/connections`, which this work package does not own.
+    const row = await requireConnection(database, userId, result.connectionId);
+    const persisted = await deps.walletRpc.store.persistPending(row.providerConnectionId, {
+      connectionId: result.connectionId,
+      userId,
+    });
+    if (!persisted && !result.relinked) {
+      // A first link that staged nothing is a wiring fault, not a user error:
+      // the sync that follows would find no descriptor. Loud, and named.
+      throw new AppError({
+        status: 500,
+        code: 'connections.wallet_descriptor_not_persisted',
+        title: 'Internal Server Error',
+        detail:
+          'The watch-only wallet linked but its address descriptor was not staged by connect(), ' +
+          'so nothing could be written to wallet_addresses.',
+        family: 'internal',
+      });
+    }
+  }
 
   let syncRunId: string | null = null;
   if (!queued) {

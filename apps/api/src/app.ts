@@ -31,6 +31,7 @@ import {
   createDomainRuntime,
   createWalletRpcRuntime,
   type DomainRuntime,
+  type WalletRpcRuntime,
 } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { buildPlatform } from './platform.ts';
@@ -45,11 +46,16 @@ import { eventRoutes } from './routes/events.ts';
 import { exportRoutes } from './routes/export.ts';
 import { healthRoutes } from './routes/health.ts';
 import { insightRoutes } from './routes/insights.ts';
+import { investmentRoutes } from './routes/investments.ts';
+import { marketDataRoutes } from './routes/market-data.ts';
+import { netWorthRoutes } from './routes/net-worth.ts';
 import { notificationRoutes } from './routes/notifications.ts';
 import { plaidRoutes } from './routes/plaid.ts';
+import { priceRoutes } from './routes/prices.ts';
 import { recurringRoutes } from './routes/recurring.ts';
 import { reportRoutes } from './routes/reports.ts';
 import { ruleRoutes } from './routes/rules.ts';
+import { securityRoutes } from './routes/securities.ts';
 import { transactionRoutes } from './routes/transactions.ts';
 
 export const CORRELATION_ID_HEADER = 'x-correlation-id';
@@ -71,6 +77,16 @@ export interface BuildAppOptions {
    * the only way anything else gets into it.
    */
   readonly connectorRegistry?: ConnectorRegistry;
+  /**
+   * WP 3.9. The watch-only wallet runtime, when the caller built one.
+   *
+   * Only ever supplied alongside `connectorRegistry`: a test that registers its
+   * own `WalletRpcConnector` must hand over the **same** runtime, because
+   * `routes/connections.ts` drains the store's pending map after the link
+   * commits and two stores would leave the descriptor staged forever. In
+   * production this is absent and `buildApp` constructs it.
+   */
+  readonly walletRpc?: WalletRpcRuntime;
 }
 
 /**
@@ -272,6 +288,30 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
             'Channels, rules and the delivery outbox. Attaching or destroying a channel needs a ' +
             "step-up assertion, the same policy as a connection's credential.",
         },
+        {
+          name: 'investments',
+          description:
+            'Holdings aggregated across accounts, per-account lots and basis provenance, ' +
+            'allocation, drift, performance, securities and prices. `unclassifiedPct` and ' +
+            '`stale` are always fields, never inferences; a time-weighted return, a ' +
+            'money-weighted return and a dollar gain never share an object (07 §4.2). A ' +
+            'session is enough to read and to set an overlay; the rung-1 price override and ' +
+            'the sticky basis-method election need a step-up assertion.',
+        },
+        {
+          name: 'planning',
+          description:
+            'Net worth over time. The series is gapless and a day with no data is `null`, not ' +
+            'zero; sealed days are labelled as such. A correction never rewrites a sealed row — ' +
+            'it writes the next revision with its reason — and needs a step-up assertion.',
+        },
+        {
+          name: 'market-data',
+          description:
+            'Price-source priority, provider key **presence** (never a key value), rate ' +
+            'budgets, the licence obligations that bind on any surface showing these numbers, ' +
+            'and a guarded test fetch. Both writes need a step-up assertion.',
+        },
       ],
     },
     transform: jsonSchemaTransform,
@@ -383,6 +423,29 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
    * give — not a null dereference.
    */
   const database = createDatabase(pool);
+  /**
+   * WP 3.6's watch-only runtime, hoisted out of the registry construction.
+   *
+   * It used to be built inline in the registry call below, which made
+   * its `store` unreachable from anything else. WP 3.9 needs it in one more
+   * place: `routes/connections.ts` calls `store.persistPending(...)` after
+   * `createConnection` commits, because `@ctx/connections` calls
+   * `connector.connect()` *before* the `connections` row exists and `put` has
+   * nowhere to write on a first link (`wp3.w-wiring.md` §10 item 8). Hoisting it
+   * changes nothing about what is registered; it only gives the route file a
+   * handle on the same store the connector holds.
+   *
+   * `options.walletRpc` exists for a test that injects its own registry: a
+   * runtime and a registry built from it have to be the *same* store instance,
+   * or `persistPending` would drain a map nothing staged into.
+   */
+  const walletRpc: WalletRpcRuntime =
+    options.walletRpc ??
+    createWalletRpcRuntime({
+      database,
+      allowedHosts: config.crypto.allowedHosts,
+      etherscanApiKey: config.secrets.etherscan_api_key,
+    });
   const registry =
     options.connectorRegistry ??
     createConnectorRegistry({
@@ -398,11 +461,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       // `database` is available at this point (it is built one line up), which
       // is what lets the store be bound here rather than in
       // `createDomainRuntime` the way CSV's and Manual's are.
-      walletRpc: createWalletRpcRuntime({
-        database,
-        allowedHosts: config.crypto.allowedHosts,
-        etherscanApiKey: config.secrets.etherscan_api_key,
-      }),
+      walletRpc,
       clock,
       logger: app.log,
     });
@@ -414,6 +473,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     pool,
     clock,
     config,
+    walletRpc,
     connections(): DomainRuntime {
       const secretBox = security.requireSecretBox();
       // Rebuild if the runtime was destroyed and re-initialised: holding an
@@ -445,6 +505,14 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(recurringRoutes(deps));
   await app.register(insightRoutes(deps));
   await app.register(notificationRoutes(deps));
+  // WP 3.9. Five routers rather than one: they own disjoint path prefixes and
+  // disjoint readers, and the plan assigns them as five files so a later wave
+  // editing the market-data settings cannot collide with one editing holdings.
+  await app.register(investmentRoutes(deps));
+  await app.register(securityRoutes(deps));
+  await app.register(priceRoutes(deps));
+  await app.register(netWorthRoutes(deps));
+  await app.register(marketDataRoutes(deps));
 
   /**
    * Idempotent repair pass for every user that already exists (condition D-6,

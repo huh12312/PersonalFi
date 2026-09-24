@@ -16,7 +16,7 @@ import type { Database } from '@core/db';
 import type { Clock } from '@core/kernel';
 import type pg from 'pg';
 import type { Guards } from '../auth/guards.ts';
-import type { DomainRuntime } from '../domain.ts';
+import type { DomainRuntime, WalletRpcRuntime } from '../domain.ts';
 
 export interface RouteDeps {
   readonly guards: Guards;
@@ -33,6 +33,26 @@ export interface RouteDeps {
    * the moment `buildApp` returns.
    */
   readonly config: AppConfig;
+  /**
+   * WP 3.9. The watch-only wallet store, when this process built one.
+   *
+   * `null` only when the caller injected its own `ConnectorRegistry` and no
+   * runtime with it — the shape a narrow test registry is in. It is here rather
+   * than inside `connections()` because it is needed **after**
+   * `createConnection` has committed and before the response is written:
+   * `docs/evidence/phase-3/wp3.w-wiring.md` §10 item 8 records that
+   * `WalletAddressStore.put` cannot persist on a first link, because
+   * `@ctx/connections`' `createConnection` calls `connector.connect()` *before*
+   * it inserts the `connections` row, so at `put` time there is no
+   * `connections.id` to reference. `persistPending` is the drain, and
+   * `routes/connections.ts` is the one place that has both the staged
+   * descriptor (same process, same request) and the committed id.
+   *
+   * A plain field rather than a function, like `config` and unlike
+   * `connections()`: it needs no `SecretBox` — a watch-only descriptor is an
+   * xpub or an address and there is nothing to seal.
+   */
+  readonly walletRpc: WalletRpcRuntime | null;
   /** The connections wiring, or a 503 problem naming why the app is locked. */
   connections(): DomainRuntime;
 }

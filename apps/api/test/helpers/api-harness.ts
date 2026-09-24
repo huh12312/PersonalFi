@@ -37,6 +37,7 @@ import {
   SeedConnector,
 } from '@connector/manual';
 import { PLAID_MANIFEST, type PlaidConnector } from '@connector/plaid';
+import { WALLETRPC_MANIFEST, WalletRpcConnector } from '@connector/walletrpc';
 import { loadConfig, type AppConfig } from '@core/config';
 import { newId, systemClock, type Clock } from '@core/kernel';
 import { silentLogger } from '@core/platform';
@@ -48,7 +49,7 @@ import { ConnectorRegistry, SyncOrchestrator } from '@ctx/connections';
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../../src/app.ts';
 import type { SecurityRuntime } from '../../src/auth/runtime.ts';
-import { ledgerWriter } from '../../src/domain.ts';
+import { createWalletRpcRuntime, ledgerWriter } from '../../src/domain.ts';
 import { createTempSecrets, type TempSecrets } from './secrets.ts';
 
 /** `describe.skipIf(NO_DATABASE)` — the guard every `*-db` suite uses. */
@@ -78,7 +79,10 @@ export interface TestSession {
 }
 
 export interface ApiRequest {
-  readonly method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  // `PUT` joined the list in WP 3.9: `/prices/{id}`, `/investments/basis-method`
+  // and `/market-data/priority` are idempotent whole-resource writes, which is
+  // what `PUT` means and what `POST` would have misreported.
+  readonly method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   readonly url: string;
   /** Omit to send no session at all, which is how the 401s are tested. */
   readonly session?: TestSession;
@@ -147,6 +151,22 @@ export interface HarnessOptions {
    * absence (`AgeUnavailableError`, mapped to a 503).
    */
   readonly extraSecrets?: Readonly<Record<string, string>>;
+  /**
+   * WP 3.9: register the watch-only `wallet_rpc` connector, bound to the same
+   * `WalletRpcRuntime` this harness hands `buildApp`.
+   *
+   * Off by default, and not because it is expensive — `connect()` performs no
+   * I/O at all. `connections-routes.test.ts` asserts `GET /connectors` against
+   * an *exact* sorted provider list, so registering a fifth adapter for every
+   * suite would turn that assertion red for a reason unrelated to what it is
+   * about. Opting in per suite keeps both claims true.
+   *
+   * The runtime must be the **same object** the app's `RouteDeps.walletRpc`
+   * holds: `routes/connections.ts` drains the store's request-scoped pending
+   * map after the link commits (`wp3.w-wiring.md` §10 item 8), and two stores
+   * would leave the descriptor staged forever and `wallet_addresses` empty.
+   */
+  readonly walletRpc?: boolean;
 }
 
 /**
@@ -195,6 +215,13 @@ export async function createApiHarness(options: HarnessOptions): Promise<ApiHarn
    * provider that stopped being registered in production would still be caught
    * by the separate assertion in `connections-routes.test.ts`.
    */
+  // WP 3.9. Built here, not inside `buildApp`, precisely so the connector and
+  // the route file share one store — see `HarnessOptions.walletRpc`.
+  const walletRpc =
+    options.walletRpc === true
+      ? createWalletRpcRuntime({ database: database.db, allowedHosts: [] })
+      : null;
+
   const registry = new ConnectorRegistry([
     { connector: new ManualConnector({ store: manualStore }), manifest: MANUAL_MANIFEST },
     { connector: new CsvImportConnector(), manifest: CSV_MANIFEST },
@@ -202,12 +229,27 @@ export async function createApiHarness(options: HarnessOptions): Promise<ApiHarn
     ...(options.plaidConnector === undefined
       ? []
       : [{ connector: options.plaidConnector, manifest: PLAID_MANIFEST }]),
+    ...(walletRpc === null
+      ? []
+      : [
+          {
+            connector: new WalletRpcConnector({
+              store: walletRpc.store,
+              esploraTransport: walletRpc.esploraTransport,
+              etherscanTransport: walletRpc.etherscanTransport,
+              etherscanApiKey: walletRpc.etherscanApiKey,
+              clock: options.clock ?? systemClock,
+            }),
+            manifest: WALLETRPC_MANIFEST,
+          },
+        ]),
   ]);
 
   const built = await buildApp({
     config: testConfig(secrets, database.url),
     pool: database.pool,
     connectorRegistry: registry,
+    ...(walletRpc === null ? {} : { walletRpc }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
   });
   const { app, security } = built;

@@ -42,6 +42,7 @@ import {
   LOTS_CONSUMER_NAME,
 } from '@ctx/investments';
 import { NET_WORTH_CONSUMED_EVENT_TYPES, PLANNING_EVENTS } from '@ctx/planning';
+import { ADVISOR_SCOPES, BUILTIN_CATALOGUE, SCOPE_CATALOGUE } from '@ctx/insights';
 import { describe, expect, it } from 'vitest';
 import {
   NET_WORTH_CONSUMER_NAME,
@@ -379,5 +380,136 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     for (const definition of [...INVESTMENTS_EVENTS, ...INTEGRATIONS_EVENTS, ...PLANNING_EVENTS]) {
       expect(platform.registry.get(definition.type)).toBeUndefined();
     }
+  });
+});
+
+/**
+ * WP 3.9. The claim WP 3.10 left as an owed item, as a test.
+ *
+ * `docs/evidence/phase-3/wp3.10-advisor-catalog-v2.md` §7.1 ships seventeen
+ * rules "registered and off", for two reasons — 07 §7.4's release schedule, and
+ * the fact that four of the scopes they read have **no reader behind them**.
+ * That second reason is a claim about this repository's wiring, and until now
+ * nothing checked it. The failure it guards against is silent in the worst way:
+ * `SnapshotBuilder#blockFor` returns `null` for an unsourced scope, so a rule
+ * enabled against one produces **no insight at all** rather than an error, and
+ * the release looks like a quiet week rather than a broken one.
+ *
+ * ## What writing this test found
+ *
+ * `requires_scopes` is a **grant** list, not a list of hard requirements. Two
+ * rules that ship *enabled* — C1 and C2 — declare `market.rates` and are
+ * correct to: `rules-cash.ts` reads `snapshot.market_rates?.rates ?? []` and
+ * falls back to "the best rate you already hold", which is byte-identical to
+ * what Phase 2 shipped. So "an enabled rule may not read an unsourced scope" is
+ * *too strong*, and asserting it would have forced a wrong fix. What is
+ * assertable, and is what this test says, is that the list of enabled rules
+ * doing so is **exactly the reviewed one** — a new rule joining it fails here
+ * until somebody reads its fallback and adds it deliberately.
+ */
+describe('advisor scopes and their readers (WP 3.9)', () => {
+  /**
+   * The four blocks `wp3.10-advisor-catalog-v2.md` §7.1 owes, and the reason WP
+   * 3.9 could not land them: `SnapshotPorts`, `SnapshotBuilder#blockFor` and
+   * `contract/scopes.ts` are all `packages/contexts/insights/src/**`, which WP
+   * 3.9's brief forbids it from editing, and there is no snapshot builder in
+   * `apps/api` to put them in instead. `docs/evidence/phase-3/wp3.9-routes.md`
+   * §7 states the exact additions and the seam they stop at.
+   */
+  const OWED_READERS = [
+    'holdings.aggregate',
+    'holdings.detail',
+    'liabilities.terms',
+    'market.rates',
+  ];
+
+  /**
+   * The other scopes with no reader, and the reason theirs is not a gap.
+   *
+   * `goals.list` and `risk.profile` belong to Planning, which is Phase 4 —
+   * `@ctx/planning` today is WP 3.8's net-worth snapshotter and nothing else.
+   * `market.watchlist` has no model in the app at all. `institutions.names` is
+   * the one deliberate refusal in the list: 08 §4.2 gives it the highest
+   * sensitivity of any scope and nothing has needed it.
+   *
+   * Listed rather than tolerated, so that "which scopes have no reader?" has a
+   * checked answer instead of a `.filter()` a reader has to interpret.
+   */
+  const NOT_YET_MODELLED = ['goals.list', 'institutions.names', 'market.watchlist', 'risk.profile'];
+
+  /**
+   * Rules that ship **on** while declaring a scope with no reader, each
+   * reviewed and each with a fallback that is not silence.
+   *
+   * Both are `rules-cash.ts`'s: with a published FRED rate they benchmark
+   * against the world, and without one they benchmark against the best account
+   * the user already holds — the Phase 2 behaviour, unchanged. A rule added to
+   * this list without that property would ship a wave of silence.
+   */
+  const DEGRADES_WITHOUT_ITS_READER = [
+    'builtin.cash.idle_above_cushion',
+    'builtin.cash.yield_spread',
+  ];
+
+  it('every advisor scope has a reader', () => {
+    const byScope = new Map(SCOPE_CATALOGUE.map((definition) => [definition.scope, definition]));
+
+    // 1. No scope may exist on the wire without a catalogue row deciding what
+    //    it yields, what it drops, and whether it has a reader at all.
+    for (const scope of ADVISOR_SCOPES) {
+      expect(byScope.get(scope), `${scope} has no SCOPE_CATALOGUE row`).toBeDefined();
+    }
+    expect(SCOPE_CATALOGUE).toHaveLength(ADVISOR_SCOPES.length);
+
+    // 2. The set of scopes with no reader is exactly the four §7.1 owes — in
+    //    both directions. Adding a fifth unsourced scope fails here; so does
+    //    landing a reader without flipping its `sourcedInPhase2` flag in the
+    //    same commit, which would leave the builder with a dead arm.
+    const unsourced = SCOPE_CATALOGUE.filter((definition) => !definition.sourcedInPhase2)
+      .map((definition) => definition.scope as string)
+      .sort();
+    expect(
+      unsourced,
+      'the scopes with no reader must be exactly the four wp3.10 §7.1 owes plus the four whose ' +
+        'source context does not exist yet',
+    ).toEqual([...OWED_READERS, ...NOT_YET_MODELLED].sort());
+
+    // 3. And every *other* scope claims a reader, which is what makes the
+    //    catalogue's `sourcedInPhase2` a statement about this repository rather
+    //    than a field nobody maintains.
+    for (const definition of SCOPE_CATALOGUE) {
+      if (OWED_READERS.includes(definition.scope)) continue;
+      if (NOT_YET_MODELLED.includes(definition.scope)) continue;
+      expect(definition.sourcedInPhase2, `${definition.scope} lost its reader`).toBe(true);
+    }
+  });
+
+  it('a rule reading a scope with no reader ships off, or is a reviewed exception', () => {
+    const unsourced = new Set(
+      SCOPE_CATALOGUE.filter((definition) => !definition.sourcedInPhase2).map(
+        (definition) => definition.scope as string,
+      ),
+    );
+
+    const enabledAndUnsourced: string[] = [];
+    for (const entry of BUILTIN_CATALOGUE) {
+      const reads = entry.advisor.manifest.requires_scopes.some((scope) =>
+        unsourced.has(scope as string),
+      );
+      if (!reads) continue;
+      if (entry.defaultEnabled) {
+        enabledAndUnsourced.push(entry.advisorId);
+        continue;
+      }
+      // An off rule must say *why* in the row a reviewer reads, not only in a
+      // comment in the file that set the flag.
+      expect(entry.disabledReason ?? '', `${entry.advisorId}`).toContain('reader');
+    }
+
+    expect(
+      enabledAndUnsourced.sort(),
+      'a rule that ships enabled while reading a scope with no reader needs a fallback that is ' +
+        'not silence; add it to DEGRADES_WITHOUT_ITS_READER only after reading that fallback',
+    ).toEqual([...DEGRADES_WITHOUT_ITS_READER].sort());
   });
 });

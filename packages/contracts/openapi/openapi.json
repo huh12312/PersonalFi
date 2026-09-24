@@ -1441,6 +1441,7 @@
               "transactions",
               "balances",
               "holdings",
+              "investment_txns",
               "liabilities"
             ]
           },
@@ -2338,6 +2339,1117 @@
           "grantedScopes",
           "lastRunStatus",
           "lastRunRejected"
+        ]
+      },
+      "PriceQuoteInput": {
+        "type": "object",
+        "properties": {
+          "close": {
+            "type": "string",
+            "description": "A decimal string. Never a JSON number (D3)."
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "priceDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "The observation used — not necessarily the date asked for."
+          },
+          "rung": {
+            "type": "string",
+            "description": "Which rung of 07 §6.1’s ladder answered."
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "carriedForward": {
+            "type": "boolean"
+          },
+          "providerCarriedForward": {
+            "type": "boolean"
+          },
+          "observedAt": {
+            "type": "string"
+          },
+          "staleness": {
+            "type": "string",
+            "enum": [
+              "FRESH",
+              "STALE"
+            ]
+          },
+          "includeInAsOfNowDeltas": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "close",
+          "currency",
+          "priceDate",
+          "rung",
+          "source",
+          "carriedForward",
+          "providerCarriedForward",
+          "observedAt",
+          "staleness",
+          "includeInAsOfNowDeltas"
+        ]
+      },
+      "UnrealizedGainInput": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable"
+            ]
+          },
+          "gain": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null` whenever the status is unavailable. Never a zero standing in for unknown."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "basis_unknown",
+                  "price_unknown",
+                  "currency_mismatch"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "gain",
+          "reason",
+          "warning"
+        ]
+      },
+      "AggregatedHoldingInput": {
+        "type": "object",
+        "properties": {
+          "securityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "symbol": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "securityType": {
+            "type": "string",
+            "enum": [
+              "equity",
+              "etf",
+              "mutual_fund",
+              "crypto",
+              "bond",
+              "cash",
+              "other"
+            ]
+          },
+          "assetClass": {
+            "type": "string",
+            "enum": [
+              "US_EQUITY",
+              "INTL_DEV_EQUITY",
+              "EM_EQUITY",
+              "US_BOND",
+              "INTL_BOND",
+              "TIPS",
+              "REAL_ESTATE",
+              "COMMODITY",
+              "CRYPTO",
+              "CASH",
+              "OTHER",
+              "UNCLASSIFIED"
+            ]
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "US",
+              "DEV_EX_US",
+              "EM",
+              "GLOBAL",
+              "UNKNOWN"
+            ]
+          },
+          "sector": {
+            "type": "string"
+          },
+          "classificationSource": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "accountCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "marketValue": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "costBasis": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unrealized": {
+            "$ref": "#/components/schemas/UnrealizedGainInput"
+          },
+          "weight": {
+            "description": "Share of the valued portfolio, as a Ratio string.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceQuoteInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stale": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "securityId",
+          "symbol",
+          "name",
+          "securityType",
+          "assetClass",
+          "region",
+          "sector",
+          "classificationSource",
+          "quantity",
+          "accountCount",
+          "marketValue",
+          "costBasis",
+          "unrealized",
+          "weight",
+          "price",
+          "stale"
+        ]
+      },
+      "AllocationReportInput": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "asset_class",
+              "region",
+              "sector"
+            ]
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "as_of_now",
+              "last_known"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "total": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ]
+          },
+          "slices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "object",
+                  "properties": {
+                    "minor": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    }
+                  },
+                  "required": [
+                    "minor",
+                    "currency"
+                  ]
+                },
+                "weight": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "value",
+                "weight"
+              ]
+            }
+          },
+          "unclassifiedPct": {
+            "type": "string"
+          },
+          "unclassifiedValue": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ]
+          },
+          "excluded": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "holdingId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "symbol": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "stale_price",
+                    "price_unknown",
+                    "currency_mismatch"
+                  ]
+                }
+              },
+              "required": [
+                "holdingId",
+                "symbol",
+                "reason"
+              ]
+            }
+          },
+          "includesCash": {
+            "type": "boolean",
+            "const": true
+          },
+          "lookThrough": {
+            "type": "string",
+            "const": "fund_level_only"
+          }
+        },
+        "required": [
+          "dimension",
+          "basis",
+          "currency",
+          "total",
+          "slices",
+          "unclassifiedPct",
+          "unclassifiedValue",
+          "excluded",
+          "includesCash",
+          "lookThrough"
+        ]
+      },
+      "TimeWeightedReturnInput": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "time_weighted"
+          },
+          "periodReturn": {
+            "type": "string"
+          },
+          "annualized": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "annualizationWithheld": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "spanDays": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "sub_period_linking",
+              "modified_dietz"
+            ]
+          },
+          "approximate": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "detail"
+              ]
+            }
+          },
+          "benchmarkComparable": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "kind",
+          "periodReturn",
+          "annualized",
+          "annualizationWithheld",
+          "spanDays",
+          "from",
+          "to",
+          "method",
+          "approximate",
+          "warnings",
+          "benchmarkComparable"
+        ]
+      },
+      "MoneyWeightedReturnInput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "money_weighted"
+              },
+              "status": {
+                "type": "string",
+                "const": "available"
+              },
+              "periodReturn": {
+                "type": "string"
+              },
+              "annualized": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "annualizationWithheld": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "spanDays": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "from": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "to": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "solver": {
+                "type": "string",
+                "enum": [
+                  "newton",
+                  "bisection"
+                ]
+              },
+              "newtonDiverged": {
+                "type": "boolean"
+              },
+              "benchmarkComparable": {
+                "type": "boolean",
+                "const": false
+              }
+            },
+            "required": [
+              "kind",
+              "status",
+              "periodReturn",
+              "annualized",
+              "annualizationWithheld",
+              "spanDays",
+              "from",
+              "to",
+              "solver",
+              "newtonDiverged",
+              "benchmarkComparable"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "money_weighted"
+              },
+              "status": {
+                "type": "string",
+                "const": "unavailable"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "spanDays": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "benchmarkComparable": {
+                "type": "boolean",
+                "const": false
+              }
+            },
+            "required": [
+              "kind",
+              "status",
+              "reason",
+              "detail",
+              "spanDays",
+              "benchmarkComparable"
+            ]
+          }
+        ]
+      },
+      "DollarGainInput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "dollar_gain"
+              },
+              "status": {
+                "type": "string",
+                "const": "available"
+              },
+              "gain": {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              "marketValue": {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              "costBasis": {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "status",
+              "gain",
+              "marketValue",
+              "costBasis"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "dollar_gain"
+              },
+              "status": {
+                "type": "string",
+                "const": "unavailable"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "warning": {
+                "type": "string"
+              },
+              "marketValue": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 3
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "positionIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "status",
+              "reason",
+              "warning",
+              "marketValue",
+              "positionIds"
+            ]
+          }
+        ]
+      },
+      "AttributionInput": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "linkUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "logoRequired": {
+            "type": "boolean"
+          },
+          "surfaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "clause": {
+            "type": "string"
+          },
+          "redistribution": {
+            "type": "string",
+            "enum": [
+              "forbidden",
+              "permitted_with_attribution",
+              "unrestricted"
+            ]
+          }
+        },
+        "required": [
+          "provider",
+          "required",
+          "text",
+          "linkUrl",
+          "logoRequired",
+          "surfaces",
+          "clause",
+          "redistribution"
+        ]
+      },
+      "MarketDataProviderSettingsInput": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "keyPresent": {
+            "type": "boolean"
+          },
+          "registered": {
+            "type": "boolean"
+          },
+          "capabilities": {
+            "type": "object",
+            "properties": {
+              "prices": {
+                "type": "boolean"
+              },
+              "fx": {
+                "type": "boolean"
+              },
+              "macro": {
+                "type": "boolean"
+              },
+              "search": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "prices",
+              "fx",
+              "macro",
+              "search"
+            ]
+          },
+          "budget": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "used": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "label",
+                "used",
+                "limit"
+              ]
+            }
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/AttributionInput"
+          }
+        },
+        "required": [
+          "provider",
+          "keyPresent",
+          "registered",
+          "capabilities",
+          "budget",
+          "attribution"
+        ]
+      },
+      "NetWorthSeriesPointInput": {
+        "type": "object",
+        "properties": {
+          "asOfDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "netWorth": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "assets": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "liabilities": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "liquid": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "investable": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "onBudget": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sealed": {
+            "type": "boolean"
+          },
+          "sealedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stalePrice": {
+            "type": "boolean"
+          },
+          "dirty": {
+            "type": "boolean"
+          },
+          "accountsCounted": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accountsUnvalued": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "correctionReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "asOfDate",
+          "netWorth",
+          "assets",
+          "liabilities",
+          "liquid",
+          "investable",
+          "onBudget",
+          "sealed",
+          "sealedAt",
+          "revision",
+          "source",
+          "stalePrice",
+          "dirty",
+          "accountsCounted",
+          "accountsUnvalued",
+          "correctionReason"
         ]
       },
       "NotificationChannelInput": {
@@ -4044,6 +5156,375 @@
           "changedCount",
           "sample",
           "actionsRecorded"
+        ]
+      },
+      "SecurityInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "identityKind": {
+            "type": "string"
+          },
+          "identityKey": {
+            "type": "string"
+          },
+          "ticker": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cusip": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "figi": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "chain": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contract": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "equity",
+              "etf",
+              "mutual_fund",
+              "crypto",
+              "bond",
+              "cash",
+              "other"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mergedIntoId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "derived": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assetClass": {
+                "type": "string",
+                "enum": [
+                  "US_EQUITY",
+                  "INTL_DEV_EQUITY",
+                  "EM_EQUITY",
+                  "US_BOND",
+                  "INTL_BOND",
+                  "TIPS",
+                  "REAL_ESTATE",
+                  "COMMODITY",
+                  "CRYPTO",
+                  "CASH",
+                  "OTHER",
+                  "UNCLASSIFIED"
+                ]
+              },
+              "region": {
+                "type": "string",
+                "enum": [
+                  "US",
+                  "DEV_EX_US",
+                  "EM",
+                  "GLOBAL",
+                  "UNKNOWN"
+                ]
+              },
+              "sector": {
+                "type": "string"
+              },
+              "expenseRatio": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "isCashEquivalent": {
+                "type": "boolean"
+              },
+              "classificationSource": {
+                "type": "string"
+              },
+              "classificationDepth": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "classificationResidual": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "classificationFlagged": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "assetClass",
+              "region",
+              "sector",
+              "expenseRatio",
+              "isCashEquivalent",
+              "classificationSource",
+              "classificationDepth",
+              "classificationResidual",
+              "classificationFlagged"
+            ]
+          },
+          "overlay": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "assetClass": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "US_EQUITY",
+                          "INTL_DEV_EQUITY",
+                          "EM_EQUITY",
+                          "US_BOND",
+                          "INTL_BOND",
+                          "TIPS",
+                          "REAL_ESTATE",
+                          "COMMODITY",
+                          "CRYPTO",
+                          "CASH",
+                          "OTHER",
+                          "UNCLASSIFIED"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "region": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "US",
+                          "DEV_EX_US",
+                          "EM",
+                          "GLOBAL",
+                          "UNKNOWN"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sector": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "expenseRatio": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "isCashEquivalent": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "lockedFields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "asset_class",
+                        "region",
+                        "sector",
+                        "name",
+                        "expense_ratio",
+                        "is_cash_equivalent"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "assetClass",
+                  "region",
+                  "sector",
+                  "name",
+                  "expenseRatio",
+                  "isCashEquivalent",
+                  "note",
+                  "lockedFields"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effective": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assetClass": {
+                "type": "string",
+                "enum": [
+                  "US_EQUITY",
+                  "INTL_DEV_EQUITY",
+                  "EM_EQUITY",
+                  "US_BOND",
+                  "INTL_BOND",
+                  "TIPS",
+                  "REAL_ESTATE",
+                  "COMMODITY",
+                  "CRYPTO",
+                  "CASH",
+                  "OTHER",
+                  "UNCLASSIFIED"
+                ]
+              },
+              "region": {
+                "type": "string",
+                "enum": [
+                  "US",
+                  "DEV_EX_US",
+                  "EM",
+                  "GLOBAL",
+                  "UNKNOWN"
+                ]
+              },
+              "sector": {
+                "type": "string"
+              },
+              "expenseRatio": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "isCashEquivalent": {
+                "type": "boolean"
+              },
+              "classificationSource": {
+                "type": "string"
+              },
+              "overridden": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "asset_class",
+                    "region",
+                    "sector",
+                    "name",
+                    "expense_ratio",
+                    "is_cash_equivalent"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "name",
+              "assetClass",
+              "region",
+              "sector",
+              "expenseRatio",
+              "isCashEquivalent",
+              "classificationSource",
+              "overridden"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "identityKind",
+          "identityKey",
+          "ticker",
+          "mic",
+          "cusip",
+          "isin",
+          "figi",
+          "chain",
+          "contract",
+          "type",
+          "currency",
+          "mergedIntoId",
+          "derived",
+          "overlay",
+          "effective"
         ]
       },
       "TransactionSplitInput": {
@@ -6106,6 +7587,7 @@
               "transactions",
               "balances",
               "holdings",
+              "investment_txns",
               "liabilities"
             ]
           },
@@ -7017,6 +8499,1150 @@
           "grantedScopes",
           "lastRunStatus",
           "lastRunRejected"
+        ],
+        "additionalProperties": false
+      },
+      "PriceQuote": {
+        "type": "object",
+        "properties": {
+          "close": {
+            "type": "string",
+            "description": "A decimal string. Never a JSON number (D3)."
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "priceDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "The observation used — not necessarily the date asked for."
+          },
+          "rung": {
+            "type": "string",
+            "description": "Which rung of 07 §6.1’s ladder answered."
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "carriedForward": {
+            "type": "boolean"
+          },
+          "providerCarriedForward": {
+            "type": "boolean"
+          },
+          "observedAt": {
+            "type": "string"
+          },
+          "staleness": {
+            "type": "string",
+            "enum": [
+              "FRESH",
+              "STALE"
+            ]
+          },
+          "includeInAsOfNowDeltas": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "close",
+          "currency",
+          "priceDate",
+          "rung",
+          "source",
+          "carriedForward",
+          "providerCarriedForward",
+          "observedAt",
+          "staleness",
+          "includeInAsOfNowDeltas"
+        ],
+        "additionalProperties": false
+      },
+      "UnrealizedGain": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable"
+            ]
+          },
+          "gain": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null` whenever the status is unavailable. Never a zero standing in for unknown."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "basis_unknown",
+                  "price_unknown",
+                  "currency_mismatch"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "gain",
+          "reason",
+          "warning"
+        ],
+        "additionalProperties": false
+      },
+      "AggregatedHolding": {
+        "type": "object",
+        "properties": {
+          "securityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "symbol": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "securityType": {
+            "type": "string",
+            "enum": [
+              "equity",
+              "etf",
+              "mutual_fund",
+              "crypto",
+              "bond",
+              "cash",
+              "other"
+            ]
+          },
+          "assetClass": {
+            "type": "string",
+            "enum": [
+              "US_EQUITY",
+              "INTL_DEV_EQUITY",
+              "EM_EQUITY",
+              "US_BOND",
+              "INTL_BOND",
+              "TIPS",
+              "REAL_ESTATE",
+              "COMMODITY",
+              "CRYPTO",
+              "CASH",
+              "OTHER",
+              "UNCLASSIFIED"
+            ]
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "US",
+              "DEV_EX_US",
+              "EM",
+              "GLOBAL",
+              "UNKNOWN"
+            ]
+          },
+          "sector": {
+            "type": "string"
+          },
+          "classificationSource": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "accountCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "marketValue": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "costBasis": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unrealized": {
+            "$ref": "#/components/schemas/UnrealizedGain"
+          },
+          "weight": {
+            "description": "Share of the valued portfolio, as a Ratio string.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceQuote"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stale": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "securityId",
+          "symbol",
+          "name",
+          "securityType",
+          "assetClass",
+          "region",
+          "sector",
+          "classificationSource",
+          "quantity",
+          "accountCount",
+          "marketValue",
+          "costBasis",
+          "unrealized",
+          "weight",
+          "price",
+          "stale"
+        ],
+        "additionalProperties": false
+      },
+      "AllocationReport": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "asset_class",
+              "region",
+              "sector"
+            ]
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "as_of_now",
+              "last_known"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "total": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false
+          },
+          "slices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "object",
+                  "properties": {
+                    "minor": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    }
+                  },
+                  "required": [
+                    "minor",
+                    "currency"
+                  ],
+                  "additionalProperties": false
+                },
+                "weight": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "value",
+                "weight"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unclassifiedPct": {
+            "type": "string"
+          },
+          "unclassifiedValue": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false
+          },
+          "excluded": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "holdingId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "symbol": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "stale_price",
+                    "price_unknown",
+                    "currency_mismatch"
+                  ]
+                }
+              },
+              "required": [
+                "holdingId",
+                "symbol",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "includesCash": {
+            "type": "boolean",
+            "const": true
+          },
+          "lookThrough": {
+            "type": "string",
+            "const": "fund_level_only"
+          }
+        },
+        "required": [
+          "dimension",
+          "basis",
+          "currency",
+          "total",
+          "slices",
+          "unclassifiedPct",
+          "unclassifiedValue",
+          "excluded",
+          "includesCash",
+          "lookThrough"
+        ],
+        "additionalProperties": false
+      },
+      "TimeWeightedReturn": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "time_weighted"
+          },
+          "periodReturn": {
+            "type": "string"
+          },
+          "annualized": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "annualizationWithheld": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "spanDays": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "sub_period_linking",
+              "modified_dietz"
+            ]
+          },
+          "approximate": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "detail"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "benchmarkComparable": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "kind",
+          "periodReturn",
+          "annualized",
+          "annualizationWithheld",
+          "spanDays",
+          "from",
+          "to",
+          "method",
+          "approximate",
+          "warnings",
+          "benchmarkComparable"
+        ],
+        "additionalProperties": false
+      },
+      "MoneyWeightedReturn": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "money_weighted"
+              },
+              "status": {
+                "type": "string",
+                "const": "available"
+              },
+              "periodReturn": {
+                "type": "string"
+              },
+              "annualized": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "annualizationWithheld": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "spanDays": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "from": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "to": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "solver": {
+                "type": "string",
+                "enum": [
+                  "newton",
+                  "bisection"
+                ]
+              },
+              "newtonDiverged": {
+                "type": "boolean"
+              },
+              "benchmarkComparable": {
+                "type": "boolean",
+                "const": false
+              }
+            },
+            "required": [
+              "kind",
+              "status",
+              "periodReturn",
+              "annualized",
+              "annualizationWithheld",
+              "spanDays",
+              "from",
+              "to",
+              "solver",
+              "newtonDiverged",
+              "benchmarkComparable"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "money_weighted"
+              },
+              "status": {
+                "type": "string",
+                "const": "unavailable"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "spanDays": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "benchmarkComparable": {
+                "type": "boolean",
+                "const": false
+              }
+            },
+            "required": [
+              "kind",
+              "status",
+              "reason",
+              "detail",
+              "spanDays",
+              "benchmarkComparable"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "DollarGain": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "dollar_gain"
+              },
+              "status": {
+                "type": "string",
+                "const": "available"
+              },
+              "gain": {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              "marketValue": {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              "costBasis": {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "kind",
+              "status",
+              "gain",
+              "marketValue",
+              "costBasis"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "dollar_gain"
+              },
+              "status": {
+                "type": "string",
+                "const": "unavailable"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "warning": {
+                "type": "string"
+              },
+              "marketValue": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "minor": {
+                        "type": "string"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 3
+                      }
+                    },
+                    "required": [
+                      "minor",
+                      "currency"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "positionIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "status",
+              "reason",
+              "warning",
+              "marketValue",
+              "positionIds"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "Attribution": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "linkUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "logoRequired": {
+            "type": "boolean"
+          },
+          "surfaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "clause": {
+            "type": "string"
+          },
+          "redistribution": {
+            "type": "string",
+            "enum": [
+              "forbidden",
+              "permitted_with_attribution",
+              "unrestricted"
+            ]
+          }
+        },
+        "required": [
+          "provider",
+          "required",
+          "text",
+          "linkUrl",
+          "logoRequired",
+          "surfaces",
+          "clause",
+          "redistribution"
+        ],
+        "additionalProperties": false
+      },
+      "MarketDataProviderSettings": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "keyPresent": {
+            "type": "boolean"
+          },
+          "registered": {
+            "type": "boolean"
+          },
+          "capabilities": {
+            "type": "object",
+            "properties": {
+              "prices": {
+                "type": "boolean"
+              },
+              "fx": {
+                "type": "boolean"
+              },
+              "macro": {
+                "type": "boolean"
+              },
+              "search": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "prices",
+              "fx",
+              "macro",
+              "search"
+            ],
+            "additionalProperties": false
+          },
+          "budget": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "used": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "label",
+                "used",
+                "limit"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/Attribution"
+          }
+        },
+        "required": [
+          "provider",
+          "keyPresent",
+          "registered",
+          "capabilities",
+          "budget",
+          "attribution"
+        ],
+        "additionalProperties": false
+      },
+      "NetWorthSeriesPoint": {
+        "type": "object",
+        "properties": {
+          "asOfDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "netWorth": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "assets": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "liabilities": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "liquid": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "investable": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "onBudget": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sealed": {
+            "type": "boolean"
+          },
+          "sealedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stalePrice": {
+            "type": "boolean"
+          },
+          "dirty": {
+            "type": "boolean"
+          },
+          "accountsCounted": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accountsUnvalued": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "correctionReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "asOfDate",
+          "netWorth",
+          "assets",
+          "liabilities",
+          "liquid",
+          "investable",
+          "onBudget",
+          "sealed",
+          "sealedAt",
+          "revision",
+          "source",
+          "stalePrice",
+          "dirty",
+          "accountsCounted",
+          "accountsUnvalued",
+          "correctionReason"
         ],
         "additionalProperties": false
       },
@@ -8776,6 +11402,379 @@
           "changedCount",
           "sample",
           "actionsRecorded"
+        ],
+        "additionalProperties": false
+      },
+      "Security": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "identityKind": {
+            "type": "string"
+          },
+          "identityKey": {
+            "type": "string"
+          },
+          "ticker": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cusip": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "figi": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "chain": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contract": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "equity",
+              "etf",
+              "mutual_fund",
+              "crypto",
+              "bond",
+              "cash",
+              "other"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mergedIntoId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "derived": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assetClass": {
+                "type": "string",
+                "enum": [
+                  "US_EQUITY",
+                  "INTL_DEV_EQUITY",
+                  "EM_EQUITY",
+                  "US_BOND",
+                  "INTL_BOND",
+                  "TIPS",
+                  "REAL_ESTATE",
+                  "COMMODITY",
+                  "CRYPTO",
+                  "CASH",
+                  "OTHER",
+                  "UNCLASSIFIED"
+                ]
+              },
+              "region": {
+                "type": "string",
+                "enum": [
+                  "US",
+                  "DEV_EX_US",
+                  "EM",
+                  "GLOBAL",
+                  "UNKNOWN"
+                ]
+              },
+              "sector": {
+                "type": "string"
+              },
+              "expenseRatio": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "isCashEquivalent": {
+                "type": "boolean"
+              },
+              "classificationSource": {
+                "type": "string"
+              },
+              "classificationDepth": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "classificationResidual": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "classificationFlagged": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "assetClass",
+              "region",
+              "sector",
+              "expenseRatio",
+              "isCashEquivalent",
+              "classificationSource",
+              "classificationDepth",
+              "classificationResidual",
+              "classificationFlagged"
+            ],
+            "additionalProperties": false
+          },
+          "overlay": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "assetClass": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "US_EQUITY",
+                          "INTL_DEV_EQUITY",
+                          "EM_EQUITY",
+                          "US_BOND",
+                          "INTL_BOND",
+                          "TIPS",
+                          "REAL_ESTATE",
+                          "COMMODITY",
+                          "CRYPTO",
+                          "CASH",
+                          "OTHER",
+                          "UNCLASSIFIED"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "region": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "US",
+                          "DEV_EX_US",
+                          "EM",
+                          "GLOBAL",
+                          "UNKNOWN"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sector": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "expenseRatio": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "isCashEquivalent": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "lockedFields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "asset_class",
+                        "region",
+                        "sector",
+                        "name",
+                        "expense_ratio",
+                        "is_cash_equivalent"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "assetClass",
+                  "region",
+                  "sector",
+                  "name",
+                  "expenseRatio",
+                  "isCashEquivalent",
+                  "note",
+                  "lockedFields"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effective": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assetClass": {
+                "type": "string",
+                "enum": [
+                  "US_EQUITY",
+                  "INTL_DEV_EQUITY",
+                  "EM_EQUITY",
+                  "US_BOND",
+                  "INTL_BOND",
+                  "TIPS",
+                  "REAL_ESTATE",
+                  "COMMODITY",
+                  "CRYPTO",
+                  "CASH",
+                  "OTHER",
+                  "UNCLASSIFIED"
+                ]
+              },
+              "region": {
+                "type": "string",
+                "enum": [
+                  "US",
+                  "DEV_EX_US",
+                  "EM",
+                  "GLOBAL",
+                  "UNKNOWN"
+                ]
+              },
+              "sector": {
+                "type": "string"
+              },
+              "expenseRatio": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "isCashEquivalent": {
+                "type": "boolean"
+              },
+              "classificationSource": {
+                "type": "string"
+              },
+              "overridden": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "asset_class",
+                    "region",
+                    "sector",
+                    "name",
+                    "expense_ratio",
+                    "is_cash_equivalent"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "name",
+              "assetClass",
+              "region",
+              "sector",
+              "expenseRatio",
+              "isCashEquivalent",
+              "classificationSource",
+              "overridden"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "identityKind",
+          "identityKey",
+          "ticker",
+          "mic",
+          "cusip",
+          "isin",
+          "figi",
+          "chain",
+          "contract",
+          "type",
+          "currency",
+          "mergedIntoId",
+          "derived",
+          "overlay",
+          "effective"
         ],
         "additionalProperties": false
       },
@@ -20108,6 +23107,2619 @@
           }
         }
       }
+    },
+    "/holdings": {
+      "get": {
+        "operationId": "listHoldings",
+        "summary": "Every position, aggregated by ticker across accounts",
+        "tags": [
+          "investments"
+        ],
+        "description": "One row per security, summed over every account that holds it. `unclassifiedPct` and each row’s `stale` are fields, not inferences: 07 §4.3 makes the first normative and 07 §6.1 makes the second a statement about the clock at read time.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "asOf",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "as_of_now",
+                "last_known"
+              ]
+            },
+            "in": "query",
+            "name": "basis",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "asOf": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "basis": {
+                      "type": "string",
+                      "enum": [
+                        "as_of_now",
+                        "last_known"
+                      ]
+                    },
+                    "currency": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    },
+                    "total": {
+                      "type": "object",
+                      "properties": {
+                        "minor": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 3
+                        }
+                      },
+                      "required": [
+                        "minor",
+                        "currency"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "unclassifiedPct": {
+                      "type": "string"
+                    },
+                    "holdings": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AggregatedHolding"
+                      }
+                    },
+                    "excluded": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "holdingId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "symbol": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "stale_price",
+                              "price_unknown",
+                              "currency_mismatch"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "holdingId",
+                          "symbol",
+                          "reason"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "asOf",
+                    "basis",
+                    "currency",
+                    "total",
+                    "unclassifiedPct",
+                    "holdings",
+                    "excluded"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{accountId}/holdings": {
+      "get": {
+        "operationId": "listAccountHoldings",
+        "summary": "The positions in one account, with their lots and basis provenance",
+        "tags": [
+          "investments"
+        ],
+        "description": "Per-position lots with their ages, basis source, and an `unavailable` unrealized gain where the basis is unknown — 04 §5.5’s rule, carried onto the wire rather than computed from a zero.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "asOf",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "as_of_now",
+                "last_known"
+              ]
+            },
+            "in": "query",
+            "name": "basis",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accountId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "asOf": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "basis": {
+                      "type": "string",
+                      "enum": [
+                        "as_of_now",
+                        "last_known"
+                      ]
+                    },
+                    "currency": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    },
+                    "total": {
+                      "type": "object",
+                      "properties": {
+                        "minor": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 3
+                        }
+                      },
+                      "required": [
+                        "minor",
+                        "currency"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "unclassifiedPct": {
+                      "type": "string"
+                    },
+                    "positions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "holdingId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "securityId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "symbol": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "assetClass": {
+                            "type": "string",
+                            "enum": [
+                              "US_EQUITY",
+                              "INTL_DEV_EQUITY",
+                              "EM_EQUITY",
+                              "US_BOND",
+                              "INTL_BOND",
+                              "TIPS",
+                              "REAL_ESTATE",
+                              "COMMODITY",
+                              "CRYPTO",
+                              "CASH",
+                              "OTHER",
+                              "UNCLASSIFIED"
+                            ]
+                          },
+                          "quantity": {
+                            "type": "string"
+                          },
+                          "marketValue": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "minor": {
+                                    "type": "string"
+                                  },
+                                  "currency": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 3
+                                  }
+                                },
+                                "required": [
+                                  "minor",
+                                  "currency"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "costBasis": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "minor": {
+                                    "type": "string"
+                                  },
+                                  "currency": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 3
+                                  }
+                                },
+                                "required": [
+                                  "minor",
+                                  "currency"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "costBasisSource": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "basisMethod": {
+                            "type": "string",
+                            "enum": [
+                              "FIFO",
+                              "LIFO",
+                              "HIFO",
+                              "SPECIFIC_ID",
+                              "AVERAGE_COST"
+                            ]
+                          },
+                          "unrealized": {
+                            "$ref": "#/components/schemas/UnrealizedGain"
+                          },
+                          "price": {
+                            "anyOf": [
+                              {
+                                "$ref": "#/components/schemas/PriceQuote"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "stale": {
+                            "type": "boolean"
+                          },
+                          "lots": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "lotId": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                },
+                                "openDate": {
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "ageDays": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "longTerm": {
+                                  "type": "boolean"
+                                },
+                                "quantityRemaining": {
+                                  "type": "string"
+                                },
+                                "basis": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "minor": {
+                                          "type": "string"
+                                        },
+                                        "currency": {
+                                          "type": "string",
+                                          "minLength": 3,
+                                          "maxLength": 3
+                                        }
+                                      },
+                                      "required": [
+                                        "minor",
+                                        "currency"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "basisSource": {
+                                  "type": "string"
+                                },
+                                "basisWarning": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "lotId",
+                                "openDate",
+                                "ageDays",
+                                "longTerm",
+                                "quantityRemaining",
+                                "basis",
+                                "basisSource",
+                                "basisWarning"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "holdingId",
+                          "securityId",
+                          "symbol",
+                          "name",
+                          "assetClass",
+                          "quantity",
+                          "marketValue",
+                          "costBasis",
+                          "costBasisSource",
+                          "basisMethod",
+                          "unrealized",
+                          "price",
+                          "stale",
+                          "lots"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "excluded": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "holdingId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "symbol": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "stale_price",
+                              "price_unknown",
+                              "currency_mismatch"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "holdingId",
+                          "symbol",
+                          "reason"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "accountId",
+                    "asOf",
+                    "basis",
+                    "currency",
+                    "total",
+                    "unclassifiedPct",
+                    "positions",
+                    "excluded"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/investments/allocation": {
+      "get": {
+        "operationId": "getAllocation",
+        "summary": "Allocation by asset class, region and sector, with % unclassified",
+        "tags": [
+          "investments"
+        ],
+        "description": "Fund-level only (no synthetic look-through), cash in the denominator, and `unclassifiedPct` on every dimension — present even when zero, because 07 §4.3 makes a drift claim beside a large unclassified share noise.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "asOf",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "as_of_now",
+                "last_known"
+              ]
+            },
+            "in": "query",
+            "name": "basis",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "asOf": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "byAssetClass": {
+                      "$ref": "#/components/schemas/AllocationReport"
+                    },
+                    "byRegion": {
+                      "$ref": "#/components/schemas/AllocationReport"
+                    },
+                    "bySector": {
+                      "$ref": "#/components/schemas/AllocationReport"
+                    }
+                  },
+                  "required": [
+                    "asOf",
+                    "byAssetClass",
+                    "byRegion",
+                    "bySector"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/investments/drift": {
+      "get": {
+        "operationId": "getDrift",
+        "summary": "Drift against a target allocation, on the absolute 5-point band",
+        "tags": [
+          "investments"
+        ],
+        "description": "Targets are supplied as `?target=US_EQUITY:0.6`. **With no targets the response suppresses rather than invents** (07 §8 Q9): `targetsSet` is `false`, `rows` is empty, and `unclassifiedPct` is still returned. There is no `allocation_targets` table in Phase 3 — see wp3.9-routes.md §8.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "asOf",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "as_of_now",
+                "last_known"
+              ]
+            },
+            "in": "query",
+            "name": "basis",
+            "required": false
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "target",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "asOf": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "targetsSet": {
+                      "type": "boolean"
+                    },
+                    "bandPoints": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "object",
+                      "properties": {
+                        "minor": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 3
+                        }
+                      },
+                      "required": [
+                        "minor",
+                        "currency"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "unclassifiedPct": {
+                      "type": "string"
+                    },
+                    "noisy": {
+                      "type": "boolean"
+                    },
+                    "proposalsWithheld": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "assetClass": {
+                            "type": "string",
+                            "enum": [
+                              "US_EQUITY",
+                              "INTL_DEV_EQUITY",
+                              "EM_EQUITY",
+                              "US_BOND",
+                              "INTL_BOND",
+                              "TIPS",
+                              "REAL_ESTATE",
+                              "COMMODITY",
+                              "CRYPTO",
+                              "CASH",
+                              "OTHER",
+                              "UNCLASSIFIED"
+                            ]
+                          },
+                          "actualWeight": {
+                            "type": "string"
+                          },
+                          "targetWeight": {
+                            "type": "string"
+                          },
+                          "actualValue": {
+                            "type": "object",
+                            "properties": {
+                              "minor": {
+                                "type": "string"
+                              },
+                              "currency": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 3
+                              }
+                            },
+                            "required": [
+                              "minor",
+                              "currency"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "gapPoints": {
+                            "type": "string"
+                          },
+                          "insideBand": {
+                            "type": "boolean"
+                          },
+                          "proposal": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "direction": {
+                                    "type": "string",
+                                    "enum": [
+                                      "increase",
+                                      "reduce"
+                                    ]
+                                  },
+                                  "amount": {
+                                    "type": "object",
+                                    "properties": {
+                                      "minor": {
+                                        "type": "string"
+                                      },
+                                      "currency": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 3
+                                      }
+                                    },
+                                    "required": [
+                                      "minor",
+                                      "currency"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "direction",
+                                  "amount"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "assetClass",
+                          "actualWeight",
+                          "targetWeight",
+                          "actualValue",
+                          "gapPoints",
+                          "insideBand",
+                          "proposal"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "allocation": {
+                      "$ref": "#/components/schemas/AllocationReport"
+                    },
+                    "excluded": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "holdingId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "symbol": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "stale_price",
+                              "price_unknown",
+                              "currency_mismatch"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "holdingId",
+                          "symbol",
+                          "reason"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "asOf",
+                    "targetsSet",
+                    "bandPoints",
+                    "total",
+                    "unclassifiedPct",
+                    "noisy",
+                    "proposalsWithheld",
+                    "rows",
+                    "allocation",
+                    "excluded"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/investments/performance": {
+      "get": {
+        "operationId": "getPerformance",
+        "summary": "Time-weighted return, money-weighted return and dollar gain — in three shapes",
+        "tags": [
+          "investments"
+        ],
+        "description": "07 §4.2: never a TWR beside a dollar gain, never a benchmarked MWR. The three answers occupy three disjoint objects under three keys, so no object in this payload expresses the forbidden pairing.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "to": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    },
+                    "timeWeighted": {
+                      "$ref": "#/components/schemas/TimeWeightedReturn"
+                    },
+                    "moneyWeighted": {
+                      "$ref": "#/components/schemas/MoneyWeightedReturn"
+                    },
+                    "dollarGain": {
+                      "$ref": "#/components/schemas/DollarGain"
+                    },
+                    "unvaluedTransfers": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "valuationDates": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "currency",
+                    "timeWeighted",
+                    "moneyWeighted",
+                    "dollarGain",
+                    "unvaluedTransfers",
+                    "valuationDates"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/investments/basis-method": {
+      "put": {
+        "operationId": "electBasisMethod",
+        "summary": "Elect the cost-basis method for one account and security",
+        "tags": [
+          "investments"
+        ],
+        "description": "Needs a step-up assertion: `AVERAGE_COST` is sticky by database trigger (`basis_method_elections_average_cost_is_sticky`) and is a tax election the user cannot take back. **`AVERAGE_COST` is refused for anything that is not a mutual fund** — the engine does not know a security’s type, by design (wp3.2-lots.md §12 item 5), so the check belongs here, where it does.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "accountId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "securityId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "FIFO",
+                      "LIFO",
+                      "HIFO",
+                      "SPECIFIC_ID",
+                      "AVERAGE_COST"
+                    ]
+                  }
+                },
+                "required": [
+                  "accountId",
+                  "securityId",
+                  "method"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accountId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "securityId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "method": {
+                      "type": "string",
+                      "enum": [
+                        "FIFO",
+                        "LIFO",
+                        "HIFO",
+                        "SPECIFIC_ID",
+                        "AVERAGE_COST"
+                      ]
+                    },
+                    "sticky": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "accountId",
+                    "securityId",
+                    "method",
+                    "sticky"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/securities/{securityId}": {
+      "get": {
+        "operationId": "getSecurity",
+        "summary": "One security: the derived facts, the user’s overlay, and the resolution",
+        "tags": [
+          "investments"
+        ],
+        "description": "Three blocks rather than one merged object, because \"what the provider said\" and \"what I corrected\" are different questions and a screen that offered to edit the merged value could not tell the user which half they were changing.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "securityId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "security": {
+                      "$ref": "#/components/schemas/Security"
+                    }
+                  },
+                  "required": [
+                    "security"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchSecurity",
+        "summary": "Set or clear the user’s overlay on one security (04 §3.2)",
+        "tags": [
+          "investments"
+        ],
+        "description": "A value sets **and locks** the field; `null` clears **and unlocks** it; an absent field is untouched. `lockedFields` is not accepted from the client — a stored value that is not locked is a setting that silently does nothing. A session is enough: this writes no credential and is reversible in one call.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "assetClass": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "US_EQUITY",
+                          "INTL_DEV_EQUITY",
+                          "EM_EQUITY",
+                          "US_BOND",
+                          "INTL_BOND",
+                          "TIPS",
+                          "REAL_ESTATE",
+                          "COMMODITY",
+                          "CRYPTO",
+                          "CASH",
+                          "OTHER",
+                          "UNCLASSIFIED"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "region": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "US",
+                          "DEV_EX_US",
+                          "EM",
+                          "GLOBAL",
+                          "UNKNOWN"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sector": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "expenseRatio": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^\\d*\\.?\\d+$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "isCashEquivalent": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "securityId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "security": {
+                      "$ref": "#/components/schemas/Security"
+                    }
+                  },
+                  "required": [
+                    "security"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/prices/{securityId}": {
+      "get": {
+        "operationId": "getPrice",
+        "summary": "The best price for one security on one date, and which rung answered",
+        "tags": [
+          "investments"
+        ],
+        "description": "The ladder’s answer plus the raw observations behind it. `staleness` is a field: 07 §6.1’s 24-hour rule is a statement about the clock at read time, and a client deriving it from `observedAt` would derive it against a different clock.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "asOf",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 3
+            },
+            "in": "query",
+            "name": "currency",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "securityId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "securityId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "asOf": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    },
+                    "price": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "securityId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "priceDate": {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                            },
+                            "close": {
+                              "type": "string"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 3
+                            },
+                            "rung": {
+                              "type": "string"
+                            },
+                            "source": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "carriedForward": {
+                              "type": "boolean"
+                            },
+                            "providerCarriedForward": {
+                              "type": "boolean"
+                            },
+                            "observedAt": {
+                              "type": "string"
+                            },
+                            "staleness": {
+                              "type": "string",
+                              "enum": [
+                                "FRESH",
+                                "STALE"
+                              ]
+                            },
+                            "includeInAsOfNowDeltas": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "securityId",
+                            "priceDate",
+                            "close",
+                            "currency",
+                            "rung",
+                            "source",
+                            "carriedForward",
+                            "providerCarriedForward",
+                            "observedAt",
+                            "staleness",
+                            "includeInAsOfNowDeltas"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "observations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "priceDate": {
+                            "type": "string",
+                            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                          },
+                          "close": {
+                            "type": "string"
+                          },
+                          "currency": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 3
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "providerCarriedForward": {
+                            "type": "boolean"
+                          },
+                          "observedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "priceDate",
+                          "close",
+                          "currency",
+                          "source",
+                          "providerCarriedForward",
+                          "observedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "securityId",
+                    "asOf",
+                    "currency",
+                    "price",
+                    "observations"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putPriceOverride",
+        "summary": "Write the rung-1 user price override for one security and date",
+        "tags": [
+          "investments"
+        ],
+        "description": "Needs a step-up assertion: this is rung 1 of 07 §6.1’s ladder and outranks every provider, so it silently restates what the portfolio is worth. `close` is a decimal string — never a JSON number (D3). The write is an upsert on `(user, security, date, source, currency)`, so correcting a typo produces one row rather than two the ladder then has to choose between.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "priceDate": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "close": {
+                    "type": "string",
+                    "pattern": "^\\d*\\.?\\d+$"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "priceDate",
+                  "close"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "securityId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "securityId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "priceDate": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    },
+                    "price": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "securityId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "priceDate": {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                            },
+                            "close": {
+                              "type": "string"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 3
+                            },
+                            "rung": {
+                              "type": "string"
+                            },
+                            "source": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "carriedForward": {
+                              "type": "boolean"
+                            },
+                            "providerCarriedForward": {
+                              "type": "boolean"
+                            },
+                            "observedAt": {
+                              "type": "string"
+                            },
+                            "staleness": {
+                              "type": "string",
+                              "enum": [
+                                "FRESH",
+                                "STALE"
+                              ]
+                            },
+                            "includeInAsOfNowDeltas": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "securityId",
+                            "priceDate",
+                            "close",
+                            "currency",
+                            "rung",
+                            "source",
+                            "carriedForward",
+                            "providerCarriedForward",
+                            "observedAt",
+                            "staleness",
+                            "includeInAsOfNowDeltas"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "securityId",
+                    "priceDate",
+                    "currency",
+                    "price"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/net-worth/series": {
+      "get": {
+        "operationId": "getNetWorthSeries",
+        "summary": "Net worth per day over a window, gapless, with the seal on every row",
+        "tags": [
+          "planning"
+        ],
+        "description": "One row per calendar day between `from` and `to`, from the migration’s own spine function — a day with no data comes back with `null` totals rather than being absent, because \"we did not know\" and \"it was zero\" are different facts. `sealed`, `revision`, `source` and `stalePrice` are fields: a chart cannot infer any of them.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "to": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "baseCurrency": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    },
+                    "points": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NetWorthSeriesPoint"
+                      }
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "baseCurrency",
+                    "points"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/net-worth/corrections": {
+      "post": {
+        "operationId": "correctNetWorthDay",
+        "summary": "Recompute one closed day and write the result as a new revision",
+        "tags": [
+          "planning"
+        ],
+        "description": "Needs a step-up assertion. The sealed row is **never written to**: `correctDay` inserts the next revision carrying `supersedes_id` and a mandatory `correction_reason`, so the app can still answer \"what did we show on the 14th?\" after the 14th has been corrected. A missing FX rate is a 409 naming the pair, never a conversion at par (D4).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "asOfDate": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "asOfDate",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "asOfDate": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "netWorth": {
+                      "type": "object",
+                      "properties": {
+                        "minor": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 3
+                        }
+                      },
+                      "required": [
+                        "minor",
+                        "currency"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "stalePrice": {
+                      "type": "boolean"
+                    },
+                    "accountsCounted": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "accountsUnvalued": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "asOfDate",
+                    "revision",
+                    "netWorth",
+                    "source",
+                    "stalePrice",
+                    "accountsCounted",
+                    "accountsUnvalued"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market-data/settings": {
+      "get": {
+        "operationId": "getMarketDataSettings",
+        "summary": "Source priority, key presence, budgets and the licence obligations",
+        "tags": [
+          "market-data"
+        ],
+        "description": "Key **presence** only — there is no field in this response that could carry a key value, and the exit test plants a synthetic key and asserts its bytes appear nowhere. `attribution` carries the exact licence string and its quoted clause, because a UI cannot render an obligation it was never told about (01 §4.3).",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MarketDataProviderSettings"
+                      }
+                    },
+                    "ladders": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "securityKind": {
+                            "type": "string"
+                          },
+                          "sources": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "user_override",
+                                    "exchange_fill",
+                                    "tiingo",
+                                    "coingecko",
+                                    "fred",
+                                    "yfinance",
+                                    "last_known"
+                                  ]
+                                },
+                                "rung": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "source",
+                                "rung"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "securityKind",
+                          "sources"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "settingsAttributions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Attribution"
+                      }
+                    },
+                    "allowedHostsNarrowed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "providers",
+                    "ladders",
+                    "settingsAttributions",
+                    "allowedHostsNarrowed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market-data/priority": {
+      "put": {
+        "operationId": "putMarketDataPriority",
+        "summary": "Reorder the price-source ladder for one security kind",
+        "tags": [
+          "market-data"
+        ],
+        "description": "Needs a step-up assertion: this decides which provider’s number becomes the price of everything the user owns. Rung numbers are **computed**, not accepted — `user_override` is pinned to 1 and `last_known` to 99 by CHECK constraints, and a client that could choose them could disable the one rung a human controls.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "securityKind": {
+                    "type": "string",
+                    "enum": [
+                      "equity",
+                      "etf",
+                      "mutual_fund",
+                      "crypto",
+                      "bond",
+                      "cash",
+                      "other"
+                    ]
+                  },
+                  "sources": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "user_override",
+                        "exchange_fill",
+                        "tiingo",
+                        "coingecko",
+                        "fred",
+                        "yfinance",
+                        "last_known"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "securityKind",
+                  "sources"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "securityKind": {
+                      "type": "string"
+                    },
+                    "sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "user_override",
+                              "exchange_fill",
+                              "tiingo",
+                              "coingecko",
+                              "fred",
+                              "yfinance",
+                              "last_known"
+                            ]
+                          },
+                          "rung": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "rung"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "securityKind",
+                    "sources"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market-data/test-fetch": {
+      "post": {
+        "operationId": "testMarketDataFetch",
+        "summary": "One guarded live call to a provider, to prove a key works",
+        "tags": [
+          "market-data"
+        ],
+        "description": "Needs a step-up assertion — this is the only route in this work package that leaves the machine. It goes through the **existing** `PriceSource`, so it inherits WP 2.4’s egress allow-list, the literal-IP and private-address refusals, the timeout and the rate budget, and it spends against that budget like any other call. With no key configured it answers `skipped_no_key` and makes no request at all. No response field can carry a key value, and any provider error text is run through `redactedMessageOf` before it is returned.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "tiingo",
+                      "fred",
+                      "coingecko",
+                      "openfigi",
+                      "yfinance"
+                    ]
+                  },
+                  "symbol": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "date": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  }
+                },
+                "required": [
+                  "provider"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string"
+                    },
+                    "operation": {
+                      "type": "string",
+                      "enum": [
+                        "test_fetch"
+                      ]
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "no_data",
+                        "skipped_no_key",
+                        "rate_limited",
+                        "refused",
+                        "error"
+                      ]
+                    },
+                    "quote": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "date": {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                            },
+                            "value": {
+                              "type": "string"
+                            },
+                            "currency": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "attribution": {
+                              "$ref": "#/components/schemas/Attribution"
+                            }
+                          },
+                          "required": [
+                            "date",
+                            "value",
+                            "currency",
+                            "attribution"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "detail": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "refusalCode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "retryAfterMs": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "budget": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string"
+                          },
+                          "used": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "limit": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "used",
+                          "limit"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "operation",
+                    "outcome",
+                    "quote",
+                    "detail",
+                    "refusalCode",
+                    "retryAfterMs",
+                    "budget"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "servers": [
@@ -20167,6 +25779,18 @@
     {
       "name": "notifications",
       "description": "Channels, rules and the delivery outbox. Attaching or destroying a channel needs a step-up assertion, the same policy as a connection's credential."
+    },
+    {
+      "name": "investments",
+      "description": "Holdings aggregated across accounts, per-account lots and basis provenance, allocation, drift, performance, securities and prices. `unclassifiedPct` and `stale` are always fields, never inferences; a time-weighted return, a money-weighted return and a dollar gain never share an object (07 §4.2). A session is enough to read and to set an overlay; the rung-1 price override and the sticky basis-method election need a step-up assertion."
+    },
+    {
+      "name": "planning",
+      "description": "Net worth over time. The series is gapless and a day with no data is `null`, not zero; sealed days are labelled as such. A correction never rewrites a sealed row — it writes the next revision with its reason — and needs a step-up assertion."
+    },
+    {
+      "name": "market-data",
+      "description": "Price-source priority, provider key **presence** (never a key value), rate budgets, the licence obligations that bind on any surface showing these numbers, and a guarded test fetch. Both writes need a step-up assertion."
     }
   ]
 }
