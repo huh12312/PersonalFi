@@ -101,7 +101,10 @@ describe.skipIf(SKIP)(`api image closure (${IMAGE})`, () => {
       missing,
       `pruned out of the image but required at runtime: ${missing.join(', ')}`,
     ).toEqual([]);
-  });
+    // `pnpm list` over the whole closure plus one container start: past the
+    // 5 s default on CI's runner once Phase 3 added four more workspace
+    // projects (red on 5cfb90b at exactly the default).
+  }, 60_000);
 
   it('can import the composition root inside the image', () => {
     // The exact failure: `domain.ts` is what pulls in every connector and every
@@ -117,5 +120,5 @@ describe.skipIf(SKIP)(`api image closure (${IMAGE})`, () => {
     ]);
     expect(output).toContain('IMPORT_OK');
     expect(output).not.toContain('IMPORT_FAIL');
-  });
+  }, 60_000);
 });
