@@ -75,7 +75,7 @@ export default defineConfig<ColdStartOptions>({
     {
       name: 'chromium',
       testMatch:
-        /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget)\.spec\.ts/,
+        /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:5183' },
     },
     {
