@@ -526,23 +526,41 @@ $ pnpm exec prettier --check <every file this WP touched>
 `packages/db/migrations/*.sql` has no Prettier parser and never has — 0018 is in the same position as
 0001–0017 and the repo-wide `prettier --check .` does not reach it.
 
-**`pnpm exec tsc -b --noEmit` and `--project api-db` are green for this work package and red for a
-concurrent one.** WP 3.9 is in flight in the same tree and owns `apps/api/src/routes/**` and
-`apps/api/test/db/{investments,market-data,net-worth}-routes.test.ts`. At the moment of writing, `tsc`
-reports errors only in `apps/api/test/db/net-worth-routes.test.ts` (four `TS4111` index-signature
-accesses) and `api-db` fails only `investments-routes.test.ts` (3 of its 14). Nothing this WP owns appears
-in either list; `grep -v` over the routes paths gives a clean `tsc`, and the three files this WP added or
-extended are green:
-
 ```
-$ DATABASE_URL=… pnpm exec vitest run --project api-db \
-    apps/api/test/db/investments-sync.test.ts        →  8 passed
-    apps/api/test/db/insufficient-scope.test.ts      →  1 passed
-    apps/api/test/db/phase3-wiring.test.ts           →  7 passed
-    apps/api/test/db/export-import.test.ts           →  6 passed
+$ DATABASE_URL=postgres://personalfi:personalfi@127.0.0.1:5433/personalfi_dev \
+  pnpm exec vitest run --project api-db
+  Test Files  34 passed | 1 skipped (35)
+       Tests  204 passed | 2 skipped (206)
 ```
 
-`export-import.test.ts` is in that list because **this WP broke it and fixed it**: its
+The skip is `plaid-sandbox.test.ts`, which is the live Sandbox smoke and skips because no Plaid credential
+file exists on this host — unchanged by this WP, and the reason §11 item 6 carries "nothing here has been
+observed against live Plaid".
+
+**A note on timing, because an intermediate run of this suite was red and a reviewer may find it in the
+log.** WP 3.9 was in flight in the same tree throughout. An earlier full `api-db` sweep failed four tests:
+three in `investments-routes.test.ts` (WP 3.9's own file, mid-edit, and repaired by that agent before the
+final run) and **one that was this work package's**, described next. The intermediate is recorded so the
+discrepancy with the green run above is not read as a flake.
+
+**`pnpm exec tsc -b --noEmit` is still red, and every error belongs to WP 3.9.** At the close of this work
+package it reports seven, all in two files that agent owns and is mid-edit on — two in
+`apps/api/test/db/investments-routes.test.ts` (a stale `@ts-expect-error` and a `never` assignment) and five
+`TS4111` index-signature accesses in `apps/api/test/db/net-worth-routes.test.ts`. Filtering those two paths
+out leaves a clean build, and nothing this WP owns has appeared in the error list at any point:
+
+```
+$ pnpm exec tsc -b --noEmit 2>&1 | grep -E '^[a-z].*\([0-9]+,[0-9]+\)' \
+    | grep -v -E 'routes/|-routes\.test\.ts'
+  (no output)
+```
+
+This is the one check the orchestrator must re-run at the landing commit rather than take from here: it is
+a whole-repo build and it cannot be green for this WP alone while another agent's files are open.
+
+The one that was ours:
+
+**this WP broke `export-import.test.ts` and fixed it.** Its
 `'every user-scoped table appears in the manifest'` test discovers user-scoped tables from the live schema,
 so `connection_sync_facts` failed it the moment 0018 landed — which is the mechanism working, not a
 nuisance. One `EXEMPT_TABLES` entry in `apps/api/src/reports/export/registry.ts`, with the same reasoning
