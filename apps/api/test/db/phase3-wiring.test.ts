@@ -45,6 +45,14 @@
  * registration, the pump, the transaction, the store and the outbox — and all
  * of those are.
  */
+import { PlaidConnector } from '@connector/plaid';
+import {
+  FakePlaidApi,
+  PUBLIC_TOKEN,
+  defaultItemSpec,
+  linkSettings,
+  testClock as plaidTestClock,
+} from '@connector/plaid/test';
 import { DateOnly, money, newId, systemClock } from '@core/kernel';
 import { createConsumerPump, platformExecutor } from '@core/platform';
 import { createEgressPolicy, createNtfyChannel, createSmtpChannel } from '@ctx/notifications';
@@ -87,10 +95,23 @@ describe.skipIf(NO_DATABASE)(
   'Phase 3 wiring batch (apps/api/src/{platform,domain,modules}.ts)',
   () => {
     let h: ApiHarness;
+    let plaidApi: FakePlaidApi;
 
     beforeAll(async () => {
-      h = await createApiHarness({ suite: 'p3wire' });
-    }, 60_000);
+      // WP 3.7: a real `PlaidConnector` over the hermetic fake, so the last
+      // test in this file can drive a *real* holdings/investment-transactions
+      // sync rather than a stubbed port. Adding it to the registry changes
+      // nothing for the tests above — they link `manual`.
+      plaidApi = new FakePlaidApi([defaultItemSpec()]);
+      h = await createApiHarness({
+        suite: 'p3wire',
+        plaidConnector: new PlaidConnector({
+          api: plaidApi,
+          settings: linkSettings(),
+          clock: plaidTestClock(),
+        }),
+      });
+    }, 120_000);
 
     afterAll(async () => {
       await h.close();
@@ -362,6 +383,318 @@ describe.skipIf(NO_DATABASE)(
       expect(facts.holdings).toEqual([]);
       expect(facts.transactions).toEqual([]);
     });
+
+    it('a real provider leg, the real port and the real pump put a lot in the database', async () => {
+      // WP 3.7 closes the loop the test above leaves open. Nothing is stubbed:
+      // the `holdings` and `investment_txns` legs of the real orchestrator call
+      // the real `PlaidConnector`, which maps the recorded Sandbox fixture
+      // through the real `map.ts`; the legs write real
+      // `connection_sync_facts`; the real `createInvestmentSyncPort` reads them
+      // back and resolves each security through WP 3.1's real
+      // `SecurityResolver`; the real lot consumer, delivered by the real pump,
+      // derives a lot. The only double in the chain is the socket.
+      const logger = pino({ level: 'silent' });
+
+      const linked = await h.request({
+        method: 'POST',
+        url: '/connections/plaid/exchange',
+        session: h.fresh,
+        body: { publicToken: PUBLIC_TOKEN, institutionName: 'Northwind Brokerage' },
+      });
+      expect(linked.statusCode, 'the plaid link must succeed').toBe(201);
+      const connectionId = (linked.json() as { connectionId: string }).connectionId;
+
+      const denyAll = createEgressPolicy({ allowedHosts: [] });
+      const runtime = createDomainRuntime({
+        database: h.database.db,
+        clock: systemClock,
+        logger,
+        registry: createConnectorRegistry(),
+        secretBox: h.security.requireSecretBox(),
+      });
+      const modules = appModules({
+        database: h.database.db,
+        userId: h.userId,
+        orchestrator: runtime.orchestrator,
+        timezone: 'UTC',
+        clock: systemClock,
+        notificationChannels: {
+          ntfy: createNtfyChannel({ policy: denyAll }),
+          smtp: createSmtpChannel({ policy: denyAll }),
+        },
+        secretBox: h.security.requireSecretBox(),
+        // The real one. This is the line the whole test exists for.
+        investmentSyncPort: createInvestmentSyncPort(h.database.db),
+      });
+      const investments = modules.find((module) => module.flagKey === 'module.investments');
+      const pump = createConsumerPump({
+        pool: h.database.pool,
+        db: drizzleTransactionalExecutor(h.database.db),
+        clock: systemClock,
+        logger,
+        consumers: [...(investments?.consumers ?? [])],
+      });
+      // Catch up over everything the earlier tests produced, so what this test
+      // asserts is what *this* sync caused.
+      await pump.drain();
+
+      // --- the sync itself -----------------------------------------------
+      const summary = await h.orchestrator.syncConnection({
+        connectionId,
+        userId: h.userId,
+        trigger: 'manual',
+        correlationId: newId(),
+      });
+      expect(summary.error).toBeNull();
+
+      const staged = await h.database.db.execute<{ kind: string; count: string }>(
+        sql`SELECT kind, count(*)::text AS count FROM connection_sync_facts GROUP BY kind ORDER BY kind`,
+      );
+      const stagedByKind = new Map(staged.rows.map((row) => [row.kind, Number(row.count)]));
+      expect(stagedByKind.get('holding'), 'the holdings leg staged the fixture positions').toBe(3);
+      expect(stagedByKind.get('investment_transaction')).toBe(5);
+
+      // --- the consumer, through the real pump ----------------------------
+      await pump.drain();
+
+      // The security came from the resolver, not from a made-up id.
+      //
+      // Keyed on the FIGI, which is one of the four names `holdingFactOf` files
+      // a VTI position under. It used to be the *only* one — WP 3.7 §11 item 1,
+      // fixed in WP 3.7a — and the three tests below this one are that fix's.
+      const security = await h.database.db.execute<{ id: string; ticker: string | null }>(sql`
+        SELECT DISTINCT s.id, s.ticker
+          FROM securities s
+          JOIN security_identifiers i ON i.security_id = s.id
+         WHERE s.user_id = ${h.userId}::uuid AND i.value = 'BBG000BDTF76'
+      `);
+      expect(security.rows, 'one security for the synced VTI position').toHaveLength(1);
+      const securityId = security.rows[0]?.id;
+      expect(securityId).toBeDefined();
+      if (securityId === undefined) return;
+
+      // The transactions the lot engine stored, labelled as the provider's own.
+      // Scoped to `plaid`: the first test in this file wrote one `manual`
+      // transaction through the stubbed port, and counting it here would make
+      // this assertion about that test instead of this one.
+      const stored = await h.database.db.execute<{ source: string; provider: string }>(sql`
+        SELECT source, provider
+          FROM investment_transactions
+         WHERE user_id = ${h.userId}::uuid AND provider = 'plaid'
+      `);
+      expect(stored.rows.length, 'five fixture transactions land in the ledger').toBe(5);
+      expect(
+        stored.rows.every((row) => row.source === 'BROKER' && row.provider === 'plaid'),
+        'an exact provider leg is BROKER, never IMPORTED or ESTIMATED',
+      ).toBe(true);
+
+      // …and the lot. The buy of 5 VTI at 268.40 opened one; the sell of 2
+      // consumed part of it, so what survives is one open lot with 3 left.
+      //
+      // Scoped to `plaid` through the transaction that opened it, for the same
+      // reason the assertion above is: the first test in this file opened a lot
+      // on a `manual` transaction, in a different account, for VTI. Until WP
+      // 3.7a that lot was invisible from here, because its security was a
+      // *different row* — the ticker sighting the FIGI sighting could not
+      // merge with. Now there is one security, so an unscoped count sees both
+      // lots, and the test that used to pass by accident has to say which leg
+      // it is about. The merge is asserted directly in 'a security seen as a
+      // ticker and later as a FIGI is one securities row' below.
+      const lots = await h.database.db.execute<{
+        quantity_remaining: string;
+        basis_source: string;
+      }>(sql`
+        SELECT l.quantity_remaining, l.basis_source
+          FROM cost_basis_lots l
+          JOIN investment_transactions t ON t.id = l.opened_by_transaction_id
+         WHERE l.user_id = ${h.userId}::uuid
+           AND l.security_id = ${securityId}::uuid
+           AND t.provider = 'plaid'
+      `);
+      expect(lots.rows, 'the synced buy opened exactly one lot').toHaveLength(1);
+      expect(Number(lots.rows[0]?.quantity_remaining ?? '0')).toBe(3);
+      // `BROKER`, because the buy carried a real price — not `ESTIMATED`, which
+      // is what an unknown basis must produce (04 §5.5).
+      expect(lots.rows[0]?.basis_source).toBe('BROKER');
+
+      // The positions the holdings leg asserted are stored too.
+      const holdings = await h.database.db.execute<{ count: string }>(
+        sql`SELECT count(*)::text AS count FROM holdings WHERE user_id = ${h.userId}::uuid`,
+      );
+      expect(Number(holdings.rows[0]?.count ?? '0')).toBeGreaterThan(0);
+    }, 120_000);
+
+    /**
+     * WP 3.7a, item 1 — and the reason this file is where it is asserted.
+     *
+     * The first test in this describe resolved `ticker/VTI@XNYS` through
+     * `securityResolverFor` (it needed a real `securities` row for a foreign
+     * key). The test above then synced the Plaid fixture, whose VTI security
+     * carries a FIGI, an ISIN, a CUSIP **and** that same MIC-qualified ticker.
+     * Those are two sightings of one asset, by two different providers, and
+     * nothing but the holdings leg connects them.
+     *
+     * Before the fix this query returned **two** rows: `holdingSecurityOf` kept
+     * the FIGI and dropped the other three, so the resolver — which tiers
+     * strongest-first over the set it is shown — was never shown the ticker
+     * that would have found the row already there. It is the §5 risk table's
+     * "one asset, two securities", reproduced by the fixtures rather than
+     * argued about.
+     *
+     * `merged_into_id IS NULL` is in the `WHERE` on purpose: a merge is a
+     * legitimate way to end up with one *surviving* row, and counting losers
+     * would make this test unable to tell "never split" from "split and
+     * healed". Here nothing merges — the second sighting joins the first row
+     * directly — and the assertion on `merged` below says so.
+     */
+    it('a security seen as a ticker and later as a FIGI is one securities row', async () => {
+      const rows = await h.database.db.execute<{
+        id: string;
+        ticker: string | null;
+        figi: string | null;
+        isin: string | null;
+        cusip: string | null;
+        identity_kind: string;
+        merged_into_id: string | null;
+      }>(sql`
+        SELECT DISTINCT s.id, s.ticker, s.figi, s.isin, s.cusip, s.identity_kind, s.merged_into_id
+          FROM securities s
+          JOIN security_identifiers i ON i.security_id = s.id
+         WHERE s.user_id = ${h.userId}::uuid
+           AND s.merged_into_id IS NULL
+           AND upper(i.value) IN ('VTI', 'BBG000BDTF76', 'US9229087690', '922908769')
+      `);
+      expect(
+        rows.rows,
+        'the ticker sighting and the FIGI sighting are one security, not two',
+      ).toHaveLength(1);
+
+      // …and it is one row that knows all four names, which is the thing that
+      // makes the *next* provider's sighting land here too.
+      const row = rows.rows[0];
+      expect(row?.ticker).toBe('VTI');
+      expect(row?.figi).toBe('BBG000BDTF76');
+      expect(row?.isin).toBe('US9229087690');
+      expect(row?.cusip).toBe('922908769');
+      // The FIGI outranks the ticker that established the row, so the identity
+      // was upgraded in place — same id, better name. Holdings and lots point
+      // at that id and none of them had to move.
+      expect(row?.identity_kind).toBe('figi');
+      expect(row?.merged_into_id).toBeNull();
+
+      const merged = await h.database.db.execute<{ count: string }>(sql`
+        SELECT count(*)::text AS count FROM securities
+         WHERE user_id = ${h.userId}::uuid AND merged_into_id IS NOT NULL
+      `);
+      expect(
+        Number(merged.rows[0]?.count ?? '0'),
+        'nothing had to be merged: the two sightings never became two rows',
+      ).toBe(0);
+    });
+
+    /**
+     * WP 3.7a, item 2. The same field, costing a different column.
+     *
+     * `securities.type` for VTI is `etf` because the holdings leg carried
+     * Plaid's `type: 'etf'` and its display name alongside the identifiers. It
+     * could not before: a `SecurityIdentifier` has no room for either, so
+     * `securityTypeOf(null, identity, null)` answered `other` for everything
+     * that was not a `chain_contract`.
+     *
+     * The row was *created* by the first test in this file from a bare ticker
+     * with no provider type at all, so `other` is genuinely what it held until
+     * this sync — which makes this an assertion about the resolver's upgrade
+     * rule (`descriptionUpgradeOf`) as much as about the port shape. The rule
+     * is one-directional: `other` gives way to a real answer, and a real answer
+     * never gives way to `other`.
+     */
+    it('securities.type survives the holdings path', async () => {
+      const rows = await h.database.db.execute<{
+        type: string;
+        name: string | null;
+        asset_class: string;
+      }>(sql`
+        SELECT s.type, s.name, s.asset_class
+          FROM securities s
+         WHERE s.user_id = ${h.userId}::uuid AND s.figi = 'BBG000BDTF76'
+      `);
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]?.type, 'the provider said etf and the row says etf').toBe('etf');
+      expect(rows.rows[0]?.name).toBe('Vanguard Total Stock Market ETF');
+      // The classification columns were recomputed with the type rather than
+      // left behind at whatever an unclassifiable `other` produced.
+      expect(rows.rows[0]?.asset_class).not.toBe('UNCLASSIFIED');
+    });
+
+    /**
+     * WP 3.7a, item 3 — WP 3.7 §11's third carried item.
+     *
+     * The cash-sweep position in the Plaid fixture carries no ticker, CUSIP,
+     * ISIN or FIGI, so the only name available is Plaid's own `security_id`,
+     * emitted as `proprietary`. The resolver refuses a proprietary identifier
+     * as an identity, mints nothing, and appends `SecurityResolutionFailed` —
+     * which is the correct behaviour and the record that the position exists.
+     *
+     * What was not correct is that the resolution runs in a transaction of its
+     * own (`createInvestmentSyncPort`'s comment says why), so the pump retrying
+     * a delivery re-ran the abstention and appended it again. This test calls
+     * `factsForRun` a second time on the same run — which is exactly what a
+     * retried delivery does to this port — and counts.
+     */
+    it('a retried delivery appends one SecurityResolutionFailed', async () => {
+      const runs = await h.database.db.execute<{ id: string }>(sql`
+        SELECT id FROM sync_runs
+         WHERE user_id = ${h.userId}::uuid AND operation = 'holdings'
+         ORDER BY started_at DESC LIMIT 1
+      `);
+      const holdingsRunId = runs.rows[0]?.id;
+      expect(holdingsRunId, 'the holdings leg must have settled a sync_runs row').toBeDefined();
+      if (holdingsRunId === undefined) return;
+
+      const countFailures = async (): Promise<number> => {
+        const rows = await h.database.db.execute<{ count: string }>(sql`
+          SELECT count(*)::text AS count FROM domain_events
+           WHERE user_id = ${h.userId}::uuid
+             AND event_type = 'investments.SecurityResolutionFailed'
+             AND payload->>'syncRunId' = ${holdingsRunId}
+        `);
+        return Number(rows.rows[0]?.count ?? '0');
+      };
+
+      expect(await countFailures(), 'the unnamed cash sweep failed to resolve exactly once').toBe(
+        1,
+      );
+
+      // The payload says which sync produced it — the field the dedupe key is
+      // built on, and the one a reader actually wants.
+      const event = await h.database.db.execute<{
+        provider: string;
+        provider_security_id: string;
+      }>(sql`
+        SELECT payload->>'provider' AS provider,
+               payload->>'providerSecurityId' AS provider_security_id
+          FROM domain_events
+         WHERE user_id = ${h.userId}::uuid
+           AND event_type = 'investments.SecurityResolutionFailed'
+           AND payload->>'syncRunId' = ${holdingsRunId}
+      `);
+      expect(event.rows[0]?.provider).toBe('plaid');
+      expect(event.rows[0]?.provider_security_id).toBe('sec-cash-0002');
+
+      // The retry. Same run, same port, same abstention — and no second report.
+      const port = createInvestmentSyncPort(h.database.db);
+      await port.factsForRun(h.userId, holdingsRunId);
+      expect(
+        await countFailures(),
+        'a retried delivery is the same observation, not a second one',
+      ).toBe(1);
+
+      // Twice more, because "idempotent" that only survives one retry is a
+      // coincidence. The pump backs off and retries repeatedly.
+      await port.factsForRun(h.userId, holdingsRunId);
+      await port.factsForRun(h.userId, holdingsRunId);
+      expect(await countFailures()).toBe(1);
+    }, 60_000);
 
     it('module.planning: a real ledger.BalanceRecorded reaches the net-worth consumer through the real pump, and the 04:00 schedule lands', async () => {
       // WP 3.8's half of the flag flip, and it asserts the two things

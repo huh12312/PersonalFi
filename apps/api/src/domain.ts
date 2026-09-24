@@ -90,8 +90,10 @@ import {
   SyncOrchestrator,
   createCsvStagingStore,
   createManualStagingStore,
+  investmentFactsForRun,
   type LedgerWriter,
   type RegisteredConnector,
+  type RunInvestmentFacts,
 } from '@ctx/connections';
 import { listCategories, type LedgerPort } from '@ctx/categorization';
 import {
@@ -923,33 +925,58 @@ export function securityResolverFor(
  * `@ctx/connections`' sync bookkeeping and `isRetirementAccount` reads
  * `@ctx/ledger`'s accounts, and the lot engine may import neither.
  *
- * ## `factsForRun` answers honestly, and today that answer is empty
+ * ## `factsForRun` — WP 3.7, and the shape WP 3.w predicted
  *
  * The port's contract is "the holdings and investment-transaction facts this
- * sync run produced, each already resolved to a `security_id`". **No provider
- * leg persists such a fact yet.** `@connector/port` grew
- * `ProviderHoldingFact` and `ProviderInvestmentTransactionFact` in WP 3.1, and
- * `@connector/coinbase` and `@connector/plaid` can *produce* them, but the
- * orchestrator legs that call `syncHoldings`/`syncInvestmentTransactions` and
- * write the results down are **WP 3.7's**, not this wave's, and
- * `@ctx/connections`' `sync_runs` row carries counts rather than facts.
+ * sync run produced, each already resolved to a `security_id`". Through the
+ * Phase 3 wiring wave this returned two empty arrays because no provider leg
+ * persisted such a fact. WP 3.7's `holdings` and `investment_txns` legs now
+ * write them to `connection_sync_facts` (migration 0018) inside the same
+ * transaction that settles the leg's `sync_runs` row, so the three steps this
+ * comment promised are the three steps below:
  *
- * So this returns the run's provider and date with two empty arrays. That is
- * the honest answer to "what did this run produce", and it makes the consumer
- * a no-op rather than a liar: `runLotSync` over no facts touches no holding,
- * opens no lot and appends no event, so `module.investments` can be on, the
- * consumer can catch up over the whole event history on first boot, and
- * nothing is written until there is something real to write. The alternative —
- * leaving the consumer unregistered until WP 3.7 — would mean the first boot
- * after 3.7 replays every `connections.SyncRunCompleted` ever recorded against
- * a port that had by then changed shape, which is a worse first day.
+ *   1. read the run's facts, already joined to the ledger account they belong
+ *      to, through `@ctx/connections`' published `investmentFactsForRun` —
+ *      this file never writes the join itself, because the SQL that names
+ *      another context's tables belongs inside that context;
+ *   2. put **every** identifier the run mentioned through *one*
+ *      `resolveAll(...)` — one batched OpenFIGI pass for a 120-position
+ *      brokerage rather than 120 (`wp3.1-securities.md`, `openfigi.test.ts`);
+ *   3. drop every *holding* the resolver abstained on. A fact with a null
+ *      `security_id` must never be returned, and `SecurityResolutionFailed` is
+ *      the record that the position existed. A **transaction** with no
+ *      security at all is different and is kept: a cash sweep, a fee and a
+ *      deposit are real investment transactions, `ResolvedTransactionFact`
+ *      types `securityId` as nullable for exactly them, and `lotEffectOf`
+ *      already returns `NONE`.
  *
- * **WP 3.7's change is confined to this function.** When the holdings leg
- * lands, `factsForRun` reads the rows it wrote, runs each through
- * `securityResolverFor(...).resolveAll(...)`, drops every position the
- * resolver abstained on (the `SecurityResolutionFailed` event is the record
- * that it existed — a fact with a null `security_id` must never be returned)
- * and returns the rest. Nothing in `modules.ts` or in `@ctx/investments` moves.
+ * Every transaction carries `source: 'BROKER'`. That is the truthful label for
+ * a fact a provider stated exactly — it is what tells the lot engine the basis
+ * it derives is exact rather than reconstructed, and it is the same seam the
+ * R6 verdict needs so a CSV leg can hand the same engine `IMPORTED` facts
+ * without the engine knowing which it is looking at.
+ *
+ * ## Why the resolution runs in its own transaction, and what that costs
+ *
+ * `securityResolverFor` is built per-transaction *for the sync path*, where a
+ * rolled-back sync must not leave behind a durable record of a resolution that
+ * happened during work that never happened. Here the caller is the lot
+ * consumer, and the pump hands it a transaction this port never sees:
+ * `createInvestmentSyncPort(database)` is constructed once, in `worker.ts`,
+ * over the pool. So the resolution gets a transaction of its own.
+ *
+ * That is defensible and it is not free, so both halves are written down.
+ * Securities are **master data**: minting one is a statement about an asset,
+ * not about a run, it is idempotent on the identifier, and a derivation that
+ * fails for an unrelated reason should not have to re-mint it on every retry.
+ * The cost was that a retried delivery re-ran an abstention and appended a
+ * second `SecurityResolutionFailed` for the same unresolvable position —
+ * duplicated *reporting*, never a duplicated row, because the resolver mints
+ * nothing when it abstains. `wp3.7-plaid-investments.md` §11 item 3 carried it;
+ * WP 3.7a closes it in `runFactsResolverFor` below, by making the append
+ * idempotent on `(syncRunId, provider, providerSecurityId)` rather than by
+ * moving the transaction. Moving it would have traded a duplicated log line for
+ * a lost security row, which is the worse half of the trade.
  */
 export function createInvestmentSyncPort(
   database: Database,
@@ -957,37 +984,30 @@ export function createInvestmentSyncPort(
 ): InvestmentSyncPort {
   return {
     async factsForRun(userId, syncRunId) {
-      const run = await database.execute<{
-        provider: string | null;
-        started_at: Date | string | null;
-      }>(sql`
-        SELECT c.provider AS provider, r.started_at AS started_at
-          FROM sync_runs r
-          JOIN connections c ON c.id = r.connection_id
-         WHERE r.id = ${syncRunId}::uuid AND r.user_id = ${userId}::uuid
-      `);
-      const row = run.rows[0];
-      // `execute` returns whatever the driver parsed, and for a raw statement
-      // that is a `timestamptz` *string* rather than the `Date` a Drizzle
-      // column mapping would give. Both are handled: guessing wrong here threw
-      // `startedAt.toISOString is not a function` on the first real sync run
-      // this port ever saw, which is exactly the class of bug a
-      // never-exercised adapter hides.
-      const startedAt = row?.started_at ?? null;
-      const asOf =
-        startedAt === null
-          ? clock.now()
-          : startedAt instanceof Date
-            ? startedAt
-            : new Date(startedAt);
-      const holdings: readonly ResolvedHoldingFact[] = [];
-      const transactions: readonly ResolvedTransactionFact[] = [];
-      return {
-        provider: row?.provider ?? 'unknown',
-        asOfDate: DateOnly.parse(asOf.toISOString().slice(0, 10)),
-        holdings,
-        transactions,
-      };
+      const observed = await investmentFactsForRun(database, userId, syncRunId);
+      // No such run for this user — including another user's run id, because
+      // the reader puts `user_id` in the `WHERE` rather than in a branch. The
+      // consumer's contract wants a shape either way, so it gets an empty one.
+      if (observed === null) {
+        return {
+          provider: 'unknown',
+          asOfDate: dateOnlyOfInstant(clock.now()),
+          holdings: [],
+          transactions: [],
+        };
+      }
+      // A balances or a plain transactions run: the legs that write facts are
+      // the only ones that write any, and returning early keeps the common
+      // case (every nightly bank sync) one query rather than a transaction.
+      if (observed.holdings.length === 0 && observed.transactions.length === 0) {
+        return {
+          provider: observed.provider,
+          asOfDate: dateOnlyOfInstant(observed.startedAt),
+          holdings: [],
+          transactions: [],
+        };
+      }
+      return database.transaction((tx) => resolveRunFacts(tx, clock, userId, syncRunId, observed));
     },
 
     /**
@@ -1031,6 +1051,180 @@ export function createInvestmentSyncPort(
         .limit(1);
       return rows[0]?.type === 'crypto';
     },
+  };
+}
+
+/**
+ * `securityResolverFor`, with the one thing this caller needs that the sync
+ * path does not: an append that a retry cannot double.
+ *
+ * WP 3.7 §11 item 3. The lot consumer's resolution runs in a transaction of its
+ * own (see `createInvestmentSyncPort`'s comment for why that is the right
+ * trade), so the pump retrying a delivery re-runs every abstention in the run
+ * and, before this, appended a second `SecurityResolutionFailed` for each one.
+ * The duplicate is not a duplicated row — nothing is minted on an abstention —
+ * but it is a duplicated *report*, and a notification or a support answer built
+ * on "how many times did this fail" would have counted retries as failures.
+ *
+ * **The dedupe is a check inside the same transaction, not an outbox feature.**
+ * `appendEvent` takes an `Executor` and an envelope and has no idempotency key
+ * (`packages/platform/src/events/outbox.ts`); the two dedupe mechanisms this
+ * codebase does have are elsewhere and are not reusable here —
+ * `notification_outbox.dedupe_key` is a notification's, and `ledger_dedup_keys`
+ * is the ledger's same-transaction-seen-twice table. So the key is stated where
+ * it is checked: `(syncRunId, provider, providerSecurityId)`, read out of
+ * `domain_events`' own payload.
+ *
+ * Scoped to the **run**, deliberately, and that is the whole reason the key
+ * needed a `syncRunId` in the payload at all. `SecurityResolutionFailed`'s
+ * registry description says a later sync that fails the same way must emit
+ * again — "the second failure is a second observation and suppressing it would
+ * make a permanent gap look like a transient one" — and a key without the run
+ * in it would have silently turned that into "report it once, ever". A retried
+ * delivery of the *same* run is not a second observation, and that is exactly
+ * the line this draws.
+ *
+ * The `SELECT` sees this transaction's own earlier appends as well as committed
+ * ones, so it also collapses the case where one run stages two unresolvable
+ * positions in two accounts that are the same provider security.
+ */
+function runFactsResolverFor(
+  executor: InvestmentsExecutor,
+  clock: Clock,
+  userId: string,
+  syncRunId: string,
+): SecurityResolver {
+  return createSecurityResolver({
+    store: drizzleSecurityStore(executor, clock),
+    clock,
+    events: {
+      append: async (event) => {
+        const payload = (event.payload ?? {}) as {
+          readonly provider?: string;
+          readonly providerSecurityId?: string | null;
+        };
+        const already = await executor.execute<{ one: number }>(sql`
+          SELECT 1 AS one
+            FROM domain_events
+           WHERE user_id = ${userId}::uuid
+             AND event_type = ${event.eventType}
+             AND payload->>'syncRunId' = ${syncRunId}
+             AND payload->>'provider' = ${payload.provider ?? null}
+             AND payload->>'providerSecurityId' IS NOT DISTINCT FROM ${payload.providerSecurityId ?? null}
+           LIMIT 1
+        `);
+        if (already.rows.length > 0) return;
+        await appendEvent(investmentsOutboxOf(executor), event);
+      },
+    },
+  });
+}
+
+/**
+ * A `DateOnly` from an instant, in UTC.
+ *
+ * UTC deliberately, and the reasoning is the Plaid adapter's own: this dates a
+ * *provider observation*, not a user-facing period boundary. `todayIn(clock,
+ * zone)` is for budget months and the daily seal; pretending to know the
+ * user's zone down here would be a guess dressed as precision.
+ */
+function dateOnlyOfInstant(instant: Date): DateOnly {
+  return DateOnly.parse(instant.toISOString().slice(0, 10));
+}
+
+/**
+ * Turn one run's raw provider facts into the port's resolved shape.
+ *
+ * Separated from `factsForRun` so the transaction boundary is one line at the
+ * call site and this function is a pure-ish mapping over an executor. See
+ * `createInvestmentSyncPort`'s comment for the three steps and for why the
+ * transaction is this port's own.
+ */
+async function resolveRunFacts(
+  executor: InvestmentsExecutor,
+  clock: Clock,
+  userId: string,
+  syncRunId: string,
+  observed: RunInvestmentFacts,
+): Promise<{
+  readonly provider: string;
+  readonly asOfDate: DateOnly;
+  readonly holdings: readonly ResolvedHoldingFact[];
+  readonly transactions: readonly ResolvedTransactionFact[];
+}> {
+  const resolver = runFactsResolverFor(executor, clock, userId, syncRunId);
+  const context = { userId, provider: observed.provider, syncRunId };
+
+  // One list, one call. `resolveAll` exists so a 120-position brokerage is two
+  // OpenFIGI requests rather than a hundred and twenty, and splitting holdings
+  // from transactions into two calls would halve that saving for no reason —
+  // they name the same securities.
+  const withSecurity = [
+    // The **whole** `ProviderSecurityFact`, every name the provider gave at
+    // once. This line used to build `{ identifiers: [holding.fact.security] }`
+    // out of the single identifier the port carried, which is how a security
+    // Plaid named with a FIGI, an ISIN, a CUSIP *and* a MIC-qualified ticker
+    // reached a resolver that tiers over the set having been told one of the
+    // four. WP 3.7a; see `docs/evidence/phase-3/wp3.7a-holding-identifiers.md`.
+    ...observed.holdings.map((holding) => holding.fact.security),
+    ...observed.transactions.flatMap((transaction) =>
+      transaction.fact.security === null
+        ? []
+        : [
+            {
+              identifiers: [transaction.fact.security],
+              providerSecurityId: transaction.fact.providerSecurityId,
+            },
+          ],
+    ),
+  ];
+  const resolutions = await resolver.resolveAll(withSecurity, context);
+
+  const holdings: ResolvedHoldingFact[] = [];
+  let cursor = 0;
+  for (const holding of observed.holdings) {
+    const resolution = resolutions[cursor];
+    cursor += 1;
+    // 07's rule: an unresolved thing fails loudly rather than minting a row,
+    // and the `SecurityResolutionFailed` the resolver just appended is the
+    // record that this position existed. A holding with a null security is not
+    // a holding in anything.
+    if (resolution?.outcome !== 'resolved') continue;
+    holdings.push({
+      fact: holding.fact,
+      accountId: holding.accountId,
+      securityId: resolution.securityId,
+    });
+  }
+
+  const transactions: ResolvedTransactionFact[] = [];
+  for (const transaction of observed.transactions) {
+    let securityId: string | null = null;
+    if (transaction.fact.security !== null) {
+      const resolution = resolutions[cursor];
+      cursor += 1;
+      // Same rule, different consequence: a *buy* whose security nobody can
+      // name cannot open a lot, so it is dropped exactly as a holding is. A
+      // transaction that named no security at all never entered `withSecurity`
+      // and never reaches this branch — it is kept below with a null id.
+      if (resolution?.outcome !== 'resolved') continue;
+      securityId = resolution.securityId;
+    }
+    transactions.push({
+      fact: transaction.fact,
+      accountId: transaction.accountId,
+      securityId,
+      // Exact, as the provider stated it. `IMPORTED` is the CSV leg's label
+      // and `USER` is hand entry; neither is reachable from here.
+      source: 'BROKER',
+    });
+  }
+
+  return {
+    provider: observed.provider,
+    asOfDate: dateOnlyOfInstant(observed.startedAt),
+    holdings,
+    transactions,
   };
 }
 

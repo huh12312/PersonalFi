@@ -463,14 +463,23 @@ describe('holdingFactOf', () => {
     const fact = holdingFactOf(holdings[0] as Holding, SECURITIES, NOW);
     expect(fact).toMatchObject({
       providerAccountId: 'acct-brokerage-003',
-      providerSecurityId: 'sec-vti-0001',
-      // The strongest name Plaid gave, not the first one it listed: the fixture
-      // carries a FIGI, an ISIN, a CUSIP and a MIC-qualified ticker, and
-      // `IDENTIFIER_RANK` picks the FIGI — the only globally unique, permanent,
-      // exchange-level name in the set (01 §5.5, `figi` added 2026-06-18).
-      security: { kind: 'figi', value: 'BBG000BDTF76', chain: null, mic: null },
       quantity: '62.5',
     });
+    // WP 3.7a: **every** name Plaid gave, not the strongest one. This assertion
+    // used to read `security: { kind: 'figi', … }`, and the four names it threw
+    // away are the four listed here — which is why a security seen elsewhere as
+    // `ticker/VTI@XNYS` could not merge with the row this position created.
+    expect(fact.security.providerSecurityId).toBe('sec-vti-0001');
+    expect(fact.security.identifiers).toEqual([
+      { kind: 'figi', value: 'BBG000BDTF76', chain: null, mic: null },
+      { kind: 'isin', value: 'US9229087690', chain: null, mic: null },
+      { kind: 'cusip', value: '922908769', chain: null, mic: null },
+      { kind: 'ticker', value: 'VTI', chain: null, mic: 'XNYS' },
+    ]);
+    // …and the provider's own description, which the single identifier had no
+    // room for and which is what keeps `securities.type` off `other`.
+    expect(fact.security.type).toBe('etf');
+    expect(fact.security.name).toBe('Vanguard Total Stock Market ETF');
     expect(fact.value.minor).toBe(1_677_500n);
     expect(fact.costBasis?.minor).toBe(1_420_000n);
     expect(fact.asOf).toEqual(new Date('2026-06-01T20:00:00Z'));
@@ -487,7 +496,9 @@ describe('holdingFactOf', () => {
 
   it('keeps a sub-satoshi quantity as a decimal string, never as 1e-7', () => {
     const fact = holdingFactOf(holdings[2] as Holding, SECURITIES, NOW);
-    expect(fact.security.value).toBe('BTC');
+    expect(fact.security.identifiers).toEqual([
+      { kind: 'ticker', value: 'BTC', chain: null, mic: null },
+    ]);
     expect(fact.quantity).toBe('0.0000001');
     expect(fact.costBasis).toBeNull();
   });
@@ -499,13 +510,10 @@ describe('holdingFactOf', () => {
     // identity. The position therefore surfaces as a resolution failure rather
     // than minting an anonymous row nothing will ever merge with.
     const fact = holdingFactOf(holdings[1] as Holding, SECURITIES, NOW);
-    expect(fact.security).toEqual({
-      kind: 'proprietary',
-      value: 'sec-cash-0002',
-      chain: null,
-      mic: null,
-    });
-    expect(fact.providerSecurityId).toBe('sec-cash-0002');
+    expect(fact.security.identifiers).toEqual([
+      { kind: 'proprietary', value: 'sec-cash-0002', chain: null, mic: null },
+    ]);
+    expect(fact.security.providerSecurityId).toBe('sec-cash-0002');
   });
 });
 

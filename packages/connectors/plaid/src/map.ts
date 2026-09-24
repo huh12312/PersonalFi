@@ -297,14 +297,22 @@ export function securityIdentifiersOf(security: Security | null): readonly Secur
 }
 
 /**
- * The identifier a position is filed under.
+ * The single identifier an *investment transaction* is filed under.
  *
  * When Plaid gave no identifier at all — it happens for private placements and
  * for some cash-sweep lines — the fallback is `proprietary` carrying Plaid's own
  * `security_id`. That is deliberately a *dead end*: `@ctx/investments` never
- * accepts a proprietary identifier as an identity, so the holding surfaces as a
+ * accepts a proprietary identifier as an identity, so the position surfaces as a
  * resolution failure the user can see instead of minting an anonymous
  * `securities` row that will never merge with anything.
+ *
+ * **Holdings no longer come through here.** Picking the strongest single name
+ * out of the four `securityIdentifiersOf` had already extracted is the WP 3.7a
+ * defect (`@connector/port`'s `ProviderHoldingFact.security`), and a holding now
+ * carries the whole `ProviderSecurityFact` through `holdingSecurityFactOf`.
+ * `ProviderInvestmentTransactionFact.security` is still one identifier, so this
+ * is still its shape; it is carried in
+ * `docs/evidence/phase-3/wp3.7a-holding-identifiers.md` §7.
  */
 function holdingSecurityOf(providerSecurityId: string, security: Security | null) {
   return (
@@ -315,15 +323,14 @@ function holdingSecurityOf(providerSecurityId: string, security: Security | null
 
 /** One Plaid `Security`, as the port's canonical security fact. */
 export function securityFactOf(security: Security): ProviderSecurityFact {
-  const identifiers = securityIdentifiersOf(security);
+  const extracted = securityIdentifiersOf(security);
+  const identifiers =
+    extracted.length > 0 ? extracted : [securityIdentifierOf('proprietary', security.security_id)];
   const closePriceAsOf = security.close_price_as_of ?? null;
 
   return {
     providerSecurityId: security.security_id,
-    identifiers:
-      identifiers.length > 0
-        ? identifiers
-        : [securityIdentifierOf('proprietary', security.security_id)],
+    identifiers,
     name: security.name ?? null,
     type: security.type === null || security.type === undefined ? null : String(security.type),
     subtype: null,
@@ -338,11 +345,39 @@ export function securityFactOf(security: Security): ProviderSecurityFact {
         ? null
         : dateOnlyOf(closePriceAsOf, 'security.close_price_as_of'),
     raw: security,
-    fingerprint: securityFingerprintOf(
-      identifiers.length > 0
-        ? identifiers
-        : [securityIdentifierOf('proprietary', security.security_id)],
-    ),
+    fingerprint: securityFingerprintOf(identifiers),
+  };
+}
+
+/**
+ * The security a *position* is filed under — the whole fact, every name at once.
+ *
+ * `/investments/holdings/get` returns `holdings` and `securities` as two arrays
+ * joined by `security_id`, so this is a map lookup that cannot always hit: Plaid
+ * has been observed to reference a `security_id` it did not include. That case
+ * gets the same `proprietary` dead end `securityFactOf` uses for a security with
+ * no names — the resolver refuses it as an identity and the position surfaces as
+ * a `SecurityResolutionFailed` the user can act on, rather than as an anonymous
+ * `securities` row that will never merge with anything.
+ */
+function holdingSecurityFactOf(
+  providerSecurityId: string,
+  security: Security | null,
+): ProviderSecurityFact {
+  if (security !== null) return securityFactOf(security);
+  const identifiers = [securityIdentifierOf('proprietary', providerSecurityId)];
+  return {
+    providerSecurityId,
+    identifiers,
+    name: null,
+    type: null,
+    subtype: null,
+    currency: null,
+    isCashEquivalent: null,
+    closePrice: null,
+    closePriceAsOf: null,
+    raw: null,
+    fingerprint: securityFingerprintOf(identifiers),
   };
 }
 
@@ -358,8 +393,7 @@ export function holdingFactOf(
 
   return {
     providerAccountId: holding.account_id,
-    security: holdingSecurityOf(holding.security_id, security),
-    providerSecurityId: holding.security_id,
+    security: holdingSecurityFactOf(holding.security_id, security),
     quantity: decimalStringOf(holding.quantity, 'holding.quantity'),
     // 01 §5.5: fill rates vary wildly and it is often *total* rather than
     // per-share. Carried as reported; Phase 3 prefers deriving from investment
@@ -372,7 +406,10 @@ export function holdingFactOf(
         : asOfDate !== null && asOfDate.length > 0
           ? instantOf(`${asOfDate}T00:00:00.000Z`, 'holding.institution_price_as_of')
           : fallbackAsOf,
-    raw: { holding, security },
+    // The `Security` is no longer duplicated in here: it travels verbatim as
+    // `security.raw`, and this fact is staged as jsonb in `connection_sync_facts`
+    // where carrying it twice is a row that is twice the size for no answer.
+    raw: { holding },
   };
 }
 

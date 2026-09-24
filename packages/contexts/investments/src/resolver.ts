@@ -123,6 +123,15 @@ export interface ResolveContext {
   readonly userId: string;
   /** Which connector is talking. Required: an anonymous failure is unactionable. */
   readonly provider: string;
+  /**
+   * Which sync run this resolution belongs to, when it belongs to one.
+   *
+   * Opaque: this context does not own `sync_runs`. It travels onto
+   * `SecurityResolutionFailed.syncRunId`, where it is both the "which sync
+   * produced it" a reader wants and the key an event sink dedupes a retried
+   * delivery on. Absent for a hand-entered security or a backfill.
+   */
+  readonly syncRunId?: string | null;
   readonly correlationId?: string;
   readonly causationId?: string | null;
 }
@@ -352,6 +361,69 @@ export function createSecurityResolver(options: SecurityResolverOptions): Securi
   }
 
   /**
+   * What a later, richer sighting is allowed to teach a row that already exists.
+   *
+   * WP 3.7a, item 2. The identity upgrade beside this one has always existed:
+   * a sighting that names the security more strongly than whatever established
+   * it replaces the identity and keeps the id. `type` and `name` had no such
+   * path, so a row first created from a bare `ticker/VTI@XNYS` — no provider
+   * `type`, therefore `securityTypeOf(...) === 'other'` — stayed `other`
+   * forever, even after Plaid's holdings leg turned up with `type: 'etf'` and
+   * "Vanguard Total Stock Market ETF". The holdings path is exactly where the
+   * richer description arrives, because the position is what the brokerage
+   * describes.
+   *
+   * **Upgrades only, never downgrades**, and that asymmetry is the whole rule:
+   *
+   *   * `name` is filled when the row has none. A provider that disagrees about
+   *     the display name does not get to overwrite one we already have — that
+   *     would make the name a function of whichever connector synced last.
+   *   * `type` moves off `other` and never back onto it. `other` is the answer
+   *     the classifier gives when it was told nothing, so replacing it with a
+   *     real answer loses no information; replacing `etf` with `other` because
+   *     a second, quieter provider mentioned the same security would.
+   *
+   * The classification columns are recomputed *with* the type rather than left
+   * behind, because they are derived from it: a row that says `etf` and carries
+   * the asset class of an unclassifiable `other` is internally inconsistent,
+   * and the next reader to trust one of the two columns would be wrong. The
+   * guard means this runs at most once per row — the second sync sees a `type`
+   * that is no longer `other` and patches nothing.
+   */
+  function descriptionUpgradeOf(
+    winner: SecurityRecord,
+    security: ResolvableSecurity,
+    identifiers: readonly NormalisedIdentifier[],
+    identity: NormalisedIdentifier,
+  ): SecurityPatch {
+    const name = (security.name ?? '').trim();
+    const namePatch: SecurityPatch =
+      (winner.name ?? '').trim().length === 0 && name.length > 0 ? { name } : {};
+
+    const type = securityTypeOf(security.type, identity, security.isCashEquivalent);
+    if (winner.type !== 'other' || type === 'other') return namePatch;
+
+    const classification = classificationOf(
+      { ...security, name: security.name ?? winner.name },
+      identifiers,
+      type,
+    );
+    return {
+      ...namePatch,
+      type,
+      expenseRatio: classification.expenseRatio,
+      isCashEquivalent: classification.isCashEquivalent ?? security.isCashEquivalent ?? false,
+      assetClass: classification.assetClass,
+      region: classification.region,
+      sector: classification.sector,
+      classificationSource: classification.source,
+      classificationDepth: classification.depth,
+      classificationResidual: classification.residual,
+      classificationFlagged: classification.flagged,
+    };
+  }
+
+  /**
    * Which of several candidate rows survives. Deterministic, by construction.
    *
    * Sorting rather than a fold so the rule reads in one place: strongest
@@ -445,6 +517,7 @@ export function createSecurityResolver(options: SecurityResolverOptions): Securi
       const event = SecurityResolutionFailed.create(
         {
           provider: context.provider,
+          syncRunId: context.syncRunId ?? null,
           providerSecurityId: security.providerSecurityId ?? null,
           identifiers: security.identifiers.map((identifier) => ({
             kind: identifier.kind,
@@ -519,6 +592,7 @@ export function createSecurityResolver(options: SecurityResolverOptions): Securi
     const ourRank = identityRankOf(identity.kind) ?? Number.POSITIVE_INFINITY;
     const patch: SecurityPatch = {
       ...fieldsOfNonNull(fieldsOf(normalised)),
+      ...descriptionUpgradeOf(winner, security, normalised, identity),
       ...(ourRank < winnerRank
         ? { identityKind: identity.kind as IdentityKind, identityKey: identity.key }
         : {}),

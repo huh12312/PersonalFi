@@ -244,17 +244,34 @@ export interface ProviderSecurityFact {
 export interface ProviderHoldingFact {
   readonly providerAccountId: string;
   /**
-   * What this is a position *in*.
+   * What this is a position *in* — **every** name the provider gave it.
    *
    * Was `securityId: string` + `symbol: string | null` through Phase 1 — the
    * provider's opaque id and an unqualified ticker, which between them cannot
    * express "ETH on Ethereum" and cannot distinguish `BHP` on XASX from `BHP` on
    * XNYS. Both failure modes end the same way: two `securities` rows for one
    * asset, allocation double-counting it and TWR wrong for both halves.
+   *
+   * WP 3.1 replaced that pair with a single `SecurityIdentifier`, and WP 3.7's
+   * own wiring test found that this was still one name short of enough. The
+   * resolver tiers **strongest-first over the whole set** and `ProviderSecurityFact`
+   * exists so an adapter can hand it that set at once; a field holding one
+   * identifier forces every adapter to pick, and picking is the defect. Plaid's
+   * `holdingSecurityOf` picked the FIGI and dropped the ISIN, the CUSIP and the
+   * MIC-qualified ticker it had already extracted, so a security first seen as
+   * `ticker/VTI@XNYS` and later as `figi/BBG000BDTF76` became two `securities`
+   * rows that could never merge — no provider ever stated both at once. The
+   * single identifier also carried no `type` and no `name`, so `securities.type`
+   * from this path degraded to `other` for everything.
+   *
+   * So this is the **whole fact**, not an identifier and not an identifier plus
+   * an optional set: one shape, no dual path, nothing for an adapter to choose
+   * between. `providerSecurityId` lives inside it (evidence, never identity),
+   * which is also why this interface no longer carries its own copy.
+   *
+   * See `docs/evidence/phase-3/wp3.7a-holding-identifiers.md`.
    */
-  readonly security: SecurityIdentifier;
-  /** The provider's opaque id for the security. Evidence, never identity. */
-  readonly providerSecurityId: string;
+  readonly security: ProviderSecurityFact;
   /** `@core/kernel`'s `Quantity` wire form: a decimal string, never a float. */
   readonly quantity: string;
   readonly costBasis: Money | null;

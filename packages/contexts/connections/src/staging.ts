@@ -433,13 +433,20 @@ export async function recordHoldingFacts(
         syncRunId: target.syncRunId,
         kind: 'holding' as const,
         providerAccountId: fact.providerAccountId,
-        providerSecurityId: fact.providerSecurityId,
+        // The provider's opaque id lives on the security fact now (WP 3.7a); it
+        // stays a *column* here because it is half of this kind's natural key
+        // and an `ON CONFLICT` target cannot be a jsonb path.
+        providerSecurityId: fact.security.providerSecurityId,
         quantity: fact.quantity,
         valueMinor: fact.value.minor,
         valueCurrency: fact.value.currency,
         costBasisMinor: fact.costBasis?.minor ?? null,
         costBasisCurrency: fact.costBasis?.currency ?? null,
         asOf: fact.asOf,
+        // `security` is the whole `ProviderSecurityFact` — every identifier the
+        // provider gave, plus its type and name — rather than the one identifier
+        // an adapter had to choose. That is a jsonb *shape* change and not a DDL
+        // one: `fact` is `jsonb NOT NULL` in migration 0018 and always was.
         fact: { security: fact.security, raw: fact.raw },
       })),
     )
@@ -764,8 +771,12 @@ function holdingFactFromRow(row: ConnectionSyncFactRow): ProviderHoldingFact {
   const fact = row.fact as Record<string, unknown>;
   return {
     providerAccountId: row.providerAccountId,
+    // Round-trips as JSON: every field of `ProviderSecurityFact` is a string, a
+    // boolean, a null or an array of those. `closePriceAsOf` is a `DateOnly`,
+    // which is a *branded string*, and `closePrice` is a decimal string rather
+    // than a float — so nothing here needs a reviver, and nothing loses
+    // precision on the way through Postgres.
     security: fact['security'] as ProviderHoldingFact['security'],
-    providerSecurityId: row.providerSecurityId as string,
     quantity: row.quantity as string,
     costBasis: moneyOrNull(row.costBasisMinor, row.costBasisCurrency),
     value: money(row.valueMinor as bigint, row.valueCurrency as string),

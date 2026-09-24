@@ -593,7 +593,7 @@ describe('the other datasets', () => {
   it('syncs holdings and liabilities', async () => {
     const { connector, handle, options } = harness();
     const holdings = await connector.syncHoldings(handle, options);
-    expect(holdings.map((h) => h.providerSecurityId)).toEqual([
+    expect(holdings.map((h) => h.security.providerSecurityId)).toEqual([
       'sec-vti-0001',
       'sec-cash-0002',
       'sec-btc-0003',

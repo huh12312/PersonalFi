@@ -133,13 +133,21 @@ describe('holdings and securities', () => {
     const holding = holdingFactOf(btc, '63105.23', NOW);
     expect(holding).toMatchObject({
       providerAccountId: BTC_WALLET,
-      security: { kind: 'ticker', value: 'BTC', chain: null, mic: null },
-      providerSecurityId: 'BTC-USD',
       quantity: '0.35',
       // v3 reports no basis at all. `null`, never zero: 04 §5.5 wants
       // `unavailable`, not gain-from-zero.
       costBasis: null,
     });
+    // WP 3.7a: the whole `ProviderSecurityFact`, which for Coinbase is the same
+    // one `securityFactOf` gives the balances path — one identifier, because v3
+    // names an asset by its code and nothing else, but carrying the type and
+    // the display name a `SecurityIdentifier` had no room for.
+    expect(holding.security.identifiers).toEqual([
+      { kind: 'ticker', value: 'BTC', chain: null, mic: null },
+    ]);
+    expect(holding.security.providerSecurityId).toBe('BTC-USD');
+    expect(holding.security.type).toBe('cryptocurrency');
+    expect(holding.security).toEqual(securityFactOf('BTC', '63105.23'));
     expect(holding.value).toEqual(Money.of(2_208_683n, 'USD'));
   });
 

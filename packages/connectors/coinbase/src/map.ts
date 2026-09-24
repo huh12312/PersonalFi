@@ -206,8 +206,13 @@ export function holdingFactOf(
   const total = totalBalanceOf(account);
   return {
     providerAccountId: account.uuid,
-    security: securityIdentifierOfAsset(asset),
-    providerSecurityId: coinbaseProductIdOf(asset),
+    // The whole fact, not the ticker alone (WP 3.7a). For Coinbase the set has
+    // one member either way — v3 names an asset by its code and nothing else —
+    // but `type: 'cryptocurrency'` and the display name ride along with it, and
+    // those are what keep `securities.type` from degrading to `other` on the
+    // holdings path. `securityFactOf` is the same function the balances path
+    // uses, so the two can no longer disagree about what ETH is.
+    security: securityFactOf(asset, price),
     quantity: total,
     costBasis: null,
     value: usdValueOf(total, price, 'holding.value'),

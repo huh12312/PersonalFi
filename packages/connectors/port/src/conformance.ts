@@ -48,10 +48,15 @@
  *     credential. P0-12, and the reason `ConnectionHandle.secret` is a closure.
  * 12. `disconnect/revokes` — after `disconnect`, the adapter refuses to sync.
  * 13. `holdings/names a security` — a position identifies what it is a position
- *     *in*, with a kind from `SECURITY_IDENTIFIER_KINDS` and a non-empty value,
- *     and its quantity is a decimal string. WP 3.1: the port has carried
- *     `ProviderHoldingFact` since Phase 1 and asserted nothing about it, so an
- *     adapter could name a security by a bare provider id and nothing noticed.
+ *     *in* with **every** name the provider gave it: a non-empty identifier set
+ *     whose kinds all come from `SECURITY_IDENTIFIER_KINDS`, a
+ *     `providerSecurityId`, a fingerprint that is actually
+ *     `securityFingerprintOf(identifiers)`, and a decimal-string quantity.
+ *     WP 3.1: the port has carried `ProviderHoldingFact` since Phase 1 and
+ *     asserted nothing about it, so an adapter could name a security by a bare
+ *     provider id and nothing noticed. WP 3.7a: asserting *one* identifier was
+ *     still not enough — an adapter that had four names and passed the strongest
+ *     one satisfied the old check and still split the security in two.
  * 14. `investment-txns/fingerprinted` — mandatory fingerprint, unique
  *     `providerTransactionId` within one window (there is no cursor to dedupe
  *     with — 01 §5.5), and quantity/price as decimal strings.
@@ -67,6 +72,7 @@ import type {
 } from './connector.ts';
 import { isConnectorError } from './errors.ts';
 import { SECURITY_IDENTIFIER_KINDS, type ProviderTransactionFact } from './facts.ts';
+import { securityFingerprintOf } from './fingerprint.ts';
 
 export interface ConformanceCheck {
   readonly name: string;
@@ -392,7 +398,7 @@ export function connectorConformanceChecks(subject: ConformanceSubject): Conform
       // return a position naming a security by a bare provider id and no check
       // would notice — which is exactly how one asset becomes two `securities`
       // rows, allocation double-counts it, and TWR is wrong for both halves.
-      name: 'holdings/every position names a security and carries a decimal quantity',
+      name: 'holdings/every position names a security by every name it has, and carries a decimal quantity',
       run: async () => {
         if (!supports(capabilitiesOf(), 'holdings')) return;
         const syncHoldings = connector().syncHoldings;
@@ -407,19 +413,47 @@ export function connectorConformanceChecks(subject: ConformanceSubject): Conform
             holding.providerAccountId.length > 0,
             'a holding does not say which account it belongs to',
           );
+          // WP 3.7a. `security` is the whole `ProviderSecurityFact`, so what is
+          // checked here is the *set* — because handing the resolver one name
+          // out of four is the defect this shape exists to make unrepresentable
+          // (`facts.ts`, `ProviderHoldingFact.security`), and an adapter that
+          // filled the field with a one-element set it had to choose would be
+          // back in it.
           assert(
-            SECURITY_IDENTIFIER_KINDS.includes(holding.security.kind),
-            `a holding names its security with an unknown identifier kind ` +
-              `'${String(holding.security.kind)}'`,
+            holding.security.providerSecurityId.trim().length > 0,
+            'a holding carries a security with no providerSecurityId; it is evidence rather ' +
+              'than identity, but an adapter always has one and it is what corroborates the ' +
+              'row on the next sync',
           );
           assert(
-            holding.security.value.trim().length > 0,
-            'a holding carries an empty security identifier value',
+            holding.security.identifiers.length > 0,
+            'a holding names its security with an empty identifier set; an adapter with no ' +
+              'name at all must still say so with a `proprietary` identifier, which the ' +
+              'resolver refuses as an identity and reports as a resolution failure the user ' +
+              'can see',
           );
+          for (const identifier of holding.security.identifiers) {
+            assert(
+              SECURITY_IDENTIFIER_KINDS.includes(identifier.kind),
+              `a holding names its security with an unknown identifier kind ` +
+                `'${String(identifier.kind)}'`,
+            );
+            assert(
+              identifier.value.trim().length > 0,
+              'a holding carries an empty security identifier value',
+            );
+            assert(
+              identifier.kind !== 'chain_contract' || identifier.chain !== null,
+              'a holding names a chain_contract with no chain; a contract address without its ' +
+                'chain is not an identifier — the same address exists on every EVM network',
+            );
+          }
+          // The identifier set is what merges two providers' sightings, so a
+          // stale or hand-built fingerprint is a silent cross-provider split.
           assert(
-            holding.security.kind !== 'chain_contract' || holding.security.chain !== null,
-            'a holding names a chain_contract with no chain; a contract address without its ' +
-              'chain is not an identifier — the same address exists on every EVM network',
+            holding.security.fingerprint === securityFingerprintOf(holding.security.identifiers),
+            'a holding carries a security whose fingerprint is not ' +
+              'securityFingerprintOf(identifiers); it is mandatory on every fact (08 §2.5)',
           );
           // A float here is the D3 failure the whole quantity type exists to
           // prevent: 18-decimal tokens do not survive IEEE-754, and the error

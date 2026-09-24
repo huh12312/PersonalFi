@@ -55,12 +55,28 @@ export const SecurityResolutionFailed = defineEvent({
     'A provider named a security and no tier could turn that name into an identity, so no ' +
     'securities row was written. The identifiers and the per-tier abstain reason travel in the ' +
     'payload because there is no row to re-read — that is what makes this event the only record ' +
-    'that the holding exists at all. Emitted once per resolution attempt; a re-sync that fails the ' +
-    'same way emits again, because the second failure is a second observation and suppressing it ' +
-    'would make a permanent gap look like a transient one.',
+    'that the holding exists at all. Emitted once per sync run per (provider, providerSecurityId); ' +
+    'a *later* sync that fails the same way emits again, because the second failure is a second ' +
+    'observation and suppressing it would make a permanent gap look like a transient one, but a ' +
+    'retried delivery of the same run is the same observation and appends nothing.',
   schema: z.object({
     /** Which connector was talking. Never `null`: an anonymous failure is unactionable. */
     provider: z.string().min(1),
+    /**
+     * Which sync run observed this name, when one did.
+     *
+     * Opaque here — this context does not own `sync_runs` and never joins to it.
+     * It is on the payload for two reasons, and the first is the duller one: the
+     * question a reader asks of this event is "which sync produced it", and
+     * before WP 3.7a the only answer was a correlation id minted on the spot.
+     * The second is that it is the **dedupe key**. The lot consumer resolves in
+     * a transaction of its own (`apps/api/src/domain.ts`), so a retried delivery
+     * re-runs the abstention; `(syncRunId, provider, providerSecurityId)` is what
+     * lets the appender recognise the retry as the same observation rather than
+     * a new one. `null` for a resolution that is not part of a sync run at all —
+     * a hand-entered security, a backfill script.
+     */
+    syncRunId: z.uuid().nullable(),
     /** The provider's own opaque id, when it had one. Evidence; never an identity. */
     providerSecurityId: z.string().nullable(),
     /** What the provider called it. May be empty — that is itself the failure. */
