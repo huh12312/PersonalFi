@@ -98,7 +98,9 @@ const FRED_KEY = 'fredkey_0a1b2c3d4e5f60718293a4b5c6d7e8f9'; // gitleaks:allow â
  * it is a `23514` in the face of whoever wires consent. Owed a migration in
  * `packages/db` (not WP 3.10a's to write).
  */
-const UNGRANTABLE_SCOPES = ['liabilities.terms', 'market.rates'];
+// Empty since migration 0019 widened `snapshot_grants_scope_check` to contract 1.1.0's scopes;
+// kept as the seam the next contract minor would use, pinned by the registration test.
+const UNGRANTABLE_SCOPES: readonly string[] = [];
 const PUBLIC_IP = () => Promise.resolve(['93.184.216.34']);
 
 function isoDay(offsetDays: number): string {

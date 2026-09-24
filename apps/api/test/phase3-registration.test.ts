@@ -29,7 +29,7 @@
  */
 import { systemClock } from '@core/kernel';
 import { createEventRegistry, type RegisteredConsumer } from '@core/platform';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   INTEGRATIONS_EVENTS,
@@ -561,28 +561,40 @@ describe('advisor scopes and their readers (WP 3.9, closed by WP 3.10a)', () => 
    * observed from a real database by `apps/api/test/db/phase3-advisors.test.ts`,
    * which is what turned this from a reading of the SQL into a fact.
    *
-   * It is **owed a migration in `packages/db`**, which WP 3.10a does not own.
-   * Recorded here as an exact expected set rather than left to be rediscovered:
-   * landing the migration turns this red and deletes the list, and adding a
-   * sixteenth scope without one turns it red naming the scope.
+   * Migration `0019_snapshot_grant_scopes_v1_1.sql` closed that gap by
+   * re-declaring the CHECK. The list is now read from the **latest** migration
+   * that declares `snapshot_grants_scope_check` (0012's inline column CHECK, or
+   * any later `ADD CONSTRAINT snapshot_grants_scope_check`), so each contract
+   * minor that adds a scope must ship a widening migration or this goes red
+   * naming the scope — a build failure rather than a runtime 23514.
    */
-  const UNGRANTABLE_UNTIL_MIGRATED = ['liabilities.terms', 'market.rates'];
+  const UNGRANTABLE_UNTIL_MIGRATED: readonly string[] = [];
 
   it('every advisor scope can actually be granted, or is a recorded migration gap', () => {
-    const migration = readFileSync(
-      join(import.meta.dirname, '../../../packages/db/migrations/0012_insights.sql'),
-      'utf8',
-    );
+    const migrationsDir = join(import.meta.dirname, '../../../packages/db/migrations');
+    const files = readdirSync(migrationsDir)
+      .filter((name) => name.endsWith('.sql'))
+      .sort();
     // The `scope IN ( ... )` list on `snapshot_grants`, read out of the
-    // migration itself rather than restated here — a copy would agree with
-    // itself forever.
-    const check =
-      /CREATE TABLE snapshot_grants[\s\S]*?scope\s+TEXT\s+NOT NULL CHECK \(scope IN \(([\s\S]*?)\)\)/u.exec(
-        migration,
-      );
+    // migrations themselves rather than restated here — a copy would agree
+    // with itself forever. The last declaration wins, as it does in Postgres.
+    let check: RegExpExecArray | null = null;
+    for (const name of files) {
+      const migration = readFileSync(join(migrationsDir, name), 'utf8');
+      const declared =
+        /CREATE TABLE snapshot_grants[\s\S]*?scope\s+TEXT\s+NOT NULL CHECK \(scope IN \(([\s\S]*?)\)\)/u.exec(
+          migration,
+        ) ??
+        /ADD CONSTRAINT snapshot_grants_scope_check CHECK \(scope IN \(([\s\S]*?)\)\)/u.exec(
+          migration,
+        );
+      if (declared !== null) check = declared;
+    }
     expect(check, 'the snapshot_grants scope CHECK could not be located').not.toBeNull();
     const grantable = new Set(
-      [...(check?.[1] ?? '').matchAll(/'([a-z_.]+)'/gu)].map((match) => match[1] as string),
+      [...(check?.[1] ?? '').replace(/--[^\n]*/gu, '').matchAll(/'([a-z_.]+)'/gu)].map(
+        (match) => match[1] as string,
+      ),
     );
     expect(grantable.size, 'the CHECK list parsed as empty').toBeGreaterThan(0);
 

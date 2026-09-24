@@ -331,6 +331,11 @@ describeWithDb('runMigrations', () => {
       //   No column here is a float: `quantity` is NUMERIC(38,18), `price` is
       //   NUMERIC(20,10), `apr` is NUMERIC(9,6) and every money value is a
       //   BIGINT/CHAR(3) pair (D3).
+      // 0019_snapshot_grant_scopes_v1_1: no table. Re-declares
+      //   `snapshot_grants_scope_check` with advisor contract 1.1.0's two
+      //   added scopes (`liabilities.terms`, `market.rates`); WP 3.10a hit
+      //   the 23514 writing the first real grant. Parity with
+      //   `ADVISOR_SCOPES` is asserted by apps/api's registration test.
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
