@@ -168,10 +168,15 @@ describe.skipIf(NO_DATABASE)('/recurring (WP 2.r)', () => {
     expect(again.statusCode).toBe(404);
   });
 
+  // The series was seeded from charges one month ago and today, so its next
+  // occurrence is exactly one calendar month out. In a 30-day month that lands
+  // on the default 30-day window's far edge (CI went red on 2026-09-24, green on
+  // the 22nd), so the window is widened explicitly: what this test asserts is
+  // that a confirmed series projects at all, not where the default edge falls.
   it('projects the confirmed series into upcoming/forecast/safe-to-spend', async () => {
     const upcoming = await h.request({
       method: 'GET',
-      url: '/recurring/upcoming',
+      url: '/recurring/upcoming?days=45',
       session: h.stale,
     });
     expectStatus(upcoming, 200);
@@ -179,7 +184,7 @@ describe.skipIf(NO_DATABASE)('/recurring (WP 2.r)', () => {
 
     const forecast = await h.request({
       method: 'GET',
-      url: '/recurring/forecast',
+      url: '/recurring/forecast?days=45',
       session: h.stale,
     });
     expectStatus(forecast, 200);
@@ -187,7 +192,7 @@ describe.skipIf(NO_DATABASE)('/recurring (WP 2.r)', () => {
 
     const safeToSpend = await h.request({
       method: 'GET',
-      url: '/recurring/safe-to-spend',
+      url: '/recurring/safe-to-spend?days=45',
       session: h.stale,
     });
     expectStatus(safeToSpend, 200);
