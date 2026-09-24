@@ -200,7 +200,7 @@ export const cryptoLossLot: BuiltinRule = {
       ? 'The wash-sale rule is treated here as reaching digital assets, as this app last ' +
         'checked. That treatment changes by legislation rather than gradually.'
       : 'The wash-sale rule does not reach digital assets as this app last checked, because ' +
-        'they are treated as property rather than as securities. Bills to change that recur, ' +
+        'they are treated as property rather than as stocks or bonds. Bills to change that recur, ' +
         'so this is a statement with a date on it rather than a standing one.';
 
     const insights: Insight[] = [];
@@ -241,7 +241,7 @@ export const cryptoLossLot: BuiltinRule = {
             actions: [
               suggest(
                 'Read about realising a crypto loss',
-                'The treatment differs from securities, and it is the kind of difference that ' +
+                'The treatment differs from stocks and bonds, and it is the kind of difference that ' +
                   'changes without much warning.',
               ),
             ],
