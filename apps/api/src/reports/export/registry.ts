@@ -212,6 +212,19 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'market_data_runs',
     "market data (WP 3.4); another deployment's run history would seed this one's rate budget with calls it never made.",
   ],
+  // Phase 3 WP 3.7's provider fact staging (migration 0018) — the sibling of
+  // `connection_staged_facts` above and exempt for the same reason, not a new
+  // one: every row is a restatement of what the provider said on the last
+  // sync, and the *next* sync rewrites all of them. Nothing here is a
+  // derivation the user could lose. What must survive a round trip is what the
+  // lot engine computed **from** these facts — `investment_transactions` and
+  // `cost_basis_lots`, both already listed above — and a bundle carrying the
+  // provider's raw assertions alongside them would restore two copies of the
+  // same truth, one of which would be stale the moment the connection synced.
+  [
+    'connection_sync_facts',
+    're-derivable by re-sync; the provider’s last statement, not a derivation (the connection_staged_facts reason, WP 3.7).',
+  ],
   // Phase 3 WP 3.6's watch-only wallet descriptors (migration 0016). An
   // xpub/ypub/zpub is **not** a credential — it is public information a block
   // explorer would show anyone, and there is no key material column here to

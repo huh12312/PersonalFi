@@ -304,6 +304,33 @@ describeWithDb('runMigrations', () => {
       //   There is deliberately no `fx_rate_missing` column and no default: a
       //   missing rate is FxRateUnavailable and the day is not written for
       //   that account, never a silent 1.0 (08 §6.6).
+      // 0018_connection_sync_facts: one @ctx/connections table —
+      //   connection_sync_facts — plus a widened `sync_runs.operation` CHECK
+      //   that adds `investment_txns` as a fifth leg. WP 3.7's dispatch entry
+      //   said "Migrations. None" and missed two CHECK constraints: 0005's
+      //   operation list had no `investment_txns` member, and 0008's
+      //   `connection_staged_facts.kind` list has no holding/liability member
+      //   and no `sync_run_id` column, so there was nowhere durable for the
+      //   facts `InvestmentSyncPort.factsForRun(userId, syncRunId)` reads from
+      //   another process. The table is keyed on the **provider's** natural
+      //   key — three partial UNIQUE indexes, one per kind, of which
+      //   `connection_sync_facts_investment_transaction_idx` on
+      //   (connection_id, provider_transaction_id) is 01 §5.5's idempotency
+      //   key made structural — and `sync_run_id` means "the run that last
+      //   observed this", so re-fetching the same 24-month window nightly
+      //   restates rows instead of appending 500 more.
+      //   Six CHECKs carry the load-bearing claims.
+      //   `connection_sync_facts_holding_is_a_position` refuses a holding with
+      //   no security, no quantity or no value, so a position cannot become a
+      //   number with nothing behind it; four `…_is_money` CHECKs refuse a
+      //   minor amount without its currency; and
+      //   `connection_sync_facts_investment_transaction_is_identified`
+      //   requires the idempotency key, the fingerprint, the quantity, the
+      //   price and the date together — 01 §5.5 makes the upsert the only
+      //   protection against a re-fetched window, so the key is not optional.
+      //   No column here is a float: `quantity` is NUMERIC(38,18), `price` is
+      //   NUMERIC(20,10), `apr` is NUMERIC(9,6) and every money value is a
+      //   BIGINT/CHAR(3) pair (D3).
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
@@ -324,6 +351,7 @@ describeWithDb('runMigrations', () => {
         'config_snapshots',
         'connection_accounts',
         'connection_staged_facts',
+        'connection_sync_facts',
         'connections',
         'cost_basis_lots',
         'delivery_attempts',

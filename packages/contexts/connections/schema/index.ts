@@ -37,3 +37,10 @@ export {
   type NewConnectionStagedFactRow,
   type StagedFactKind,
 } from './staging.ts';
+export {
+  SYNC_FACT_KINDS,
+  connectionSyncFacts,
+  type ConnectionSyncFactRow,
+  type NewConnectionSyncFactRow,
+  type SyncFactKind,
+} from './sync-facts.ts';

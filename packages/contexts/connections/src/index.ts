@@ -70,6 +70,25 @@ export { ConnectorRegistry, type RegisteredConnector } from './registry.ts';
 // --- durable staging for the process-local connectors (decision D-5) --------
 export { createCsvStagingStore, createManualStagingStore } from './staging.ts';
 
+// --- what a provider's dataset legs observed (WP 3.7, migration 0018) -------
+//
+// The writers are the orchestrator's alone and are not exported: a fact is
+// written by the leg that fetched it, inside the transaction that settles that
+// leg's `sync_runs` row, or it is not written. The readers are published
+// because two consumers live outside this context — `@ctx/investments`' lot
+// engine, through `InvestmentSyncPort.factsForRun`, and WP 3.10's
+// `liabilities.terms` scope, through the snapshot builder's
+// `investments.liabilities(...)` port. Both are satisfied in
+// `apps/api/src/domain.ts`.
+export {
+  investmentFactsForRun,
+  liabilityTermsFor,
+  type LiabilityTerms,
+  type RunHoldingFact,
+  type RunInvestmentFacts,
+  type RunInvestmentTransactionFact,
+} from './staging.ts';
+
 // --- lifecycle --------------------------------------------------------------
 export {
   accountMap,

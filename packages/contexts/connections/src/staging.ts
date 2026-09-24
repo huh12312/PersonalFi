@@ -22,17 +22,28 @@
  * same way `connect()` staging an account and `linkAccounts()` upserting it
  * are two different writes today.
  */
-import { money, newId } from '@core/kernel';
+import { DateOnly, money, newId, type DateOnly as DateOnlyType, type Money } from '@core/kernel';
 import type {
   ProviderAccountFact,
   ProviderBalanceFact,
+  ProviderHoldingFact,
+  ProviderInvestmentTransactionFact,
+  ProviderLiabilityFact,
   ProviderTransactionFact,
 } from '@connector/port';
 import type { StagingStore as CsvStagingStore } from '@connector/csv';
 import type { StagingStore as ManualStagingStore } from '@connector/manual';
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
-import { connectionStagedFacts, type ConnectionStagedFactRow } from '../schema/index.ts';
-import type { ConnectionsDatabase } from './db.ts';
+import {
+  connectionAccounts,
+  connectionStagedFacts,
+  connectionSyncFacts,
+  connections,
+  syncRuns,
+  type ConnectionStagedFactRow,
+  type ConnectionSyncFactRow,
+} from '../schema/index.ts';
+import type { ConnectionsDatabase, ConnectionsExecutor } from './db.ts';
 
 const TRANSACTION_KINDS = [
   'transaction_added',
@@ -319,4 +330,468 @@ export function createManualStagingStore(database: ConnectionsDatabase): ManualS
 /** For `apps/api/src/domain.ts` to attach to the registry's `CsvImportConnector`. */
 export function createCsvStagingStore(database: ConnectionsDatabase): CsvStagingStore {
   return buildStagingStore(database);
+}
+
+// ---------------------------------------------------------------------------
+// `connection_sync_facts` — the other staging table (migration 0018)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a *remote* provider leg observed, staged for another context to read.
+ *
+ * The mirror image of everything above. `connection_staged_facts` is an
+ * **inbox**: rows a process-local connector accumulated and has not flushed
+ * yet. `connection_sync_facts` is an **outbox**: rows a provider already gave
+ * us, written so `@ctx/investments`' lot consumer can read them back through
+ * `InvestmentSyncPort.factsForRun` in a different transaction, in a different
+ * process, some seconds later. 08 §3.4 is why it cannot be the event payload —
+ * "payloads are ids, counts and enums, never rows".
+ *
+ * ## Every write is an upsert on the provider's natural key
+ *
+ * Not on the run. 01 §5.5: there is no `/investments/transactions/sync`, so
+ * every nightly sync re-fetches the whole 24-month window and restates the
+ * same facts. Keyed on `provider_transaction_id`, the second sync of the same
+ * window writes **zero** new rows and simply re-points `sync_run_id` at the
+ * run that just saw them — which is the row-level half of "two syncs of the
+ * same window add no investment transactions", and the reason this table's
+ * size is the size of the portfolio rather than the size of the sync history.
+ *
+ * ## These take an executor, and the leg passes its transaction
+ *
+ * Unlike `buildStagingStore` above (whose every method is a standalone
+ * statement, deliberately outside the orchestrator's commit), a leg's facts
+ * and the `sync_runs` row that announces them have to land together: a run
+ * that says `added_count = 42` with no facts behind it would send the lot
+ * consumer looking for rows that do not exist, and a rolled-back leg that left
+ * its facts behind would hand the *next* run's `factsForRun` somebody else's
+ * observations.
+ */
+export interface SyncFactTarget {
+  readonly userId: string;
+  readonly connectionId: string;
+  /** The run being recorded. Becomes `sync_run_id` — "last observed by". */
+  readonly syncRunId: string;
+}
+
+/** How many rows a fact write touched, and how many of those were new. */
+export interface SyncFactWriteResult {
+  /** Rows inserted or updated. Equal to `facts.length` unless one was dropped. */
+  readonly written: number;
+  /** Rows that did not exist before this write. The idempotence measurement. */
+  readonly inserted: number;
+}
+
+const NO_FACTS: SyncFactWriteResult = Object.freeze({ written: 0, inserted: 0 });
+
+/** Verbatim predicates of migration 0018's three partial unique indexes. */
+const HOLDING_WHERE = sql`kind = 'holding'`;
+const INVESTMENT_TRANSACTION_WHERE = sql`kind = 'investment_transaction'`;
+const LIABILITY_WHERE = sql`kind = 'liability'`;
+
+/**
+ * `xmax = 0` is Postgres' own answer to "was this an insert or an update".
+ *
+ * Counting `RETURNING` rows cannot tell them apart on an `ON CONFLICT DO
+ * UPDATE`, and the difference is exactly what the idempotence evidence
+ * measures. `recordBalance` in `@ctx/ledger` uses the same trick and so does
+ * the test harness's ledger double.
+ */
+const INSERTED = sql<boolean>`(xmax = 0)`;
+
+function countInserted(rows: readonly { inserted: boolean | null }[]): SyncFactWriteResult {
+  return {
+    written: rows.length,
+    inserted: rows.filter((row) => row.inserted === true).length,
+  };
+}
+
+/**
+ * The holdings leg's facts: one row per (connection, account, security).
+ *
+ * A position the provider stops reporting is **left behind** rather than
+ * deleted. Two reasons, and neither is laziness: the row is keyed on the
+ * provider's natural key and carries the run that last saw it, so a stale row
+ * is visibly stale (`sync_run_id` points at an old run) and answers no
+ * `factsForRun`; and deleting on absence would make one truncated provider
+ * response — the failure mode 08 §2.2 says an honest adapter must never
+ * produce — permanently destroy the record that the position existed.
+ */
+export async function recordHoldingFacts(
+  executor: ConnectionsExecutor,
+  target: SyncFactTarget,
+  facts: readonly ProviderHoldingFact[],
+): Promise<SyncFactWriteResult> {
+  if (facts.length === 0) return NO_FACTS;
+  const rows = await executor
+    .insert(connectionSyncFacts)
+    .values(
+      facts.map((fact) => ({
+        id: newId(),
+        userId: target.userId,
+        connectionId: target.connectionId,
+        syncRunId: target.syncRunId,
+        kind: 'holding' as const,
+        providerAccountId: fact.providerAccountId,
+        providerSecurityId: fact.providerSecurityId,
+        quantity: fact.quantity,
+        valueMinor: fact.value.minor,
+        valueCurrency: fact.value.currency,
+        costBasisMinor: fact.costBasis?.minor ?? null,
+        costBasisCurrency: fact.costBasis?.currency ?? null,
+        asOf: fact.asOf,
+        fact: { security: fact.security, raw: fact.raw },
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [
+        connectionSyncFacts.connectionId,
+        connectionSyncFacts.providerAccountId,
+        connectionSyncFacts.providerSecurityId,
+      ],
+      targetWhere: HOLDING_WHERE,
+      set: {
+        syncRunId: sql`excluded.sync_run_id`,
+        quantity: sql`excluded.quantity`,
+        valueMinor: sql`excluded.value_minor`,
+        valueCurrency: sql`excluded.value_currency`,
+        costBasisMinor: sql`excluded.cost_basis_minor`,
+        costBasisCurrency: sql`excluded.cost_basis_currency`,
+        asOf: sql`excluded.as_of`,
+        fact: sql`excluded.fact`,
+        updatedAt: sql`now()`,
+      },
+    })
+    .returning({ inserted: INSERTED });
+  return countInserted(rows);
+}
+
+/**
+ * The investment-transactions leg's facts: one row per provider transaction id.
+ *
+ * `onConflictDoUpdate` rather than `DoNothing` because a provider is allowed to
+ * *correct* a transaction inside the window — Plaid restates a settlement price
+ * — and a `DO NOTHING` would silently keep the first answer forever. The
+ * conflict target is 01 §5.5's idempotency key, so a correction updates the row
+ * it corrects and a re-fetch of an unchanged window changes nothing but
+ * `sync_run_id`.
+ */
+export async function recordInvestmentTransactionFacts(
+  executor: ConnectionsExecutor,
+  target: SyncFactTarget,
+  facts: readonly ProviderInvestmentTransactionFact[],
+): Promise<SyncFactWriteResult> {
+  if (facts.length === 0) return NO_FACTS;
+  const rows = await executor
+    .insert(connectionSyncFacts)
+    .values(
+      facts.map((fact) => ({
+        id: newId(),
+        userId: target.userId,
+        connectionId: target.connectionId,
+        syncRunId: target.syncRunId,
+        kind: 'investment_transaction' as const,
+        providerAccountId: fact.providerAccountId,
+        providerSecurityId: fact.providerSecurityId,
+        providerTransactionId: fact.providerTransactionId,
+        fingerprint: fact.fingerprint,
+        quantity: fact.quantity,
+        price: fact.price,
+        amountMinor: fact.amount.minor,
+        amountCurrency: fact.amount.currency,
+        feesMinor: fact.fees?.minor ?? null,
+        feesCurrency: fact.fees?.currency ?? null,
+        transactionDate: fact.date,
+        fact: {
+          security: fact.security,
+          name: fact.name,
+          type: fact.type,
+          subtype: fact.subtype,
+          raw: fact.raw,
+        },
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [connectionSyncFacts.connectionId, connectionSyncFacts.providerTransactionId],
+      targetWhere: INVESTMENT_TRANSACTION_WHERE,
+      set: {
+        syncRunId: sql`excluded.sync_run_id`,
+        providerAccountId: sql`excluded.provider_account_id`,
+        providerSecurityId: sql`excluded.provider_security_id`,
+        fingerprint: sql`excluded.fingerprint`,
+        quantity: sql`excluded.quantity`,
+        price: sql`excluded.price`,
+        amountMinor: sql`excluded.amount_minor`,
+        amountCurrency: sql`excluded.amount_currency`,
+        feesMinor: sql`excluded.fees_minor`,
+        feesCurrency: sql`excluded.fees_currency`,
+        transactionDate: sql`excluded.transaction_date`,
+        fact: sql`excluded.fact`,
+        updatedAt: sql`now()`,
+      },
+    })
+    .returning({ inserted: INSERTED });
+  return countInserted(rows);
+}
+
+/**
+ * The liabilities leg's facts: one terms block per (connection, account).
+ *
+ * This is the APR / statement-balance / minimum-payment / next-payment-due
+ * block WP 2.7's `CATALOGUE_GAPS` called "the highest-value addition to the
+ * scope catalogue a later phase could make". It is current state, not history:
+ * a card has one APR at a time, and the row is overwritten.
+ */
+export async function recordLiabilityFacts(
+  executor: ConnectionsExecutor,
+  target: SyncFactTarget,
+  facts: readonly ProviderLiabilityFact[],
+): Promise<SyncFactWriteResult> {
+  if (facts.length === 0) return NO_FACTS;
+  const rows = await executor
+    .insert(connectionSyncFacts)
+    .values(
+      facts.map((fact) => ({
+        id: newId(),
+        userId: target.userId,
+        connectionId: target.connectionId,
+        syncRunId: target.syncRunId,
+        kind: 'liability' as const,
+        providerAccountId: fact.providerAccountId,
+        apr: fact.apr,
+        statementBalanceMinor: fact.statementBalance?.minor ?? null,
+        statementBalanceCurrency: fact.statementBalance?.currency ?? null,
+        minimumPaymentMinor: fact.minimumPayment?.minor ?? null,
+        minimumPaymentCurrency: fact.minimumPayment?.currency ?? null,
+        nextPaymentDue: fact.nextPaymentDue,
+        fact: { raw: fact.raw },
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [connectionSyncFacts.connectionId, connectionSyncFacts.providerAccountId],
+      targetWhere: LIABILITY_WHERE,
+      set: {
+        syncRunId: sql`excluded.sync_run_id`,
+        apr: sql`excluded.apr`,
+        statementBalanceMinor: sql`excluded.statement_balance_minor`,
+        statementBalanceCurrency: sql`excluded.statement_balance_currency`,
+        minimumPaymentMinor: sql`excluded.minimum_payment_minor`,
+        minimumPaymentCurrency: sql`excluded.minimum_payment_currency`,
+        nextPaymentDue: sql`excluded.next_payment_due`,
+        fact: sql`excluded.fact`,
+        updatedAt: sql`now()`,
+      },
+    })
+    .returning({ inserted: INSERTED });
+  return countInserted(rows);
+}
+
+// ---------------------------------------------------------------------------
+// …and reading them back
+// ---------------------------------------------------------------------------
+
+/**
+ * One holding fact, with the ledger account it belongs to already resolved.
+ *
+ * The join to `connection_accounts` happens here rather than at the caller so
+ * the SQL that names this context's tables stays inside this context —
+ * `pnpm lint:schema-ownership`'s rule, and the reason
+ * `InvestmentSyncPort.factsForRun` in `apps/api/src/domain.ts` can be about
+ * securities and sources rather than about a three-table join.
+ */
+export interface RunHoldingFact {
+  /** `@ctx/ledger`'s `accounts.id`. Opaque here, as everywhere in this context. */
+  readonly accountId: string;
+  readonly fact: ProviderHoldingFact;
+}
+
+export interface RunInvestmentTransactionFact {
+  readonly accountId: string;
+  readonly fact: ProviderInvestmentTransactionFact;
+}
+
+/** Everything one run observed, plus the two fields the consumer's port needs. */
+export interface RunInvestmentFacts {
+  readonly provider: string;
+  /** The run's `started_at`. The consumer turns it into the facts' `asOfDate`. */
+  readonly startedAt: Date;
+  readonly holdings: readonly RunHoldingFact[];
+  readonly transactions: readonly RunInvestmentTransactionFact[];
+}
+
+/**
+ * The `holdings` and `investment_transaction` facts a run last observed.
+ *
+ * `null` when there is no such run for this user — which is also the answer for
+ * another user's run id, because the `user_id` predicate is in the `WHERE` and
+ * not in a branch somebody could forget.
+ *
+ * A fact whose `provider_account_id` this connection has never mapped is
+ * **dropped**, not raised. That is the opposite of `groupByAccount`'s rule for
+ * transactions, and deliberately so: there, a dropped row is money the user
+ * loses sight of, so a contract violation is worth failing the page over. Here
+ * the leg has already committed and the only reader is a derivation that runs
+ * minutes later; raising would turn a provider's stray account id into a
+ * permanently red consumer that no retry can clear. The fact is not lost when
+ * that happens — the row is still in `connection_sync_facts`, still keyed by
+ * the provider account id nobody could map — so the evidence survives even
+ * though the derivation skips it, and the next `listAccounts` that discovers
+ * the account makes it readable.
+ */
+export async function investmentFactsForRun(
+  executor: ConnectionsExecutor,
+  userId: string,
+  syncRunId: string,
+): Promise<RunInvestmentFacts | null> {
+  const runs = await executor
+    .select({
+      provider: connections.provider,
+      startedAt: syncRuns.startedAt,
+    })
+    .from(syncRuns)
+    .innerJoin(connections, eq(connections.id, syncRuns.connectionId))
+    .where(and(eq(syncRuns.id, syncRunId), eq(syncRuns.userId, userId)))
+    .limit(1);
+  const run = runs[0];
+  if (run === undefined) return null;
+
+  const rows = await executor
+    .select({
+      fact: connectionSyncFacts,
+      accountId: connectionAccounts.accountId,
+    })
+    .from(connectionSyncFacts)
+    .innerJoin(
+      connectionAccounts,
+      and(
+        eq(connectionAccounts.connectionId, connectionSyncFacts.connectionId),
+        eq(connectionAccounts.providerAccountId, connectionSyncFacts.providerAccountId),
+      ),
+    )
+    .where(
+      and(
+        eq(connectionSyncFacts.userId, userId),
+        eq(connectionSyncFacts.syncRunId, syncRunId),
+        inArray(connectionSyncFacts.kind, ['holding', 'investment_transaction']),
+      ),
+    )
+    .orderBy(asc(connectionSyncFacts.seq));
+
+  const holdings: RunHoldingFact[] = [];
+  const transactions: RunInvestmentTransactionFact[] = [];
+  for (const row of rows) {
+    if (row.fact.kind === 'holding') {
+      holdings.push({ accountId: row.accountId, fact: holdingFactFromRow(row.fact) });
+    } else {
+      transactions.push({
+        accountId: row.accountId,
+        fact: investmentTransactionFactFromRow(row.fact),
+      });
+    }
+  }
+  return { provider: run.provider, startedAt: run.startedAt, holdings, transactions };
+}
+
+/** One account's loan or card terms, as the provider last stated them. */
+export interface LiabilityTerms {
+  readonly accountId: string;
+  readonly providerAccountId: string;
+  readonly provider: string;
+  /** A percentage, as a decimal string. `null` when the provider did not say. */
+  readonly apr: string | null;
+  readonly statementBalance: Money | null;
+  readonly minimumPayment: Money | null;
+  readonly nextPaymentDue: DateOnlyType | null;
+  /** When this block was last re-observed, so a reader can call it stale. */
+  readonly observedAt: Date;
+}
+
+/**
+ * Every liability terms block this user has, newest observation per account.
+ *
+ * The published reader behind WP 3.10's `liabilities.terms` scope: 08 §4.2's
+ * block needs an APR, a statement balance, a minimum payment and a due date,
+ * and `@ctx/ledger` has none of them — a liability *account* carries a balance
+ * and a credit limit, and the terms are what the `liabilities` product adds.
+ * The snapshot builder's `investments.liabilities(...)` port is satisfied at
+ * the composition root by joining this to the ledger's liability accounts, and
+ * the `liability_ref` tokeniser is what strips `accountId` before anything
+ * leaves.
+ */
+export async function liabilityTermsFor(
+  executor: ConnectionsExecutor,
+  userId: string,
+): Promise<readonly LiabilityTerms[]> {
+  const rows = await executor
+    .select({
+      fact: connectionSyncFacts,
+      accountId: connectionAccounts.accountId,
+      provider: connections.provider,
+    })
+    .from(connectionSyncFacts)
+    .innerJoin(
+      connectionAccounts,
+      and(
+        eq(connectionAccounts.connectionId, connectionSyncFacts.connectionId),
+        eq(connectionAccounts.providerAccountId, connectionSyncFacts.providerAccountId),
+      ),
+    )
+    .innerJoin(connections, eq(connections.id, connectionSyncFacts.connectionId))
+    .where(and(eq(connectionSyncFacts.userId, userId), eq(connectionSyncFacts.kind, 'liability')))
+    .orderBy(asc(connectionSyncFacts.seq));
+
+  return rows.map((row) => ({
+    accountId: row.accountId,
+    providerAccountId: row.fact.providerAccountId,
+    provider: row.provider,
+    apr: row.fact.apr,
+    statementBalance: moneyOrNull(
+      row.fact.statementBalanceMinor,
+      row.fact.statementBalanceCurrency,
+    ),
+    minimumPayment: moneyOrNull(row.fact.minimumPaymentMinor, row.fact.minimumPaymentCurrency),
+    nextPaymentDue:
+      row.fact.nextPaymentDue === null ? null : DateOnly.parse(row.fact.nextPaymentDue),
+    observedAt: row.fact.updatedAt,
+  }));
+}
+
+function moneyOrNull(minor: bigint | null, currency: string | null): Money | null {
+  return minor === null || currency === null ? null : money(minor, currency);
+}
+
+function holdingFactFromRow(row: ConnectionSyncFactRow): ProviderHoldingFact {
+  const fact = row.fact as Record<string, unknown>;
+  return {
+    providerAccountId: row.providerAccountId,
+    security: fact['security'] as ProviderHoldingFact['security'],
+    providerSecurityId: row.providerSecurityId as string,
+    quantity: row.quantity as string,
+    costBasis: moneyOrNull(row.costBasisMinor, row.costBasisCurrency),
+    value: money(row.valueMinor as bigint, row.valueCurrency as string),
+    asOf: row.asOf as Date,
+    raw: fact['raw'] ?? null,
+  };
+}
+
+function investmentTransactionFactFromRow(
+  row: ConnectionSyncFactRow,
+): ProviderInvestmentTransactionFact {
+  const fact = row.fact as Record<string, unknown>;
+  return {
+    providerAccountId: row.providerAccountId,
+    providerTransactionId: row.providerTransactionId as string,
+    security: (fact['security'] as ProviderInvestmentTransactionFact['security']) ?? null,
+    providerSecurityId: row.providerSecurityId,
+    date: DateOnly.parse(row.transactionDate as string),
+    name: (fact['name'] as string | undefined) ?? '',
+    type: (fact['type'] as string | undefined) ?? '',
+    subtype: (fact['subtype'] as string | undefined) ?? '',
+    quantity: row.quantity as string,
+    price: row.price as string,
+    amount: money(row.amountMinor as bigint, row.amountCurrency as string),
+    fees: moneyOrNull(row.feesMinor, row.feesCurrency),
+    raw: fact['raw'] ?? null,
+    fingerprint: row.fingerprint as string,
+  };
 }

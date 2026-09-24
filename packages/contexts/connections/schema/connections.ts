@@ -42,7 +42,23 @@ export const SYNC_TRIGGERS = [
 ] as const;
 export type SyncTrigger = (typeof SYNC_TRIGGERS)[number];
 
-export const SYNC_OPERATIONS = ['transactions', 'balances', 'holdings', 'liabilities'] as const;
+/**
+ * One per dataset leg, because one per *sync* was the bug 0005 already fixed.
+ *
+ * `investment_txns` arrived with WP 3.7 (migration 0018) rather than at 0005:
+ * 01 §5.5 records that Plaid has no `/investments/transactions/sync`, so that
+ * leg is a date window with no cursor and it fails for entirely different
+ * reasons than the holdings leg does. Sharing `holdings` between them would
+ * put us back where 0005's comment says we were — "a holdings failure hides a
+ * successful transactions run".
+ */
+export const SYNC_OPERATIONS = [
+  'transactions',
+  'balances',
+  'holdings',
+  'investment_txns',
+  'liabilities',
+] as const;
 export type SyncOperation = (typeof SYNC_OPERATIONS)[number];
 
 export const SYNC_RUN_STATUSES = ['running', 'success', 'partial', 'failed'] as const;

@@ -34,6 +34,16 @@ Tables listed here are _claimed_; most do not exist yet. Claiming early is the p
   is one table with a `kind` column rather than three, and why the dedupe key
   is `provider_transaction_id` rather than `fingerprint`.
 
+### Built (migration 0018)
+
+- `connection_sync_facts` — what a provider's `holdings` / `investment_txns` /
+  `liabilities` leg observed, keyed on the provider's natural key and pointing at
+  the run that last saw it (WP 3.7). The sibling of `connection_staged_facts` and
+  its mirror image: staged facts are _inbound, not yet applied_; sync facts are
+  _already observed, published for another context to read_ through
+  `InvestmentSyncPort.factsForRun`. See the migration header for why the row is
+  keyed on the natural key rather than on the run.
+
 ### Claimed, not yet built
 
 - `providers`

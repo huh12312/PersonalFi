@@ -106,6 +106,51 @@
  * manual connection nobody ever entered one on — writes no `balances` row at
  * all: a row exists to explain a recording or a failure, not to say "nothing
  * happened" a second time when the transactions row already said so.
+ *
+ * ## 7. Holdings, investment transactions and liabilities are three more of the same
+ *
+ * WP 3.7. `#syncHoldingsIfDue`, `#syncInvestmentTransactionsIfDue` and
+ * `#syncLiabilitiesIfDue` are invariant 6 applied three more times, and they
+ * are deliberately *the same shape* rather than a shared generic: each writes
+ * its own `sync_runs` row with its own `operation`, each is classified the same
+ * way, and none of them can relabel or roll back the transactions delta. None
+ * throws for a *provider* failure either — that is the return path, not the
+ * exception path, exactly as `syncConnection` itself works; a database that
+ * cannot write the run row still propagates, as it does in the balances leg,
+ * because at that point the sync is not the thing that is broken.
+ * `#datasetLeg` below holds the parts that are genuinely
+ * identical — the gate, the run row, the classification, the event — and each
+ * leg supplies only "ask the connector this, and write what it said".
+ *
+ * Three things they add that balances did not need:
+ *
+ *   * **A missing capability is a skip, not an error.** 08 §2.2: the
+ *     orchestrator "skips what isn't advertised rather than catching
+ *     `NotImplemented`". So the gate is `supports(capabilities, …)` *and* the
+ *     optional port member being present, checked before any call is made —
+ *     no row, no error, no event. `assertSupports` inside the adapter is the
+ *     second half of the same rule and exists for the adapter that has the
+ *     method but not the claim; it is not the path a well-formed connector
+ *     takes.
+ *
+ *   * **They emit `connections.SyncRunCompleted`.** The transactions leg
+ *     always has; balances does not, because nothing consumes a balances run.
+ *     `@ctx/investments`' lot consumer *does* consume these, and it reads the
+ *     facts back by `syncRunId` through `InvestmentSyncPort.factsForRun` —
+ *     which is the whole reason the facts are written to
+ *     `connection_sync_facts` (migration 0018) inside the same transaction
+ *     that settles the run row. A run announcing 42 facts with no facts behind
+ *     it would send the consumer looking for rows that do not exist.
+ *
+ *   * **`INSUFFICIENT_SCOPE` clears the capability for this connection.**
+ *     08 §2.4's own gloss on the condition is "disable that dataset for this
+ *     connection, keep others", and `KIND_OF_CONDITION` already classifies it
+ *     `permanent` — retrying cannot help until the user re-links with wider
+ *     scope. So the leg narrows `connections.capabilities.supports`, which is
+ *     the same column `createConnection` narrows from Plaid's
+ *     `available_products`, and every *other* leg keeps working. The
+ *     connection's status is untouched: a brokerage that will not share
+ *     holdings is not a broken connection.
  */
 import { newId, type Clock } from '@core/kernel';
 import {
@@ -124,7 +169,13 @@ import {
 } from '@core/platform';
 import type { SecretBox } from '@core/secretbox';
 import { and, eq, gte, sql } from 'drizzle-orm';
-import { connections, syncRuns, type SyncRunStatus, type SyncTrigger } from '../schema/index.ts';
+import {
+  connections,
+  syncRuns,
+  type SyncOperation,
+  type SyncRunStatus,
+  type SyncTrigger,
+} from '../schema/index.ts';
 import {
   accountMap,
   linkAccounts,
@@ -132,6 +183,13 @@ import {
   requireConnection,
   setConnectionStatus,
 } from './connections.ts';
+import {
+  recordHoldingFacts,
+  recordInvestmentTransactionFacts,
+  recordLiabilityFacts,
+  type SyncFactTarget,
+  type SyncFactWriteResult,
+} from './staging.ts';
 import {
   platformOf,
   type ConnectionsContext,
@@ -146,6 +204,7 @@ import {
   asConnectorError,
   cursorOf,
   supports,
+  type Capability,
   type ConnectionHandle,
   type Connector,
   type ConnectorCapabilities,
@@ -240,6 +299,43 @@ interface Counters {
   modified: number;
   removed: number;
   restarts: number;
+}
+
+/**
+ * What every dataset leg is handed. Identical to what `#syncBalancesIfDue`
+ * takes, named once because there are now four of them.
+ */
+interface DatasetLegInput {
+  readonly handle: ConnectionHandle | null;
+  readonly connector: Connector;
+  readonly capabilities: ConnectorCapabilities;
+  readonly connectionId: string;
+  readonly trigger: SyncTrigger;
+  readonly context: ConnectionsContext;
+  readonly transactionsFailed: boolean;
+  readonly transactionsPageCount: number;
+}
+
+/**
+ * The three lines that differ between one dataset leg and the next.
+ *
+ * Everything else — the capability gate, the run row, the classification, the
+ * `INSUFFICIENT_SCOPE` narrowing, the event — is `#datasetLeg`'s, so a fifth
+ * dataset is this object and nothing more.
+ */
+interface DatasetLeg {
+  /** Gated on, and the member `INSUFFICIENT_SCOPE` clears. */
+  readonly capability: Capability;
+  /** The `sync_runs.operation` this leg's row carries. */
+  readonly operation: SyncOperation;
+  /** Ask the connector, write what it said, report what the write did. */
+  write(
+    executor: ConnectionsExecutor,
+    target: SyncFactTarget,
+    connector: Connector,
+    handle: ConnectionHandle,
+    options: SyncOptions,
+  ): Promise<SyncFactWriteResult>;
 }
 
 export class SyncOrchestrator {
@@ -371,7 +467,12 @@ export class SyncOrchestrator {
       );
     }
     const connector = registry.get(row.provider);
-    const capabilities = connector.capabilities();
+    // What the adapter *can* do, narrowed by what this connection was granted.
+    // `createConnection` writes `connections.capabilities` from the adapter's
+    // declaration intersected with the provider's `observedCapabilities`, and
+    // `INSUFFICIENT_SCOPE` narrows it further at runtime; reading the
+    // declaration alone here would make both of those narrowings decorative.
+    const capabilities = effectiveCapabilities(connector.capabilities(), row.capabilities);
 
     const refusal = await this.#preflight(row.id, row.lastSyncedAt, capabilities, input.trigger);
     if (refusal !== null) {
@@ -492,6 +593,26 @@ export class SyncOrchestrator {
       transactionsFailed: failure !== null,
       transactionsPageCount: counters.pages,
     });
+
+    // Invariant 7, three times. Sequential rather than `Promise.all`: these are
+    // three more requests to one institution, and firing them concurrently is
+    // how a per-Item rate limit (Plaid's is 5/min on some endpoints, 01 §1.8)
+    // gets spent three times as fast for no latency the user can perceive on a
+    // background sync. Each awaits the previous and none of them throws, so a
+    // holdings failure does not stop the liabilities leg either.
+    const legInput = {
+      handle,
+      connector,
+      capabilities,
+      connectionId: row.id,
+      trigger: input.trigger,
+      context,
+      transactionsFailed: failure !== null,
+      transactionsPageCount: counters.pages,
+    };
+    await this.#syncHoldingsIfDue(legInput);
+    await this.#syncInvestmentTransactionsIfDue(legInput);
+    await this.#syncLiabilitiesIfDue(legInput);
 
     return {
       syncRunId,
@@ -633,6 +754,239 @@ export class SyncOrchestrator {
         'balances sync failed',
       );
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Holdings, investment transactions, liabilities — invariant 7
+  // -------------------------------------------------------------------------
+
+  /** Positions, as the institution asserts them. `operation: 'holdings'`. */
+  async #syncHoldingsIfDue(input: DatasetLegInput): Promise<void> {
+    await this.#datasetLeg(input, {
+      capability: 'holdings',
+      operation: 'holdings',
+      // `?.` and `?? []` rather than a `!`: the gate in `#datasetLeg` has
+      // already refused a connector whose port member is absent, but the
+      // member is optional on the interface and a non-null assertion here
+      // would be a crash waiting for the first adapter that declares the
+      // capability and forgets the method.
+      write: async (tx, target, connector, handle, options) => {
+        const facts = (await connector.syncHoldings?.(handle, options)) ?? [];
+        return recordHoldingFacts(tx, target, facts);
+      },
+    });
+  }
+
+  /**
+   * Buys, sells, dividends and transfers in kind. `operation: 'investment_txns'`.
+   *
+   * No cursor, and that is the provider's shape rather than a simplification:
+   * 01 §5.5 records that there is no `/investments/transactions/sync`, so the
+   * adapter takes a date window from `SyncOptions.historyDays` (clamped to the
+   * declared 730-day / 24-month ceiling by `windowStart`) and idempotency is
+   * the upsert on `provider_transaction_id`. Nothing here writes
+   * `transactions_cursor`, and the signature gives it no way to.
+   */
+  async #syncInvestmentTransactionsIfDue(input: DatasetLegInput): Promise<void> {
+    await this.#datasetLeg(input, {
+      capability: 'investment_txns',
+      operation: 'investment_txns',
+      write: async (tx, target, connector, handle, options) => {
+        const facts = (await connector.syncInvestmentTransactions?.(handle, options)) ?? [];
+        return recordInvestmentTransactionFacts(tx, target, facts);
+      },
+    });
+  }
+
+  /** APR, statement balance, minimum payment, due date. `operation: 'liabilities'`. */
+  async #syncLiabilitiesIfDue(input: DatasetLegInput): Promise<void> {
+    await this.#datasetLeg(input, {
+      capability: 'liabilities',
+      operation: 'liabilities',
+      write: async (tx, target, connector, handle, options) => {
+        const facts = (await connector.syncLiabilities?.(handle, options)) ?? [];
+        return recordLiabilityFacts(tx, target, facts);
+      },
+    });
+  }
+
+  /**
+   * One dataset leg, end to end. Never throws.
+   *
+   * The order is the whole design and it is the same order the transactions
+   * leg uses:
+   *
+   *   1. **Gate.** No handle, no declared capability, or no port member ⇒
+   *      return having done *nothing at all*. Not a row, not an error, not an
+   *      event: 08 §2.2's "skips what isn't advertised rather than catching
+   *      `NotImplemented`". This is also the only branch that can be taken
+   *      before a `sync_runs` row exists, which is what makes "skipped" and
+   *      "ran and found nothing" distinguishable in the history.
+   *   2. **Open the run row** (`status: 'running'`) so a crash mid-leg leaves
+   *      a visible stuck row rather than silence, exactly as the transactions
+   *      leg does. The row must exist before the facts because
+   *      `connection_sync_facts.sync_run_id` references it.
+   *   3. **Call the provider, then write.** The call is inside the
+   *      transaction's callback and that is a deliberate exception to the rule
+   *      `#runPages` follows: these legs are one request each with no
+   *      pagination, the facts and the run row must commit together (see
+   *      invariant 7), and holding one pooled connection for one request is a
+   *      smaller cost than a run that announces facts it did not write. The
+   *      per-connection deadline (`SyncOptions.deadline`) bounds it.
+   *   4. **Settle the row and announce.** In a second transaction, because by
+   *      then the interesting one has either committed or rolled back and the
+   *      row's job is to say which.
+   */
+  async #datasetLeg(input: DatasetLegInput, leg: DatasetLeg): Promise<void> {
+    const { handle, connector, capabilities, context } = input;
+    if (handle === null) return;
+    if (!supports(capabilities, leg.capability)) return;
+    // The optional port member. A connector may declare the capability and
+    // still not implement it — the conformance suite forbids it, but the port
+    // types it as optional, and an orchestrator that dereferenced `undefined`
+    // here would turn a contract violation into a process crash.
+    if (!implementsLeg(connector, leg.capability)) return;
+    // Same reasoning as the balances leg: a transactions half that produced
+    // nothing at all means the credential or the provider is the problem, and
+    // three more requests would spend the rate limit the reconnect needs.
+    if (input.transactionsFailed && input.transactionsPageCount === 0) return;
+
+    const { clock, database } = this.#options;
+    const startedAt = clock.now();
+    const syncRunId = newId();
+    await database.insert(syncRuns).values({
+      id: syncRunId,
+      userId: context.userId,
+      connectionId: input.connectionId,
+      trigger: input.trigger,
+      operation: leg.operation,
+      status: 'running',
+      correlationId: context.correlationId,
+      startedAt,
+    });
+
+    let written: SyncFactWriteResult = { written: 0, inserted: 0 };
+    let failure: ConnectorError | null = null;
+    try {
+      const options = this.#syncOptions(capabilities, context.clock, undefined);
+      const target: SyncFactTarget = {
+        userId: context.userId,
+        connectionId: input.connectionId,
+        syncRunId,
+      };
+      written = await database.transaction((tx) =>
+        leg.write(tx, target, connector, handle, options),
+      );
+    } catch (cause) {
+      failure = asConnectorError(cause);
+    }
+
+    const finishedAt = clock.now();
+    await database.transaction(async (tx) => {
+      await tx
+        .update(syncRuns)
+        .set({
+          status: failure === null ? 'success' : 'failed',
+          pageCount: 1,
+          // `added_count` is rows this run *created*; `modified_count` is rows
+          // it restated. A re-fetched 24-month window is all modified and no
+          // added, which is what makes the idempotence claim readable straight
+          // off the history view instead of needing a row count beside it.
+          addedCount: written.inserted,
+          modifiedCount: written.written - written.inserted,
+          errorKind: failure?.kind ?? null,
+          errorCode: failure?.condition ?? failure?.providerCode ?? null,
+          errorDetail: failure === null ? null : errorDetailOf(failure),
+          finishedAt,
+          durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
+        })
+        .where(eq(syncRuns.id, syncRunId));
+
+      if (failure?.condition === 'INSUFFICIENT_SCOPE') {
+        await this.#clearCapability(tx, input.connectionId, leg.capability, clock);
+      }
+
+      await appendEvent(
+        platformOf(tx),
+        SyncRunCompleted.create(
+          {
+            connectionId: input.connectionId,
+            syncRunId,
+            trigger: input.trigger,
+            status: failure === null ? 'success' : 'failed',
+            pageCount: 1,
+            addedCount: written.inserted,
+            modifiedCount: written.written - written.inserted,
+            removedCount: 0,
+            restartCount: 0,
+            durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
+            errorKind: failure?.kind ?? null,
+          },
+          {
+            userId: context.userId,
+            correlationId: context.correlationId,
+            aggregateId: input.connectionId,
+          },
+          clock,
+        ),
+      );
+    });
+
+    if (failure !== null) {
+      this.#logger.warn(
+        {
+          connectionId: input.connectionId,
+          syncRunId,
+          operation: leg.operation,
+          kind: failure.kind,
+          condition: failure.condition,
+          correlationId: context.correlationId,
+        },
+        'dataset leg failed',
+      );
+    }
+  }
+
+  /**
+   * Narrow `connections.capabilities.supports` by one member, permanently.
+   *
+   * 08 §2.4's gloss on `INSUFFICIENT_SCOPE` is "disable that dataset for this
+   * connection, keep others", and `KIND_OF_CONDITION` classifies it
+   * `permanent`: retrying cannot help until the user re-links with wider
+   * scope, and asking nightly forever is a request the provider will refuse
+   * every time while still counting it against the Item's rate limit.
+   *
+   * Read-modify-write inside the settling transaction rather than a `jsonb_set`
+   * expression, because the value is a list that has to be *filtered* and the
+   * row is already ours for the duration. The connection's status is
+   * deliberately untouched: a card that does not carry investments is a
+   * healthy card.
+   */
+  async #clearCapability(
+    executor: ConnectionsExecutor,
+    connectionId: string,
+    capability: Capability,
+    clock: Clock,
+  ): Promise<void> {
+    const rows = await executor
+      .select({ capabilities: connections.capabilities })
+      .from(connections)
+      .where(eq(connections.id, connectionId))
+      .limit(1);
+    const stored = rows[0]?.capabilities;
+    if (stored === undefined || stored === null || typeof stored !== 'object') return;
+    const record = stored as Record<string, unknown>;
+    const declared = Array.isArray(record['supports']) ? (record['supports'] as unknown[]) : [];
+    const narrowed = declared.filter((member) => member !== capability);
+    if (narrowed.length === declared.length) return;
+    await executor
+      .update(connections)
+      .set({
+        capabilities: { ...record, supports: narrowed },
+        updatedAt: clock.now(),
+      })
+      .where(eq(connections.id, connectionId));
+    this.#logger.warn({ connectionId, capability }, 'capability cleared after INSUFFICIENT_SCOPE');
   }
 
   // -------------------------------------------------------------------------
@@ -1075,6 +1429,56 @@ function groupByAccount(
     );
   }
   return byAccount;
+}
+
+/** Which optional port member a dataset capability is served by. */
+const LEG_METHOD_OF: Readonly<Record<string, keyof Connector>> = Object.freeze({
+  holdings: 'syncHoldings',
+  investment_txns: 'syncInvestmentTransactions',
+  liabilities: 'syncLiabilities',
+});
+
+/**
+ * Does this adapter actually have the method behind the capability it declares?
+ *
+ * The port types `syncHoldings`, `syncInvestmentTransactions` and
+ * `syncLiabilities` as optional, so "declared the capability" and "wrote the
+ * method" are two separate facts and the conformance suite is what normally
+ * keeps them together. The orchestrator checks anyway, because the failure mode
+ * of not checking is a `TypeError` in a background job rather than a typed
+ * refusal in a `sync_runs` row.
+ */
+function implementsLeg(connector: Connector, capability: Capability): boolean {
+  const method = LEG_METHOD_OF[capability];
+  return method !== undefined && typeof connector[method] === 'function';
+}
+
+/**
+ * The adapter's declaration, narrowed by what this connection was granted.
+ *
+ * `connections.capabilities` is written at link time from the declaration
+ * intersected with the provider's `observedCapabilities` (`capabilitiesJson` in
+ * `connections.ts`), and `#clearCapability` narrows it further whenever a leg
+ * answers `INSUFFICIENT_SCOPE`. Both are pointless if the sync path reads the
+ * declaration instead.
+ *
+ * It only ever **narrows**: a stored `supports` naming something the adapter no
+ * longer declares — an old row, a downgraded adapter — cannot re-enable it, so
+ * the intersection is taken rather than the stored list adopted. A row with no
+ * usable `supports` (a hand-built test fixture, a `{}` default) falls back to
+ * the declaration, because "this column was never written" and "this connection
+ * was granted nothing" must not look the same.
+ */
+export function effectiveCapabilities(
+  declared: ConnectorCapabilities,
+  stored: unknown,
+): ConnectorCapabilities {
+  if (typeof stored !== 'object' || stored === null) return declared;
+  const granted = (stored as Record<string, unknown>)['supports'];
+  if (!Array.isArray(granted)) return declared;
+  const allowed = new Set(granted.map(String));
+  const supported = declared.supports.filter((capability) => allowed.has(capability));
+  return { ...declared, supports: supported };
 }
 
 function errorDetailOf(error: ConnectorError): Record<string, unknown> {
