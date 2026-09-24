@@ -867,7 +867,7 @@ describe.each([
 describe('coinbase secrets', () => {
   const KEY_NAME =
     'organizations/11111111-1111-1111-1111-111111111111/apiKeys/22222222-2222-2222-2222-222222222222';
-  const PRIVATE_KEY = 'ZmFrZS1lZDI1NTE5LXNlZWQtZm9yLXRlc3Rpbmctb25seS1ub3QtYS1yZWFsLWtleQ==';
+  const PRIVATE_KEY = 'ZmFrZS1lZDI1NTE5LXNlZWQtZm9yLXRlc3Rpbmctb25seS1ub3QtYS1yZWFsLWtleQ=='; // gitleaks:allow — base64 of 'fake-ed25519-seed-for-testing-only-not-a-real-key'
 
   it('is null when neither file is present — the ordinary unconfigured install', () => {
     const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });

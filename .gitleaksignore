@@ -41,3 +41,10 @@
 # at this commit — the value is a URL path, not a token; the fake never holds a
 # real access token (it mints synthetic `access-sandbox-…` strings).
 581054cb3507cf43a2068f2101a18edeeb70a9d0:packages/connectors/plaid/test/fake.ts:generic-api-key:375
+
+# packages/config/src/load.test.ts's coinbase-secrets suite plants a synthetic
+# private key whose value is literally base64("fake-ed25519-seed-for-testing-
+# only-not-a-real-key"); the generic-api-key heuristic flags it in the commit
+# that introduced it (123c767, the Phase 3 wiring snapshot). The line now
+# carries `gitleaks:allow`; this entry covers the historical commit.
+123c76708f9cacf5c6605a8111bf7cb4a1db0349:packages/config/src/load.test.ts:generic-api-key:870
