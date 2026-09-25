@@ -119,6 +119,19 @@ export {
   type Valuation,
 } from './basis.ts';
 
+// WP 3.14 close-out — the v0.5 rung's "holdings reconcile to balances" clause
+// (docs/evidence/phase-3/wp3.14-quality.md §1, §8 item 5): compares the
+// stored `institutionValue` against a computed `quantity × price`, reusing
+// `basis.ts`'s `marketValueOf` arithmetic rather than adding a second one.
+export {
+  DEFAULT_RECONCILE_TOLERANCE_MINOR,
+  HOLDING_RECONCILIATION_STATUSES,
+  reconcileHolding,
+  reconcileHoldings,
+  type HoldingReconciliation,
+  type HoldingReconciliationStatus,
+} from './reconcile.ts';
+
 export {
   DEFAULT_WASH_SALE_CONFIG,
   POSSIBLE_WASH_SALE,

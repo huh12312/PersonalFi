@@ -327,3 +327,158 @@ describe.skipIf(NO_DATABASE)('/net-worth/series and /net-worth/corrections (WP 3
     expect(DateOnly.is(day(0))).toBe(true);
   });
 });
+
+/**
+ * WP 3.14 close-out — exit criterion (d), "a missing FX rate surfaces rather
+ * than defaulting" (docs/evidence/phase-3/wp3.14-quality.md §1 row d, §8
+ * item 4). `packages/contexts/planning/test/fx-missing.test.ts` proves the
+ * domain layer (`computeNetWorth` throws `FxRateUnavailable`, never a 1.0);
+ * this is the HTTP seam the evidence doc named as untested:
+ * `apps/api/src/routes/net-worth.ts` around line 344 catches it with the
+ * exported `isFxRateUnavailable` predicate and translates it to a 409 named
+ * `planning.fx_rate_missing`, never a 500 and never a converted total.
+ *
+ * A **separate, isolated harness** on purpose: the describe block above
+ * seals `sealedDay` in USD only, and adding a CAD account with no FX rate
+ * into that shared setup would make every other test in this file fail at
+ * `beforeAll` instead of the one thing this suite exists to prove.
+ *
+ * Two surfaces, both required by the criterion's wording:
+ *
+ *   1. `POST /net-worth/corrections` — the write path that would otherwise
+ *      *compute and persist* a converted total — refuses outright, by name,
+ *      rather than writing a row that quietly priced CAD at par.
+ *   2. `GET /net-worth` (`accounts.ts`, `@ctx/ledger`'s "now" read) never
+ *      attempts FX conversion at all (its own file header: "adding dollars
+ *      to euros here would be a wrong number rendered confidently"), so the
+ *      CAD balance is asserted to still appear on **its own currency line**
+ *      and the USD total is asserted to be exactly the USD account's own
+ *      balance — proof the CAD amount was never folded in at 1.0.
+ */
+describe.skipIf(NO_DATABASE)(
+  'a missing FX rate surfaces rather than defaulting (WP 3.14 close-out, criterion d)',
+  () => {
+    let h: ApiHarness;
+    let asOfDate: string;
+
+    beforeAll(async () => {
+      h = await createApiHarness({ suite: 'wp314-fx-missing' });
+
+      await linkManual(h, {
+        providerConnectionId: 'wp314-fx-usd-conn',
+        displayName: 'Test Bank USD',
+        accounts: [
+          { providerAccountId: 'checking', name: 'Checking', type: 'depository', currency: 'USD' },
+        ],
+        batch: {
+          balances: [
+            {
+              providerAccountId: 'checking',
+              current: money(500_000n, 'USD'),
+              available: null,
+              limit: null,
+              asOf: new Date(Date.now() - 5 * DAY_MS),
+            },
+          ],
+        },
+      });
+
+      asOfDate = day(-1);
+
+      const ports = planningPortsFor(h.database.db, {
+        userId: h.userId,
+        timeZone: 'UTC',
+        clock: systemClock,
+      });
+
+      // A first, USD-only snapshot, so `asOfDate` has an existing revision —
+      // `correctDay` needs one to supersede (`SealedRowImmutable`/404
+      // otherwise; see 'refuses a correction to a day that has no revision
+      // to supersede' above). At this point there is no CAD account yet, so
+      // this computation cannot itself hit the missing-rate path.
+      const snapshot = await computeNetWorth(ports, {
+        userId: h.userId,
+        asOfDate,
+        baseCurrency: 'USD',
+      });
+      await upsertOpenDay(h.database.db, { userId: h.userId, snapshot, clock: systemClock });
+
+      // Now add the CAD account and a balance dated on `asOfDate`, with
+      // deliberately **no** `fx_rates` row for CAD/USD at all — the S0
+      // sabotage from wp3.14-quality.md §5 ("computeNetWorth threw ...
+      // unplanned"), reproduced here on purpose.
+      await linkManual(h, {
+        providerConnectionId: 'wp314-fx-cad-conn',
+        displayName: 'Test Bank CAD',
+        accounts: [
+          {
+            providerAccountId: 'cad-savings',
+            name: 'CAD Savings',
+            type: 'depository',
+            currency: 'CAD',
+          },
+        ],
+        batch: {
+          balances: [
+            {
+              providerAccountId: 'cad-savings',
+              current: money(708_000n, 'CAD'),
+              available: null,
+              limit: null,
+              asOf: new Date(Date.now() - 5 * DAY_MS),
+            },
+          ],
+        },
+      });
+    }, 120_000);
+
+    afterAll(async () => {
+      await h.close();
+    });
+
+    it('POST /net-worth/corrections surfaces planning.fx_rate_missing rather than defaulting to 1.0', async () => {
+      const response = await h.request({
+        method: 'POST',
+        url: '/net-worth/corrections',
+        session: h.fresh,
+        body: { asOfDate, reason: 'CAD account added; no FX rate seeded yet' },
+      });
+      expect(response.statusCode).toBe(409);
+      const problem = problemOf(response);
+      expect(problem['code']).toBe('planning.fx_rate_missing');
+      // `error.message` (FxRateUnavailable) names the pair and says out loud
+      // what did not happen — the same assertions
+      // `packages/contexts/planning/test/fx-missing.test.ts` makes on the
+      // domain error, now checked on the wire.
+      const detail = String(problem['detail']);
+      expect(detail).toContain('CAD');
+      expect(detail).toContain('USD');
+      expect(detail).toContain('rather than a 1.0');
+    });
+
+    it('GET /net-worth (the ledger "now" read) reports the CAD balance on its own line, never folded into USD at 1.0', async () => {
+      const response = await h.request({ method: 'GET', url: '/net-worth', session: h.stale });
+      expectStatus(response, 200);
+      const body = response.json() as {
+        totals: readonly {
+          currency: string;
+          assets: { minor: string; currency: string };
+          net: { minor: string; currency: string };
+        }[];
+      };
+
+      const usdTotal = body.totals.find((total) => total.currency === 'USD');
+      const cadTotal = body.totals.find((total) => total.currency === 'CAD');
+      expect(
+        cadTotal,
+        'the CAD balance gets its own currency line, not a converted USD one',
+      ).toBeTruthy();
+      expect(cadTotal?.assets.minor).toBe('708000');
+      // The USD total is exactly the USD account's own balance. Had the CAD
+      // amount been folded in at par, it would read 500000 + 708000 =
+      // 1208000 instead.
+      expect(usdTotal?.assets.minor).toBe('500000');
+      expect(body.totals).toHaveLength(2);
+    });
+  },
+);

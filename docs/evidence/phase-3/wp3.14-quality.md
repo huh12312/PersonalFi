@@ -31,24 +31,24 @@ The criteria, verbatim from the dispatch §1:
 Every test name below was confirmed present in the tree by `grep -F`, not quoted from
 another evidence file.
 
-| #   | Criterion                                                                                                         | Verdict                                                                           | Proof, or what is missing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| --- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| a   | Net worth reconciles to a hand computation across every account type **including a manual asset and a liability** | **Proven**                                                                        | `packages/contexts/planning/test/reconcile.test.ts` → `'net worth reconciles to a hand computation across every account type including a manual asset and a liability'` (the criterion, verbatim), and its persisted half `packages/contexts/planning/test/db/reconcile.test.ts` → `'the persisted row reconciles to the same hand computation, read back through SQL'`. **This WP adds a second, independent hand computation**: the seed now carries a manual asset ($450,000.00), a liability ($18,250.00) and a CAD account, with `netWorth.expectedTotal = $465,925.56` declared as a literal and its arithmetic written out — asserted by `packages/seed/test/investments-ground-truth.test.ts` → `'the declared net worth is the sum of its declared parts'`.                                                                                                                                                                        |
-| b   | A past date's net worth is immutable across a re-run                                                              | **Proven at the domain layer; the cold-stack half is carried to the gate**        | `packages/contexts/planning/test/db/seal.test.ts` → `'a past date is byte-identical after a second snapshot run'`, `'SABOTAGE: lets the writer update a sealed row, and the database refuses by name'`, `'refuses to recompute a sealed day through the ordinary write path'`; route half `apps/api/test/db/net-worth-routes.test.ts` → `'a correction supersedes the sealed day and never rewrites it'`. **Carried:** dispatch §5 asks the gate to "re-run the snapshotter twice over the seed and diff the sealed range byte for byte" on the cold stack; no evidence file claims that has been done. The browser half (`apps/web/e2e/networth.spec.ts` → `'a past date on the chart is unchanged after a re-sync'`) exists but is **invisible to CI** — see §8 item 2.                                                                                                                                                                   |
-| c   | ETH on Coinbase and in a wallet resolves to one security                                                          | **Proven against fixtures; the live Coinbase leg needs Chris's account**          | `packages/contexts/investments/src/resolver.test.ts` → `'ETH as a Coinbase ticker, a chain+contract and a brokerage CUSIP resolve to one securityId'`; DB half `packages/contexts/investments/test/db/securities.test.ts` → `'ETH from Coinbase, a wallet contract address and Plaid ETHEREUM resolve to one security_id'`; connector half `packages/connectors/walletrpc/test/one-security.test.ts` → `'both sightings canonicalise onto the same NATIVE_ASSETS row — one chain, one identity'`; end-to-end `apps/api/test/db/phase3-wiring.test.ts` → `'a security seen as a ticker and later as a FIGI is one securities row'` (added by WP 3.7a to close the splitting defect WP 3.7 §11.1 found). The seed now carries ETH with all three identifier kinds (`ticker`, `chain_contract`, `cusip`) so a loader has the subject to hand. **Needs real accounts:** wp3.5 §10 — "the live smoke has never run", no CDP key on this machine. |
-| d   | A missing FX rate surfaces rather than defaulting                                                                 | **Proven at the domain layer; the HTTP surfacing has no named test — a real gap** | `packages/contexts/planning/test/fx-missing.test.ts` → `'a missing rate raises FxRateUnavailable and never returns 1.0'` and, crucially for a control that must discriminate, `'accepts a genuine observation that happens to be exactly 1.0'`. **Observed live during this WP**: with the seeded CAD account and no `fx_rates` rows, `computeNetWorth` threw `FxRateUnavailable: no FX rate for CAD/USD on or before 2026-09-24 … This is deliberately an error rather than a 1.0` while `investments-perf.test.ts` was being built — the control firing over the seed, unplanned (§5, S0). **Gap:** `apps/api/src/routes/net-worth.ts:344–350` translates it to `planning.fx_rate_missing`, and no test in `apps/api/test/**` is named for that translation. Recommended to the gate as a one-test fix at the route seam; not written here because `apps/api/src/routes/net-worth.ts` and its suite are not this WP's files.              |
-| e   | Allocation matches a spreadsheet check                                                                            | **Proven**                                                                        | `packages/contexts/investments/src/analytics/allocation.test.ts` → `'allocation matches the committed spreadsheet fixture to the cent'`, over `test/fixtures/allocation-{portfolio,expected}.csv`. **This WP re-runs it from the seed's own vocabulary**: `packages/seed/test/investments-ground-truth.test.ts` → `'allocation matches the committed spreadsheet fixture, rebuilt from seed shapes'` maps every fixture row through `SeedSecurity` + `SeedPhase3Holding` first, so a seed that lost `expenseRatio`, `isCashEquivalent` or one-security-in-two-accounts would fail. Browser half `apps/web/e2e/investments.spec.ts` → `'the allocation donut totals match the committed spreadsheet fixture'` exists but is invisible to CI (§8 item 2).                                                                                                                                                                                     |
+| #   | Criterion                                                                                                         | Verdict                                                                    | Proof, or what is missing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a   | Net worth reconciles to a hand computation across every account type **including a manual asset and a liability** | **Proven**                                                                 | `packages/contexts/planning/test/reconcile.test.ts` → `'net worth reconciles to a hand computation across every account type including a manual asset and a liability'` (the criterion, verbatim), and its persisted half `packages/contexts/planning/test/db/reconcile.test.ts` → `'the persisted row reconciles to the same hand computation, read back through SQL'`. **This WP adds a second, independent hand computation**: the seed now carries a manual asset ($450,000.00), a liability ($18,250.00) and a CAD account, with `netWorth.expectedTotal = $465,925.56` declared as a literal and its arithmetic written out — asserted by `packages/seed/test/investments-ground-truth.test.ts` → `'the declared net worth is the sum of its declared parts'`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| b   | A past date's net worth is immutable across a re-run                                                              | **Proven at the domain layer; the cold-stack half is carried to the gate** | `packages/contexts/planning/test/db/seal.test.ts` → `'a past date is byte-identical after a second snapshot run'`, `'SABOTAGE: lets the writer update a sealed row, and the database refuses by name'`, `'refuses to recompute a sealed day through the ordinary write path'`; route half `apps/api/test/db/net-worth-routes.test.ts` → `'a correction supersedes the sealed day and never rewrites it'`. **Carried:** dispatch §5 asks the gate to "re-run the snapshotter twice over the seed and diff the sealed range byte for byte" on the cold stack; no evidence file claims that has been done. The browser half (`apps/web/e2e/networth.spec.ts` → `'a past date on the chart is unchanged after a re-sync'`) exists but is **invisible to CI** — see §8 item 2.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| c   | ETH on Coinbase and in a wallet resolves to one security                                                          | **Proven against fixtures; the live Coinbase leg needs Chris's account**   | `packages/contexts/investments/src/resolver.test.ts` → `'ETH as a Coinbase ticker, a chain+contract and a brokerage CUSIP resolve to one securityId'`; DB half `packages/contexts/investments/test/db/securities.test.ts` → `'ETH from Coinbase, a wallet contract address and Plaid ETHEREUM resolve to one security_id'`; connector half `packages/connectors/walletrpc/test/one-security.test.ts` → `'both sightings canonicalise onto the same NATIVE_ASSETS row — one chain, one identity'`; end-to-end `apps/api/test/db/phase3-wiring.test.ts` → `'a security seen as a ticker and later as a FIGI is one securities row'` (added by WP 3.7a to close the splitting defect WP 3.7 §11.1 found). The seed now carries ETH with all three identifier kinds (`ticker`, `chain_contract`, `cusip`) so a loader has the subject to hand. **Needs real accounts:** wp3.5 §10 — "the live smoke has never run", no CDP key on this machine.                                                                                                                                                                                                                                                                                                                         |
+| d   | A missing FX rate surfaces rather than defaulting                                                                 | **Proven**                                                                 | `packages/contexts/planning/test/fx-missing.test.ts` → `'a missing rate raises FxRateUnavailable and never returns 1.0'` and, crucially for a control that must discriminate, `'accepts a genuine observation that happens to be exactly 1.0'`. **Observed live during this WP**: with the seeded CAD account and no `fx_rates` rows, `computeNetWorth` threw `FxRateUnavailable: no FX rate for CAD/USD on or before 2026-09-24 … This is deliberately an error rather than a 1.0` while `investments-perf.test.ts` was being built — the control firing over the seed, unplanned (§5, S0). **Closed (§10 below):** `apps/api/test/db/net-worth-routes.test.ts` → `'POST /net-worth/corrections surfaces planning.fx_rate_missing rather than defaulting to 1.0'` proves the HTTP translation at `apps/api/src/routes/net-worth.ts:344–350` (409, `planning.fx_rate_missing`, the pair named in `detail`), and a second test on the same fixture, `'GET /net-worth (the ledger "now" read) reports the CAD balance on its own line, never folded into USD at 1.0'`, proves the complementary half of the criterion on the un-FX'd ledger read (`accounts.ts`'s `GET /net-worth`), where a CAD total sits on its own currency line rather than a converted USD one. |
+| e   | Allocation matches a spreadsheet check                                                                            | **Proven**                                                                 | `packages/contexts/investments/src/analytics/allocation.test.ts` → `'allocation matches the committed spreadsheet fixture to the cent'`, over `test/fixtures/allocation-{portfolio,expected}.csv`. **This WP re-runs it from the seed's own vocabulary**: `packages/seed/test/investments-ground-truth.test.ts` → `'allocation matches the committed spreadsheet fixture, rebuilt from seed shapes'` maps every fixture row through `SeedSecurity` + `SeedPhase3Holding` first, so a seed that lost `expenseRatio`, `isCashEquivalent` or one-security-in-two-accounts would fail. Browser half `apps/web/e2e/investments.spec.ts` → `'the allocation donut totals match the committed spreadsheet fixture'` exists but is invisible to CI (§8 item 2).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ### The v0.5 rung (§2.3)
 
 > "Holdings reconcile to balances; allocation matches a spreadsheet check; crypto
 > on-ramps classified as transfers."
 
-| Clause                                  | Verdict                                                  | Proof, or what is missing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| --------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Holdings reconcile to balances          | **Not proven — the one clause of the rung with no test** | `holdings.institution_value_minor` is written (`packages/contexts/investments/src/lots-store.ts:337`) and is the column a reconciliation would compare against Σ(quantity × price), but no test in the tree asserts the two agree: `grep -rn "reconcile" --include=*.test.ts packages apps/api/test \| grep -i "holding\|balance"` returns nothing. Recommended as a small addition to `@ctx/investments` (compare the computed market value to `institutionValue` per holding and report a tolerance breach) — not written here because `packages/contexts/investments/**` is not this WP's to edit. |
-| Allocation matches a spreadsheet check  | **Proven**                                               | criterion (e) above.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Crypto on-ramps classified as transfers | **Proven against recorded fixtures**                     | `packages/connectors/coinbase/test/onramp.test.ts` → `'a USD deposit followed by a BTC buy yields one transfer, one trade and zero spending'`, `'a fiat deposit is a transfer, never income'`. Live leg needs Chris's Coinbase account (wp3.5 §10).                                                                                                                                                                                                                                                                                                                                                   |
+| Clause                                  | Verdict                                                   | Proof, or what is missing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Holdings reconcile to balances          | **Proven** (was: the one clause of the rung with no test) | `apps/api/test/db/holdings-reconcile.test.ts` → `'holdings reconcile to balances on the seed'` and `'a holding whose price is missing is reported as unreconciled, never silently reconciled'`. Written at the **route** seam rather than inside `@ctx/investments`: both sides are read back over real HTTP — Σ of `GET /accounts/{id}/holdings`'s `positions[].marketValue` against `GET /accounts`'s `balance.current` — so the claim covers the ladder, the valuation, the rounding and the serialisers, not just a context function. Three of the four seeded investment accounts agree **to the cent**; the fourth's difference is named and asserted (§13 below, with the per-account table and the sabotage). The `institution_value_minor` route the earlier verdict recommended is unavailable by construction: the column is written but **exposed on no route**, which §13 records as a gap. |
+| Allocation matches a spreadsheet check  | **Proven**                                                | criterion (e) above.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Crypto on-ramps classified as transfers | **Proven against recorded fixtures**                      | `packages/connectors/coinbase/test/onramp.test.ts` → `'a USD deposit followed by a BTC buy yields one transfer, one trade and zero spending'`, `'a fiat deposit is a transfer, never income'`. Live leg needs Chris's Coinbase account (wp3.5 §10).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ### Real-data items (dispatch §6 Q8) — all four need Chris's accounts
 
@@ -350,12 +350,15 @@ disagrees with any entry can delete it and watch the check go red.
    `seed` layer (agents touch neither the lockfile nor that file). Nothing under
    `packages/seed/src/` imports a context — the shipped generator still depends on
    `@core/kernel` alone.
-4. **The route-level `fx_rate_missing` surfacing has no test** (§1 criterion d). One test
-   at `apps/api/test/db/net-worth-routes.test.ts` would close it; that file is not this
-   WP's.
-5. **"Holdings reconcile to balances" — the v0.5 clause with no test.** `institution_value_minor`
-   is stored and never compared to Σ(quantity × price). A ~30-line addition to
-   `@ctx/investments`; not this WP's package.
+4. ~~**The route-level `fx_rate_missing` surfacing has no test** (§1 criterion d).~~ **Closed,
+   §10.** `apps/api/test/db/net-worth-routes.test.ts` now carries the test.
+5. ~~**"Holdings reconcile to balances" — the v0.5 clause with no test.**~~ **Closed, twice,
+   independently.** §13 closes it at the route seam (`apps/api/test/db/holdings-reconcile.test.ts`,
+   a concurrent agent's). §10 below closes it a second way, at the pure-function seam this
+   item originally pointed at: `@ctx/investments`'s own `reconcile.ts` compares
+   `institution_value_minor` to Σ(quantity × price) directly, with unit fixtures and a
+   Postgres round trip, independent of any route. Both stand; neither supersedes the other
+   — a route-level proof and a context-level proof fail for different reasons.
 6. **The perf dataset is a correctness seed, not a scale seed** (§6). A 200-position,
    5-year run is worth having before anyone quotes these numbers as headroom.
 7. **What this WP did _not_ do:** the 3.14 carry half (`apps/web/**`,
@@ -391,3 +394,368 @@ This WP's tree touches exactly: `packages/seed/{src/{index,investments,prng,phas
 `apps/api/test/db/investments-perf.test.ts`, `docs/TESTING.md`,
 `docs/evidence/phase-3/wp3.14-quality.md`, `justfile` (the `lint` recipe),
 `.github/workflows/ci.yml` (additive), `vitest.config.ts` (the two edits in §8 item 1).
+
+---
+
+## 10. Close-out 2026-09-24 — §8 items 4 and 5, both closed
+
+_A separate finishing pass over §1's own audit, dispatched by the orchestrator specifically
+for the two clauses §1 named as gaps: criterion (d)'s HTTP surfacing, and the v0.5 rung's
+"holdings reconcile to balances". Ownership for this pass:
+`packages/contexts/investments/src/reconcile.ts` (new), one export line in that package's
+`index.ts`, `packages/contexts/investments/test/holdings-reconcile.test.ts` (new),
+`packages/contexts/investments/test/db/holdings-reconcile.test.ts` (new),
+`apps/api/test/db/net-worth-routes.test.ts`, and this file — nothing else touched._
+
+**A note on §13, found already in the tree at the start of this pass.** A concurrent agent
+independently closed the same v0.5-rung clause at a different altitude —
+`apps/api/test/db/holdings-reconcile.test.ts`, a route-level HTTP proof
+(`GET /accounts/{id}/holdings` Σ against `GET /accounts`'s balance) — before this pass
+started writing. Rather than rewrite or duplicate §13's own table row and prose (already
+correct, already sabotage-tested, and not this pass's file to edit), this section adds a
+second, independent proof at the seam §8 item 5 originally pointed at: a pure function
+inside `@ctx/investments` itself, comparing `institution_value_minor` to
+Σ(quantity × price) directly, with no HTTP, no route serialiser and no seed dependency in
+the path. The two proofs fail for different reasons — a route proof catches a serialiser or
+ladder-wiring regression the pure function cannot see; the pure function catches an
+arithmetic or tolerance regression a route test would only see indirectly, through whatever
+fixture happens to be seeded. Both are now in the tree, neither superseding the other.
+
+### 10.1 Holdings reconcile to balances (§1 v0.5 rung, §8 item 5) — the pure-function proof
+
+`packages/contexts/investments/src/reconcile.ts` — `reconcileHolding`/`reconcileHoldings` —
+compares a `Holding`'s stored `institutionValue` against a computed
+`marketValueOf(quantity, price, scale)` (reusing `basis.ts`'s existing arithmetic; no new
+rounding is introduced) and reports one of three states: `reconciled`, `tolerance_breach`
+(with both values and the signed `differenceMinor`), or `no_price` — never a silent pass.
+
+**The tolerance rule: one minor unit per holding.** `marketValueOf` rounds
+`quantity × price` half-even into minor units exactly once; the institution's own value is
+an independent rounding of the same real number, at the same scale. Two honest roundings of
+one true value can differ by at most one unit in the last place — that is what "rounding"
+means — so one minor unit is the largest gap that can be explained by rounding alone.
+Anything larger is `tolerance_breach`: a stale price, a wrong quantity, an unapplied
+corporate action, or a genuine data error, and the signed difference is diagnostic (an exact
+multiple of the price points at a quantity bug; a difference proportional to the whole
+position points at a stale price). This is stated in full, with the reasoning, in the file's
+own header comment.
+
+Tests:
+
+- `packages/contexts/investments/test/holdings-reconcile.test.ts` (project `investments`,
+  hand-built fixtures — `@core/seed` is not importable from this package's tests; see the
+  file header and `docs/TESTING.md`'s note on the `context` layer's allow-list):
+  - `'holdings reconcile to balances'` — the criterion, verbatim as the test name asked for
+    — four holdings in one `reconcileHoldings` call: an exact match (`reconciled`,
+    `differenceMinor: 0n`), a one-minor-unit disagreement at the tolerance boundary
+    (`reconciled`, `differenceMinor: -1n`), a 150-minor-unit disagreement
+    (`tolerance_breach`), and a holding with no price at all (`no_price`).
+  - `'a difference of exactly one minor unit is reconciled; two is a tolerance_breach'` —
+    isolates the boundary: one minor unit off is `reconciled`, two is `tolerance_breach`.
+  - `'an 18-decimal crypto quantity reconciles exactly, with no float in the path'` — a
+    `NUMERIC(38,18)`-shaped quantity string through the same arithmetic.
+  - `'never coerces a currency mismatch between the holding and the price'` — throws, the
+    same convention `Money.add` states in `docs/CONVENTIONS.md`.
+- `packages/contexts/investments/test/db/holdings-reconcile.test.ts` (project
+  `investments-db`) — the two real write paths agree with the pure function: a holding
+  written by `drizzleLotStore.upsertHolding` (the sync/import path) and a price written by
+  `recordUserPriceOverride` (the rung-1 write path), both read back through the real store
+  (`drizzlePriceStore` + `createPriceReader` for the price; a plain `SELECT` for the holding,
+  since `LotStore` exposes no holdings reader) and handed to `reconcileHolding` unchanged.
+  Three tests: an exact reconciliation, a `no_price` holding (no price row written at all),
+  and a $48.80 `tolerance_breach`.
+
+**Sabotage**, both on `reconcile.ts`, each applied, run, and reverted (byte-identical restore
+confirmed by re-diffing against a pre-sabotage copy):
+
+1. `DEFAULT_RECONCILE_TOLERANCE_MINOR` widened from `1n` to `1_000_000_000_000n` (an
+   effectively infinite tolerance). **RED, first attempt** — 2 of 4 tests in
+   `holdings-reconcile.test.ts` failed: the `tolerance_breach` fixture in the composite test
+   silently reclassified as `reconciled` (`expected "tolerance_breach" ... Received
+"reconciled"`), and the boundary test's `tolerance_breach` case likewise. Restored; 4/4
+   green.
+2. The price term dropped from the computed value
+   (`marketValueOf(holding.quantity, { ...price, amount: Quantity.zero }, scale)`).
+   **RED, first attempt** — 3 of 4 tests failed: every fixture whose institution value was
+   non-zero was reclassified `tolerance_breach` (`computedValue.minor` forced to `0`), e.g.
+   `expected computedValue.minor 472500n, Received 0n` on the 18-decimal ETH fixture.
+   Restored; 4/4 green.
+
+### 10.2 A missing FX rate surfaces rather than defaulting (§1 criterion d, §8 item 4)
+
+`packages/contexts/planning/test/fx-missing.test.ts` already proved the domain layer
+(`computeNetWorth` throws `FxRateUnavailable`, never a 1.0). The gap §1 named was the HTTP
+seam: `apps/api/src/routes/net-worth.ts` around line 344 catches it with the exported
+`isFxRateUnavailable` predicate and translates it to a 409 named `planning.fx_rate_missing`
+— untested until now.
+
+Added to `apps/api/test/db/net-worth-routes.test.ts`, a new, isolated `describe` block (its
+own `ApiHarness`, not sharing the file's existing `beforeAll` — reusing it would put a CAD
+account with no FX rate into every other test's shared setup and fail them at `beforeAll`
+instead of proving anything):
+
+1. seed a USD account, compute and write one open (unsealed) day, so `asOfDate` has an
+   existing revision for `correctDay` to supersede (`SealedRowImmutable`/404 otherwise — the
+   same rule the file's own `'refuses a correction to a day that has no revision to
+supersede'` test exercises);
+2. link a **second**, CAD account with a balance dated on `asOfDate`, and deliberately write
+   **no** `fx_rates` row for CAD/USD at all — reproducing on purpose the unplanned §5 S0
+   finding ("`computeNetWorth` threw ... while `investments-perf.test.ts` was being built");
+3. two tests:
+   - `'POST /net-worth/corrections surfaces planning.fx_rate_missing rather than defaulting
+to 1.0'` — asserts `409`, `code: 'planning.fx_rate_missing'`, and that `detail` names
+     both currencies and contains `'rather than a 1.0'` (the same wording
+     `fx-missing.test.ts` asserts on the domain error's own message).
+   - `'GET /net-worth (the ledger "now" read) reports the CAD balance on its own line, never
+folded into USD at 1.0'` — the complementary half of the criterion, on the route that
+     never attempts FX conversion at all (`accounts.ts`'s `GET /net-worth`, per its own file
+     header: "adding dollars to euros here would be a wrong number rendered confidently"):
+     asserts the CAD total is `708000` minor on its own currency line, and the USD total is
+     exactly `500000` — the USD account's own balance, not `500000 + 708000` at par.
+
+**Sabotage**, on `apps/api/src/routes/net-worth.ts`, applied, run, and reverted
+(byte-identical restore confirmed by `diff` against a pre-sabotage copy):
+
+The `isFxRateUnavailable(error)` branch gated with `if (false && isFxRateUnavailable(error))`
+— the route falls through to the generic `throw error`, i.e. it swallows the dedicated
+translation and lets the error become an unhandled 500. **RED, first attempt**:
+
+```
+FAIL … > POST /net-worth/corrections surfaces planning.fx_rate_missing rather than defaulting to 1.0
+AssertionError: expected 500 to be 409
+```
+
+The other 9 tests in the file, including the new `GET /net-worth` test, stayed green — the
+sabotage only touched the one branch it targeted. Restored; 10/10 green.
+
+### 10.3 A defect found, not fixed (out of ownership)
+
+`apps/api/src/routes/accounts.ts`'s `GET /net-worth` (`netWorthNow`, `@ctx/ledger`) never
+attempts FX conversion **at all**, regardless of whether a rate exists — it is not that a
+missing rate is refused there, it is that no rate is ever consulted on that surface. That is
+the correct behaviour for the criterion this pass tested (a CAD total on its own line, never
+folded in at par) and is asserted as such, but it means `GET /net-worth` cannot itself
+distinguish "no FX rate exists yet" from "FX rate exists but we don't convert here" — both
+render identically as an un-converted per-currency line. Not a defect in what was tested, but
+worth the gate knowing: the "surfaces rather than defaulting" guarantee lives entirely on the
+`@ctx/planning` seam (`computeNetWorth` / `POST /net-worth/corrections`), not on the ledger
+"now" read, which was never going to convert in the first place. Neither `accounts.ts` nor
+`@ctx/ledger` is this pass's file to change.
+
+### 10.4 Verification
+
+Every command in the foreground, at this tree, with
+`DATABASE_URL=postgres://personalfi:personalfi@127.0.0.1:5433/personalfi_dev` (an
+already-running dev Postgres found listening on `127.0.0.1:5433`; no compose stack started or
+touched by this pass, per `docs/TESTING.md`).
+
+| Command                                                                              | Result                                                                    |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `pnpm exec tsc -b --noEmit`                                                          | **clean**                                                                 |
+| `pnpm exec eslint` (every file this pass touched)                                    | **clean**                                                                 |
+| `pnpm exec prettier --write` (every file this pass touched)                          | **clean** (whitespace-only diffs)                                         |
+| `node scripts/check-numeric-boundaries.ts`                                           | self-test PASS, tree **PASS** — 689 files, 0 violations                   |
+| `pnpm exec vitest run --project investments`                                         | **23 files, 204 tests passed**                                            |
+| `pnpm exec vitest run --project investments-db`                                      | **6 files, 40 tests passed**                                              |
+| `pnpm exec vitest run --project api-db test/db/net-worth-routes.test.ts`             | **1 file, 10 tests passed**                                               |
+| Sabotage 1 (infinite tolerance), `investments` / `holdings-reconcile.test.ts`        | **RED, first attempt** — 2/4 failed; restored, 4/4 green                  |
+| Sabotage 2 (price term dropped), `investments` / `holdings-reconcile.test.ts`        | **RED, first attempt** — 3/4 failed; restored, 4/4 green                  |
+| Sabotage 3 (route swallows `fx_rate_missing`), `api-db` / `net-worth-routes.test.ts` | **RED, first attempt** — 1/10 failed (500 not 409); restored, 10/10 green |
+
+`git diff --cached --name-only` empty throughout (memory: staged-rename-leak). This pass's
+tree touches exactly: `packages/contexts/investments/src/{reconcile.ts (new),index.ts}`,
+`packages/contexts/investments/test/{holdings-reconcile.test.ts (new),db/holdings-reconcile.test.ts (new)}`,
+`apps/api/test/db/net-worth-routes.test.ts`, and this file.
+
+_A full `--project investments --project investments-db --project api-db` re-run follows this
+write-up; see the line appended immediately below when it completes. One known, pre-existing,
+unrelated failure to expect in the `api-db` project: `test/db/phase3-wiring.test.ts`'s
+`module.planning: a real ledger.BalanceRecorded reaches the net-worth consumer...` test failed
+independently of this pass's changes (confirmed: it fails when `net-worth-routes.test.ts` is
+excluded from the run too), most likely a collision with the concurrent agent's in-flight
+edits to `packages/connectors/**` / `packages/contexts/connections/**` /
+`apps/api/test/db/investments-routes.test.ts` — none of which this pass touched or owns._
+
+_Orchestrator's re-run at commit time (2026-09-24 23:07 EDT, the agent's own background re-run
+was killed as a session orphan): `--project investments --project investments-db` → **29 files,
+244 tests passed**; `--project api-db test/db/holdings-reconcile.test.ts test/db/net-worth-routes.test.ts`
+→ **2 files, 13 tests passed**. `just verify` at e03fdb8 was green through check, web build,
+gitleaks, license, hardening and trivy; Playwright showed three 30 s timeouts under a load
+average of ~12 (two agents' suites running concurrently); all three pass in isolation
+(walkthrough 2/2 with `--repeat-each 2`). CI on the real runner is the arbiter._
+
+---
+
+## 13. Holdings reconcile to balances — now tested
+
+_Added after the §1 audit, which found this clause of the v0.5 rung (§2.3) had no test in
+the tree. It is the only row of that table this section changes; §8 item 5, which carried
+it as owed, is superseded by what follows._
+
+`apps/api/test/db/holdings-reconcile.test.ts` (project `api-db`), three tests:
+
+1. `'the seeded portfolio is in the database and every seeded investment account is covered'`
+2. `'holdings reconcile to balances on the seed'`
+3. `'a holding whose price is missing is reported as unreconciled, never silently reconciled'`
+
+### 13.1 What is compared, and why the two sides are independent
+
+Σ of `GET /accounts/{id}/holdings` → `positions[].marketValue`, against
+`GET /accounts` → `balance.current`, for every seeded investment account. Both over the
+real application (`buildApp`, real guards, real Zod serialisers) on a scratch Postgres.
+
+The two sides do not share a derivation, which is the whole point of the exercise:
+
+- **The balance** is the institution's figure. It is recorded over HTTP through
+  `POST /accounts/{id}/balance` — the same writer a sync uses — from
+  `phase3-investments.ts`'s **hand-computed `expectedMarketValue` literals**, the ones
+  `packages/seed/test/investments-ground-truth.test.ts` grades against `marketValueOf`.
+- **The Σ** comes back out of the database through `readHoldings` → WP 3.4's price ladder
+  → `valueHoldings`' single half-even rounding at the minor-unit boundary → the route's
+  own response schema.
+
+A generator that lied, a ladder that picked the wrong rung, a rounding that moved or a
+route that dropped a position separates them. Test 1 additionally asserts that each
+declared balance **is** Σ of the seed's own declared values, so the expectation table
+cannot drift away from the generator; that assertion is one of the two that the sabotage
+in §13.4 turns red.
+
+### 13.2 The per-account table
+
+Printed by the test itself on every run (`process.stdout.write`), reproduced verbatim:
+
+```
+holdings reconcile to balances (seed 314):
+| Account | Balance | Σ holdings | Difference | Verdict / reason |
+| --- | --- | --- | --- | --- |
+| Taxable Brokerage | USD 18,315.36 | USD 18,315.36 | USD 0.00 | reconciled / exact |
+| Rollover IRA | USD 7,471.00 | USD 7,471.00 | USD 0.00 | reconciled / exact |
+| Crypto Exchange | USD 3,150.00 | USD 3,150.00 | USD 0.00 | reconciled / exact |
+| CAD Brokerage | CAD 7,080.00 | USD 0.00 | incomparable | unreconciled / foreign_currency_not_converted (XIC) |
+```
+
+| Account           | Balance        | Σ holdings   | Difference       | Reason, asserted by name                                                                                                                                                                                                   |
+| ----------------- | -------------- | ------------ | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Taxable Brokerage | `$18,315.36`   | `$18,315.36` | **`$0.00`**      | `exact`. 3 VTI × $305.12 = $915.36, 20 AAPL × $245.00 = $4,900.00, **plus the $12,500.00 cash sweep** — see §13.3.                                                                                                         |
+| Rollover IRA      | `$7,471.00`    | `$7,471.00`  | **`$0.00`**      | `exact`. 100 BND × $71.50 = $7,150.00 + 5 VXUS × $64.20 = $321.00. VXUS was transferred in with no basis: what it _cost_ is `unavailable` (04 §5.5), what it is _worth_ is not, and it reconciles like any other position. |
+| Crypto Exchange   | `$3,150.00`    | `$3,150.00`  | **`$0.00`**      | `exact`. 1.000000000000000000 ETH × $3,150.00 — an 18-decimal quantity rounded once, at the boundary.                                                                                                                      |
+| CAD Brokerage     | `CAD 7,080.00` | `USD 0.00`   | **incomparable** | `foreign_currency_not_converted`. The report is USD, there is no USD quote for XIC, and the position is **excluded and named** rather than counted at par. See §13.5.                                                      |
+
+The manual asset (`$450,000.00`) and the liability (`$18,250.00`) hold no positions and
+are criterion (a)'s subject, not this one's. Test 1 asserts that the two accounts the
+suite does _not_ reconcile are exactly those two, by `kind` — so the table cannot quietly
+cover fewer accounts than the seed carries.
+
+### 13.3 The cash sweep, asserted as a counterfactual
+
+wp3.7 §5's second row says a sweep is face value, not a quote. A reconciliation that
+valued only the **investable** positions would report a `$12,500.00` hole in an account
+that is in fact correct, so the clause is asserted both ways:
+
+- the `CASH` position is present, priced `$12,500.00`, and **not stale**; and
+- `total − Σ(non-cash positions) === 1_250_000` minor units, exactly.
+
+Worth recording how the sweep gets priced at all, because it is not the obvious path: the
+`cash` ladder is `['user_override', 'last_known']`, so the only rung that can answer for
+`CASH` is `last_known`, which takes the most recent observation **strictly before** the
+day asked for. The fixture therefore writes three recent days at `closeOnAsOf` with a
+fresh `observed_at`, not one. A series that stopped at the seed's last month-end would be
+_entirely_ STALE at read time (07 §6.1 reads `observed_at`, not `price_date`) and every
+position in every account would be excluded — this file would then pass by reporting four
+unreconciled accounts, which is the way it could most plausibly have proved nothing.
+
+### 13.4 Sabotage: one cent on one balance
+
+The taxable account's recorded balance was changed from `1831536` to `1831537` minor
+units — a single cent — and the suite re-run. Two tests red, on the first attempt:
+
+```
+ ❯ |api-db| test/db/holdings-reconcile.test.ts (3 tests | 2 failed) 3187ms
+     × the seeded portfolio is in the database and every seeded investment account is covered
+     × holdings reconcile to balances on the seed
+
+ FAIL  … > the seeded portfolio is in the database and every seeded investment account is covered
+AssertionError: Taxable Brokerage: Σ of the seed's declared values: expected '1831536' to be '1831537'
+
+ FAIL  … > holdings reconcile to balances on the seed
+AssertionError: Taxable Brokerage: 3 VTI × $305.12 = $915.36, 20 AAPL × $245.00 = $4,900.00,
+and the $12,500.00 cash sweep — $18,315.36 to the cent. …: expected 'unreconciled' to be 'reconciled'
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+```
+
+Restored; green again (§13.7). Note the second failure's shape: the corrupted account did
+not merely miss its expected difference, it changed **verdict** — a cent with nothing to
+explain it is `unexplained`, and `unexplained` never reconciles.
+
+### 13.5 The unreconciled mechanism, and "never silently reconciled"
+
+The verdict is computed by a `reconcile()` helper over a closed list of reasons —
+`exact`, `unpriced_position_excluded`, `stale_position_excluded`,
+`foreign_currency_not_converted`, `balance_missing`, `unexplained` — with one rule written
+into the function rather than into an assertion, so that it holds for every account on
+every run:
+
+> **An excluded position can never produce a `reconciled` verdict**, including when the
+> arithmetic happens to land on zero.
+
+That is what test 3 is named for. It deletes **every** `prices` row for the seeded BND
+security (every date, every source: leaving one behind would let the `last_known` rung
+answer and the position would stay priced), then asserts, against the Rollover IRA:
+
+| Claim                              | Assertion                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------ |
+| The account is flagged             | `verdict === 'unreconciled'`, `reason === 'unpriced_position_excluded'`                    |
+| The flag **names the security**    | `namedSecurities === ['BND']`; `excluded === [{ symbol: 'BND', reason: 'price_unknown' }]` |
+| The position is not erased         | it is still in `positions[]`, with `marketValue: null` and `price: null`                   |
+| `null`, never a zero               | a zero would be a valuation this system never made                                         |
+| It was **not** silently reconciled | balance still `$7,471.00`, valued Σ now `$321.00`, difference `$7,150.00 ≠ 0`              |
+| The hole is accounted for          | the difference **equals** the missing position's own market value                          |
+
+The IRA is asserted `reconciled / exact` immediately **before** the deletion, so the red
+verdict is a control and not a coincidence. The rows are re-inserted verbatim in a
+`finally`, and the account is asserted `reconciled / exact` again afterwards — which both
+proves the restore and keeps the suite from poisoning anything downstream of it.
+
+The CAD account exercises the same machinery from the other side, for D4: `total` is
+asserted **not** to be `708000` (CAD 7,080.00 counted as USD 7,080.00 is exactly the §5
+"never"), and asserted to be `0` with `XIC` excluded and named.
+
+### 13.6 Route field gaps — recorded, not edited around
+
+No route was touched. Both gaps are computed around inside the test:
+
+1. **No route reports a reconciliation.** Neither response carries a difference, a verdict
+   or a tolerance, so the difference is computed in the test from the two payloads.
+   Relatedly, and this is the one the §1 audit row had pointed at:
+   `holdings.institution_value_minor` is written
+   (`packages/contexts/investments/src/lots-store.ts:337`) but is **exposed on no route at
+   all** — it is absent from `/accounts/{id}/holdings`'s `positions[]` and from
+   `/holdings`'s aggregated rows. So the _per-position_ half of wp3.7 §5's table cannot be
+   reconciled over HTTP by anyone, test or user. The account-level balance is used
+   instead, which is what the criterion ("holdings reconcile to _balances_") actually says.
+2. **`excluded[].reason` under-describes the CAD case.** The seeded CAD position comes back
+   as `price_unknown`, not `currency_mismatch`, because `createPriceReader` filters
+   observations by quote currency (`prices.ts` → `observationsOnOrBefore(userId,
+securityId, quoteCurrency, date)`) before `valueHoldings`' `currency_mismatch` branch
+   ever sees a row. The position **is** priced — in CAD, on every date in the series — it
+   is simply not priced in USD, and "we have no price" is a materially different thing to
+   show a user than "we have a price we cannot convert". The behaviour that exists is
+   pinned by the test; the label is thinner than the cause, and closing that is a route or
+   context change neither this section nor this file owns.
+
+### 13.7 Verification
+
+Every command in the foreground, at this tree.
+
+| Command                                                                                            | Result                                   |
+| -------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `DATABASE_URL=… pnpm exec vitest run --project api-db apps/api/test/db/holdings-reconcile.test.ts` | **1 file, 3 tests passed** — 10.3 s      |
+| the same, with one balance corrupted by `$0.01`                                                    | **2 of 3 failed** (§13.4), then restored |
+| `pnpm exec tsc -b --noEmit`                                                                        | **clean**                                |
+| `pnpm exec eslint apps/api/test/db/holdings-reconcile.test.ts`                                     | **clean**                                |
+| `pnpm exec prettier --check apps/api/test/db/holdings-reconcile.test.ts`                           | **clean**                                |
+
+This section's tree touches exactly `apps/api/test/db/holdings-reconcile.test.ts` (new) and
+this file (the §2.3 audit row and §13). No route, no context, no config, nothing staged.
