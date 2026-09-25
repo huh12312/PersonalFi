@@ -579,10 +579,14 @@ edits to `packages/connectors/**` / `packages/contexts/connections/**` /
 _Orchestrator's re-run at commit time (2026-09-24 23:07 EDT, the agent's own background re-run
 was killed as a session orphan): `--project investments --project investments-db` → **29 files,
 244 tests passed**; `--project api-db test/db/holdings-reconcile.test.ts test/db/net-worth-routes.test.ts`
-→ **2 files, 13 tests passed**. `just verify` at e03fdb8 was green through check, web build,
-gitleaks, license, hardening and trivy; Playwright showed three 30 s timeouts under a load
-average of ~12 (two agents' suites running concurrently); all three pass in isolation
-(walkthrough 2/2 with `--repeat-each 2`). CI on the real runner is the arbiter._
+→ **2 files, 13 tests passed**. `just verify` at e03fdb8 was green through check and the web
+build, then stopped at Playwright with three 30 s timeouts under a load average of ~12 (two
+agents' suites running concurrently); all three pass in isolation (walkthrough 2/2 with
+`--repeat-each 2`). The steps after Playwright (gitleaks, license, hardening, trivy) did not
+run locally. CI on the real runner at 5e0f51a: 12/13 green — gitleaks, hardening, trivy and
+Playwright all passed there; the license gate was red only on the `THIRD_PARTY.md` lockfile
+stamp (the `@ctx/investments` devDependency added to `@core/seed` changed the lockfile),
+restamped in the following commit._
 
 ---
 
