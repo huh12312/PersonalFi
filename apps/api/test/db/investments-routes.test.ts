@@ -733,6 +733,73 @@ describe.skipIf(NO_DATABASE)('/holdings, /securities, /prices and /investments (
       expect(serialised).not.toContain(id);
     }
   });
+
+  /**
+   * WP 3.9 §4, S1: dropping `WHERE h.user_id` from `readHoldings` stayed
+   * **green**, not because the control was absent but because the `JOIN
+   * securities s ON … AND s.user_id` doubles it. That is proof the
+   * *combination* leaks nothing for an ordinary, same-owner holding — it is
+   * not proof either predicate is independently sufficient, and the sabotage
+   * table itself says so: "a single-predicate sabotage is not sufficient
+   * evidence for this route."
+   *
+   * A holding whose `security_id` names a security some *other* user owns is
+   * exactly the shape that tells the two predicates apart: the owner of the
+   * *holding row* is refused by the join (their id never matches the
+   * security's real owner), and the owner of the *security* is refused by the
+   * `WHERE` (they never owned the holding row). Drop the `WHERE` and only the
+   * second refusal survives — which is precisely what the sabotage below
+   * demonstrates.
+   *
+   * **No constraint refuses the plant.** `holdings.security_id` is a bare
+   * `REFERENCES securities (id)` (migration 0014's `CREATE TABLE holdings`),
+   * not a composite FK against `(user_id, security_id)`, and neither a CHECK
+   * nor a trigger anywhere compares the two tables' `user_id` columns. So this
+   * is a genuine plant, not a write-time refusal standing in for one.
+   */
+  it('a holding whose security belongs to another user is visible to neither', async () => {
+    // otherUserId's own holding, naming a security h.userId owns.
+    await insertHolding({
+      userId: otherUserId,
+      accountId: newId(), // opaque; `holdings.account_id` carries no FK (see the table's header)
+      securityId: seeded.vti,
+      quantity: '1.000000000000000000',
+      costBasisMinor: null,
+      institutionValueMinor: 10_000n,
+    });
+
+    // The security's real owner: excluded by `WHERE h.user_id` — this was
+    // never their holding row. VTI's aggregate must be exactly what the first
+    // test in this file pinned before anything was planted: two accounts,
+    // 15 shares. A leak would grow one of those two numbers.
+    const asOwner = await h.request({ method: 'GET', url: '/holdings', session: h.stale });
+    expectStatus(asOwner, 200);
+    const ownerVti = (asOwner.json() as HoldingsBody).holdings.find(
+      (row) => row.securityId === seeded.vti,
+    );
+    expect(ownerVti?.accountCount, 'the security owner never held the planted row').toBe(2);
+    expect(ownerVti?.quantity).toBe('15.000000000000000000');
+
+    // The holding's owner: excluded by the join, because `s.user_id` — bound
+    // to *their* id — never matches the security's real owner.
+    const theirs = await h.issueSession({ userId: otherUserId, fresh: true });
+    const asPlanter = await h.request({ method: 'GET', url: '/holdings', session: theirs });
+    expectStatus(asPlanter, 200);
+    const planterBody = asPlanter.json() as HoldingsBody;
+    expect(planterBody.holdings, "the planted row is not the planter's to see either").toHaveLength(
+      0,
+    );
+    expect(planterBody.total.minor).toBe('0');
+
+    // `/accounts/{id}/holdings`, `/investments/allocation` and
+    // `/investments/drift` all read through this same `readHoldings` — see
+    // `portfolioFor` in `apps/api/src/routes/investments.ts` — so one fix (and
+    // this one test) covers every caller; there is no second query to repeat
+    // this against. The sabotage itself (dropping `WHERE h.user_id`) is
+    // recorded in `docs/evidence/phase-3/wp3.14a-port-and-scope.md` rather
+    // than left in the source, because it is a defect this test exists to
+    // catch, not a state to commit.
+  });
 });
 
 /**

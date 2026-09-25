@@ -541,10 +541,25 @@ describe('investmentTransactionFactOf', () => {
     expect(fact.fees?.minor).toBe(65n);
   });
 
+  it('names its security by every identifier Plaid gave it, not the strongest alone', () => {
+    // WP 3.14a: the same shape WP 3.7a proved for `holdingFactOf` above — a
+    // transaction that named its security by the FIGI alone could never merge
+    // with a sighting that only ever saw the ticker.
+    const fact = investmentTransactionFactOf(sell!, SECURITIES);
+    expect(fact.security?.providerSecurityId).toBe('sec-vti-0001');
+    expect(fact.security?.identifiers).toEqual([
+      { kind: 'figi', value: 'BBG000BDTF76', chain: null, mic: null },
+      { kind: 'isin', value: 'US9229087690', chain: null, mic: null },
+      { kind: 'cusip', value: '922908769', chain: null, mic: null },
+      { kind: 'ticker', value: 'VTI', chain: null, mic: 'XNYS' },
+    ]);
+    expect(fact.security?.type).toBe('etf');
+    expect(fact.security?.name).toBe('Vanguard Total Stock Market ETF');
+  });
+
   it('tolerates a cash movement with no security at all', () => {
     const fact = investmentTransactionFactOf(contribution!, SECURITIES);
     expect(fact.security).toBeNull();
-    expect(fact.providerSecurityId).toBeNull();
     expect(fact.fees).toBeNull();
   });
 

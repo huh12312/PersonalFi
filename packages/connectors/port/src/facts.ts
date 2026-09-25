@@ -311,10 +311,17 @@ export interface ProviderInvestmentTransactionFact {
   /**
    * The security traded, or `null` — a cash sweep, a fee and a deposit are all
    * real investment transactions with no security behind them.
+   *
+   * The whole `ProviderSecurityFact`, not a single `SecurityIdentifier` — WP
+   * 3.14a, the item `ProviderHoldingFact.security`'s own doc comment named as
+   * carried: "the same argument applies to it... The fix is the same
+   * one-field change." A provider that states a FIGI *and* a ticker for the
+   * same trade is the identical shape holdings had, and `providerSecurityId`
+   * lives inside the fact now, for the same reason `ProviderHoldingFact`
+   * dropped its own copy — see `docs/evidence/phase-3/wp3.7a-holding-identifiers.md`
+   * §2 and `docs/evidence/phase-3/wp3.14a-port-and-scope.md`.
    */
-  readonly security: SecurityIdentifier | null;
-  /** The provider's opaque security id. Evidence, never identity. */
-  readonly providerSecurityId: string | null;
+  readonly security: ProviderSecurityFact | null;
   readonly date: DateOnly;
   readonly name: string;
   /** Provider vocabulary: `buy`, `sell`, `cash`, `fee`, `transfer`. */

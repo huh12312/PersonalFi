@@ -25,6 +25,7 @@ import { describe, expect, it } from 'vitest';
 import { Money } from '@core/kernel';
 import { COINBASE_TRANSFER_IN_PFC, COINBASE_TRANSFER_OUT_PFC } from '../src/ledger.ts';
 import { encodeWatermark } from '../src/cursor.ts';
+import { securityFactOf } from '../src/map.ts';
 import {
   BTC_WALLET,
   USD_WALLET,
@@ -72,7 +73,8 @@ describe('the fiat on-ramp', () => {
     // A positive magnitude, like the port's `limit`: the fee is already inside
     // `amount`, and a second signed copy of it is how a fee gets counted twice.
     expect(buys[0]?.fees).toEqual(Money.of(2_000n, 'USD'));
-    expect(buys[0]?.security).toEqual({ kind: 'ticker', value: 'BTC', chain: null, mic: null });
+    // WP 3.14a: the whole fact, not the ticker alone.
+    expect(buys[0]?.security).toEqual(securityFactOf('BTC', '40000'));
 
     // ---- zero spending ---------------------------------------------------
     // Every ledger transaction this adapter emitted is a transfer. Nothing it

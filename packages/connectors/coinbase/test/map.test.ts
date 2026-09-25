@@ -270,13 +270,16 @@ describe('fills', () => {
     expect(fact).toMatchObject({
       providerAccountId: ETH_WALLET,
       providerTransactionId: '6b2e1f4d9c3a5b7e0d1f2a3b4c5d6e7f',
-      providerSecurityId: 'ETH-USD',
       date: '2026-06-02',
       type: 'buy',
       subtype: 'crypto_trade',
       quantity: '2',
       price: '2500',
     });
+    // WP 3.14a: the whole fact, the same `securityFactOf` the holdings leg
+    // uses — not the identifier alone — so the two can no longer disagree
+    // about what ETH is.
+    expect(fact.security).toEqual(securityFactOf('ETH', '2500'));
     // 2 × 2,500 + 12.50 out of the USD wallet.
     expect(fact.amount).toEqual(Money.of(-501_250n, 'USD'));
     expect(fact.fees).toEqual(Money.of(1_250n, 'USD'));

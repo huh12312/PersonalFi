@@ -91,8 +91,20 @@ describe.skipIf(NO_DATABASE)('the lot consumer, against Postgres', () => {
       fact: {
         providerAccountId: 'provider-acct-1',
         providerTransactionId,
-        security: { kind: 'ticker', value: 'VTI', chain: null, mic: null },
-        providerSecurityId: 'provider-sec-1',
+        // WP 3.14a: the whole `ProviderSecurityFact`, not a bare identifier.
+        security: {
+          providerSecurityId: 'provider-sec-1',
+          identifiers: [{ kind: 'ticker', value: 'VTI', chain: null, mic: null }],
+          name: 'Vanguard Total Stock Market ETF',
+          type: 'etf',
+          subtype: null,
+          currency: 'USD',
+          isCashEquivalent: false,
+          closePrice: null,
+          closePriceAsOf: null,
+          raw: {},
+          fingerprint: 'fp-provider-sec-1',
+        },
         date: DateOnly.parse(date),
         name: 'Buy VTI',
         type: 'buy',

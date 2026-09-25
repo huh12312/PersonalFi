@@ -48,9 +48,14 @@
 import { PlaidConnector } from '@connector/plaid';
 import {
   FakePlaidApi,
+  INVESTMENTS,
+  ITEM,
   PUBLIC_TOKEN,
+  SYNC_PAGES,
   defaultItemSpec,
+  fakePlaidItem,
   linkSettings,
+  plainItemOf,
   testClock as plaidTestClock,
 } from '@connector/plaid/test';
 import { DateOnly, money, newId, systemClock } from '@core/kernel';
@@ -144,8 +149,20 @@ describe.skipIf(NO_DATABASE)(
         fact: {
           providerAccountId: 'p3wire-account',
           providerTransactionId: 'p3wire-buy-1',
-          security: { kind: 'ticker', value: 'VTI', chain: null, mic: 'XNYS' },
-          providerSecurityId: 'p3wire-sec-1',
+          // WP 3.14a: the whole `ProviderSecurityFact`, not a bare identifier.
+          security: {
+            providerSecurityId: 'p3wire-sec-1',
+            identifiers: [{ kind: 'ticker', value: 'VTI', chain: null, mic: 'XNYS' }],
+            name: 'Vanguard Total Stock Market ETF',
+            type: 'etf',
+            subtype: null,
+            currency: 'USD',
+            isCashEquivalent: false,
+            closePrice: null,
+            closePriceAsOf: null,
+            raw: {},
+            fingerprint: 'p3wire-fingerprint-1',
+          },
           date: DateOnly.parse('2026-02-02'),
           name: 'Buy VTI',
           type: 'buy',
@@ -694,6 +711,172 @@ describe.skipIf(NO_DATABASE)(
       await port.factsForRun(h.userId, holdingsRunId);
       await port.factsForRun(h.userId, holdingsRunId);
       expect(await countFailures()).toBe(1);
+    }, 60_000);
+
+    /**
+     * WP 3.14a — the item wp3.7a-holding-identifiers.md §7 carried:
+     * "`ProviderInvestmentTransactionFact.security` is still one
+     * `SecurityIdentifier`... A run that produced investment transactions and
+     * **no** holdings for the same security would split it exactly as
+     * holdings used to."
+     *
+     * Reproduced with a *second* Plaid Item (`fakePlaidItem` — namespaced
+     * account ids, so it cannot collide with the default Item's ledger
+     * accounts) whose fixture has no `.holdings` at all: the holdings leg
+     * comes back `PRODUCTS_NOT_SUPPORTED` (capability cleared, no facts
+     * written) and the *only* sighting of this security is one investment
+     * transaction. A security a provider names with a FIGI **and** a ticker
+     * on the very same record is exactly `holdingSecurityOf`'s old failure —
+     * before this WP, `investmentTransactionFactOf` picked the FIGI (the
+     * strongest identifier) and dropped the ticker, the same defect WP 3.7a
+     * fixed for holdings.
+     *
+     * The earlier sighting is a `manual` ticker-only resolution — same shape
+     * as the very first test in this file — so the two sightings share
+     * exactly one name if and only if the transaction fact carried it.
+     *
+     * `factsForRun` is called directly, deliberately skipping the lot
+     * consumer/pump: what is under test is `resolveRunFacts`'s resolution
+     * step alone, and running the consumer would open a lot and a cost-basis
+     * row that the later `'a real provider leg...'` test's `provider =
+     * 'plaid'`-scoped counts never anticipated a second Item contributing to.
+     */
+    it('an investment transaction with no holding for its security still merges with an earlier ticker-only sighting', async () => {
+      const itemSpec = fakePlaidItem({
+        accessToken: 'access-sandbox-NEVER-REAL-p314a-0000000000000000',
+        publicToken: 'public-sandbox-NEVER-REAL-p314a-1111111111111111',
+        itemId: 'item-p314a',
+      });
+      const security = {
+        ...INVESTMENTS.securities[0]!,
+        security_id: 'sec-p314a-0001',
+        isin: null,
+        cusip: null,
+        figi: 'BBG000P31401',
+        ticker_symbol: 'P314A',
+        market_identifier_code: 'XNAS',
+        name: 'P3.14a Test Security',
+        type: 'equity',
+      };
+      const transaction = {
+        ...INVESTMENTS.investment_transactions[0]!,
+        investment_transaction_id: 'ivt-p314a-buy',
+        account_id: 'item-p314a-acct-brokerage-003',
+        security_id: security.security_id,
+        name: 'BUY P314A',
+      };
+      plaidApi.addItem({
+        ...itemSpec,
+        // `fakePlaidItem`'s own accounts are namespaced by `itemId`
+        // (`account_id`), but `SYNC_PAGES` is a shared fixture that splices
+        // the *unnamespaced* `ACCOUNTS` onto every page (`harness.ts`'s own
+        // comment: "Plaid volunteers the full account list on every page").
+        // The transactions leg re-upserts every account a page volunteers
+        // (`orchestrator.ts`'s `if (page.accounts.length > 0)`), so reusing
+        // `SYNC_PAGES` here would collide with the default Item's
+        // already-linked `acct-checking-001` on the ledger's own natural key.
+        // An empty page (no accounts, no transactions) sidesteps the
+        // collision; this test is about the investment_txns leg, not the
+        // transactions one.
+        pages: [
+          {
+            accounts: [],
+            added: [],
+            modified: [],
+            removed: [],
+            next_cursor: '',
+            has_more: false,
+            // Borrowed rather than typed by hand, so this file never needs to
+            // import the `plaid` SDK's own enum.
+            transactions_update_status: SYNC_PAGES[0]!.transactions_update_status,
+            request_id: 'req-p314a-transactions-sync',
+          },
+        ],
+        // No `.holdings`: `/investments/holdings/get` answers
+        // PRODUCTS_NOT_SUPPORTED, exactly the `withoutHoldings` scenario
+        // `defaultItemSpec` names, so this Item's only investments leg is
+        // investment_txns.
+        investmentTransactions: {
+          accounts: [],
+          securities: [security],
+          investment_transactions: [transaction],
+          total_investment_transactions: 1,
+          item: plainItemOf(ITEM),
+          request_id: 'req-p314a-investments-transactions-get',
+        },
+      });
+
+      // The earlier, weaker sighting — a hand-entered ticker, the same shape
+      // the first test in this file uses, and from a different provider so
+      // there is no other route to the same row than the identifier itself.
+      const priorResolution = await securityResolverFor(h.database.db, systemClock).resolve(
+        { kind: 'ticker', value: 'P314A', chain: null, mic: 'XNAS' },
+        { userId: h.userId, provider: 'manual', correlationId: newId() },
+      );
+      expect(priorResolution.outcome, 'the resolver must place a ticker with a MIC').toBe(
+        'resolved',
+      );
+
+      const linked = await h.request({
+        method: 'POST',
+        url: '/connections/plaid/exchange',
+        session: h.fresh,
+        body: { publicToken: itemSpec.publicToken, institutionName: 'P3.14a Test Co' },
+      });
+      expect(linked.statusCode, 'the plaid link must succeed').toBe(201);
+      const connectionId = (linked.json() as { connectionId: string }).connectionId;
+
+      const summary = await h.orchestrator.syncConnection({
+        connectionId,
+        userId: h.userId,
+        trigger: 'manual',
+        correlationId: newId(),
+      });
+      expect(
+        summary.error,
+        'the transactions leg is unaffected by the missing products',
+      ).toBeNull();
+
+      const runs = await h.database.db.execute<{ id: string }>(sql`
+        SELECT id FROM sync_runs
+         WHERE connection_id = ${connectionId}::uuid AND operation = 'investment_txns'
+         ORDER BY started_at DESC LIMIT 1
+      `);
+      const investmentTxnsRunId = runs.rows[0]?.id;
+      expect(
+        investmentTxnsRunId,
+        'the investment_txns leg must have settled a sync_runs row',
+      ).toBeDefined();
+      if (investmentTxnsRunId === undefined) return;
+
+      // Directly, not through the pump: see the header comment for why.
+      await createInvestmentSyncPort(h.database.db).factsForRun(h.userId, investmentTxnsRunId);
+
+      const rows = await h.database.db.execute<{
+        id: string;
+        ticker: string | null;
+        figi: string | null;
+        identity_kind: string;
+        merged_into_id: string | null;
+      }>(sql`
+        SELECT DISTINCT s.id, s.ticker, s.figi, s.identity_kind, s.merged_into_id
+          FROM securities s
+          JOIN security_identifiers i ON i.security_id = s.id
+         WHERE s.user_id = ${h.userId}::uuid
+           AND s.merged_into_id IS NULL
+           AND upper(i.value) IN ('P314A', 'BBG000P31401')
+      `);
+      expect(
+        rows.rows,
+        'the ticker sighting and the investment-transaction-only FIGI sighting are one ' +
+          'security, not two',
+      ).toHaveLength(1);
+      expect(rows.rows[0]?.ticker).toBe('P314A');
+      expect(rows.rows[0]?.figi).toBe('BBG000P31401');
+      // The FIGI outranks the ticker that established the row, so — as in the
+      // holdings case — the identity was upgraded in place.
+      expect(rows.rows[0]?.identity_kind).toBe('figi');
+      expect(rows.rows[0]?.merged_into_id).toBeNull();
     }, 60_000);
 
     it('module.planning: a real ledger.BalanceRecorded reaches the net-worth consumer through the real pump, and the 04:00 schedule lands', async () => {

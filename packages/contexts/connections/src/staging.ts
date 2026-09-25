@@ -499,7 +499,11 @@ export async function recordInvestmentTransactionFacts(
         syncRunId: target.syncRunId,
         kind: 'investment_transaction' as const,
         providerAccountId: fact.providerAccountId,
-        providerSecurityId: fact.providerSecurityId,
+        // WP 3.14a: `security` is now the whole `ProviderSecurityFact`, and
+        // `providerSecurityId` lives inside it — the column is still read
+        // from there rather than from a field the fact no longer carries, the
+        // same move WP 3.7a made for the holdings leg.
+        providerSecurityId: fact.security?.providerSecurityId ?? null,
         providerTransactionId: fact.providerTransactionId,
         fingerprint: fact.fingerprint,
         quantity: fact.quantity,
@@ -510,6 +514,9 @@ export async function recordInvestmentTransactionFacts(
         feesCurrency: fact.fees?.currency ?? null,
         transactionDate: fact.date,
         fact: {
+          // The whole `ProviderSecurityFact`, not one identifier — same jsonb
+          // *shape* change WP 3.7a made to the holding leg's `fact` column,
+          // and not a DDL one (`fact` is `jsonb NOT NULL` in migration 0018).
           security: fact.security,
           name: fact.name,
           type: fact.type,
@@ -792,8 +799,10 @@ function investmentTransactionFactFromRow(
   return {
     providerAccountId: row.providerAccountId,
     providerTransactionId: row.providerTransactionId as string,
+    // Round-trips as JSON for the same reason `holdingFactFromRow` does: every
+    // field of `ProviderSecurityFact` is a string, a boolean, a null or an
+    // array of those (WP 3.14a).
     security: (fact['security'] as ProviderInvestmentTransactionFact['security']) ?? null,
-    providerSecurityId: row.providerSecurityId,
     date: DateOnly.parse(row.transactionDate as string),
     name: (fact['name'] as string | undefined) ?? '',
     type: (fact['type'] as string | undefined) ?? '',

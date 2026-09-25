@@ -506,11 +506,44 @@ export function connectorConformanceChecks(subject: ConformanceSubject): Conform
             typeof fact.amount.minor === 'bigint' && fact.amount.currency.length === 3,
             `${fact.providerTransactionId} carries an amount that is not a Money pair`,
           );
-          assert(
-            fact.security === null || fact.security.value.trim().length > 0,
-            `${fact.providerTransactionId} names a security with an empty value; use null for ` +
-              '"this transaction has no security", which a cash sweep or a fee genuinely has not',
-          );
+          // WP 3.14a. `security` is the whole `ProviderSecurityFact`, the same
+          // shape `holding.security` is checked against above and for the same
+          // reason: a transaction that named its security by one identifier
+          // out of several the provider actually gave is the defect the shape
+          // exists to make unrepresentable.
+          if (fact.security !== null) {
+            assert(
+              fact.security.providerSecurityId.trim().length > 0,
+              `${fact.providerTransactionId} carries a security with no providerSecurityId; ` +
+                'it is evidence rather than identity, but an adapter always has one',
+            );
+            assert(
+              fact.security.identifiers.length > 0,
+              `${fact.providerTransactionId} names its security with an empty identifier set; ` +
+                'use null for "this transaction has no security", which a cash sweep or a fee ' +
+                'genuinely has not',
+            );
+            for (const identifier of fact.security.identifiers) {
+              assert(
+                SECURITY_IDENTIFIER_KINDS.includes(identifier.kind),
+                `${fact.providerTransactionId} names its security with an unknown identifier ` +
+                  `kind '${String(identifier.kind)}'`,
+              );
+              assert(
+                identifier.value.trim().length > 0,
+                `${fact.providerTransactionId} carries an empty security identifier value`,
+              );
+              assert(
+                identifier.kind !== 'chain_contract' || identifier.chain !== null,
+                `${fact.providerTransactionId} names a chain_contract with no chain`,
+              );
+            }
+            assert(
+              fact.security.fingerprint === securityFingerprintOf(fact.security.identifiers),
+              `${fact.providerTransactionId} carries a security whose fingerprint is not ` +
+                'securityFingerprintOf(identifiers); it is mandatory on every fact (08 §2.5)',
+            );
+          }
         }
       },
     },

@@ -1783,21 +1783,21 @@ async function resolveRunFacts(
   // they name the same securities.
   const withSecurity = [
     // The **whole** `ProviderSecurityFact`, every name the provider gave at
-    // once. This line used to build `{ identifiers: [holding.fact.security] }`
-    // out of the single identifier the port carried, which is how a security
-    // Plaid named with a FIGI, an ISIN, a CUSIP *and* a MIC-qualified ticker
-    // reached a resolver that tiers over the set having been told one of the
-    // four. WP 3.7a; see `docs/evidence/phase-3/wp3.7a-holding-identifiers.md`.
+    // once, for both legs. This line used to build
+    // `{ identifiers: [holding.fact.security] }` out of the single identifier
+    // the port carried, which is how a security Plaid named with a FIGI, an
+    // ISIN, a CUSIP *and* a MIC-qualified ticker reached a resolver that tiers
+    // over the set having been told one of the four. WP 3.7a fixed it for
+    // holdings; WP 3.7a §7 carried the identical fix for
+    // `ProviderInvestmentTransactionFact.security`, closed here by WP 3.14a —
+    // a run with an investment transaction and no holding for the same
+    // security used to split it exactly as holdings once did, because nothing
+    // forced the two legs through the same resolver input shape. See
+    // `docs/evidence/phase-3/wp3.7a-holding-identifiers.md` and
+    // `docs/evidence/phase-3/wp3.14a-port-and-scope.md`.
     ...observed.holdings.map((holding) => holding.fact.security),
     ...observed.transactions.flatMap((transaction) =>
-      transaction.fact.security === null
-        ? []
-        : [
-            {
-              identifiers: [transaction.fact.security],
-              providerSecurityId: transaction.fact.providerSecurityId,
-            },
-          ],
+      transaction.fact.security === null ? [] : [transaction.fact.security],
     ),
   ];
   const resolutions = await resolver.resolveAll(withSecurity, context);

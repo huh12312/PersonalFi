@@ -337,7 +337,11 @@ export function investmentTransactionFactOf(
   }
 
   const side = sideOf(fill);
-  const security = securityIdentifierOfAsset(base);
+  // The identifier alone, kept only for the fingerprint — the same strongest
+  // pick `securityFingerprintOf` makes, computed directly rather than through
+  // `strongestIdentifier(security.identifiers)` because Coinbase only ever
+  // gives this adapter one identifier to begin with (decision 3 above).
+  const identifier = securityIdentifierOfAsset(base);
   const date = dateOnlyOfInstant(fill.trade_time, 'fill.trade_time');
   const quantity = baseEffectOf(fill);
   const price = quantityOf(fill.price, 'fill.price');
@@ -347,8 +351,10 @@ export function investmentTransactionFactOf(
   return {
     providerAccountId,
     providerTransactionId: fillIdOf(fill),
-    security,
-    providerSecurityId: coinbaseProductIdOf(base),
+    // WP 3.14a: the whole fact, the same function `holdingFactOf` uses, so a
+    // fill and a balance can no longer disagree about what this asset is —
+    // the same argument `holdingFactOf`'s own comment makes.
+    security: securityFactOf(base, price),
     date,
     name: `${side === 'BUY' ? 'Buy' : 'Sell'} ${base} on Coinbase Advanced Trade`,
     type: side === 'BUY' ? 'buy' : 'sell',
@@ -362,7 +368,7 @@ export function investmentTransactionFactOf(
       providerAccountId,
       date,
       amount,
-      security,
+      security: identifier,
       quantity,
     }),
   };

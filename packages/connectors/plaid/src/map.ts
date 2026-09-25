@@ -296,31 +296,6 @@ export function securityIdentifiersOf(security: Security | null): readonly Secur
   return identifiers;
 }
 
-/**
- * The single identifier an *investment transaction* is filed under.
- *
- * When Plaid gave no identifier at all — it happens for private placements and
- * for some cash-sweep lines — the fallback is `proprietary` carrying Plaid's own
- * `security_id`. That is deliberately a *dead end*: `@ctx/investments` never
- * accepts a proprietary identifier as an identity, so the position surfaces as a
- * resolution failure the user can see instead of minting an anonymous
- * `securities` row that will never merge with anything.
- *
- * **Holdings no longer come through here.** Picking the strongest single name
- * out of the four `securityIdentifiersOf` had already extracted is the WP 3.7a
- * defect (`@connector/port`'s `ProviderHoldingFact.security`), and a holding now
- * carries the whole `ProviderSecurityFact` through `holdingSecurityFactOf`.
- * `ProviderInvestmentTransactionFact.security` is still one identifier, so this
- * is still its shape; it is carried in
- * `docs/evidence/phase-3/wp3.7a-holding-identifiers.md` §7.
- */
-function holdingSecurityOf(providerSecurityId: string, security: Security | null) {
-  return (
-    strongestIdentifier(securityIdentifiersOf(security)) ??
-    securityIdentifierOf('proprietary', providerSecurityId)
-  );
-}
-
 /** One Plaid `Security`, as the port's canonical security fact. */
 export function securityFactOf(security: Security): ProviderSecurityFact {
   const extracted = securityIdentifiersOf(security);
@@ -350,15 +325,21 @@ export function securityFactOf(security: Security): ProviderSecurityFact {
 }
 
 /**
- * The security a *position* is filed under — the whole fact, every name at once.
+ * The security a *position or a trade* is filed under — the whole fact, every
+ * name at once.
  *
- * `/investments/holdings/get` returns `holdings` and `securities` as two arrays
- * joined by `security_id`, so this is a map lookup that cannot always hit: Plaid
- * has been observed to reference a `security_id` it did not include. That case
- * gets the same `proprietary` dead end `securityFactOf` uses for a security with
- * no names — the resolver refuses it as an identity and the position surfaces as
- * a `SecurityResolutionFailed` the user can act on, rather than as an anonymous
- * `securities` row that will never merge with anything.
+ * Named for the holdings leg, which is where it was born (WP 3.7a), but the
+ * shape it solves is identical for a trade: `/investments/transactions/get`
+ * hands back a `security_id` that may or may not resolve in the `securities`
+ * map it returned alongside it, exactly like `/investments/holdings/get`
+ * does, so `investmentTransactionFactOf` below reuses this function rather
+ * than a second copy of the same lookup-and-fallback.
+ *
+ * A miss gets the same `proprietary` dead end `securityFactOf` uses for a
+ * security with no names — the resolver refuses it as an identity and the
+ * position surfaces as a `SecurityResolutionFailed` the user can act on,
+ * rather than as an anonymous `securities` row that will never merge with
+ * anything.
  */
 function holdingSecurityFactOf(
   providerSecurityId: string,
@@ -432,6 +413,14 @@ export function holdingFactOf(
  *     01 §5.5's "no `/investments/transactions/sync`" means the only protection
  *     against a re-run of the same date window is idempotency, and the
  *     fingerprint is what makes that hold across a provider id rotation too.
+ *
+ * WP 3.14a: `security` carries the **whole** `ProviderSecurityFact` now, not
+ * the single strongest identifier `holdingSecurityOf` used to pick — the same
+ * one-field change WP 3.7a made to `ProviderHoldingFact.security`, and
+ * `holdingSecurityFactOf` (above) is the same function that leg already uses,
+ * because `/investments/transactions/get` can reference a `security_id` its
+ * own `securities` array does not resolve, exactly as the holdings endpoint
+ * can. See `docs/evidence/phase-3/wp3.14a-port-and-scope.md`.
  */
 export function investmentTransactionFactOf(
   transaction: InvestmentTransaction,
@@ -448,8 +437,10 @@ export function investmentTransactionFactOf(
   // a deposit) and a `proprietary` dead end when Plaid named one it would not
   // identify — the two are different facts and collapsing them would make an
   // unresolvable security look like a cash movement.
-  const identifier =
-    transaction.security_id === null ? null : holdingSecurityOf(transaction.security_id, security);
+  const securityFact =
+    transaction.security_id === null
+      ? null
+      : holdingSecurityFactOf(transaction.security_id, security);
   const date = dateOnlyOf(transaction.date, 'investment_transaction.date');
   const quantity = decimalStringOf(transaction.quantity, 'investment_transaction.quantity');
   const amount = signedAmountOf(transaction.amount, code, 'investment_transaction.amount');
@@ -457,8 +448,7 @@ export function investmentTransactionFactOf(
   return {
     providerAccountId: transaction.account_id,
     providerTransactionId: transaction.investment_transaction_id,
-    security: identifier,
-    providerSecurityId: transaction.security_id,
+    security: securityFact,
     date,
     name: transaction.name,
     type: String(transaction.type),
@@ -472,7 +462,10 @@ export function investmentTransactionFactOf(
       providerAccountId: transaction.account_id,
       date,
       amount,
-      security: identifier,
+      // The fingerprint stays over the *strongest* identifier alone — the
+      // same reason `ProviderSecurityFact.fingerprint` does — so this pick is
+      // unchanged from what `holdingSecurityOf` used to return directly.
+      security: securityFact === null ? null : strongestIdentifier(securityFact.identifiers),
       quantity,
     }),
   };
