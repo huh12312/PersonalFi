@@ -149,6 +149,7 @@ export {
   forwardCashFlow,
   listCandidates,
   listOverrides,
+  listPriceChangeEventsBySeries,
   listSeries,
   projectCharges,
   projectSeries,
@@ -158,6 +159,7 @@ export {
   type CalendarDay,
   type CandidateQueueEntry,
   type CashFlowForecast,
+  type PriceChangeEventView,
   type ProjectedCharge,
   type ProjectionInput,
   type SafeToSpend,
@@ -182,7 +184,10 @@ export {
 
 export {
   RECURRING_ADVISORY_LOCK_CLASS,
+  upsertPriceChange,
   type MetadataPatch,
+  type PriceChangeValues,
+  type PriceChangeWriteResult,
   type RecurringContext,
   type RecurringDatabase,
   type RecurringExecutor,

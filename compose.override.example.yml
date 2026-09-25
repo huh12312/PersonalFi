@@ -70,3 +70,23 @@ services:
   # worker:
   #   environment:
   #     PLAID_ENABLED: 'true'
+
+  # Point a real api/worker's notification channels at compose.dev.yml's
+  # `dev-sinks` profile (mailpit + ntfy — `wp3.14-carryovers.md` item 3)
+  # instead of a real SMTP/ntfy host, while iterating on a channel or a rule
+  # locally. Only meaningful if you are running the *full* compose.yml stack
+  # (this file layers onto compose.yml, never onto compose.dev.yml — see this
+  # file's own header) alongside `docker compose -f compose.dev.yml --profile
+  # dev-sinks up -d` at the same time, with both compose projects sharing a
+  # network path to `mailpit`/`ntfy`'s published ports.
+  # `NOTIFICATIONS_ALLOWED_HOSTS`'s default (unset) is deny-all by design
+  # (.env.example: "an operator who has not named a host has not consented to
+  # one") — this override exists so that widening is visible and local, never
+  # the default a fresh clone gets, the same reasoning every other example in
+  # this file gives for itself.
+  # api:
+  #   environment:
+  #     NOTIFICATIONS_ALLOWED_HOSTS: 'mailpit,ntfy'
+  # worker:
+  #   environment:
+  #     NOTIFICATIONS_ALLOWED_HOSTS: 'mailpit,ntfy'

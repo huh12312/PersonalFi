@@ -299,7 +299,7 @@ export function priceReaderFor(
   });
 }
 
-interface PricedPortfolio {
+export interface PricedPortfolio {
   readonly holdings: readonly AnalyticsHolding[];
   /** Keyed by `holdingId`, so a response can report the rung and the date. */
   readonly points: ReadonlyMap<string, PricePoint | null>;
@@ -313,7 +313,7 @@ interface PricedPortfolio {
  * and a taxable account is one price, and asking twice would double the read
  * cost and risk two different answers if a refresh landed in between.
  */
-async function priceHoldings(
+export async function priceHoldings(
   reads: readonly HoldingRead[],
   reader: PriceReader,
   asOf: string,

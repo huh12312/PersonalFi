@@ -198,3 +198,58 @@ test('the net-worth screens are axe clean in both themes', async ({ page }) => {
     await page.keyboard.press('Escape');
   }
 });
+
+/**
+ * `wp3.14-carryovers.md` item 2: `features/crypto/{CoinbaseKeyForm,
+ * WalletWatchOnlyForm}.tsx` (WP 3.12) were never wired into
+ * `AddConnectionDialog`'s `credential_form` branch
+ * (`features/connections/AddConnectionDialog.tsx`) — this deployment's two
+ * `credential_form` connectors, `coinbase` and `wallet_rpc`
+ * (`mock-networth.ts`'s `COINBASE_CONNECTOR`/`WALLETRPC_CONNECTOR`), rendered
+ * only a "needs a credential form this pass does not build yet" placeholder
+ * from the real add-connection flow. This test drives the actual dialog on
+ * `/accounts/connections`, not the standalone `CryptoConnectScreen` WP 3.12
+ * built as a workaround, and exercises the same step-up gate
+ * `investments.spec.ts`'s basis-method test exercises for `PUT
+ * /investments/basis-method` — `POST /connections` refuses once with
+ * `step_up_required` before `mock-networth.ts` accepts it.
+ */
+test('a watch-only wallet links from the add-connection dialog and the private-key warning is shown', async ({
+  page,
+}) => {
+  await installFakeWebAuthnAssertion(page);
+  const state = await installNetworthMocks(page);
+  await login(page);
+
+  await page.goto('/accounts/connections');
+  // Two "Add connection" buttons render when there are no connections yet
+  // (the header action and the empty state's own) — either opens the same
+  // dialog, so `.first()` is a stable choice, not an arbitrary one.
+  await page.getByRole('button', { name: 'Add connection' }).first().click();
+
+  const dialog = page.getByRole('dialog', { name: 'Add a connection' });
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByRole('tab', { name: 'Bitcoin / Ethereum wallet (watch-only)' }).click();
+
+  // The never-ask-for-a-private-key line, verbatim — the wallet form's own
+  // warning, not a paraphrase of it.
+  await expect(
+    dialog.getByText('We will never ask for a private key or a seed phrase'),
+  ).toBeVisible();
+  await expect(dialog.getByText('watch-only', { exact: false }).first()).toBeVisible();
+
+  const address = '0x0000000000000000000000000000000000dEaD';
+  await dialog.getByLabel('Chain').selectOption('ethereum');
+  await dialog.getByLabel('Address').fill(address);
+  await dialog.getByRole('button', { name: 'Add wallet' }).click();
+
+  // Linking succeeds only after the step-up ceremony — `installFakeWebAuthnAssertion`
+  // answers the passkey prompt `useStepUpRetry` triggers on the first
+  // `step_up_required` refusal, then the same submit is retried once.
+  await expect(dialog).toBeHidden();
+  await expect
+    .poll(() => state.lastConnectionBody)
+    .toEqual({ provider: 'wallet_rpc', input: { chain: 'ethereum', value: address } });
+  expect(state.connectionRequiredStepUp).toBe(true);
+});

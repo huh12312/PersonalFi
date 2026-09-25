@@ -16,11 +16,13 @@ import {
   confirmCandidate,
   forwardCashFlow,
   listCandidates,
+  listPriceChangeEventsBySeries,
   listSeries,
   mergeSeries,
   rejectCandidate,
   safeToSpend,
   upcomingCalendar,
+  type PriceChangeEventView,
   type ProjectedCharge,
   type RecurringContext,
 } from '@ctx/recurring';
@@ -80,6 +82,26 @@ const projectedChargeSchema = z
   })
   .meta({ id: 'RecurringProjectedCharge' });
 
+/**
+ * `wp3.14-carryovers.md` item 4 (`wp3.13-carryovers.md` §1 row 8b): a
+ * `price_change_events` row, on the wire. `fromAmount`/`toAmount` are the two
+ * observed prices; `deltaAmount` and `annualImpact` are magnitudes, matching
+ * the schema column comment ("Magnitudes, not signed amounts") — `direction`
+ * is what carries the sign.
+ */
+const priceChangeEventSchema = z
+  .object({
+    id: z.uuid(),
+    direction: z.enum(['INCREASE', 'DECREASE']),
+    effectiveDate: z.string(),
+    fromAmount: moneySchema,
+    toAmount: moneySchema,
+    deltaAmount: moneySchema,
+    annualImpact: moneySchema,
+    confirmed: z.boolean(),
+  })
+  .meta({ id: 'RecurringPriceChangeEvent' });
+
 const seriesSchema = z
   .object({
     id: z.uuid(),
@@ -99,8 +121,27 @@ const seriesSchema = z
     firstSeen: z.string(),
     lastSeen: z.string(),
     duplicateNode: z.string().nullable(),
+    /**
+     * Newest-first, every recorded change — not only the latest — so a
+     * screen can show a history rather than a single fact it must then
+     * re-derive. `[]` for a series that has never had one, never `null`.
+     */
+    priceChangeEvents: z.array(priceChangeEventSchema),
   })
   .meta({ id: 'RecurringSeries' });
+
+function priceChangeEventOf(row: PriceChangeEventView): z.infer<typeof priceChangeEventSchema> {
+  return {
+    id: row.id,
+    direction: row.direction,
+    effectiveDate: row.effectiveDate,
+    fromAmount: money(row.fromAmount),
+    toAmount: money(row.toAmount),
+    deltaAmount: money(row.deltaAmount),
+    annualImpact: money(row.annualImpact),
+    confirmed: row.confirmed,
+  };
+}
 
 const candidateSchema = z
   .object({
@@ -152,6 +193,11 @@ export const recurringRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             ? {}
             : { merchantIds: request.query.merchantIds }),
         });
+        const priceChangesBySeries = await listPriceChangeEventsBySeries(
+          database,
+          session.userId,
+          rows.map((row) => row.id),
+        );
         return {
           series: rows.map((row) => ({
             id: row.id,
@@ -171,6 +217,7 @@ export const recurringRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             firstSeen: row.firstSeen,
             lastSeen: row.lastSeen,
             duplicateNode: row.duplicateNode,
+            priceChangeEvents: (priceChangesBySeries.get(row.id) ?? []).map(priceChangeEventOf),
           })),
         };
       },

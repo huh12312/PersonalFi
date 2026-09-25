@@ -5,7 +5,8 @@ import { EmptyState } from '../../components/patterns/EmptyState.tsx';
 import { Money } from '../../components/finance/Money.tsx';
 import { Percent } from '../../components/finance/Percent.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
-import type { GetAllocationResponse } from '../../api/generated/types.gen.ts';
+import { ProviderAttribution } from '../market-data/Attribution.tsx';
+import type { Attribution, GetAllocationResponse } from '../../api/generated/types.gen.ts';
 import { AllocationDonut } from './AllocationDonut.tsx';
 import { DIMENSION_LABELS, exclusionReasonLabel, ratioToNumber } from './labels.ts';
 import type { AllocationDimension } from './search.ts';
@@ -26,6 +27,16 @@ export interface AllocationPanelProps {
   readonly isLoading: boolean;
   readonly dimension: AllocationDimension;
   readonly onDimensionChange: (next: AllocationDimension) => void;
+  /**
+   * Whether the portfolio holds at least one CoinGecko-priced crypto
+   * position. `GET /investments/allocation` has no per-slice `source` field
+   * (`wp3.9-routes.md`), so this is derived once, from `GET /holdings`, by
+   * the parent screen and passed down — the donut's CRYPTO slice is a sum
+   * over exactly those prices, so the obligation travels with it
+   * (`wp3.14-carryovers.md` item 1).
+   */
+  readonly hasCoinGeckoCryptoHolding?: boolean;
+  readonly coinGeckoAttribution?: Attribution;
 }
 
 /**
@@ -47,6 +58,8 @@ export function AllocationPanel({
   isLoading,
   dimension,
   onDimensionChange,
+  hasCoinGeckoCryptoHolding = false,
+  coinGeckoAttribution,
 }: AllocationPanelProps) {
   if (isLoading) return <Skeleton variant="block" height={260} />;
   if (data === undefined) return null;
@@ -137,6 +150,10 @@ export function AllocationPanel({
             ))}
           </ul>
         </div>
+      )}
+
+      {hasCoinGeckoCryptoHolding && coinGeckoAttribution !== undefined && (
+        <ProviderAttribution attribution={coinGeckoAttribution} />
       )}
     </section>
   );

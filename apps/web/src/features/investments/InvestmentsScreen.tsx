@@ -8,6 +8,7 @@ import { StatTile } from '../../components/finance/StatTile.tsx';
 import { Tabs, TabsIndicator, TabsList, TabsPanel, TabsTab } from '../../components/ui/tabs.tsx';
 import { Button } from '../../components/ui/button.tsx';
 import { useAccountsLookup } from '../accounts/useAccountsLookup.ts';
+import { useCoinGeckoAttribution } from '../market-data/api.ts';
 import { AccountPositionsPanel } from './AccountPositionsPanel.tsx';
 import { AllocationPanel } from './AllocationPanel.tsx';
 import { DriftPanel } from './DriftPanel.tsx';
@@ -99,6 +100,15 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
   const securityTypeOf = (securityId: string) =>
     holdings?.holdings.find((holding) => holding.securityId === securityId)?.securityType;
 
+  // `wp3.14-carryovers.md` item 1: `GET /holdings` carries `price.source` per
+  // row but no `attribution` field of its own (`wp3.9-routes.md`), so every
+  // tab that renders a value derived from these prices needs both signals —
+  // whether a CoinGecko-priced crypto holding exists at all, and the exact
+  // licence text to render when it does.
+  const coinGeckoAttribution = useCoinGeckoAttribution();
+  const hasCoinGeckoCryptoHolding =
+    holdings?.holdings.some((holding) => holding.price?.source === 'coingecko') ?? false;
+
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -178,6 +188,7 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
               securityTypeOf={securityTypeOf}
               election={election}
               onBack={() => onSearchChange({ ...search, account: undefined })}
+              coinGeckoAttribution={coinGeckoAttribution}
             />
           ) : (
             <div className="flex flex-col gap-4">
@@ -200,6 +211,7 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
                 accountHoldings={accountHoldings.byAccountId}
                 accountNameOf={accounts.nameOf}
                 onOpenAccount={(accountId) => update({ account: accountId })}
+                coinGeckoAttribution={coinGeckoAttribution}
               />
               {holdings !== undefined && holdings.excluded.length > 0 && (
                 <p className="flex items-start gap-2 text-caption text-text-muted">
@@ -218,6 +230,8 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
             isLoading={allocationQuery.isLoading}
             dimension={dimension}
             onDimensionChange={(next) => update({ dimension: next })}
+            hasCoinGeckoCryptoHolding={hasCoinGeckoCryptoHolding}
+            coinGeckoAttribution={coinGeckoAttribution}
           />
         </TabsPanel>
 
@@ -245,7 +259,12 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
         </TabsPanel>
 
         <TabsPanel value="performance">
-          <PerformancePanel data={performanceQuery.data} isLoading={performanceQuery.isLoading} />
+          <PerformancePanel
+            data={performanceQuery.data}
+            isLoading={performanceQuery.isLoading}
+            hasCoinGeckoCryptoHolding={hasCoinGeckoCryptoHolding}
+            coinGeckoAttribution={coinGeckoAttribution}
+          />
         </TabsPanel>
       </Tabs>
     </div>

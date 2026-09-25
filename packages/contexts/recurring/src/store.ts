@@ -952,6 +952,17 @@ export async function recordRejection(
 // Price changes
 // ---------------------------------------------------------------------------
 
+/**
+ * `upsertPriceChange` is exported from the package root (`wp3.14-carryovers.md`
+ * item 4) so `apps/api/test/db/recurring-routes.test.ts` can seed a real
+ * `price_change_events` row through this function — the same natural-key
+ * upsert `service.ts`'s detection pass itself calls — rather than a raw
+ * `INSERT`, for the same reason `recurring-routes.test.ts`'s own header gives
+ * for driving its candidate through the real consumer: "not a raw insert".
+ * Exercising the full statistical detection path that produces a genuine
+ * price change from transaction history is out of scope for a route-level
+ * projection test and is covered elsewhere in this package's own test suite.
+ */
 export interface PriceChangeValues {
   readonly seriesId: string;
   readonly direction: 'INCREASE' | 'DECREASE';

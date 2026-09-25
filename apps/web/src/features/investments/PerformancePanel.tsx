@@ -2,13 +2,24 @@
 import { Money } from '../../components/finance/Money.tsx';
 import { Percent } from '../../components/finance/Percent.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
-import type { GetPerformanceResponse } from '../../api/generated/types.gen.ts';
+import { ProviderAttribution } from '../market-data/Attribution.tsx';
+import type { Attribution, GetPerformanceResponse } from '../../api/generated/types.gen.ts';
 import { MoneyOrUnavailable, Unavailable } from './UnavailableValue.tsx';
 import { ratioToNumber } from './labels.ts';
 
 export interface PerformancePanelProps {
   readonly data: GetPerformanceResponse | undefined;
   readonly isLoading: boolean;
+  /**
+   * Whether the portfolio holds at least one CoinGecko-priced crypto
+   * position. `GET /investments/performance` returns only aggregate TWR/MWR/
+   * dollar-gain figures with no per-security `source` (`wp3.9-routes.md`), so
+   * this is derived once, from `GET /holdings`, by the parent screen — those
+   * aggregates are computed over the same priced positions, so the
+   * obligation travels with them (`wp3.14-carryovers.md` item 1).
+   */
+  readonly hasCoinGeckoCryptoHolding?: boolean;
+  readonly coinGeckoAttribution?: Attribution;
 }
 
 /**
@@ -28,7 +39,12 @@ export interface PerformancePanelProps {
  * "Return", because the whole point of showing both is that they answer
  * different questions.
  */
-export function PerformancePanel({ data, isLoading }: PerformancePanelProps) {
+export function PerformancePanel({
+  data,
+  isLoading,
+  hasCoinGeckoCryptoHolding = false,
+  coinGeckoAttribution,
+}: PerformancePanelProps) {
   if (isLoading) return <Skeleton variant="block" height={200} />;
   if (data === undefined) return null;
 
@@ -199,6 +215,10 @@ export function PerformancePanel({ data, isLoading }: PerformancePanelProps) {
           {data.unvaluedTransfers} transfer(s) in this window could not be valued and were not
           counted as zero flows.
         </p>
+      )}
+
+      {hasCoinGeckoCryptoHolding && coinGeckoAttribution !== undefined && (
+        <ProviderAttribution attribution={coinGeckoAttribution} />
       )}
     </section>
   );

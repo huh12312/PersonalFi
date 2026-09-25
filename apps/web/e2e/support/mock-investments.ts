@@ -77,13 +77,13 @@ const ACCOUNTS = [
   account('acct-crypto', 'Coinbase', 'crypto', '9012'),
 ];
 
-function price(close: string, staleness: 'FRESH' | 'STALE', priceDate: string) {
+function price(close: string, staleness: 'FRESH' | 'STALE', priceDate: string, source = 'tiingo') {
   return {
     close,
     currency: 'USD',
     priceDate,
     rung: staleness === 'STALE' ? 'last_known' : 'provider',
-    source: 'tiingo',
+    source,
     carriedForward: staleness === 'STALE',
     providerCarriedForward: false,
     observedAt: `${priceDate}T20:00:00.000Z`,
@@ -92,8 +92,59 @@ function price(close: string, staleness: 'FRESH' | 'STALE', priceDate: string) {
   };
 }
 
-const FRESH = (close: string) => price(close, 'FRESH', AS_OF);
+const FRESH = (close: string, source = 'tiingo') => price(close, 'FRESH', AS_OF, source);
 const STALE = (close: string) => price(close, 'STALE', '2026-09-11');
+
+/**
+ * The CoinGecko attribution, shaped exactly like `GET /market-data/settings`'s
+ * `providers[].attribution` (`ATTRIBUTIONS.coingecko`,
+ * `packages/contexts/integrations/src/attribution.ts`) — `mock-networth.ts`
+ * carries the same literal object for its own settings-screen coverage;
+ * duplicated here (not imported) because that module is WP 3.12's own fork,
+ * off limits per the collision rules this file's own header documents.
+ * `wp3.14-carryovers.md` item 1: BTC (`sec-btc`) is priced `source:
+ * 'coingecko'` below so every investments screen showing it has something
+ * real to derive the attribution obligation from.
+ */
+const COINGECKO_ATTRIBUTION = {
+  provider: 'coingecko',
+  required: true,
+  text: 'Data provided by CoinGecko',
+  linkUrl: 'https://www.coingecko.com',
+  logoRequired: true,
+  surfaces: ['any_price', 'settings'],
+  clause:
+    'CoinGecko Demo (free tier): "Attribution required even on free tier — must display ' +
+    "'Data provided by CoinGecko' with logo + hyperlink\" — a hard license condition, not a courtesy.",
+  redistribution: 'permitted_with_attribution',
+};
+
+function marketDataSettingsResponse() {
+  return {
+    providers: [
+      {
+        provider: 'coingecko',
+        keyPresent: false,
+        registered: true,
+        capabilities: { prices: true, fx: false, macro: false, search: false },
+        budget: [{ label: 'requests/min', used: 3, limit: 100 }],
+        attribution: COINGECKO_ATTRIBUTION,
+      },
+    ],
+    ladders: [
+      {
+        securityKind: 'crypto',
+        sources: [
+          { source: 'user_override', rung: 1 },
+          { source: 'coingecko', rung: 2 },
+          { source: 'last_known', rung: 3 },
+        ],
+      },
+    ],
+    settingsAttributions: [COINGECKO_ATTRIBUTION],
+    allowedHostsNarrowed: true,
+  };
+}
 
 interface HoldingSeed {
   securityId: string;
@@ -196,7 +247,7 @@ const HOLDINGS: HoldingSeed[] = [
     // The CSV's empty `cost_basis` cell: unknown, and never a zero.
     costBasisMinor: null,
     weight: '0.1125815',
-    price: FRESH('63250.10'),
+    price: FRESH('63250.10', 'coingecko'),
     stale: false,
   },
   {
@@ -638,7 +689,7 @@ const POSITIONS: Record<string, { totalMinor: string; positions: PositionSeed[] 
         costBasisMinor: null,
         costBasisSource: null,
         basisMethod: 'FIFO',
-        price: FRESH('63250.10'),
+        price: FRESH('63250.10', 'coingecko'),
         stale: false,
         lots: [
           {
@@ -955,6 +1006,12 @@ export async function installInvestmentsMocks(page: Page): Promise<MockInvestmen
 
     if (path === '/api/investments/performance' && method === 'GET') {
       return route.fulfill(json(performanceResponse(url.searchParams.get('from') ?? '2025-09-23')));
+    }
+
+    // `useCoinGeckoAttribution` (`features/market-data/api.ts`), fired by
+    // `InvestmentsScreen` on every mount — `wp3.14-carryovers.md` item 1.
+    if (path === '/api/market-data/settings' && method === 'GET') {
+      return route.fulfill(json(marketDataSettingsResponse()));
     }
 
     if (path === '/api/investments/basis-method' && method === 'PUT') {

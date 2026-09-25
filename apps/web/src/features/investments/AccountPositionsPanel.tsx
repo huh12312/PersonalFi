@@ -6,8 +6,10 @@ import { Money } from '../../components/finance/Money.tsx';
 import { Percent } from '../../components/finance/Percent.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
 import { Button } from '../../components/ui/button.tsx';
+import { ProviderAttribution } from '../market-data/Attribution.tsx';
 import type {
   AggregatedHolding,
+  Attribution,
   ListAccountHoldingsResponse,
 } from '../../api/generated/types.gen.ts';
 import { BasisMethodControl } from './BasisMethodControl.tsx';
@@ -24,6 +26,13 @@ export interface AccountPositionsPanelProps {
   readonly securityTypeOf: (securityId: string) => AggregatedHolding['securityType'] | undefined;
   readonly election: BasisMethodElection;
   readonly onBack: () => void;
+  /**
+   * CoinGecko's licence-mandated attribution, rendered when at least one of
+   * this account's positions is priced `price.source === 'coingecko'`
+   * (`wp3.14-carryovers.md` item 1 — the wire shape carries no `attribution`
+   * field, so the obligation is derived per row, scoped to this account).
+   */
+  readonly coinGeckoAttribution?: Attribution;
 }
 
 /**
@@ -48,9 +57,14 @@ export function AccountPositionsPanel({
   securityTypeOf,
   election,
   onBack,
+  coinGeckoAttribution,
 }: AccountPositionsPanelProps) {
   if (isLoading) return <Skeleton variant="block" height={280} />;
   if (data === undefined) return null;
+
+  const hasCoinGeckoPrice = data.positions.some(
+    (position) => position.price?.source === 'coingecko',
+  );
 
   return (
     <section className="flex flex-col gap-4" aria-labelledby="account-holdings-heading">
@@ -221,6 +235,10 @@ export function AccountPositionsPanel({
             ))}
           </ul>
         </div>
+      )}
+
+      {hasCoinGeckoPrice && coinGeckoAttribution !== undefined && (
+        <ProviderAttribution attribution={coinGeckoAttribution} />
       )}
     </section>
   );

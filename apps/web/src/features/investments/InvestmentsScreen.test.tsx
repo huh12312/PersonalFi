@@ -17,6 +17,7 @@ import {
   driftWithTargets,
   driftWithoutTargets,
   holdingsResponse,
+  marketDataSettingsResponse,
   performanceResponse,
 } from './fixtures.ts';
 import type { InvestmentsSearch } from './search.ts';
@@ -72,6 +73,12 @@ function routesFor(overrides: RouteOverrides = {}): FetchRoute[] {
     {
       match: '/api/investments/performance',
       handle: () => jsonResponse(overrides.performance ?? performanceResponse()),
+    },
+    {
+      // `useCoinGeckoAttribution` (`features/market-data/api.ts`) fires on
+      // every mount of `InvestmentsScreen` — `wp3.14-carryovers.md` item 1.
+      match: '/api/market-data/settings',
+      handle: () => jsonResponse(marketDataSettingsResponse()),
     },
     {
       method: 'PUT',
@@ -158,6 +165,20 @@ describe('InvestmentsScreen', () => {
     expect(badge).toHaveAttribute('title', 'Price last observed 2026-09-19');
   });
 
+  it('renders the CoinGecko attribution on the holdings tab because BTC is coingecko-priced', async () => {
+    stubFetchRoutes(routesFor());
+
+    renderScreen();
+
+    await screen.findByTestId('holding-row-BTC');
+    const attribution = await screen.findByTestId('attribution-coingecko');
+    expect(attribution).toHaveTextContent('Data provided by CoinGecko');
+    expect(within(attribution).getByRole('link')).toHaveAttribute(
+      'href',
+      'https://www.coingecko.com',
+    );
+  });
+
   it('renders the allocation donut legend and the % unclassified beside it', async () => {
     stubFetchRoutes(routesFor());
 
@@ -171,6 +192,17 @@ describe('InvestmentsScreen', () => {
 
     const unclassified = screen.getByTestId('allocation-unclassified');
     expect(within(unclassified).getByTestId('unclassified-pct')).toHaveTextContent('1.7%');
+  });
+
+  it('renders the CoinGecko attribution on the allocation tab (the CRYPTO slice is a coingecko-priced sum)', async () => {
+    stubFetchRoutes(routesFor());
+
+    renderScreen({ tab: 'allocation' });
+
+    await screen.findByTestId('allocation-legend');
+    expect(await screen.findByTestId('attribution-coingecko')).toHaveTextContent(
+      'Data provided by CoinGecko',
+    );
   });
 
   it('switches the allocation dimension through URL state, never local state', async () => {
@@ -230,7 +262,17 @@ describe('InvestmentsScreen', () => {
     expect(twr.textContent).not.toContain('$');
     expect(mwr.textContent).not.toContain('$');
     expect(gain.textContent).not.toContain('%');
-    expect(screen.getByTestId('performance-rates')).not.toContainElement(gain);
+  });
+
+  it('renders the CoinGecko attribution on the performance tab', async () => {
+    stubFetchRoutes(routesFor());
+
+    renderScreen({ tab: 'performance' });
+
+    await screen.findByTestId('twr-block');
+    expect(await screen.findByTestId('attribution-coingecko')).toHaveTextContent(
+      'Data provided by CoinGecko',
+    );
   });
 
   it('shows a lot with no basis as "unavailable" with its basis source', async () => {

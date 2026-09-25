@@ -39,8 +39,9 @@
  * exists for the "what might I be missing?" view, which says so on screen.
  */
 import { DateOnly, Money, type Money as MoneyType } from '@core/kernel';
-import { and, asc, eq, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
 import {
+  priceChangeEvents,
   recurringCandidates,
   recurringSeries,
   type RecurringCandidateRow,
@@ -529,6 +530,77 @@ export async function listSeries(
     .from(recurringSeries)
     .where(and(...conditions))
     .orderBy(asc(recurringSeries.nextDueDate), asc(recurringSeries.streamKey));
+}
+
+/**
+ * One `price_change_events` row, read-model shaped (`MoneyType` rather than
+ * the schema's separate `*Minor`/`currency` columns) — `wp3.14-carryovers.md`
+ * item 4.
+ */
+export interface PriceChangeEventView {
+  readonly id: string;
+  readonly seriesId: string;
+  readonly direction: 'INCREASE' | 'DECREASE';
+  readonly effectiveDate: string;
+  readonly fromAmount: MoneyType;
+  readonly toAmount: MoneyType;
+  readonly deltaAmount: MoneyType;
+  readonly annualImpact: MoneyType;
+  readonly confirmed: boolean;
+}
+
+/**
+ * `price_change_events` for a set of series, newest-first per series.
+ *
+ * `wp3.13-carryovers.md` §1 row 8b: `GET /recurring/series` named no price
+ * changes at all — `apps/api/src/routes/recurring.ts`'s `seriesSchema` had no
+ * `priceChangeEvents` field and `grep -rn priceChangeEvents
+ * apps/api/src/routes/recurring.ts` returned nothing. This is a **separate**
+ * function from `listSeries` rather than a join folded into it, on purpose:
+ * `RecurringSeriesRow`/`listSeries`'s own return shape is unchanged, so every
+ * existing caller (`test/db/*.test.ts`, `apps/api/src/routes/recurring.ts`'s
+ * other reads) is unaffected by this addition. The route composes the two.
+ *
+ * `userId` is filtered on directly (not derived from the series set) so a
+ * caller cannot be handed another user's events by passing their series ids —
+ * the same belt-and-suspenders scoping `listSeries` itself applies.
+ */
+export async function listPriceChangeEventsBySeries(
+  executor: RecurringExecutor,
+  userId: string,
+  seriesIds: readonly string[],
+): Promise<ReadonlyMap<string, PriceChangeEventView[]>> {
+  const result = new Map<string, PriceChangeEventView[]>();
+  if (seriesIds.length === 0) return result;
+
+  const rows = await executor
+    .select()
+    .from(priceChangeEvents)
+    .where(
+      and(
+        eq(priceChangeEvents.userId, userId),
+        inArray(priceChangeEvents.seriesId, [...seriesIds]),
+      ),
+    )
+    .orderBy(desc(priceChangeEvents.effectiveDate), desc(priceChangeEvents.createdAt));
+
+  for (const row of rows) {
+    const view: PriceChangeEventView = {
+      id: row.id,
+      seriesId: row.seriesId,
+      direction: row.direction,
+      effectiveDate: row.effectiveDate,
+      fromAmount: Money.of(row.fromMinor, row.currency),
+      toAmount: Money.of(row.toMinor, row.currency),
+      deltaAmount: Money.of(row.deltaMinor, row.currency),
+      annualImpact: Money.of(row.annualImpactMinor, row.currency),
+      confirmed: row.confirmed,
+    };
+    const existing = result.get(row.seriesId);
+    if (existing === undefined) result.set(row.seriesId, [view]);
+    else existing.push(view);
+  }
+  return result;
 }
 
 /**

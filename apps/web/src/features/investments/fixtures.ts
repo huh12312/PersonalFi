@@ -16,9 +16,11 @@
  */
 import type {
   AggregatedHolding,
+  Attribution,
   AllocationReport,
   GetAllocationResponse,
   GetDriftResponse,
+  GetMarketDataSettingsResponse,
   GetPerformanceResponse,
   ListAccountHoldingsResponse,
   ListHoldingsResponse,
@@ -46,6 +48,67 @@ export function freshPrice(close: string, priceDate = '2026-09-23'): PriceQuote 
 
 export function stalePrice(close: string, priceDate = '2026-09-19'): PriceQuote {
   return { ...freshPrice(close, priceDate), staleness: 'STALE', carriedForward: true };
+}
+
+/**
+ * A crypto price sourced from CoinGecko — `wp3.14-carryovers.md` item 1's
+ * fixture: `holdings[].price.source === 'coingecko'` is the per-row signal
+ * every investments screen derives its attribution obligation from (the
+ * holdings/price wire shape carries no `attribution` field of its own; see
+ * `wp3.9-routes.md`).
+ */
+export function coinGeckoPrice(close: string, priceDate = '2026-09-23'): PriceQuote {
+  return { ...freshPrice(close, priceDate), source: 'coingecko' };
+}
+
+/**
+ * `Attribution` for CoinGecko, shaped exactly like `GET /market-data/settings`'s
+ * `providers[].attribution` (`ATTRIBUTIONS.coingecko` in
+ * `@ctx/integrations/src/attribution.ts`) — the object `useCoinGeckoAttribution`
+ * (`features/market-data/api.ts`) resolves at runtime, reproduced here so a
+ * unit test can stub the same route without importing a backend package.
+ */
+export function coinGeckoAttribution(): Attribution {
+  return {
+    provider: 'coingecko',
+    required: true,
+    text: 'Data provided by CoinGecko',
+    linkUrl: 'https://www.coingecko.com',
+    logoRequired: true,
+    surfaces: ['any_price', 'settings'],
+    clause:
+      'CoinGecko Demo (free tier): "Attribution required even on free tier — must display ' +
+      "'Data provided by CoinGecko' with logo + hyperlink\" — a hard license condition, not a courtesy.",
+    redistribution: 'permitted_with_attribution',
+  };
+}
+
+/** `GET /market-data/settings`, just enough for `useCoinGeckoAttribution` to resolve. */
+export function marketDataSettingsResponse(): GetMarketDataSettingsResponse {
+  return {
+    providers: [
+      {
+        provider: 'coingecko',
+        keyPresent: false,
+        registered: true,
+        capabilities: { prices: true, fx: false, macro: false, search: false },
+        budget: [{ label: 'requests/min', used: 3, limit: 100 }],
+        attribution: coinGeckoAttribution(),
+      },
+    ],
+    ladders: [
+      {
+        securityKind: 'crypto',
+        sources: [
+          { source: 'user_override', rung: 1 },
+          { source: 'coingecko', rung: 2 },
+          { source: 'last_known', rung: 3 },
+        ],
+      },
+    ],
+    settingsAttributions: [coinGeckoAttribution()],
+    allowedHostsNarrowed: true,
+  };
 }
 
 export function aggregatedHolding(
@@ -112,7 +175,7 @@ export const SPREADSHEET_HOLDINGS: readonly AggregatedHolding[] = [
       warning: 'No cost basis has been recorded for this position.',
     },
     weight: '0.1125815583',
-    price: freshPrice('63250.10'),
+    price: coinGeckoPrice('63250.10'),
   }),
   aggregatedHolding({
     securityId: 'sec-oldco',
@@ -196,7 +259,7 @@ export function accountHoldingsResponse(
           reason: 'basis_unknown',
           warning: 'No cost basis has been recorded for this position.',
         },
-        price: freshPrice('63250.10'),
+        price: coinGeckoPrice('63250.10'),
         stale: false,
         lots: [
           {

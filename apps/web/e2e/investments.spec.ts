@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { injectAxe } from './support/axe.ts';
 import type { AxeViolation } from './support/axe.ts';
@@ -219,6 +219,65 @@ test.describe('investments screen (WP 3.11)', () => {
     // does an unknown become a zero.
     const panel = await page.getByTestId('position-BTC').innerText();
     expect(panel).not.toContain('$0.00');
+  });
+
+  test('the CoinGecko attribution is present on every investments screen showing a crypto price', async ({
+    page,
+  }) => {
+    await installFakeWebAuthnAssertion(page);
+    await installInvestmentsMocks(page);
+    await loginAndReachInvestments(page);
+
+    // `wp3.14-carryovers.md` item 1: `GET /holdings` carries no
+    // `attribution` field of its own — `mock-investments.ts` prices BTC
+    // (`sec-btc`) with `source: 'coingecko'`, and every screen below derives
+    // its obligation from that field per row (holdings, per-account) or from
+    // the portfolio-level "does a coingecko-priced holding exist" signal
+    // (allocation, performance — 07/`wp3.9-routes.md`'s aggregate routes
+    // carry no per-row `source`).
+    function assertAttribution(scope: Locator | Page) {
+      const attribution = scope.getByTestId('attribution-coingecko');
+      return expect(attribution).toHaveText('Data provided by CoinGecko');
+    }
+
+    // 1. Holdings table.
+    await page.getByRole('tab', { name: 'Holdings' }).click();
+    await expect(page.getByTestId('holdings-table')).toBeVisible();
+    await assertAttribution(page);
+    const holdingsLink = page.getByTestId('attribution-coingecko').getByRole('link');
+    await expect(holdingsLink).toHaveAttribute('href', 'https://www.coingecko.com');
+    await injectAxe(page);
+    await expectNoAxeViolationsOutsideSharedSidebar(page, 'investments holdings attribution');
+
+    // 2. Per-account detail — the crypto account specifically (a non-crypto
+    // account's positions must not carry an obligation that isn't theirs).
+    await page.getByRole('button', { name: 'Coinbase' }).first().click();
+    await expect(page.getByTestId('position-BTC')).toBeVisible();
+    await assertAttribution(page);
+    await injectAxe(page);
+    await expectNoAxeViolationsOutsideSharedSidebar(page, 'investments account detail attribution');
+    await page.getByRole('button', { name: 'All accounts' }).click();
+
+    // A non-crypto account has no CoinGecko obligation to render.
+    await page.getByRole('button', { name: 'Taxable brokerage' }).first().click();
+    await expect(page.getByTestId('position-VTI')).toBeVisible();
+    await expect(page.getByTestId('attribution-coingecko')).toHaveCount(0);
+    await page.getByRole('button', { name: 'All accounts' }).click();
+
+    // 3. Allocation — the CRYPTO slice is a sum over the same coingecko price.
+    await page.getByRole('tab', { name: 'Allocation' }).click();
+    await expect(page.getByTestId('allocation-legend')).toBeVisible();
+    await assertAttribution(page);
+    await injectAxe(page);
+    await expectNoAxeViolationsOutsideSharedSidebar(page, 'investments allocation attribution');
+
+    // 4. Performance — TWR/MWR/dollar-gain are computed over the same priced
+    // positions.
+    await page.getByRole('tab', { name: 'Performance' }).click();
+    await expect(page.getByTestId('twr-block')).toBeVisible();
+    await assertAttribution(page);
+    await injectAxe(page);
+    await expectNoAxeViolationsOutsideSharedSidebar(page, 'investments performance attribution');
   });
 
   test('a stale price is visibly labeled', async ({ page }) => {

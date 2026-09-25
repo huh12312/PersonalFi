@@ -76,6 +76,22 @@ export function SeriesList({ series, nameOf }: SeriesListProps) {
                 {inferAmountModelLabel(row.observedMin.minor, row.observedMax.minor)}
               </p>
               <p className="text-small text-text-muted">{formatNextDue(row.nextDueDate)}</p>
+              {/*
+                `priceChangeEvents` is newest-first (`GET /recurring/series`,
+                `wp3.14-carryovers.md` item 4), so `[0]` is the latest change.
+                `?? []` even though the wire schema makes the field required:
+                a fixture built against an older contract (an e2e mock this
+                work package does not own, or a client not yet regenerated)
+                should degrade to "no price-change line" rather than throw.
+              */}
+              {(row.priceChangeEvents ?? []).length > 0 && (
+                <p className="text-caption text-text-muted">
+                  Price{' '}
+                  {row.priceChangeEvents[0]?.direction === 'INCREASE' ? 'increased' : 'decreased'}{' '}
+                  to <Money value={row.priceChangeEvents[0]!.toAmount} colorBySign={false} /> on{' '}
+                  {row.priceChangeEvents[0]?.effectiveDate}
+                </p>
+              )}
             </div>
             <Money value={row.typicalAmount} className="shrink-0" />
             <div className="flex shrink-0 flex-wrap items-center gap-2">

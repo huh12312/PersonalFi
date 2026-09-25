@@ -14,7 +14,7 @@ import { manualTransaction } from '@connector/manual';
 import { DateOnly, money, systemClock } from '@core/kernel';
 import { createConsumerPump, platformExecutor } from '@core/platform';
 import { createRecurringLedgerPort } from '../../src/domain.ts';
-import { createRecurringConsumer } from '@ctx/recurring';
+import { createRecurringConsumer, upsertPriceChange } from '@ctx/recurring';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createApiHarness,
@@ -29,11 +29,22 @@ interface WireCandidate {
   readonly candidateId: string;
   readonly merchantId: string;
 }
+interface WirePriceChangeEvent {
+  readonly id: string;
+  readonly direction: 'INCREASE' | 'DECREASE';
+  readonly effectiveDate: string;
+  readonly fromAmount: { readonly minor: string; readonly currency: string };
+  readonly toAmount: { readonly minor: string; readonly currency: string };
+  readonly deltaAmount: { readonly minor: string; readonly currency: string };
+  readonly annualImpact: { readonly minor: string; readonly currency: string };
+  readonly confirmed: boolean;
+}
 interface WireSeries {
   readonly id: string;
   readonly merchantId: string;
   readonly userConfirmed: boolean;
   readonly state: string;
+  readonly priceChangeEvents: readonly WirePriceChangeEvent[];
 }
 
 async function drainRecurring(h: ApiHarness): Promise<void> {
@@ -166,6 +177,63 @@ describe.skipIf(NO_DATABASE)('/recurring (WP 2.r)', () => {
       body: {},
     });
     expect(again.statusCode).toBe(404);
+  });
+
+  // `wp3.14-carryovers.md` item 4 (`wp3.13-carryovers.md` §1 row 8b):
+  // `GET /recurring/series` carries `priceChangeEvents` per series now.
+  // Seeded through `upsertPriceChange` — the package's own real write
+  // primitive, the same one `service.ts`'s detection pass calls — rather
+  // than a raw `INSERT`, for the same "not a raw insert" reason this file's
+  // header gives for its candidate. Runs after "confirming a candidate pins
+  // the series" so a real, confirmed series already exists to attach the
+  // event to.
+  it('a series carries its price-change events', async () => {
+    const before = await h.request({ method: 'GET', url: '/recurring/series', session: h.stale });
+    expectStatus(before, 200);
+    const mine = (before.json() as { series: WireSeries[] }).series[0];
+    expect(mine).toBeDefined();
+    const seriesId = mine?.id ?? '';
+    expect(mine?.priceChangeEvents).toEqual([]);
+
+    const effectiveDate = DateOnly.parse(systemClock.now().toISOString().slice(0, 10));
+    await upsertPriceChange(
+      h.database.db,
+      { userId: h.userId, clock: systemClock, correlationId: 'wp-recurring-price-change-seed' },
+      {
+        seriesId,
+        direction: 'INCREASE',
+        effectiveDate,
+        from: money(1_599n, 'USD'),
+        to: money(1_799n, 'USD'),
+        delta: money(200n, 'USD'),
+        annualImpact: money(2_400n, 'USD'),
+        confirmed: true,
+        priorTransactionIds: [],
+        recentTransactionIds: [],
+      },
+    );
+
+    const after = await h.request({ method: 'GET', url: '/recurring/series', session: h.stale });
+    expectStatus(after, 200);
+    const row = (after.json() as { series: WireSeries[] }).series.find((s) => s.id === seriesId);
+    expect(row?.priceChangeEvents).toHaveLength(1);
+
+    const event = row?.priceChangeEvents[0];
+    expect(event?.direction).toBe('INCREASE');
+    expect(event?.effectiveDate).toBe(effectiveDate);
+    expect(event?.fromAmount).toEqual({ minor: '1599', currency: 'USD' });
+    expect(event?.toAmount).toEqual({ minor: '1799', currency: 'USD' });
+    expect(event?.deltaAmount).toEqual({ minor: '200', currency: 'USD' });
+    expect(event?.annualImpact).toEqual({ minor: '2400', currency: 'USD' });
+    expect(event?.confirmed).toBe(true);
+
+    // Another series (there is only this one) never carries someone else's
+    // event — the per-series grouping in `listPriceChangeEventsBySeries`
+    // is asserted structurally by there being exactly one event on the one
+    // series that has one, not zero and not duplicated.
+    for (const other of (after.json() as { series: WireSeries[] }).series) {
+      if (other.id !== seriesId) expect(other.priceChangeEvents).toEqual([]);
+    }
   });
 
   // The series was seeded from charges one month ago and today, so its next

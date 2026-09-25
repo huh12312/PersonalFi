@@ -224,6 +224,10 @@ export interface MockNetworthState {
   seriesCallCount: number;
   lastPriorityBody: unknown;
   lastTestFetchBody: unknown;
+  /** The body of the last `POST /connections` that actually went through (after any step-up retry) — `wp3.14-carryovers.md` item 2. */
+  lastConnectionBody: unknown;
+  /** Whether that call arrived only after a step-up assertion, same shape as `mock-investments.ts`'s basis-method state. */
+  connectionRequiredStepUp: boolean;
 }
 
 export async function installNetworthMocks(page: Page): Promise<MockNetworthState> {
@@ -231,8 +235,11 @@ export async function installNetworthMocks(page: Page): Promise<MockNetworthStat
     seriesCallCount: 0,
     lastPriorityBody: null,
     lastTestFetchBody: null,
+    lastConnectionBody: null,
+    connectionRequiredStepUp: false,
   };
   let authenticated = false;
+  let steppedUp = false;
 
   await page.route('**/*', async (route: Route) => {
     const request = route.request();
@@ -272,6 +279,7 @@ export async function installNetworthMocks(page: Page): Promise<MockNetworthStat
     }
 
     if (path === '/api/auth/step-up/verify' && method === 'POST') {
+      steppedUp = true;
       return route.fulfill(json({ freshUntil: new Date(Date.now() + 300_000).toISOString() }));
     }
 
@@ -344,6 +352,25 @@ export async function installNetworthMocks(page: Page): Promise<MockNetworthStat
     }
 
     if (path === '/api/connections' && method === 'POST') {
+      // Step-up gated, same as `mock-investments.ts`'s basis-method route —
+      // `useStepUpRetry` (`src/lib/step-up.ts`) retries once after a
+      // `step_up_required` refusal.
+      if (!steppedUp) {
+        return route.fulfill(
+          json(
+            {
+              type: 'about:blank',
+              title: 'Step-up required',
+              status: 403,
+              code: 'step_up_required',
+              correlationId: 'corr_add_connection',
+            },
+            403,
+          ),
+        );
+      }
+      state.connectionRequiredStepUp = true;
+      state.lastConnectionBody = request.postDataJSON();
       return route.fulfill(
         json(
           {

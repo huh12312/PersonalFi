@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 #
-# Development database only.
+# Development database, plus an opt-in `dev-sinks` profile.
 #
 # The production stack — Caddy, api, worker, migrator, backup, and the hardening
 # that goes with them — is WP 0.4's, and deliberately not here: a dev compose file
@@ -11,6 +11,51 @@
 #   just migrate    apply migrations
 #   just db-down    stop it (keeps the volume)
 #   just db-reset   stop it and destroy the volume
+#
+#   docker compose -f compose.dev.yml --profile dev-sinks up -d   start db + the sinks below
+#   docker compose -f compose.dev.yml --profile dev-sinks down    stop them
+#
+# `dev-sinks` (`wp3.14-carryovers.md` item 3, carried from WP 3.13's own
+# `Owns` list — `docker/compose.dev-sinks.yml`, named in 03-phase-3-dispatch.md
+# §3, never landed): `mailpit` and `ntfy`, real local sinks for
+# `@ctx/notifications`'s SMTP and ntfy channels, so `apps/api/test/db/
+# notifications-delivery.test.ts` can prove a delivery actually lands
+# somewhere instead of trusting the channel adapter's own "delivered" return
+# value. Off by default (a fresh `docker compose up` never pays for two more
+# containers it did not ask for — the same reasoning `compose.yml`'s
+# `sidecar`/`local-llm`/`webhooks` placeholders give for their own profiles),
+# and held to the exact same P0-6/P0-7 baseline as `db` below: `read_only`,
+# `cap_drop: [ALL]`, `security_opt: ['no-new-privileges:true']`, a non-root
+# `user`, loopback-only ports. Neither image needs a *documented exception*
+# for `missing-read-only` the way `db` does — both are single static Go
+# binaries with no database file configured (`ntfy`'s message cache and
+# `mailpit`'s mailbox are both in-memory here, never persisted to a volume),
+# so the small `tmpfs` mounts below are enough for whatever scratch space
+# either wants to open.
+#
+# **Not wired to send real notifications from a running `apps/api`/`worker`.**
+# `compose.dev.yml` runs no `api`/`worker` service at all (see the header
+# above) — those exist only in the production `compose.yml` stack. For a
+# deployment that *does* run the full stack (`compose.yml` +
+# `compose.override.yml`) and wants `NOTIFICATIONS_ALLOWED_HOSTS` pointed at
+# these two sinks, see the example block in `compose.override.example.yml`.
+# `apps/api/test/db/notifications-delivery.test.ts` itself never goes through
+# that env var at all — it calls `@ctx/notifications`'s adapters directly with
+# an injected resolver/transport pointed at these containers' published
+# loopback ports, the same test-only "swap the validated address for the live
+# fixture's" pattern `packages/contexts/notifications/test/
+# egress-allowlist.test.ts` already established (`guardDestination`'s "no
+# allow private addresses switch, not even for tests" stays true in
+# production; this is a test file substituting where the bytes physically go,
+# not a policy change).
+#
+# Not live-verified against the real images in the environment this file was
+# written in (`docker images` had neither cached, and this pass had no reason
+# to pull ~150 MB of image over the network just to validate two Dockerfiles
+# it did not author) — `docker compose --profile dev-sinks config` is clean
+# (schema-valid, passes the hardening gate), but an actual `up` of these two
+# services has not been observed. Recorded as an open item in
+# `docs/evidence/phase-3/wp3.14-carryovers.md` rather than claimed as tested.
 
 name: personalfi-dev
 
@@ -59,6 +104,83 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+
+  # ---------- profile: dev-sinks ----------
+  mailpit:
+    profiles: ['dev-sinks']
+    # Pinned, not `:latest` — Renovate proposes the bump, same as `db` above.
+    image: axllent/mailpit:v1.21.3
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    # mailpit's own image runs as root by default; there is no documented
+    # non-root uid to pin the way `db`'s uid 70 pins postgres's own user, so
+    # this is an arbitrary unprivileged uid (`nobody:nobody`, the same one
+    # `compose.yml`'s placeholder services use) rather than root.
+    user: '65534:65534'
+    environment:
+      TZ: UTC
+      # No `MP_DATABASE` set: mailbox is in-memory only, discarded on
+      # container stop — there is nothing here worth persisting past one dev
+      # session, and an in-memory mailbox is also what keeps `read_only: true`
+      # true rather than needing a writable named volume.
+      MP_SMTP_AUTH_ACCEPT_ANY: '1'
+      MP_SMTP_AUTH_ALLOW_INSECURE: '1'
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    ports:
+      # Loopback only, both non-privileged: 1025 (SMTP) and 8025 (the web UI
+      # + the REST API `notifications-delivery.test.ts` polls to confirm a
+      # send actually landed, rather than trusting the channel adapter's own
+      # "delivered" outcome).
+      - '127.0.0.1:1025:1025'
+      - '127.0.0.1:8025:8025'
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://127.0.0.1:8025/readyz']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  ntfy:
+    profiles: ['dev-sinks']
+    image: binwiederhier/ntfy:v2.11.0
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    user: '65534:65534'
+    command: ['serve']
+    environment:
+      TZ: UTC
+      # ntfy's default listener is :80, a privileged port a non-root uid
+      # cannot bind without `cap_add: [NET_BIND_SERVICE]` — widening
+      # capabilities to get a port number is exactly backwards, so this picks
+      # ntfy's own documented unprivileged alternative instead.
+      NTFY_LISTEN_HTTP: ':2586'
+      # In-memory cache only (no `NTFY_CACHE_FILE`), same reasoning as
+      # mailpit's `MP_DATABASE` above — nothing persisted, `read_only: true`
+      # stays true. `poll=1` reads from this cache (ntfy's default 12 h
+      # retention), which is what the delivery test polls after a send.
+      NTFY_CACHE_DURATION: '12h'
+      NTFY_AUTH_DEFAULT_ACCESS: 'read-write'
+      NTFY_BEHIND_PROXY: 'false'
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+      # Defensive only: ntfy is not given `NTFY_CACHE_FILE`/`NTFY_AUTH_FILE`
+      # so it should never need either directory, but both exist under
+      # `read_only: true` in case the binary still probes for them at boot.
+      - /var/cache/ntfy:size=16m
+      - /var/lib/ntfy:size=16m
+    ports:
+      - '127.0.0.1:2586:2586'
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://127.0.0.1:2586/v1/health']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
 
 volumes:
   pgdata:

@@ -51,6 +51,7 @@ const SERIES = {
   firstSeen: '2026-01-01',
   lastSeen: '2026-06-01',
   duplicateNode: null,
+  priceChangeEvents: [],
 };
 
 function upcomingRoute(): FetchRoute {
@@ -260,6 +261,41 @@ describe('RecurringScreen', () => {
     expect(screen.getByText(/Monthly/)).toBeInTheDocument();
     expect(screen.getByText('Next due Jul 1')).toBeInTheDocument();
     expect(screen.getByText("Might be slowing down — we're watching")).toBeInTheDocument();
+  });
+
+  it('shows the latest price change alongside a series that has one (wp3.14-carryovers.md item 4)', async () => {
+    const withPriceChange = {
+      ...SERIES,
+      priceChangeEvents: [
+        {
+          id: 'pce_1',
+          direction: 'INCREASE' as const,
+          effectiveDate: '2026-05-15',
+          fromAmount: { minor: '899', currency: 'USD' },
+          toAmount: { minor: '999', currency: 'USD' },
+          deltaAmount: { minor: '100', currency: 'USD' },
+          annualImpact: { minor: '1200', currency: 'USD' },
+          confirmed: true,
+        },
+      ],
+    };
+    stubFetchRoutes([
+      { match: '/api/recurring/candidates', handle: () => jsonResponse({ candidates: [] }) },
+      {
+        match: '/api/recurring/series',
+        handle: () => jsonResponse({ series: [withPriceChange] }),
+      },
+      upcomingRoute(),
+      forecastRoute(),
+      safeToSpendRoute(),
+      transactionsRoute('Spotify', 'merch_spotify'),
+    ]);
+
+    renderScreen();
+
+    expect(await screen.findByText('Spotify')).toBeInTheDocument();
+    expect(screen.getByText(/Price increased to/)).toBeInTheDocument();
+    expect(screen.getByText(/2026-05-15/)).toBeInTheDocument();
   });
 
   it('renders the safe-to-spend figure and forecast headline from the real routes', async () => {
