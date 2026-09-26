@@ -304,7 +304,11 @@ describe('WP 4.2 — the assumptions file', () => {
     expect(first.pid).not.toBe(second.pid);
     expect(first.version).toBe(second.version);
     expect(first.version).toBe(assumptionsVersion());
-  });
+    // Two cold node processes each import the whole data module; ~2.5 s
+    // apiece on an idle machine and over the 5 s default when other suites
+    // share the box (WP 4.3's run saw 5.2 s and 5.4 s). The budget is for the
+    // process spawns, not the hash.
+  }, 30_000);
 
   it('an override stores a delta and never a copy of the default', () => {
     const assumptions = loadAssumptions();

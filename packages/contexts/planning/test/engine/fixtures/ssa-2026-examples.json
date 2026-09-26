@@ -1,0 +1,359 @@
+{
+  "about": "SSA Office of the Chief Actuary's own worked example for workers retiring in 2026, used as WP 4.4's Social Security golden. Every published figure below is SSA's; the test recomputes each from the inputs with the engine and the bend points / factors / reduction fractions read from WP 4.2's assumptions file.",
+  "sources": {
+    "example": "SSA OACT, 'Benefit Calculation Examples for Workers Retiring in 2026', https://www.ssa.gov/oact/progdata/retirebenefit1.html (earnings, indexing factors, highest-35 totals, AIME) and https://www.ssa.gov/oact/progdata/retirebenefit2.html (PIA formula, truncation, COLAs, reduced benefit); retrieved 2026-09-26 via the Internet Archive (web.archive.org/web/2026id_/\u2026) because ssa.gov refused the direct request (HTTP 403)",
+    "awi": "SSA OACT, 'National Average Wage Index', https://www.ssa.gov/oact/cola/AWI.html \u2014 series 1951\u20132024; the 2024 index is 69,846.57; retrieved 2026-09-26 via the Internet Archive",
+    "bendPoints": "SSA OACT, 'Benefit Formula Bend Points', https://www.ssa.gov/oact/cola/bendpoints.html \u2014 2021: $996 / $6,002; 2026: $1,286 / $7,749; retrieved 2026-09-26 via the Internet Archive",
+    "reduction": "SSA, 'Benefit Reduction for Early Retirement' \u2014 born 1960 or later, claiming at 62 reduces the PIA by 30% (20 CFR 404.410); 'Delayed Retirement Credits' \u2014 born 1943 or later, 8%/yr to 70, 124% at 70 for FRA 67 (20 CFR 404.313)"
+  },
+  "caseA": {
+    "birthYear": 1964,
+    "eligibilityYear": 2026,
+    "indexYear": 2024,
+    "earnings": [
+      {
+        "year": 1986,
+        "earnings": "16196"
+      },
+      {
+        "year": 1987,
+        "earnings": "17283"
+      },
+      {
+        "year": 1988,
+        "earnings": "18191"
+      },
+      {
+        "year": 1989,
+        "earnings": "18971"
+      },
+      {
+        "year": 1990,
+        "earnings": "19909"
+      },
+      {
+        "year": 1991,
+        "earnings": "20715"
+      },
+      {
+        "year": 1992,
+        "earnings": "21850"
+      },
+      {
+        "year": 1993,
+        "earnings": "22107"
+      },
+      {
+        "year": 1994,
+        "earnings": "22770"
+      },
+      {
+        "year": 1995,
+        "earnings": "23755"
+      },
+      {
+        "year": 1996,
+        "earnings": "24994"
+      },
+      {
+        "year": 1997,
+        "earnings": "26533"
+      },
+      {
+        "year": 1998,
+        "earnings": "28007"
+      },
+      {
+        "year": 1999,
+        "earnings": "29657"
+      },
+      {
+        "year": 2000,
+        "earnings": "31392"
+      },
+      {
+        "year": 2001,
+        "earnings": "32238"
+      },
+      {
+        "year": 2002,
+        "earnings": "32660"
+      },
+      {
+        "year": 2003,
+        "earnings": "33558"
+      },
+      {
+        "year": 2004,
+        "earnings": "35224"
+      },
+      {
+        "year": 2005,
+        "earnings": "36621"
+      },
+      {
+        "year": 2006,
+        "earnings": "38419"
+      },
+      {
+        "year": 2007,
+        "earnings": "40281"
+      },
+      {
+        "year": 2008,
+        "earnings": "41330"
+      },
+      {
+        "year": 2009,
+        "earnings": "40826"
+      },
+      {
+        "year": 2010,
+        "earnings": "41914"
+      },
+      {
+        "year": 2011,
+        "earnings": "43354"
+      },
+      {
+        "year": 2012,
+        "earnings": "44839"
+      },
+      {
+        "year": 2013,
+        "earnings": "45544"
+      },
+      {
+        "year": 2014,
+        "earnings": "47298"
+      },
+      {
+        "year": 2015,
+        "earnings": "49085"
+      },
+      {
+        "year": 2016,
+        "earnings": "49783"
+      },
+      {
+        "year": 2017,
+        "earnings": "51651"
+      },
+      {
+        "year": 2018,
+        "earnings": "53677"
+      },
+      {
+        "year": 2019,
+        "earnings": "55848"
+      },
+      {
+        "year": 2020,
+        "earnings": "57590"
+      },
+      {
+        "year": 2021,
+        "earnings": "62889"
+      },
+      {
+        "year": 2022,
+        "earnings": "66421"
+      },
+      {
+        "year": 2023,
+        "earnings": "69560"
+      },
+      {
+        "year": 2024,
+        "earnings": "73133"
+      },
+      {
+        "year": 2025,
+        "earnings": "75868"
+      }
+    ],
+    "published": {
+      "highest35Total": "2446845",
+      "aime": "5825",
+      "formula": ".9(1286) + .32(5825 - 1286) = $2,609.88",
+      "piaBeforeTruncation": "2609.88",
+      "pia": "2609.80",
+      "claimAt62Monthly": "1826.00",
+      "earlyMonths": 60
+    }
+  },
+  "caseB": {
+    "birthYear": 1959,
+    "eligibilityYear": 2021,
+    "aime": "11463",
+    "bendPoints2021": {
+      "first": "996",
+      "second": "6002"
+    },
+    "colas2021to2025": ["0.059", "0.087", "0.032", "0.025", "0.028"],
+    "published": {
+      "formula": ".9(996) + .32(6002 - 996) + .15(11463 - 6002) = $3,317.47",
+      "pia": "4152.40",
+      "monthlyAtNormalRetirementAge": "4152.00",
+      "normalRetirementAge": "66 years 10 months"
+    }
+  },
+  "averageWageIndex": [
+    {
+      "year": 1986,
+      "index": "17321.82"
+    },
+    {
+      "year": 1987,
+      "index": "18426.51"
+    },
+    {
+      "year": 1988,
+      "index": "19334.04"
+    },
+    {
+      "year": 1989,
+      "index": "20099.55"
+    },
+    {
+      "year": 1990,
+      "index": "21027.98"
+    },
+    {
+      "year": 1991,
+      "index": "21811.60"
+    },
+    {
+      "year": 1992,
+      "index": "22935.42"
+    },
+    {
+      "year": 1993,
+      "index": "23132.67"
+    },
+    {
+      "year": 1994,
+      "index": "23753.53"
+    },
+    {
+      "year": 1995,
+      "index": "24705.66"
+    },
+    {
+      "year": 1996,
+      "index": "25913.90"
+    },
+    {
+      "year": 1997,
+      "index": "27426.00"
+    },
+    {
+      "year": 1998,
+      "index": "28861.44"
+    },
+    {
+      "year": 1999,
+      "index": "30469.84"
+    },
+    {
+      "year": 2000,
+      "index": "32154.82"
+    },
+    {
+      "year": 2001,
+      "index": "32921.92"
+    },
+    {
+      "year": 2002,
+      "index": "33252.09"
+    },
+    {
+      "year": 2003,
+      "index": "34064.95"
+    },
+    {
+      "year": 2004,
+      "index": "35648.55"
+    },
+    {
+      "year": 2005,
+      "index": "36952.94"
+    },
+    {
+      "year": 2006,
+      "index": "38651.41"
+    },
+    {
+      "year": 2007,
+      "index": "40405.48"
+    },
+    {
+      "year": 2008,
+      "index": "41334.97"
+    },
+    {
+      "year": 2009,
+      "index": "40711.61"
+    },
+    {
+      "year": 2010,
+      "index": "41673.83"
+    },
+    {
+      "year": 2011,
+      "index": "42979.61"
+    },
+    {
+      "year": 2012,
+      "index": "44321.67"
+    },
+    {
+      "year": 2013,
+      "index": "44888.16"
+    },
+    {
+      "year": 2014,
+      "index": "46481.52"
+    },
+    {
+      "year": 2015,
+      "index": "48098.63"
+    },
+    {
+      "year": 2016,
+      "index": "48642.15"
+    },
+    {
+      "year": 2017,
+      "index": "50321.89"
+    },
+    {
+      "year": 2018,
+      "index": "52145.80"
+    },
+    {
+      "year": 2019,
+      "index": "54099.99"
+    },
+    {
+      "year": 2020,
+      "index": "55628.60"
+    },
+    {
+      "year": 2021,
+      "index": "60575.07"
+    },
+    {
+      "year": 2022,
+      "index": "63795.13"
+    },
+    {
+      "year": 2023,
+      "index": "66621.80"
+    },
+    {
+      "year": 2024,
+      "index": "69846.57"
+    }
+  ]
+}

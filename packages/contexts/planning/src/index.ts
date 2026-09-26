@@ -323,3 +323,7 @@ export {
   type SpendingCategorySummary,
 } from './revealed.ts';
 export { trailingWindow, type OneOffThresholds, type TrailingWindow } from './windows.ts';
+
+// --- WP 4.4: the deterministic projection engine (pure; the number boundary
+// lives in engine/boundary.ts and nowhere else) --------------------------------
+export * from './engine/index.ts';

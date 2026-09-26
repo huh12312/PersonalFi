@@ -1,0 +1,15 @@
+case,age_in_final_year,years_from_start,measure,reference,formula
+A,44,10,wealth_end_real,256064.44,A_acc
+A,54,20,wealth_end_real,558240.79,A_acc
+A,64,30,wealth_end_real,1001357.27,A_acc
+A,74,40,wealth_end_real,847489.77,A_dec
+A,84,50,wealth_end_real,621855.87,A_dec
+A,94,60,wealth_end_real,290982.54,A_dec
+B,44,10,wealth_end_real,279423.24,B_acc
+B,54,20,wealth_end_real,530575.58,B_acc
+B,64,30,wealth_end_real,879629.90,B_acc
+B,66,32,wealth_end_real,787554.02,B_dec1
+B,74,40,wealth_end_real,682089.50,B_dec2
+B,84,50,wealth_end_real,507992.49,B_dec2
+B,94,60,wealth_end_real,271235.65,B_dec2
+C,64,30,required_monthly_real,1471.97,C_pmt

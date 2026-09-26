@@ -1,0 +1,632 @@
+{
+  "about": "WP 4.4 golden: historical Guyton-Klinger cohorts run through the engine's own stepYear. 'published' holds the claims being reproduced, verbatim, with their sources; 'reproduced' is the engine's output pinned on 2026-09-26 for drift detection (it is NOT an independent reference — the published claims are). Portfolio: $1,000,000, one TAXABLE bucket, static equity share, rebalanced annually, no fees, no taxes, calendar-year steps.",
+  "series_provenance": {
+    "sp500": "Annual total return on the S&P 500 including dividends, percent. Aswath Damodaran, 'Historical Returns on Stocks, Bonds and Bills: 1928-2024' (histretSP, updated January 2026), https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/histretSP.html, retrieved 2026-09-26.",
+    "tbond10": "Annual total return on the 10-year US Treasury bond, percent. Same Damodaran table, same retrieval.",
+    "cpi": "Annual percent change in the annual-average CPI-U (BLS), percent, as tabulated by the Federal Reserve Bank of Minneapolis, 'Consumer Price Index, 1913-', https://www.minneapolisfed.org/about-us/monetary-policy/inflation-calculator/consumer-price-index-1913-, retrieved 2026-09-26.",
+    "licence_note": "Annual index returns and CPI changes are published statistics. Recorded for D15: WP 4.5's vendored series (dispatch §6 Q3) is the licence-checked home for historical data; this fixture carries 60 annual rows of each series for one test."
+  },
+  "rules": "GUYTON_KLINGER defaults in src/engine/guardrails.ts: ±20% rails, ±10% adjustments, preservation off in the final 15 years, COLA skipped after a negative nominal year when the frozen rate exceeds the initial rate, COLA capped at 6%. 'capped' adds 07 §5.6's 20% cumulative real-cut cap; no spending floor.",
+  "series": {
+    "1966": {
+      "sp500": "-9.97",
+      "tbond10": "2.91",
+      "cpi": "2.9"
+    },
+    "1967": {
+      "sp500": "23.80",
+      "tbond10": "-1.58",
+      "cpi": "3.1"
+    },
+    "1968": {
+      "sp500": "10.81",
+      "tbond10": "3.27",
+      "cpi": "4.2"
+    },
+    "1969": {
+      "sp500": "-8.24",
+      "tbond10": "-5.01",
+      "cpi": "5.5"
+    },
+    "1970": {
+      "sp500": "3.56",
+      "tbond10": "16.75",
+      "cpi": "5.8"
+    },
+    "1971": {
+      "sp500": "14.22",
+      "tbond10": "9.79",
+      "cpi": "4.3"
+    },
+    "1972": {
+      "sp500": "18.76",
+      "tbond10": "2.82",
+      "cpi": "3.3"
+    },
+    "1973": {
+      "sp500": "-14.31",
+      "tbond10": "3.66",
+      "cpi": "6.2"
+    },
+    "1974": {
+      "sp500": "-25.90",
+      "tbond10": "1.99",
+      "cpi": "11.1"
+    },
+    "1975": {
+      "sp500": "37.00",
+      "tbond10": "3.61",
+      "cpi": "9.1"
+    },
+    "1976": {
+      "sp500": "23.83",
+      "tbond10": "15.98",
+      "cpi": "5.7"
+    },
+    "1977": {
+      "sp500": "-6.98",
+      "tbond10": "1.29",
+      "cpi": "6.5"
+    },
+    "1978": {
+      "sp500": "6.51",
+      "tbond10": "-0.78",
+      "cpi": "7.6"
+    },
+    "1979": {
+      "sp500": "18.52",
+      "tbond10": "0.67",
+      "cpi": "11.3"
+    },
+    "1980": {
+      "sp500": "31.74",
+      "tbond10": "-2.99",
+      "cpi": "13.5"
+    },
+    "1981": {
+      "sp500": "-4.70",
+      "tbond10": "8.20",
+      "cpi": "10.3"
+    },
+    "1982": {
+      "sp500": "20.42",
+      "tbond10": "32.81",
+      "cpi": "6.1"
+    },
+    "1983": {
+      "sp500": "22.34",
+      "tbond10": "3.20",
+      "cpi": "3.2"
+    },
+    "1984": {
+      "sp500": "6.15",
+      "tbond10": "13.73",
+      "cpi": "4.3"
+    },
+    "1985": {
+      "sp500": "31.24",
+      "tbond10": "25.71",
+      "cpi": "3.5"
+    },
+    "1986": {
+      "sp500": "18.49",
+      "tbond10": "24.28",
+      "cpi": "1.9"
+    },
+    "1987": {
+      "sp500": "5.81",
+      "tbond10": "-4.96",
+      "cpi": "3.7"
+    },
+    "1988": {
+      "sp500": "16.54",
+      "tbond10": "8.22",
+      "cpi": "4.1"
+    },
+    "1989": {
+      "sp500": "31.48",
+      "tbond10": "17.69",
+      "cpi": "4.8"
+    },
+    "1990": {
+      "sp500": "-3.06",
+      "tbond10": "6.24",
+      "cpi": "5.4"
+    },
+    "1991": {
+      "sp500": "30.23",
+      "tbond10": "15.00",
+      "cpi": "4.2"
+    },
+    "1992": {
+      "sp500": "7.49",
+      "tbond10": "9.36",
+      "cpi": "3.0"
+    },
+    "1993": {
+      "sp500": "9.97",
+      "tbond10": "14.21",
+      "cpi": "3.0"
+    },
+    "1994": {
+      "sp500": "1.33",
+      "tbond10": "-8.04",
+      "cpi": "2.6"
+    },
+    "1995": {
+      "sp500": "37.20",
+      "tbond10": "23.48",
+      "cpi": "2.8"
+    },
+    "1996": {
+      "sp500": "22.68",
+      "tbond10": "1.43",
+      "cpi": "2.9"
+    },
+    "1997": {
+      "sp500": "33.10",
+      "tbond10": "9.94",
+      "cpi": "2.3"
+    },
+    "1998": {
+      "sp500": "28.34",
+      "tbond10": "14.92",
+      "cpi": "1.6"
+    },
+    "1999": {
+      "sp500": "20.89",
+      "tbond10": "-8.25",
+      "cpi": "2.2"
+    },
+    "2000": {
+      "sp500": "-9.03",
+      "tbond10": "16.66",
+      "cpi": "3.4"
+    },
+    "2001": {
+      "sp500": "-11.85",
+      "tbond10": "5.57",
+      "cpi": "2.8"
+    },
+    "2002": {
+      "sp500": "-21.97",
+      "tbond10": "15.12",
+      "cpi": "1.6"
+    },
+    "2003": {
+      "sp500": "28.36",
+      "tbond10": "0.38",
+      "cpi": "2.3"
+    },
+    "2004": {
+      "sp500": "10.74",
+      "tbond10": "4.49",
+      "cpi": "2.7"
+    },
+    "2005": {
+      "sp500": "4.83",
+      "tbond10": "2.87",
+      "cpi": "3.4"
+    },
+    "2006": {
+      "sp500": "15.61",
+      "tbond10": "1.96",
+      "cpi": "3.2"
+    },
+    "2007": {
+      "sp500": "5.48",
+      "tbond10": "10.21",
+      "cpi": "2.9"
+    },
+    "2008": {
+      "sp500": "-36.55",
+      "tbond10": "20.10",
+      "cpi": "3.8"
+    },
+    "2009": {
+      "sp500": "25.94",
+      "tbond10": "-11.12",
+      "cpi": "-0.4"
+    },
+    "2010": {
+      "sp500": "14.82",
+      "tbond10": "8.46",
+      "cpi": "1.6"
+    },
+    "2011": {
+      "sp500": "2.10",
+      "tbond10": "16.04",
+      "cpi": "3.2"
+    },
+    "2012": {
+      "sp500": "15.89",
+      "tbond10": "2.97",
+      "cpi": "2.1"
+    },
+    "2013": {
+      "sp500": "32.15",
+      "tbond10": "-9.10",
+      "cpi": "1.5"
+    },
+    "2014": {
+      "sp500": "13.52",
+      "tbond10": "10.75",
+      "cpi": "1.6"
+    },
+    "2015": {
+      "sp500": "1.38",
+      "tbond10": "1.28",
+      "cpi": "0.1"
+    },
+    "2016": {
+      "sp500": "11.77",
+      "tbond10": "0.69",
+      "cpi": "1.3"
+    },
+    "2017": {
+      "sp500": "21.61",
+      "tbond10": "2.80",
+      "cpi": "2.1"
+    },
+    "2018": {
+      "sp500": "-4.23",
+      "tbond10": "-0.02",
+      "cpi": "2.4"
+    },
+    "2019": {
+      "sp500": "31.21",
+      "tbond10": "9.64",
+      "cpi": "1.8"
+    },
+    "2020": {
+      "sp500": "18.02",
+      "tbond10": "11.33",
+      "cpi": "1.2"
+    },
+    "2021": {
+      "sp500": "28.47",
+      "tbond10": "-4.42",
+      "cpi": "4.7"
+    },
+    "2022": {
+      "sp500": "-18.04",
+      "tbond10": "-17.83",
+      "cpi": "8.0"
+    },
+    "2023": {
+      "sp500": "26.06",
+      "tbond10": "3.88",
+      "cpi": "4.1"
+    },
+    "2024": {
+      "sp500": "24.88",
+      "tbond10": "-1.64",
+      "cpi": "2.9"
+    },
+    "2025": {
+      "sp500": "17.78",
+      "tbond10": "7.80",
+      "cpi": "2.6"
+    }
+  },
+  "cohorts": [
+    {
+      "id": "1973",
+      "start": 1973,
+      "years": 30,
+      "equityShare": "0.5",
+      "initialRate": "0.058",
+      "reproduced": {
+        "unmodified": {
+          "spendingRatio": [
+            "1.0000",
+            "0.9416",
+            "0.7628",
+            "0.7411",
+            "0.7411",
+            "0.6263",
+            "0.6170",
+            "0.5288",
+            "0.4939",
+            "0.4272",
+            "0.4268",
+            "0.4268",
+            "0.4268",
+            "0.4268",
+            "0.4695",
+            "0.4695",
+            "0.4695",
+            "0.5164",
+            "0.5164",
+            "0.5164",
+            "0.5164",
+            "0.5680",
+            "0.5680",
+            "0.6248",
+            "0.6248",
+            "0.6873",
+            "0.7561",
+            "0.7561",
+            "0.7561",
+            "0.7561"
+          ],
+          "preservationCuts": [1975, 1978, 1980, 1982],
+          "prosperityRaises": [1987, 1990, 1994, 1996, 1998, 1999],
+          "capBound": [],
+          "worstCut": "0.5732",
+          "depletedInYear": null,
+          "realWealthAfterFiveYears": "0.5759",
+          "terminalRealWealth": "0.7275"
+        },
+        "capped": {
+          "spendingRatio": [
+            "1.0000",
+            "0.9416",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000"
+          ],
+          "preservationCuts": [
+            1975, 1976, 1978, 1979, 1980, 1981, 1982, 1983, 1984, 1985, 1986, 1987
+          ],
+          "prosperityRaises": [],
+          "capBound": [1975, 1976, 1978, 1979, 1980, 1981, 1982, 1983, 1984, 1985, 1986, 1987],
+          "worstCut": "0.2000",
+          "depletedInYear": 1994,
+          "realWealthAfterFiveYears": "0.5667",
+          "terminalRealWealth": "0.0000"
+        },
+        "constantRealWealthAfterFiveYears": "0.5279"
+      },
+      "published": [
+        {
+          "claim": "sustainable",
+          "text": "Using these decision rules, Guyton calculated the maximum initial withdrawal rate for this period to be 5.8 percent for a portfolio containing 50 percent equities",
+          "source": "Guyton & Klinger, \"Decision Rules and Maximum Initial Withdrawal Rates\", Journal of Financial Planning, March 2006, p. 2 (FPA PDF, https://www.financialplanningassociation.org/sites/default/files/2021-11/2006%20-%20Guyton%20and%20Klinger%20-%20Decision%20Rules%20and%20SWR%20(1).PDF), summarising Guyton, JFP October 2004",
+          "asserted_as": "the unmodified rules at 5.8% / 50% equity leave the 1973 portfolio above zero for all 30 years"
+        },
+        {
+          "claim": "cuts_in_first_decade",
+          "text": "a retirement distribution period beginning in 1973, chosen for its real-life \"perfect storm\" characteristics that included a severe market decline in the initial retirement years combined with inflation in the first decade of retirement that was three times the long-term historical norm",
+          "source": "Guyton & Klinger 2006, p. 2",
+          "asserted_as": "every capital-preservation cut falls in 1973–1982, and no prosperity raise comes before 1983"
+        },
+        {
+          "claim": "worse_than_2000_after_five_years",
+          "text": "the combined impact of inflation and the 1973–1974 bear market placed a 1973 retiree in a more financially uncertain position after five years of retirement at the end of 1977 than a 2000 retiree found after 2004 following the 2000–2002 bear market",
+          "source": "Guyton & Klinger 2006, p. 2",
+          "asserted_as": "with the same constant real withdrawal, real wealth after five years is lower for the 1973 cohort than for the 2000 cohort; and under the rules the 1973 retiree has already cut deeper by year five"
+        }
+      ]
+    },
+    {
+      "id": "2000",
+      "start": 2000,
+      "years": 26,
+      "equityShare": "0.5",
+      "initialRate": "0.058",
+      "reproduced": {
+        "unmodified": {
+          "spendingRatio": [
+            "1.0000",
+            "1.0000",
+            "0.9728",
+            "0.8617",
+            "0.8617",
+            "0.8617",
+            "0.7755",
+            "0.7755",
+            "0.7755",
+            "0.6724",
+            "0.6724",
+            "0.6724",
+            "0.6724",
+            "0.6724",
+            "0.6724",
+            "0.6724",
+            "0.6724",
+            "0.6724",
+            "0.6724",
+            "0.6567",
+            "0.6567",
+            "0.6567",
+            "0.6567",
+            "0.6080",
+            "0.6080",
+            "0.6080"
+          ],
+          "preservationCuts": [2003, 2006, 2009],
+          "prosperityRaises": [],
+          "capBound": [],
+          "worstCut": "0.3920",
+          "depletedInYear": null,
+          "realWealthAfterFiveYears": "0.7577",
+          "terminalRealWealth": "0.4315"
+        },
+        "capped": {
+          "spendingRatio": [
+            "1.0000",
+            "1.0000",
+            "0.9728",
+            "0.8617",
+            "0.8617",
+            "0.8617",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000"
+          ],
+          "preservationCuts": [2003, 2006, 2009, 2010],
+          "prosperityRaises": [],
+          "capBound": [2006, 2009, 2010, 2019, 2023],
+          "worstCut": "0.2000",
+          "depletedInYear": null,
+          "realWealthAfterFiveYears": "0.7577",
+          "terminalRealWealth": "0.2007"
+        },
+        "constantRealWealthAfterFiveYears": "0.7382"
+      },
+      "published": [
+        {
+          "claim": "three_cuts_bottom_36",
+          "text": "A household that retired just before the Dot-Com Bubble burst would have hit its lower guardrail 3 times, ultimately bottoming out at 36% below the planned spending level.",
+          "source": "Kitces (Derek Tharp), \"Why Guyton-Klinger Guardrails Are Too Risky For Most Retirees (And How Risk-Based Guardrails Can Help)\", kitces.com, March 2024, https://www.kitces.com/blog/guyton-klinger-guardrails-retirement-income-rules-risk-based/ — $1M, $43,000/yr, 60/40, retirement in 1999; quote verified against the page text 2026-09-26",
+          "asserted_as": "exactly three capital-preservation cuts; the first in 2003 (after the 2000–2002 bear market) and the last in 2009 (after 2008); the deepest real cut lies within 36% ± 5 points (reproduction: 39.2% at G-K's own 5.8% / 50% equity)"
+        },
+        {
+          "claim": "cap_binds",
+          "text": "unmodified guardrails produced cumulative spending cuts of ~28% in 2008, ~36% in the dot-com bust, and ~54% through 1965–1975 stagflation … cap cumulative real cuts at 20%",
+          "source": "07 §5.6, after Kitces 2024",
+          "asserted_as": "with the 20% cap the worst cut is exactly 0.20 and cap_bound is recorded; without it the cut exceeds 0.20"
+        },
+        {
+          "claim": "jeske_over_50_not_reproduced",
+          "text": "Jeske also shows that January 2000 retirees, whether they began with 4%, 5%, or 6% withdrawal rates, would all have taken over 50% cumulative pay cuts during retirement.",
+          "source": "Kitces 2024, citing Karsten Jeske (Early Retirement Now); verified against the page text 2026-09-26",
+          "asserted_as": "NOT asserted. The annual Damodaran/BLS reproduction gives 25.3% (4.3%, 60/40) to 39.2% (5.8%, 50/50) through 2025. Jeske's series is monthly with his own horizon and allocation; recorded here so the divergence is visible rather than dropped."
+        }
+      ]
+    },
+    {
+      "id": "1966-kitces",
+      "start": 1966,
+      "years": 30,
+      "equityShare": "0.6",
+      "initialRate": "0.043",
+      "reproduced": {
+        "unmodified": {
+          "spendingRatio": [
+            "1.0000",
+            "0.9718",
+            "0.9718",
+            "0.9718",
+            "0.9212",
+            "0.8290",
+            "0.8290",
+            "0.8290",
+            "0.7806",
+            "0.6324",
+            "0.6144",
+            "0.6144",
+            "0.5769",
+            "0.5115",
+            "0.4871",
+            "0.4550",
+            "0.4372",
+            "0.4368",
+            "0.4368",
+            "0.4368",
+            "0.4368",
+            "0.4805",
+            "0.4805",
+            "0.4805",
+            "0.5285",
+            "0.5285",
+            "0.5814",
+            "0.6395",
+            "0.6395",
+            "0.6395"
+          ],
+          "preservationCuts": [1971, 1975, 1979],
+          "prosperityRaises": [1987, 1990, 1992, 1993],
+          "capBound": [],
+          "worstCut": "0.5632",
+          "depletedInYear": null,
+          "realWealthAfterFiveYears": "0.7548",
+          "terminalRealWealth": "0.8646"
+        },
+        "capped": {
+          "spendingRatio": [
+            "1.0000",
+            "0.9718",
+            "0.9718",
+            "0.9718",
+            "0.9212",
+            "0.8290",
+            "0.8290",
+            "0.8290",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000",
+            "0.8000"
+          ],
+          "preservationCuts": [1971, 1975, 1976, 1977, 1978, 1979, 1980],
+          "prosperityRaises": [],
+          "capBound": [1974, 1975, 1976, 1977, 1978, 1979, 1980, 1981, 1982, 1983, 1995],
+          "worstCut": "0.2000",
+          "depletedInYear": null,
+          "realWealthAfterFiveYears": "0.7548",
+          "terminalRealWealth": "0.1700"
+        },
+        "constantRealWealthAfterFiveYears": "0.7478"
+      },
+      "published": [
+        {
+          "claim": "stagflation_54",
+          "text": "Retiring before the Stagflation Era (October 1965) hit this hypothetical household hardest of all, with spending falling to 54% below initially planned spending!",
+          "source": "Kitces 2024 — $1M, $43,000 (4.3%), 60/40; 07 §5.6 quotes the same ~54%",
+          "asserted_as": "the January-1966 reproduction's worst cut is within 5 percentage points of 54% (annual Damodaran/BLS data against Kitces' monthly series and an October 1965 start)"
+        }
+      ]
+    }
+  ]
+}
