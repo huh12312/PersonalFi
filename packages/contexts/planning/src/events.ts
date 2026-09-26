@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * Every fact `@ctx/planning` states. Today there is one.
+ * Every fact `@ctx/planning` states.
  *
  * Same payload discipline as `@ctx/ledger`'s and `@ctx/recurring`'s: **ids and
  * counts, never rows**. A consumer that wants the breakdown re-reads it, which
@@ -28,6 +28,7 @@
  */
 import { defineEvent, type EventDefinition } from '@core/platform';
 import { z } from 'zod';
+import { AssumptionsOverridden } from './assumptions.ts';
 
 /** Minor units as a string. `bigint` and IEEE-754 both make a JSON number a liability. */
 const minorUnits = z.string().regex(/^-?\d+$/);
@@ -57,9 +58,78 @@ export const NetWorthSnapshotTaken = defineEvent({
 });
 
 /**
+ * A goal was created (WP 4.1).
+ *
+ * Ids and counts, never the row: no target amount, no name, no account ids.
+ * The consumers this exists for — WP 4.6's projection refresh and the Insights
+ * goal rules — re-read the goal through Planning's reader under their own
+ * scope, which is also how they see whatever has been edited since. The target
+ * date and priority travel because "a new goal due within a year" is a routing
+ * decision a consumer should not need a read to make; neither is a figure.
+ */
+export const GoalCreated = defineEvent({
+  type: 'planning.GoalCreated',
+  aggregateType: 'goal',
+  description:
+    'A goal was created. Carries the goal id, its kind, target date, priority and how many ' +
+    'funding accounts it names — never the target amount, the name or the account ids, which a ' +
+    'consumer re-reads through Planning under its own scope.',
+  schema: z.object({
+    goalId: z.uuid(),
+    kind: z.enum(['retirement', 'emergency_fund', 'purchase', 'sabbatical', 'custom']),
+    targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    priority: z.int().min(1).max(5),
+    fundingAccountCount: z.int().nonnegative(),
+  }),
+});
+
+/**
+ * The holder answered the risk questionnaire (WP 4.1).
+ *
+ * `tolerance` and `consistencyPenalty` travel because a notification that
+ * "your answers disagreed, so your profile is more conservative than you
+ * described" is the whole point of the penalty, and a consumer should not have
+ * to re-read the row to know whether to say it. The tax-bracket band does
+ * **not** travel: it is `risk.profile`-scoped data (sensitivity 4) and crosses
+ * only through a granted snapshot, never through the event log.
+ */
+export const RiskProfileAnswered = defineEvent({
+  type: 'planning.RiskProfileAnswered',
+  aggregateType: 'risk_profile',
+  description:
+    'The risk questionnaire was answered and a tolerance derived. Carries the new row id, the ' +
+    'instrument version, the derived tolerance and the consistency penalty (points withheld ' +
+    'because two framings of one disposition disagreed). Never the answers, never the band.',
+  schema: z.object({
+    riskProfileId: z.uuid(),
+    instrument: z.string().regex(/^risk-v\d+$/),
+    tolerance: z.enum([
+      'conservative',
+      'moderate_conservative',
+      'moderate',
+      'moderate_aggressive',
+      'aggressive',
+    ]),
+    consistencyPenalty: z.int().nonnegative(),
+  }),
+});
+
+/**
  * Registered at the composition root. Exported as a list so `apps/api` cannot
  * forget one: an event type that is appended but not registered is invisible to
  * the pump's upcasting, and the failure surfaces as a silent consumer rather
  * than as an error.
  */
-export const PLANNING_EVENTS: readonly EventDefinition[] = Object.freeze([NetWorthSnapshotTaken]);
+/**
+ * WP 4.2's event. Defined with `defineEvent` in `src/assumptions.ts`, because
+ * `saveOverrides` appends it in the same transaction as the row it announces;
+ * re-exported here rather than defined twice, and registered in the list.
+ */
+export { AssumptionsOverridden };
+
+export const PLANNING_EVENTS: readonly EventDefinition[] = Object.freeze([
+  NetWorthSnapshotTaken,
+  GoalCreated,
+  RiskProfileAnswered,
+  AssumptionsOverridden,
+]);

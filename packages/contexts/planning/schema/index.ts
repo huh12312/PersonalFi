@@ -9,7 +9,8 @@
  * `pnpm lint:schema-ownership` is what keeps one table from being claimed by two
  * packages.
  *
- * One table today. `goals`, `plan_scenarios`, `projection_runs` and the rest of
+ * `net_worth_daily` here; WP 4.1's four goal tables in `goals.ts`; WP 4.2's
+ * `plan_assumptions` in `assumptions.ts`. `plan_scenarios`, `projection_runs` and the rest of
  * Planning's claims in OWNERSHIP.md are Phase 4's, and are still claims.
  */
 import {
@@ -64,3 +65,6 @@ export const netWorthDaily = pgTable('net_worth_daily', {
 /** `observed` | `interpolated` | `corrected` (04 §5.4, 08 §3.5). */
 export const NET_WORTH_SOURCES = ['observed', 'interpolated', 'corrected'] as const;
 export type NetWorthSource = (typeof NET_WORTH_SOURCES)[number];
+
+export * from './goals.ts';
+export * from './assumptions.ts';

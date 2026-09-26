@@ -148,9 +148,17 @@ describe('the names the composition root registers', () => {
     expect(NetWorthSnapshotTaken.type).toBe('planning.NetWorthSnapshotTaken');
     // The registry list `apps/api` iterates; an appended-but-unregistered event
     // is invisible to the pump's upcasting and fails silently.
-    expect(PLANNING_EVENTS.map((event) => event.type)).toEqual(['planning.NetWorthSnapshotTaken']);
+    // WP 4.1 appended GoalCreated and RiskProfileAnswered; WP 4.2, AssumptionsOverridden.
+    expect(PLANNING_EVENTS.map((event) => event.type)).toEqual([
+      'planning.NetWorthSnapshotTaken',
+      'planning.GoalCreated',
+      'planning.RiskProfileAnswered',
+      'planning.AssumptionsOverridden',
+    ]);
     // 0003_platform.sql's `domain_events.event_type` CHECK, read out of the file.
-    expect(EVENT_TYPE_CHECK.test(NetWorthSnapshotTaken.type)).toBe(true);
+    for (const definition of PLANNING_EVENTS) {
+      expect(EVENT_TYPE_CHECK.test(definition.type), definition.type).toBe(true);
+    }
   });
 
   it('consumes exactly the three events the dispatch names', () => {

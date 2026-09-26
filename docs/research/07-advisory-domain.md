@@ -1553,8 +1553,8 @@ Put these in `config/tax/us_2026.yaml`, keyed by year, never inlined in code. Ev
 | Standard deduction — MFJ / single & MFS / HoH | **$32,200 / $16,100 / $24,150** |
 | Brackets (single) | 10% ≤$12,400; 12% >$12,400; 22% >$50,400; 24% >$105,700; 32% >$201,775; 35% >$256,225; 37% >$640,600 |
 | MFJ thresholds | approximately double the single thresholds |
-| LTCG 0% / 15% / 20% (single) | ≤$48,350 / ≤$533,400 / above |
-| LTCG 0% / 15% / 20% (MFJ) | ≤$96,700 / ≤$600,050 / above |
+| LTCG 0% / 15% / 20% (single) | ≤$49,450 / ≤$545,500 / above — **corrected 2026-09-26 by WP 4.2**: this row originally read ≤$48,350 / ≤$533,400, which are the 2025 figures; 2026 per Rev. Proc. 2025-32 §3.03 |
+| LTCG 0% / 15% / 20% (MFJ) | ≤$98,900 / ≤$613,700 / above — **corrected 2026-09-26 by WP 4.2**: originally ≤$96,700 / ≤$600,050 (2025); 2026 per Rev. Proc. 2025-32 §3.03 |
 | NIIT (3.8%) MAGI threshold | $200,000 single / $250,000 MFJ (not indexed) |
 | Capital loss ordinary-income offset | $3,000/yr, remainder carries forward |
 

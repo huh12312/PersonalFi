@@ -188,12 +188,22 @@ export const MODULE_FLAGS: readonly FlagDefinition[] = Object.freeze([
     // Flipped `true` once `phase3-wiring.test.ts` → 'module.planning: a real
     // ledger.BalanceRecorded reaches the net-worth consumer through the real
     // pump, and the 04:00 schedule lands' was green (6 passed).
+    //
+    // Phase 4 (docs/plan/04-phase-4-dispatch.md §4 item 3, asked for by
+    // wp3.8-net-worth.md §9): this flag now guards Planning proper — goals,
+    // assumptions, scenarios, the deterministic projection and the Monte
+    // Carlo worker, and the `planning.projection_refresh` schedule — not only
+    // the net-worth snapshotter it was born for. It stays `true`; every new
+    // Planning consumer and schedule registers behind it, and WP 4.14 proves
+    // flag-off registers none of them (the 2.13 pattern, re-proved in 3.14).
     defaultEnabled: true,
     owner: 'planning',
     removeWhen:
-      'never — this is the kill switch for the net-worth read model, and a ' +
+      'never — this is the kill switch for Planning as a whole: the net-worth ' +
+      'read model, goals and assumptions, and every projection job. A ' +
       'snapshotter that cannot be switched off is one that cannot be paused ' +
-      'while a sealed row is corrected',
+      'while a sealed row is corrected, and a projection that cannot be ' +
+      'switched off is one that keeps forecasting from inputs known to be wrong',
   }),
 ]);
 

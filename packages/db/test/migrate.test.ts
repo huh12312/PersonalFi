@@ -336,6 +336,16 @@ describeWithDb('runMigrations', () => {
       //   added scopes (`liabilities.terms`, `market.rates`); WP 3.10a hit
       //   the 23514 writing the first real grant. Parity with
       //   `ADVISOR_SCOPES` is asserted by apps/api's registration test.
+      // 0020_planning_goals: four @ctx/planning tables — goals,
+      //   goal_contributions, risk_profile, cash_earmarks (WP 4.1,
+      //   docs/plan/04-phase-4-dispatch.md §3). Every one is user_id-scoped
+      //   from its first migration; `risk_profile` stores a tax-bracket
+      //   *band* and never the income that produced it (08 §4.2), and
+      //   `tolerance` is derived from the stored answers, never typed in.
+      // 0021_plan_assumptions: one @ctx/planning table — plan_assumptions
+      //   (WP 4.2). Stores only the user's deltas against a named
+      //   `assumptions_version` (the content hash of the checked-in file),
+      //   never a copy of the defaults.
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
@@ -349,6 +359,7 @@ describeWithDb('runMigrations', () => {
         'budget_lines',
         'budget_periods',
         'budgets',
+        'cash_earmarks',
         'categories',
         'category_assignments',
         'classifier_examples',
@@ -365,6 +376,8 @@ describeWithDb('runMigrations', () => {
         'event_consumer_offsets',
         'feature_flags',
         'fx_rates',
+        'goal_contributions',
+        'goals',
         'holdings',
         'holdings_snapshots',
         'insight_actions',
@@ -384,6 +397,7 @@ describeWithDb('runMigrations', () => {
         'notification_channels',
         'notification_outbox',
         'notification_rules',
+        'plan_assumptions',
         'price_change_events',
         'price_source_priority',
         'prices',
@@ -395,6 +409,7 @@ describeWithDb('runMigrations', () => {
         'recurring_series',
         'registration_tokens',
         'rejected_transfer_pairs',
+        'risk_profile',
         'rollovers',
         'rule_runs',
         'rules',
