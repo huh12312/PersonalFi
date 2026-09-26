@@ -23,8 +23,11 @@ Tables listed here are _claimed_; most do not exist yet. Claiming early is the p
 - `goals`
 - `goal_contributions`
 - `risk_profile`
+- `cash_earmarks`
 - `plan_scenarios`
 - `plan_assumptions`
 - `projection_runs`
 - `projection_percentiles`
 - `net_worth_daily`
+
+## Claimed by WP 4.2 — `plan_assumptions` (already listed under Tables, so not re-listed: a second bullet would be a double claim) is created by migration 0021 and typed in `schema/assumptions.ts`; it holds deltas only, against a named assumptions-file version.
