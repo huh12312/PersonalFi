@@ -249,6 +249,31 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'net_worth_daily',
     'planning (WP 3.8); sealed rows are historical assertions with correction provenance a recomputation cannot rebuild — exported with the investments batch, not dropped.',
   ],
+  // Phase 4 WP 4.1 (migration 0020) and WP 4.2 (0021). These are the
+  // user-authored rows 08 §7.3 calls "the truly irreplaceable data" — a goal,
+  // a risk answer set, an assumptions delta — so they are deferred, never
+  // excluded: WP 4.12's export batch (docs/plan/04-phase-4-dispatch.md §3
+  // "WP 4.12", C-7 in the Phase 3 gate) adds them with the Phase 3 tables,
+  // `plan_assumptions.assumptions_version` round-tripping verbatim (wp4.2
+  // §9 item 6). Landed here as deferrals so the completeness check names them
+  // the day WP 4.12 forgets one, exactly as it named the Phase 3 tables.
+  ['goals', 'planning (WP 4.1); user-authored — exported by WP 4.12 with the Phase 3 batch.'],
+  [
+    'goal_contributions',
+    'planning (WP 4.1); user-authored — exported by WP 4.12 with the Phase 3 batch.',
+  ],
+  [
+    'risk_profile',
+    'planning (WP 4.1); user-authored — exported by WP 4.12 with the Phase 3 batch.',
+  ],
+  [
+    'cash_earmarks',
+    'planning (WP 4.1); user-authored — exported by WP 4.12 with the Phase 3 batch.',
+  ],
+  [
+    'plan_assumptions',
+    'planning (WP 4.2); user deltas against a named version — exported by WP 4.12, assumptions_version verbatim.',
+  ],
   ['advisors', "insights (WP 2.6); not named in this WP's export scope."],
   ['advisor_runs', "insights (WP 2.6); not named in this WP's export scope."],
   ['insights', "insights (WP 2.6); not named in this WP's export scope."],
