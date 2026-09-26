@@ -438,8 +438,13 @@ export async function recordHoldingFacts(
         // and an `ON CONFLICT` target cannot be a jsonb path.
         providerSecurityId: fact.security.providerSecurityId,
         quantity: fact.quantity,
-        valueMinor: fact.value.minor,
-        valueCurrency: fact.value.currency,
+        // `null` as of the Phase 3 gate's C-2 condition: a watch-only
+        // wallet's provider makes no fiat assertion at all
+        // (`@connector/port`'s `ProviderHoldingFact.value` doc comment).
+        // Migration `0025` dropped `connection_sync_facts_holding_is_a_position`'s
+        // `value_minor IS NOT NULL` half accordingly.
+        valueMinor: fact.value?.minor ?? null,
+        valueCurrency: fact.value?.currency ?? null,
         costBasisMinor: fact.costBasis?.minor ?? null,
         costBasisCurrency: fact.costBasis?.currency ?? null,
         asOf: fact.asOf,
@@ -786,7 +791,9 @@ function holdingFactFromRow(row: ConnectionSyncFactRow): ProviderHoldingFact {
     security: fact['security'] as ProviderHoldingFact['security'],
     quantity: row.quantity as string,
     costBasis: moneyOrNull(row.costBasisMinor, row.costBasisCurrency),
-    value: money(row.valueMinor as bigint, row.valueCurrency as string),
+    // `moneyOrNull`, not `money`, as of the Phase 3 gate's C-2 condition —
+    // see the write side's comment in `recordHoldingFacts` above.
+    value: moneyOrNull(row.valueMinor, row.valueCurrency),
     asOf: row.asOf as Date,
     raw: fact['raw'] ?? null,
   };

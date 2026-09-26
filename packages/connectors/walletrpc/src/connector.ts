@@ -25,22 +25,50 @@
  *     here is ever sealed with `SecretBox`, and there is no path by which one
  *     could be.
  *
- * ## Why every non-zero balance surfaces as `DATA_UNAVAILABLE`
+ * ## Holdings: an unvalued quantity, never a fabricated zero (Phase 3 gate C-2)
  *
- * This connector has no price source. `ProviderBalanceFact.current` and
- * `ProviderHoldingFact.value` are `Money` — a *fiat* amount, `@core/kernel`'s
- * `CurrencyCode` defaulting to two decimal places, structurally incapable of
- * holding a native BTC/ETH quantity without ruinous precision loss — so
- * reporting either for a real balance would require a USD price, which this
- * connector does not fetch (01 §3.5's two hosts, Esplora and Etherscan, quote
- * neither). 08 §2.2: "an honest adapter never reports $0.00 for an unpriced
- * asset." So a **non-zero** on-chain balance raises a named
- * `DATA_UNAVAILABLE` naming the asset — exactly `CoinbaseConnector`'s
- * `#pricesFor` failure mode — and only a **literal zero** balance is reported,
- * because zero is true in every currency without needing a price at all. A
- * real fiat valuation for these balances is WP 3.4's `PriceSource` plus the
- * resolver's `security_id` join, joining downstream of this connector rather
- * than inside it.
+ * This connector has no price source (01 §3.5's two hosts, Esplora and
+ * Etherscan, quote neither). Through the Phase 3 gate a non-zero balance
+ * raised `DATA_UNAVAILABLE` on **both** `syncBalances` and `syncHoldings`,
+ * which meant a funded watch-only wallet could never become a holding at all
+ * (`docs/evidence/phase-3/gate-security-review.md` G3-14) — the "downstream"
+ * valuation WP 3.6 deferred to WP 3.4's price ladder was never actually
+ * wired, because there was no fact for the ladder to join against.
+ *
+ * `syncHoldings` now reports the real on-chain **quantity** with `value:
+ * null` — `@connector/port`'s `ProviderHoldingFact.value` is `Money | null`
+ * precisely for this case (see its doc comment): `null` states "this
+ * provider has no fiat quote for it", which is a different claim from a
+ * fabricated `$0.00` and a different claim from the position not existing.
+ * `costBasis` is `null` for the same pre-existing reason (WP 3.6, this
+ * connector never had a basis to report). The security this quantity is
+ * *in* still carries the chain's native-asset `chain_contract` identifier
+ * (`nativeSecurityIdentifierOf`), so the resolver still merges it onto the
+ * same `security_id` a Coinbase sighting of the same asset would use
+ * (`one-security.test.ts`), and once resolved, `@ctx/investments`' holdings
+ * pipeline values it from WP 3.4's price ladder exactly as every other
+ * holding is valued — `institutionValue` (this fact's `value`) is never read
+ * for market value or allocation; only `PriceReader` is. See
+ * `docs/evidence/phase-4/wp4.12a-gate-conditions.md` C-2 for the traced path
+ * and the alternative (widening `Money` itself) that was rejected.
+ *
+ * **`syncBalances` is unchanged and still raises `DATA_UNAVAILABLE` for a
+ * non-zero balance.** `ProviderBalanceFact.current` is `Money`, not `Money |
+ * null` — it is `@ctx/ledger`'s own account balance, which has no downstream
+ * ladder join at all (a checking account's balance is definitional, not
+ * priced), so there is nowhere for an unvalued balance to be rescued the way
+ * an unvalued holding now is. This is a deliberate, documented residual:
+ * `@ctx/planning`'s `INTERPOLATION_POLICY` values an `investment`-kind
+ * account (which is how a crypto wallet's account is classified) from
+ * `quantity × price` over its **holdings**, never from `accounts.balance`
+ * (`packages/contexts/planning/src/interpolate.ts`), so net worth and
+ * allocation are unaffected by this connector's balance leg staying
+ * unpriced — only this specific account's own ledger-balance figure (an
+ * operational display, not a security boundary) does, and its sync leg will
+ * keep retrying and failing for a funded wallet. Widening
+ * `ProviderBalanceFact.current` the same way would touch every adapter and
+ * every ledger consumer for a display-only field with no ladder to join
+ * against; out of scope for this condition — recorded for WP 4.12b.
  */
 import {
   ConnectorError,
@@ -54,8 +82,10 @@ import {
   type ProviderAccountFact,
   type ProviderBalanceFact,
   type ProviderHoldingFact,
+  type ProviderSecurityFact,
   type SyncOptions,
   type TransactionPage,
+  securityFingerprintOf,
   securityIdentifierOf,
 } from '@connector/port';
 import { Money, newId, type Clock } from '@core/kernel';
@@ -182,7 +212,7 @@ export class WalletRpcConnector implements Connector {
 
   async syncHoldings(
     handle: ConnectionHandle,
-    _options: SyncOptions,
+    options: SyncOptions,
   ): Promise<readonly ProviderHoldingFact[]> {
     assertSupports(this.provider, this.capabilities(), 'holdings');
     const record = await this.#recordFor(handle);
@@ -193,7 +223,19 @@ export class WalletRpcConnector implements Connector {
     // than emitting a holding worth nothing).
     if (quantity.minorUnits === 0n) return [];
 
-    throw this.#unpriced(record, quantity.decimal);
+    // See this file's header (C-2): a real quantity, no fiat value — never a
+    // fabricated zero, and never a refusal that hides the position entirely.
+    return [
+      {
+        providerAccountId: record.providerConnectionId,
+        security: nativeSecurityFactOf(record.chain),
+        quantity: quantity.decimal,
+        costBasis: null,
+        value: null,
+        asOf: options.clock.now(),
+        raw: { chain: record.chain, quantity: quantity.decimal },
+      },
+    ];
   }
 
   async disconnect(handle: ConnectionHandle): Promise<void> {
@@ -270,6 +312,12 @@ export class WalletRpcConnector implements Connector {
     });
   }
 
+  /**
+   * `syncBalances`' failure path only — see this file's header (C-2) for why
+   * `syncHoldings` no longer calls this: a holding now reports its quantity
+   * with `value: null` instead of refusing, but a ledger balance has no
+   * downstream ladder to rescue it, so it still refuses here.
+   */
   #unpriced(record: WalletAddressRecord, quantityDecimal: string): ConnectorError {
     const asset = record.chain === 'bitcoin' ? 'BTC' : 'ETH';
     // The identifier travels even into the failure path: once WP 3.4 supplies
@@ -321,4 +369,41 @@ export function nativeSecurityIdentifierOf(chain: WalletChain) {
     });
   }
   return securityIdentifierOf('chain_contract', BITCOIN_NATIVE_CONTRACT, { chain: 'bitcoin' });
+}
+
+/**
+ * The whole `ProviderSecurityFact` a holding needs — `nativeSecurityIdentifierOf`
+ * wrapped with the `name`/`type` a resolved security carries, exactly as
+ * `@connector/coinbase`'s own `securityFactOf` wraps its ticker identifier
+ * (WP 3.7a's whole-fact rule: `ProviderHoldingFact.security` is the whole
+ * fact so an adapter never has to pick one name out of several). This
+ * connector only ever states one identifier for a native asset, so the set
+ * has one member either way — what matters is that `type: 'cryptocurrency'`
+ * and a display name ride along with it, the same reason Coinbase's own
+ * comment gives.
+ *
+ * `providerSecurityId` is this connector's own opaque id for the asset — not
+ * a real provider id (there is no provider account for a native coin the way
+ * Coinbase has a wallet uuid), but evidence, never identity, exactly like
+ * every other adapter's (`facts.ts`'s `ProviderSecurityFact` doc comment).
+ */
+function nativeSecurityFactOf(chain: WalletChain): ProviderSecurityFact {
+  const identifiers = [nativeSecurityIdentifierOf(chain)];
+  const symbol = chain === 'ethereum' ? 'ETH' : 'BTC';
+  return {
+    providerSecurityId: `${WALLETRPC_PROVIDER}:${chain}:native`,
+    identifiers,
+    name: symbol,
+    type: 'cryptocurrency',
+    subtype: null,
+    // No fiat quote of its own — see this file's header. `null` here is the
+    // same "the provider does not say" the port's own doc comment states for
+    // `currency`, never a guessed 'USD'.
+    currency: null,
+    isCashEquivalent: null,
+    closePrice: null,
+    closePriceAsOf: null,
+    raw: { chain },
+    fingerprint: securityFingerprintOf(identifiers),
+  };
 }

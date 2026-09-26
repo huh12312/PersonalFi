@@ -275,7 +275,24 @@ export interface ProviderHoldingFact {
   /** `@core/kernel`'s `Quantity` wire form: a decimal string, never a float. */
   readonly quantity: string;
   readonly costBasis: Money | null;
-  readonly value: Money;
+  /**
+   * `null` when the provider itself has no fiat quote for this position —
+   * distinct from a zero balance, which is never reported as a holding at all
+   * (see every adapter's own `syncHoldings`: a zero quantity is filtered out
+   * before this shape is even built). WP 3.6's `WalletRpcConnector` is the
+   * motivating case: a watch-only wallet reads a real on-chain quantity but
+   * has no price source of its own (01 §3.5's Esplora/Etherscan hosts quote
+   * neither), so 08 §2.2's "never report $0.00 for an unpriced asset" applies
+   * here exactly as it does to `costBasis` above — `null` is the honest
+   * answer, and a caller that needs a fiat figure gets one downstream, from
+   * WP 3.4's price ladder joined on `security_id` after resolution (never
+   * fabricated here, and never coerced to zero). `@ctx/investments`'
+   * `Holding.institutionValue` carries this through unchanged; every
+   * consumer that values a holding for allocation, net worth or the holdings
+   * list already reads the ladder's own price and never this field — see
+   * `docs/evidence/phase-4/wp4.12a-gate-conditions.md` C-2 for the trace.
+   */
+  readonly value: Money | null;
   readonly asOf: Date;
   readonly raw: unknown;
 }

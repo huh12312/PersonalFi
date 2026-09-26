@@ -72,6 +72,29 @@ function isoDay(offsetDays: number): string {
   return new Date(Date.now() + offsetDays * DAY_MS).toISOString().slice(0, 10);
 }
 
+/**
+ * Walks a thrown error's `.cause` chain for the first node shaped like a
+ * Postgres error (a five-character SQLSTATE), so a raw-SQL constraint
+ * violation can be asserted by code and by name rather than by message
+ * text. Same shape as `packages/contexts/planning/test/db/assumptions.test.ts`'s
+ * own `sqlStateOf` — not imported, so this file has no cross-suite dependency
+ * on another work package's test file.
+ */
+function sqlStateOf(error: unknown): { code?: string; constraint?: string } {
+  let cursor: unknown = error;
+  while (cursor !== null && typeof cursor === 'object') {
+    const candidate = cursor as { code?: unknown; constraint?: unknown; cause?: unknown };
+    if (typeof candidate.code === 'string' && /^[0-9A-Z]{5}$/.test(candidate.code)) {
+      return {
+        code: candidate.code,
+        ...(typeof candidate.constraint === 'string' ? { constraint: candidate.constraint } : {}),
+      };
+    }
+    cursor = candidate.cause;
+  }
+  return {};
+}
+
 interface Seeded {
   readonly brokerageAccountId: string;
   readonly iraAccountId: string;
@@ -743,62 +766,64 @@ describe.skipIf(NO_DATABASE)('/holdings, /securities, /prices and /investments (
    * table itself says so: "a single-predicate sabotage is not sufficient
    * evidence for this route."
    *
-   * A holding whose `security_id` names a security some *other* user owns is
-   * exactly the shape that tells the two predicates apart: the owner of the
-   * *holding row* is refused by the join (their id never matches the
-   * security's real owner), and the owner of the *security* is refused by the
-   * `WHERE` (they never owned the holding row). Drop the `WHERE` and only the
-   * second refusal survives — which is precisely what the sabotage below
-   * demonstrates.
-   *
-   * **No constraint refuses the plant.** `holdings.security_id` is a bare
-   * `REFERENCES securities (id)` (migration 0014's `CREATE TABLE holdings`),
-   * not a composite FK against `(user_id, security_id)`, and neither a CHECK
-   * nor a trigger anywhere compares the two tables' `user_id` columns. So this
-   * is a genuine plant, not a write-time refusal standing in for one.
+   * **Phase 3 gate C-14 (§4.1(d)) closed the gap this test used to stand in
+   * for.** Through the gate, `holdings.security_id` was a bare `REFERENCES
+   * securities (id)`, not a composite FK against `(user_id, security_id)`,
+   * so the plant below succeeded and the assertions that followed proved the
+   * *read-path* predicates independently sufficient — proof the query is
+   * safe, never proof the data is impossible. Migration `0025` adds
+   * `holdings_security_belongs_to_user`, a composite FK to `securities
+   * (user_id, id)` (itself now `UNIQUE`), so the exact insert below is now
+   * refused by the database before a row is ever written — the assertion
+   * this test now makes. The read-path predicates this test used to exercise
+   * (`WHERE h.user_id`, `JOIN securities s ON … AND s.user_id`) still exist
+   * in `readHoldings` as defence in depth, but there is no longer any way to
+   * construct the row that would tell them apart.
    */
-  it('a holding whose security belongs to another user is visible to neither', async () => {
-    // otherUserId's own holding, naming a security h.userId owns.
-    await insertHolding({
-      userId: otherUserId,
-      accountId: newId(), // opaque; `holdings.account_id` carries no FK (see the table's header)
-      securityId: seeded.vti,
-      quantity: '1.000000000000000000',
-      costBasisMinor: null,
-      institutionValueMinor: 10_000n,
-    });
+  it('a holding whose security belongs to another user is refused by the database (holdings_security_belongs_to_user), not merely by the read-path predicates', async () => {
+    // otherUserId attempts to hold a security h.userId owns.
+    let thrown: unknown;
+    try {
+      await insertHolding({
+        userId: otherUserId,
+        accountId: newId(), // opaque; `holdings.account_id` carries no FK (see the table's header)
+        securityId: seeded.vti,
+        quantity: '1.000000000000000000',
+        costBasisMinor: null,
+        institutionValueMinor: 10_000n,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    const state = sqlStateOf(thrown);
+    expect(state.code, 'a foreign_key_violation (23503), not a silent success').toBe('23503');
+    expect(state.constraint).toBe('holdings_security_belongs_to_user');
 
-    // The security's real owner: excluded by `WHERE h.user_id` — this was
-    // never their holding row. VTI's aggregate must be exactly what the first
-    // test in this file pinned before anything was planted: two accounts,
-    // 15 shares. A leak would grow one of those two numbers.
+    // The insert never happened: VTI's aggregate is exactly what the first
+    // test in this file pinned, undisturbed by the refused plant.
     const asOwner = await h.request({ method: 'GET', url: '/holdings', session: h.stale });
     expectStatus(asOwner, 200);
     const ownerVti = (asOwner.json() as HoldingsBody).holdings.find(
       (row) => row.securityId === seeded.vti,
     );
-    expect(ownerVti?.accountCount, 'the security owner never held the planted row').toBe(2);
+    expect(ownerVti?.accountCount, 'the security owner never gained a planted row').toBe(2);
     expect(ownerVti?.quantity).toBe('15.000000000000000000');
 
-    // The holding's owner: excluded by the join, because `s.user_id` — bound
-    // to *their* id — never matches the security's real owner.
+    // The would-be planter has nothing either — the insert was refused, not
+    // merely hidden from them by a query predicate.
     const theirs = await h.issueSession({ userId: otherUserId, fresh: true });
     const asPlanter = await h.request({ method: 'GET', url: '/holdings', session: theirs });
     expectStatus(asPlanter, 200);
     const planterBody = asPlanter.json() as HoldingsBody;
-    expect(planterBody.holdings, "the planted row is not the planter's to see either").toHaveLength(
+    expect(planterBody.holdings, 'nothing was ever inserted for the would-be planter').toHaveLength(
       0,
     );
     expect(planterBody.total.minor).toBe('0');
 
     // `/accounts/{id}/holdings`, `/investments/allocation` and
     // `/investments/drift` all read through this same `readHoldings` — see
-    // `portfolioFor` in `apps/api/src/routes/investments.ts` — so one fix (and
-    // this one test) covers every caller; there is no second query to repeat
-    // this against. The sabotage itself (dropping `WHERE h.user_id`) is
-    // recorded in `docs/evidence/phase-3/wp3.14a-port-and-scope.md` rather
-    // than left in the source, because it is a defect this test exists to
-    // catch, not a state to commit.
+    // `portfolioFor` in `apps/api/src/routes/investments.ts` — so the
+    // structural fix (and this one test) covers every caller.
   });
 });
 

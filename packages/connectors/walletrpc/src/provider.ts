@@ -28,11 +28,13 @@ export const WALLETRPC_MAX_ADDRESSES_PER_SYNC = 500;
  * `holdings` and `balances` are declared because the connector can read chain
  * state — but see `connector.ts`'s header for what it does when it cannot
  * *price* what it read: 08 §2.2's rule that an honest adapter never reports
- * $0.00 for an unpriced asset means every non-zero balance this connector
- * finds surfaces as a named `DATA_UNAVAILABLE` rather than a fabricated fiat
- * value, because this connector has no price source of its own (out of scope
- * — WP 3.4's `PriceSource` + the resolver's `security_id` join is where a real
- * valuation for these balances eventually comes from).
+ * $0.00 for an unpriced asset. As of the Phase 3 gate's C-2 condition,
+ * `syncHoldings` reports the real quantity with `value: null` rather than
+ * refusing — WP 3.4's `PriceSource` + the resolver's `security_id` join is
+ * where a real valuation for it comes from, downstream of this connector.
+ * `syncBalances` still raises a named `DATA_UNAVAILABLE` for a non-zero
+ * balance: a ledger balance has no such downstream ladder to join against
+ * (see `connector.ts`'s header for why that residual is accepted).
  */
 export function walletRpcCapabilities(): ConnectorCapabilities {
   return {

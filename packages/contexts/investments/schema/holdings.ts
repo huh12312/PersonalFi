@@ -62,8 +62,15 @@ export const holdings = pgTable(
     /** Signed: a short position is negative. `NUMERIC(38,18)`, a decimal string. */
     quantity: quantityColumn('quantity').notNull(),
 
-    /** What the institution says the position is worth. An assertion, not a computation. */
-    institutionValueMinor: amountMinorColumn('institution_value_minor').notNull(),
+    /**
+     * What the institution says the position is worth. An assertion, not a
+     * computation. NULL as of migration `0025` (Phase 3 gate C-2): a
+     * watch-only wallet's provider has no fiat quote of its own to assert —
+     * see `@connector/port`'s `ProviderHoldingFact.value` doc comment and
+     * `src/holdings.ts`'s `DEFAULT_HOLDING_CURRENCY`. Never read for market
+     * value; `valueHoldings` prices every holding from the price ladder.
+     */
+    institutionValueMinor: amountMinorColumn('institution_value_minor'),
     currency: currencyColumn().notNull(),
 
     /** NULL = the provider reported no basis. Not zero. See the file header. */
@@ -96,7 +103,8 @@ export const holdingsSnapshots = pgTable(
 
     asOfDate: dateColumn('as_of_date').notNull(),
     quantity: quantityColumn('quantity').notNull(),
-    institutionValueMinor: amountMinorColumn('institution_value_minor').notNull(),
+    /** NULL as of migration `0025`. See the `holdings` table's own column. */
+    institutionValueMinor: amountMinorColumn('institution_value_minor'),
     currency: currencyColumn().notNull(),
     costBasisMinor: amountMinorColumn('cost_basis_minor'),
 

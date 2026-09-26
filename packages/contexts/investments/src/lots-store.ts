@@ -49,7 +49,7 @@ import {
   type BasisMethod,
   type CostBasisLotRow,
 } from '../schema/index.ts';
-import type { Holding, InvestmentTransaction } from './holdings.ts';
+import { DEFAULT_HOLDING_CURRENCY, type Holding, type InvestmentTransaction } from './holdings.ts';
 import { DEFAULT_BASIS_METHOD, type Lot } from './lots.ts';
 
 export class LotConstraintError extends Error {
@@ -249,8 +249,9 @@ export function inMemoryLotStore(): InMemoryLotStore {
       const changed =
         existing === undefined ||
         !Quantity.equals(existing.quantity, holding.quantity) ||
-        existing.institutionValue.minor !== holding.institutionValue.minor ||
-        existing.institutionValue.currency !== holding.institutionValue.currency ||
+        (existing.institutionValue?.minor ?? null) !== (holding.institutionValue?.minor ?? null) ||
+        (existing.institutionValue?.currency ?? null) !==
+          (holding.institutionValue?.currency ?? null) ||
         (existing.costBasis?.minor ?? null) !== (holding.costBasis?.minor ?? null) ||
         existing.asOfDate !== holding.asOfDate;
       return { changed };
@@ -334,8 +335,8 @@ export function drizzleLotStore(db: Database, clock: Clock): LotStore {
           accountId: holding.accountId,
           securityId: holding.securityId,
           quantity: Quantity.toDatabaseString(holding.quantity),
-          institutionValueMinor: holding.institutionValue.minor,
-          currency: holding.institutionValue.currency,
+          institutionValueMinor: holding.institutionValue?.minor ?? null,
+          currency: holding.institutionValue?.currency ?? DEFAULT_HOLDING_CURRENCY,
           costBasisMinor: holding.costBasis?.minor ?? null,
           costBasisPerUnit: perUnit,
           costBasisIsUserSupplied: false,
@@ -349,8 +350,8 @@ export function drizzleLotStore(db: Database, clock: Clock): LotStore {
           target: [holdings.userId, holdings.accountId, holdings.securityId],
           set: {
             quantity: Quantity.toDatabaseString(holding.quantity),
-            institutionValueMinor: holding.institutionValue.minor,
-            currency: holding.institutionValue.currency,
+            institutionValueMinor: holding.institutionValue?.minor ?? null,
+            currency: holding.institutionValue?.currency ?? DEFAULT_HOLDING_CURRENCY,
             // 04 §5.5, as SQL rather than as a habit: when the user supplied
             // the basis, the sync's value is discarded and the stored one kept.
             costBasisMinor: sql`CASE WHEN ${holdings.costBasisIsUserSupplied}
@@ -391,8 +392,8 @@ export function drizzleLotStore(db: Database, clock: Clock): LotStore {
           securityId: holding.securityId,
           asOfDate: holding.asOfDate,
           quantity: Quantity.toDatabaseString(holding.quantity),
-          institutionValueMinor: holding.institutionValue.minor,
-          currency: holding.institutionValue.currency,
+          institutionValueMinor: holding.institutionValue?.minor ?? null,
+          currency: holding.institutionValue?.currency ?? DEFAULT_HOLDING_CURRENCY,
           costBasisMinor: holding.costBasis?.minor ?? null,
           createdAt: now(),
         })
@@ -405,7 +406,7 @@ export function drizzleLotStore(db: Database, clock: Clock): LotStore {
           ],
           set: {
             quantity: Quantity.toDatabaseString(holding.quantity),
-            institutionValueMinor: holding.institutionValue.minor,
+            institutionValueMinor: holding.institutionValue?.minor ?? null,
             costBasisMinor: holding.costBasis?.minor ?? null,
           },
         });

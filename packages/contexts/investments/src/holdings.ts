@@ -37,6 +37,7 @@
 import {
   Money,
   Quantity,
+  currency,
   type CurrencyCode,
   type DateOnly as DateOnlyType,
   type Money as MoneyType,
@@ -289,12 +290,33 @@ export function warningForEstimatedBasis(transaction: InvestmentTransaction): st
   );
 }
 
+/**
+ * The currency written to `holdings.currency` / `holdings_snapshots.currency`
+ * when `institutionValue` is `null` — the column stays `NOT NULL` (it also
+ * carries `costBasis`'s currency when a basis exists with no institution
+ * value asserted), and this is this app's own base currency, never a guessed
+ * or provider-stated one. Inert whenever both `institutionValue` and
+ * `costBasis` are null, which is `@connector/walletrpc`'s case (C-2): nothing
+ * downstream reads this column for market value — `valueHoldings` prices
+ * every holding from WP 3.4's ladder, keyed on `security_id`, never from this
+ * column. See `docs/evidence/phase-4/wp4.12a-gate-conditions.md` C-2.
+ */
+export const DEFAULT_HOLDING_CURRENCY: CurrencyCode = currency('USD');
+
 /** One position, in the house shape. */
 export interface Holding {
   readonly accountId: string;
   readonly securityId: string;
   readonly quantity: QuantityType;
-  readonly institutionValue: MoneyType;
+  /**
+   * `null` = the provider itself has no fiat value for this position — an
+   * assertion it never made, not a computation this package performs. See
+   * `@connector/port`'s `ProviderHoldingFact.value` doc comment: a wallet's
+   * on-chain quantity has no institution behind it to assert one. Never read
+   * for market value; `valueHoldings` (`analytics/allocation.ts`) prices
+   * every holding from WP 3.4's price ladder instead.
+   */
+  readonly institutionValue: MoneyType | null;
   /** `null` = the provider reported no basis. Never a zero standing in for one. */
   readonly costBasis: MoneyType | null;
   readonly asOfDate: DateOnlyType;
@@ -303,10 +325,12 @@ export interface Holding {
 /**
  * `ProviderHoldingFact` → `Holding`.
  *
- * The one line that matters: `fact.costBasis` is `Money | null` on the port and
- * the `null` is carried through unchanged. `@connector/coinbase`'s `map.test.ts`
- * already asserts it emits `null` rather than `0` for a position it cannot
- * price; throwing that away here would undo the work at the last step.
+ * The one line that matters: `fact.costBasis` and, since the Phase 3 gate's
+ * C-2 condition, `fact.value` are both `Money | null` on the port and both
+ * `null`s are carried through unchanged. `@connector/coinbase`'s `map.test.ts`
+ * already asserts it emits a `null` cost basis rather than `0` for a position
+ * it cannot price; throwing either away here would undo the work at the last
+ * step.
  */
 export function holdingOf(
   fact: ProviderHoldingFact,

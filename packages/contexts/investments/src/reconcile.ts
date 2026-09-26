@@ -39,6 +39,18 @@
  * and this package's own `basis.ts` treat a missing input as its own state
  * rather than a zero standing in for one.
  *
+ * ## `no_institution_value` (Phase 3 gate C-2)
+ *
+ * Symmetric with `no_price`, added when `@connector/walletrpc`'s holdings
+ * stopped refusing a funded wallet and started reporting one with no
+ * institution value at all (`holdings.institution_value_minor` is nullable as
+ * of migration `0025`). There is nothing to reconcile *against* — this
+ * function never invents an institution figure of `$0.00` to compare, which
+ * would report a spurious 100%-of-value disagreement exactly as folding a
+ * missing price into `tolerance_breach` would. The computed side is still
+ * reported when a price is available, because that half is honestly
+ * knowable; it is `null` when it is not, for the same reason `no_price`'s is.
+ *
  * ## Sabotage record
  *
  * See `docs/evidence/phase-3/wp3.14-quality.md` §10 for the exact mutations
@@ -50,13 +62,14 @@
  */
 import type { CurrencyCode, Money as MoneyType } from '@core/kernel';
 import { marketValueOf, type LotPrice } from './basis.ts';
-import type { Holding } from './holdings.ts';
+import { DEFAULT_HOLDING_CURRENCY, type Holding } from './holdings.ts';
 
-/** One holding's reconciliation outcome. Three states, never a boolean. */
+/** One holding's reconciliation outcome. Four states, never a boolean. */
 export const HOLDING_RECONCILIATION_STATUSES = [
   'reconciled',
   'tolerance_breach',
   'no_price',
+  'no_institution_value',
 ] as const;
 export type HoldingReconciliationStatus = (typeof HOLDING_RECONCILIATION_STATUSES)[number];
 
@@ -85,6 +98,15 @@ export type HoldingReconciliation =
       readonly institutionValue: MoneyType;
       readonly computedValue: null;
       readonly differenceMinor: null;
+    }
+  | {
+      readonly accountId: string;
+      readonly securityId: string;
+      readonly status: 'no_institution_value';
+      readonly institutionValue: null;
+      /** Reported when a price is available, even though there is nothing to compare it against. */
+      readonly computedValue: MoneyType | null;
+      readonly differenceMinor: null;
     };
 
 /**
@@ -103,6 +125,21 @@ export function reconcileHolding(
   scale: number,
   toleranceMinor: bigint = DEFAULT_RECONCILE_TOLERANCE_MINOR,
 ): HoldingReconciliation {
+  // Checked first, and separately from `price === null` below: an unvalued
+  // wallet holding (C-2) may still have a perfectly good price from the
+  // ladder, and reporting the computed side when it exists is more honest
+  // than folding this into `no_price`, which would claim the price is the
+  // missing half when it is the institution's own assertion that is.
+  if (holding.institutionValue === null) {
+    return {
+      accountId: holding.accountId,
+      securityId: holding.securityId,
+      status: 'no_institution_value',
+      institutionValue: null,
+      computedValue: price === null ? null : marketValueOf(holding.quantity, price, scale),
+      differenceMinor: null,
+    };
+  }
   if (price === null) {
     return {
       accountId: holding.accountId,
@@ -151,12 +188,16 @@ export function reconcileHoldings(
   scaleOf: (currency: CurrencyCode) => number,
   toleranceMinor: bigint = DEFAULT_RECONCILE_TOLERANCE_MINOR,
 ): readonly HoldingReconciliation[] {
-  return holdings.map((holding) =>
-    reconcileHolding(
-      holding,
-      priceOf(holding),
-      scaleOf(holding.institutionValue.currency),
-      toleranceMinor,
-    ),
-  );
+  return holdings.map((holding) => {
+    const price = priceOf(holding);
+    // The scale describes whichever currency `computedValue` will actually
+    // be denominated in; when there is no institution value to prefer, that
+    // is the price's own currency (or, when neither exists, the scale is
+    // never read — `reconcileHolding` returns `computedValue: null` and
+    // `DEFAULT_HOLDING_CURRENCY` is just a harmless placeholder to call
+    // `scaleOf` with).
+    const scaleCurrency =
+      holding.institutionValue?.currency ?? price?.currency ?? DEFAULT_HOLDING_CURRENCY;
+    return reconcileHolding(holding, price, scaleOf(scaleCurrency), toleranceMinor);
+  });
 }

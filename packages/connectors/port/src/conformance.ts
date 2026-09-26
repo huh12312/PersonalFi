@@ -464,8 +464,9 @@ export function connectorConformanceChecks(subject: ConformanceSubject): Conform
               'Quantity is a decimal string, never a number',
           );
           assert(
-            typeof holding.value.minor === 'bigint' && holding.value.currency.length === 3,
-            'a holding carries a value that is not a (bigint minor, ISO currency) pair',
+            holding.value === null ||
+              (typeof holding.value.minor === 'bigint' && holding.value.currency.length === 3),
+            'a holding carries a value that is neither null nor a (bigint minor, ISO currency) pair',
           );
         }
       },

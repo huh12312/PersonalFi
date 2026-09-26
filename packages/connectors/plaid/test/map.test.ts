@@ -480,7 +480,10 @@ describe('holdingFactOf', () => {
     // room for and which is what keeps `securities.type` off `other`.
     expect(fact.security.type).toBe('etf');
     expect(fact.security.name).toBe('Vanguard Total Stock Market ETF');
-    expect(fact.value.minor).toBe(1_677_500n);
+    // Plaid always reports an institution value; `null` is
+    // `@connector/walletrpc`'s case (Phase 3 gate C-2), not this adapter's.
+    expect(fact.value).not.toBeNull();
+    expect(fact.value?.minor).toBe(1_677_500n);
     expect(fact.costBasis?.minor).toBe(1_420_000n);
     expect(fact.asOf).toEqual(new Date('2026-06-01T20:00:00Z'));
   });
