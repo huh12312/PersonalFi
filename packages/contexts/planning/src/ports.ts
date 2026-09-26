@@ -46,6 +46,7 @@
  * that derivation, exported so the adapter reuses it rather than inventing a
  * second. `docs/evidence/phase-3/wp3.8-net-worth.md` §7 records the gap.
  */
+import type { DateOnly, Money } from '@core/kernel';
 
 /** The account classes the interpolation policy and the flag defaults turn on. */
 export const ACCOUNT_KINDS = [
@@ -239,4 +240,256 @@ export interface SnapshotPorts {
   readonly holdings: HoldingsReader;
   readonly prices: PriceReader;
   readonly fx: FxReader;
+}
+
+// ===========================================================================
+// WP 4.3 — revealed behaviour: the two ports the rolling-12-month derivation
+// reads through
+// ===========================================================================
+//
+// 09 GOAL-4: *"contribution rates are derived from observed transfers over the
+// trailing 12 months … and retirement spending is anchored to his observed
+// non-savings spending (with one-offs excluded)."* Two halves, two owners, two
+// arrows:
+//
+//   * **`CashflowReader` — `plan → ledger`.** Who owns which account, which of
+//     them is a tax bucket, what arrived in each, and which arrivals Phase 1's
+//     pairing already labelled as one leg of an internal transfer. 08 §1.6 draws
+//     this arrow, so the composition root may satisfy it over `@ctx/ledger`'s
+//     `listAccounts` and `transactions`/`transfer_links`. (The dispatch calls
+//     this half the `ContributionsReader`; it is named for what it returns,
+//     because the same inflows answer income as well as contributions.)
+//   * **`SpendingReader` — no arrow at all.** 08 §1.6 draws *no* `plan → budg`
+//     edge, yet 07 §5.6's `floor_spending = essential_spend` is defined over
+//     D19's NEED-class budget categories, which only `@ctx/budgeting` knows.
+//     So the answer arrives through this port, bound in `apps/api/src/domain.ts`,
+//     and this package never names `@ctx/budgeting` — `scripts/eslint-boundaries.js`
+//     refuses the import outright, in `test/` as well as `src/`.
+//
+// `SpendingReader` is a **deliberate structural mirror** of three functions
+// `@ctx/budgeting` already exports — `listBudgets`, `listPeriods`, `getPeriod`
+// — with the executor argument closed over. Its binding therefore maps no
+// field: every `BudgetPeriodView` budgeting returns is handed through as-is.
+// `test/ports.test.ts` proves that with the TypeScript compiler (a planning
+// test may not import budgeting, so it type-checks a probe that can), and the
+// day either side drifts is the day that test goes red.
+
+/**
+ * 07 §5.2's four tax buckets — the recursion is run once per bucket.
+ *
+ * **`@ctx/ledger` does not carry this.** `accounts` has a provider `subtype`
+ * (`401k`, `roth`, `hsa`, …) and no tax-treatment column, exactly as it has
+ * `include_in_net_worth` and none of 07 §4.1's other three booleans. WP 4.3
+ * does not add one (that is Ledger's migration, and 09 AC-7's "classify each
+ * account's role" is the user-facing half of it); `defaultTaxBucketFor` below is
+ * the interim derivation, exported so the composition root reuses it rather than
+ * inventing a second — `defaultFlagsFor`'s precedent, one table up.
+ */
+export const TAX_BUCKETS = ['TAXABLE', 'TAX_DEFERRED', 'ROTH', 'HSA'] as const;
+export type TaxBucket = (typeof TAX_BUCKETS)[number];
+
+/**
+ * Provider subtypes, lower-cased, that name a tax-advantaged wrapper. Plaid's
+ * investment-subtype vocabulary is the source; anything not listed here on an
+ * investment account is `TAXABLE`, which is the conservative reading (it taxes
+ * growth the projection might otherwise have sheltered).
+ */
+const TAX_DEFERRED_SUBTYPES: ReadonlySet<string> = new Set([
+  '401a',
+  '401k',
+  '403b',
+  '457b',
+  'ira',
+  'keogh',
+  'lira',
+  'pension',
+  'profit sharing plan',
+  'retirement',
+  'rrsp',
+  'sarsep',
+  'sep ira',
+  'simple ira',
+  'thrift savings plan',
+  'traditional ira',
+]);
+const ROTH_SUBTYPES: ReadonlySet<string> = new Set([
+  'roth',
+  'roth 401k',
+  'roth 403b',
+  'roth ira',
+  // Canada's tax-free account: contributed after tax, withdrawn free — Roth's shape.
+  'tfsa',
+]);
+const HSA_SUBTYPES: ReadonlySet<string> = new Set(['hsa', 'health savings account']);
+/**
+ * Tax-advantaged, but not one of the four retirement buckets: education
+ * accounts fund a different goal, and folding a 529 into `TAX_DEFERRED` would
+ * let college money pay for retirement in the projection.
+ */
+const NOT_A_RETIREMENT_BUCKET: ReadonlySet<string> = new Set([
+  '529',
+  'education savings account',
+  'ugma',
+  'utma',
+]);
+
+/**
+ * The account's tax bucket, or `null` when it is not an invested account at
+ * all (cash, credit, a loan, a house) or is an invested account for a
+ * non-retirement purpose (a 529).
+ *
+ * Only an `investment`-kind account has a bucket: a savings account is
+ * *savings* in 09 AC-7's role vocabulary, not *taxable*, and a transfer into it
+ * is not a retirement contribution. Crypto maps to `investment` in the
+ * composition root's `planningKindOf`, so a crypto exchange is `TAXABLE` here,
+ * which is what it is.
+ */
+export function defaultTaxBucketFor(kind: AccountKind, subtype: string | null): TaxBucket | null {
+  if (kind !== 'investment') return null;
+  const key = (subtype ?? '').trim().toLowerCase();
+  if (NOT_A_RETIREMENT_BUCKET.has(key)) return null;
+  if (ROTH_SUBTYPES.has(key)) return 'ROTH';
+  if (HSA_SUBTYPES.has(key)) return 'HSA';
+  if (TAX_DEFERRED_SUBTYPES.has(key)) return 'TAX_DEFERRED';
+  return 'TAXABLE';
+}
+
+/**
+ * One account, as the revealed-behaviour derivation needs to see it.
+ *
+ * `PlanningAccount` plus a bucket — and *not* a widened `PlanningAccount`,
+ * because `apps/api/src/domain.ts` builds `PlanningAccount`s today and a new
+ * required field there would break the composition root's build from inside
+ * this package. `flags.onBudget` is the WP 3.8 derivation, reused:
+ * `defaultFlagsFor(kind)` narrowed by `@ctx/budgeting`'s exclusion list.
+ */
+export interface CashflowAccount extends PlanningAccount {
+  readonly taxBucket: TaxBucket | null;
+}
+
+/**
+ * One posted, positive-amount ledger row — money arriving in an account.
+ *
+ * The composition root drops what never moved money: pending rows, rows a
+ * duplicate check superseded, provider tombstones. It does **not** drop what the
+ * user excluded or what the pairing labelled: those are facts this derivation
+ * must *name* when it sets them aside, and it cannot name what it never saw.
+ */
+export interface CashflowInflow {
+  readonly transactionId: string;
+  readonly accountId: string;
+  /** `transactions.effective_date`. */
+  readonly date: DateOnly;
+  /** Positive, in the account's own currency, house sign convention. */
+  readonly amount: Money;
+  /** The resolved display name, so an exclusion can be named in words. */
+  readonly label: string;
+  /** 09 TX-10: the holder set this row aside. */
+  readonly userExcluded: boolean;
+  /** `@ctx/ledger`'s refund hint is set: money coming back, not money earned. */
+  readonly isRefund: boolean;
+  /**
+   * When Phase 1's pairing (`transfer_links`) matched this row to an outflow
+   * elsewhere, **the account that outflow left from**; `null` for an unpaired
+   * row. This is the whole of "internal transfer" as this derivation sees it.
+   */
+  readonly transferCounterpartAccountId: string | null;
+}
+
+/**
+ * `@ctx/ledger`'s half of revealed behaviour (`plan → ledger`, 08 §1.6).
+ *
+ * `historyStarts` exists because an empty month and an unobserved month are
+ * different facts: twelve months of no contributions is a rate of zero, but
+ * four months of history is not twelve months of anything, and 09 GOAL-4's
+ * "trailing 12 months" must not annualise what it never saw.
+ */
+export interface CashflowReader {
+  accounts(userId: string, asOf: string): Promise<readonly CashflowAccount[]>;
+  /**
+   * The earliest `effective_date` of any posted row, per account. An account
+   * with no rows is absent from the map.
+   */
+  historyStarts(
+    userId: string,
+    accountIds: readonly string[],
+  ): Promise<ReadonlyMap<string, DateOnly>>;
+  /** Every posted row with a positive amount on these accounts in `[from, to]`, inclusive. */
+  inflows(
+    userId: string,
+    accountIds: readonly string[],
+    from: DateOnly,
+    to: DateOnly,
+  ): Promise<readonly CashflowInflow[]>;
+}
+
+/**
+ * `@ctx/budgeting`'s `BudgetClass`, restated. 07 §1.6's 50/30/20 layer; `null`
+ * is an honest "never classified", and is never read as either of the others.
+ */
+export type SpendingClass = 'NEED' | 'WANT' | 'SAVINGS';
+
+/** The subset of `@ctx/budgeting`'s `BudgetLineView` this derivation reasons about. */
+export interface SpendingLine {
+  readonly id: string;
+  readonly kind: 'category' | 'credit_card_payment';
+  /** Opaque (`@ctx/categorization` owns categories). `null` iff a card-payment line. */
+  readonly categoryId: string | null;
+  readonly name: string | null;
+  /**
+   * The period's net activity on this envelope, **transfers already excluded
+   * and refunds already netted by budgeting** (`transferExcludedCount`,
+   * `refundNettedCount` on the same view). Negative is spending.
+   */
+  readonly activity: Money;
+  readonly class: SpendingClass | null;
+}
+
+/** The subset of `@ctx/budgeting`'s `BudgetPeriodView`. */
+export interface SpendingPeriod {
+  readonly id: string;
+  readonly startDate: DateOnly;
+  /** **Exclusive**, as budgeting's own view documents. */
+  readonly endDate: DateOnly;
+  readonly lines: readonly SpendingLine[];
+}
+
+/** The subset of `@ctx/budgeting`'s `budgets` row. */
+export interface SpendingBudget {
+  readonly id: string;
+  readonly currency: string;
+}
+
+/** The subset of `@ctx/budgeting`'s `BudgetPeriodSummary`. */
+export interface SpendingPeriodSummary {
+  readonly id: string;
+  readonly startDate: DateOnly;
+  /** Exclusive. */
+  readonly endDate: DateOnly;
+}
+
+/**
+ * `@ctx/budgeting`'s half of revealed behaviour — bound at the composition
+ * root because 08 §1.6 draws no `plan → budg` arrow.
+ *
+ * Three methods, each `@ctx/budgeting`'s function of the same name with its
+ * executor closed over. Choosing *which* periods fall in the window is this
+ * context's job (`src/revealed.ts`), so the binding carries no logic to drift.
+ */
+export interface SpendingReader {
+  listBudgets(input: { readonly userId: string }): Promise<readonly SpendingBudget[]>;
+  listPeriods(input: {
+    readonly userId: string;
+    readonly budgetId: string;
+  }): Promise<readonly SpendingPeriodSummary[]>;
+  getPeriod(input: {
+    readonly userId: string;
+    readonly periodId: string;
+  }): Promise<SpendingPeriod | null>;
+}
+
+/** Everything revealed behaviour reads, in one bag. */
+export interface RevealedPorts {
+  readonly cashflow: CashflowReader;
+  readonly spending: SpendingReader;
 }

@@ -278,3 +278,48 @@ export {
   type LiquidityNeed,
   type RiskTolerance,
 } from '../schema/goals.ts';
+
+// --- WP 4.3: revealed behaviour, rolling twelve months ----------------------
+// The two ports the composition root binds (`CashflowReader` over @ctx/ledger,
+// `SpendingReader` over @ctx/budgeting — 08 §1.6 draws no plan → budg arrow),
+// the pure derivation, and the window arithmetic under it.
+export {
+  TAX_BUCKETS,
+  defaultTaxBucketFor,
+  type CashflowAccount,
+  type CashflowInflow,
+  type CashflowReader,
+  type RevealedPorts,
+  type SpendingBudget,
+  type SpendingClass,
+  type SpendingLine,
+  type SpendingPeriod,
+  type SpendingPeriodSummary,
+  type SpendingReader,
+  type TaxBucket,
+} from './ports.ts';
+export {
+  INCOME_BASIS,
+  REVEALED_DEFAULTS,
+  RevealedParametersInvalid,
+  computeRevealedBehavior,
+  deriveRevealedBehavior,
+  derivedContributionPlan,
+  gatherRevealedFacts,
+  type DerivedAmount,
+  type DerivedAmountValue,
+  type DerivedRate,
+  type DerivedRateValue,
+  type ExclusionReason,
+  type InsufficientHistory,
+  type NotDerivable,
+  type OneOffTestOutcome,
+  type RevealedBehavior,
+  type RevealedExclusion,
+  type RevealedFacts,
+  type RevealedInput,
+  type RevealedParameters,
+  type RevealedWindow,
+  type SpendingCategorySummary,
+} from './revealed.ts';
+export { trailingWindow, type OneOffThresholds, type TrailingWindow } from './windows.ts';

@@ -18,7 +18,11 @@
  * test passed because the fake scheduler never applied the CHECK, and the real
  * worker crash-looped from its first start.
  */
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   createFxReader,
   createPriceReader,
@@ -128,6 +132,168 @@ describe('the ports are structural mirrors of the readers that fill them', () =>
       reader.price('5e000000-0000-4000-8000-0000000000f1', '2026-06-15', 'USD'),
     ).resolves.toBeNull();
   });
+});
+
+/**
+ * WP 4.3's `SpendingReader`, checked against `@ctx/budgeting` by the compiler.
+ *
+ * The WP 3.8 checks above are plain assignments because `@ctx/investments` is
+ * on planning's allow-list (08 §1.6: plan → invest). `@ctx/budgeting` is not,
+ * and must not be — 08 §1.6 draws no plan → budg arrow, the Phase 4 dispatch §4
+ * item 2 forbids adding one, and `scripts/eslint-boundaries.js` refuses the
+ * import in `test/` exactly as in `src/` (the `crossContext` message; a relative
+ * path is refused as `escapes`). `@ctx/budgeting` is not even a dependency of
+ * this package, so pnpm would not resolve it here either.
+ *
+ * So this test does what the composition root does, from where the composition
+ * root stands: it writes the **exact binding `apps/api/src/domain.ts` is to
+ * carry** into a scratch directory whose `paths` resolve both packages from
+ * source, and runs the repo's own `tsc` over it with the repo's own
+ * `tsconfig.base.json`. The binding closes over an executor and maps no field —
+ * each of budgeting's three functions is handed through, and its return type
+ * must already *be* planning's port type.
+ *
+ * A type check that cannot fail proves nothing, so the same run compiles a
+ * second file, `drift.ts`, which assigns the identical binding to a port whose
+ * `activity` has drifted to `bigint`. The test requires that file to fail with
+ * TS2322 naming `activity`, and `binding.ts` to have no error at all — if
+ * resolution silently degraded to `any`, the drift file would compile and this
+ * test would go red.
+ */
+const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+
+const SPENDING_READER_BINDING = `import { getPeriod, listBudgets, listPeriods, type BudgetingExecutor } from '@ctx/budgeting';
+import type { SpendingReader } from '@ctx/planning';
+
+/** WP 4.3's SpendingReader over @ctx/budgeting: the executor closed over, no field mapped. */
+export function planningSpendingReaderFor(executor: BudgetingExecutor): SpendingReader {
+  return {
+    listBudgets: (input) => listBudgets(executor, input),
+    listPeriods: (input) => listPeriods(executor, input),
+    getPeriod: (input) => getPeriod(executor, input),
+  };
+}
+`;
+
+const DRIFTED_BINDING = `import { getPeriod, listBudgets, listPeriods, type BudgetingExecutor } from '@ctx/budgeting';
+import type { SpendingLine, SpendingPeriod, SpendingReader } from '@ctx/planning';
+
+type DriftedLine = Omit<SpendingLine, 'activity'> & { readonly activity: bigint };
+type DriftedReader = Omit<SpendingReader, 'getPeriod'> & {
+  getPeriod(input: { readonly userId: string; readonly periodId: string }): Promise<
+    (Omit<SpendingPeriod, 'lines'> & { readonly lines: readonly DriftedLine[] }) | null
+  >;
+};
+
+export function drifted(executor: BudgetingExecutor): DriftedReader {
+  return {
+    listBudgets: (input) => listBudgets(executor, input),
+    listPeriods: (input) => listPeriods(executor, input),
+    getPeriod: (input) => getPeriod(executor, input),
+  };
+}
+`;
+
+interface ProbeDiagnostic {
+  readonly file: string;
+  readonly code: string;
+  readonly text: string;
+}
+
+function typeCheckProbe(files: Readonly<Record<string, string>>): {
+  readonly diagnostics: readonly ProbeDiagnostic[];
+  readonly output: string;
+} {
+  const directory = mkdtempSync(join(tmpdir(), 'wp43-spending-reader-'));
+  try {
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({ type: 'module' }));
+    writeFileSync(
+      join(directory, 'tsconfig.json'),
+      JSON.stringify({
+        extends: join(REPO_ROOT, 'tsconfig.base.json'),
+        compilerOptions: {
+          typeRoots: [join(REPO_ROOT, 'node_modules/@types')],
+          paths: {
+            '@ctx/budgeting': [join(REPO_ROOT, 'packages/contexts/budgeting/src/index.ts')],
+            '@ctx/planning': [join(REPO_ROOT, 'packages/contexts/planning/src/index.ts')],
+          },
+        },
+        files: Object.keys(files),
+      }),
+    );
+    for (const [name, source] of Object.entries(files))
+      writeFileSync(join(directory, name), source);
+    let output = '';
+    try {
+      output = execFileSync(
+        process.execPath,
+        [
+          join(REPO_ROOT, 'node_modules/typescript/bin/tsc'),
+          '-p',
+          'tsconfig.json',
+          '--pretty',
+          'false',
+        ],
+        { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+    } catch (error) {
+      const failed = error as { stdout?: string; stderr?: string };
+      output = `${failed.stdout ?? ''}${failed.stderr ?? ''}`;
+    }
+    const diagnostics: ProbeDiagnostic[] = [];
+    let current: { file: string; code: string; lines: string[] } | null = null;
+    for (const line of output.split('\n')) {
+      const match = /^(\S+?)\(\d+,\d+\): error (TS\d+): (.*)$/.exec(line);
+      if (match !== null) {
+        if (current !== null) {
+          diagnostics.push({
+            file: current.file,
+            code: current.code,
+            text: current.lines.join('\n'),
+          });
+        }
+        current = { file: match[1] ?? '', code: match[2] ?? '', lines: [match[3] ?? ''] };
+      } else if (current !== null && line.trim() !== '') {
+        current.lines.push(line.trim());
+      }
+    }
+    if (current !== null) {
+      diagnostics.push({ file: current.file, code: current.code, text: current.lines.join('\n') });
+    }
+    return { diagnostics, output };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+describe('the revealed-behaviour ports (WP 4.3)', () => {
+  it("the SpendingReader binding is assignable from @ctx/budgeting's reader with no adapter", () => {
+    const { diagnostics, output } = typeCheckProbe({
+      'binding.ts': SPENDING_READER_BINDING,
+      'drift.ts': DRIFTED_BINDING,
+    });
+    // The binding the composition root will carry compiles, untouched.
+    expect(
+      diagnostics.filter((d) => d.file === 'binding.ts'),
+      output,
+    ).toEqual([]);
+    // And the check is live: the same binding against a drifted port is refused,
+    // by the field that drifted.
+    const drift = diagnostics.filter((d) => d.file === 'drift.ts');
+    expect(drift.length, output).toBeGreaterThan(0);
+    expect(drift.map((d) => d.code)).toContain('TS2322');
+    expect(
+      drift.some((d) => /activity/.test(d.text) && /Money/.test(d.text)),
+      output,
+    ).toBe(true);
+    // Deliberately *not* asserted: that nothing else in the tree the probe pulls
+    // in (budgeting, planning, and through planning `@ctx/investments`) fails to
+    // compile. That is `tsc -b`'s job, and asserting it here would make this
+    // test red whenever an unrelated package is mid-edit — the first draft did,
+    // on another work package's in-flight `dwell.ts`. The two assertions above
+    // are the check: the binding file is clean and the drift file is refused on
+    // the field that drifted, so resolution cannot have degraded to `any`.
+  }, 120_000);
 });
 
 describe('the names the composition root registers', () => {
