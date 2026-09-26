@@ -195,6 +195,16 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'basis_method_elections',
     'investments (WP 3.2); the sticky AVERAGE_COST election is user state; exported by WP 3.7.',
   ],
+  // Phase 4 WP 4.7's allocation-target and security-tag tables (migration
+  // 0026, owned by @ctx/investments — 08 §1.6's arrows point down, so this is
+  // Investments' user state, not Planning's). User-authored the same way the
+  // WP 3.2 rows above are: a stored target set and an employer-stock tag are
+  // both facts a holder set on purpose, and neither is recomputable from
+  // anything else in the schema. Deferred, never excluded, for the same
+  // reason WP 4.1's row above it is — WP 4.12's export batch adds them with
+  // the rest of the investments batch.
+  ['allocation_targets', 'investments (WP 4.7); exported by WP 4.12.'],
+  ['security_tags', 'investments (WP 4.7); exported by WP 4.12.'],
   // Phase 3 WP 3.4's market data. `prices`/`fx_rates` are provider facts,
   // re-fetchable and — under Tiingo's personal tier — not redistributable
   // (wp3.4-market-data.md §4), so a bundle must not carry them; a restored

@@ -28,6 +28,12 @@ would be deleted with the holding and the stickiness would silently lapse.
 injected writer port (08 §1.3 #7). `wallet_addresses` lands in 0016 (WP 3.6) and
 is still a claim.
 
+`allocation_targets` and `security_tags` exist as of `0026_allocation_targets.sql`
+(WP 4.7) — owned here and not by `@ctx/planning`, because 08 §1.6's arrows point
+down and drift is an investments analytic (`GET /investments/drift` is this
+context's own route). See that migration's header for the ownership argument in
+full.
+
 ## Depends on
 
 - Platform
@@ -48,3 +54,5 @@ is still a claim.
 - `fx_rates`
 - `wallet_addresses`
 - `price_source_priority`
+- `allocation_targets`
+- `security_tags`

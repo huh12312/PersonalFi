@@ -534,7 +534,7 @@ work package here and confirmed at dispatch rather than reserved for a pair:
 | **0020** `planning_goals` | `goals`, `goal_contributions`, `risk_profile`, `cash_earmarks` | 4.1 |
 | **0021** `plan_assumptions` | `plan_assumptions` | 4.2 |
 | **0022** `plan_projections` | `plan_scenarios`, `plan_life_events`, `projection_runs`, `projection_percentiles` | 4.6 |
-| **0023** `allocation_targets` | `allocation_targets`, `security_tags` | 4.7 |
+| ~~**0023**~~ → **0026** `allocation_targets` | `allocation_targets`, `security_tags` | 4.7 — **renumbered 2026-09-26**: `security_tags`' composite FK targets the `UNIQUE (user_id, id)` on `securities` that WP 4.12a's 0025 creates, and 0023 runs before 0025; 0025 was already immutable, so 0023 is burned and 4.7 took 0026 (execution log 17:40 EDT) |
 | **0024** `snapshot_grant_scopes_v1_2` | the `snapshot_grants_scope_check` widening for `plan.projection` | 4.9 |
 | **0025** | reserved for 4.8 / 4.12, used only if reported necessary | — |
 

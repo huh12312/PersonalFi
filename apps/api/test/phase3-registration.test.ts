@@ -184,12 +184,13 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     expect(executed.length).toBeGreaterThan(0);
 
     const declared = [...INVESTMENTS_EVENTS, ...INTEGRATIONS_EVENTS, ...PLANNING_EVENTS];
-    // Five from investments, two from integrations, four from planning
+    // Six from investments (Phase 3's five plus WP 4.7's
+    // `AllocationTargetsChanged`), two from integrations, four from planning
     // (`NetWorthSnapshotTaken`; WP 4.1's `GoalCreated` and
     // `RiskProfileAnswered`; WP 4.2's `AssumptionsOverridden`). Pinned so that
     // an event *added* to a context without a line here is a failure rather
     // than a silently unregistered type.
-    expect(INVESTMENTS_EVENTS).toHaveLength(5);
+    expect(INVESTMENTS_EVENTS).toHaveLength(6);
     expect(INTEGRATIONS_EVENTS).toHaveLength(2);
     expect(PLANNING_EVENTS).toHaveLength(4);
 

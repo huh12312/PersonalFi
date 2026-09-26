@@ -44,6 +44,7 @@
 export const CONTEXT_ID = 'investments' as const;
 
 export {
+  AllocationTargetsChanged,
   HoldingsUpdated,
   INVESTMENTS_EVENTS,
   LotsUpdated,
@@ -358,6 +359,39 @@ export {
   type PriceStore,
   type UserPriceOverride,
 } from './prices.ts';
+
+// ---------------------------------------------------------------------------
+// WP 4.7 — the Phase 3 gap-field sources: stored allocation targets, security
+// tags, and idle-cash dwell (migration 0026). See each file's own header for
+// the ownership argument: 08 §1.6's arrows point down, so this context stores
+// what its own analytics and routes need and never reads @ctx/planning.
+// ---------------------------------------------------------------------------
+
+export {
+  AllocationTargetsError,
+  TARGET_SUM_TOLERANCE,
+  assertTargetsSumToOne,
+  drizzleAllocationTargetsStore,
+  inMemoryAllocationTargetsStore,
+  type StoredAllocationTarget,
+  type AllocationTargetInput,
+  type AllocationTargetsStore,
+} from './targets.ts';
+
+export {
+  drizzleSecurityTagsStore,
+  inMemorySecurityTagsStore,
+  type SecurityTag,
+  type SecurityTagsStore,
+} from './tags.ts';
+
+export {
+  cashPositionFor,
+  cashSnapshotHistory,
+  idleDaysOf,
+  type CashSnapshot,
+  type DwellCashInput,
+} from './dwell.ts';
 
 // ---------------------------------------------------------------------------
 // WP 3.3 — portfolio analytics (pure; no tables, no I/O, no clock)

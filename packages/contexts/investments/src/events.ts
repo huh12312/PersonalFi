@@ -211,6 +211,32 @@ export const PossibleWashSaleFlagged = defineEvent({
 });
 
 /**
+ * A user's stored allocation target set was replaced.
+ *
+ * WP 4.7. Fired by `src/targets.ts`'s `setAllocationTargets` on every
+ * successful write, including the write that clears the set back to empty —
+ * "unset" is itself a state worth an event, because a consumer watching for
+ * "the user changed their mind about targets" must see the clear as well as
+ * the set. Ids and a count, never the targets themselves: a consumer that
+ * wants the set re-reads it through the store, which is also how it picks up
+ * whatever is current rather than what was true when the event was written.
+ */
+export const AllocationTargetsChanged = defineEvent({
+  type: 'investments.AllocationTargetsChanged',
+  aggregateType: 'user',
+  description:
+    'The stored allocation target set was replaced — every existing row for this user removed ' +
+    'and the new set (possibly empty) inserted in one transaction. Carries the asset classes and ' +
+    'the count, never the weights: a consumer re-reads the set through the store. An empty set is ' +
+    'a real event, not a no-op — it is the user clearing their targets, and 07 §8 Q9 makes that ' +
+    'state ("unset") distinct from any particular allocation.',
+  schema: z.object({
+    assetClasses: z.array(z.string()),
+    count: z.int().nonnegative(),
+  }),
+});
+
+/**
  * Registered at the composition root. Exported as a list so `apps/api` cannot
  * forget one: an event type that is appended but not registered is invisible to
  * the pump's upcasting, and the failure surfaces as a silent consumer rather
@@ -222,4 +248,5 @@ export const INVESTMENTS_EVENTS: readonly EventDefinition[] = Object.freeze([
   LotsUpdated,
   RealizedGainRecorded,
   PossibleWashSaleFlagged,
+  AllocationTargetsChanged,
 ]);

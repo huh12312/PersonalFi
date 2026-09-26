@@ -97,3 +97,18 @@ export {
   type PriceSourceName,
   type PriceSourcePriorityRow,
 } from './prices.ts';
+
+// WP 4.7, migration 0026_allocation_targets.sql. Owned by this context, not
+// @ctx/planning — 08 §1.6's arrows point down and drift is an investments
+// analytic; see that migration's header for the ownership argument in full.
+export {
+  DEFAULT_BAND_PCT,
+  SECURITY_TAGS,
+  allocationTargets,
+  securityTags,
+  type AllocationTargetRow,
+  type NewAllocationTargetRow,
+  type NewSecurityTagRow,
+  type SecurityTagKind,
+  type SecurityTagRow,
+} from './targets.ts';

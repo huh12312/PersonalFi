@@ -346,11 +346,26 @@ describeWithDb('runMigrations', () => {
       //   (WP 4.2). Stores only the user's deltas against a named
       //   `assumptions_version` (the content hash of the checked-in file),
       //   never a copy of the defaults.
+      // 0025_investments_security_scoping: no table. Composite
+      //   (user_id, security_id) FKs on holdings, cost_basis_lots,
+      //   investment_transactions and prices (Phase 3 gate C-14);
+      //   institution_value_minor made nullable for provider-unvalued
+      //   holdings (C-2). Adds the UNIQUE (user_id, id) on securities that
+      //   0026 below references — which is why WP 4.7's tables could not
+      //   take the 0023 slot the dispatch reserved: 0023 runs before 0025
+      //   and the FK target did not exist yet. 0023 is burned, not reused.
+      // 0026_allocation_targets: two @ctx/investments tables —
+      //   allocation_targets, security_tags (WP 4.7). Owned by investments,
+      //   not planning, because 08 §1.6's arrows point down: drift is an
+      //   investments analytic. `security_tags` references securities by the
+      //   composite (user_id, id) key 0025 introduced; the employer tag is
+      //   set by the holder and never inferred (07 I5).
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
         'advisor_runs',
         'advisors',
+        'allocation_targets',
         'auth_attempts',
         'auth_lockouts',
         'basis_method_elections',
@@ -419,6 +434,7 @@ describeWithDb('runMigrations', () => {
         'security_events',
         'security_identifiers',
         'security_overlay',
+        'security_tags',
         'sessions',
         'snapshot_grants',
         'subscription_metadata',

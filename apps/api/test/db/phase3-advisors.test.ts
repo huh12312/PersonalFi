@@ -41,10 +41,34 @@
  * and structurally silent.
  *
  * `'the investing rules with no field behind them are silent, and it is these
- * three'` pins that. It is deliberately an assertion about *silence*, which is
- * the hardest kind of claim to keep honest, so it is paired with the test above
- * it proving the same run is **not** silent for I4 — otherwise a broken port
- * would pass it for the wrong reason.
+ * three'` pinned that. It was deliberately an assertion about *silence*, which
+ * is the hardest kind of claim to keep honest, so it was paired with the test
+ * above it proving the same run is **not** silent for I4 — otherwise a broken
+ * port would pass it for the wrong reason.
+ *
+ * ## WP 4.7 — the silence test, re-derived
+ *
+ * `allocation_targets`, `security_tags` and idle-cash dwell now exist
+ * (`packages/contexts/investments/src/{targets,tags,dwell}.ts`, migration
+ * `0026_allocation_targets.sql`), so the day one of these three gains a
+ * source is this day. **This work package does not own
+ * `apps/api/src/domain.ts`**, so `createInsightsInvestmentsPort` itself still
+ * hardcodes `targets: []`, `idleCash: null` and `employerStock: false` at this
+ * commit — the composition WP 4.7's evidence specifies for the orchestrator's
+ * wiring batch has not landed there yet. Rather than leave the silence test
+ * standing (which would now be *wrong*, not merely stale) or delete it (which
+ * would lose the control), `'I1, I3 and I5 now fire on the seed, and the
+ * rules with no field behind them are exactly the ones still named'` drives
+ * the real advisor rules against a **decorated** port: the real
+ * `createInsightsInvestmentsPort` result, with its three gap fields replaced
+ * by real reads through the new investments readers over the same seeded
+ * rows. Every other field — the account facts, the valuation, the liability
+ * crossing — is untouched, real, and still the thing this suite's other tests
+ * exercise. When the orchestrator's wiring batch lands the identical
+ * composition in `domain.ts`, this decoration becomes redundant with
+ * production and may be deleted in favour of calling the real port directly;
+ * until then it is the only way to prove the *rule* fires on the *reader*
+ * without this work package touching a file it does not own.
  */
 import {
   ATTRIBUTIONS,
@@ -55,7 +79,7 @@ import {
   jsonResponse,
   policyFor,
 } from '@ctx/integrations';
-import { DateOnly, money, newId, systemClock } from '@core/kernel';
+import { DateOnly, Money, currency, money, newId, systemClock } from '@core/kernel';
 import {
   SnapshotBuilder,
   createBuiltinRegistry,
@@ -66,7 +90,15 @@ import {
   parsePath,
   runAdvisors,
   type InsightsDependencies,
+  type InvestmentsPort as InsightsInvestmentsPort,
 } from '@ctx/insights';
+import {
+  cashPositionFor,
+  cashSnapshotHistory,
+  drizzleAllocationTargetsStore,
+  drizzleSecurityTagsStore,
+  idleCash,
+} from '@ctx/investments';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -177,6 +209,103 @@ describe.skipIf(NO_DATABASE)('the nightly advisor run over a synced portfolio (W
         ${isoDay(0)}::date, 'tiingo', ${input.close}, 'USD', false, now()
       )
     `);
+  }
+
+  /**
+   * A `holdings_snapshots` row, for WP 4.7's dwell reader — the history
+   * `cashSnapshotHistory` reads to derive `idleDays`, exactly as it would in
+   * production. `offsetDays` is negative for the past; `0` is today.
+   */
+  async function insertHoldingsSnapshot(input: {
+    readonly accountId: string;
+    readonly securityId: string;
+    readonly offsetDays: number;
+    readonly quantity: string;
+    readonly institutionValueMinor: bigint;
+  }): Promise<void> {
+    await h.database.db.execute(sql`
+      INSERT INTO holdings_snapshots (
+        id, user_id, account_id, security_id, as_of_date, quantity, institution_value_minor, currency
+      ) VALUES (
+        ${newId()}::uuid, ${h.userId}::uuid, ${input.accountId}::uuid, ${input.securityId}::uuid,
+        ${isoDay(input.offsetDays)}::date, ${input.quantity}, ${input.institutionValueMinor}, 'USD'
+      )
+    `);
+  }
+
+  /**
+   * WP 4.7's decoration of the real port, for `'I1, I3 and I5 now fire on the
+   * seed…'` below. See the file header's "WP 4.7" section: this work package
+   * does not own `apps/api/src/domain.ts`, so the composition it specifies for
+   * that file's `createInsightsInvestmentsPort` is applied here instead, over
+   * the same real port and the same real rows — every field this function
+   * does not name is the base port's own answer, untouched.
+   */
+  function wrapWithGapFieldSources(base: InsightsInvestmentsPort): InsightsInvestmentsPort {
+    return {
+      ...base,
+      async holdings(input) {
+        const result = await base.holdings(input);
+        if (result === null) return null;
+
+        const targets = await drizzleAllocationTargetsStore(h.database.db, systemClock).listAll(
+          h.userId,
+        );
+
+        const securityIds = [...new Set(result.positions.map((position) => position.securityId))];
+        const tagsBySecurity = await drizzleSecurityTagsStore(
+          h.database.db,
+          systemClock,
+        ).listForMany(h.userId, securityIds);
+        const employerStockOf = (securityId: string): boolean =>
+          tagsBySecurity.get(securityId)?.has('employer_stock') ?? false;
+
+        const asOfDate = DateOnly.parse(isoDay(0));
+        const usd = currency('USD');
+        const history = await cashSnapshotHistory(h.database.db, {
+          userId: h.userId,
+          accountId: brokerageAccountId,
+          asOfDate,
+          currency: usd,
+        });
+        const cashPosition = cashPositionFor(
+          {
+            accountId: brokerageAccountId,
+            asOfDate,
+            cash: money(1_200_000n, 'USD'),
+            accountValue: money(3_700_000n, 'USD'),
+            earmarkedAmount: Money.zero('USD'),
+          },
+          history,
+        );
+        const idle = idleCash([cashPosition], { currency: usd });
+
+        return {
+          ...result,
+          aggregate: {
+            ...result.aggregate,
+            targets: targets.map((target) => ({
+              assetClass: target.assetClass,
+              weight: Number(target.targetWeight),
+            })),
+            idleCash: {
+              total: idle.idleTotal,
+              floor: idle.floor,
+              minDays: idle.minDays,
+              longestIdleDays: idle.rows.reduce((max, row) => Math.max(max, row.idleDays), 0),
+            },
+            positions: result.aggregate.positions.map((position) => ({
+              ...position,
+              employerStock: employerStockOf(position.securityId),
+            })),
+          },
+          positions: result.positions.map((position) => ({
+            ...position,
+            employerStock: employerStockOf(position.securityId),
+          })),
+        };
+      },
+    };
   }
 
   /**
@@ -461,8 +590,49 @@ describe.skipIf(NO_DATABASE)('the nightly advisor run over a synced portfolio (W
     expect(json).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/iu);
   }, 180_000);
 
-  it('the investing rules with no field behind them are silent, and it is these three', async () => {
-    const dependencies = dependenciesOf({ withFred: true });
+  it('I1, I3 and I5 now fire on the seed, and the rules with no field behind them are exactly the ones still named', async () => {
+    // The three sources WP 4.7 adds, seeded exactly the way a holder would set
+    // them: a complete target set (VTI is 100% of investable assets, so a
+    // 60/40 target drifts by 40pp — nowhere near the 5pp band), an
+    // employer-stock tag on the one security this portfolio holds, and a cash
+    // position that has sat above its threshold for longer than a fortnight
+    // with nothing earmarked against it.
+    await drizzleAllocationTargetsStore(h.database.db, systemClock).replaceAll(h.userId, [
+      { assetClass: 'US_EQUITY', targetWeight: '0.60' },
+      { assetClass: 'US_BOND', targetWeight: '0.40' },
+    ]);
+    await drizzleSecurityTagsStore(h.database.db, systemClock).set(
+      h.userId,
+      vtiSecurityId,
+      'employer_stock',
+    );
+    const cashSecurityId = await insertSecurity({
+      ticker: 'CASH-SWEEP',
+      name: 'Brokerage cash sweep',
+      type: 'cash',
+      assetClass: 'CASH',
+      expenseRatio: null,
+    });
+    await insertPrice({ securityId: cashSecurityId, close: '1.00' });
+    for (const offsetDays of [-20, -10, 0]) {
+      await insertHoldingsSnapshot({
+        accountId: brokerageAccountId,
+        securityId: cashSecurityId,
+        offsetDays,
+        quantity: '12000.000000000000000000',
+        institutionValueMinor: 1_200_000n,
+      });
+    }
+
+    const baseDependencies = dependenciesOf({ withFred: true });
+    const dependencies: InsightsDependencies = {
+      ...baseDependencies,
+      ports: {
+        ...baseDependencies.ports,
+        investments: wrapWithGapFieldSources(baseDependencies.ports.investments),
+      },
+    };
+
     const context = {
       userId: h.userId,
       clock: systemClock,
@@ -489,34 +659,34 @@ describe.skipIf(NO_DATABASE)('the nightly advisor run over a synced portfolio (W
 
     // Every one of them *ran*. Silence here is a rule deciding it has nothing
     // to say, never a rule that was refused or errored — which is a different
-    // fact and would make the claim below meaningless.
+    // fact and would make the claims below meaningless.
     for (const result of results) expect(result.status, result.advisorId).toBe('completed');
 
     /**
-     * Each entry names the field, never the effort — the same standard
-     * `CATALOGUE_GAPS` holds itself to. The day one of these gains a source,
-     * this test goes red and names the rule that should now be firing.
+     * The three WP 4.7 gave a source. Each now fires — the day-one silence
+     * `wp3.10a-snapshot-readers.md` §7.2 measured is over.
      */
-    const silentForLackOfAField = [
-      // `targets: []` — there is no `allocation_targets` table in this
-      // repository (`wp3.9-routes.md` §8 finding 1), and §8 Q9 forbids a
-      // default 60/40, so I1 withholds rather than inventing a benchmark.
-      'builtin.investing.drift',
-      // `idleCash: null` — no dwell history exists to measure idleness
-      // against, and the block is omitted rather than zeroed.
-      'builtin.investing.idle_cash',
-      // `employerStock: false` — the holder's own tag, and there is no column
-      // for one. 07 I5 is explicit that an employer is never inferred.
-      'builtin.investing.employer_stock',
+    const nowFiring = [
+      'builtin.investing.drift', // I1 — allocation_targets
+      'builtin.investing.idle_cash', // I3 — dwell + earmark composition
+      'builtin.investing.employer_stock', // I5 — security_tags
     ];
-    for (const advisorId of silentForLackOfAField) {
-      expect(proposedBy.get(advisorId)?.proposed, `${advisorId} unexpectedly fired`).toBe(0);
+    for (const advisorId of nowFiring) {
+      expect(proposedBy.get(advisorId)?.proposed, `${advisorId} should now fire`).toBeGreaterThan(
+        0,
+      );
     }
 
-    // The control. Without this the test above passes against a port that
-    // returns `null` for everything, which is the failure it is meant to catch.
+    // The control, preserved: I4 and I2 fired before this work package and
+    // must still fire on the same run, unaffected by the decoration above —
+    // otherwise this test would prove nothing about the three it names.
     expect(proposedBy.get('builtin.investing.concentration')?.proposed).toBeGreaterThan(0);
     expect(proposedBy.get('builtin.investing.expense_ratio')?.proposed).toBeGreaterThan(0);
+
+    // And the decoration touches exactly `targets`, `idleCash` and
+    // `employerStock` — I6 needs no new field and fires on nothing here
+    // (VTI's lot is a gain, not a loss), which the decoration did not change.
+    expect(proposedBy.get('builtin.investing.loss_lot')?.proposed ?? 0).toBe(0);
   }, 180_000);
 
   it('market.rates carries the FRED licence sentence verbatim, from the constant', async () => {
