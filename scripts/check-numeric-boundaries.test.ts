@@ -104,5 +104,9 @@ describe('check-numeric-boundaries, against the real tree', () => {
       .join('\n');
     expect(detail).toBe('');
     expect(result.filesScanned).toBeGreaterThan(500);
-  });
+    // A whole-tree AST scan: ~2 s alone at 686 files (WP 3.14), ~5.5 s at 766
+    // files under a full parallel `just check` — over the 5 s default, which
+    // is what turned `just check` red twice on 2026-09-27 with zero
+    // violations. The budget is for the scan, not the assertion.
+  }, 60_000);
 });
