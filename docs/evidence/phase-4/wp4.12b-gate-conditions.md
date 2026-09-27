@@ -86,7 +86,7 @@ flips mid-poll, and two source-shape assertions (no early `return;` before the p
    1 test fails (`sleepFn must not include unref`). Restored, `git diff --stat` empty.
 2. `main()`'s no-holder branch: added `return;` immediately after the
    `logger.warn(...)` line, before `awaitAccountHolder(...)`. Red: 1 test fails (`the
-   no-holder branch returns before polling`). Restored, `git diff --stat` empty.
+no-holder branch returns before polling`). Restored, `git diff --stat` empty.
 
 Re-run green: `worker-account-holder-poll.test.ts` + `worker-pool-guard.test.ts` (below),
 **11/11**.
@@ -523,7 +523,7 @@ vacuous.
   `ProviderInvestmentTransactionFact.security` "is still one identifier" is stale — the
   field has been `ProviderSecurityFact | null` (the whole fact) since WP 3.14a
   (`git log` commit `9fb4191`, confirmed against the current
-  `packages/connectors/port/src/facts.ts:341`), which landed *before* the Phase 3 gate
+  `packages/connectors/port/src/facts.ts:341`), which landed _before_ the Phase 3 gate
   wrote this row. Row struck with the commit reference.
 
 ---
@@ -564,17 +564,17 @@ git diff --cached --name-only                    # empty
 
 Targeted vitest, foreground, against dev Postgres (`127.0.0.1:5433/personalfi_dev`):
 
-| Project(s) | Result |
-| --- | --- |
-| `config` | 148/148 |
-| `platform` | 34/34 |
-| `notifications` | 24/24 |
-| `integrations` | 56/56 (4 pre-existing live-smoke skips) |
-| `planning` | 125/125 |
-| `insights` + `insights-db` | 213/213 |
-| `api` (full project) | 95/95 |
+| Project(s)                                                                                                                                                                                                                | Result                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `config`                                                                                                                                                                                                                  | 148/148                                                                                    |
+| `platform`                                                                                                                                                                                                                | 34/34                                                                                      |
+| `notifications`                                                                                                                                                                                                           | 24/24                                                                                      |
+| `integrations`                                                                                                                                                                                                            | 56/56 (4 pre-existing live-smoke skips)                                                    |
+| `planning`                                                                                                                                                                                                                | 125/125                                                                                    |
+| `insights` + `insights-db`                                                                                                                                                                                                | 213/213                                                                                    |
+| `api` (full project)                                                                                                                                                                                                      | 95/95                                                                                      |
 | `api-db` (targeted files: `export-import-phase3-phase4`, `export-import`, `export-encrypt`, `export-encrypt-age-absent`, `phase4-wiring`, `onramp-spending-e2e`, `coinbase-routes`, `plaid-routes`, `connections-routes`) | 15+8+2+4+31+3+3 = every file individually green; see §16 for the full `api-db` project run |
 
 ## 16. Full `api-db` project run (appended after this document was written, per instructions)
 
-<!-- appended below once the background run completes -->
+_Appended by the orchestrator, 2026-09-27 13:45 EDT — the agent was killed by the account's session limit before it could run this. Full `api-db` project on the snapshot e98fba5 tree: **49 files passed, 1 skipped; 298 tests passed, 4 skipped (credential-gated)**. Alongside it the orchestrator re-ran `api`, `insights`, `insights-db`, `platform`, `planning`, `integrations`, `config`, `categorization` and `db` together: **83 files, 933 passed, 4 skipped**; tsc clean; numeric boundaries 766 files / 0 violations; schema ownership 103 claimed / 90 defined; compose hardening self-test + real files PASS; `docker compose config` parses._
