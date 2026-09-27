@@ -525,3 +525,62 @@ written by `@ctx/planning`'s `computeNetWorth` → `upsertOpenDay`, the two call
 the 04:00 job makes. Budgets: **p95 < 200 ms** for each, against 08 §7.1's
 150 ms for a 1,825-point net-worth chart. The suite asserts its own row counts
 before it times anything — a perf number over an empty table is a lie.
+
+## The Phase 4 scale seed (`@core/seed`), and the two whole-path budgets it feeds
+
+`packages/seed/src/phase4-scale.ts` (WP 4.13) closes the gap wp3.14-quality.md
+§8 item 6 named: _"the perf dataset is a correctness seed, not a scale
+seed."_ `generatePhase4Scale(seed, options?)` is additive over
+`generatePhase3Investments` exactly as that generator is additive over
+`generateDemoData` — a second, independent dataset, never a replacement, so
+the correctness seed's byte-identity is untouched (`phase4-scale.test.ts` →
+`'leaves the Phase 3 correctness seed untouched'`).
+
+What it carries: **200 positions**, one distinct security each, across
+**eleven accounts spanning all four tax buckets** (`TAXABLE`/`TAX_DEFERRED`/
+`ROTH`/`HSA`) plus a CAD-denominated taxable account; **five years of daily**
+prices, holdings snapshots and a net-worth series (1,825 points each — 08
+§7.1's own figure); an FX series with **one declared gap**, exactly as Phase 3
+carries one (the account's holding on that day must surface the gap, never
+default to 1.0); and a plan — two goals, their contribution plans, and two
+life events (one the engine can express as income, one it can only name as
+`unapplied`, per `life-events.ts`'s own documented limit). Every shape is
+fixed; only ids and price-walk draws move with the seed
+(`'the scale seed generates 200 positions and five years of daily snapshots,
+byte-identically for a fixed seed'`).
+
+**Why it emits generic shapes, not `@ctx/planning` types.** `packages/seed`'s
+one allowed dependency is `@core/kernel` (the same rule `phase3-investments.ts`
+follows); `ScaleGoal`/`ScaleContribution`/`ScaleLifeEvent` and the net-worth
+breakdown fields echo `@ctx/planning`'s vocabulary by name so a consumer's
+mapping is a rename, never a translation, but nothing in `phase4-scale.ts`
+imports a context.
+
+**Why daily bps are not monthly bps.** `phase3-investments.ts`'s price walk is
+month-end; this one is 1,825 _daily_ steps, and reusing month-sized
+drift/volatility constants per day compounds to billions of dollars per
+position (observed directly, before the constants were corrected — see
+`wp4.13-scale-seed.md` §5). Daily drift is 0–4 bps, daily volatility 60–150
+bps; FX drift is 0–1 bp/day, volatility 40 bps/day.
+
+Two perf files read it:
+
+- `packages/contexts/planning/src/engine/perf.test.ts` (WP 4.5's engine-alone
+  budget, 800 ms p95, `planning-perf` project): reads the scale seed's last
+  day, summed by tax bucket the way WP 4.6 sums `net_worth_daily`'s breakdown,
+  in place of the hand-built 200-position plan the file used before this WP
+  landed.
+- `apps/api/test/db/projection-perf.test.ts` (new, WP 4.13): the whole-path
+  halves of both 08 §7.1 and §7.2's budgets, over real Postgres. `net_worth_daily`
+  is loaded by direct SQL rather than 1,825 calls to `computeNetWorth` — the
+  same trade `investments-perf.test.ts` already makes for `securities`/
+  `holdings`/`prices`, stated here for the table that trade had not yet been
+  applied to. `GET /net-worth/series` runs over real `fetch()`
+  (`ApiHarness.listen()`); the projection half calls `@ctx/planning`'s
+  `runProjection` directly, because `POST /plan/scenarios/{id}/projections`
+  is WP 4.8's route and does not exist yet — the test's name is kept exactly as
+  the dispatch's exit-test name, and WP 4.8 inherits the obligation to rebind
+  it over real HTTP without renaming it. Every sample is a fresh scenario fork
+  (a one-dollar-larger `annual_spending` lever each time) so the service's own
+  cache — proven in `wp4.6-projection-service.md` §2 — never turns a sample
+  into a no-op.

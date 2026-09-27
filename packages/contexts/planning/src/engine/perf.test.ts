@@ -37,23 +37,26 @@
  * ## On what
  *
  * Dispatch §5 says "measured on WP 4.13's scale plan (200 positions, five
- * years of daily rows)". **That seed does not exist yet** (WP 4.13 has not
- * landed), so this file builds an explicit 200-position-shaped input and
- * asserts its counts before timing. The engine does not see positions: WP 4.6
- * sums them into four tax buckets (`projection-service.ts`, from
- * `net_worth_daily`), so what 200 positions change here is the buckets' sizes
- * and the crypto sleeve — the cost is paths × years × (the plan's features),
- * and this plan turns every feature on: four buckets each with its own
- * glidepath, contributions into three, Guyton-Klinger guardrails with a floor,
- * Social Security, a pension with a COLA, part-time income, and crypto (its own
- * draws, and a second set of bands). The return series is the synthetic fixture at the
- * real Shiller window's length (1,847 months), so the bootstrap indexes a
- * table of the real size. When WP 4.13's seed lands, this file should read it
- * instead of building one.
+ * years of daily rows)", and WP 4.13 has now landed: `@core/seed`'s
+ * `generatePhase4Scale` builds exactly that (11 accounts across four tax
+ * buckets, 200 distinct positions, a crypto sleeve, and five years of daily
+ * `net_worth_daily`-shaped rows) and this file reads its **last** day's
+ * per-account breakdown rather than building an equivalent shape by hand. The
+ * engine does not see positions: WP 4.6 sums them into four tax buckets
+ * (`projection-service.ts`, from `net_worth_daily`), so what 200 positions
+ * change here is the buckets' sizes and the crypto sleeve — the cost is
+ * paths × years × (the plan's features), and this plan turns every feature
+ * on: four buckets each with its own glidepath, contributions into three,
+ * Guyton-Klinger guardrails with a floor, Social Security, a pension with a
+ * COLA, part-time income, and crypto (its own draws, and a second set of
+ * bands). The return series is the synthetic fixture at the real Shiller
+ * window's length (1,847 months), so the bootstrap indexes a table of the
+ * real size.
  */
 import { cpus, loadavg } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { DateOnly, Money } from '@core/kernel';
+import { generatePhase4Scale } from '@core/seed';
 import { loadAssumptions } from '../assumptions.ts';
 import { syntheticSeries, SYNTHETIC_MONTHS } from '../../test/engine/fixtures/synthetic-series.ts';
 import type { ProjectionBucket, ProjectionPlan } from './boundary.ts';
@@ -64,45 +67,59 @@ const WARM_UPS = 3;
 const SAMPLES = 25;
 const BUDGET_MS = 800;
 
-interface Position {
-  readonly account: string;
-  readonly bucket: ProjectionBucket;
-  readonly crypto: boolean;
-  readonly symbol: string;
-  readonly marketWorth: Money;
-}
-
-/** Ten accounts, 200 positions: what a scale household holds, summed the way WP 4.6 sums it. */
-function scalePositions(): readonly Position[] {
-  const accounts: readonly (readonly [string, ProjectionBucket, boolean, number])[] = [
-    ['brokerage-1', 'TAXABLE', false, 34],
-    ['brokerage-2', 'TAXABLE', false, 22],
-    ['brokerage-3', 'TAXABLE', false, 14],
-    ['401k-current', 'TAX_DEFERRED', false, 26],
-    ['401k-previous', 'TAX_DEFERRED', false, 18],
-    ['rollover-ira', 'TAX_DEFERRED', false, 30],
-    ['roth-ira-1', 'ROTH', false, 20],
-    ['roth-ira-2', 'ROTH', false, 16],
-    ['hsa', 'HSA', false, 12],
-    ['crypto-wallet', 'TAXABLE', true, 8],
-  ];
-  const positions: Position[] = [];
-  let n = 0;
-  for (const [account, bucket, crypto, count] of accounts) {
-    for (let k = 0; k < count; k += 1) {
-      n += 1;
-      // Whole cents, deterministic, between $250 and ~$21k per position.
-      const cents = 25_000n + BigInt((n * 7_919 * 104_729) % 2_100_000);
-      positions.push({
-        account,
-        bucket,
-        crypto,
-        symbol: `SYM${String(n)}`,
-        marketWorth: Money.of(cents, 'USD'),
-      });
-    }
+/**
+ * The scale seed's last day, summed by tax bucket the way WP 4.6 sums
+ * `net_worth_daily`'s breakdown — every account but `crypto-wallet` into its
+ * bucket, that one account into `cryptoHolding` — plus the counts a perf
+ * number is asserted against before anything is timed.
+ */
+function scaleBalances(): {
+  readonly byBucket: Readonly<Record<ProjectionBucket, Money>>;
+  readonly cryptoHolding: Money;
+  readonly positionCount: number;
+  readonly securityCount: number;
+} {
+  const scale = generatePhase4Scale(20_260_926);
+  // Counts before timing: 200 positions, every one a distinct security.
+  if (scale.holdings.length !== 200) {
+    throw new Error(
+      `expected 200 positions from the scale seed, got ${String(scale.holdings.length)}`,
+    );
   }
-  return positions;
+  const distinctSecurities = new Set(scale.holdings.map((holding) => holding.securityId));
+  if (distinctSecurities.size !== 200) {
+    throw new Error('the scale seed did not give every position its own security');
+  }
+  const lastDay = scale.netWorthDaily.at(-1);
+  if (lastDay === undefined) throw new Error('the scale seed has no net_worth_daily rows');
+  const cryptoAccount = scale.accounts.find((account) => account.name === 'crypto-wallet');
+  if (cryptoAccount === undefined) throw new Error('the scale seed has no crypto-wallet account');
+  const bucketOf = new Map(scale.accounts.map((account) => [account.id, account.bucket] as const));
+
+  const zero = Money.zero('USD');
+  const byBucket: Record<ProjectionBucket, Money> = {
+    TAXABLE: zero,
+    TAX_DEFERRED: zero,
+    ROTH: zero,
+    HSA: zero,
+  };
+  let cryptoHolding = zero;
+  for (const entry of lastDay.byAccount) {
+    const money = Money.of(BigInt(entry.baseMinor), lastDay.baseCurrency);
+    if (entry.accountId === cryptoAccount.id) {
+      cryptoHolding = Money.add(cryptoHolding, money);
+      continue;
+    }
+    const bucket = bucketOf.get(entry.accountId);
+    if (bucket === undefined) continue;
+    byBucket[bucket] = Money.add(byBucket[bucket], money);
+  }
+  return {
+    byBucket,
+    cryptoHolding,
+    positionCount: scale.holdings.length,
+    securityCount: distinctSecurities.size,
+  };
 }
 
 function percentile(sorted: readonly number[], p: number): number {
@@ -115,28 +132,10 @@ function percentile(sorted: readonly number[], p: number): number {
 
 describe('the 08 §7.2 budget', () => {
   it('10,000 paths over 40 years complete within 800 ms p95 on one core', async () => {
-    const positions = scalePositions();
-    const zero = Money.zero('USD');
-    const byBucket: Record<ProjectionBucket, Money> = {
-      TAXABLE: zero,
-      TAX_DEFERRED: zero,
-      ROTH: zero,
-      HSA: zero,
-    };
-    let cryptoHolding = zero;
-    for (const position of positions) {
-      if (position.crypto) cryptoHolding = Money.add(cryptoHolding, position.marketWorth);
-      else byBucket[position.bucket] = Money.add(byBucket[position.bucket], position.marketWorth);
-    }
-    // Counts before timing: 200 positions, every one summed exactly once.
-    expect(positions.length).toBe(200);
-    expect(new Set(positions.map((position) => position.symbol)).size).toBe(200);
-    expect(
-      Money.equals(
-        Money.sum([...Object.values(byBucket), cryptoHolding]),
-        Money.sum(positions.map((position) => position.marketWorth)),
-      ),
-    ).toBe(true);
+    const { byBucket, cryptoHolding, positionCount, securityCount } = scaleBalances();
+    // Counts before timing: 200 positions, every one a distinct security.
+    expect(positionCount).toBe(200);
+    expect(securityCount).toBe(200);
     expect(cryptoHolding.minor).toBeGreaterThan(0n);
 
     const plan: ProjectionPlan = {
@@ -212,7 +211,7 @@ describe('the 08 §7.2 budget', () => {
     console.log(
       `[perf] ${cpu} × ${String(cpus().length)} logical, Node ${process.version}, load ${loadavg()
         .map((x) => x.toFixed(2))
-        .join(' ')}; 200 positions → buckets ${Object.entries(byBucket)
+        .join(' ')}; WP 4.13 scale seed, 200 positions → buckets ${Object.entries(byBucket)
         .map(([bucket, total]) => `${bucket} ${Money.formatAmount(total)}`)
         .join(', ')}, crypto ${Money.formatAmount(cryptoHolding)}; ${String(job.paths)} paths × ` +
         `${String(yearsOf(job.plan))} years, bootstrap over ${String(series.equityReal.length)} months`,

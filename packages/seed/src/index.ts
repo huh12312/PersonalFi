@@ -37,3 +37,13 @@ export {
  * into `generateDemoData`.
  */
 export * from './phase3-investments.ts';
+/**
+ * WP 4.13: the Phase 4 **scale** seed — 200 positions across four tax
+ * buckets, five years of daily prices/holdings-snapshots/net-worth, a
+ * multi-currency account with an FX series, and a plan with goals,
+ * contributions and life events. `generatePhase3Investments` above is the
+ * correctness seed and stays byte-identical; this is a second, additive
+ * dataset for the 800 ms / 150 ms perf budgets (08 §7.1–7.2). See
+ * `phase4-scale.ts`'s own header.
+ */
+export * from './phase4-scale.ts';
