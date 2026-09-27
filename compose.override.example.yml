@@ -71,22 +71,23 @@ services:
   #   environment:
   #     PLAID_ENABLED: 'true'
 
-  # Point a real api/worker's notification channels at compose.dev.yml's
-  # `dev-sinks` profile (mailpit + ntfy — `wp3.14-carryovers.md` item 3)
-  # instead of a real SMTP/ntfy host, while iterating on a channel or a rule
-  # locally. Only meaningful if you are running the *full* compose.yml stack
-  # (this file layers onto compose.yml, never onto compose.dev.yml — see this
-  # file's own header) alongside `docker compose -f compose.dev.yml --profile
-  # dev-sinks up -d` at the same time, with both compose projects sharing a
-  # network path to `mailpit`/`ntfy`'s published ports.
-  # `NOTIFICATIONS_ALLOWED_HOSTS`'s default (unset) is deny-all by design
-  # (.env.example: "an operator who has not named a host has not consented to
-  # one") — this override exists so that widening is visible and local, never
-  # the default a fresh clone gets, the same reasoning every other example in
-  # this file gives for itself.
-  # api:
-  #   environment:
-  #     NOTIFICATIONS_ALLOWED_HOSTS: 'mailpit,ntfy'
-  # worker:
-  #   environment:
-  #     NOTIFICATIONS_ALLOWED_HOSTS: 'mailpit,ntfy'
+  # WP 4.12b, C-16 (G3-9, `gate-security-review.md` §3.9): this block used to
+  # suggest pointing a real api/worker's notification channels at
+  # compose.dev.yml's `dev-sinks` profile (mailpit + ntfy) by allow-listing
+  # them here. **That can never work, and the gate proved it from inside a
+  # real worker container**: `mailpit`/`ntfy` resolve to addresses in the
+  # `personalfi_backend` network's private range, and the egress guard's
+  # private-range refusal is not configurable by any allow-list — widening
+  # `NOTIFICATIONS_ALLOWED_HOSTS` narrows *which* public host may be dialled,
+  # never *whether* a private one may be. ntfy's dev-sink port (2586) is also
+  # plain HTTP, which `allowedSchemes`/`allowedPorts` refuse independently of
+  # the host question. Observed: ntfy on 443 → `resolves to … (private)`; ntfy
+  # on 2586 → `port 2586 is not allowed`; SMTP to mailpit:465 → `resolves to …
+  # (private)`.
+  #
+  # The dev sinks are for `apps/api/test/db/notifications-delivery.test.ts`'s
+  # own idiom instead: the full guard runs, then only the socket target is
+  # swapped to the sink's address with `secure: false` — proving the guard and
+  # the transport without ever pointing the *production* egress path at a
+  # private address. There is no compose override that reaches the same
+  # result, because the guard is doing exactly what it is supposed to do here.

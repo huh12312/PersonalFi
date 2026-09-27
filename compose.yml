@@ -64,6 +64,10 @@ volumes:
   caddy_data: {}
   caddy_config: {}
   backups: {}
+  # WP 4.5/4.6 (WP 4.12b, the Wave C wiring handover §4.4): `worker`'s cache
+  # for the pinned, checksum-verified return series. See that service's own
+  # comment above.
+  returns_cache: {}
 
 secrets:
   # FILE MODE (M-2). There is deliberately no `mode: 0400` here. Compose's
@@ -425,6 +429,13 @@ services:
       # is avoided by construction: one env var, read by both.
       JOB_POLL_INTERVAL_MS: ${JOB_POLL_INTERVAL_MS:-5000}
       SCHEDULER_INTERVAL_MS: ${SCHEDULER_INTERVAL_MS:-30000}
+      # WP 4.5/4.6, the Wave C wiring handover §4.3/§4.4: `worker` is the one
+      # process with a job runner, so it is the one process that constructs
+      # `createMonteCarloRunnerFromCache` and the one process that needs this
+      # volume mounted read-write — `api` binds no `monteCarlo`. Points at the
+      # named volume below, not the package's own default cache directory
+      # (inside the image, and this rootfs is read-only — `x-common` above).
+      PLANNING_RETURNS_CACHE_DIR: /var/lib/personalfi/returns
     # WP 3.4's four market-data keys and WP 3.5's CDP pair join the list here
     # and on `worker` — and on neither `migrator` nor `proxy` nor `backup`.
     # Kept in step with `just harden-secrets`, in the same edit (N-1).
@@ -446,6 +457,15 @@ services:
       ]
     networks: [backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
+    # WP 4.5/4.6 (WP 4.12b, the Wave C wiring handover §4.4): the only named,
+    # writable volume this service mounts, and the only service that mounts
+    # `returns_cache` at all (`scripts/compose-hardening-check.sh`'s
+    # `WRITABLE_NAMED_VOLUMES` names `worker` as its one owner). An operator
+    # fetches WP 4.5's pinned return series onto it once
+    # (`packages/contexts/planning/data/returns/fetch.ts`); this batch never
+    # fetches on the process's own behalf.
+    volumes:
+      - returns_cache:/var/lib/personalfi/returns
     user: '10001:10001'
     depends_on:
       db: { condition: service_healthy }

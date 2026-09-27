@@ -263,6 +263,18 @@ export const environmentSchema = z.object({
   // property the allow-list exists to deny.
   MARKET_DATA_ALLOWED_HOSTS: z.string().default(''),
 
+  // ------------------------------------------------------------------ planning
+  //
+  // A writable volume for WP 4.5's fetched-once, checksum-pinned return series
+  // (`packages/contexts/planning/data/returns/PROVENANCE.md`) — the package's
+  // own default cache directory (`data/returns/cache/`) is inside the image,
+  // which is read-only in production (WP 4.12b, wiring handover §4.3).
+  // Empty/absent ⇒ the package's own default, correct for local dev, where the
+  // tree is writable. Only `worker` ever reads this: it is the one process
+  // with a job runner, so it is the one process that constructs
+  // `createMonteCarloRunnerFromCache`; `api` never binds `monteCarlo`.
+  PLANNING_RETURNS_CACHE_DIR: z.string().default(''),
+
   // -------------------------------------------------------------------- crypto
   //
   // The same shape and the same narrowing semantics, for the crypto connectors:

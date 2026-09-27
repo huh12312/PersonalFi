@@ -433,8 +433,18 @@ export function checkUrl(rawUrl: string, policy: EgressPolicy): EgressDecision {
     return refuse('scheme_not_allowed', `${scheme}: only https may appear in a channel URL`);
   }
   const port = url.port === '' ? 443 : Number.parseInt(url.port, 10);
+  // WP 4.12b, C-12 (gate input (2), the "honest gap"): this used to hand
+  // `checkDestination` the literal `'https'` rather than the `scheme` this
+  // function just parsed and validated above — inert today only because the
+  // check three lines up already refuses everything but `https` before
+  // reaching here, so `checkDestination`'s own `allowedSchemes` policy never
+  // saw anything else to refuse. Passing the parsed value makes
+  // `allowedSchemes` a real second layer rather than a comforting no-op: if
+  // the check above is ever loosened (a future scheme joining the channel-URL
+  // allowance), it is `checkDestination`'s policy — not this function's own
+  // hardcoded string — that decides what a `ChannelEgressPolicy` actually permits.
   return checkDestination(
-    { scheme: 'https', host: url.hostname, port, path: `${url.pathname}${url.search}` },
+    { scheme, host: url.hostname, port, path: `${url.pathname}${url.search}` },
     policy,
   );
 }

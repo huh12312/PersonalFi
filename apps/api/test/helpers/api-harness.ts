@@ -36,6 +36,7 @@ import {
   SEED_MANIFEST,
   SeedConnector,
 } from '@connector/manual';
+import { COINBASE_MANIFEST, type CoinbaseConnector } from '@connector/coinbase';
 import { PLAID_MANIFEST, type PlaidConnector } from '@connector/plaid';
 import { WALLETRPC_MANIFEST, WalletRpcConnector } from '@connector/walletrpc';
 import { loadConfig, type AppConfig } from '@core/config';
@@ -143,6 +144,14 @@ export interface HarnessOptions {
    */
   readonly plaidConnector?: PlaidConnector;
   /**
+   * A `CoinbaseConnector` wired to a fake transport (`@connector/coinbase/test`'s
+   * `FakeCoinbaseApi`), for `coinbase-routes.test.ts` (WP 4.12b, C-4). The same
+   * seam as `plaidConnector` above, for the same reason: `createConnectorRegistry`
+   * (`domain.ts`) always builds a real, network-bound `fetchTransport()` for
+   * Coinbase, and a route test must never dial out.
+   */
+  readonly coinbaseConnector?: CoinbaseConnector;
+  /**
    * Extra file secrets under `SECRETS_DIR`, name → contents. WP 3.13's
    * `export-encrypt.test.ts` is the motivating caller: `?encrypt=true`
    * (`routes/export.ts`) reads `age_recipients` from this directory, and
@@ -229,6 +238,9 @@ export async function createApiHarness(options: HarnessOptions): Promise<ApiHarn
     ...(options.plaidConnector === undefined
       ? []
       : [{ connector: options.plaidConnector, manifest: PLAID_MANIFEST }]),
+    ...(options.coinbaseConnector === undefined
+      ? []
+      : [{ connector: options.coinbaseConnector, manifest: COINBASE_MANIFEST }]),
     ...(walletRpc === null
       ? []
       : [

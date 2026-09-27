@@ -73,8 +73,23 @@ export function Sidebar() {
                     <Link
                       to={item.to}
                       className={cn(
-                        'flex h-10 items-center gap-3 rounded-md px-2.5 text-small font-medium text-text-secondary hover:bg-bg-subtle focus-visible:outline-none',
-                        active && 'bg-accent-wash text-accent-text hover:bg-accent-wash',
+                        'flex h-10 items-center gap-3 rounded-md border-l-2 border-transparent px-2.5 text-small font-medium text-text-secondary hover:bg-bg-subtle focus-visible:outline-none',
+                        // wp3.11 §10 item 3 / wp4.10: `text-accent-text` on
+                        // `--accent-wash` measured 4.28:1 in dark mode
+                        // (axe, `color-contrast`, AA needs 4.5:1) — the same
+                        // token pair `HoldingsTable.tsx` hit and fixed by
+                        // dropping the accent hue from the *text* entirely
+                        // (wp3.11-investments-ui.md §6.2). Applied here too:
+                        // the active row keeps its accent *wash* background
+                        // and gains an accent-coloured left rail (border vs.
+                        // `--bg-surface`, not text vs. `--accent-wash`, so
+                        // it is judged against a different, passing pair —
+                        // 5.17:1 light / 4.89:1 dark, both ≥3:1 for a
+                        // non-text mark, WCAG 1.4.11) instead of colouring
+                        // the label. "Current" is still carried by
+                        // `aria-current="page"`, the wash, and the rail —
+                        // never by the label's hue alone (1.4.1).
+                        active && 'border-accent bg-accent-wash text-text-primary hover:bg-accent-wash',
                       )}
                       aria-current={active ? 'page' : undefined}
                       title={collapsed ? item.label : undefined}

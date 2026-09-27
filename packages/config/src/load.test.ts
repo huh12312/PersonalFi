@@ -858,6 +858,39 @@ describe.each([
 });
 
 /**
+ * `PLANNING_RETURNS_CACHE_DIR` (WP 4.12b, the Wave C wiring handover §4.3).
+ *
+ * No hostname validation here — this is a filesystem path, not an egress
+ * allow-list — so the only claim worth a test is the one every other
+ * "empty/absent means the code's own default" variable in this file makes:
+ * an empty string is `undefined`, never the literal `''`, so a caller can
+ * write `config.planning.returnsCacheDir ?? theirOwnDefault` and land on the
+ * package's own default rather than trying to open a directory named "".
+ */
+describe('PLANNING_RETURNS_CACHE_DIR', () => {
+  it('defaults to undefined — the package keeps its own default cache directory', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+    expect(config.planning.returnsCacheDir).toBeUndefined();
+  });
+
+  it('an empty string means undefined too, not one empty path', () => {
+    const config = loadConfig({
+      env: env({ PLANNING_RETURNS_CACHE_DIR: '' }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.planning.returnsCacheDir).toBeUndefined();
+  });
+
+  it('a non-empty value passes through verbatim', () => {
+    const config = loadConfig({
+      env: env({ PLANNING_RETURNS_CACHE_DIR: '/var/lib/personalfi/returns' }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.planning.returnsCacheDir).toBe('/var/lib/personalfi/returns');
+  });
+});
+
+/**
  * `coinbase_key_name` / `coinbase_private_key` (wp3.5-coinbase.md §8.1).
  *
  * Feature-detected exactly as the Plaid pair is, and — the half that earns

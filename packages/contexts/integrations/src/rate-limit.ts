@@ -238,6 +238,28 @@ export const OPENFIGI_WINDOWS: readonly RateWindow[] = Object.freeze([
 ]);
 
 /**
+ * OpenFIGI, anonymous (no `openfigi_api_key`): the published unauthenticated
+ * tier — **25 mapping *requests* per minute**, not jobs (WP 4.12b, C-8;
+ * `gate-security-review.md` §6, G3-11). `OPENFIGI_WINDOWS` above is the
+ * *keyed* rate, 25,000 jobs/minute, and `createOpenFigiMapper` used to apply
+ * it unconditionally — including to the anonymous mode it already batches at
+ * a tenth the size for (`OPENFIGI_ANONYMOUS_MAX_JOBS_PER_REQUEST`,
+ * `openfigi.ts`). Unlike the keyed tier, the anonymous limit bills by
+ * **request**, not job: OpenFIGI's own published anonymous quota is a request
+ * count, and the 10-jobs/batch cap already keeps any one request's job count
+ * small — the risk this budget exists to prevent is *how often* an unkeyed
+ * process calls, not how many symbols one call carries.
+ */
+export const OPENFIGI_ANONYMOUS_WINDOWS: readonly RateWindow[] = Object.freeze([
+  Object.freeze({
+    windowMs: MINUTE_MS,
+    limit: 25,
+    unit: 'request' as const,
+    label: '25 requests/minute (anonymous)',
+  }),
+]);
+
+/**
  * yfinance/Yahoo: no documented quota, "throttled ad hoc" (01 §4.1).
  *
  * A self-imposed 60/hour, because the honest answer to an undocumented limit is

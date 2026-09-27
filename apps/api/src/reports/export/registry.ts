@@ -78,8 +78,27 @@ export const SENSITIVE_COLUMNS: readonly SensitiveColumn[] = [
   },
 ];
 
-/** Defence in depth: a column named like a secret is dropped from *any* table. */
-const SENSITIVE_NAME_PATTERN = /sealed|credential|_secret$|access_token|api_key/iu;
+/**
+ * Defence in depth: a column named like a secret is dropped from *any* table.
+ *
+ * The `sealed` branch exists for `sealed_credentials`/`sealed_config`/
+ * `sealed_secret`-shaped SecretBox envelope columns (D5) — every one of them
+ * names "sealed" as a **prefix**: "the sealed thing is a `<noun>`". It must
+ * not also catch a column that merely has "sealed" *somewhere in its name*
+ * (WP 4.12b, C-7 — found twice, exercising this file's own `fetchStream`
+ * against real fixtures: first `net_worth_daily.sealed_at` — "when this row
+ * was sealed", not a secret — then `projection_runs.balances_sealed` — a
+ * boolean, "sealed" as a **suffix**. Both were silently redacted on export;
+ * both round trips then broke downstream, the first on
+ * `net_worth_daily_one_open_day_idx`, the second on a `NOT NULL` violation on
+ * import). Anchoring the branch to `^sealed_` — "sealed" at the very start,
+ * followed by an underscore — matches every envelope column above and
+ * excludes both false positives structurally, not by naming each one: a
+ * future `sealed_<secret-shaped-noun>` column is still caught, and a future
+ * `<anything>_sealed` boolean or `sealed_at`/`sealed_on`/`sealed_by`-shaped
+ * timestamp/attribution column is not.
+ */
+const SENSITIVE_NAME_PATTERN = /^sealed_(?!at$)|credential|_secret$|access_token|api_key/iu;
 
 export function isSensitiveColumn(table: string, column: string): boolean {
   if (SENSITIVE_COLUMNS.some((entry) => entry.table === table && entry.column === column)) {

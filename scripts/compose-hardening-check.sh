@@ -144,6 +144,12 @@ const WRITABLE_NAMED_VOLUMES = new Map([
   ['backups:backup', 'encrypted nightly dumps'],
   ['caddy_data:proxy', "Caddy's internal-CA key material and issued certificates"],
   ['caddy_config:proxy', "Caddy's autosaved config snapshot"],
+  [
+    'returns_cache:worker',
+    "WP 4.5's fetched-once, checksum-pinned return series (WP 4.12b, the Wave C " +
+      'wiring handover §4.4); the api runs no jobs and binds no Monte Carlo runner, ' +
+      'so it never mounts this volume.',
+  ],
 ]);
 
 function writableVolumeOwners(volumeName) {

@@ -364,7 +364,16 @@ async function valueByQuantityTimesPrice(
 }
 
 /**
- * A decimal major-unit string to minor units, half-up away from zero.
+ * A decimal major-unit string to minor units, half-even (banker's rounding).
+ *
+ * WP 4.12b, C-11 (G3-6): this used to round half-up away from zero, the one
+ * place in the app that disagreed with `docs/CONVENTIONS.md`'s "rounding is
+ * banker's (half-even) by default" — every other rounding call in this
+ * codebase (`@core/kernel`'s `Money.multiplyByDecimal`, `Quantity`'s own
+ * `ROUND_HALF_EVEN`) already follows it. `test/net-worth.test.ts`'s reconcile
+ * fixture plants an exact half cent (`quantity x price` landing exactly on
+ * `.125` at the third decimal place) precisely because half-up and half-even
+ * agree on every other digit and disagree only there.
  *
  * Two-decimal minor units: every currency this app handles today is
  * `minorUnitScale` 2, and a security priced in a zero-decimal currency would
@@ -372,14 +381,35 @@ async function valueByQuantityTimesPrice(
  * change worth making when there is one rather than a parameter nobody passes.
  * The rounding is applied once per position rather than once per share, which is
  * where a naive implementation loses a cent per lot.
+ *
+ * The full fractional remainder (not just one extra digit) decides the tie,
+ * so a value whose exact halfway point is hidden behind more than three
+ * decimal places (an 18-decimal crypto quantity times a ten-digit price, say)
+ * is still judged correctly rather than by a truncated shadow of itself.
  */
 function toMinorUnits(major: string): bigint {
   const negative = major.startsWith('-');
   const digits = negative ? major.slice(1) : major;
   const [whole = '0', fraction = ''] = digits.split('.');
-  const padded = `${fraction}00`.slice(0, 3);
-  const scaled = BigInt(whole) * 1000n + BigInt(padded === '' ? '0' : padded);
-  const rounded = (scaled + 5n) / 10n;
+  const kept = fraction.slice(0, 2).padEnd(2, '0');
+  const rest = fraction.slice(2);
+  const scaled = BigInt(whole) * 100n + BigInt(kept === '' ? '0' : kept);
+
+  let rounded: bigint;
+  if (/^0*$/.test(rest)) {
+    rounded = scaled; // exact at two decimal places already; nothing to round
+  } else {
+    const firstRestDigit = Number(rest[0] ?? '0');
+    const strictlyPastHalf = rest.slice(1).replace(/0+$/, '') !== '';
+    if (firstRestDigit > 5 || (firstRestDigit === 5 && strictlyPastHalf)) {
+      rounded = scaled + 1n;
+    } else if (firstRestDigit < 5) {
+      rounded = scaled;
+    } else {
+      // Exactly half a cent: round to the even neighbour.
+      rounded = scaled % 2n === 0n ? scaled : scaled + 1n;
+    }
+  }
   return negative ? -rounded : rounded;
 }
 

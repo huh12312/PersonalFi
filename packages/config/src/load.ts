@@ -96,6 +96,21 @@ export interface AllowedHostsConfig {
 }
 
 /**
+ * `PLANNING_RETURNS_CACHE_DIR`, as deployment configuration (WP 4.12b, the
+ * Wave C wiring handover §4.3).
+ *
+ * `undefined` when the env var is empty or absent — never an empty string —
+ * so a caller can write `config.planning.returnsCacheDir ?? theirOwnDefault`
+ * and get the package's own default (`packages/contexts/planning/data/returns/cache/`)
+ * exactly the way an absent override behaves everywhere else in this file.
+ * Only `worker` ever reads it: it is the one process with a job runner, so it
+ * is the one process that constructs `createMonteCarloRunnerFromCache`.
+ */
+export interface PlanningConfig {
+  readonly returnsCacheDir: string | undefined;
+}
+
+/**
  * Coinbase, feature-detected — or absent.
  *
  * `AppConfig.coinbase` is `null` whenever `coinbase_key_name` or
@@ -130,6 +145,8 @@ export interface AppConfig {
   readonly marketData: AllowedHostsConfig;
   /** `CRYPTO_ALLOWED_HOSTS`, validated. Empty ⇒ the code's own list stands. */
   readonly crypto: AllowedHostsConfig;
+  /** `PLANNING_RETURNS_CACHE_DIR`. Empty/absent ⇒ `returnsCacheDir` is `undefined`. */
+  readonly planning: PlanningConfig;
   readonly isProduction: boolean;
   readonly isTest: boolean;
 }
@@ -323,6 +340,10 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       allowedHosts: Object.freeze(marketDataAllowedHostsResult.hosts),
     }),
     crypto: Object.freeze({ allowedHosts: Object.freeze(cryptoAllowedHostsResult.hosts) }),
+    planning: Object.freeze({
+      returnsCacheDir:
+        env.PLANNING_RETURNS_CACHE_DIR === '' ? undefined : env.PLANNING_RETURNS_CACHE_DIR,
+    }),
     isProduction,
     isTest: env.NODE_ENV === 'test',
   });

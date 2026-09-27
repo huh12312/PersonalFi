@@ -144,6 +144,23 @@ describe('the OpenFIGI adapter', () => {
     }
   });
 
+  it(
+    'without a key, the budget is the published anonymous tier — 25 requests/minute, billed by ' +
+      'request — not the keyed 25,000 jobs/minute (WP 4.12b, C-8)',
+    async () => {
+      const transport = batchEcho();
+      const mapper = mapperOver(transport, apiKeyOf('openfigi', ''));
+
+      // 3 requests (10 + 10 + 5), so 3 requests spent — never 25 jobs spent
+      // against a jobs-denominated window.
+      await mapper.map(jobs(25));
+
+      const [window] = mapper.budget(NOW);
+      expect(window?.limit).toBe(25);
+      expect(window?.used).toBe(3);
+    },
+  );
+
   it('"No identifier found" is a no_match, anything else is an error', async () => {
     // A fact about the identifier versus a fault in the call. Recording a
     // transient fault as `no_match` would write a permanent, wrong conclusion

@@ -42,6 +42,8 @@
  * the compose stack, against the dev Postgres at `127.0.0.1:5433`.
  */
 import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { DateOnly, Money, money, newId, systemClock, type Money as MoneyType } from '@core/kernel';
 import { createConsumerPump } from '@core/platform';
 import { recordBalance, upsertAccount } from '@ctx/ledger';
@@ -670,6 +672,67 @@ describe.skipIf(NO_DATABASE)(
         expect(settled).toEqual(['rejected', 'rejected', 'rejected', 'rejected', 'rejected']);
       },
       10_000,
+    );
+
+    it(
+      "worker.ts's own boot path binds a non-null Monte Carlo runner when a return series is " +
+        'present and null when it is not (WP 4.12b, the Wave C wiring handover §4.2/§4.4)',
+      () => {
+        // Source-shape half, the same style `worker-account-holder-poll.test.ts`
+        // uses for C-1: proves the *wiring line* exists in `worker.ts` rather
+        // than only that `createMonteCarloRunnerFromCache` behaves correctly in
+        // isolation (already proven above, and again below). Before this WP,
+        // `worker.ts` never called `createMonteCarloRunnerFromCache` at all —
+        // `domain.ts` only exported it — so `ModuleWiringOptions.monteCarlo`
+        // was always `undefined` in production and the nightly baseline never
+        // ran a real Monte Carlo, silently.
+        const worker = readFileSync(
+          fileURLToPath(new URL('../../src/worker.ts', import.meta.url)),
+          'utf8',
+        );
+        expect(
+          worker.includes('createMonteCarloRunnerFromCache('),
+          'worker.ts must construct the runner itself — it is the one process with a job runner.',
+        ).toBe(true);
+        expect(
+          worker.includes('config.planning.returnsCacheDir'),
+          'the cache directory must come from @core/config, not a hardcoded or missing default.',
+        ).toBe(true);
+        // The constructed value must actually reach `appModules`, not just be
+        // constructed and dropped — a `const monteCarlo = …` with no consumer
+        // would pass the two assertions above and still leave the nightly
+        // baseline deterministic-only.
+        const appModulesCall = /appModules\(\{[\s\S]*?\n {12}\}\),/u.exec(worker)?.[0];
+        expect(appModulesCall, 'no appModules({...}) call found to inspect').toBeDefined();
+        expect(
+          (appModulesCall ?? '').includes('monteCarlo,') ||
+            (appModulesCall ?? '').includes('monteCarlo:'),
+          'the constructed `monteCarlo` value must be passed into appModules({...}).',
+        ).toBe(true);
+
+        // Behavioural half: the exact function worker.ts calls, fed the exact
+        // shape `config.planning.returnsCacheDir` has (`string | undefined`).
+        // This tree's `packages/contexts/planning/data/returns/cache/` already
+        // carries WP 4.5's fetched-once series (`loadReturnSeries()` above, at
+        // line ~558, already relies on this), so the *default* — `undefined`,
+        // exactly as an operator who has not set `PLANNING_RETURNS_CACHE_DIR`
+        // gets — resolves to a real, present series.
+        const bound = createMonteCarloRunnerFromCache({
+          logger: capturingLogger().logger as never,
+        });
+        expect(bound, 'a present return series must bind a non-null runner').not.toBeNull();
+
+        // And the null half: an explicit path that does not exist, the same
+        // shape an operator's un-fetched cache volume has on a fresh install.
+        const missing = createMonteCarloRunnerFromCache({
+          cacheDir: `/tmp/personalfi-wp4.12b-c-wiring-no-such-cache-${newId()}`,
+          logger: capturingLogger().logger as never,
+        });
+        expect(
+          missing,
+          'an absent return series must bind null, never a silent lognormal',
+        ).toBeNull();
+      },
     );
   },
 );

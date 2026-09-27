@@ -58,7 +58,7 @@ function parseBundleOrThrow(text: string): ParsedBundle {
 }
 
 export interface ExportRouteOptions {
-  /** `@core/config`'s `env.SECRETS_DIR` — where `age_recipients` is looked for. */
+  /** `@core/config`'s `env.SECRETS_DIR` — where `age_recipient` is looked for. */
   readonly secretsDir: string;
 }
 

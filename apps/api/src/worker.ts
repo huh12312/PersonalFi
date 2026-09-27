@@ -47,6 +47,7 @@ import {
   createMarketDataRunRecorder,
   createMarketDataRuntime,
   createMarketDataWriter,
+  createMonteCarloRunnerFromCache,
   createNotificationChannels,
   createWalletRpcRuntime,
   drizzleTransactionalExecutor,
@@ -147,7 +148,7 @@ export function assertPoolCoversLeases(
   const pinned = 3 + 2 + consumerCount;
   if (poolMax > pinned) return;
   const detail =
-    "3 LISTEN + 2 leader leases + one lease per consumer. Every job-runner poll and scheduler " +
+    '3 LISTEN + 2 leader leases + one lease per consumer. Every job-runner poll and scheduler ' +
     'tick would queue on pool.connect() forever with no error. Raise DATABASE_POOL_MAX or ' +
     'reduce the number of registered consumers.';
   logger.error({ poolMax, pinned, consumerCount }, `refusing to boot: ${detail}`);
@@ -417,6 +418,23 @@ async function main(): Promise<void> {
       );
     }
 
+    // WP 4.5/4.6, the Wave C wiring handover §4.2: the worker is the one
+    // process with a job runner, so it is the one process that constructs the
+    // Monte Carlo runner and binds it into `appModules`, mirroring
+    // `marketDataRuntime` above. `createMonteCarloRunnerFromCache` never
+    // throws for an absent or checksum-mismatched cache — it logs and returns
+    // `null`, and the nightly baseline then runs deterministic and records
+    // that it did (`modules.ts`'s own doc on `ModuleWiringOptions.monteCarlo`).
+    // It does throw for anything else `loadReturnSeries` can throw, which
+    // reaches this function's caller — `main()`'s own top-level catch — the
+    // same way every other unhandled boot error does.
+    const monteCarlo = createMonteCarloRunnerFromCache({
+      ...(config.planning.returnsCacheDir === undefined
+        ? {}
+        : { cacheDir: config.planning.returnsCacheDir }),
+      logger,
+    });
+
     const modules =
       secretBox === null
         ? { consumers: [], jobs: [], enabled: [], disabled: ['module.connections'] }
@@ -425,9 +443,11 @@ async function main(): Promise<void> {
             userId,
             appModules({
               database,
-              // D6: one holder. `module.planning` binds `@ctx/investments`'
-              // price and FX readers to it, and refuses by name if a job
-              // arrives for another (see `modules.ts`'s `planningModule`).
+              // D6: one holder — this deployment's assumption, no longer a
+              // structural refusal. `module.planning`'s jobs build their ports
+              // from each job's own context.userId (WP 4.6; see `modules.ts`'s
+              // `planningModule`), so a job for a second holder is served
+              // correctly rather than refused by name.
               userId,
               orchestrator: createDomainRuntime({
                 database,
@@ -491,6 +511,10 @@ async function main(): Promise<void> {
                 writer: createMarketDataWriter(database),
                 recorder: createMarketDataRunRecorder(database),
               },
+              // WP 4.5/4.6 — built above, once per process, from whatever an
+              // operator has already fetched onto the cache volume. `null`
+              // when no pinned series is present; never a silent lognormal.
+              monteCarlo,
             }),
           );
     logger.info({ enabled: modules.enabled, disabled: modules.disabled }, 'modules resolved');
@@ -578,6 +602,10 @@ async function main(): Promise<void> {
 // (`test/worker-account-holder-poll.test.ts`, `test/worker-pool-guard.test.ts`)
 // without also booting a real worker — needing a database, a KEK and a
 // container's env — every time the module is merely imported.
+// This guard exists to decide whether to call loadConfig() at all (see the
+// comment above); it cannot read the value through @core/config without
+// calling the very function it is guarding.
+// eslint-disable-next-line no-restricted-properties -- see the comment above
 if (process.env['VITEST'] === undefined) {
   try {
     await main();

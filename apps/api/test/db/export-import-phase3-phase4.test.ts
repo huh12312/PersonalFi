@@ -61,7 +61,10 @@ const describeWithDb = describe.skipIf(NO_DATABASE);
 
 /** `sha256:` + 64 lowercase hex — every content-hash-shaped column this batch needs. */
 function fakeSha256(label: string): string {
-  const hex = Buffer.from(label.padEnd(32, '.'), 'utf8').toString('hex').slice(0, 64).padEnd(64, '0');
+  const hex = Buffer.from(label.padEnd(32, '.'), 'utf8')
+    .toString('hex')
+    .slice(0, 64)
+    .padEnd(64, '0');
   return `sha256:${hex}`;
 }
 
@@ -150,7 +153,7 @@ describeWithDb('export/import — the Phase 3 + Phase 4 tables (Phase 3 gate C-7
       source: string;
       supersedes_id: string | null;
       correction_reason: string | null;
-      net_worth_minor: string;
+      net_worth_minor: bigint;
       sealed_at: Date | null;
     }>(
       `SELECT id, revision, source, supersedes_id, correction_reason, net_worth_minor, sealed_at
@@ -173,7 +176,7 @@ describeWithDb('export/import — the Phase 3 + Phase 4 tables (Phase 3 gate C-7
     // *imported* revision 1's row (same id, verbatim), not to nothing.
     expect(imported2?.supersedes_id).toBe(revision1Id);
     expect(imported2?.correction_reason).toBe('a missed FX rate was backfilled');
-    expect(imported2?.net_worth_minor).toBe('523920');
+    expect(imported2?.net_worth_minor).toBe(523920n);
     expect(imported2?.sealed_at).toBeNull();
   });
 
@@ -324,12 +327,12 @@ describeWithDb('export/import — the Phase 3 + Phase 4 tables (Phase 3 gate C-7
     // wp4.2 §9 item 6: assumptions_version round-trips verbatim, never rehashed.
     expect(run.rows[0]?.assumptions_version).toBe(assumptionsVersion);
 
-    const percentile = await clean.pool.query<{ run_id: string; p50_minor: string }>(
+    const percentile = await clean.pool.query<{ run_id: string; p50_minor: bigint }>(
       `SELECT run_id, p50_minor FROM projection_percentiles WHERE run_id = $1`,
       [runId],
     );
     expect(percentile.rows[0]?.run_id).toBe(runId);
-    expect(percentile.rows[0]?.p50_minor).toBe('100000000');
+    expect(percentile.rows[0]?.p50_minor).toBe(100000000n);
 
     const assumptions = await clean.pool.query<{ assumptions_version: string }>(
       `SELECT assumptions_version FROM plan_assumptions WHERE id = $1`,

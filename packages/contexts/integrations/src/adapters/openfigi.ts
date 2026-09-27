@@ -43,7 +43,12 @@
  */
 import { arrayOf, recordOf } from '../json.ts';
 import type { ProviderClient } from '../http.ts';
-import { createRateBudget, OPENFIGI_WINDOWS, type RateBudget } from '../rate-limit.ts';
+import {
+  createRateBudget,
+  OPENFIGI_ANONYMOUS_WINDOWS,
+  OPENFIGI_WINDOWS,
+  type RateBudget,
+} from '../rate-limit.ts';
 import type { ApiKey } from '../secrets.ts';
 import { budgetReport, callJson, type CallContext } from './common.ts';
 
@@ -88,7 +93,7 @@ export interface OpenFigiOptions {
 }
 
 export interface OpenFigiMapper extends FigiMapper {
-  /** What this adapter has spent against 25,000 jobs/minute. */
+  /** What this adapter has spent, against 25,000 jobs/minute keyed or 25 requests/minute anonymous. */
   budget(
     now: Date,
   ): readonly { readonly label: string; readonly used: number; readonly limit: number }[];
@@ -97,7 +102,14 @@ export interface OpenFigiMapper extends FigiMapper {
 }
 
 export function createOpenFigiMapper(options: OpenFigiOptions): OpenFigiMapper {
-  const budget = options.budget ?? createRateBudget(OPENFIGI_WINDOWS);
+  // WP 4.12b, C-8: the anonymous tier is a *different* published budget, not
+  // a smaller helping of the keyed one — 25 requests/minute, billed by
+  // request, versus 25,000 jobs/minute, billed by job. Applying the keyed
+  // window to an unkeyed process would let it call far faster than OpenFIGI's
+  // own documented anonymous quota permits.
+  const budget =
+    options.budget ??
+    createRateBudget(options.key.present ? OPENFIGI_WINDOWS : OPENFIGI_ANONYMOUS_WINDOWS);
   const context: CallContext = {
     client: options.client,
     key: options.key,
@@ -134,8 +146,10 @@ export function createOpenFigiMapper(options: OpenFigiOptions): OpenFigiMapper {
         ...(options.key.present ? { 'x-openfigi-apikey': options.key.reveal() } : {}),
       },
       body,
-      // Billed in jobs, not requests (01 §4.1: "25,000 mapping jobs/min").
-      cost: batch.length,
+      // Keyed: billed in jobs, not requests (01 §4.1: "25,000 mapping
+      // jobs/min"). Anonymous: billed by request — `OPENFIGI_ANONYMOUS_WINDOWS`'
+      // own header explains why the two tiers do not share a unit.
+      cost: options.key.present ? batch.length : 1,
     }));
 
     if (!call.ok) {

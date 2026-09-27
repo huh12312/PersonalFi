@@ -36,7 +36,7 @@ export const OPENAPI_CONTRACT_VERSION = '0.1.0';
  * `AdvisorRequest`, the `Insight[]` response with evidence refs, derivations,
  * confidence, a severity ceiling and `requires_review`, and `AdvisorManifest`.
  */
-export const ADVISOR_CONTRACT_VERSION = '1.1.0';
+export const ADVISOR_CONTRACT_VERSION = '1.2.0';
 
 /**
  * The integer that crosses the wire, as distinct from the artefact version

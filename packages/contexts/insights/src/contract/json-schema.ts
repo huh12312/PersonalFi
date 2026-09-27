@@ -51,7 +51,7 @@ import { ADVISOR_CONTRACT_MAJOR, ADVISOR_SCHEMA_BASE } from './version.ts';
  * test where the contracts package is read from disk. The parity test asserts
  * the two agree, so the duplication is checked rather than hoped about.
  */
-export const ADVISOR_ARTEFACT_VERSION = '1.1.0' as const;
+export const ADVISOR_ARTEFACT_VERSION = '1.2.0' as const;
 
 export interface SchemaDocument {
   /** File name under `packages/contracts/advisor/v1/`. */
