@@ -33,6 +33,7 @@
 import { isCategorizationError, type CategorizationErrorCode } from '@ctx/categorization';
 import { ConnectorError, isConnectionsError, type ConnectionsErrorCode } from '@ctx/connections';
 import { isLedgerError, type LedgerErrorCode } from '@ctx/ledger';
+import { MonteCarloRefused } from '@ctx/planning';
 import { AppError } from '../problem.ts';
 
 /**
@@ -156,6 +157,25 @@ export function toDomainProblem(error: unknown): unknown {
       title: titleOf(status),
       detail: error.message,
       family: status === 404 || status === 400 || status === 422 ? 'user' : 'domain',
+    });
+  }
+
+  if (error instanceof MonteCarloRefused) {
+    // Thrown by `worker-host.ts`'s `assertWithinEnvelope`, **before** a worker
+    // is spawned: a path count, horizon, path×year product, seed, series or ν
+    // outside `MONTE_CARLO_ENVELOPE` — the request's own arithmetic, not a
+    // broken invariant, so 422 rather than 409/500
+    // (docs/evidence/phase-4/wp4.5-montecarlo.md §10 item 7; wp4.6-projection
+    // -service.md §10.2, "the binding belongs with the binding, WP 4.8 builds
+    // the routes"). `error.code` is one of the `planning.montecarlo_*
+    // _outside_envelope` / `…_invalid` codes; `error.field` names which
+    // request field it was.
+    return new AppError({
+      status: 422,
+      code: error.code,
+      title: titleOf(422),
+      detail: error.message,
+      family: 'domain',
     });
   }
 

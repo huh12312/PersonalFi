@@ -77,10 +77,14 @@ import {
 import { RECURRING_EVENTS, createRecurringConsumer, type RecurringDatabase } from '@ctx/recurring';
 import {
   PLANNING_EVENTS,
-  SNAPSHOT_JOB_KIND,
+  createGoalPaceConsumer,
   createNetWorthConsumer,
+  goalEvaluationStoreOf,
   netWorthSnapshotJobHandler,
+  projectionRefreshJobHandler,
   registerNetWorthSnapshotSchedule,
+  registerProjectionRefreshSchedule,
+  type MonteCarloRunner,
   type PlanningDatabase,
 } from '@ctx/planning';
 import {
@@ -113,6 +117,7 @@ import {
   createRecurringLedgerPort,
   assertDrizzleTransaction,
   planningPortsFor,
+  planningRevealedPortsFor,
   type MarketDataRuntime,
 } from './domain.ts';
 import type { InvestmentSyncPort } from '@ctx/investments';
@@ -140,20 +145,22 @@ export interface ModuleWiringOptions {
    * The account holder these modules are being built for — the same id
    * `resolveModules(platform, userId, …)` is called with.
    *
-   * Only `module.planning` reads it, and only because two of the four ports
-   * `@ctx/planning` reads its world through (`PriceReader`, `FxReader`) take no
-   * `userId` argument: they are `@ctx/investments`' readers, assigned straight
-   * through with no adapter, and bind the holder at construction.
-   * `SnapshotJobDependencies.portsFor` receives the job's transaction and
-   * nothing else, so the id has to be closed over here.
-   *
-   * **This deployment has one holder (D6)** — the same assumption
-   * `module.notifications`'s `secretBoxFor: () => options.secretBox` already
-   * makes one screen up — and `planningModule` refuses **by name** if a job
-   * ever arrives for a different user, so the assumption is checked rather
-   * than merely documented. `docs/evidence/phase-3/wp3.w-wiring.md` §10 records
-   * the clean fix, which is `@ctx/planning`'s to make: `portsFor` should take
-   * `(executor, userId)`.
+   * `module.planning`'s own jobs no longer need it closed over: WP 4.6 changed
+   * `SnapshotJobDependencies.portsFor` (and `ProjectionRefreshJobDependencies
+   * .portsFor`) to `(executor, userId) => …`, so `planningModule` below builds
+   * `@ctx/planning`'s ports from **the job's own `context.userId`** on every
+   * run — `docs/evidence/phase-3/wp3.w-wiring.md` §10's clean fix, made by
+   * `@ctx/planning` itself in `docs/evidence/phase-4/wp4.6-projection-service.md`
+   * §10.1. This field is kept because every other module still takes it (the
+   * flag-resolution call site, `orchestrator.registerNightlySchedule`, …), and
+   * because **this deployment still has one holder (D6)** — the same
+   * assumption `module.notifications`'s `secretBoxFor: () => options.secretBox`
+   * makes one screen up — but that is now a deployment fact this process is
+   * only ever asked to serve, not a structural refusal `planningModule` has to
+   * enforce: a job or a schedule call for a second holder is served correctly,
+   * from that holder's own ports, which is exactly what
+   * `apps/api/test/db/phase4-wiring.test.ts`'s "a second holder's refresh job
+   * is served, not refused by name" drives against a real pump.
    */
   readonly userId: string;
   /**
@@ -224,6 +231,21 @@ export interface ModuleWiringOptions {
    * change and a test can drive a non-USD holder through the real wiring.
    */
   readonly baseCurrency?: string;
+  /**
+   * WP 4.5's Monte Carlo, bound to WP 4.5's worker host and a loaded return
+   * series (`domain.ts`'s `createMonteCarloRunner` /
+   * `createMonteCarloRunnerFromCache`). `undefined` and `null` are the same
+   * thing to `planningModule`: the nightly `planning.projection_refresh` job
+   * runs the deterministic baseline and the run records `method:
+   * 'deterministic'` — **never** a silent substitution of the lognormal
+   * engine for an unavailable Monte Carlo one
+   * (docs/evidence/phase-4/wp4.6-projection-service.md §10.2;
+   * wp4.5-montecarlo.md §10 item 4). Only the worker process constructs a
+   * non-null value today (`app.ts` runs no jobs, so it has nothing to refresh
+   * with one); see this WP's evidence, "For the orchestrator", for the exact
+   * line `worker.ts` needs.
+   */
+  readonly monteCarlo?: MonteCarloRunner | null;
 }
 
 /** The three `module.integrations` collaborators `domain.ts` builds. */
@@ -278,6 +300,18 @@ export {
   SNAPSHOT_JOB_KIND as NET_WORTH_SNAPSHOT_JOB_KIND,
   SNAPSHOT_SCHEDULE_NAME as NET_WORTH_SNAPSHOT_SCHEDULE_NAME,
   NET_WORTH_CONSUMER_NAME,
+} from '@ctx/planning';
+
+/**
+ * `planning.projection_refresh` — WP 4.6's 04:30 job and schedule, and WP 4.6's
+ * `planning.goal_pace@v1` consumer name. Re-exported rather than restated for
+ * the same one-definition reason as the net-worth constants just above.
+ */
+export {
+  PROJECTION_REFRESH_CRON,
+  PROJECTION_REFRESH_JOB_KIND,
+  PROJECTION_REFRESH_SCHEDULE_NAME,
+  GOAL_PACE_CONSUMER_NAME,
 } from '@ctx/planning';
 
 /**
@@ -483,49 +517,70 @@ export function appModules(options: ModuleWiringOptions): readonly ModuleRegistr
 }
 
 /**
- * `module.planning` — WP 3.8's net-worth snapshot.
+ * `module.planning` — WP 3.8's net-worth snapshot and WP 4.6's baseline
+ * projection refresh.
  *
- * The first module in this list that registers **all three** of a consumer, a
- * job and a schedule, and the division of labour between them is the design:
+ * Two jobs, each with the same three-part division of labour: a consumer that
+ * marks something dirty (or, for the second, claims a run) and does no
+ * arithmetic, a job that does the work once overnight, and a schedule that
+ * fires it.
  *
- *   * the **consumer** (`planning.net_worth@v1`) marks the open day `dirty`
- *     when a balance, a holding or a price lands, and does no arithmetic. One
- *     nightly sync produces one `ledger.BalanceRecorded` per account;
- *     recomputing inside each delivery would run the whole aggregate — every
- *     account, every holding, an FX lookup each — a dozen times in ninety
- *     seconds to produce a row only the last run's value survives in;
- *   * the **job** does that work once, at 04:00 local;
- *   * the **schedule** is what fires it.
+ *   * `planning.net_worth@v1` (WP 3.8) marks the open day `dirty` when a
+ *     balance, a holding or a price lands; `planning.net_worth_snapshot`
+ *     seals it at 04:00 local.
+ *   * `planning.goal_pace@v1` (WP 4.6) claims a **baseline** run's
+ *     `planning.ProjectionCompleted` and evaluates goal pace exactly once per
+ *     evaluation; `planning.projection_refresh` recomputes (or re-serves from
+ *     cache) the baseline at 04:30 local, after the snapshot has sealed the
+ *     day it starts from.
  *
  * ## Two things this function is careful about
  *
- * **`executorFor` hands the consumer the pump's Drizzle transaction.**
- * `markDirty` is written against the query builder, and `ConsumerContext.tx` is
- * not a Drizzle handle unless the pump was built with
- * `drizzleTransactionalExecutor` — see `domain.ts` and wp3.w-wiring.md §4.
- * `assertDrizzleTransaction` fails **by name** if it was not, rather than as a
- * `db.select is not a function` recorded in `failed_error` where nobody looks.
+ * **`executorFor`/`storeFor`/`outboxFor` hand each consumer the pump's Drizzle
+ * transaction.** `markDirty` and the goal-pace claim are both written against
+ * the query builder, and `ConsumerContext.tx` is not a Drizzle handle unless
+ * the pump was built with `drizzleTransactionalExecutor` — see `domain.ts` and
+ * wp3.w-wiring.md §4. `assertDrizzleTransaction` fails **by name** if it was
+ * not, rather than as a `db.select is not a function` recorded in
+ * `failed_error` where nobody looks.
  *
- * **The job is refused if it arrives for another holder.** `portsFor` receives
- * the job's transaction and no user id, so `planningPortsFor` closes over
- * `options.userId` (D6: one holder). That assumption is checked here rather
- * than trusted: a job whose `context.userId` differs would otherwise compute
- * one user's net worth from another user's prices, which is the class of bug
- * that is invisible in every test that has one user.
+ * **Neither job binds one holder any more.** Through WP 3.8, `portsFor`
+ * received the job's transaction and no user id, so this function closed over
+ * `options.userId` and refused, by name, a job whose `context.userId` differed
+ * (D6: one holder, checked rather than merely documented). WP 4.6 changed
+ * `SnapshotJobDependencies.portsFor` and added
+ * `ProjectionRefreshJobDependencies.portsFor` as `(executor, userId) => …`
+ * (docs/evidence/phase-4/wp4.6-projection-service.md §10.1), so both jobs below
+ * build `@ctx/planning`'s ports from **the job's own `context.userId`** —
+ * `netWorthSnapshotJobHandler` and `projectionRefreshJobHandler` do the
+ * threading internally, and there is no wrapper left here to refuse anything.
+ * `apps/api/test/db/phase4-wiring.test.ts` drives a second holder's refresh
+ * job and asserts it is served, not refused.
  */
 function planningModule(options: ModuleWiringOptions, clock: Clock): ModuleRegistration {
   const database = options.database;
   const baseCurrency = options.baseCurrency ?? 'USD';
+  // Built once per holder id, for the two jobs below — `planningPortsFor` and
+  // `planningRevealedPortsFor` both take `(executor, { userId, timeZone, clock })`.
+  const portOptions = (userId: string): { userId: string; timeZone: string; clock: Clock } => ({
+    userId,
+    timeZone: options.timezone,
+    clock,
+  });
   const snapshot = netWorthSnapshotJobHandler({
     database,
-    portsFor: (executor) =>
-      planningPortsFor(executor, {
-        userId: options.userId,
-        timeZone: options.timezone,
-        clock,
-      }),
+    portsFor: (executor, userId) => planningPortsFor(executor, portOptions(userId)),
     timeZone: options.timezone,
     baseCurrency,
+  });
+  const refresh = projectionRefreshJobHandler({
+    database,
+    portsFor: (executor, userId) => planningRevealedPortsFor(executor, portOptions(userId)),
+    // `null` until WP 4.5's worker host is bound (see `ModuleWiringOptions
+    // .monteCarlo`'s own doc): the nightly baseline then runs deterministic
+    // and the run records that it did.
+    monteCarlo: options.monteCarlo ?? null,
+    timeZone: options.timezone,
   });
 
   return {
@@ -537,26 +592,27 @@ function planningModule(options: ModuleWiringOptions, clock: Clock): ModuleRegis
         options: { timeZone: options.timezone },
         executorFor: (context) => assertDrizzleTransaction(context.tx),
       }),
+      // `planning.goal_pace@v1` on `planning.ProjectionCompleted`. The claim,
+      // every read and every `GoalOffTrack` land in the pump's own
+      // transaction — the WP 3.2 "re-delivery re-announced" lesson, closed in
+      // the row rather than in a receipt (wp4.6-projection-service.md §4).
+      createGoalPaceConsumer({
+        storeFor: (context) =>
+          goalEvaluationStoreOf(assertDrizzleTransaction(context.tx), context.clock),
+        outboxFor: (context) => context.tx,
+      }),
     ],
-    jobs: [
-      {
-        ...snapshot,
-        handler: async (payload, context) => {
-          if (context.userId !== options.userId) {
-            throw new Error(
-              `${SNAPSHOT_JOB_KIND} was enqueued for a user these modules were not built for ` +
-                "(apps/api/src/modules.ts binds @ctx/planning's price and FX readers to one " +
-                'holder — D6). Rebuild appModules() for that user, or give ' +
-                "SnapshotJobDependencies.portsFor the job's own userId " +
-                '(docs/evidence/phase-3/wp3.w-wiring.md §10).',
-            );
-          }
-          await snapshot.handler(payload, context);
-        },
-      },
-    ],
+    // planning.net_worth_snapshot (04:00), planning.projection_refresh
+    // (04:30) — both concurrency 1 (declared by each job in `@ctx/planning`'s
+    // own `jobs.ts`, preserved here because nothing wraps them any more).
+    jobs: [snapshot, refresh],
     schedules: async (userId: string): Promise<void> => {
       await registerNetWorthSnapshotSchedule(
+        database,
+        { userId, timezone: options.timezone },
+        clock,
+      );
+      await registerProjectionRefreshSchedule(
         database,
         { userId, timezone: options.timezone },
         clock,

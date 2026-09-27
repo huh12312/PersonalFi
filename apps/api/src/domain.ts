@@ -178,9 +178,14 @@ import {
   type WalletAddressStore,
 } from '@connector/walletrpc';
 import {
+  ENGINE_VERSION,
+  MONTE_CARLO_VERSION,
+  ReturnSeriesRefused,
   defaultFlagsFor,
   defaultTaxBucketFor,
   liveEarmarksByAccount,
+  loadReturnSeries,
+  runMonteCarloInWorker,
   type AccountKind as PlanningAccountKind,
   type BalanceObservation as PlanningBalanceObservation,
   type BalancesReader as PlanningBalancesReader,
@@ -189,8 +194,11 @@ import {
   type CashflowReader as PlanningCashflowReader,
   type HoldingObservation as PlanningHoldingObservation,
   type HoldingsReader as PlanningHoldingsReader,
+  type MonteCarloHostOptions,
+  type MonteCarloRunner,
   type PlanningAccount,
   type PlanningExecutor,
+  type ReturnSeries,
   type RevealedPorts as PlanningRevealedPorts,
   type SnapshotPorts,
   type SpendingReader as PlanningSpendingReader,
@@ -2859,6 +2867,199 @@ export function planningRevealedPortsFor(
     cashflow: planningCashflowReaderFor(executor, options),
     spending: planningSpendingReaderFor(executor),
   };
+}
+
+// ---------------------------------------------------------------------------
+// WP 4.5/4.6 — binding `MonteCarloRunner` to WP 4.5's worker host
+// ---------------------------------------------------------------------------
+//
+// `@ctx/planning`'s projection service is written against `MonteCarloRunner`
+// (`ports.ts`) and is handed `null` until this file binds it —
+// `docs/evidence/phase-4/wp4.6-projection-service.md` §10.2 and
+// `wp4.5-montecarlo.md` §10.2 describe the adapter; this is it, corrected
+// against WP 4.5's *landed* surface rather than the draft the first evidence
+// wrote against.
+
+/**
+ * A small counting semaphore: `acquire()` resolves once fewer than `limit`
+ * holders are inside; `release()` wakes the oldest waiter (or, with nobody
+ * waiting, frees the slot). No timeout and no separate queue cap — the caller
+ * (`createMonteCarloRunner`) already refused anything outside
+ * `MONTE_CARLO_ENVELOPE` before a request reaches here, so a queued run is
+ * always one this process has already agreed to do; only *concurrency* is
+ * bounded, never admission.
+ */
+function createSemaphore(limit: number): { acquire(): Promise<void>; release(): void } {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return {
+    acquire(): Promise<void> {
+      if (active < limit) {
+        active += 1;
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => waiting.push(resolve));
+    },
+    release(): void {
+      const next = waiting.shift();
+      if (next !== undefined) next();
+      else active -= 1;
+    },
+  };
+}
+
+/**
+ * WP 4.5 measured ~30–45 MB per concurrent Monte Carlo worker (10k–20k paths)
+ * against a 512 MB container (`wp4.5-montecarlo.md` §4.5, §10 open items): ten
+ * at once exhausts it. Eight is comfortably under that (~360 MB at the high
+ * end) while still letting more than one request run at a time. **Not a
+ * config value yet** — `packages/config` is outside this WP's ownership; see
+ * this WP's evidence for the key an operator would tune this with.
+ */
+const MAX_CONCURRENT_MONTE_CARLO_RUNS = 8;
+
+/**
+ * WP 4.5's `MonteCarloRunner`, over a loaded return series.
+ *
+ * Three things this adapter must not get wrong, each because a WP 4.5/4.6
+ * evidence note names the exact failure:
+ *
+ *   1. **The seed travels unchanged, in both directions.**
+ *      `runMonteCarloInWorker` already treats the seed as a 64-bit pattern —
+ *      `toMonteCarloJob` canonicalises it to unsigned before it reaches the
+ *      worker, and the summary echoes it unsigned. WP 4.6's original adapter
+ *      draft called for `BigInt.asIntN`/`asUintN` conversions that WP 4.5's
+ *      finished surface made unnecessary (`wp4.5-montecarlo.md` §10 item 8:
+ *      "harmless if kept"). They are not harmless on the way *out*:
+ *      `BigInt.asIntN(64, summary.seed)` would turn every echoed seed ≥ 2^63
+ *      negative, which the service's own echo check (`checkedOutcome`) would
+ *      then see as a seed mismatch and refuse
+ *      `planning.monte_carlo_outcome_mismatch` — silently, for roughly half
+ *      of all baselines. This adapter passes `request.seed` and
+ *      `summary.seed` through untouched.
+ *   2. **`engineVersion` is a property of the runner, known before any run**,
+ *      because it is part of the projection service's cache key. It folds the
+ *      Monte Carlo version, the deterministic engine it shares a `stepYear`
+ *      with, the engine kind, and the return series' own checksum, so a
+ *      different series is a different cache key rather than a silently
+ *      different distribution served under an old one.
+ *   3. **The seven bands are per level, not per period**
+ *      (`summary.bands` is `PERCENTILE_LEVELS` order: p5, p10, p25, p50, p75,
+ *      p90, p95), and this adapter regroups them into one `MonteCarloPeriod`
+ *      per year, index `t` ↦ `{ age: startAge + t, calendarYear: startYear +
+ *      t }`. Swapping two levels here (e.g. p75 for p90) would produce a
+ *      plausible-looking band set with the wrong numbers in it and no type
+ *      error anywhere.
+ */
+export function createMonteCarloRunner(options: {
+  readonly series: ReturnSeries;
+  readonly deadlineMs?: number;
+  readonly maxConcurrent?: number;
+  /**
+   * Injectable, for the same reason WP 4.5's own tests inject it
+   * (`worker-limits.test.ts`): a test that wants to *prove* the envelope
+   * refuses before a worker exists needs a spawn it can count. Never set in
+   * production.
+   */
+  readonly spawn?: MonteCarloHostOptions['spawn'];
+}): MonteCarloRunner {
+  const det = ENGINE_VERSION.slice(ENGINE_VERSION.lastIndexOf('/') + 1);
+  // e.g. 'personalfi.montecarlo/1;det/1;bootstrap;cbdefda1752e' — well under
+  // `projection_runs.engine_version`'s 64 characters.
+  const engineVersion =
+    `${MONTE_CARLO_VERSION};det/${det};bootstrap;` + `${options.series.sha256.slice(0, 12)}`;
+  if (engineVersion.length > 64) {
+    throw new Error(
+      `Monte Carlo engineVersion "${engineVersion}" exceeds the column's 64 characters`,
+    );
+  }
+  const semaphore = createSemaphore(options.maxConcurrent ?? MAX_CONCURRENT_MONTE_CARLO_RUNS);
+
+  return {
+    engineVersion,
+    async run(request) {
+      await semaphore.acquire();
+      try {
+        const { summary } = await runMonteCarloInWorker(
+          {
+            plan: request.plan,
+            assumptions: request.assumptions,
+            // A 64-bit pattern already (0022 stores it unsigned) — no
+            // asIntN/asUintN conversion; see this function's header, item 1.
+            seed: request.seed,
+            paths: request.paths,
+            engine: 'bootstrap',
+            series: options.series,
+          },
+          {
+            ...(options.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
+            ...(options.spawn === undefined ? {} : { spawn: options.spawn }),
+          },
+        );
+        const [p5, p10, p25, p50, p75, p90, p95] = summary.bands; // PERCENTILE_LEVELS order
+        if (summary.bands.length !== 7 || p50 === undefined) {
+          throw new Error(
+            `Monte Carlo worker returned ${String(summary.bands.length)} bands, expected p5..p95`,
+          );
+        }
+        return {
+          engineVersion,
+          seed: summary.seed,
+          paths: summary.paths,
+          successProbability: summary.successProbability,
+          periods: p50.byYear.map((median, t) => ({
+            index: t,
+            age: summary.startAge + t,
+            calendarYear: summary.startYear + t,
+            p5: p5!.byYear[t]!,
+            p10: p10!.byYear[t]!,
+            p25: p25!.byYear[t]!,
+            p50: median,
+            p75: p75!.byYear[t]!,
+            p90: p90!.byYear[t]!,
+            p95: p95!.byYear[t]!,
+          })),
+        };
+      } finally {
+        semaphore.release();
+      }
+    },
+  };
+}
+
+/**
+ * Load WP 4.5's pinned return series and bind it, or answer `null` and log
+ * exactly why — **never** a silent fallback to the lognormal engine, which the
+ * projection service would have no way to tell apart from an honest Monte
+ * Carlo run of the real thing (`wp4.6-projection-service.md` §10.2,
+ * `wp4.5-montecarlo.md` §10 item 4).
+ *
+ * Called once at worker boot (`worker.ts` — see this WP's evidence for the
+ * exact line; not this file's to add) and handed to `appModules` as
+ * `ModuleWiringOptions.monteCarlo`. Uses `loadReturnSeries` rather than
+ * `ensureReturnSeries`: this process never downloads Shiller's workbook on the
+ * holder's behalf — that is `data/returns/fetch.ts`, an operator command run
+ * once and reviewed (`wp4.5-montecarlo.md` §6's licence verdict) — it only
+ * reads whatever an operator has already fetched onto the cache volume.
+ */
+export function createMonteCarloRunnerFromCache(options: {
+  readonly cacheDir?: string;
+  readonly logger: PlatformLogger;
+}): MonteCarloRunner | null {
+  try {
+    const series = loadReturnSeries(options.cacheDir);
+    return createMonteCarloRunner({ series });
+  } catch (error) {
+    if (error instanceof ReturnSeriesRefused) {
+      options.logger.warn(
+        { err: error, code: error.code },
+        'planning.returns_series_unavailable: Monte Carlo is bound to null; ' +
+          'the nightly baseline runs deterministic and records that it did',
+      );
+      return null;
+    }
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -915,7 +915,7 @@ describe.skipIf(NO_DATABASE)(
         investmentSyncPort: createInvestmentSyncPort(h.database.db),
       });
       const planning = modules.find((module) => module.flagKey === 'module.planning');
-      expect(planning?.consumers ?? []).toHaveLength(1);
+      expect(planning?.consumers ?? []).toHaveLength(2);
 
       // --- (b) the schedule row, through the real upsert ------------------
       await planning?.schedules?.(h.userId);

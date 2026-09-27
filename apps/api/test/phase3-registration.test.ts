@@ -45,6 +45,7 @@ import { NET_WORTH_CONSUMED_EVENT_TYPES, PLANNING_EVENTS } from '@ctx/planning';
 import { ADVISOR_SCOPES, BUILTIN_CATALOGUE, SCOPE_CATALOGUE } from '@ctx/insights';
 import { describe, expect, it } from 'vitest';
 import {
+  GOAL_PACE_CONSUMER_NAME,
   NET_WORTH_CONSUMER_NAME,
   NET_WORTH_SNAPSHOT_CRON,
   NET_WORTH_SNAPSHOT_JOB_KIND,
@@ -52,6 +53,7 @@ import {
   PRICE_REFRESH_CRON,
   PRICE_REFRESH_JOB_KIND,
   PRICE_REFRESH_SCHEDULE_NAME,
+  PROJECTION_REFRESH_JOB_KIND,
   appModules,
   type ModuleWiringOptions,
 } from '../src/modules.ts';
@@ -290,7 +292,11 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     expect(integrations?.consumers ?? []).toHaveLength(0);
   });
 
-  it('module.planning registers the net-worth consumer, the 04:00 job and its schedule', () => {
+  it('module.planning registers the net-worth consumer, the goal-pace consumer, the 04:00 and 04:30 jobs and their schedules', () => {
+    // WP 4.6 added a second consumer (`planning.goal_pace@v1`) and a second
+    // job/schedule pair (`planning.projection_refresh`, 04:30) beside WP 3.8's
+    // net-worth snapshot; this is that test, renamed and extended rather than
+    // duplicated, per docs/evidence/phase-4/wp4.6-projection-service.md §10.3.
     const planning = appModules(wiringOptions()).find(
       (module) => module.flagKey === 'module.planning',
     );
@@ -298,20 +304,28 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     expect(planning?.events).toEqual(PLANNING_EVENTS);
 
     const consumers = planning?.consumers ?? [];
-    expect(consumers).toHaveLength(1);
-    const consumer = consumers[0] as RegisteredConsumer;
-    expect(consumer.name).toBe(NET_WORTH_CONSUMER_NAME);
+    expect(consumers).toHaveLength(2);
+    const netWorthConsumer = consumers[0] as RegisteredConsumer;
+    expect(netWorthConsumer.name).toBe(NET_WORTH_CONSUMER_NAME);
     // Three producers, none of which `@ctx/planning` may import: the filter is
     // strings for exactly that reason (`consumer.ts`'s own doc).
-    expect(consumer.filter).toEqual([...NET_WORTH_CONSUMED_EVENT_TYPES]);
-    expect(consumer.filter).toContain('ledger.BalanceRecorded');
-    expect(consumer.filter).toContain('investments.HoldingsUpdated');
-    expect(consumer.filter).toContain('integrations.PricesUpdated');
+    expect(netWorthConsumer.filter).toEqual([...NET_WORTH_CONSUMED_EVENT_TYPES]);
+    expect(netWorthConsumer.filter).toContain('ledger.BalanceRecorded');
+    expect(netWorthConsumer.filter).toContain('investments.HoldingsUpdated');
+    expect(netWorthConsumer.filter).toContain('integrations.PricesUpdated');
 
-    expect((planning?.jobs ?? []).map((job) => job.kind)).toEqual([NET_WORTH_SNAPSHOT_JOB_KIND]);
-    // One snapshot in flight at a time — preserved through the composition
-    // root's own wrapper, which is the thing that could silently drop it.
+    const goalPaceConsumer = consumers[1] as RegisteredConsumer;
+    expect(goalPaceConsumer.name).toBe(GOAL_PACE_CONSUMER_NAME);
+    expect(goalPaceConsumer.filter).toEqual(['planning.ProjectionCompleted']);
+
+    expect((planning?.jobs ?? []).map((job) => job.kind)).toEqual([
+      NET_WORTH_SNAPSHOT_JOB_KIND,
+      PROJECTION_REFRESH_JOB_KIND,
+    ]);
+    // One run in flight at a time, for each job — declared by `@ctx/planning`
+    // itself in `jobs.ts` now that nothing here wraps either handler.
     expect(planning?.jobs?.[0]?.concurrency).toBe(1);
+    expect(planning?.jobs?.[1]?.concurrency).toBe(1);
     expect(planning?.schedules).toBeDefined();
   });
 
@@ -331,27 +345,42 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     }
   });
 
-  it('the net-worth job refuses, by name, a job enqueued for another holder', async () => {
-    // D6: `appModules` binds `@ctx/planning`'s price and FX readers to one
-    // holder, because `SnapshotJobDependencies.portsFor` receives the job's
-    // transaction and no user id. Without this guard a job for user B would
-    // compute B's net worth from A's prices and A's ladder — a wrong number
-    // with no error, and invisible in every test that has one user.
+  it('neither planning job wraps its handler with a by-name refusal any more', async () => {
+    // Through WP 3.8, `appModules` bound `@ctx/planning`'s price and FX readers
+    // to one holder and this file's wrapper refused, by name, a job whose
+    // `context.userId` differed (D6). WP 4.6 changed `SnapshotJobDependencies
+    // .portsFor` / added `ProjectionRefreshJobDependencies.portsFor` to
+    // `(executor, userId) => …`, so `modules.ts`'s `planningModule` no longer
+    // wraps either handler — the ports are built from the job's own userId on
+    // every run (docs/evidence/phase-4/wp4.6-projection-service.md §10.1).
+    //
+    // Proved behaviourally, not by string-matching a deleted message:
+    // `wiringOptions()`'s stub `database.transaction` is a `noop` that throws
+    // "not called by a registration-shape test" the instant anything calls
+    // it. The old wrapper threw its own, different message **before** ever
+    // reaching `database.transaction` for a different-holder context; with
+    // the wrapper gone, both handlers reach straight through to it and throw
+    // the stub's message instead. That a *different real* holder's job is
+    // actually served end to end needs a real transaction and a real second
+    // holder's row, which is why the full proof is
+    // `apps/api/test/db/phase4-wiring.test.ts`'s "a second holder's refresh
+    // job is served, not refused by name".
     const planning = appModules(wiringOptions()).find(
       (module) => module.flagKey === 'module.planning',
     );
-    const handler = planning?.jobs?.[0]?.handler;
-    expect(handler).toBeDefined();
-    if (handler === undefined) return;
-
-    await expect(
-      handler({}, {
-        userId: 'a-different-holder',
-        correlationId: 'c',
-        clock: systemClock,
-        logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
-      } as never),
-    ).rejects.toThrow(/was enqueued for a user these modules were not built for/u);
+    const jobs = planning?.jobs ?? [];
+    expect(jobs).toHaveLength(2);
+    const context = {
+      userId: 'a-different-holder',
+      correlationId: 'c',
+      clock: systemClock,
+      logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+    } as never;
+    for (const job of jobs) {
+      await expect(job.handler({}, context)).rejects.toThrow(
+        /not called by a registration-shape test/u,
+      );
+    }
   });
 
   it('a flag that is off contributes no event, no consumer, no job and no schedule', async () => {
