@@ -20,7 +20,14 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveShillerMonthly, LAST_MONTH, FIRST_MONTH } from './derive.ts';
-import { CHECKSUM_FILE, DEFAULT_CACHE_DIR, SERIES_FILE, parseReturnSeries, pinnedSha256, sha256Hex } from './series.ts';
+import {
+  CHECKSUM_FILE,
+  DEFAULT_CACHE_DIR,
+  SERIES_FILE,
+  parseReturnSeries,
+  pinnedSha256,
+  sha256Hex,
+} from './series.ts';
 import { readWorkbook } from './xls.ts';
 
 const LANDING_PAGE = 'https://shillerdata.com/';
@@ -32,7 +39,16 @@ function argument(name: string): string | undefined {
   return at < 0 ? undefined : process.argv[at + 1];
 }
 
-async function download(): Promise<{ readonly bytes: Uint8Array; readonly url: string; readonly lastModified: string }> {
+/** An operator command's output: stdout for the report, stderr for the refusal. */
+function say(line: string): void {
+  process.stdout.write(`${line}\n`);
+}
+
+async function download(): Promise<{
+  readonly bytes: Uint8Array;
+  readonly url: string;
+  readonly lastModified: string;
+}> {
   let url = LAST_SEEN_URL;
   try {
     const page = await (await fetch(LANDING_PAGE)).text();
@@ -89,7 +105,7 @@ function damodaranCrossCheck(csv: string, histret: Uint8Array): void {
   }
   const n = rows.length;
   const correlation = (n * sxy - sx * sy) / Math.sqrt((n * sxx - sx * sx) * (n * syy - sy * sy));
-  console.log(
+  say(
     `damodaran cross-check: ${String(n)} calendar years 1928..${LAST_MONTH.slice(0, 4)}, ` +
       `mean |Shiller − Damodaran| real S&P = ${(sumAbs / n).toFixed(4)}, correlation = ${correlation.toFixed(4)}, ` +
       `mean Shiller = ${(sx / n).toFixed(4)}, mean Damodaran = ${(sy / n).toFixed(4)}`,
@@ -108,32 +124,39 @@ async function main(): Promise<void> {
   }
   const derived = deriveShillerMonthly(source.bytes);
   const digest = sha256Hex(derived.csv);
-  console.log(`source:              ${source.url}`);
-  console.log(`source last-modified: ${source.lastModified}`);
-  console.log(`source sha256:       ${sha256Hex(source.bytes)} (${String(source.bytes.length)} bytes; not pinned)`);
-  console.log(`upstream last row:   ${derived.upstreamLastDate}`);
-  console.log(`window:              ${FIRST_MONTH}..${LAST_MONTH}, ${String(derived.rows)} months`);
-  console.log(`cross-check vs Shiller's index columns: equity ${String(derived.equityCrossCheck)}, bond ${String(derived.bondCrossCheck)}`);
-  console.log(`derived sha256:      ${digest}`);
+  say(`source:              ${source.url}`);
+  say(`source last-modified: ${source.lastModified}`);
+  say(
+    `source sha256:       ${sha256Hex(source.bytes)} (${String(source.bytes.length)} bytes; not pinned)`,
+  );
+  say(`upstream last row:   ${derived.upstreamLastDate}`);
+  say(`window:              ${FIRST_MONTH}..${LAST_MONTH}, ${String(derived.rows)} months`);
+  say(
+    `cross-check vs Shiller's index columns: equity ${String(derived.equityCrossCheck)}, bond ${String(derived.bondCrossCheck)}`,
+  );
+  say(`derived sha256:      ${digest}`);
 
   if (pin) {
     writeFileSync(CHECKSUM_FILE, `${digest}  ${SERIES_FILE}\n`);
-    console.log(`pinned in ${CHECKSUM_FILE}`);
+    say(`pinned in ${CHECKSUM_FILE}`);
   } else {
     const pinned = pinnedSha256();
     if (digest !== pinned) {
-      console.error(`REFUSED: the derived series hashes to ${digest}, the pin is ${pinned}. Review, then --pin.`);
+      process.stderr.write(
+        `REFUSED: the derived series hashes to ${digest}, the pin is ${pinned}. Review, then --pin.\n`,
+      );
       process.exitCode = 1;
       return;
     }
-    console.log('matches the pin');
+    say('matches the pin');
   }
   mkdirSync(cacheDir, { recursive: true });
   writeFileSync(join(cacheDir, SERIES_FILE), derived.csv);
-  console.log(`wrote ${join(cacheDir, SERIES_FILE)}`);
+  say(`wrote ${join(cacheDir, SERIES_FILE)}`);
 
   const damodaran = argument('--damodaran');
-  if (damodaran !== undefined) damodaranCrossCheck(derived.csv, new Uint8Array(readFileSync(damodaran)));
+  if (damodaran !== undefined)
+    damodaranCrossCheck(derived.csv, new Uint8Array(readFileSync(damodaran)));
 }
 
 await main();

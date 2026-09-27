@@ -45,12 +45,7 @@
  *
  * Interior module: `number` only.
  */
-import {
-  nextDouble,
-  nextIndex,
-  nextNormal,
-  type Xoshiro,
-} from './prng.ts';
+import { nextDouble, nextIndex, nextNormal, type Xoshiro } from './prng.ts';
 
 /** 07 §5.4: `p_stay = 1 − 1/12`, so E[block] = 12 months. */
 export const P_STAY = 1 - 1 / 12;
@@ -90,7 +85,10 @@ export interface PreparedSeries {
   readonly inflationVariance: number;
 }
 
-function demeanedLogs(column: Float64Array): { readonly logs: Float64Array; readonly variance: number } {
+function demeanedLogs(column: Float64Array): {
+  readonly logs: Float64Array;
+  readonly variance: number;
+} {
   const n = column.length;
   const logs = new Float64Array(n);
   let sum = 0;
@@ -111,13 +109,18 @@ function demeanedLogs(column: Float64Array): { readonly logs: Float64Array; read
 
 export function prepareSeries(series: ReturnSeries): PreparedSeries {
   const months = series.equityReal.length;
-  if (months < MONTHS_PER_YEAR || series.bondReal.length !== months || series.inflation.length !== months) {
+  if (
+    months < MONTHS_PER_YEAR ||
+    series.bondReal.length !== months ||
+    series.inflation.length !== months
+  ) {
     throw new RangeError('a return series needs three equal columns of at least twelve months');
   }
   for (const column of [series.equityReal, series.bondReal, series.inflation]) {
     for (let i = 0; i < months; i += 1) {
       const r = column[i] ?? Number.NaN;
-      if (!Number.isFinite(r) || r <= -1) throw new RangeError(`series row ${String(i)} is not a return`);
+      if (!Number.isFinite(r) || r <= -1)
+        throw new RangeError(`series row ${String(i)} is not a return`);
     }
   }
   const equity = demeanedLogs(series.equityReal);
@@ -196,7 +199,16 @@ export function drawBootstrapYear(
  * the leading block). The remaining five are still factored, so a matrix that
  * is not positive definite anywhere is refused, not partly used.
  */
-export const LOGNORMAL_ORDER = ['USEQ', 'BOND', 'CRYPTO', 'INTL', 'EM', 'TIPS', 'REIT', 'CASH'] as const;
+export const LOGNORMAL_ORDER = [
+  'USEQ',
+  'BOND',
+  'CRYPTO',
+  'INTL',
+  'EM',
+  'TIPS',
+  'REIT',
+  'CASH',
+] as const;
 
 /**
  * `A = L Lᵀ` for a symmetric positive-definite `A`, lower-triangular `L`, row

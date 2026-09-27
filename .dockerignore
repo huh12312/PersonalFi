@@ -19,3 +19,9 @@ docs
 *.md
 !README.md
 !THIRD_PARTY.md
+
+# WP 4.5: the Monte Carlo return series is downloaded on first run (neither
+# Shiller nor Damodaran grants redistribution — data/returns/PROVENANCE.md) and
+# pinned by checksum; an image built on a machine that has fetched it must not
+# ship it.
+packages/contexts/planning/data/returns/cache

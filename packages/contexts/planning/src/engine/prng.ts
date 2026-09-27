@@ -120,11 +120,19 @@ export function newXoshiro(): Xoshiro {
 }
 
 /**
- * A stored seed as its two uint32 halves. The seed is a `bigint` because it is
- * a Postgres `BIGINT` on `projection_runs` (04 §5.6, WP 4.6); the host refuses
- * anything outside the signed 64-bit range before it gets here, so the
- * two's-complement reinterpretation below is a bijection on legal seeds.
+ * A seed as its two uint32 halves. **A seed is a 64-bit pattern**: WP 4.6
+ * stores it unsigned on `projection_runs.seed` (`numeric(20, 0)`, 0..2^64 − 1),
+ * and the host's envelope accepts either representation of a pattern — signed
+ * (−2^63..2^63 − 1) or unsigned — and canonicalises to the unsigned one
+ * (`canonicalSeed`), which is what every result echoes. `asUintN(64, ·)` below
+ * maps a signed seed and its unsigned twin to the same halves, so the draws
+ * depend on the pattern alone.
  */
+/** The unsigned representation of a seed's 64-bit pattern: what is stored and what a result echoes. */
+export function canonicalSeed(seed: bigint): bigint {
+  return BigInt.asUintN(64, seed);
+}
+
 export function seedHalves(seed: bigint): readonly [number, number] {
   const view = new DataView(new ArrayBuffer(8));
   view.setBigUint64(0, BigInt.asUintN(64, seed));
@@ -151,12 +159,7 @@ function mulLo64(ah: number, al: number, bh: number, bl: number, out: Uint32Arra
  * SplitMix64 word `k` for `seed`: mix(seed + (k + 1) × γ). Written into
  * `out[0]` (high) and `out[1]` (low). `k` is a non-negative integer below 2^53.
  */
-export function splitMix64Word(
-  seedHi: number,
-  seedLo: number,
-  k: number,
-  out: Uint32Array,
-): void {
+export function splitMix64Word(seedHi: number, seedLo: number, k: number, out: Uint32Array): void {
   const step = k + 1;
   const stepHi = Math.floor(step / TWO_POW_32) >>> 0;
   const stepLo = step >>> 0;
@@ -202,7 +205,9 @@ export function seedStream(
   }
   // The all-zero state is xoshiro's one fixed point; SplitMix64 cannot emit four
   // zero words in a row for any seed, but the guard costs nothing.
-  if ((g.s[0] | g.s[1] | g.s[2] | g.s[3] | g.s[4] | g.s[5] | g.s[6] | g.s[7]) === 0) g.s[7] = 1;
+  let any = 0;
+  for (let h = 0; h < 8; h += 1) any |= g.s[h] ?? 0;
+  if (any === 0) g.s[7] = 1;
   g.poolAt = POOL_SIZE;
   g.spare = 0;
   g.hasSpare = false;

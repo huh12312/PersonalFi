@@ -17,24 +17,43 @@
  * `levels × years` doubles, and its buffer is transferred, not copied.
  */
 import { parentPort, resourceLimits, workerData } from 'node:worker_threads';
-import { runMonteCarlo, solveForSuccess, type WorkerReply, type WorkerRequest } from './montecarlo.ts';
+import {
+  runMonteCarlo,
+  solveForSuccess,
+  type WorkerReply,
+  type WorkerRequest,
+} from './montecarlo.ts';
 
-function handle(request: WorkerRequest): { readonly reply: WorkerReply; readonly transfer: ArrayBuffer[] } {
+function handle(request: WorkerRequest): {
+  readonly reply: WorkerReply;
+  readonly transfer: ArrayBuffer[];
+} {
   switch (request.kind) {
     case 'run': {
       const result = runMonteCarlo(request.job);
       const transfer: ArrayBuffer[] = [result.bands.buffer as ArrayBuffer];
       if (result.sequence !== null) transfer.push(result.sequence.deciles.buffer as ArrayBuffer);
-      if (result.withoutCrypto !== null) transfer.push(result.withoutCrypto.bands.buffer as ArrayBuffer);
-      return { reply: { kind: 'run', result }, transfer };
+      if (result.withoutCrypto !== null)
+        transfer.push(result.withoutCrypto.bands.buffer as ArrayBuffer);
+      // This thread's own CPU time since it started — one core's cost, whatever else the host runs.
+      const cpu = process.threadCpuUsage();
+      return {
+        reply: { kind: 'run', result, threadCpuMs: (cpu.user + cpu.system) / 1_000 },
+        transfer,
+      };
     }
     case 'solve':
-      return { reply: { kind: 'solve', outcome: solveForSuccess(request.job, request.target) }, transfer: [] };
+      return {
+        reply: { kind: 'solve', outcome: solveForSuccess(request.job, request.target) },
+        transfer: [],
+      };
     case 'probe':
       // What this thread was actually given — the worker-limits test and the gate read it.
       return {
         reply: {
           kind: 'probe',
+          // The probe exists to prove this is empty (`env: {}`); nothing here reads configuration.
+          // eslint-disable-next-line no-restricted-properties -- reporting the thread's environment keys, not reading config
           envKeys: Object.keys(process.env),
           execArgv: [...process.execArgv],
           resourceLimits: { ...resourceLimits },

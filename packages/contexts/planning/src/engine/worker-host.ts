@@ -13,9 +13,9 @@
  *    is a typed `MonteCarloRefused` thrown by `assertWithinEnvelope` — the
  *    spawn function is never called. This is the bound that matters for
  *    memory: **`resourceLimits` do not cover typed-array backing stores**
- *    (measured: a 512 MB `Float64Array` allocates happily under a 16 MB
- *    `maxOldGenerationSizeMb`, see the WP 4.5 evidence), and every large
- *    buffer here is one. The envelope caps them at ~41 MB.
+ *    (measured: a 512 MB `Float64Array` allocates happily under these very
+ *    limits — 64 MB old generation — see the WP 4.5 evidence), and every large
+ *    buffer here is one. The envelope caps them at ~49 MB.
  * 2. **Declared `resourceLimits`** — the JS heap, the young generation and the
  *    stack, each with its reason below.
  * 3. **An empty environment and no execArgv.** `env: {}` — an empty object,
@@ -60,6 +60,7 @@ import {
 } from './boundary.ts';
 import { NO_EXTRA } from './deterministic.ts';
 import type { ReturnSeries } from './bootstrap.ts';
+import { canonicalSeed } from './prng.ts';
 import {
   DEFAULT_PATHS,
   PERCENTILE_LEVELS,
@@ -90,13 +91,18 @@ export const MONTE_CARLO_ENVELOPE = Object.freeze({
   /** WP 4.4's `MAX_PLAN_AGE` is 120; a plan from age 20 is 100 years. */
   maxYears: 100,
   /**
-   * paths × years. Bounds the buffers `resourceLimits` cannot: 4 shock arrays + 1
-   * checkpoint array × 8 bytes × 1,000,000 cells = 40 MB, plus 5 × 8 × paths.
+   * paths × years. Bounds the buffers `resourceLimits` cannot: 4 shock arrays + 2
+   * checkpoint arrays (the plan, and crypto at zero) × 8 bytes × 1,000,000 cells =
+   * 48 MB, plus 5 × 8 × paths.
    */
   maxCells: 1_000_000,
-  /** A Postgres BIGINT, which is what `projection_runs.seed` stores. */
+  /**
+   * A seed is a 64-bit pattern (`prng.ts`, `seedHalves`): WP 4.6 stores it unsigned in
+   * `projection_runs.seed` (`numeric(20, 0)`), and a signed representation of the same pattern is
+   * accepted too — −2^63 ..= 2^64 − 1 — then canonicalised to unsigned, which the result echoes.
+   */
   minSeed: -(2n ** 63n),
-  maxSeed: 2n ** 63n - 1n,
+  maxSeed: 2n ** 64n - 1n,
   /** 200 years of months: Shiller's series is ~1,850; a clone of more is not a return series. */
   maxSeriesMonths: 2_400,
   /** ν beyond 30 is a normal distribution with extra steps; below 3 the variance is infinite. */
@@ -170,7 +176,9 @@ export class MonteCarloTimeout extends Error {
   readonly deadlineMs: number;
 
   constructor(deadlineMs: number) {
-    super(`the Monte Carlo worker exceeded its ${String(deadlineMs)} ms deadline and was terminated`);
+    super(
+      `the Monte Carlo worker exceeded its ${String(deadlineMs)} ms deadline and was terminated`,
+    );
     this.deadlineMs = deadlineMs;
   }
 }
@@ -217,12 +225,20 @@ export function assertWithinEnvelope(job: MonteCarloJob): void {
     );
   }
   if (typeof job.seed !== 'bigint' || job.seed < e.minSeed || job.seed > e.maxSeed) {
-    refuse('planning.montecarlo_seed_outside_envelope', 'seed', 'must be a signed 64-bit integer');
+    refuse(
+      'planning.montecarlo_seed_outside_envelope',
+      'seed',
+      'a 64-bit pattern, signed or unsigned: −2^63 ..= 2^64 − 1',
+    );
   }
   if (job.engine === 'bootstrap') {
     const series = job.series;
     if (series === null) {
-      refuse('planning.montecarlo_series_invalid', 'series', 'the bootstrap engine needs a return series');
+      refuse(
+        'planning.montecarlo_series_invalid',
+        'series',
+        'the bootstrap engine needs a return series',
+      );
     }
     const months = series.equityReal.length;
     if (
@@ -327,21 +343,37 @@ export interface WorkerRun {
   readonly result: MonteCarloResult;
   /** Wall time, spawn to reply. Not part of the result's bytes: a duration is not a result. */
   readonly durationMs: number;
+  /** The worker thread's own CPU time, start to reply (08 §7.2's "single core" measure). */
+  readonly threadCpuMs: number;
 }
 
 /** Envelope, spawn, run. The engine-unit entry point (the perf and reproducibility tests use it). */
-export async function runJobInWorker(job: MonteCarloJob, options: HostOptions = {}): Promise<WorkerRun> {
+export async function runJobInWorker(
+  job: MonteCarloJob,
+  options: HostOptions = {},
+): Promise<WorkerRun> {
   assertWithinEnvelope(job);
   const started = performance.now();
-  const reply = await inWorker({ kind: 'run', job }, options);
-  if (reply.kind !== 'run') throw new MonteCarloWorkerFailed(`unexpected ${reply.kind} reply`, null);
-  return { result: reply.result, durationMs: performance.now() - started };
+  const reply = await inWorker(
+    { kind: 'run', job: { ...job, seed: canonicalSeed(job.seed) } },
+    options,
+  );
+  if (reply.kind !== 'run')
+    throw new MonteCarloWorkerFailed(`unexpected ${reply.kind} reply`, null);
+  return {
+    result: reply.result,
+    durationMs: performance.now() - started,
+    threadCpuMs: reply.threadCpuMs,
+  };
 }
 
 /** Ask a worker what it was given (environment keys, execArgv, resource limits). */
-export async function probeWorker(options: HostOptions = {}): Promise<Extract<WorkerReply, { kind: 'probe' }>> {
+export async function probeWorker(
+  options: HostOptions = {},
+): Promise<Extract<WorkerReply, { kind: 'probe' }>> {
   const reply = await inWorker({ kind: 'probe' }, options);
-  if (reply.kind !== 'probe') throw new MonteCarloWorkerFailed(`unexpected ${reply.kind} reply`, null);
+  if (reply.kind !== 'probe')
+    throw new MonteCarloWorkerFailed(`unexpected ${reply.kind} reply`, null);
   return reply;
 }
 
@@ -372,7 +404,7 @@ function rateOf(node: CitedRate, field: string): number {
 export interface MonteCarloRequest {
   readonly plan: ProjectionPlan;
   readonly assumptions: AssumptionsLike;
-  /** Stored on the run (WP 4.6); a signed 64-bit integer. */
+  /** Stored on the run (WP 4.6) unsigned; a 64-bit pattern, signed or unsigned representation. */
   readonly seed: bigint;
   /** Default 10,000 (07 §5.3). */
   readonly paths?: number;
@@ -421,9 +453,16 @@ export function toMonteCarloJob(request: MonteCarloRequest): MonteCarloJob {
       holding,
       expectedNominal: rateOf(market.crypto.expectedReturn, 'crypto.expectedReturn'),
       volatility: rateOf(market.crypto.volatility, 'crypto.volatility'),
-      degreesOfFreedom: toEngineRate(citedOf(market.crypto.degreesOfFreedom), 'crypto.degreesOfFreedom'),
+      degreesOfFreedom: toEngineRate(
+        citedOf(market.crypto.degreesOfFreedom),
+        'crypto.degreesOfFreedom',
+      ),
     },
-    seed: request.seed,
+    // Canonical (unsigned) when it is a 64-bit pattern; anything else is left for the envelope to refuse.
+    seed:
+      request.seed >= -(2n ** 63n) && request.seed < 2n ** 64n
+        ? canonicalSeed(request.seed)
+        : request.seed,
     paths: request.paths ?? DEFAULT_PATHS,
     extra: NO_EXTRA,
   };
@@ -485,7 +524,10 @@ function probability(count: number, paths: number): string {
 }
 
 /** Every engine float → Money (rounded once, by the boundary) or a decimal string. */
-export function toMonteCarloSummary(result: MonteCarloResult, request: MonteCarloRequest): MonteCarloSummary {
+export function toMonteCarloSummary(
+  result: MonteCarloResult,
+  request: MonteCarloRequest,
+): MonteCarloSummary {
   const code = planCurrency(request.plan);
   const years = result.years;
   const money = (dollars: number, field: string) => solverMoney(dollars, code, field);
@@ -503,7 +545,10 @@ export function toMonteCarloSummary(result: MonteCarloResult, request: MonteCarl
           startAge: result.sequence.startAge,
           years: result.sequence.years,
           deciles: Array.from({ length: SEQUENCE_DECILES }, (_, d) => {
-            const row = result.sequence?.deciles.subarray(d * SEQUENCE_COLUMNS, (d + 1) * SEQUENCE_COLUMNS);
+            const row = result.sequence?.deciles.subarray(
+              d * SEQUENCE_COLUMNS,
+              (d + 1) * SEQUENCE_COLUMNS,
+            );
             const paths = row?.[2] ?? 0;
             return {
               decile: d + 1,
@@ -519,7 +564,10 @@ export function toMonteCarloSummary(result: MonteCarloResult, request: MonteCarl
     result.withoutCrypto === null
       ? null
       : {
-          withoutCryptoSuccessProbability: probability(result.withoutCrypto.successCount, result.paths),
+          withoutCryptoSuccessProbability: probability(
+            result.withoutCrypto.successCount,
+            result.paths,
+          ),
           withoutCryptoMedianTerminal: money(
             result.withoutCrypto.bands[median * years + years - 1] ?? Number.NaN,
             'withoutCrypto.medianTerminal',
@@ -543,7 +591,9 @@ export function toMonteCarloSummary(result: MonteCarloResult, request: MonteCarl
       medianDepletionAge: failed === 0 ? null : result.failure.medianDepletionAge,
       medianShortfallYears: failed === 0 ? null : result.failure.medianShortfallYears,
       medianShortfallTotal:
-        failed === 0 ? null : money(result.failure.medianShortfallTotal, 'failure.medianShortfallTotal'),
+        failed === 0
+          ? null
+          : money(result.failure.medianShortfallTotal, 'failure.medianShortfallTotal'),
     },
     worstSpendingCutP95: fromEngineRatio(result.worstCutP95, 6),
     sequence,
@@ -592,7 +642,11 @@ export type ProbabilitySavingsResult =
   | {
       readonly kind: 'unreachable';
       readonly constraint:
-        | { readonly name: 'no_contribution_window'; readonly detail: string; readonly contributionsEndAge: number }
+        | {
+            readonly name: 'no_contribution_window';
+            readonly detail: string;
+            readonly contributionsEndAge: number;
+          }
         | {
             readonly name: 'monthly_ceiling';
             readonly detail: string;
@@ -630,7 +684,13 @@ export async function solveProbabilityInWorker(
     objective = {
       kind: 'wealth_at',
       yearIndex: years - 1,
-      target: toEngineTarget(savings.objective.target, code, savings.objective.basis, years, job.plan.inflation),
+      target: toEngineTarget(
+        savings.objective.target,
+        code,
+        savings.objective.basis,
+        years,
+        job.plan.inflation,
+      ),
     };
   }
   assertWithinEnvelope(job);
@@ -641,7 +701,8 @@ export async function solveProbabilityInWorker(
     { kind: 'solve', job, target: { objective, requiredCount, ceilingAnnual } },
     { deadlineMs: DEFAULT_SOLVE_DEADLINE_MS, ...options },
   );
-  if (reply.kind !== 'solve') throw new MonteCarloWorkerFailed(`unexpected ${reply.kind} reply`, null);
+  if (reply.kind !== 'solve')
+    throw new MonteCarloWorkerFailed(`unexpected ${reply.kind} reply`, null);
   return toProbabilitySavings(reply.outcome, job, code, savings);
 }
 
@@ -662,7 +723,9 @@ function toProbabilitySavings(
       const monthly = monthlyFromAnnual(outcome.annual, code);
       // The Money handed back must be the exact amount the worker verified.
       if (annualFromMonthly(monthly, code) !== outcome.annual) {
-        throw new Error('solveProbabilityInWorker: the verified cents did not survive the boundary');
+        throw new Error(
+          'solveProbabilityInWorker: the verified cents did not survive the boundary',
+        );
       }
       return {
         kind: 'required',

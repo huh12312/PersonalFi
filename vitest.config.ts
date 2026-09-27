@@ -309,7 +309,28 @@ export default defineConfig({
         test: {
           name: 'planning',
           include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          // WP 4.5's timing test runs in its own project below so it is never
+          // measured under the rest of this suite's contention.
+          exclude: ['src/engine/perf.test.ts', '**/node_modules/**'],
           environment: 'node',
+        },
+      },
+      {
+        // WP 4.5's 800 ms p95 exit criterion (docs/plan/04-phase-4-dispatch.md
+        // §3 "WP 4.5"): 10,000 Monte Carlo paths over 40 years on one core.
+        // Isolated from the `planning` project so no sibling file shares the
+        // box while it samples — under a shared run p95 read 1,155 ms; alone
+        // it reads ~590 ms (wp4.5-montecarlo.md §7). This isolates it from
+        // this suite, not from other processes: a red here on a loaded machine
+        // is re-run alone before it is believed.
+        root: './packages/contexts/planning',
+        test: {
+          name: 'planning-perf',
+          include: ['src/engine/perf.test.ts'],
+          environment: 'node',
+          fileParallelism: false,
+          sequence: { groupOrder: 1 },
+          testTimeout: 120_000,
         },
       },
       {

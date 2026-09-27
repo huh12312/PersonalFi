@@ -32,7 +32,11 @@
 #     ledger, categorization, connector-port, connector-manual, connector-csv,
 #     connector-plaid, connections, recurring, budgeting, notifications,
 #     insights, investments, integrations, planning, connector-coinbase,
-#     connector-walletrpc, scripts
+#     connector-walletrpc, scripts, planning-perf
+#
+#   `planning-perf` (WP 4.5) is the Monte Carlo 800 ms p95 timing test in its
+#   own project so nothing else in the planning suite shares the box while it
+#   samples; a red on a loaded runner is re-run alone before it is believed.
 #
 #   `scripts` (WP 3.14) is the repo-checks project: it is rooted at the repo
 #   root rather than at a package and runs scripts/**/*.test.ts. It reads
@@ -203,7 +207,7 @@ jobs:
             --project connector-walletrpc \
             --project connections --project recurring --project budgeting \
             --project notifications --project insights --project investments \
-            --project integrations --project planning --project scripts
+            --project integrations --project planning --project planning-perf --project scripts
 
   migration-test:
     name: migration test (postgres 18)

@@ -54,7 +54,10 @@ export function pinnedSha256(checksumFile = CHECKSUM_FILE): string {
     const match = /^([0-9a-f]{64}) {2}(\S+)$/.exec(line.trim());
     if (match?.[2] === SERIES_FILE && match[1] !== undefined) return match[1];
   }
-  throw new ReturnSeriesRefused('planning.returns_series_malformed', `${checksumFile} pins no ${SERIES_FILE}`);
+  throw new ReturnSeriesRefused(
+    'planning.returns_series_malformed',
+    `${checksumFile} pins no ${SERIES_FILE}`,
+  );
 }
 
 const ROW = /^(\d{4}-\d{2}),(-?\d+\.\d+),(-?\d+\.\d+),(-?\d+\.\d+)$/;
@@ -63,7 +66,10 @@ const ROW = /^(\d{4}-\d{2}),(-?\d+\.\d+),(-?\d+\.\d+),(-?\d+\.\d+)$/;
 export function parseReturnSeries(csv: string, sha256: string, id = SERIES_ID): ReturnSeries {
   const lines = csv.split('\n');
   if (lines[0] !== CSV_HEADER || lines[lines.length - 1] !== '') {
-    throw new ReturnSeriesRefused('planning.returns_series_malformed', 'not a canonical return-series CSV');
+    throw new ReturnSeriesRefused(
+      'planning.returns_series_malformed',
+      'not a canonical return-series CSV',
+    );
   }
   const body = lines.slice(1, -1);
   const equityReal = new Float64Array(body.length);
@@ -73,7 +79,10 @@ export function parseReturnSeries(csv: string, sha256: string, id = SERIES_ID): 
   body.forEach((line, i) => {
     const match = ROW.exec(line);
     if (match === null) {
-      throw new ReturnSeriesRefused('planning.returns_series_malformed', `row ${String(i + 2)}: ${line}`);
+      throw new ReturnSeriesRefused(
+        'planning.returns_series_malformed',
+        `row ${String(i + 2)}: ${line}`,
+      );
     }
     if (i === 0) firstMonth = match[1] ?? '';
     equityReal[i] = Number(match[2]);
@@ -84,7 +93,10 @@ export function parseReturnSeries(csv: string, sha256: string, id = SERIES_ID): 
 }
 
 /** Load the cached series, verifying its bytes against the pin first. */
-export function loadReturnSeries(cacheDir = DEFAULT_CACHE_DIR, checksumFile = CHECKSUM_FILE): ReturnSeries {
+export function loadReturnSeries(
+  cacheDir = DEFAULT_CACHE_DIR,
+  checksumFile = CHECKSUM_FILE,
+): ReturnSeries {
   const path = join(cacheDir, SERIES_FILE);
   if (!existsSync(path)) {
     throw new ReturnSeriesRefused(

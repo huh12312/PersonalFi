@@ -21,10 +21,31 @@
  * + `test/*.test.ts` (the WP 4.4 precedent; see its evidence).
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { newXoshiro, nextDouble, nextWord, seedHalves, seedStream, splitMix64Word } from './prng.ts';
+import { loadAssumptions } from '../assumptions.ts';
+import { referencePlan } from '../../test/engine/support.ts';
+import { syntheticCsv } from '../../test/engine/fixtures/synthetic-series.ts';
+import {
+  FETCH_COMMAND,
+  SERIES_FILE,
+  ensureReturnSeries,
+  loadReturnSeries,
+  pinnedSha256,
+  sha256Hex,
+} from '../../data/returns/series.ts';
+import { runMonteCarlo, serialiseResult } from './montecarlo.ts';
+import {
+  newXoshiro,
+  nextDouble,
+  nextWord,
+  seedHalves,
+  seedStream,
+  splitMix64Word,
+} from './prng.ts';
+import { runJobInWorker, toMonteCarloJob } from './worker-host.ts';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../../../..');
 const FIXTURES = resolve(import.meta.dirname, '../../test/engine/fixtures');
@@ -115,9 +136,10 @@ describe('reproducibility', () => {
       const a = Buffer.from(run.bytes, 'base64');
       const b = Buffer.from(next.bytes, 'base64');
       const headerEnd = a.indexOf(10, a.indexOf(10) + 1) + 1;
-      expect(a.subarray(headerEnd).equals(b.subarray(headerEnd)), `${run.engine}: bands identical`).toBe(
-        false,
-      );
+      expect(
+        a.subarray(headerEnd).equals(b.subarray(headerEnd)),
+        `${run.engine}: bands identical`,
+      ).toBe(false);
       console.log(
         `[reproducible] ${run.engine}: seed 20260910 → ${run.sha256}, seed 20260911 → ${next.sha256}`,
       );
@@ -160,6 +182,76 @@ describe('reproducibility', () => {
       // The pooled path (64 doubles per refill), across a refill boundary.
       seedStream(g, hi, lo, 0, 0);
       for (const text of c.path0MarketDoubles) expect(nextDouble(g)).toBe(Number(text));
+    }
+  });
+
+  it('a seed is a 64-bit pattern: its signed and unsigned representations draw the same bytes and echo unsigned', async () => {
+    // WP 4.6 stores the seed unsigned (numeric(20, 0)); a signed twin of the same pattern is the same run.
+    const job = toMonteCarloJob({
+      plan: referencePlan('B'),
+      assumptions: loadAssumptions(),
+      seed: -1n,
+      engine: 'lognormal',
+      paths: 300,
+    });
+    expect(job.seed).toBe(2n ** 64n - 1n);
+    const signed = runMonteCarlo({ ...job, seed: -1n });
+    const unsigned = runMonteCarlo({ ...job, seed: 2n ** 64n - 1n });
+    expect(signed.seed).toBe(2n ** 64n - 1n);
+    expect(
+      Buffer.from(serialiseResult(signed)).equals(Buffer.from(serialiseResult(unsigned))),
+    ).toBe(true);
+    // Through the worker: the host canonicalises before the clone.
+    const { result } = await runJobInWorker({ ...job, seed: -5n }, { deadlineMs: 20_000 });
+    expect(result.seed).toBe(2n ** 64n - 5n);
+    expect(
+      Buffer.from(serialiseResult(result)).equals(
+        Buffer.from(serialiseResult(runMonteCarlo({ ...job, seed: 2n ** 64n - 5n }))),
+      ),
+    ).toBe(true);
+  });
+
+  it('the return series is refused unless its bytes hash to the committed pin', async () => {
+    // The committed pin is the reviewed Shiller derivation (data/returns/PROVENANCE.md).
+    expect(pinnedSha256()).toBe('cbdefda1752eac2bd393efbae29a8dfb8d0af2b79a9d7cf2baa5f0e292851e80');
+    const root = mkdtempSync(join(tmpdir(), 'pf-returns-'));
+    try {
+      const cache = join(root, 'cache');
+      const sums = join(root, 'SHA256SUMS');
+      const csv = syntheticCsv();
+      mkdirSync(cache);
+      writeFileSync(join(cache, SERIES_FILE), csv);
+      writeFileSync(sums, `${sha256Hex(csv)}  ${SERIES_FILE}\n`);
+      const loaded = loadReturnSeries(cache, sums);
+      expect(loaded.equityReal.length).toBe(1_847);
+      expect(loaded.sha256).toBe(sha256Hex(csv));
+      // One digit changed: refused by name, never a silently different Monte Carlo.
+      writeFileSync(
+        join(cache, SERIES_FILE),
+        csv.replace(/\d(?=\n)/, (d) => String((Number(d) + 1) % 10)),
+      );
+      expect(() => loadReturnSeries(cache, sums)).toThrow(
+        expect.objectContaining({ code: 'planning.returns_series_checksum_mismatch' }),
+      );
+      // Absent, with no downloader: refused, naming the command that fills the cache.
+      rmSync(join(cache, SERIES_FILE));
+      await expect(
+        ensureReturnSeries({ cacheDir: cache, checksumFile: sums }),
+      ).rejects.toMatchObject({
+        code: 'planning.returns_series_unavailable',
+        message: expect.stringContaining(FETCH_COMMAND) as unknown,
+      });
+      // Absent, with a downloader that returns something that is not the workbook: nothing is cached.
+      await expect(
+        ensureReturnSeries({
+          cacheDir: cache,
+          checksumFile: sums,
+          download: () => Promise.resolve(new Uint8Array(512)),
+        }),
+      ).rejects.toThrow();
+      expect(existsSync(join(cache, SERIES_FILE))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

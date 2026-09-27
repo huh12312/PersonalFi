@@ -77,6 +77,7 @@ import {
   MARKET_STREAM,
   newXoshiro,
   nextChiSquare2,
+  canonicalSeed,
   nextNormal,
   seedHalves,
   seedStream,
@@ -123,7 +124,11 @@ export interface MonteCarloJob {
   /** Required for `bootstrap`; ignored by `lognormal`. */
   readonly series: ReturnSeries | null;
   /** Annual σ, from WP 4.2's file (the lognormal engine only; the bootstrap's σ is history's). */
-  readonly volatility: { readonly equity: number; readonly bond: number; readonly inflation: number };
+  readonly volatility: {
+    readonly equity: number;
+    readonly bond: number;
+    readonly inflation: number;
+  };
   readonly correlation: EngineCorrelation;
   readonly crypto: EngineCrypto;
   readonly seed: bigint;
@@ -205,8 +210,7 @@ export function drawShocks(job: MonteCarloJob): ShockMatrix {
   if (!Number.isFinite(loadOwn)) {
     throw new RangeError('crypto correlations too large for a Student-t coupling at this ν');
   }
-  const equityShockSd =
-    series === null ? 1 : Math.sqrt(12 * series.equityVariance) || 1;
+  const equityShockSd = series === null ? 1 : Math.sqrt(12 * series.equityVariance) || 1;
 
   const market = newXoshiro();
   const own = newXoshiro();
@@ -323,7 +327,8 @@ function fillMarket(
     into.inflation = Math.expm1(i + f.inflationShift);
   } else {
     // 1 + R = (1 + m) exp(σ_l z − σ_l²/2): E[R] = m, and at σ = 0 exactly m.
-    into.equityReal = f.equityMean + (1 + f.equityMean) * Math.expm1(f.equityLogSigma * e + f.equityShift);
+    into.equityReal =
+      f.equityMean + (1 + f.equityMean) * Math.expm1(f.equityLogSigma * e + f.equityShift);
     into.bondReal = f.bondMean + (1 + f.bondMean) * Math.expm1(f.bondLogSigma * b + f.bondShift);
     into.inflation = f.inflationMean + f.inflationSigma * i;
   }
@@ -373,16 +378,39 @@ export function newSimulationBuffers(paths: number, years: number): SimulationBu
 }
 
 /** The first retirement year's index and the window's length; length 0 when the plan ends first. */
-export function sequenceWindow(plan: EnginePlan): { readonly start: number; readonly length: number } {
+export function sequenceWindow(plan: EnginePlan): {
+  readonly start: number;
+  readonly length: number;
+} {
   const years = yearsOf(plan);
   const start = Math.max(0, plan.retireAge - plan.startAge);
   return { start, length: Math.max(0, Math.min(SEQUENCE_WINDOW_YEARS, years - start)) };
 }
 
 /**
+ * 07 §6.4 treatment 2, filled in the same pass as the plan with crypto: the
+ * year-end wealth of the four buckets alone, and how many paths had no
+ * unfunded year with crypto valued at zero.
+ */
+export interface CryptoAtZero {
+  readonly checkpoints: Float64Array;
+  successes: number;
+}
+
+/**
  * Run every path through `stepYear`. Returns the number of paths with no
  * unfunded year (the success count). `cryptoHolding` is separate from the job
- * so the dual projection can re-run the same shocks with crypto at zero.
+ * so the same shocks can be run with any sleeve.
+ *
+ * **One pass serves both projections.** The sleeve never feeds the four
+ * buckets — it only covers a shortfall `stepYear` has already reported — so
+ * the buckets' path is the same with crypto and with crypto at zero, and
+ * `stepYear` reads its depletion field only to set it. When `atZero` is given,
+ * each path's crypto-at-zero outcome is taken from the same `stepYear` calls:
+ * the buckets' wealth (checkpoints, `+ 0` exactly as a zero sleeve adds) and
+ * whether any year reported a shortfall. The bytes equal two separate passes
+ * (`reproducible.test.ts`'s digests did not move when this replaced them), at
+ * half the simulation cost.
  */
 export function simulate(
   prepared: PreparedPlan,
@@ -391,6 +419,7 @@ export function simulate(
   extra: ExtraContribution,
   cryptoHolding: number,
   out: SimulationBuffers,
+  atZero: CryptoAtZero | null = null,
 ): number {
   const plan = prepared.plan;
   const years = shocks.years;
@@ -410,13 +439,19 @@ export function simulate(
     resetPathState(state, plan);
     let sleeve = holdsCrypto ? cryptoHolding : 0;
     let windowGross = 1;
+    let failedAtZero = false;
     const base = i * years;
     for (let t = 0; t < years; t += 1) {
       const cell = base + t;
       fillMarket(market, shocks, cell, f);
       const shortBefore = state.shortfallTotal;
       const depletedBefore = state.depletedAtAge;
+      // Cleared so `stepYear` marks *this* year's depletion whatever the sleeve covered before;
+      // an earlier depletion is put back straight after, which is exactly what `stepYear` keeps.
+      state.depletedAtAge = -1;
       stepYear(prepared, state, t, view, extra, false);
+      if (state.depletedAtAge >= 0) failedAtZero = true;
+      if (depletedBefore >= 0) state.depletedAtAge = depletedBefore;
       if (sleeve > 0) {
         // Crypto funds last: only what the four buckets could not.
         const short = state.shortfallTotal - shortBefore;
@@ -435,7 +470,9 @@ export function simulate(
         sleeve = (sleeve * (1 + nominal)) / (1 + market.inflation);
       }
       const w = state.wealth;
-      out.checkpoints[t * paths + i] = (w[0] ?? 0) + (w[1] ?? 0) + (w[2] ?? 0) + (w[3] ?? 0) + sleeve;
+      const buckets = (w[0] ?? 0) + (w[1] ?? 0) + (w[2] ?? 0) + (w[3] ?? 0);
+      out.checkpoints[t * paths + i] = buckets + sleeve;
+      if (atZero !== null) atZero.checkpoints[t * paths + i] = buckets + 0;
       if (t >= window.start && t < windowEnd) {
         windowGross *= (1 + state.lastNominalReturn) / (1 + market.inflation);
       }
@@ -443,9 +480,9 @@ export function simulate(
     out.depletedAtAge[i] = state.depletedAtAge;
     out.shortfallTotal[i] = state.shortfallTotal;
     out.worstCut[i] = state.guard.worstCut;
-    out.sequenceReturn[i] =
-      window.length > 0 ? windowGross ** (1 / window.length) - 1 : Number.NaN;
+    out.sequenceReturn[i] = window.length > 0 ? windowGross ** (1 / window.length) - 1 : Number.NaN;
     if (state.depletedAtAge < 0) successes += 1;
+    if (atZero !== null && !failedAtZero) atZero.successes += 1;
   }
   return successes;
 }
@@ -565,10 +602,15 @@ export interface MonteCarloResult {
   readonly withoutCrypto: { readonly successCount: number; readonly bands: Float64Array } | null;
 }
 
-function bandsOf(buffers: SimulationBuffers, paths: number, years: number, scratch: Float64Array): Float64Array {
+function bandsOf(
+  checkpoints: Float64Array,
+  paths: number,
+  years: number,
+  scratch: Float64Array,
+): Float64Array {
   const bands = new Float64Array(PERCENTILE_LEVELS.length * years);
   for (let t = 0; t < years; t += 1) {
-    scratch.set(buffers.checkpoints.subarray(t * paths, (t + 1) * paths));
+    scratch.set(checkpoints.subarray(t * paths, (t + 1) * paths));
     quantilesInPlace(scratch, paths, PERCENTILE_LEVELS, bands, t, years);
   }
   return bands;
@@ -581,7 +623,12 @@ function medianOf(scratch: Float64Array, n: number): number {
   return out[0] ?? Number.NaN;
 }
 
-function failureOf(buffers: SimulationBuffers, plan: EnginePlan, paths: number, scratch: Float64Array): FailureSummary {
+function failureOf(
+  buffers: SimulationBuffers,
+  plan: EnginePlan,
+  paths: number,
+  scratch: Float64Array,
+): FailureSummary {
   let n = 0;
   for (let i = 0; i < paths; i += 1) {
     const age = buffers.depletedAtAge[i] ?? -1;
@@ -599,10 +646,19 @@ function failureOf(buffers: SimulationBuffers, plan: EnginePlan, paths: number, 
   for (let i = 0; i < paths; i += 1) {
     if ((buffers.depletedAtAge[i] ?? -1) >= 0) scratch[n++] = buffers.shortfallTotal[i] ?? 0;
   }
-  return { count, medianDepletionAge, medianShortfallYears, medianShortfallTotal: medianOf(scratch, count) };
+  return {
+    count,
+    medianDepletionAge,
+    medianShortfallYears,
+    medianShortfallTotal: medianOf(scratch, count),
+  };
 }
 
-function sequenceOf(buffers: SimulationBuffers, plan: EnginePlan, paths: number): SequenceTable | null {
+function sequenceOf(
+  buffers: SimulationBuffers,
+  plan: EnginePlan,
+  paths: number,
+): SequenceTable | null {
   const window = sequenceWindow(plan);
   if (window.length === 0 || paths < SEQUENCE_DECILES) return null;
   const r = buffers.sequenceReturn;
@@ -626,7 +682,7 @@ function sequenceOf(buffers: SimulationBuffers, plan: EnginePlan, paths: number)
   return { startAge: plan.startAge + window.start, years: window.length, deciles };
 }
 
-/** The whole job: shocks, simulation (twice when crypto is held), summary. */
+/** The whole job: shocks, one simulation pass (both projections when crypto is held), summary. */
 export function runMonteCarlo(job: MonteCarloJob): MonteCarloResult {
   const prepared = preparePlan(job.plan);
   const shocks = drawShocks(job);
@@ -634,13 +690,26 @@ export function runMonteCarlo(job: MonteCarloJob): MonteCarloResult {
   const buffers = newSimulationBuffers(paths, years);
   const scratch = new Float64Array(paths);
 
-  let withoutCrypto: MonteCarloResult['withoutCrypto'] = null;
-  if (job.crypto.holding > 0) {
-    const successCount = simulate(prepared, job, shocks, job.extra, 0, buffers);
-    withoutCrypto = { successCount, bands: bandsOf(buffers, paths, years, scratch) };
-  }
-  const successCount = simulate(prepared, job, shocks, job.extra, job.crypto.holding, buffers);
-  const bands = bandsOf(buffers, paths, years, scratch);
+  // Crypto held: one pass fills both the plan and the plan with crypto at zero (see `simulate`).
+  const atZero: CryptoAtZero | null =
+    job.crypto.holding > 0 ? { checkpoints: new Float64Array(paths * years), successes: 0 } : null;
+  const successCount = simulate(
+    prepared,
+    job,
+    shocks,
+    job.extra,
+    job.crypto.holding,
+    buffers,
+    atZero,
+  );
+  const withoutCrypto: MonteCarloResult['withoutCrypto'] =
+    atZero === null
+      ? null
+      : {
+          successCount: atZero.successes,
+          bands: bandsOf(atZero.checkpoints, paths, years, scratch),
+        };
+  const bands = bandsOf(buffers.checkpoints, paths, years, scratch);
   const failure = failureOf(buffers, job.plan, paths, scratch);
   scratch.set(buffers.worstCut);
   const cut = new Float64Array(1);
@@ -652,7 +721,8 @@ export function runMonteCarlo(job: MonteCarloJob): MonteCarloResult {
     engine: job.engine,
     seriesId: job.engine === 'bootstrap' ? (job.series?.id ?? null) : null,
     seriesSha256: job.engine === 'bootstrap' ? (job.series?.sha256 ?? null) : null,
-    seed: job.seed,
+    // The unsigned representation of the pattern, whichever one the job carried.
+    seed: canonicalSeed(job.seed),
     paths,
     years,
     startAge: job.plan.startAge,
@@ -694,7 +764,11 @@ export type SuccessSolveOutcome =
       readonly metCount: number;
       readonly iterations: number;
     }
-  | { readonly kind: 'unreachable'; readonly constraint: 'no_contribution_window'; readonly untilAge: number }
+  | {
+      readonly kind: 'unreachable';
+      readonly constraint: 'no_contribution_window';
+      readonly untilAge: number;
+    }
   | {
       readonly kind: 'unreachable';
       readonly constraint: 'monthly_ceiling';
@@ -795,7 +869,15 @@ export type WorkerRequest =
   | { readonly kind: 'probe' };
 
 export type WorkerReply =
-  | { readonly kind: 'run'; readonly result: MonteCarloResult }
+  | {
+      readonly kind: 'run';
+      readonly result: MonteCarloResult;
+      /**
+       * CPU time this thread consumed from its start to the reply (user + system, ms): module
+       * load, the clone in, the kernel. The 08 §7.2 "single core" figure; not part of the result.
+       */
+      readonly threadCpuMs: number;
+    }
   | { readonly kind: 'solve'; readonly outcome: SuccessSolveOutcome }
   | {
       readonly kind: 'probe';

@@ -104,12 +104,16 @@ function columnOf(sheet: XlsSheet, headerRow: number, labels: readonly string[])
 function monthOf(shillerDate: number): string {
   const year = Math.floor(shillerDate);
   const month = Math.round((shillerDate - year) * 100);
-  if (month < 1 || month > 12) throw new Error(`ie_data.xls: ${String(shillerDate)} is not a Shiller month`);
+  if (month < 1 || month > 12)
+    throw new Error(`ie_data.xls: ${String(shillerDate)} is not a Shiller month`);
   return `${String(year)}-${String(month).padStart(2, '0')}`;
 }
 
 /** The `Data` sheet's rows, keyed by month. */
-export function readShillerRows(file: Uint8Array): { readonly rows: ShillerRow[]; readonly upstreamLastDate: string } {
+export function readShillerRows(file: Uint8Array): {
+  readonly rows: ShillerRow[];
+  readonly upstreamLastDate: string;
+} {
   const sheet = readWorkbook(file).find((candidate) => candidate.name === 'Data');
   if (sheet === undefined) throw new Error('ie_data.xls: no Data sheet');
   let headerRow = -1;
@@ -165,16 +169,22 @@ export function deriveShillerMonthly(file: Uint8Array): DerivedSeries {
   const lines = [CSV_HEADER];
   let equityCrossCheck = 0;
   let bondCrossCheck = 0;
-  let [year, month] = FIRST_MONTH.split('-').map((part) => Number.parseInt(part, 10)) as [number, number];
+  let [year, month] = FIRST_MONTH.split('-').map((part) => Number.parseInt(part, 10)) as [
+    number,
+    number,
+  ];
   let label = FIRST_MONTH;
-  let previous = byMonth.get(`${String(month === 1 ? year - 1 : year)}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`);
+  let previous = byMonth.get(
+    `${String(month === 1 ? year - 1 : year)}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`,
+  );
   for (;;) {
     const current = byMonth.get(label);
     if (current === undefined || previous === undefined) {
       throw new Error(`ie_data.xls: month ${label} or the month before it is missing`);
     }
     const deflator = previous.cpi / current.cpi;
-    const equityReal = ((current.composite + current.dividend / 12) / previous.composite) * deflator - 1;
+    const equityReal =
+      ((current.composite + current.dividend / 12) / previous.composite) * deflator - 1;
     const bondReal = previous.bondGross * deflator - 1;
     const inflation = current.cpi / previous.cpi - 1;
     for (const [name, ratio] of [

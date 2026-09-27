@@ -88,3 +88,49 @@ export {
   type RequiredSavingsRequest,
   type RequiredSavingsResult,
 } from './solve.ts';
+
+// --- WP 4.5: the Monte Carlo, run in a worker_thread ----------------------------
+// Money callers use the worker-host entry points (envelope → worker → Money);
+// the kernel's own exports are for the stored run's metadata and byte form.
+export { type ReturnSeries } from './bootstrap.ts';
+export {
+  DEFAULT_PATHS as MONTE_CARLO_DEFAULT_PATHS,
+  MONTE_CARLO_VERSION,
+  PERCENTILE_LEVELS as MONTE_CARLO_PERCENTILE_LEVELS,
+  serialiseResult as serialiseMonteCarloResult,
+  type EngineKind as MonteCarloEngineKind,
+  type MonteCarloResult,
+} from './montecarlo.ts';
+export {
+  DEFAULT_DEADLINE_MS as MONTE_CARLO_DEADLINE_MS,
+  DEFAULT_SOLVE_DEADLINE_MS as MONTE_CARLO_SOLVE_DEADLINE_MS,
+  DEFAULT_SUCCESS_TARGET,
+  MONTE_CARLO_ENVELOPE,
+  MonteCarloRefused,
+  MonteCarloTimeout,
+  MonteCarloWorkerFailed,
+  WORKER_RESOURCE_LIMITS as MONTE_CARLO_RESOURCE_LIMITS,
+  runMonteCarloInWorker,
+  solveProbabilityInWorker,
+  toMonteCarloJob,
+  toMonteCarloSummary,
+  type HostOptions as MonteCarloHostOptions,
+  type MonteCarloRefusalCode,
+  type MonteCarloRequest,
+  type MonteCarloRun,
+  type MonteCarloSummary,
+  type MoneyBand,
+  type ProbabilitySavingsRequest,
+  type ProbabilitySavingsResult,
+  type SequenceDecile,
+} from './worker-host.ts';
+// The historical series: fetched on first run and checksum-pinned, never vendored
+// (data/returns/PROVENANCE.md). The composition root decides whether a download is allowed.
+export {
+  FETCH_COMMAND as RETURN_SERIES_FETCH_COMMAND,
+  ReturnSeriesRefused,
+  ensureReturnSeries,
+  loadReturnSeries,
+  type EnsureOptions as ReturnSeriesOptions,
+  type ReturnSeriesRefusalCode,
+} from '../../data/returns/series.ts';
