@@ -91,6 +91,7 @@ import {
   type InsightsDependencies,
 } from '@ctx/insights';
 import { drizzleAllocationTargetsStore, drizzleSecurityTagsStore } from '@ctx/investments';
+import { createEarmark, createGoal } from '@ctx/planning';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -99,6 +100,7 @@ import {
   createInsightsLedgerPort,
   createInsightsMarketDataPort,
   createInsightsRecurringPort,
+  planningPortsFor,
 } from '../../src/domain.ts';
 import {
   NO_DATABASE,
@@ -192,13 +194,26 @@ describe.skipIf(NO_DATABASE)('the nightly advisor run over a synced portfolio (W
   async function insertPrice(input: {
     readonly securityId: string;
     readonly close: string;
+    /**
+     * Defaults to `'tiingo'`, which is on every equity/ETF ladder rung
+     * (`DEFAULT_LADDERS`, `packages/contexts/investments/src/prices.ts`) but
+     * **not** on `cash`'s (`['user_override', 'last_known']` — a market-data
+     * vendor has no reason to quote a security whose price is its face value).
+     * A cash security's own price row must be inserted with a source that
+     * ladder actually consults, or `PriceReader.price()` returns `null` and
+     * `valueHoldings` drops the holding as `price_unknown` — silently, with no
+     * exception, which is exactly how WP 4.7's own composition's first draft
+     * of this fixture went quietly wrong (see the "idle_cash" test's own
+     * comment below).
+     */
+    readonly source?: 'tiingo' | 'user_override';
   }): Promise<void> {
     await h.database.db.execute(sql`
       INSERT INTO prices (
         id, user_id, security_id, price_date, source, close, currency, stale, observed_at
       ) VALUES (
         ${newId()}::uuid, ${h.userId}::uuid, ${input.securityId}::uuid,
-        ${isoDay(0)}::date, 'tiingo', ${input.close}, 'USD', false, now()
+        ${isoDay(0)}::date, ${input.source ?? 'tiingo'}, ${input.close}, 'USD', false, now()
       )
     `);
   }
@@ -530,7 +545,12 @@ describe.skipIf(NO_DATABASE)('the nightly advisor run over a synced portfolio (W
       assetClass: 'CASH',
       expenseRatio: null,
     });
-    await insertPrice({ securityId: cashSecurityId, close: '1.00' });
+    // `'user_override'`, not the default `'tiingo'`: see `insertPrice`'s own
+    // comment — `cash`'s ladder is `['user_override', 'last_known']` and a
+    // `'tiingo'` row is never consulted for it, which is why this fixture's
+    // first draft left the cash holding silently excluded from
+    // `set.valued` (`price_unknown`) and `idle_cash` never fired.
+    await insertPrice({ securityId: cashSecurityId, close: '1.00', source: 'user_override' });
     // A live `holdings` row too, not only history: the real composition
     // (apps/api/src/domain.ts, WP 4.7 §7.1) derives today's cash from
     // `cashByAccount(set)` over the same valued live holdings `readHoldings`
@@ -616,6 +636,72 @@ describe.skipIf(NO_DATABASE)('the nightly advisor run over a synced portfolio (W
     // (VTI's lot is a gain, not a loss), which the decoration did not change.
     expect(proposedBy.get('builtin.investing.loss_lot')?.proposed ?? 0).toBe(0);
   }, 180_000);
+
+  it(
+    "an earmark on the same idle cash suppresses I3 — the composition's other real " +
+      'source, exercised for the first time',
+    async () => {
+      // Same account, same cash, same twenty days of dwell history as the
+      // previous test left behind (nothing here is truncated between `it`s in
+      // this file) — the only new fact is a real earmark covering it in full.
+      // `wp4.7-gap-fields.md` §7.1 composes `liveEarmarksByAccount` into
+      // exactly this field, but no test before this one gave it a non-empty
+      // map to compose with: dropping the earmark read entirely
+      // (`earmarkedAmount: earmarksByAccount.get(...) ?? Money.zero(...)` →
+      // `Money.zero(...)`, unconditionally) left every existing assertion
+      // green, because every existing fixture's earmark map was already
+      // empty. This is that composition's first real exercise.
+      const timeZone = 'America/New_York';
+      const context = {
+        userId: h.userId,
+        clock: systemClock,
+        timeZone,
+        correlationId: newId(),
+        causationId: null,
+      };
+      const roster = {
+        accounts: planningPortsFor(h.database.db, { userId: h.userId, timeZone }).balances,
+      };
+
+      const goal = await createGoal(h.database.db, roster, context, {
+        kind: 'custom',
+        name: 'WP 4.7 earmark-suppression fixture',
+        target: money(1_200_000n, 'USD'),
+        targetDate: '2030-01-01',
+        fundedFromAccountIds: [brokerageAccountId],
+      });
+      await createEarmark(h.database.db, roster, context, {
+        goalId: goal.id,
+        accountId: brokerageAccountId,
+        name: 'Cover the idle cash sweep',
+        // The full $12,000 the previous test's `insertHolding`/
+        // `insertHoldingsSnapshot` calls put in this account — earmarking it
+        // exactly, not merely partially, is what should take I3's `idle` flag
+        // to `false` rather than merely lowering its total.
+        amount: money(1_200_000n, 'USD'),
+      });
+
+      const dependencies: InsightsDependencies = dependenciesOf({ withFred: true });
+      const runContext = {
+        userId: h.userId,
+        clock: systemClock,
+        correlationId: newId(),
+        causationId: null,
+      };
+      const results = await runAdvisors(h.database.db, runContext, dependencies, {
+        advisorIds: ['builtin.investing.idle_cash'],
+        trigger: 'schedule',
+      });
+      const idle = results.find((result) => result.advisorId === 'builtin.investing.idle_cash');
+      expect(idle?.status).toBe('completed');
+      expect(
+        idle?.proposed ?? 0,
+        'the same cash, aged the same twenty days, over the same threshold — earmarked now, ' +
+          'and I3 must fall silent because of it',
+      ).toBe(0);
+    },
+    180_000,
+  );
 
   it('market.rates carries the FRED licence sentence verbatim, from the constant', async () => {
     const built = await snapshotOf(['market.rates'], { withFred: true });
