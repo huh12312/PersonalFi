@@ -184,6 +184,14 @@
                 "required": ["month", "net_worth"],
                 "additionalProperties": false
               }
+            },
+            "excluded_currencies": {
+              "maxItems": 16,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              }
             }
           },
           "required": ["as_of", "assets", "liabilities", "net_worth", "trend"],
@@ -281,6 +289,14 @@
                 },
                 "required": ["account_ref", "type", "balance", "apy"],
                 "additionalProperties": false
+              }
+            },
+            "excluded_currencies": {
+              "maxItems": 16,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
               }
             }
           },

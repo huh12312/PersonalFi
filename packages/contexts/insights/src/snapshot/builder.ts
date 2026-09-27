@@ -360,9 +360,15 @@ export class SnapshotBuilder {
     const code = input.baseCurrency;
     let assets = Money.zero(code);
     let liabilities = Money.zero(code);
+    const excludedCurrencies = new Set<string>();
     for (const account of open) {
-      if (account.balance.minor >= 0n) assets = Money.add(assets, account.balance);
-      else liabilities = Money.add(liabilities, Money.absolute(account.balance));
+      const converted = await this.#convertToBase(account.balance, code, input.today);
+      if (converted === null) {
+        excludedCurrencies.add(account.balance.currency);
+        continue;
+      }
+      if (converted.minor >= 0n) assets = Money.add(assets, converted);
+      else liabilities = Money.add(liabilities, Money.absolute(converted));
     }
 
     const trend = await this.#ports.ledger.netWorthTrend({
@@ -378,7 +384,32 @@ export class SnapshotBuilder {
       trend: trend
         .slice(-SNAPSHOT_WINDOWS.netWorthTrendMonths)
         .map((point) => ({ month: point.month, net_worth: moneyJson(point.netWorth, rounding) })),
+      ...(excludedCurrencies.size > 0
+        ? { excluded_currencies: [...excludedCurrencies].sort() }
+        : {}),
     };
+  }
+
+  /**
+   * `account.balance` → `baseCurrency`, or `null` when it cannot be done
+   * honestly.
+   *
+   * Same currency needs no port at all. A different currency with no `fx`
+   * port wired, or an `fx` port that has no rate for the pair, both answer
+   * `null` — **never a fabricated par rate** (the same rule
+   * `@ctx/investments/src/fx.ts` states for the ledger). The caller's job is to
+   * exclude the account from the total and name its currency, not to throw:
+   * see `FxPort`'s header in `ports.ts` for why a snapshot degrades here
+   * instead of raising `CurrencyMismatchError` out of `build()` (G3-13).
+   */
+  async #convertToBase(
+    amount: Money,
+    baseCurrency: string,
+    asOf: BuildSnapshotInput['today'],
+  ): Promise<Money | null> {
+    if (amount.currency === baseCurrency) return amount;
+    if (this.#ports.fx === undefined) return null;
+    return this.#ports.fx.convert({ amount, toCurrency: baseCurrency, asOf });
   }
 
   async #cash(
@@ -393,17 +424,26 @@ export class SnapshotBuilder {
 
     const code = input.baseCurrency;
     let total = Money.zero(code);
-    for (const account of accounts) total = Money.add(total, account.balance);
+    const excludedCurrencies = new Set<string>();
 
     // Balance-weighted, and weighted by the accounts that actually declare an
     // APY: averaging a `null` as zero would report a cash position as earning
     // less than it does, which is the direction that produces bad advice.
+    // Both the total and the weighting use the *converted* balance — weighting
+    // by a raw minor-unit figure across currencies would blend a CAD cent with
+    // a USD cent as if the two were the same size.
     let weighted = 0;
     let weightBase = 0n;
     for (const account of accounts) {
-      if (account.apy === null || account.balance.minor <= 0n) continue;
-      weighted += account.apy * Number(account.balance.minor);
-      weightBase += account.balance.minor;
+      const converted = await this.#convertToBase(account.balance, code, input.today);
+      if (converted === null) {
+        excludedCurrencies.add(account.balance.currency);
+        continue;
+      }
+      total = Money.add(total, converted);
+      if (account.apy === null || converted.minor <= 0n) continue;
+      weighted += account.apy * Number(converted.minor);
+      weightBase += converted.minor;
     }
     const blendedApy = weightBase === 0n ? 0 : ratio(weighted / Number(weightBase));
 
@@ -439,6 +479,9 @@ export class SnapshotBuilder {
         balance: moneyJson(account.balance),
         apy: account.apy === null ? null : ratio(account.apy),
       })),
+      ...(excludedCurrencies.size > 0
+        ? { excluded_currencies: [...excludedCurrencies].sort() }
+        : {}),
     };
   }
 

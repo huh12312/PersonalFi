@@ -86,6 +86,13 @@ export const NetWorthSummarySchema = z.strictObject({
   net_worth: MoneyJsonSchema,
   /** Up to 12 points, oldest first. Month granularity; no finer. */
   trend: z.array(z.strictObject({ month: yearMonth, net_worth: MoneyJsonSchema })).max(12),
+  /**
+   * ISO-4217 codes left out of `assets`/`liabilities`/`net_worth` because no
+   * FX conversion was available for them (WP 4.12b, C-10/G3-13). Absent when
+   * every open account already matched the base currency, or every mismatch
+   * converted. The builder never folds an unconverted account in at par.
+   */
+  excluded_currencies: z.array(z.string().regex(/^[A-Z]{3}$/)).max(16).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -111,6 +118,8 @@ export const CashSummarySchema = z.strictObject({
       }),
     )
     .max(64),
+  /** Same rule as `NetWorthSummarySchema.excluded_currencies`, for `total`. */
+  excluded_currencies: z.array(z.string().regex(/^[A-Z]{3}$/)).max(16).optional(),
 });
 
 // ---------------------------------------------------------------------------

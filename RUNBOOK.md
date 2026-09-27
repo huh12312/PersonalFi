@@ -337,6 +337,21 @@ docker compose ps        # everything healthy? the P0-6/-7 evidence in
                           # is what "healthy" is checked against
 ```
 
+**`worker` has no account holder yet at this point** — steps 5 and 6 below can
+take as long as you need. It logs `no account holder yet; polling for one`
+once and then idles, polling in place, until step 7 enrols one; its
+healthcheck stays `healthy` the whole time (D-3's liveness heartbeat touches on
+every poll). It does **not** restart while it waits, however long that is —
+`docker compose ps` / `docker inspect --format='{{.RestartCount}}' <container>`
+should read `0` from boot through step 7 and beyond. (Condition C-1,
+`docs/evidence/phase-3/gate-security-review.md` §3.1/§6, G3-1: earlier builds
+returned from the worker's start-up function while idle, which let the
+process exit once the database pool's idle connections timed out — the
+Compose restart policy then masked it as a roughly 30-second
+exit-and-restart loop rather than the "idle until enrolled" the log line
+always claimed. A worker that restarts here on the current build is a
+regression, not a known quirk.)
+
 ### 5. Trust the internal CA (LAN mode)
 
 Caddy's internal CA issues a real certificate for `personalfi.lan` with no
@@ -406,16 +421,37 @@ recipe falls back to the host and the local dev database, which is what
 
 `GET /export` (step-up required) downloads the whole database as a JSONL
 bundle. `?encrypt=true` pipes it through `age` first, encrypted to
-`secrets/age_recipients` — the same recipients file step 2, item 4 above
-already has you write for backups, so nothing new to create if backups are
-already configured. **The api image does not ship the `age` binary today**
-(`docker/api.Dockerfile` has no `age` package line); until it does,
-`?encrypt=true` answers `503 export.encryption_unavailable` naming exactly
-that, rather than silently downgrading to plaintext or hanging.
-`apps/api/test/db/export-encrypt.test.ts` (WP 3.13) proves the encrypted path
-decrypts to the same bundle on a host that does have `age` on `PATH`, so the
-one remaining step is a Dockerfile line (`apk add --no-cache age`, Alpine's
-main repository), not a design change.
+`secrets/age_recipient` (**singular** — the same recipients file step 2, item
+4 above already has you write for backups, so nothing new to create if
+backups are already configured; earlier releases of this file and of
+`bundle.ts`'s own default said `age_recipients`, plural, which no `compose.yml`
+service ever mounted — condition C-5, `gate-security-review.md` G3-4, fixed
+one recipients filename everywhere).
+
+**As of WP 4.12b, C-5:** `docker/api.Dockerfile`'s runtime stage installs
+`age` (pinned, alongside `tini`), and `compose.yml` mounts the `age_recipient`
+secret on `api` as well as on `backup` — the export route runs in `api`, and
+until this change it had no way to read the recipients file even once the
+binary existed. If this secret was already hardened on this host under the
+old, single-consumer state (`just harden-secrets`'s previous behaviour: owner
+`10002:10002`, mode `0400`), `scripts/check-secret-ownership.sh` will now
+correctly report it as a violation until you re-run `just harden-secrets`
+(needs sudo) — that recipe now chowns `age_recipient` to `10001:10002` at
+mode `0440` (two consumers, the same shape `pg_password` already uses). This
+is the intended signal, not a regression: the file's real permissions have to
+change to match the new mount, and the check is what makes that visible
+instead of a silent `EACCES` the first time someone downloads an encrypted
+export.
+
+**Not re-walked live by this work package:** downloading `?encrypt=true`
+from a running `api` container built from this Dockerfile and decrypting the
+result with `age` — that needs a rebuilt image and the compose stack up,
+which this work package's rules kept it from doing. `apps/api/test/db/
+export-encrypt.test.ts` (WP 3.13) and `export-encrypt-age-absent.test.ts`
+(WP 4.12b) prove the code path — the happy path against a real `age` binary
+on the dev host, and the `age`-absent refusal in isolation — but the gate
+walk item ("download, decrypt with `age`, diff against the plaintext bundle")
+against the actual shipped image is still owed.
 
 `POST /import` refuses to run against an instance that already has user
 data (`409 export.instance_not_empty`) — it is a same-schema restore, not a

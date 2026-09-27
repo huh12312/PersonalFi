@@ -58,7 +58,7 @@
  * therefore the one place the decision is made, and
  * `test/snapshot-scopes.test.ts` is where it is asserted from the outside.
  */
-import type { DateOnly, Money } from '@core/kernel';
+import { Money, type DateOnly } from '@core/kernel';
 import type { AccountTaxTreatment, LiabilityKind, MarketRateKind } from '../contract/snapshot.ts';
 
 // ---------------------------------------------------------------------------
@@ -504,13 +504,55 @@ export interface MarketDataPort {
   }): Promise<InsightsMarketRates | null>;
 }
 
-/** The five ports, as one object, because the builder always wants all five. */
+// ---------------------------------------------------------------------------
+// FX — WP 4.12b (C-10)
+// ---------------------------------------------------------------------------
+
+/**
+ * A read-only conversion into the snapshot's base currency.
+ *
+ * `#netWorth`/`#cash` used to fold every open account into one `Money` total
+ * with `Money.add`, which throws `CurrencyMismatchError` the moment one
+ * account's currency differs from `input.baseCurrency` — and because that
+ * throw happens inside `build()`'s scope loop, it takes down the *whole*
+ * snapshot, denying every granted scope to an advisor that asked for none of
+ * this one (G3-13). `FxPort` is this package's own mirror of
+ * `@ctx/investments`'s `FxReader` — insights cannot import that context
+ * directly (the layer lint forbids `@ctx/*` → `@ctx/*`) — narrowed to the one
+ * call the builder needs.
+ *
+ * `null` is a first-class answer, exactly like everywhere else this app reads
+ * an FX rate: **never a fabricated par rate**. The builder's response to a
+ * `null` is to exclude that account from the total and name its currency in
+ * `excluded_currencies`, not to throw a second time — a snapshot has no
+ * user-facing error surface to carry a `FxRateUnavailable` to, unlike the
+ * ledger and the corrections route.
+ */
+export interface FxPort {
+  convert(input: {
+    readonly amount: Money;
+    readonly toCurrency: string;
+    readonly asOf: DateOnly;
+  }): Promise<Money | null>;
+}
+
+/**
+ * The five ports the builder always wants, plus the FX conversion it wants
+ * only when an account's currency does not already match `baseCurrency`.
+ *
+ * `fx` is optional so that a caller with nothing behind it (no `@ctx/investments`
+ * wiring, or a fixture with every account in one currency) never has to supply
+ * one — the builder degrades to excluding the mismatched account rather than
+ * requiring the port to exist. Supplying it is what turns that exclusion into
+ * an actual conversion; see `FxPort`'s header.
+ */
 export interface SnapshotPorts {
   readonly ledger: LedgerPort;
   readonly budget: BudgetPort;
   readonly recurring: RecurringPort;
   readonly investments: InvestmentsPort;
   readonly marketData: MarketDataPort;
+  readonly fx?: FxPort;
 }
 
 // ---------------------------------------------------------------------------
@@ -616,6 +658,25 @@ export function inMemoryMarketDataPort(rates: InsightsMarketRates | null): Marke
   return {
     rates() {
       return Promise.resolve(rates);
+    },
+  };
+}
+
+/**
+ * An `FxPort` over a fixed rate table, keyed `"FROM/TO"` (e.g. `"CAD/USD"`).
+ *
+ * Deliberately dumb — a lookup, not a cross-rate calculator — because the
+ * arithmetic this fake needs to get right belongs to `@ctx/investments`'s own
+ * `FxReader` and is proven there; this one exists only to let the builder's
+ * own conversion call be exercised without wiring the real reader in.
+ */
+export function inMemoryFxPort(rates: Readonly<Record<string, string>>): FxPort {
+  return {
+    convert({ amount, toCurrency }) {
+      if (amount.currency === toCurrency) return Promise.resolve(amount);
+      const factor = rates[`${amount.currency}/${toCurrency}`];
+      if (factor === undefined) return Promise.resolve(null);
+      return Promise.resolve(Money.multiplyByDecimal(Money.of(amount.minor, toCurrency), factor));
     },
   };
 }

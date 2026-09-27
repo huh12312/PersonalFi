@@ -88,6 +88,20 @@ export function isSensitiveColumn(table: string, column: string): boolean {
   return SENSITIVE_NAME_PATTERN.test(column);
 }
 
+/**
+ * The `ORDER BY` clause `bundle.ts`'s `fetchStream` uses for a table, keyed by
+ * table name. Every table in `TABLE_ORDER` has an `id` column (`idColumn()`,
+ * house convention) **except `projection_percentiles`**, whose primary key is
+ * the composite `(run_id, period_index)` — one row per projected year, never
+ * given its own id (WP 4.6, migration `0022_plan_projections.sql`). `fetchStream`
+ * defaults to `id`; this is the one named exception, so a future table that
+ * also lacks one is a deliberate addition here, not a query that happens to
+ * work by accident on whichever table shape somebody tested first.
+ */
+export const STREAM_ORDER_BY: ReadonlyMap<string, string> = new Map([
+  ['projection_percentiles', 'run_id, period_index'],
+]);
+
 /** Dependency order. See the module header for the FK grep this rests on. */
 export const TABLE_ORDER: readonly string[] = [
   // connections
@@ -127,6 +141,47 @@ export const TABLE_ORDER: readonly string[] = [
   'recurring_candidates',
   'subscription_metadata',
   'price_change_events',
+  // investments (Phase 3 WP 3.1/3.2/3.4, Phase 4 WP 4.7) — WP 4.12b, C-7.
+  // securities -> security_identifiers/security_overlay (0013); securities ->
+  // holdings/investment_transactions/cost_basis_lots/basis_method_elections/
+  // holdings_snapshots (0014); price_source_priority has no security FK
+  // (keyed by security_kind, a text enum — see 0015); securities ->
+  // security_tags, a composite (user_id, security_id) FK (0026); no ordering
+  // constraint from allocation_targets, which references only users.
+  'securities',
+  'security_identifiers',
+  'security_overlay',
+  'holdings',
+  'investment_transactions',
+  'cost_basis_lots',
+  'basis_method_elections',
+  'holdings_snapshots',
+  'price_source_priority',
+  'allocation_targets',
+  'security_tags',
+  // connectors (Phase 3 WP 3.6) — wallet_addresses -> connections (already
+  // exported first, above), not securities.
+  'wallet_addresses',
+  // planning (Phase 3 WP 3.8, Phase 4 WP 4.1/4.2/4.6) — WP 4.12b, C-7.
+  // net_worth_daily.supersedes_id self-references net_worth_daily (0017);
+  // goal_contributions/cash_earmarks -> goals, composite (goal_id, user_id)
+  // FKs (0020); plan_scenarios.baseline_id self-references plan_scenarios,
+  // projection_runs -> plan_scenarios and projection_percentiles ->
+  // projection_runs, both composite FKs (0022). Every self/parent reference
+  // is satisfied by `fetchStream`'s own `ORDER BY id` — `newId()` is a
+  // uuidv7, so ascending id order is chronological order, and every one of
+  // these points from a later row to an earlier one it supersedes, belongs
+  // to, or was computed from (never forward).
+  'net_worth_daily',
+  'goals',
+  'goal_contributions',
+  'risk_profile',
+  'cash_earmarks',
+  'plan_assumptions',
+  'plan_scenarios',
+  'plan_life_events',
+  'projection_runs',
+  'projection_percentiles',
 ];
 
 /**
@@ -175,49 +230,19 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
   ['locks', 'advisory locking state, not data.'],
   ['config_snapshots', 'boot-time configuration snapshots, not user data.'],
   // --- out of this WP's named scope (dispatch §3), not out of existence -------
-  // Phase 3 WP 3.1's securities master. These join the bundle in FK order
-  // (securities → security_identifiers/security_overlay) with the holdings and
-  // lots WP 3.7 exports; exporting the master without the positions that
-  // reference it would be half a fact. The manifest-completeness test below
-  // caught their arrival the day 0013 landed, which is what it is for.
-  ['securities', 'investments (WP 3.1); exported with holdings/lots by WP 3.7.'],
-  ['security_identifiers', 'investments (WP 3.1); exported with holdings/lots by WP 3.7.'],
-  ['security_overlay', 'investments (WP 3.1); exported with holdings/lots by WP 3.7.'],
-  // Phase 3 WP 3.2's positions and lots — the "holdings/lots" the three rows
-  // above are waiting for. They join the bundle together, in FK order, when
-  // WP 3.7 wires the investments export; until then the manifest test names
-  // them here so a reviewer sees the gap rather than the test hiding it.
-  ['holdings', 'investments (WP 3.2); exported with securities by WP 3.7.'],
-  ['holdings_snapshots', 'investments (WP 3.2); exported with securities by WP 3.7.'],
-  ['investment_transactions', 'investments (WP 3.2); exported with securities by WP 3.7.'],
-  ['cost_basis_lots', 'investments (WP 3.2); exported with securities by WP 3.7.'],
-  [
-    'basis_method_elections',
-    'investments (WP 3.2); the sticky AVERAGE_COST election is user state; exported by WP 3.7.',
-  ],
-  // Phase 4 WP 4.7's allocation-target and security-tag tables (migration
-  // 0026, owned by @ctx/investments — 08 §1.6's arrows point down, so this is
-  // Investments' user state, not Planning's). User-authored the same way the
-  // WP 3.2 rows above are: a stored target set and an employer-stock tag are
-  // both facts a holder set on purpose, and neither is recomputable from
-  // anything else in the schema. Deferred, never excluded, for the same
-  // reason WP 4.1's row above it is — WP 4.12's export batch adds them with
-  // the rest of the investments batch.
-  ['allocation_targets', 'investments (WP 4.7); exported by WP 4.12.'],
-  ['security_tags', 'investments (WP 4.7); exported by WP 4.12.'],
   // Phase 3 WP 3.4's market data. `prices`/`fx_rates` are provider facts,
   // re-fetchable and — under Tiingo's personal tier — not redistributable
   // (wp3.4-market-data.md §4), so a bundle must not carry them; a restored
   // instance refills them on its next 03:45 refresh. `price_source_priority`
-  // is the user's own ladder and is exported with the WP 3.7 batch.
-  // `market_data_runs` is excluded for good: importing another deployment's
-  // run history would seed this install's rate budget with calls it never made.
+  // (the user's own ladder) is not exempt any more — see `TABLE_ORDER` above
+  // (WP 4.12b, C-7). `market_data_runs` is excluded for good: importing
+  // another deployment's run history would seed this install's rate budget
+  // with calls it never made.
   [
     'prices',
     "market data (WP 3.4); provider facts, re-fetched on the next refresh; Tiingo's ToS forbids redistribution.",
   ],
   ['fx_rates', 'market data (WP 3.4); provider facts, re-fetched on the next refresh.'],
-  ['price_source_priority', 'investments (WP 3.4); the user-edited ladder; exported by WP 3.7.'],
   [
     'market_data_runs',
     "market data (WP 3.4); another deployment's run history would seed this one's rate budget with calls it never made.",
@@ -234,76 +259,6 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
   [
     'connection_sync_facts',
     're-derivable by re-sync; the provider’s last statement, not a derivation (the connection_staged_facts reason, WP 3.7).',
-  ],
-  // Phase 3 WP 3.6's watch-only wallet descriptors (migration 0016). An
-  // xpub/ypub/zpub is **not** a credential — it is public information a block
-  // explorer would show anyone, and there is no key material column here to
-  // leak (08 §2.6) — so the reason this is deferred rather than excluded is
-  // ordinary: the row is meaningless without the `connections` row its
-  // `connection_id` references, and `connections` is itself not in this WP's
-  // export scope. The two travel together or not at all.
-  [
-    'wallet_addresses',
-    'investments (WP 3.6); a wallet descriptor is meaningless without its connections row, which this WP does not export either.',
-  ],
-  // Phase 3 WP 3.8's net-worth read model (migration 0017). Derived, in the
-  // strict sense: every row is recomputable from `accounts`, `account_balances`,
-  // `holdings`, `prices` and `fx_rates`. Deferred rather than excluded for one
-  // reason that is not derivability — a **sealed** row is a historical
-  // assertion (08 §3.5) made against prices that may no longer be fetchable,
-  // and corrections carry `supersedes_id`/`correction_reason` provenance a
-  // recomputation cannot reconstruct. So this belongs in a bundle eventually,
-  // with its revision ladder intact, and dropping it silently would lose
-  // exactly the part that cannot be rebuilt.
-  [
-    'net_worth_daily',
-    'planning (WP 3.8); sealed rows are historical assertions with correction provenance a recomputation cannot rebuild — exported with the investments batch, not dropped.',
-  ],
-  // Phase 4 WP 4.1 (migration 0020) and WP 4.2 (0021). These are the
-  // user-authored rows 08 §7.3 calls "the truly irreplaceable data" — a goal,
-  // a risk answer set, an assumptions delta — so they are deferred, never
-  // excluded: WP 4.12's export batch (docs/plan/04-phase-4-dispatch.md §3
-  // "WP 4.12", C-7 in the Phase 3 gate) adds them with the Phase 3 tables,
-  // `plan_assumptions.assumptions_version` round-tripping verbatim (wp4.2
-  // §9 item 6). Landed here as deferrals so the completeness check names them
-  // the day WP 4.12 forgets one, exactly as it named the Phase 3 tables.
-  ['goals', 'planning (WP 4.1); user-authored — exported by WP 4.12 with the Phase 3 batch.'],
-  [
-    'goal_contributions',
-    'planning (WP 4.1); user-authored — exported by WP 4.12 with the Phase 3 batch.',
-  ],
-  [
-    'risk_profile',
-    'planning (WP 4.1); user-authored — exported by WP 4.12 with the Phase 3 batch.',
-  ],
-  [
-    'cash_earmarks',
-    'planning (WP 4.1); user-authored — exported by WP 4.12 with the Phase 3 batch.',
-  ],
-  [
-    'plan_assumptions',
-    'planning (WP 4.2); user deltas against a named version — exported by WP 4.12, assumptions_version verbatim.',
-  ],
-  // Phase 4 WP 4.6 (migration 0022). The same deferral, for the same reason:
-  // a saved scenario and a life event are the holder's own plan, and a stored
-  // run's seed + engine_version + assumptions_version is what makes a saved
-  // projection re-openable byte for byte (D20) — so the runs travel with the
-  // scenarios, never recomputed on import.
-  [
-    'plan_scenarios',
-    'planning (WP 4.6); user-authored — exported by WP 4.12 (the baseline profile and lever deltas, verbatim).',
-  ],
-  [
-    'plan_life_events',
-    'planning (WP 4.6); user-authored — exported by WP 4.12 with the Phase 3 batch.',
-  ],
-  [
-    'projection_runs',
-    'planning (WP 4.6); user-authored — exported by WP 4.12 with seed, engine_version and assumptions_version verbatim, never recomputed on import.',
-  ],
-  [
-    'projection_percentiles',
-    'planning (WP 4.6); user-authored — exported by WP 4.12 with the run it belongs to.',
   ],
   ['advisors', "insights (WP 2.6); not named in this WP's export scope."],
   ['advisor_runs', "insights (WP 2.6); not named in this WP's export scope."],

@@ -760,8 +760,19 @@ harden-secrets:
     if [[ -e pg_password ]]; then
       sudo chown 70:10002 pg_password && sudo chmod 0440 pg_password
     fi
-    # age_recipient is a PUBLIC key and the b2 files are read by backup (10002).
-    for f in age_recipient b2_key_id b2_application_key; do
+    # age_recipient is a PUBLIC key, and — since WP 4.12b, C-5 — is now read
+    # by both api (10001, GET /export?encrypt=true) and backup (10002,
+    # docker/backup/backup.sh). Same shape as pg_password above: two
+    # consuming uids means owner:group, not a second owner, and 0440 rather
+    # than 0400. scripts/check-secret-ownership.sh derives and checks this
+    # from compose.yml directly, so this line rotting again the way it did
+    # for the plaid_* secrets (N-1) would be caught there even if this
+    # comment is not read.
+    if [[ -e age_recipient ]]; then
+      sudo chown 10001:10002 age_recipient && sudo chmod 0440 age_recipient
+    fi
+    # b2 files are read by backup (10002) alone.
+    for f in b2_key_id b2_application_key; do
       [[ -e "$f" ]] || continue
       sudo chown 10002:10002 "$f" && sudo chmod 0400 "$f"
     done

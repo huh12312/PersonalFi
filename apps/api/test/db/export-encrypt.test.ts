@@ -71,7 +71,11 @@ describe.skipIf(NO_DATABASE || !AGE_AVAILABLE)(
 
       h = await createApiHarness({
         suite: 'exportencrypt',
-        extraSecrets: { age_recipients: publicKey },
+        // WP 4.12b, C-5: the recipients filename is `age_recipient`
+        // (singular), matching `compose.yml`/`justfile`/RUNBOOK.md and
+        // `bundle.ts`'s corrected default — not the `age_recipients` this
+        // test used to plant, which no deployed image ever mounted.
+        extraSecrets: { age_recipient: publicKey },
       });
     }, 120_000);
 

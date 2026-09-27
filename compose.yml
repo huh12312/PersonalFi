@@ -331,6 +331,14 @@ services:
     # WP 3.4's four market-data keys and WP 3.5's CDP pair join the list here
     # and on `worker` — and on neither `migrator` nor `proxy` nor `backup`.
     # Kept in step with `just harden-secrets`, in the same edit (N-1).
+    #
+    # `age_recipient` joins the list here too (WP 4.12b, C-5; G3-4): `GET
+    # /export?encrypt=true` runs in this container
+    # (`apps/api/src/routes/export.ts`), and `encryptWithAge` reads the
+    # recipients file from `SECRETS_DIR` directly — it is the same *public*
+    # key the `backup` service already holds below, read-only, never the
+    # matching identity (private key), which never exists in this compose
+    # file at all (RUNBOOK.md's "Export and import").
     secrets:
       [
         database_url,
@@ -346,6 +354,7 @@ services:
         coinbase_key_name,
         coinbase_private_key,
         etherscan_api_key,
+        age_recipient,
       ]
     networks: [frontend, backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']

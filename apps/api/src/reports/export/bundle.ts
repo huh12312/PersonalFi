@@ -39,7 +39,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { decodeRow, encodeRow, StreamHasher, type RawRow } from './codec.ts';
-import { isSensitiveColumn, TABLE_ORDER } from './registry.ts';
+import { isSensitiveColumn, STREAM_ORDER_BY, TABLE_ORDER } from './registry.ts';
 
 export const BUNDLE_VERSION = 1;
 
@@ -93,10 +93,12 @@ async function fetchStream(
     columnRows.rows.map((row) => row.column_name),
   );
   const selectList = columns.map((column) => `"${column}"`).join(', ');
-  // `id` exists on every table in `TABLE_ORDER` (`idColumn()`, house convention);
-  // ordering by it is what makes two exports of the same data hash identically.
+  // `id` exists on every table in `TABLE_ORDER` (`idColumn()`, house convention)
+  // except the named exceptions in `STREAM_ORDER_BY`; ordering deterministically
+  // is what makes two exports of the same data hash identically.
+  const orderBy = STREAM_ORDER_BY.get(table) ?? 'id';
   const rows = await pool.query<RawRow>(
-    `SELECT ${selectList} FROM "${table}" WHERE user_id = $1 ORDER BY id`,
+    `SELECT ${selectList} FROM "${table}" WHERE user_id = $1 ORDER BY ${orderBy}`,
     [userId],
   );
 
@@ -201,7 +203,14 @@ export function parseAndVerifyBundle(text: string): ParsedBundle {
 
 export interface AgeEncryptOptions {
   readonly secretsDir: string;
-  /** Filename under `secretsDir`. Matches `docker/backup/backup.sh`'s `AGE_RECIPIENTS_FILE` convention. */
+  /**
+   * Filename under `secretsDir`. Defaults to `age_recipient` — **singular**,
+   * matching `compose.yml`'s secret name, `docker/backup/backup.sh`'s
+   * `AGE_RECIPIENTS_FILE` (the env var name is plural; the file it points at
+   * is not), `justfile` and RUNBOOK.md. WP 4.12b, C-5: this default used to
+   * read `age_recipients` (plural), a name compose.yml never mounted on any
+   * service — one recipients filename now, everywhere.
+   */
   readonly recipientsFile?: string;
 }
 
@@ -218,7 +227,7 @@ export class AgeUnavailableError extends Error {
  * not the obstacle; *adding a dependency at all* is outside this work
  * package's remit). Encrypts to the same recipients file
  * `docker/backup/backup.sh` already writes against
- * (`${SECRETS_DIR}/age_recipients`), so a downloaded, encrypted export opens
+ * (`${SECRETS_DIR}/age_recipient`), so a downloaded, encrypted export opens
  * with the exact identity file the nightly backup's restore drill already
  * uses (D24).
  *
@@ -232,7 +241,7 @@ export async function encryptWithAge(
   plaintext: string,
   options: AgeEncryptOptions,
 ): Promise<Buffer> {
-  const recipientsPath = join(options.secretsDir, options.recipientsFile ?? 'age_recipients');
+  const recipientsPath = join(options.secretsDir, options.recipientsFile ?? 'age_recipient');
   if (!existsSync(recipientsPath)) {
     throw new AgeUnavailableError(`no age recipients file at ${recipientsPath}`);
   }

@@ -24,7 +24,7 @@ import { createDatabase, createPool } from '@core/db';
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { systemClock } from '@core/kernel';
 import { SecretBox } from '@core/secretbox';
-import { UserService } from '@ctx/identity';
+import { UserService, type UserRecord } from '@ctx/identity';
 import { loadAssumptions } from '@ctx/planning';
 import {
   createConsumerPump,
@@ -34,6 +34,7 @@ import {
   outboxHealth,
   queueHealth,
   recordConfigSnapshot,
+  PoolCannotCoverPinnedConnectionsError,
   type ConsumerPump,
   type JobRunner,
   type Scheduler,
@@ -105,30 +106,118 @@ import { MODULE_FLAGS, buildPlatform, resolveModules } from './platform.ts';
  * construction, and checked out loud at boot by `assertPoolCoversLeases`
  * below.
  */
-const WORKER_PINNED_CONNECTIONS =
+export const WORKER_PINNED_CONNECTIONS =
   /* LISTEN: feature flags, domain events, jobs */ 3 +
   /* leader leases: scheduler, job reaper */ 2 +
   /* at most one consumer lease per module */ MODULE_FLAGS.length;
 
 /**
- * Say so, by name, if the arithmetic above ever stops holding.
+ * Say so, by name, if the arithmetic above ever stops holding — and refuse to
+ * boot rather than merely say so (WP 4.12b, C-6; G3-5).
  *
  * A pool that cannot cover its own pinned connections does not fail — it
  * *hangs*, silently, with every loop queued on `pool.connect()`. So this is
  * checked at the one moment the real number is known (after `resolveModules`
- * has decided which consumers exist) and logged as an error naming both sides,
- * rather than left to be rediscovered from an idle `pg_stat_activity`.
+ * has decided which consumers exist).
+ *
+ * ## Why this throws now, and did not before
+ *
+ * It used to log and continue. The Phase 3 gate's own sabotage found exactly
+ * what that is worth: making the check a no-op (S-P1: `if (poolMax > pinned
+ * || true) return;`) or zeroing the reservation it verifies (S-P2:
+ * `0 * MODULE_FLAGS.length`) both left `api` 75/75 green, because the one
+ * test that existed (`regate-worker-boot.test.ts`) asserted only that the
+ * *string* `assertPoolCoversLeases` appears in this file — never that it
+ * evaluates anything, never a consequence a test could see. A log line a
+ * silent deadlock never triggers is not a control; a thrown error `main()`'s
+ * own `try`/`catch` turns into `process.exit(1)` is a crash-loop `docker
+ * compose ps` shows in the first second, which is strictly worse to watch and
+ * strictly better to notice than an idle process at 0% CPU nobody is paged for.
+ *
+ * Exported (along with `WORKER_PINNED_CONNECTIONS`) so the arithmetic itself
+ * — not just its presence in the source — has a direct unit test
+ * (`test/worker-pool-guard.test.ts`), which is what actually goes red under
+ * S-P1 and S-P2 reproduced, rather than green the way the string-match test was.
  */
-function assertPoolCoversLeases(logger: pino.Logger, poolMax: number, consumerCount: number): void {
+export function assertPoolCoversLeases(
+  logger: pino.Logger,
+  poolMax: number,
+  consumerCount: number,
+): void {
   const pinned = 3 + 2 + consumerCount;
   if (poolMax > pinned) return;
-  logger.error(
-    { poolMax, pinned, consumerCount },
-    "the database pool cannot cover this process's pinned connections (3 LISTEN + 2 leader " +
-      'leases + one lease per consumer). Every job-runner poll and scheduler tick will queue on ' +
-      'pool.connect() forever and nothing will log an error. Raise DATABASE_POOL_MAX or reduce ' +
-      'the number of registered consumers.',
-  );
+  const detail =
+    "3 LISTEN + 2 leader leases + one lease per consumer. Every job-runner poll and scheduler " +
+    'tick would queue on pool.connect() forever with no error. Raise DATABASE_POOL_MAX or ' +
+    'reduce the number of registered consumers.';
+  logger.error({ poolMax, pinned, consumerCount }, `refusing to boot: ${detail}`);
+  throw new PoolCannotCoverPinnedConnectionsError(poolMax, pinned, detail);
+}
+
+/** A real `setTimeout`, deliberately **not** `unref()`'d — see `awaitAccountHolder`'s header. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+export interface AccountHolderPollOptions {
+  /** `UserService#findPrimary`, or a fake that answers `null` then a user. */
+  readonly findPrimary: () => Promise<UserRecord | null>;
+  readonly intervalMs: number;
+  /** Checked before every attempt, and again before every wait: a shutdown
+   *  signal that arrives while idling must stop the poll, not outlive it. */
+  readonly isStopping: () => boolean;
+  /** The worker's own idle-heartbeat touch — called once per empty attempt. */
+  readonly onIdle?: () => void;
+  /** Test seam. Production never overrides this; see `sleep` above. */
+  readonly sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Poll for the account holder, and hand back to `main()`'s normal start-up
+ * path — **without `main()` ever returning** while idle (C-1, G3-1).
+ *
+ * ## The defect this replaces
+ *
+ * `main()` used to build no pump, runner or scheduler in the no-holder
+ * branch, touch an `unref()`'d heartbeat timer once, and then fall through to
+ * the bottom of the function and return. `unref()` is what made that a
+ * defect rather than a design: it does not count towards keeping the event
+ * loop alive, so once the pool's `idleTimeoutMillis` (30 s) closed the last
+ * checked-out client, nothing held the process open and Node exited 0.
+ * Compose's restart policy then started it again, and each restart re-read
+ * `users` — a cold install worked only by an accidental exit-and-restart
+ * loop at roughly 2/min while no holder existed (the Phase 3 gate's cold
+ * walk, `docs/evidence/phase-3/gate-security-review.md` §3.1: `RestartCount=1`
+ * exactly 30 s after boot, no `shutting down` line — it was never signalled).
+ * On a runtime with no restart policy the worker would simply stop.
+ *
+ * ## The fix, and why a plain `setTimeout` is the load-bearing part
+ *
+ * This function loops, calling `findPrimary()` and — while it answers
+ * `null` — waiting one `intervalMs` and trying again, exactly like the job
+ * runner's and scheduler's own poll loops. The wait is `sleep()` above, a
+ * `setTimeout` that is **not** `unref()`'d: a pending, ref'd timer is itself
+ * a reason for the event loop to keep turning, which is what "idle until one
+ * is enrolled" needs to actually mean rather than "idle for 30 seconds and
+ * then restart". `onIdle` (the same `liveness.touch('idle')` the old
+ * heartbeat performed) keeps compose.yml's healthcheck fresh across however
+ * many cycles this takes; `isStopping` lets a real SIGTERM/SIGINT still stop
+ * a worker that has never seen a holder, rather than making it unstoppable.
+ */
+export async function awaitAccountHolder(
+  options: AccountHolderPollOptions,
+): Promise<UserRecord | null> {
+  const wait = options.sleep ?? sleep;
+  while (!options.isStopping()) {
+    const user = await options.findPrimary();
+    if (user !== null) return user;
+    options.onIdle?.();
+    if (options.isStopping()) return null;
+    await wait(options.intervalMs);
+  }
+  return null;
 }
 
 async function main(): Promise<void> {
@@ -184,39 +273,86 @@ async function main(): Promise<void> {
   //
   // `UserService` needs no KEK, so the worker can read the account holder without
   // the six seconds of Argon2id the API pays at boot.
-  const user = await new UserService({ db: pool, clock: systemClock }).findPrimary();
+  const users = new UserService({ db: pool, clock: systemClock });
+  let user = await users.findPrimary();
 
   let pump: ConsumerPump | null = null;
   let runner: JobRunner | null = null;
   let scheduler: Scheduler | null = null;
   let secretBox: SecretBox | null = null;
-  let idleHeartbeatTimer: NodeJS.Timeout | null = null;
+  let stopping = false;
+
+  /**
+   * Shutdown order is the whole point of a graceful stop and is not arbitrary.
+   *
+   * Scheduler first: stop *creating* work. Pump next: stop taking events. Job
+   * runner last, because it is the one with work in its hands, and `stop()`
+   * waits for it. Only then does the pool close — closing it first would fail
+   * every in-flight query and turn a clean deploy into a batch of abandoned jobs.
+   *
+   * Defined and registered **before** the account-holder poll below (C-1):
+   * a SIGTERM/SIGINT that arrives while the worker has never seen a holder
+   * must still stop it — `pump`/`runner`/`scheduler`/`secretBox` are read at
+   * call time, so it is safe for every one of them to still be `null`.
+   */
+  const shutdown = async (signal: string): Promise<void> => {
+    if (stopping) return;
+    stopping = true;
+    logger.info({ signal }, 'shutting down');
+    try {
+      await scheduler?.stop();
+      await pump?.stop();
+      await runner?.stop();
+      // The KEK goes before the pool does: a process that is shutting down has
+      // no further use for it, and the window in which it sits in memory after
+      // the last job finished should be as short as the code can make it (P0-2).
+      secretBox?.destroy();
+      await platform.flags.close();
+      await pool.end();
+      logger.info({}, 'shutdown complete');
+      process.exit(0);
+    } catch (error) {
+      logger.error({ err: error }, 'shutdown failed');
+      process.exit(1);
+    }
+  };
+
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
+  process.once('SIGINT', () => void shutdown('SIGINT'));
 
   if (user === null) {
     // Not an error: a freshly migrated database has no account holder until the
-    // first passkey is enrolled. Come back after a restart rather than crash-looping.
-    logger.warn({}, 'no account holder yet; the worker will idle until one is enrolled');
-    // D-3: this is the one case where "no job-runner or scheduler heartbeat"
-    // is the correct, intended state rather than a silent death — a fresh
-    // install's healthcheck must not fail just because nobody has enrolled a
-    // passkey yet. Everything else that skips building a runner or scheduler
-    // below (an absent master_key, a locked keyring) leaves this untouched on
-    // purpose, so the healthcheck reports it exactly as it should: unhealthy.
+    // first passkey is enrolled.
     //
-    // A single touch here is not enough on its own: idle can last indefinitely
-    // (nobody has enrolled yet) or forever (a fresh install nobody has touched),
-    // and a healthcheck that only asked "does idle.heartbeat exist" would keep
-    // reporting healthy through a hang or a SIGSTOP exactly the way N-4's
-    // `node -e 'process.exit(0)'` did — this was caught re-running D-3's own
-    // kill -STOP proof against a freshly migrated database with no account
-    // holder enrolled, which is the first state every real deployment is in.
-    // Re-touching on the job runner's own poll cadence, even though no job
-    // runner exists yet, gives compose.yml's healthcheck a signal that can
-    // only stay fresh while this process's event loop is actually turning.
+    // C-1 (G3-1): this used to touch an `unref()`'d heartbeat once and let
+    // `main()` return, which let the process exit 0 once the pool's idle
+    // timeout closed the last connection — a cold install "worked" only by an
+    // accidental Compose restart-and-retry loop, never by actually idling
+    // (`awaitAccountHolder`'s header has the measured timeline). Now `main()`
+    // polls, in place, for as long as it takes, and — this is the load-bearing
+    // change — never returns while it does: the code below runs in the same
+    // invocation, the moment a holder is found, with no restart anywhere.
+    logger.warn({}, 'no account holder yet; polling for one — main() does not return while idle');
+    // D-3: a fresh install's healthcheck must not fail just because nobody has
+    // enrolled a passkey yet, and it must stay fresh for however long that
+    // takes — one touch now, then one per unsuccessful poll (`onIdle` below).
     liveness.touch('idle');
-    idleHeartbeatTimer = setInterval(() => liveness.touch('idle'), config.env.JOB_POLL_INTERVAL_MS);
-    idleHeartbeatTimer.unref?.();
-  } else {
+    user = await awaitAccountHolder({
+      findPrimary: () => users.findPrimary(),
+      intervalMs: config.env.JOB_POLL_INTERVAL_MS,
+      isStopping: () => stopping,
+      onIdle: () => liveness.touch('idle'),
+    });
+  }
+
+  if (user === null) {
+    // `stopping` became true while idling — a shutdown signal arrived before
+    // any holder was ever enrolled. `shutdown()` above is already running (and
+    // will call `process.exit`); there is nothing left to start.
+    return;
+  }
+
+  {
     const userId = user.id;
     await platform.flags.watch(pool);
 
@@ -428,50 +564,29 @@ async function main(): Promise<void> {
       'worker ready',
     );
   }
-
-  /**
-   * Shutdown order is the whole point of a graceful stop and is not arbitrary.
-   *
-   * Scheduler first: stop *creating* work. Pump next: stop taking events. Job
-   * runner last, because it is the one with work in its hands, and `stop()`
-   * waits for it. Only then does the pool close — closing it first would fail
-   * every in-flight query and turn a clean deploy into a batch of abandoned jobs.
-   */
-  let stopping = false;
-  const shutdown = async (signal: string): Promise<void> => {
-    if (stopping) return;
-    stopping = true;
-    logger.info({ signal }, 'shutting down');
-    if (idleHeartbeatTimer !== null) clearInterval(idleHeartbeatTimer);
-    try {
-      await scheduler?.stop();
-      await pump?.stop();
-      await runner?.stop();
-      // The KEK goes before the pool does: a process that is shutting down has
-      // no further use for it, and the window in which it sits in memory after
-      // the last job finished should be as short as the code can make it (P0-2).
-      secretBox?.destroy();
-      await platform.flags.close();
-      await pool.end();
-      logger.info({}, 'shutdown complete');
-      process.exit(0);
-    } catch (error) {
-      logger.error({ err: error }, 'shutdown failed');
-      process.exit(1);
-    }
-  };
-
-  process.once('SIGTERM', () => void shutdown('SIGTERM'));
-  process.once('SIGINT', () => void shutdown('SIGINT'));
 }
 
-try {
-  await main();
-} catch (error) {
-  if (error instanceof ConfigError) {
-    process.stderr.write(`${error.message}\n`);
-    process.exit(78); // EX_CONFIG
+// `docker/entrypoint.mjs` runs this file by dynamic `import()`, not by
+// invoking it as the process's own entry module (so that ROLE dispatch keeps
+// one PID and one signal-handler set — see that file's header) — which means
+// `import.meta.main` is always `false` in production and cannot be used as
+// the "am I actually being run?" guard a plain script would use. Vitest sets
+// `process.env.VITEST` in every worker process it runs (documented, and the
+// one thing every test process has that a real container never does), so
+// this is the guard that lets `awaitAccountHolder` (and `assertPoolCoversLeases`,
+// `WORKER_PINNED_CONNECTIONS`) be imported and unit-tested directly
+// (`test/worker-account-holder-poll.test.ts`, `test/worker-pool-guard.test.ts`)
+// without also booting a real worker — needing a database, a KEK and a
+// container's env — every time the module is merely imported.
+if (process.env['VITEST'] === undefined) {
+  try {
+    await main();
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      process.stderr.write(`${error.message}\n`);
+      process.exit(78); // EX_CONFIG
+    }
+    process.stderr.write(`worker failed to start: ${(error as Error).message}\n`);
+    process.exit(1);
   }
-  process.stderr.write(`worker failed to start: ${(error as Error).message}\n`);
-  process.exit(1);
 }
