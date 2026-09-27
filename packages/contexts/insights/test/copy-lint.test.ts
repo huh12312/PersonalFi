@@ -13,7 +13,7 @@
  * against a linter that returned `[]` unconditionally.
  */
 import { describe, expect, it } from 'vitest';
-import { wp310Catalogue } from '../src/advisors/catalogue.ts';
+import { wp310Catalogue, wp49Catalogue } from '../src/advisors/catalogue.ts';
 import { lintAdviceCopy, lintInsightCopy } from '../src/advisors/copy-lint.ts';
 import { contextOf } from '../src/advisors/support.ts';
 import { parseDecimal } from '../src/validate/decimal.ts';
@@ -110,5 +110,57 @@ describe('the copy linter over WP 3.10', () => {
         }
       }
     }
+  });
+});
+
+describe('the copy linter over WP 4.9', () => {
+  /**
+   * 07 §7.2's banned list *"bites hardest here"* (the dispatch): a projection
+   * is exactly the thing that wants to say `will grow` and `guaranteed
+   * returns`. This is the deliberate violation — the half that proves the
+   * linter is awake before the other half says the new copy passes it.
+   */
+  it('"this plan will grow to $2.1M" fails the linter', () => {
+    const violations = lintAdviceCopy('At this rate this plan will grow to $2.1M.', 'summary_md');
+    expect(violations.map((violation) => violation.detail)).toContain('will grow/earn/return');
+
+    const shouldFail: readonly (readonly [string, string])[] = [
+      ['Your savings will earn enough to retire at 60.', 'will grow/earn/return'],
+      ['The portfolio will return 7% a year.', 'will grow/earn/return'],
+      ['Index funds offer guaranteed returns over thirty years.', 'guaranteed returns'],
+      ['You should retire later.', 'you should'],
+    ];
+    for (const [text, name] of shouldFail) {
+      expect(
+        lintAdviceCopy(text, 'summary_md').map((violation) => violation.detail),
+        text,
+      ).toContain(name);
+    }
+  });
+
+  it('every template WP 4.9 added passes the linter on the seed', async () => {
+    let linted = 0;
+    for (const seedCase of ['drift', 'tight'] as const) {
+      const snapshot = await seedSnapshot(seedCase);
+      for (const entry of wp49Catalogue()) {
+        const output = entry.rule.evaluate(contextOf(requestFor(entry.rule.manifest, snapshot)));
+        for (const insight of output.insights) {
+          const context = traceContext({
+            snapshot,
+            derived: insight.derivations
+              .map((derivation) => parseDecimal(derivation.value))
+              .filter((value): value is bigint => value !== null),
+          });
+          const violations = lintInsightCopy(insight, context);
+          expect(
+            violations,
+            `${entry.ruleId} ${insight.key}: ${JSON.stringify(violations)}`,
+          ).toEqual([]);
+          linted += 1;
+        }
+      }
+    }
+    // Six rules fire across the two cases; each is linted at least once.
+    expect(linted).toBeGreaterThanOrEqual(6);
   });
 });

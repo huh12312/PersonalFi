@@ -53,6 +53,13 @@ export const ADVISOR_SCOPES = [
   // is what a manifest review sorts by.
   'liabilities.terms',
   'market.rates',
+  // WP 4.9, advisor contract 1.3.0. Appended for the same reason as the two
+  // above: the published enum is positional, and appending keeps the contract
+  // diff to one added member. Migration 0024 widens `snapshot_grants_scope_check`
+  // in the same change — `apps/api/test/phase3-registration.test.ts` reads the
+  // latest CHECK out of the migrations and fails the build on a scope the
+  // database would refuse to store a grant for.
+  'plan.projection',
 ] as const;
 
 export type AdvisorScope = (typeof ADVISOR_SCOPES)[number];
@@ -110,11 +117,17 @@ export interface ScopeDefinition {
    * change** — an arm without a flag is dead code and a flag without an arm is
    * a silent no-key, so the two may never be split across commits.
    *
-   * The four that remain `false` are the four whose source context does not
-   * exist: `goals.list` and `risk.profile` are `@ctx/planning`'s and Phase 4's,
-   * `market.watchlist` has no model at all, and `institutions.names` is a
-   * deliberate refusal — 08 §4.2 gives it the highest sensitivity in the table
-   * and nothing has needed it.
+   * **WP 4.9 flipped two more.** `goals.list` and `risk.profile` were
+   * `@ctx/planning`'s and Phase 4's; WP 4.1 and WP 4.6 built the readers, WP 4.9
+   * landed the `#goalsList` / `#riskProfile` arms and `PlanningPort`, and the
+   * flags flipped in the same change. Both were already published at contract
+   * 1.0.0 and already inside migration 0019's CHECK, so neither needed a bump
+   * or a widening migration of its own. `plan.projection` is new at 1.3.0 and
+   * shipped sourced from its first commit.
+   *
+   * The two that remain `false`: `market.watchlist` has no model at all, and
+   * `institutions.names` is a deliberate refusal — 08 §4.2 gives it the highest
+   * sensitivity in the table and nothing has needed it.
    */
   readonly sourcedInPhase2: boolean;
 }
@@ -236,24 +249,64 @@ export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
     scope: 'goals.list',
     sensitivity: 4,
     key: 'goals_list',
-    yields: 'Goal name, target, horizon and progress percentage.',
-    drops: 'The accounts funding the goal and any note attached to it.',
+    yields:
+      'Per active, pace-evaluable goal: its name, target, whole months to the target date, the ' +
+      'funded share, and (contract 1.3.0) the pace verdict with the monthly amount that reaches ' +
+      'the target on time beside the monthly amount the goal’s plans schedule.',
+    drops:
+      'The goal’s id (a `GOAL_` pseudonym crosses for every advisor kind), its target date (a ' +
+      'month count crosses instead), the accounts funding it, the earmarks and the funded ' +
+      'amount behind the share, and any note attached to it.',
     externalAllowed: true,
     requiresPerRunConsent: false,
     minimisation: minimisation({}),
-    // @ctx/planning lands in Phase 4.
-    sourcedInPhase2: false,
+    // WP 4.9: `#goalsList`, over `PlanningPort.goals` — WP 4.6's `evaluateGoalPace`
+    // (07 R6 made exact) at the composition root.
+    sourcedInPhase2: true,
   }),
   Object.freeze({
     scope: 'risk.profile',
     sensitivity: 4,
     key: 'risk_profile',
     yields: 'Risk tolerance, horizon in years, tax-bracket band, liquidity need.',
-    drops: 'Exact income — the bracket crosses as a band, never a figure.',
+    drops:
+      'Exact income — the bracket crosses as a band, never a figure — and the questionnaire ' +
+      'answers and consistency penalty behind the tolerance.',
     externalAllowed: true,
     requiresPerRunConsent: false,
     minimisation: minimisation({}),
-    sourcedInPhase2: false,
+    // WP 4.9: `#riskProfile`, over `PlanningPort.riskProfile` — WP 4.1's
+    // `currentRiskProfile`. A holder who declined income has no band, and the
+    // contract's band is a required string, so that holder's block is **absent**
+    // rather than carrying an invented band.
+    sourcedInPhase2: true,
+  }),
+  Object.freeze({
+    // WP 4.9, contract 1.3.0. The one scope Phase 4 had to add: R2 and R7 need
+    // a success probability and a guardrail position, and neither `goals.list`
+    // nor `risk.profile` yields either (04-phase-4-dispatch.md §3 WP 4.9).
+    // A projection is a forecast *about the holder*, which is why it is a
+    // scope of its own that a user can refuse, rather than a field smuggled
+    // into a block they already granted.
+    scope: 'plan.projection',
+    sensitivity: 5,
+    key: 'plan_projection',
+    yields:
+      'The newest baseline run: its method, path count, assumptions version and staleness; the ' +
+      'success probability and the target it is measured against, as decimal strings; the ' +
+      'p5/p50/p95 band at the plan’s last year rounded to $1,000; whole-year ages; the ' +
+      'savings rate the plan assumes beside the one observed; the RMD start age and year with ' +
+      'the tax-deferred share; the Social Security claim factors; and the withdrawal rate ' +
+      'against its guardrail band.',
+    drops:
+      'Every balance and every account: no starting balance, no bucket amount, no account id, ' +
+      'no income figure (only ratios over it), no scenario or run id, and no date finer than a ' +
+      'year — a birth date crosses as an age and a run date as a year.',
+    externalAllowed: true,
+    requiresPerRunConsent: false,
+    minimisation: minimisation({ roundMonetaryToMinor: 100_000 }),
+    // WP 4.9: `#planProjection`, over `PlanningPort.projection`.
+    sourcedInPhase2: true,
   }),
   Object.freeze({
     scope: 'market.watchlist',

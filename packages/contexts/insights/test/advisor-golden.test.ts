@@ -382,6 +382,77 @@ const GOLDEN: readonly Golden[] = [
     severity: 'notable',
     annualized: null,
   },
+  // --- WP 4.9, the retirement wave. R1 fires on `tight` (a young saver whose
+  //     stated plan outruns the observed rate); the other five on `drift` (a
+  //     66-year-old retiree). The control carries a healthy plan, so its half of
+  //     each pair is a real negative rather than an empty snapshot.
+  {
+    ruleId: 'R1',
+    seedCase: 'tight',
+    keys: ['retirement.savings_rate.baseline'],
+    summary:
+      'The retirement plan assumes contributions of 15% of your income. The months this app ' +
+      'has observed show 8.5%, which is 6.5pp below it. The plan\u2019s success probability is ' +
+      'computed from the rate it assumes, so it reads higher than your recent saving supports.',
+    severity: 'warning',
+    annualized: null,
+  },
+  {
+    ruleId: 'R2',
+    seedCase: 'drift',
+    keys: ['retirement.success_probability.baseline'],
+    summary:
+      'In 10,000 simulations of market returns, this plan lasted through age 95 in 71.3% of ' +
+      'them. The plan is measured against 80%, so it sits 8.7pp short. Retiring later, saving ' +
+      'more and spending less each move that share; the plan screen compares them side by side.',
+    severity: 'urgent',
+    annualized: null,
+  },
+  {
+    ruleId: 'R3',
+    seedCase: 'drift',
+    keys: ['retirement.rmd_window.2035'],
+    summary:
+      'Required minimum distributions start at age 75, in 2035. 62% of what the retirement plan ' +
+      'starts from is tax-deferred, and the 9 years before then are the widest window for Roth ' +
+      'conversions, while how much comes out each year is still your choice.',
+    severity: 'notable',
+    annualized: null,
+  },
+  {
+    ruleId: 'R4',
+    seedCase: 'drift',
+    keys: ['retirement.claiming_age.67_0'],
+    summary:
+      'The retirement plan claims Social Security at 67. Claiming at seventy instead makes each ' +
+      'monthly payment 24% larger, for life and in today\u2019s dollars, in exchange for the ' +
+      'payments that would have arrived in between.',
+    severity: 'notable',
+    annualized: null,
+  },
+  {
+    ruleId: 'R6',
+    seedCase: 'drift',
+    keys: ['retirement.goal_pace.GOAL_6deb4f359d91'],
+    summary:
+      'The goal \u201cHouse deposit\u201d needs about $1,500.00 a month to reach $20,000.00 in 12 ' +
+      'months. The contributions planned for it come to $500.00 a month, about $12,000.00 a ' +
+      'year short of that pace.',
+    severity: 'warning',
+    annualized: '1200000',
+  },
+  {
+    ruleId: 'R7',
+    seedCase: 'drift',
+    keys: ['retirement.withdrawal_guardrail.above'],
+    summary:
+      'This year the plan draws 6.12% of the portfolio, above the 3.6% to 5.4% guardrail band ' +
+      'around a 4.5% starting rate. Under the guardrail method, a rate above the band is the ' +
+      'point at which planned spending is trimmed by a tenth, so the portfolio is not drawn ' +
+      'down faster than it can sustain.',
+    severity: 'urgent',
+    annualized: null,
+  },
 ];
 
 describe('each rule on the seed case it was designed for', () => {

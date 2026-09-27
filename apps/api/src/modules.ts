@@ -111,6 +111,7 @@ import {
   createCategorizationLedgerPort,
   createInsightsBudgetPort,
   createInsightsInvestmentsPort,
+  createInsightsPlanningPort,
   createInsightsLedgerPort,
   createInsightsMarketDataPort,
   createInsightsRecurringPort,
@@ -785,6 +786,11 @@ function insightsModule(
       // `liabilities.terms` need only a database handle and read the same
       // readers WP 3.9's routes do.
       investments: createInsightsInvestmentsPort(database, clock),
+      // WP 4.9. `goals.list`, `risk.profile` and `plan.projection` read
+      // Planning's own readers (goals, the derived risk score, the baseline's
+      // latest projection run) under 08 §4.2 minimisation; the retirement
+      // wave is silent without this binding.
+      planning: createInsightsPlanningPort(database, clock, { timeZone: options.timezone }),
       // `market.rates` needs a *source*, and there is only one in the
       // deployment: `createMarketDataRuntime(...)`'s FRED adapter, which
       // exists only when a key file does. `undefined` here is the same

@@ -36,7 +36,9 @@ export const OPENAPI_CONTRACT_VERSION = '0.1.0';
  * `AdvisorRequest`, the `Insight[]` response with evidence refs, derivations,
  * confidence, a severity ceiling and `requires_review`, and `AdvisorManifest`.
  */
-export const ADVISOR_CONTRACT_VERSION = '1.2.0';
+// 1.3.0 (WP 4.9): the `plan.projection` scope and `goals_list[].pace`, strictly
+// additive; migration 0024 widens `snapshot_grants_scope_check` to match.
+export const ADVISOR_CONTRACT_VERSION = '1.3.0';
 
 /**
  * The integer that crosses the wire, as distinct from the artefact version

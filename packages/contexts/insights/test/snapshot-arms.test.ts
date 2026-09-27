@@ -36,7 +36,11 @@ import {
   inMemoryInvestmentsPort,
   inMemoryLedgerPort,
   inMemoryMarketDataPort,
+  inMemoryPlanningPort,
   inMemoryRecurringPort,
+  type InsightsGoal,
+  type InsightsPlanProjection,
+  type PlanningPort,
   type InsightsHoldings,
   type InsightsLiabilities,
   type InsightsMarketRates,
@@ -624,5 +628,228 @@ describe('#marketRates', () => {
     );
     // A rate a surface cannot lawfully print is worse than no rate.
     expect(Object.keys(unattributed.snapshot)).not.toContain('market_rates');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WP 4.9 — the three planning arms
+// ---------------------------------------------------------------------------
+
+function planGoal(overrides: Partial<InsightsGoal> = {}): InsightsGoal {
+  return {
+    id: 'goal-0001-never-crosses',
+    name: 'House deposit',
+    target: usd(2_000_000n),
+    monthsRemaining: 12,
+    fundedRatio: '0.1',
+    status: 'off_track',
+    requiredMonthly: usd(150_000n),
+    plannedMonthly: usd(50_000n),
+    ...overrides,
+  };
+}
+
+function planProjection(overrides: Partial<InsightsPlanProjection> = {}): InsightsPlanProjection {
+  return {
+    asOfYear: 2026,
+    currency: 'USD',
+    method: 'monte_carlo',
+    paths: 10_000,
+    assumptionsVersion: `sha256:${'0f'.repeat(32)}`,
+    stale: false,
+    successProbability: '0.713000',
+    successTarget: '0.80',
+    terminal: {
+      age: 95,
+      calendarYear: 2055,
+      p5: usd(49_999n),
+      p50: usd(41_250_000n),
+      p95: usd(187_349_999n),
+    },
+    ages: { current: 66, retirement: 65, planEnd: 95 },
+    savingsRate: { plan: '0.15', observed: '0.085', planSource: 'stated' },
+    rmd: { startAge: 75, startYear: 2035, taxDeferredShare: '0.62' },
+    socialSecurity: { claimAgeYears: 67, claimAgeMonths: 0, claimFactor: '1', factorAt70: '1.24' },
+    guardrail: {
+      withdrawalRate: '0.0612',
+      referenceRate: '0.045',
+      lower: '0.036',
+      upper: '0.054',
+      position: 'above',
+    },
+    ...overrides,
+  };
+}
+
+/** A planning port that counts its calls, so "no code path" is observable. */
+function countingPlanning(inner: PlanningPort): { port: PlanningPort; calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    port: {
+      goals(input) {
+        calls.push('goals');
+        return inner.goals(input);
+      },
+      riskProfile(input) {
+        calls.push('riskProfile');
+        return inner.riskProfile(input);
+      },
+      projection(input) {
+        calls.push('projection');
+        return inner.projection(input);
+      },
+    },
+  };
+}
+
+describe('the planning arms (WP 4.9)', () => {
+  it('an ungranted planning scope reads nothing and emits no key', async () => {
+    const counted = countingPlanning(
+      inMemoryPlanningPort({ goals: [planGoal()], projection: planProjection() }),
+    );
+    const built = await buildWith(portsWith({ planning: counted.port }), ['holdings.aggregate']);
+    expect(counted.calls).toEqual([]);
+    expect(built.snapshot.goals_list).toBeUndefined();
+    expect(built.snapshot.plan_projection).toBeUndefined();
+  });
+
+  it('a granted planning scope with no port, or a null answer, emits no key — never an empty block', async () => {
+    const scopes = ['goals.list', 'risk.profile', 'plan.projection'];
+    const noPort = await buildWith(portsWith({}), scopes);
+    expect(noPort.snapshot).toEqual({});
+    expect(noPort.emittedScopes).toEqual([]);
+
+    const nothing = await buildWith(portsWith({ planning: inMemoryPlanningPort({}) }), scopes);
+    expect(nothing.snapshot).toEqual({});
+
+    const empty = await buildWith(portsWith({ planning: inMemoryPlanningPort({ goals: [] }) }), [
+      'goals.list',
+    ]);
+    expect(empty.snapshot.goals_list).toBeUndefined();
+  });
+
+  it('#goalsList drops the id, the date and every malformed row, and caps progress at one', async () => {
+    const built = await buildWith(
+      portsWith({
+        planning: inMemoryPlanningPort({
+          goals: [
+            planGoal(),
+            planGoal({
+              id: 'goal-0002',
+              name: 'Past target',
+              fundedRatio: '1.25',
+              status: 'on_track',
+            }),
+            planGoal({ id: 'goal-0003', name: '   ' }),
+            planGoal({ id: 'goal-0004', fundedRatio: 'NaN' }),
+            planGoal({ id: 'goal-0005', monthsRemaining: -1 }),
+            planGoal({ id: 'goal-0006', plannedMonthly: Money.of(50_000n, 'EUR') }),
+          ],
+        }),
+      }),
+      ['goals.list'],
+    );
+    const goals = built.snapshot.goals_list?.goals ?? [];
+    expect(goals.map((goal) => goal.name)).toEqual(['House deposit', 'Past target']);
+    const json = JSON.stringify(built.snapshot);
+    expect(json).not.toContain('goal-0001-never-crosses');
+    expect(json).not.toContain('goal-0002');
+    expect(goals[0]?.goal_ref).toMatch(/^GOAL_[0-9a-f]{12}$/u);
+    expect(goals[0]?.pace).toEqual({
+      status: 'off_track',
+      required_monthly: { minor: '150000', currency: 'USD' },
+      planned_monthly: { minor: '50000', currency: 'USD' },
+    });
+    // Funded past the target reads as complete; the verdict keeps the truth.
+    expect(goals[1]?.progress).toBe(1);
+    expect(goals[1]?.pace?.status).toBe('on_track');
+  });
+
+  it('#planProjection rounds the band to $1,000 and passes every ratio through as a string', async () => {
+    const built = await buildWith(
+      portsWith({ planning: inMemoryPlanningPort({ projection: planProjection() }) }),
+      ['plan.projection'],
+    );
+    const block = built.snapshot.plan_projection;
+    expect(block).toBeDefined();
+    // $499.99 → $0; $412,500.00 → $412,000 (half-even); $1,873,499.99 → $1,873,000.
+    expect(block?.terminal.p5).toEqual({ minor: '0', currency: 'USD' });
+    expect(block?.terminal.p50).toEqual({ minor: '41200000', currency: 'USD' });
+    expect(block?.terminal.p95).toEqual({ minor: '187300000', currency: 'USD' });
+    expect(block?.success_probability).toBe('0.713000');
+    expect(block?.guardrail?.position).toBe('above');
+    expect(block?.savings_rate?.plan_source).toBe('stated');
+  });
+
+  it('#planProjection refuses a malformed core field whole, and drops only a malformed sub-block', async () => {
+    const floatLike = await buildWith(
+      portsWith({
+        planning: inMemoryPlanningPort({
+          projection: planProjection({ successProbability: '7.13e-1' }),
+        }),
+      }),
+      ['plan.projection'],
+    );
+    expect(floatLike.snapshot.plan_projection).toBeUndefined();
+
+    const badBand = await buildWith(
+      portsWith({
+        planning: inMemoryPlanningPort({
+          projection: planProjection({
+            terminal: {
+              age: 95,
+              calendarYear: 2055,
+              p5: null,
+              p50: Money.of(1n, 'EUR'),
+              p95: null,
+            },
+          }),
+        }),
+      }),
+      ['plan.projection'],
+    );
+    expect(badBand.snapshot.plan_projection).toBeUndefined();
+
+    const badRails = await buildWith(
+      portsWith({
+        planning: inMemoryPlanningPort({
+          projection: planProjection({
+            guardrail: {
+              withdrawalRate: '-0.01',
+              referenceRate: '0.045',
+              lower: '0.036',
+              upper: '0.054',
+              position: 'below',
+            },
+          }),
+        }),
+      }),
+      ['plan.projection'],
+    );
+    expect(badRails.snapshot.plan_projection).toBeDefined();
+    expect(badRails.snapshot.plan_projection?.guardrail).toBeUndefined();
+    expect(badRails.snapshot.plan_projection?.rmd).toBeDefined();
+  });
+
+  it('every emitted planning block validates against the published schema', async () => {
+    const { AdvisorSnapshotSchema } = await import('../src/contract/snapshot.ts');
+    const built = await buildWith(
+      portsWith({
+        planning: inMemoryPlanningPort({
+          goals: [planGoal()],
+          riskProfile: {
+            tolerance: 'moderate',
+            horizonYears: 20,
+            taxBracketBand: '22-24',
+            liquidityNeed: 'low',
+          },
+          projection: planProjection(),
+        }),
+      }),
+      ['goals.list', 'risk.profile', 'plan.projection'],
+    );
+    expect(built.emittedScopes).toEqual(['goals.list', 'risk.profile', 'plan.projection']);
+    expect(AdvisorSnapshotSchema.safeParse(built.snapshot).success).toBe(true);
   });
 });

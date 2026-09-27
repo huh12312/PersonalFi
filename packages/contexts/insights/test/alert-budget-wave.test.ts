@@ -15,7 +15,7 @@
  * can say.
  */
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_CATALOGUE, wp310Catalogue } from '../src/advisors/catalogue.ts';
+import { BUILTIN_CATALOGUE, wp310Catalogue, wp49Catalogue } from '../src/advisors/catalogue.ts';
 import { contextOf, moneyOf } from '../src/advisors/support.ts';
 import { ALERT_BUDGET, applyAlertBudget, belowFloor } from '../src/policy/alert-budget.ts';
 import type { Insight } from '../src/contract/response.ts';
@@ -25,6 +25,8 @@ interface Row {
   readonly ruleId: string;
   readonly insight: Insight;
 }
+
+type Feed = ReturnType<typeof applyAlertBudget<Row>>;
 
 function project(row: Row) {
   return {
@@ -133,5 +135,76 @@ describe('the alert budget after the investing wave', () => {
     expect(feed.dashboard.length).toBe(ALERT_BUDGET.dashboard);
     expect(feed.list.length).toBe(ALERT_BUDGET.list);
     expect(feed.overflow.length + feed.list.length + feed.belowFloor.length).toBe(rows.length);
+  });
+});
+
+/**
+ * WP 4.9 — 07 §7.4's week four, released on top of everything else.
+ *
+ * The dispatch: *"the alert budget is applied **after** the wave is released,
+ * not before."* In production that is `read.ts`' `insightFeed`, which calls
+ * `applyAlertBudget` once over every stored insight with no notion of a wave at
+ * all — so a released wave competes for the same five and twenty slots rather
+ * than arriving with its own. `releaseWave` below is that order, written as a
+ * function so the evidence doc's sabotage (budget the existing feed first, then
+ * append the wave) is a one-line change to one place.
+ */
+function releaseWave(existing: readonly Row[], wave: readonly Row[]): Feed {
+  return applyAlertBudget([...existing, ...wave], project, 'USD');
+}
+
+describe('the alert budget after the retirement wave (WP 4.9)', () => {
+  it('the alert budget is applied after the retirement wave is released, not before', async () => {
+    const existing = await releasedFeed(
+      BUILTIN_CATALOGUE.filter((entry) => entry.wave !== 'retirement'),
+    );
+    const wave = await releasedFeed(wp49Catalogue());
+    expect(wave.map((row) => row.ruleId).sort()).toEqual(['R2', 'R3', 'R4', 'R6', 'R7']);
+
+    const before = applyAlertBudget(existing, project, 'USD');
+    const after = releaseWave(existing, wave);
+
+    // The budget did not grow with the wave: five and twenty, before and after.
+    expect(before.dashboard.length).toBe(ALERT_BUDGET.dashboard);
+    expect(after.dashboard.length).toBe(ALERT_BUDGET.dashboard);
+    expect(after.list.length).toBe(ALERT_BUDGET.list);
+
+    // R2 and R7 — the wave's two urgents — reach the dashboard by competing
+    // for it, and something that was there before the release is displaced to
+    // the list rather than the dashboard gaining a sixth slot.
+    const dashboard = after.dashboard.map((row) => row.ruleId);
+    expect(dashboard).toContain('R2');
+    expect(dashboard).toContain('R7');
+    const displaced = before.dashboard.filter(
+      (row) => !after.dashboard.some((kept) => kept.insight.key === row.insight.key),
+    );
+    expect(displaced.length, 'a release that displaced nothing was not budgeted').toBeGreaterThan(
+      0,
+    );
+    for (const row of displaced) {
+      expect(
+        after.list.some((listed) => listed.insight.key === row.insight.key),
+        `${row.ruleId} was deleted instead of moved down`,
+      ).toBe(true);
+    }
+
+    // Nothing is lost: every proposal from both halves is in exactly one bucket.
+    const total = after.list.length + after.overflow.length + after.belowFloor.length;
+    expect(total).toBe(existing.length + wave.length);
+    // R3 and R4 claim no figure and are `notable`: held in overflow, not floored.
+    const overflow = after.overflow.map((row) => row.ruleId);
+    expect(overflow).toContain('R3');
+    expect(overflow).toContain('R4');
+    expect(after.belowFloor.map((row) => row.ruleId)).not.toContain('R3');
+  });
+
+  it('the one retirement rule that claims a figure clears the floor on its own merits', async () => {
+    const wave = await releasedFeed(wp49Catalogue());
+    const claiming = wave.filter((row) => row.insight.impact.annualized !== null);
+    expect(claiming.map((row) => row.ruleId)).toEqual(['R6']);
+    for (const row of claiming) expect(belowFloor(project(row), 'USD')).toBe(false);
+    for (const row of wave.filter((item) => item.insight.impact.annualized === null)) {
+      expect(belowFloor(project(row), 'USD'), `${row.ruleId}`).toBe(false);
+    }
   });
 });

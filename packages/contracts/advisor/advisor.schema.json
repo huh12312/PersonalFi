@@ -4,7 +4,7 @@
   "title": "PersonalFi Advisor contract",
   "description": "The index of the Advisor contract bundle (08 §4). Built-in rules, a local model (Phase 5) and the Vibe-Trading sidecar (Phase 6) all deliver through it, which is why it is versioned independently of the HTTP API. The normative documents are the three files under v1/; this file names them and states the wire version. An advisor pins a major and must reject anything it does not understand. The invariant the bundle exists to carry: an advisor receives a minimised, read-only snapshot over a one-way channel and returns proposals — it has no database handle, no token, no write port, and no value it can return that causes an action.",
   "contractVersion": 1,
-  "artefactVersion": "1.2.0",
+  "artefactVersion": "1.3.0",
   "supportedContractVersions": [1],
   "documents": {
     "request": { "$ref": "https://personalfi.local/contracts/advisor/v1/request.schema.json" },

@@ -4,7 +4,7 @@
   "title": "PersonalFi AdvisorRequest v1",
   "description": "What crosses the boundary to an advisor: a minimised, read-only snapshot with one key per granted scope, the digest we stored, and the limits we enforce. One-way — there is no return channel, no token and no handle (08 §4.1).",
   "contractVersion": 1,
-  "artefactVersion": "1.2.0",
+  "artefactVersion": "1.3.0",
   "type": "object",
   "properties": {
     "contract_version": {
@@ -48,7 +48,7 @@
       "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
     },
     "granted_scopes": {
-      "maxItems": 15,
+      "maxItems": 16,
       "type": "array",
       "items": {
         "type": "string",
@@ -67,7 +67,8 @@
           "transactions.raw",
           "institutions.names",
           "liabilities.terms",
-          "market.rates"
+          "market.rates",
+          "plan.projection"
         ]
       }
     },
@@ -925,6 +926,49 @@
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1
+                  },
+                  "pace": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": ["on_track", "off_track"]
+                      },
+                      "required_monthly": {
+                        "type": "object",
+                        "properties": {
+                          "minor": {
+                            "type": "string",
+                            "pattern": "^-?\\d{1,20}$"
+                          },
+                          "currency": {
+                            "type": "string",
+                            "pattern": "^[A-Z]{3}$"
+                          }
+                        },
+                        "required": ["minor", "currency"],
+                        "additionalProperties": false,
+                        "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                      },
+                      "planned_monthly": {
+                        "type": "object",
+                        "properties": {
+                          "minor": {
+                            "type": "string",
+                            "pattern": "^-?\\d{1,20}$"
+                          },
+                          "currency": {
+                            "type": "string",
+                            "pattern": "^[A-Z]{3}$"
+                          }
+                        },
+                        "required": ["minor", "currency"],
+                        "additionalProperties": false,
+                        "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                      }
+                    },
+                    "required": ["status", "required_monthly", "planned_monthly"],
+                    "additionalProperties": false
                   }
                 },
                 "required": ["goal_ref", "name", "target", "horizon_months", "progress"],
@@ -959,6 +1003,252 @@
             }
           },
           "required": ["tolerance", "horizon_years", "tax_bracket_band", "liquidity_need"],
+          "additionalProperties": false
+        },
+        "plan_projection": {
+          "type": "object",
+          "properties": {
+            "as_of_year": {
+              "type": "integer",
+              "minimum": 1900,
+              "maximum": 2200
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "method": {
+              "type": "string",
+              "enum": ["monte_carlo", "deterministic"]
+            },
+            "paths": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "assumptions_version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 96,
+              "pattern": "^[A-Za-z0-9_.:@-]+$"
+            },
+            "stale": {
+              "type": "boolean"
+            },
+            "success_probability": {
+              "type": "string",
+              "pattern": "^\\d{1,6}(\\.\\d{1,6})?$"
+            },
+            "success_target": {
+              "type": "string",
+              "pattern": "^\\d{1,6}(\\.\\d{1,6})?$"
+            },
+            "terminal": {
+              "type": "object",
+              "properties": {
+                "age": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 130
+                },
+                "calendar_year": {
+                  "type": "integer",
+                  "minimum": 1900,
+                  "maximum": 2200
+                },
+                "p5": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "minor": {
+                          "type": "string",
+                          "pattern": "^-?\\d{1,20}$"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "pattern": "^[A-Z]{3}$"
+                        }
+                      },
+                      "required": ["minor", "currency"],
+                      "additionalProperties": false,
+                      "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "p50": {
+                  "type": "object",
+                  "properties": {
+                    "minor": {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,20}$"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "pattern": "^[A-Z]{3}$"
+                    }
+                  },
+                  "required": ["minor", "currency"],
+                  "additionalProperties": false,
+                  "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                },
+                "p95": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "minor": {
+                          "type": "string",
+                          "pattern": "^-?\\d{1,20}$"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "pattern": "^[A-Z]{3}$"
+                        }
+                      },
+                      "required": ["minor", "currency"],
+                      "additionalProperties": false,
+                      "description": "Money as minor units in a string, paired with an ISO-4217 code."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["age", "calendar_year", "p5", "p50", "p95"],
+              "additionalProperties": false
+            },
+            "ages": {
+              "type": "object",
+              "properties": {
+                "current": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 130
+                },
+                "retirement": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 130
+                },
+                "plan_end": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 130
+                }
+              },
+              "required": ["current", "retirement", "plan_end"],
+              "additionalProperties": false
+            },
+            "savings_rate": {
+              "type": "object",
+              "properties": {
+                "plan": {
+                  "type": "string",
+                  "pattern": "^\\d{1,6}(\\.\\d{1,6})?$"
+                },
+                "observed": {
+                  "type": "string",
+                  "pattern": "^\\d{1,6}(\\.\\d{1,6})?$"
+                },
+                "plan_source": {
+                  "type": "string",
+                  "enum": ["stated", "derived"]
+                }
+              },
+              "required": ["plan", "observed", "plan_source"],
+              "additionalProperties": false
+            },
+            "rmd": {
+              "type": "object",
+              "properties": {
+                "start_age": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 130
+                },
+                "start_year": {
+                  "type": "integer",
+                  "minimum": 1900,
+                  "maximum": 2200
+                },
+                "tax_deferred_share": {
+                  "type": "string",
+                  "pattern": "^\\d{1,6}(\\.\\d{1,6})?$"
+                }
+              },
+              "required": ["start_age", "start_year", "tax_deferred_share"],
+              "additionalProperties": false
+            },
+            "social_security": {
+              "type": "object",
+              "properties": {
+                "claim_age_years": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 130
+                },
+                "claim_age_months": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 11
+                },
+                "claim_factor": {
+                  "type": "string",
+                  "pattern": "^\\d{1,6}(\\.\\d{1,6})?$"
+                },
+                "factor_at_70": {
+                  "type": "string",
+                  "pattern": "^\\d{1,6}(\\.\\d{1,6})?$"
+                }
+              },
+              "required": ["claim_age_years", "claim_age_months", "claim_factor", "factor_at_70"],
+              "additionalProperties": false
+            },
+            "guardrail": {
+              "type": "object",
+              "properties": {
+                "withdrawal_rate": {
+                  "type": "string",
+                  "pattern": "^\\d{1,6}(\\.\\d{1,6})?$"
+                },
+                "reference_rate": {
+                  "type": "string",
+                  "pattern": "^\\d{1,6}(\\.\\d{1,6})?$"
+                },
+                "lower": {
+                  "type": "string",
+                  "pattern": "^\\d{1,6}(\\.\\d{1,6})?$"
+                },
+                "upper": {
+                  "type": "string",
+                  "pattern": "^\\d{1,6}(\\.\\d{1,6})?$"
+                },
+                "position": {
+                  "type": "string",
+                  "enum": ["below", "within", "above"]
+                }
+              },
+              "required": ["withdrawal_rate", "reference_rate", "lower", "upper", "position"],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "as_of_year",
+            "currency",
+            "method",
+            "paths",
+            "assumptions_version",
+            "stale",
+            "success_probability",
+            "success_target",
+            "terminal",
+            "ages"
+          ],
           "additionalProperties": false
         },
         "market_watchlist": {

@@ -26,13 +26,14 @@
  *   2. **Did the user grant it?** The caller's `grantedScopes`, which comes from
  *      `snapshot_grants`.
  *   3. **Is there anything behind it in this phase?** `sourcedInPhase2`.
- *      `@ctx/planning` is Phase 4, so `goals.list`, `risk.profile` and
- *      `market.watchlist` have no source; `institutions.names` has none by
- *      choice. A granted-but-unsourced scope emits **no key**, exactly like an
- *      ungranted one — never an empty block, because an advisor cannot tell
+ *      `market.watchlist` has no model and `institutions.names` has no source
+ *      by choice. A granted-but-unsourced scope emits **no key**, exactly like
+ *      an ungranted one — never an empty block, because an advisor cannot tell
  *      "empty" from "none" and would happily reason about zero. WP 3.10a moved
  *      `holdings.aggregate`, `holdings.detail`, `liabilities.terms` and
- *      `market.rates` out of that set by landing the four arms below.
+ *      `market.rates` out of that set by landing four arms; WP 4.9 moved
+ *      `goals.list` and `risk.profile`, and added `plan.projection`, by landing
+ *      the three planning arms at the bottom of the class.
  *
  * ## The four Phase 3 arms, and the three reinterpretations they are allowed
  *
@@ -71,6 +72,7 @@
  * block boundaries, and this is the only place in the file that does.
  */
 import { DateOnly, Money, minorUnitScale, type DateOnly as DateOnlyType } from '@core/kernel';
+import { configHash } from '@core/platform';
 import {
   scopeDefinition,
   scopesPermittedForKind,
@@ -103,6 +105,8 @@ export const SNAPSHOT_WINDOWS = Object.freeze({
   lotsPerPosition: 32,
   liabilities: 64,
   marketRates: 16,
+  /** `GoalsListSchema.goals`' own ceiling. */
+  goals: 64,
 });
 
 /**
@@ -342,6 +346,12 @@ export class SnapshotBuilder {
         return this.#transactionSummary(input, tokeniser);
       case 'transactions.raw':
         return this.#transactionsRaw(input, tokeniser);
+      case 'goals.list':
+        return this.#goalsList(input);
+      case 'risk.profile':
+        return this.#riskProfile(input);
+      case 'plan.projection':
+        return this.#planProjection(input);
       default:
         // Every remaining scope has `sourcedInPhase2: false` and is filtered
         // out before this is reached. The `null` is the second line of defence
@@ -916,4 +926,229 @@ export class SnapshotBuilder {
       rates,
     };
   }
+
+  // -------------------------------------------------------------------------
+  // WP 4.9 — the three planning arms
+  // -------------------------------------------------------------------------
+
+  /**
+   * `goals.list` — one row per active goal whose pace WP 4.6 could evaluate.
+   *
+   * Two minimisation duties live here and nowhere else:
+   *
+   *   * **The goal id never crosses**, for any advisor kind. `goal_ref` is a
+   *     `GOAL_` pseudonym (`goalRef` below), so "no ids cross" holds for a
+   *     built-in exactly as for a sidecar. An in-app link back to a goal is the
+   *     UI's job from the insight key, not the advisor's from an id.
+   *   * **A row the contract cannot hold honestly is dropped, not repaired.**
+   *     A name outside 1–96 characters, a negative month count, a ratio that is
+   *     not a decimal, or amounts in a second currency: each is a port bug, and
+   *     a repaired row would be a goal the holder never set.
+   *
+   * `progress` is the 1.0.0 field and is a JSON number in `[0,1]`; a goal
+   * funded past its target reads `1`, which is what "progress" means. The
+   * exact ratio is not lost — `pace.status` says on or off track from the
+   * unrounded amounts.
+   */
+  async #goalsList(input: BuildSnapshotInput): Promise<unknown> {
+    const planning = this.#ports.planning;
+    if (planning === undefined) return null;
+    const goals = await planning.goals({ userId: input.userId, asOf: input.today });
+    if (goals === null) return null;
+
+    const rows: unknown[] = [];
+    for (const goal of goals) {
+      const name = goal.name.trim();
+      if (name.length === 0 || name.length > 96) continue;
+      if (!Number.isInteger(goal.monthsRemaining) || goal.monthsRemaining < 0) continue;
+      if (!DECIMAL_STRING.test(goal.fundedRatio)) continue;
+      const currency = goal.target.currency;
+      if (goal.requiredMonthly.currency !== currency || goal.plannedMonthly.currency !== currency) {
+        continue;
+      }
+      rows.push({
+        goal_ref: goalRef(input.tokenKey, goal.id),
+        name,
+        target: moneyJson(goal.target),
+        horizon_months: goal.monthsRemaining,
+        progress: ratio(Number(goal.fundedRatio)),
+        pace: {
+          status: goal.status,
+          required_monthly: moneyJson(goal.requiredMonthly),
+          planned_monthly: moneyJson(goal.plannedMonthly),
+        },
+      });
+      if (rows.length >= SNAPSHOT_WINDOWS.goals) break;
+    }
+    if (rows.length === 0) return null;
+    return { goals: rows };
+  }
+
+  /**
+   * `risk.profile` — the four fields the contract carries, or no key.
+   *
+   * WP 4.1's note for this arm: a holder who declined to give an income has
+   * `taxBracketBand: null`, and the contract's band is a **required** string.
+   * The block is therefore absent for that holder rather than carrying a band
+   * nobody derived (`wp4.1-goals.md` §10, "For WP 4.9"). Omitting a *field*
+   * would need the contract to make it optional, which is not additive for a
+   * reader that already relies on it.
+   */
+  async #riskProfile(input: BuildSnapshotInput): Promise<unknown> {
+    const planning = this.#ports.planning;
+    if (planning === undefined) return null;
+    const profile = await planning.riskProfile({ userId: input.userId });
+    if (profile === null) return null;
+    const band = profile.taxBracketBand;
+    if (band === null || band.length === 0 || band.length > 16) return null;
+    if (profile.tolerance.length === 0 || profile.tolerance.length > 32) return null;
+    if (!Number.isInteger(profile.horizonYears)) return null;
+    if (profile.horizonYears < 0 || profile.horizonYears > 100) return null;
+    return {
+      tolerance: profile.tolerance,
+      horizon_years: profile.horizonYears,
+      tax_bracket_band: band,
+      liquidity_need: profile.liquidityNeed,
+    };
+  }
+
+  /**
+   * `plan.projection` — the newest baseline run, with no balance in it.
+   *
+   * The port has already reduced dates to years and balances to shares (see
+   * `InsightsPlanProjection`). What the builder owns is the one lever the
+   * scope row pulls — **the terminal band is rounded to $1,000** — and the
+   * fail-closed shape check: a core field that is not what the contract says
+   * drops the whole block, and an optional sub-block that is not drops only
+   * itself. A success probability that is not a decimal string is refused
+   * outright; there is no path here that turns one into a float.
+   */
+  async #planProjection(input: BuildSnapshotInput): Promise<unknown> {
+    const planning = this.#ports.planning;
+    if (planning === undefined) return null;
+    const read = await planning.projection({ userId: input.userId, asOf: input.today });
+    if (read === null) return null;
+
+    const rounding = scopeDefinition('plan.projection').minimisation.roundMonetaryToMinor;
+    if (!DECIMAL_STRING.test(read.successProbability)) return null;
+    if (!DECIMAL_STRING.test(read.successTarget)) return null;
+    if (!isYear(read.asOfYear) || !isYear(read.terminal.calendarYear)) return null;
+    if (!isAge(read.ages.current) || !isAge(read.ages.retirement)) return null;
+    if (!isAge(read.ages.planEnd) || !isAge(read.terminal.age)) return null;
+    if (!Number.isInteger(read.paths) || read.paths < 1 || read.paths > 1_000_000) return null;
+    const bands = [read.terminal.p5, read.terminal.p50, read.terminal.p95];
+    if (bands.some((band) => band !== null && band.currency !== read.currency)) return null;
+
+    const savings = read.savingsRate;
+    const rmd = read.rmd;
+    const social = read.socialSecurity;
+    const rails = read.guardrail;
+    return {
+      as_of_year: read.asOfYear,
+      currency: read.currency,
+      method: read.method,
+      paths: read.paths,
+      assumptions_version: read.assumptionsVersion,
+      stale: read.stale,
+      success_probability: read.successProbability,
+      success_target: read.successTarget,
+      terminal: {
+        age: read.terminal.age,
+        calendar_year: read.terminal.calendarYear,
+        p5: read.terminal.p5 === null ? null : moneyJson(read.terminal.p5, rounding),
+        p50: moneyJson(read.terminal.p50, rounding),
+        p95: read.terminal.p95 === null ? null : moneyJson(read.terminal.p95, rounding),
+      },
+      ages: {
+        current: read.ages.current,
+        retirement: read.ages.retirement,
+        plan_end: read.ages.planEnd,
+      },
+      ...(savings !== null &&
+      DECIMAL_STRING.test(savings.plan) &&
+      DECIMAL_STRING.test(savings.observed)
+        ? {
+            savings_rate: {
+              plan: savings.plan,
+              observed: savings.observed,
+              plan_source: savings.planSource,
+            },
+          }
+        : {}),
+      ...(rmd !== null &&
+      isAge(rmd.startAge) &&
+      isYear(rmd.startYear) &&
+      DECIMAL_STRING.test(rmd.taxDeferredShare)
+        ? {
+            rmd: {
+              start_age: rmd.startAge,
+              start_year: rmd.startYear,
+              tax_deferred_share: rmd.taxDeferredShare,
+            },
+          }
+        : {}),
+      ...(social !== null &&
+      isAge(social.claimAgeYears) &&
+      Number.isInteger(social.claimAgeMonths) &&
+      social.claimAgeMonths >= 0 &&
+      social.claimAgeMonths <= 11 &&
+      DECIMAL_STRING.test(social.claimFactor) &&
+      DECIMAL_STRING.test(social.factorAt70)
+        ? {
+            social_security: {
+              claim_age_years: social.claimAgeYears,
+              claim_age_months: social.claimAgeMonths,
+              claim_factor: social.claimFactor,
+              factor_at_70: social.factorAt70,
+            },
+          }
+        : {}),
+      ...(rails !== null &&
+      [rails.withdrawalRate, rails.referenceRate, rails.lower, rails.upper].every((text) =>
+        DECIMAL_STRING.test(text),
+      )
+        ? {
+            guardrail: {
+              withdrawal_rate: rails.withdrawalRate,
+              reference_rate: rails.referenceRate,
+              lower: rails.lower,
+              upper: rails.upper,
+              position: rails.position,
+            },
+          }
+        : {}),
+    };
+  }
+}
+
+/** The contract's `decimalString`: non-negative, at most six places. Never a float. */
+const DECIMAL_STRING = /^\d{1,6}(\.\d{1,6})?$/u;
+
+function isYear(value: number): boolean {
+  return Number.isInteger(value) && value >= 1900 && value <= 2200;
+}
+
+function isAge(value: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value <= 130;
+}
+
+/**
+ * A goal's pseudonym: `GOAL_<12 hex>`, for **every** advisor kind.
+ *
+ * The same keyed construction `tokens.ts` uses for its always-tokenised
+ * domains (`merchant`, `liability`) — label, per-user key, domain, id, 48 bits
+ * kept — with the domain `goal`. It lives here rather than as a `TokenDomain`
+ * because `snapshot/tokens.ts` was outside WP 4.9's ownership; moving it there
+ * (one `PREFIX` entry and one `ALWAYS_TOKENISED` member, identical output) is
+ * recorded for the orchestrator, and must travel with the `@core/secretbox`
+ * swap `tokens.ts`' header carries, since both change the same construction.
+ */
+function goalRef(tokenKey: string, goalId: string): string {
+  const digest = configHash({
+    label: 'personalfi/v1|advisor-token',
+    key: tokenKey,
+    domain: 'goal',
+    id: goalId,
+  });
+  return `GOAL_${digest.slice(0, 12)}`;
 }

@@ -12,9 +12,14 @@
  *
  * | Case | What it is | What should fire |
  * | --- | --- | --- |
- * | `drift` | Cash-heavy, three subscriptions, a price rise, a creeping category, a month in the red | U2, U3, U7, C1, C2, S2, S3, S6, S7, S9, S10 |
- * | `tight` | One thin current account with two large bills landing inside a fortnight | C3, C4, C7 |
- * | `control` | The same person, with none of the problems | nothing |
+ * | `drift` | Cash-heavy, three subscriptions, a price rise, a creeping category, a month in the red; **a 66-year-old retiree** whose plan is below target, drawing above the guardrail band, inside the RMD window and claiming before seventy, with one goal off pace | U2, U3, U7, C1, C2, S2, S3, S6, S7, S9, S10; R2, R3, R4, R6, R7 |
+ * | `tight` | One thin current account with two large bills landing inside a fortnight; **a 34-year-old** whose stated plan assumes more saving than is observed | C3, C4, C7; R1 |
+ * | `control` | The same person, with none of the problems; a plan on target, contributions derived, every goal on pace | nothing |
+ *
+ * **WP 4.9.** The planning answers go through `inMemoryPlanningPort` and the
+ * real builder, like everything else here — so `goal_ref` is the builder's own
+ * `GOAL_` pseudonym, the terminal band is the builder's $1,000 rounding, and a
+ * malformed decimal would be refused by the builder before a rule saw it.
  *
  * Two cases rather than one because some of the catalogue is mutually exclusive
  * by construction: C1 fires above six months of cover and C4 below three, and no
@@ -31,8 +36,12 @@ import {
   inMemoryInvestmentsPort,
   inMemoryLedgerPort,
   inMemoryMarketDataPort,
+  inMemoryPlanningPort,
   inMemoryRecurringPort,
   type FakeLedgerData,
+  type InsightsGoal,
+  type InsightsPlanProjection,
+  type PlanningPort,
   type InsightsRecurringStream,
   type InsightsTransaction,
   type MonthlyCashflowRow,
@@ -528,6 +537,153 @@ const CONTROL_STREAMS: readonly InsightsRecurringStream[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Planning — WP 4.9
+// ---------------------------------------------------------------------------
+
+/** A fixed assumptions hash. Evidence, not identity; masked verbatim by the tracer. */
+export const SEED_ASSUMPTIONS_VERSION = `sha256:${'a1'.repeat(32)}`;
+
+function goal(overrides: Partial<InsightsGoal> & Pick<InsightsGoal, 'id' | 'name'>): InsightsGoal {
+  return {
+    target: usd(600_000),
+    monthsRemaining: 24,
+    fundedRatio: '0.5',
+    status: 'on_track',
+    requiredMonthly: usd(12_500),
+    plannedMonthly: usd(15_000),
+    ...overrides,
+  };
+}
+
+function projection(overrides: Partial<InsightsPlanProjection>): InsightsPlanProjection {
+  return {
+    asOfYear: 2026,
+    currency: USD,
+    method: 'monte_carlo',
+    paths: 10_000,
+    assumptionsVersion: SEED_ASSUMPTIONS_VERSION,
+    stale: false,
+    successProbability: '0.912000',
+    successTarget: '0.80',
+    terminal: {
+      age: 95,
+      calendarYear: 2076,
+      p5: usd(12_345_678),
+      p50: usd(98_765_432),
+      p95: usd(301_234_567),
+    },
+    ages: { current: 45, retirement: 65, planEnd: 95 },
+    savingsRate: null,
+    rmd: null,
+    socialSecurity: null,
+    guardrail: null,
+    ...overrides,
+  };
+}
+
+/**
+ * `drift`'s holder: 66, retired at 65, born 1960 (so SECURE 2.0's start age is
+ * 75, in 2035). The plan survives 71.3% of 10,000 simulations against an 80%
+ * target (R2); 62% of what it starts from is tax-deferred, nine years before
+ * distributions (R3); it claims at 67, and the factor at seventy is 1.24 (R4);
+ * this year it draws 6.12% against a 3.6%–5.4% band (R7). One goal is WP 4.6's
+ * own worked R6 case — $20,000 in twelve months, $2,000 funded, $500 a month
+ * planned, so $1,500 a month needed — and one is on pace and must stay silent.
+ */
+const DRIFT_PLANNING: PlanningPort = inMemoryPlanningPort({
+  goals: [
+    goal({
+      id: 'goal-house-deposit',
+      name: 'House deposit',
+      target: usd(2_000_000),
+      monthsRemaining: 12,
+      fundedRatio: '0.1',
+      status: 'off_track',
+      requiredMonthly: usd(150_000),
+      plannedMonthly: usd(50_000),
+    }),
+    goal({ id: 'goal-sabbatical', name: 'Sabbatical' }),
+  ],
+  riskProfile: {
+    tolerance: 'moderate',
+    horizonYears: 29,
+    taxBracketBand: '22-24',
+    liquidityNeed: 'medium',
+  },
+  projection: projection({
+    successProbability: '0.713000',
+    terminal: {
+      age: 95,
+      calendarYear: 2055,
+      p5: usd(0),
+      p50: usd(41_234_567),
+      p95: usd(187_345_678),
+    },
+    ages: { current: 66, retirement: 65, planEnd: 95 },
+    rmd: { startAge: 75, startYear: 2035, taxDeferredShare: '0.62' },
+    socialSecurity: {
+      claimAgeYears: 67,
+      claimAgeMonths: 0,
+      claimFactor: '1',
+      factorAt70: '1.24',
+    },
+    guardrail: {
+      withdrawalRate: '0.0612',
+      referenceRate: '0.045',
+      lower: '0.036',
+      upper: '0.054',
+      position: 'above',
+    },
+  }),
+});
+
+/**
+ * `tight`'s holder: 34, accumulating, and the plan they wrote down assumes
+ * 15% of income saved where the months observed show 8.5% (R1). Nothing else
+ * about the plan is wrong: 91.2% against 80%, no guardrail (not retired), and
+ * forty-one years from distributions.
+ */
+const TIGHT_PLANNING: PlanningPort = inMemoryPlanningPort({
+  projection: projection({
+    ages: { current: 34, retirement: 65, planEnd: 95 },
+    savingsRate: { plan: '0.15', observed: '0.085', planSource: 'stated' },
+    rmd: { startAge: 75, startYear: 2067, taxDeferredShare: '0.4' },
+    socialSecurity: {
+      claimAgeYears: 67,
+      claimAgeMonths: 0,
+      claimFactor: '1',
+      factorAt70: '1.24',
+    },
+  }),
+});
+
+/**
+ * The control's plan is healthy in every respect the family reads: on
+ * target, contributions derived (so the two rates agree by construction and R1
+ * is silent by design, not by threshold), outside the RMD window, claiming at
+ * seventy, still accumulating, and every goal on pace.
+ */
+const CONTROL_PLANNING: PlanningPort = inMemoryPlanningPort({
+  goals: [goal({ id: 'goal-ctl-emergency', name: 'Emergency fund top-up' })],
+  riskProfile: {
+    tolerance: 'moderate',
+    horizonYears: 20,
+    taxBracketBand: '22-24',
+    liquidityNeed: 'low',
+  },
+  projection: projection({
+    savingsRate: { plan: '0.12', observed: '0.12', planSource: 'derived' },
+    rmd: { startAge: 75, startYear: 2056, taxDeferredShare: '0.3' },
+    socialSecurity: {
+      claimAgeYears: 70,
+      claimAgeMonths: 0,
+      claimFactor: '1.24',
+      factorAt70: '1.24',
+    },
+  }),
+});
+
+// ---------------------------------------------------------------------------
 // Building
 // ---------------------------------------------------------------------------
 
@@ -545,6 +701,7 @@ function portsFor(seedCase: SeedCase): SnapshotPorts {
         // one thing that is still merged and the exact reason it is.
         investments: inMemoryInvestmentsPort({}),
         marketData: inMemoryMarketDataPort(null),
+        planning: DRIFT_PLANNING,
       };
     case 'tight':
       return {
@@ -556,6 +713,7 @@ function portsFor(seedCase: SeedCase): SnapshotPorts {
         // one thing that is still merged and the exact reason it is.
         investments: inMemoryInvestmentsPort({}),
         marketData: inMemoryMarketDataPort(null),
+        planning: TIGHT_PLANNING,
       };
     default:
       return {
@@ -567,6 +725,7 @@ function portsFor(seedCase: SeedCase): SnapshotPorts {
         // one thing that is still merged and the exact reason it is.
         investments: inMemoryInvestmentsPort({}),
         marketData: inMemoryMarketDataPort(null),
+        planning: CONTROL_PLANNING,
       };
   }
 }

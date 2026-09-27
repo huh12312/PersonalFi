@@ -61,6 +61,35 @@ describe('contract parity', () => {
     }
   });
 
+  /**
+   * WP 4.9's bump, named as the dispatch names it. 1.2.0 was taken by WP 4.12b's
+   * C-10 (`excluded_currencies`), so `plan.projection` is 1.3.0 — the dispatch
+   * table's "1.2.0" was written before C-10 landed. What the test holds is the
+   * same: the files on disk are exactly what the zod definitions emit *at this
+   * version*, and the version-bearing artefacts all say the same version.
+   */
+  it('the published schemas match the source at 1.3.0', () => {
+    expect(ADVISOR_ARTEFACT_VERSION).toBe('1.3.0');
+    for (const document of advisorSchemaDocuments()) {
+      const onDisk = JSON.parse(readContract('v1', document.file)) as Record<string, unknown>;
+      expect(onDisk['artefactVersion'], document.file).toBe('1.3.0');
+      expect(serialiseSchema(document.document), document.file).toBe(serialiseSchema(onDisk));
+    }
+    const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
+    expect(index['artefactVersion']).toBe('1.3.0');
+
+    // The additions 1.3.0 is for, present in the published request schema:
+    // the scope in the wire enum, its block, and R6's pace on a goal row.
+    const request = readContract('v1', 'request.schema.json');
+    expect(request).toContain('"plan.projection"');
+    expect(request).toContain('"plan_projection"');
+    expect(request).toContain('"success_probability"');
+    expect(request).toContain('"required_monthly"');
+    // Strictly additive: the scope is the enum's *last* member, so every
+    // position a 1.2.0 reader relied on is where it was.
+    expect(ADVISOR_SCOPES[ADVISOR_SCOPES.length - 1]).toBe('plan.projection');
+  });
+
   it('the bundle index names the three documents and the wire major', () => {
     const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
     expect(index['contractVersion']).toBe(ADVISOR_CONTRACT_MAJOR);

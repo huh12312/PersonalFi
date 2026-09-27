@@ -482,7 +482,9 @@ describe('advisor scopes and their readers (WP 3.9, closed by WP 3.10a)', () => 
    * Listed rather than tolerated, so that "which scopes have no reader?" has a
    * checked answer instead of a `.filter()` a reader has to interpret.
    */
-  const NOT_YET_MODELLED = ['goals.list', 'institutions.names', 'market.watchlist', 'risk.profile'];
+  // WP 4.9 gave `goals.list` and `risk.profile` their readers and builder arms
+  // (and added `plan.projection` with its own); the two left are Phase 5's.
+  const NOT_YET_MODELLED = ['institutions.names', 'market.watchlist'];
 
   /**
    * Rules that ship **on** while declaring a scope with no reader, each
@@ -603,7 +605,10 @@ describe('advisor scopes and their readers (WP 3.9, closed by WP 3.10a)', () => 
    */
   const UNGRANTABLE_UNTIL_MIGRATED: readonly string[] = [];
 
-  it('every advisor scope can actually be granted, or is a recorded migration gap', () => {
+  // WP 4.9 closed the last recorded gap (0024 widened the CHECK for
+  // `plan.projection`), so the list above is empty and must stay empty: a
+  // scope reaches this test only with its migration in the same commit.
+  it('every advisor scope can actually be granted', () => {
     const migrationsDir = join(import.meta.dirname, '../../../packages/db/migrations');
     const files = readdirSync(migrationsDir)
       .filter((name) => name.endsWith('.sql'))

@@ -354,6 +354,13 @@ describeWithDb('runMigrations', () => {
       //   (p5…p95 per period). WP 4.6. A run whose assumptions_version no
       //   longer resolves reads back stale with its version named, never
       //   recomputed against today's defaults.
+      // 0024_snapshot_grant_scopes_v1_3: no table. Re-declares
+      //   `snapshot_grants_scope_check` with advisor contract 1.3.0's added
+      //   scope (`plan.projection`, WP 4.9's R2/R6/R7 input). 1.2.0 (WP
+      //   4.12b's C-10, per-currency net-worth/cash blocks) added no scope and
+      //   needed no widening. Parity with `ADVISOR_SCOPES` is asserted by
+      //   apps/api's registration test, which reads the latest CHECK across
+      //   migrations — the 0019 lesson mechanised.
       // 0025_investments_security_scoping: no table. Composite
       //   (user_id, security_id) FKs on holdings, cost_basis_lots,
       //   investment_transactions and prices (Phase 3 gate C-14);

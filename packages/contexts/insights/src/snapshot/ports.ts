@@ -536,6 +536,122 @@ export interface FxPort {
   }): Promise<Money | null>;
 }
 
+// ---------------------------------------------------------------------------
+// Planning — WP 4.9
+// ---------------------------------------------------------------------------
+
+/**
+ * One goal, as much of it as `goals.list` may carry — **and one id, to drop**.
+ *
+ * `id` is here for the same reason `InsightsAccount.id` is: the builder mints
+ * the pseudonym, and a drop is only reviewable if there was something to drop.
+ * What is *not* here is the point of the type: no funding account ids, no
+ * earmarks, no funded amount, no target date. `evaluateGoalPace` needs all of
+ * them and the composition root has them; the port hands over only the
+ * verdict. The target date crosses as a month count.
+ */
+export interface InsightsGoal {
+  readonly id: string;
+  /** The holder's own label, ≤ 96 characters (WP 4.1's limit is the contract's). */
+  readonly name: string;
+  readonly target: Money;
+  /** Whole months from the evaluation day to the target date. */
+  readonly monthsRemaining: number;
+  /** funded ÷ target as WP 4.6 computed it: a six-place decimal string, may exceed 1. */
+  readonly fundedRatio: string;
+  readonly status: 'on_track' | 'off_track';
+  readonly requiredMonthly: Money;
+  readonly plannedMonthly: Money;
+}
+
+/** WP 4.1's current risk profile, minus the answers and the penalty. */
+export interface InsightsRiskProfile {
+  readonly tolerance: string;
+  readonly horizonYears: number;
+  /** `null` when the holder declined to give an income: then there is no band to send. */
+  readonly taxBracketBand: string | null;
+  readonly liquidityNeed: 'low' | 'medium' | 'high';
+}
+
+/**
+ * The newest baseline projection, already reduced to ratios, ages and years.
+ *
+ * The composition root does the reduction — birth date to an age, a run date
+ * to a year, two balances to a share — because it is the one place both the
+ * dates and the ages are in scope, and a port that carried the birth date so
+ * the builder could subtract would put a day-precision date one property away
+ * from an external advisor. The *money* that remains (the terminal band) is
+ * rounded here, in the builder, from the scope row.
+ */
+export interface InsightsPlanProjection {
+  readonly asOfYear: number;
+  readonly currency: string;
+  readonly method: 'monte_carlo' | 'deterministic';
+  readonly paths: number;
+  readonly assumptionsVersion: string;
+  readonly stale: boolean;
+  /** Decimal strings throughout. A success probability is never a `number`. */
+  readonly successProbability: string;
+  readonly successTarget: string;
+  readonly terminal: {
+    readonly age: number;
+    readonly calendarYear: number;
+    readonly p5: Money | null;
+    readonly p50: Money;
+    readonly p95: Money | null;
+  };
+  readonly ages: {
+    readonly current: number;
+    readonly retirement: number;
+    readonly planEnd: number;
+  };
+  readonly savingsRate: {
+    readonly plan: string;
+    readonly observed: string;
+    readonly planSource: 'stated' | 'derived';
+  } | null;
+  readonly rmd: {
+    readonly startAge: number;
+    readonly startYear: number;
+    readonly taxDeferredShare: string;
+  } | null;
+  readonly socialSecurity: {
+    readonly claimAgeYears: number;
+    readonly claimAgeMonths: number;
+    readonly claimFactor: string;
+    readonly factorAt70: string;
+  } | null;
+  readonly guardrail: {
+    readonly withdrawalRate: string;
+    readonly referenceRate: string;
+    readonly lower: string;
+    readonly upper: string;
+    readonly position: 'below' | 'within' | 'above';
+  } | null;
+}
+
+/**
+ * `@ctx/planning`, read-only, as three answers.
+ *
+ * Each method answers `null` for "nothing to say" — no active evaluable goal,
+ * no risk profile, no baseline run — and the builder turns that into **no
+ * key**, exactly as the investments port does. None of the three writes: the
+ * projection method in particular reads the newest *stored* run and never
+ * computes one, because a snapshot that ran the engine would be a read with a
+ * side effect (a stored run, a `ProjectionCompleted`) that no advisor asked for.
+ */
+export interface PlanningPort {
+  goals(input: {
+    readonly userId: string;
+    readonly asOf: DateOnly;
+  }): Promise<readonly InsightsGoal[] | null>;
+  riskProfile(input: { readonly userId: string }): Promise<InsightsRiskProfile | null>;
+  projection(input: {
+    readonly userId: string;
+    readonly asOf: DateOnly;
+  }): Promise<InsightsPlanProjection | null>;
+}
+
 /**
  * The five ports the builder always wants, plus the FX conversion it wants
  * only when an account's currency does not already match `baseCurrency`.
@@ -545,6 +661,14 @@ export interface FxPort {
  * one — the builder degrades to excluding the mismatched account rather than
  * requiring the port to exist. Supplying it is what turns that exclusion into
  * an actual conversion; see `FxPort`'s header.
+ *
+ * `planning` (WP 4.9) is optional for a narrower reason: three composition
+ * sites construct this object (`modules.ts`' `insightsModule`,
+ * `routes/insights.ts`' on-demand run, and the tests), and making it required
+ * would have to land in all of them at once. Absent, `goals.list`,
+ * `risk.profile` and `plan.projection` emit **no key** — the same outcome as a
+ * holder with no goals — and `wp4.9-advisor-catalog-v3.md` hands the
+ * orchestrator the one line per site that binds `createInsightsPlanningPort`.
  */
 export interface SnapshotPorts {
   readonly ledger: LedgerPort;
@@ -553,6 +677,7 @@ export interface SnapshotPorts {
   readonly investments: InvestmentsPort;
   readonly marketData: MarketDataPort;
   readonly fx?: FxPort;
+  readonly planning?: PlanningPort;
 }
 
 // ---------------------------------------------------------------------------
@@ -677,6 +802,33 @@ export function inMemoryFxPort(rates: Readonly<Record<string, string>>): FxPort 
       const factor = rates[`${amount.currency}/${toCurrency}`];
       if (factor === undefined) return Promise.resolve(null);
       return Promise.resolve(Money.multiplyByDecimal(Money.of(amount.minor, toCurrency), factor));
+    },
+  };
+}
+
+/**
+ * A `PlanningPort` over fixed answers.
+ *
+ * Each method returns its fixture verbatim — `null` stays `null` — so a test
+ * can distinguish "no goals" from "an empty goal list" the way the builder has
+ * to. Neither this fake nor the real port computes anything: the reduction to
+ * ratios and ages is the composition root's, and it is proven over a real
+ * database in `apps/api/test/db/phase4-advisors.test.ts`.
+ */
+export function inMemoryPlanningPort(data: {
+  readonly goals?: readonly InsightsGoal[] | null;
+  readonly riskProfile?: InsightsRiskProfile | null;
+  readonly projection?: InsightsPlanProjection | null;
+}): PlanningPort {
+  return {
+    goals() {
+      return Promise.resolve(data.goals ?? null);
+    },
+    riskProfile() {
+      return Promise.resolve(data.riskProfile ?? null);
+    },
+    projection() {
+      return Promise.resolve(data.projection ?? null);
     },
   };
 }

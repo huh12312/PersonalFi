@@ -136,6 +136,7 @@ import type {
   MarketRateKind,
   MonthlyCashflowRow,
   RecurringPort as InsightsRecurringPort,
+  SnapshotPorts as InsightsSnapshotPorts,
 } from '@ctx/insights';
 import { createNtfyChannel, createSmtpChannel, type ChannelRegistry } from '@ctx/notifications';
 import {
@@ -178,14 +179,35 @@ import {
   type WalletAddressStore,
 } from '@connector/walletrpc';
 import {
+  DEFAULT_SUCCESS_TARGET,
   ENGINE_VERSION,
+  GUYTON_KLINGER,
   MONTE_CARLO_VERSION,
+  PROJECTION_BUCKETS,
   ReturnSeriesRefused,
+  ageOn,
+  assembleBaselinePlan,
+  createProjectionInputsReader,
+  currentRiskProfile,
   defaultFlagsFor,
   defaultTaxBucketFor,
+  evaluateGoalPace,
+  getBaseline,
+  goalEvaluationStoreOf,
+  isAssumptionsRefusal,
+  isProjectionInputRefused,
+  isProjectionRefused,
   liveEarmarksByAccount,
   loadReturnSeries,
+  projectDeterministic,
+  readProjection,
+  resolveForUser,
   runMonteCarloInWorker,
+  taxYear,
+  type BaselineProfile,
+  type DerivedInputs,
+  type ProjectionPlan,
+  type ResolvedAssumptions,
   type AccountKind as PlanningAccountKind,
   type BalanceObservation as PlanningBalanceObservation,
   type BalancesReader as PlanningBalancesReader,
@@ -273,7 +295,8 @@ import {
   type RateBudget,
 } from '@ctx/integrations';
 import { marketDataRuns } from '@ctx/integrations/schema';
-import { and, eq, gte, sql, type SQL } from 'drizzle-orm';
+import { netWorthDaily, projectionRuns } from '@ctx/planning/schema';
+import { and, desc, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 // The readers WP 3.9's routes use, imported rather than re-implemented: see the
 // header over `createInsightsInvestmentsPort`. Type-only in the other
 // direction (`routes/investments.ts` imports only `type RouteDeps` from
@@ -1502,6 +1525,373 @@ export function createInsightsMarketDataPort(options: {
         attribution: ATTRIBUTIONS.fred.text,
         attributionUrl: ATTRIBUTIONS.fred.linkUrl,
         observations,
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// WP 4.9 — the insights planning port (`goals.list`, `risk.profile`,
+// `plan.projection`)
+// ---------------------------------------------------------------------------
+//
+// The same arrangement as `createInsightsInvestmentsPort` above, one context
+// over: `@ctx/insights` declares `PlanningPort` and may not import
+// `@ctx/planning`; this file is where both are in scope, so the reduction —
+// goal facts to a pace verdict, a birth date to an age, a run date to a year,
+// two balances to a share — happens here and nowhere else.
+//
+// **It reads; it never runs anything.** `readProjection` and the newest-run
+// lookup below read stored rows. The deterministic engine *is* called — for
+// the Social Security factors and this year's withdrawal rate — but it is a
+// pure function over the baseline's own profile and the run's own
+// starting-balance day, and it writes nothing: no `projection_runs` row, no
+// `ProjectionCompleted`. A snapshot that caused a stored run would be a read
+// with a side effect no advisor asked for.
+
+/** `@ctx/insights`' `PlanningPort`, named through the exported `SnapshotPorts`. */
+type InsightsPlanningPort = NonNullable<InsightsSnapshotPorts['planning']>;
+type InsightsGoalRow = NonNullable<Awaited<ReturnType<InsightsPlanningPort['goals']>>>[number];
+type InsightsPlanProjection = NonNullable<Awaited<ReturnType<InsightsPlanningPort['projection']>>>;
+
+/**
+ * 07 §5.6's `initial_wr = 0.045 # user-settable`: the rate the guardrail band
+ * is drawn around for R7. The multiples are WP 4.4's `GUYTON_KLINGER`; this is
+ * the one number the band needs that WP 4.2's assumptions file does not carry.
+ * **Carried:** 07 marks it user-settable, so it belongs in the assumptions file
+ * as an overridable, cited value — recorded in `wp4.9-advisor-catalog-v3.md`.
+ */
+const GUARDRAIL_REFERENCE_RATE = '0.045';
+
+/** Six-place fixed point for the ratios below. Never a float. */
+const MICRO = 1_000_000n;
+
+/** A non-negative decimal (`'0.045'`, `'1.2'`, `0.8`) → micro-units. */
+function toMicros(decimal: string | number): bigint {
+  const text = String(decimal);
+  const [whole = '0', fraction = ''] = text.split('.');
+  return BigInt(whole) * MICRO + BigInt(fraction.padEnd(6, '0').slice(0, 6));
+}
+
+/** Micro-units → the shortest decimal string (`36000n` → `'0.036'`). */
+function fromMicros(micros: bigint): string {
+  const whole = micros / MICRO;
+  const fraction = (micros % MICRO).toString().padStart(6, '0').replace(/0+$/u, '');
+  return fraction === '' ? whole.toString() : `${whole.toString()}.${fraction}`;
+}
+
+/** `numerator ÷ denominator` to `places` decimals, half-even, as a string. */
+function ratioText(numerator: bigint, denominator: bigint, places: number): string {
+  const scale = 10n ** BigInt(places);
+  const scaled = numerator * scale;
+  let quotient = scaled / denominator;
+  const twice = (scaled % denominator) * 2n;
+  if (twice > denominator || (twice === denominator && quotient % 2n === 1n)) quotient += 1n;
+  const text = quotient.toString().padStart(places + 1, '0');
+  const fraction = text.slice(-places).replace(/0+$/u, '');
+  const whole = text.slice(0, -places);
+  return fraction === '' ? whole : `${whole}.${fraction}`;
+}
+
+/**
+ * The newest `net_worth_daily` date on or before `asOf` — the day goal pace
+ * reads balances from when today has no row yet (the 04:00 snapshotter has not
+ * run, or a holder's first day). Without it a goal funded from its accounts
+ * would read as funded by nothing and be reported off track. One scoping
+ * predicate, `user_id`, and the S1 sabotage matrix in `phase4-advisors.test.ts`
+ * drops it.
+ */
+async function newestNetWorthDay(
+  database: Database,
+  userId: string,
+  asOf: DateOnly,
+): Promise<DateOnly | null> {
+  const rows = await database
+    .select({ asOfDate: netWorthDaily.asOfDate })
+    .from(netWorthDaily)
+    .where(and(eq(netWorthDaily.userId, userId), lte(netWorthDaily.asOfDate, asOf)))
+    .orderBy(desc(netWorthDaily.asOfDate))
+    .limit(1);
+  const row = rows[0];
+  return row === undefined ? null : DateOnly.parse(String(row.asOfDate).slice(0, 10));
+}
+
+/**
+ * The newest run of the holder's **baseline**. Two scoping predicates — the
+ * holder and the baseline scenario — and `readProjection` then re-reads the run
+ * by `(user_id, id)`, a third. A fork's run is a what-if and never the plan
+ * R2 speaks about.
+ */
+async function newestBaselineRunId(
+  database: Database,
+  userId: string,
+  baselineId: string,
+): Promise<string | null> {
+  const rows = await database
+    .select({ id: projectionRuns.id })
+    .from(projectionRuns)
+    .where(and(eq(projectionRuns.userId, userId), eq(projectionRuns.scenarioId, baselineId)))
+    .orderBy(desc(projectionRuns.createdAt), desc(projectionRuns.id))
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
+
+/** An expected refusal from `@ctx/planning` — the sub-block is absent, never invented. */
+function isPlanningRefusal(error: unknown): boolean {
+  return (
+    isProjectionRefused(error) || isProjectionInputRefused(error) || isAssumptionsRefusal(error)
+  );
+}
+
+async function orNull<T>(work: () => Promise<T> | T): Promise<T | null> {
+  try {
+    return await work();
+  } catch (error) {
+    if (isPlanningRefusal(error)) return null;
+    throw error;
+  }
+}
+
+/**
+ * R1's two rates over one income. `plan` is what the baseline's contributions
+ * come to — stated where the holder stated them, WP 4.3's derived figure where
+ * not — and `observed` is the derived figure alone. Same denominator, same
+ * derivation, so a plan with nothing stated agrees with itself exactly.
+ */
+function savingsRateOf(
+  profile: BaselineProfile,
+  derived: DerivedInputs,
+): InsightsPlanProjection['savingsRate'] {
+  const income = derived.annualIncome;
+  if (income === null || income.minor <= 0n) return null;
+  let planned = 0n;
+  let observed = 0n;
+  let stated = false;
+  for (const bucket of PROJECTION_BUCKETS) {
+    const fromProfile = profile.contributions?.[bucket];
+    const fromData = derived.contributions[bucket];
+    if (fromProfile !== undefined) stated = true;
+    planned += (fromProfile ?? fromData)?.minor ?? 0n;
+    observed += fromData?.minor ?? 0n;
+  }
+  if (planned < 0n || observed < 0n) return null;
+  return {
+    plan: ratioText(planned, income.minor, 4),
+    observed: ratioText(observed, income.minor, 4),
+    planSource: stated ? 'stated' : 'derived',
+  };
+}
+
+/**
+ * R3: SECURE 2.0's start age for the birth year — from the run year's table in
+ * WP 4.2's file, never a constant here — and the tax-deferred share. A year the
+ * file does not cover throws `AssumptionsYearUnavailable`, which the caller
+ * turns into an absent sub-block.
+ */
+function rmdOf(
+  profile: BaselineProfile,
+  resolved: ResolvedAssumptions,
+  derived: DerivedInputs,
+  year: number,
+): InsightsPlanProjection['rmd'] {
+  const birthYear = BigInt(DateOnly.year(profile.birthDate));
+  const cohort = taxYear(resolved, year).rmd.startAge.value.find(
+    (row) =>
+      BigInt(row.bornFrom) <= birthYear &&
+      (row.bornThrough === null || birthYear <= BigInt(row.bornThrough)),
+  );
+  if (cohort === undefined) return null;
+  const buckets = derived.balances.byBucket;
+  let total = 0n;
+  for (const bucket of PROJECTION_BUCKETS) total += buckets[bucket].minor;
+  if (total <= 0n) return null;
+  const startAge = Number.parseInt(cohort.age, 10);
+  return {
+    startAge,
+    startYear: Number(birthYear) + startAge,
+    taxDeferredShare: ratioText(buckets.TAX_DEFERRED.minor, total, 4),
+  };
+}
+
+/** R4: the statutory claim factor at the plan's age and at seventy, from the engine itself. */
+function socialSecurityOf(
+  plan: ProjectionPlan,
+  resolved: ResolvedAssumptions,
+  currentAge: number,
+): InsightsPlanProjection['socialSecurity'] {
+  const social = plan.socialSecurity;
+  // At seventy or past it there is no later age to compare; the block is
+  // absent rather than carrying a comparison with nothing on one side.
+  if (social === null || currentAge >= 70) return null;
+  const asPlanned = projectDeterministic(plan, resolved).socialSecurity;
+  const atSeventy = projectDeterministic(
+    { ...plan, socialSecurity: { ...social, claimAge: { years: 70, months: 0 } } },
+    resolved,
+  ).socialSecurity;
+  if (asPlanned === null || atSeventy === null) return null;
+  return {
+    claimAgeYears: asPlanned.claimAge.years,
+    claimAgeMonths: asPlanned.claimAge.months,
+    claimFactor: asPlanned.claimFactor,
+    factorAt70: atSeventy.claimFactor,
+  };
+}
+
+/**
+ * R7: this year's portfolio withdrawal rate — `(spending − income) ÷ portfolio`,
+ * G-K's own definition (`guardrails.ts`' header) — off the engine's first year,
+ * and the band around 07 §5.6's reference rate. Present only in decumulation
+ * and only when the portfolio funds something.
+ */
+function guardrailOf(
+  plan: ProjectionPlan,
+  resolved: ResolvedAssumptions,
+): InsightsPlanProjection['guardrail'] {
+  const first = projectDeterministic(plan, resolved).years[0];
+  if (first?.phase !== 'retirement') return null;
+  const income = Money.add(Money.add(first.socialSecurity, first.pension), first.otherIncome);
+  const drawn = Money.subtract(first.spending, income);
+  if (drawn.minor <= 0n || first.startWealth.minor <= 0n) return null;
+  const withdrawalRate = ratioText(drawn.minor, first.startWealth.minor, 4);
+  const reference = toMicros(GUARDRAIL_REFERENCE_RATE);
+  const lower = (reference * toMicros(GUYTON_KLINGER.lowerMultiple)) / MICRO;
+  const upper = (reference * toMicros(GUYTON_KLINGER.upperMultiple)) / MICRO;
+  const rate = toMicros(withdrawalRate);
+  return {
+    withdrawalRate,
+    referenceRate: GUARDRAIL_REFERENCE_RATE,
+    lower: fromMicros(lower),
+    upper: fromMicros(upper),
+    position: rate > upper ? 'above' : rate < lower ? 'below' : 'within',
+  };
+}
+
+/**
+ * `@ctx/insights`' read-only view of Planning.
+ *
+ *   * **`goals`** is WP 4.6's `evaluateGoalPace` over `goalEvaluationStoreOf`'s
+ *     facts — the same verdict the goal-pace consumer emits `GoalOffTrack`
+ *     from, so the insight and the event cannot disagree about a goal. Months
+ *     are counted from `asOf`; balances come from `asOf`'s net-worth row, or
+ *     the newest before it.
+ *   * **`riskProfile`** is WP 4.1's `currentRiskProfile`, minus the answers
+ *     and the penalty.
+ *   * **`projection`** is the newest stored baseline run through
+ *     `readProjection` (staleness included), reduced to ratios, ages and years,
+ *     with the optional sub-blocks computed from the run's own starting day.
+ *
+ * `timeZone` dates an assumption override the way every planning read does
+ * (`resolveForUser`); the builder itself never reads a clock.
+ */
+export function createInsightsPlanningPort(
+  database: Database,
+  clock: Clock,
+  options: { readonly timeZone: string },
+): InsightsPlanningPort {
+  const revealed = (userId: string) =>
+    planningRevealedPortsFor(database, { userId, timeZone: options.timeZone, clock });
+
+  return {
+    async goals(input) {
+      const balancesOn =
+        (await newestNetWorthDay(database, input.userId, input.asOf)) ?? input.asOf;
+      const facts = await goalEvaluationStoreOf(database, clock).facts(input.userId, balancesOn);
+      const byId = new Map(facts.goals.map((goal) => [goal.id, goal]));
+      const rows: InsightsGoalRow[] = [];
+      for (const verdict of evaluateGoalPace(facts, input.asOf)) {
+        if (verdict.status === 'not_evaluable') continue;
+        const goal = byId.get(verdict.goalId);
+        if (goal === undefined) continue;
+        rows.push({
+          id: goal.id,
+          name: goal.name,
+          target: verdict.target,
+          monthsRemaining: verdict.monthsRemaining,
+          fundedRatio: verdict.fundedRatio,
+          status: verdict.status,
+          requiredMonthly: verdict.requiredMonthly,
+          plannedMonthly: verdict.plannedMonthly,
+        });
+      }
+      return rows.length === 0 ? null : rows;
+    },
+
+    async riskProfile(input) {
+      const profile = await currentRiskProfile(database, input.userId);
+      if (profile === null) return null;
+      return {
+        tolerance: profile.tolerance,
+        horizonYears: profile.horizonYears,
+        taxBracketBand: profile.taxBracketBand,
+        liquidityNeed: profile.liquidityNeed,
+      };
+    },
+
+    async projection(input) {
+      const baseline = await getBaseline(database, input.userId);
+      if (baseline === null) return null;
+      const runId = await newestBaselineRunId(database, input.userId, baseline.id);
+      if (runId === null) return null;
+      const read = await orNull(() =>
+        readProjection(database, { userId: input.userId, runId, timeZone: options.timeZone }),
+      );
+      if (read === null) return null;
+      const { run, percentiles, staleness } = read;
+      const last = percentiles.reduce<(typeof percentiles)[number] | undefined>(
+        (latest, row) => (latest === undefined || row.index > latest.index ? row : latest),
+        undefined,
+      );
+      if (last === undefined) return null;
+
+      const profile = baseline.profile;
+      const currentAge = ageOn(profile.birthDate, input.asOf);
+      const derived = await orNull(() =>
+        createProjectionInputsReader(database, revealed(input.userId)).derivedInputs({
+          userId: input.userId,
+          asOf: run.asOfDate,
+          allowOpenDay: !run.balancesSealed,
+        }),
+      );
+      const resolved = await orNull(() =>
+        resolveForUser(database, { userId: input.userId, timeZone: options.timeZone }),
+      );
+      const plan =
+        derived === null ? null : await orNull(() => assembleBaselinePlan(profile, derived).plan);
+
+      return {
+        asOfYear: DateOnly.year(run.asOfDate),
+        currency: run.currency,
+        method: run.method === 'monte_carlo' ? 'monte_carlo' : 'deterministic',
+        paths: run.paths,
+        assumptionsVersion: run.assumptionsVersion,
+        stale: staleness !== null,
+        successProbability: run.successProbability,
+        successTarget: DEFAULT_SUCCESS_TARGET,
+        terminal: {
+          age: last.age,
+          calendarYear: last.calendarYear,
+          p5: last.p5,
+          p50: last.p50,
+          p95: last.p95,
+        },
+        ages: {
+          current: currentAge,
+          retirement: profile.retirementAge,
+          planEnd: profile.planEndAge,
+        },
+        savingsRate: derived === null ? null : savingsRateOf(profile, derived),
+        rmd:
+          derived === null || resolved === null
+            ? null
+            : await orNull(() => rmdOf(profile, resolved, derived, DateOnly.year(run.asOfDate))),
+        socialSecurity:
+          plan === null || resolved === null
+            ? null
+            : await orNull(() => socialSecurityOf(plan, resolved, currentAge)),
+        guardrail:
+          plan === null || resolved === null || currentAge < profile.retirementAge
+            ? null
+            : await orNull(() => guardrailOf(plan, resolved)),
       };
     },
   };

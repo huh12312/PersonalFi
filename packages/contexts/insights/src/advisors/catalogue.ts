@@ -41,6 +41,7 @@ import { AdvisorRegistry, type Advisor } from '../registry.ts';
 import { CRYPTO_RULES } from './builtin/crypto/index.ts';
 import { DEBT_RULES } from './builtin/debt/index.ts';
 import { INVESTING_RULES } from './builtin/investing/index.ts';
+import { RETIREMENT_RULES } from './builtin/retirement/index.ts';
 import { CASH_RULES } from './rules-cash.ts';
 import { SPENDING_RULES } from './rules-spending.ts';
 import { SUBSCRIPTION_RULES } from './rules-subscriptions.ts';
@@ -51,12 +52,22 @@ import { contextOf, type BuiltinRule } from './support.ts';
  *
  * *"release rules in waves (week 1: cash + subscriptions; week 2: debt; week 3:
  * investing; week 4: retirement) so the first run isn't overwhelming."* WP 3.10
- * adds the middle three; retirement waits for Phase 4's planning context.
+ * added the middle three; **WP 4.9 adds `retirement`**, which waited for Phase
+ * 4's planning context — `goals.list`, `risk.profile` and the new
+ * `plan.projection` now have readers behind them.
  * Crypto is its own wave rather than folded into investing, because a
  * deployment with no crypto has nothing to release and one with crypto gets
  * X1 — a P0 — which should not be queued behind six investing rules.
+ *
+ * **The alert budget is applied after a wave is released, never per wave.**
+ * `applyAlertBudget` ranks the whole feed at read time (`read.ts`'
+ * `insightFeed`), so releasing the retirement wave adds six rules' proposals to
+ * the *same* five dashboard slots and twenty list slots — R2 and R7 at
+ * `urgent` compete with I4, I5 and X1 rather than arriving with five slots of
+ * their own. `alert-budget-wave.test.ts` pins it on the released catalogue.
  */
-export type RuleWave = 'cash_and_subscriptions' | 'spending' | 'debt' | 'investing' | 'crypto';
+export type RuleWave =
+  'cash_and_subscriptions' | 'spending' | 'debt' | 'investing' | 'crypto' | 'retirement';
 
 /**
  * 07 §3.3's priority column, carried as data.
@@ -163,6 +174,8 @@ const [drift, expenseRatio, brokerageCash, concentration, employerStock, lossLot
 const [payoffOrder, rateAboveMarket, minimumOnly, promoEnding, principalAgainst, missedPayment] =
   DEBT_RULES;
 const [cryptoShare, cryptoCustody, idleStablecoins, cryptoLoss, cryptoBasis] = CRYPTO_RULES;
+const [savingsRate, successProbability, rmdWindow, claimingAge, goalPace, withdrawalGuardrail] =
+  RETIREMENT_RULES;
 
 function required(rule: BuiltinRule | undefined, id: string): BuiltinRule {
   if (rule === undefined) throw new Error(`catalogue is missing the rule for ${id}`);
@@ -219,6 +232,19 @@ export const BUILTIN_CATALOGUE: readonly BuiltinCatalogueEntry[] = Object.freeze
   entry('X3', required(idleStablecoins, 'X3'), 'crypto', 'P1', true),
   entry('X5', required(cryptoLoss, 'X5'), 'crypto', 'P1', true),
   entry('X6', required(cryptoBasis, 'X6'), 'crypto', 'P1', true),
+  // --- WP 4.9, retirement & goals (07 §7.4's week four). Enabled: every scope
+  //     they read — `plan.projection` and `goals.list` — has a reader behind it
+  //     (`#planProjection`, `#goalsList`, over `PlanningPort`). The same ruling
+  //     WP 3.10a made for debt, investing and crypto applies: the week-four
+  //     stagger is an operator's pacing choice through `advisors.enabled`, and
+  //     the alert budget, applied to the released feed as a whole, is what keeps
+  //     the release from being a wall of red. R5 is a gap.
+  entry('R1', required(savingsRate, 'R1'), 'retirement', 'P0', true),
+  entry('R2', required(successProbability, 'R2'), 'retirement', 'P0', true),
+  entry('R3', required(rmdWindow, 'R3'), 'retirement', 'P1', true),
+  entry('R4', required(claimingAge, 'R4'), 'retirement', 'P1', true),
+  entry('R6', required(goalPace, 'R6'), 'retirement', 'P1', true),
+  entry('R7', required(withdrawalGuardrail, 'R7'), 'retirement', 'P0', true),
 ]);
 
 /**
@@ -237,6 +263,19 @@ export const BUILTIN_CATALOGUE: readonly BuiltinCatalogueEntry[] = Object.freeze
  * the rest as P0-in-07, shipped lower, in the evidence doc.
  */
 export const WP_3_10_P0_RULE_IDS: readonly string[] = Object.freeze(['I4', 'I5', 'X1']);
+
+/**
+ * The retirement rules that emit at `urgent`: **R2 and R7**.
+ *
+ * 07 §3.3 marks four of the seven P0 — R1, R2, R5 and R7. R5 is a gap. R1
+ * ships at `warning` because it is R2's usual *cause*: a holder under-saving
+ * against a stated plan would otherwise see two urgent findings for one
+ * problem, and R2 is the one that says how much it matters. R7 is urgent only
+ * above its band; below it is good news and emits at `info`. Recorded as data
+ * here, as WP 3.10 recorded its own narrowing, so the disagreement with 07 is
+ * a field a reviewer can query rather than a paragraph they have to find.
+ */
+export const WP_4_9_URGENT_RULE_IDS: readonly string[] = Object.freeze(['R2', 'R7']);
 
 /**
  * The rules in WP 2.7's scope that Phase 2 data cannot support, and why.
@@ -341,6 +380,16 @@ export const CATALOGUE_GAPS: readonly CatalogueGap[] = Object.freeze([
       'this brief describes a position rather than a movement: `holdings.detail` can say a lot ' +
       'exists and cannot say it arrived as a reward rather than a purchase, which is the rule.',
   },
+  // --- WP 4.9's gap. Named by field, and decided rather than deferred. ----
+  {
+    ruleId: 'R5',
+    summary: 'Deferrals that hit the 402(g) limit early at a plan with no true-up.',
+    reason:
+      'Needs year-to-date 401(k) deferrals, the payroll cadence, the employer’s match formula ' +
+      'and whether the plan trues up the match — a `contributions.ytd`-shaped scope and plan ' +
+      'terms nobody has given this app. 04-phase-4-dispatch.md §6 Q4’s default is not to build ' +
+      'it; like I8–I10 it is recorded here rather than written over data that is not there.',
+  },
   {
     ruleId: 'S1',
     summary: 'A transaction far above the category’s usual size.',
@@ -412,6 +461,14 @@ export const CATALOGUE_SCOPE: readonly string[] = Object.freeze([
   'X4',
   'X5',
   'X6',
+  // WP 4.9: 07 §3.3's retirement & goals family, all seven.
+  'R1',
+  'R2',
+  'R3',
+  'R4',
+  'R5',
+  'R6',
+  'R7',
 ]);
 
 /** The rule ids WP 3.10 was asked for: the whole of the I, D and X families. */
@@ -446,6 +503,22 @@ export const WP_3_10_WAVES: readonly RuleWave[] = Object.freeze(['debt', 'invest
 /** Every entry this work package added, in catalogue order. */
 export function wp310Catalogue(): readonly BuiltinCatalogueEntry[] {
   return BUILTIN_CATALOGUE.filter((item) => WP_3_10_WAVES.includes(item.wave));
+}
+
+/** The rule ids WP 4.9 was asked for: R1–R7 (04-phase-4-dispatch.md §3). */
+export const WP_4_9_SCOPE: readonly string[] = Object.freeze([
+  'R1',
+  'R2',
+  'R3',
+  'R4',
+  'R5',
+  'R6',
+  'R7',
+]);
+
+/** WP 4.9's entries — the retirement wave — in catalogue order. */
+export function wp49Catalogue(): readonly BuiltinCatalogueEntry[] {
+  return BUILTIN_CATALOGUE.filter((item) => item.wave === 'retirement');
 }
 
 export function builtinRules(): readonly BuiltinRule[] {

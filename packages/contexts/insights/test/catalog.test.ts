@@ -194,12 +194,14 @@ describe('the built-in catalogue', () => {
         expect(entry.disabledReason, entry.ruleId).toBeNull();
       }
     }
-    // Twenty-five enabled: Phase 2's eight cash-and-subscriptions rules plus WP
-    // 3.10's seventeen, switched on by WP 3.10a once `holdings.aggregate`,
-    // `holdings.detail`, `liabilities.terms` and `market.rates` gained readers.
+    // Thirty-one enabled: Phase 2's eight cash-and-subscriptions rules, WP
+    // 3.10's seventeen (switched on by WP 3.10a once `holdings.aggregate`,
+    // `holdings.detail`, `liabilities.terms` and `market.rates` gained readers),
+    // and WP 4.9's six retirement rules, which ship on for the same reason —
+    // `goals.list` and `plan.projection` have readers from the first commit.
     // Six off: WP 2.7's spending rules, held by 07 §7.4's wave two alone — every
     // scope they read has been sourced since Phase 2.
-    expect(BUILTIN_CATALOGUE.filter((entry) => entry.defaultEnabled).length).toBe(25);
+    expect(BUILTIN_CATALOGUE.filter((entry) => entry.defaultEnabled).length).toBe(31);
     expect(BUILTIN_CATALOGUE.filter((entry) => !entry.defaultEnabled).length).toBe(6);
   });
 

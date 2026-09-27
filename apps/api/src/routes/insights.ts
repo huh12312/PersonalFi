@@ -49,6 +49,7 @@ import { z } from 'zod';
 import {
   createInsightsBudgetPort,
   createInsightsInvestmentsPort,
+  createInsightsPlanningPort,
   createInsightsLedgerPort,
   createInsightsMarketDataPort,
   createInsightsRecurringPort,
@@ -207,6 +208,9 @@ function dependenciesOf(deps: RouteDeps, timeZone: string): InsightsDependencies
       // does — a real asymmetry, named in `wp3.10a-snapshot-readers.md` §6
       // rather than papered over with a rate this process did not read.
       investments: createInsightsInvestmentsPort(deps.database, deps.clock),
+      // WP 4.9: the Planning readers behind `goals.list`, `risk.profile` and
+      // `plan.projection` — the same port the worker's nightly run binds.
+      planning: createInsightsPlanningPort(deps.database, deps.clock, { timeZone }),
       marketData: createInsightsMarketDataPort({ source: undefined }),
     },
     settings: {

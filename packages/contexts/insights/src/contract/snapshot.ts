@@ -92,7 +92,10 @@ export const NetWorthSummarySchema = z.strictObject({
    * every open account already matched the base currency, or every mismatch
    * converted. The builder never folds an unconverted account in at par.
    */
-  excluded_currencies: z.array(z.string().regex(/^[A-Z]{3}$/)).max(16).optional(),
+  excluded_currencies: z
+    .array(z.string().regex(/^[A-Z]{3}$/))
+    .max(16)
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -119,7 +122,10 @@ export const CashSummarySchema = z.strictObject({
     )
     .max(64),
   /** Same rule as `NetWorthSummarySchema.excluded_currencies`, for `total`. */
-  excluded_currencies: z.array(z.string().regex(/^[A-Z]{3}$/)).max(16).optional(),
+  excluded_currencies: z
+    .array(z.string().regex(/^[A-Z]{3}$/))
+    .max(16)
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -598,9 +604,24 @@ export const MarketRatesSchema = z.strictObject({
 });
 
 // ---------------------------------------------------------------------------
-// The blocks Phase 4 will fill
+// goals.list, risk.profile — published at 1.0.0, filled by WP 4.9
 // ---------------------------------------------------------------------------
 
+/**
+ * `goals.list` — one row per active goal whose pace can be evaluated.
+ *
+ * The five 1.0.0 fields are unchanged. `pace` is **contract 1.3.0**, optional,
+ * and strictly additive: 07 R6's sentence is *"{goal} needs ${m}/mo to reach
+ * ${target} by {date}; you're contributing ${c}"*, and neither `m` nor `c` is
+ * derivable from a progress ratio and a month count — `m` needs the funded
+ * amount (which this block deliberately does not carry) and `c` needs the
+ * goal's contribution plans. WP 4.6's `evaluateGoalPace` computes both exactly
+ * in the context that owns the rounding, and they cross here as money rather
+ * than being re-derived in a rule.
+ *
+ * `goal_ref` is a `GOAL_` pseudonym for every advisor kind, never the goal's
+ * id; the target date crosses as `horizon_months`, never as a date.
+ */
 export const GoalsListSchema = z.strictObject({
   goals: z
     .array(
@@ -610,6 +631,17 @@ export const GoalsListSchema = z.strictObject({
         target: MoneyJsonSchema,
         horizon_months: z.number().int().nonnegative(),
         progress: unitInterval,
+        /** Contract 1.3.0. WP 4.6's goal-pace verdict (07 R6). */
+        pace: z
+          .strictObject({
+            /** Off track iff what is funded plus what is planned falls short of the target. */
+            status: z.enum(['on_track', 'off_track']),
+            /** What closes the gap by the date, per month, rounded up to the minor unit. */
+            required_monthly: MoneyJsonSchema,
+            /** What the goal's contribution plans schedule, per month, on average to the date. */
+            planned_monthly: MoneyJsonSchema,
+          })
+          .optional(),
       }),
     )
     .max(64),
@@ -622,6 +654,131 @@ export const RiskProfileSchema = z.strictObject({
   tax_bracket_band: z.string().min(1).max(16),
   liquidity_need: z.enum(['low', 'medium', 'high']),
 });
+
+// ---------------------------------------------------------------------------
+// plan.projection — contract 1.3.0, WP 4.9
+// ---------------------------------------------------------------------------
+
+/**
+ * A ratio (or a factor, which may exceed one) as a **decimal string**, at most
+ * six places.
+ *
+ * Not `unitInterval`. Every ratio in this block arrives from `@ctx/planning`
+ * as a decimal string — `projection_runs.success_probability` is `NUMERIC(7,6)`
+ * and WP 4.3's savings rate is a four-place string — and the Phase 4 gate's
+ * "never" list includes *a success probability never crosses the wire as a
+ * JSON number*. Converting to a float here to satisfy the snapshot's usual
+ * convention would be the one place that rule was broken. The numeral tracer
+ * and the derivation evaluator both read decimal strings already.
+ */
+const decimalString = z
+  .string()
+  .regex(/^\d{1,6}(\.\d{1,6})?$/, 'a non-negative decimal string, never a JSON number');
+const calendarYear = z.number().int().min(1900).max(2200);
+const wholeAge = z.number().int().min(0).max(130);
+
+/**
+ * `plan.projection` — the newest baseline run, as ratios, ages and years.
+ *
+ * **No balance, no account, no date finer than a year** (the dispatch's words).
+ * The only money in the block is the terminal band, which is a *forecast* of
+ * the plan's last year rather than a balance the holder has, and it is rounded
+ * to $1,000 by the scope row. Everything a rule needs about the holder's
+ * money today crosses as a share or a rate over it:
+ *
+ *   * **R1** reads `savings_rate` — two rates over one income, so the income
+ *     itself never crosses (`risk.profile` makes the same choice with a band);
+ *   * **R2** reads `success_probability` against `success_target`, both
+ *     decimal strings, and the path count and plan-end age its sentence names;
+ *   * **R3** reads `rmd` and `ages.current`, and the tax-deferred *share*;
+ *   * **R4** reads the statutory claim factors in `social_security` — a factor
+ *     is a multiplier on a benefit, and no benefit figure crosses;
+ *   * **R7** reads `guardrail`, present only in decumulation.
+ *
+ * Every optional sub-block is absent when its inputs are: no stated
+ * contributions and no derivable income → no `savings_rate`; a birth year the
+ * RMD schedule does not cover → no `rmd`; no Social Security in the plan → no
+ * `social_security`; not yet retired, or a retirement whose income covers its
+ * spending → no `guardrail`. Absent, never zero.
+ */
+export const PlanProjectionSchema = z.strictObject({
+  /** The year of the run's starting-balance day. A year, never the date. */
+  as_of_year: calendarYear,
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  method: z.enum(['monte_carlo', 'deterministic']),
+  paths: z.number().int().min(1).max(1_000_000),
+  /** WP 4.2's content hash. Evidence for "which assumptions?", not identity. */
+  assumptions_version: z
+    .string()
+    .min(1)
+    .max(96)
+    .regex(/^[A-Za-z0-9_.:@-]+$/),
+  /** `true` when the run's assumptions are retired or differ from the holder's current ones. */
+  stale: z.boolean(),
+  /** `'0.713000'`. A deterministic run is `'1'` or `'0'` and is not a probability. */
+  success_probability: decimalString,
+  /** 09 GOAL-7's target, `'0.80'` by default: what the plan is measured against. */
+  success_target: decimalString,
+  /** The band in the plan's last year, today's dollars, rounded to $1,000. */
+  terminal: z.strictObject({
+    age: wholeAge,
+    calendar_year: calendarYear,
+    /** `null` for a deterministic run, which has one path and no band. */
+    p5: MoneyJsonSchema.nullable(),
+    p50: MoneyJsonSchema,
+    p95: MoneyJsonSchema.nullable(),
+  }),
+  ages: z.strictObject({
+    current: wholeAge,
+    retirement: wholeAge,
+    plan_end: wholeAge,
+  }),
+  savings_rate: z
+    .strictObject({
+      /** What the plan's contributions come to, over the observed income. */
+      plan: decimalString,
+      /** What WP 4.3's derived contributions come to, over the same income. */
+      observed: decimalString,
+      /** `derived`: the plan assumed exactly what was observed, so the two agree by construction. */
+      plan_source: z.enum(['stated', 'derived']),
+    })
+    .optional(),
+  rmd: z
+    .strictObject({
+      /** SECURE 2.0's start age for the holder's birth year, from WP 4.2's file. */
+      start_age: wholeAge,
+      start_year: calendarYear,
+      /** The tax-deferred bucket's share of what the plan starts from. */
+      tax_deferred_share: decimalString,
+    })
+    .optional(),
+  social_security: z
+    .strictObject({
+      claim_age_years: wholeAge,
+      claim_age_months: z.number().int().min(0).max(11),
+      /** The statutory multiplier on the benefit at the plan's claim age. */
+      claim_factor: decimalString,
+      /** The same multiplier at seventy. */
+      factor_at_70: decimalString,
+    })
+    .optional(),
+  guardrail: z
+    .strictObject({
+      /** The portfolio withdrawal rate this year: (spending − income) ÷ portfolio. */
+      withdrawal_rate: decimalString,
+      /** 07 §5.6's initial rate the band is drawn around. */
+      reference_rate: decimalString,
+      lower: decimalString,
+      upper: decimalString,
+      position: z.enum(['below', 'within', 'above']),
+    })
+    .optional(),
+});
+
+// ---------------------------------------------------------------------------
+// The two blocks with no source (market.watchlist has no model;
+// institutions.names is a deliberate refusal)
+// ---------------------------------------------------------------------------
 
 export const MarketWatchlistSchema = z.strictObject({
   symbols: z.array(z.string().min(1).max(16)).max(128),
@@ -654,6 +811,9 @@ export const AdvisorSnapshotSchema = z
     recurring_list: RecurringListSchema.optional(),
     goals_list: GoalsListSchema.optional(),
     risk_profile: RiskProfileSchema.optional(),
+    // Contract 1.3.0 (WP 4.9). Placed after `risk_profile` to match the scope
+    // catalogue's order, which is the snapshot's own property order.
+    plan_projection: PlanProjectionSchema.optional(),
     market_watchlist: MarketWatchlistSchema.optional(),
     holdings_aggregate: HoldingsAggregateSchema.optional(),
     holdings_detail: HoldingsDetailSchema.optional(),

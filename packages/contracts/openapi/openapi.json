@@ -1137,7 +1137,8 @@
               "transactions.raw",
               "institutions.names",
               "liabilities.terms",
-              "market.rates"
+              "market.rates",
+              "plan.projection"
             ]
           },
           "sensitivity": {
@@ -8508,7 +8509,8 @@
               "transactions.raw",
               "institutions.names",
               "liabilities.terms",
-              "market.rates"
+              "market.rates",
+              "plan.projection"
             ]
           },
           "sensitivity": {
@@ -28886,7 +28888,7 @@
         "tags": [
           "planning"
         ],
-        "description": "Two scoping reads, both load-bearing: the goal must be the caller’s (a stray `goalId` in the URL is not enough on its own to reach another holder’s plan), and the contribution must actually belong to *that* goal — a caller who knows another holder’s `contributionId` but not their `goalId` is refused by the second check even if the first is satisfied by their own, unrelated goal.",
+        "description": "Two scoping predicates, both load-bearing and genuinely independent: (1) the goal named in the URL must be the caller’s — enforced by `listContributions`’s own `getGoal` call, so a stray `goalId` refuses before this route reads a single contribution row; (2) the contribution named in the URL must actually belong to *that* goal, not merely to the caller — a caller who owns both the named goal and the named contribution, but under *different* goals, is refused by the second check even though the first is satisfied. (An earlier draft of this route also called `getGoal` directly before this line, as a distinct \"predicate 1\" — removed once the sabotage matrix showed it was never independently load-bearing: dropping it left the route exactly as secure, because `listContributions` already re-derives the same fact. Recorded in `docs/evidence/phase-4/wp4.8-routes.md` as the finding it is, in the spirit of WP 3.9’s S1 — a predicate that \"passes when dropped\" is telling you something, and the answer here was \"this check was redundant\", not \"insecure\".)",
         "parameters": [
           {
             "schema": {
@@ -31724,7 +31726,8 @@
                         "transactions.raw",
                         "institutions.names",
                         "liabilities.terms",
-                        "market.rates"
+                        "market.rates",
+                        "plan.projection"
                       ]
                     }
                   },
@@ -31779,7 +31782,8 @@
                           "transactions.raw",
                           "institutions.names",
                           "liabilities.terms",
-                          "market.rates"
+                          "market.rates",
+                          "plan.projection"
                         ]
                       }
                     },
@@ -31802,7 +31806,8 @@
                           "transactions.raw",
                           "institutions.names",
                           "liabilities.terms",
-                          "market.rates"
+                          "market.rates",
+                          "plan.projection"
                         ]
                       }
                     }
