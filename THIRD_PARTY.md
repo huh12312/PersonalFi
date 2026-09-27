@@ -5,7 +5,7 @@
 # Third-Party Notices
 
 PersonalFi is MIT-licensed. This file lists the runtime (production) dependency tree —
-`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:447d48eaf741b674.
+`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:d3780161dcad6ff3.
 devDependencies (build tooling, test frameworks) are not distributed and are not listed
 here; see `licenses.policy.yaml` for the policy that governs both.
 
@@ -20,6 +20,7 @@ part of PersonalFi’s dependency tree and are not listed here.
 ## Apache-2.0
 
 - `class-variance-authority`@0.7.1 — https://github.com/joe-bell/cva#readme
+- `comlink`@4.4.2 — https://github.com/GoogleChromeLabs/comlink#readme
 - `drizzle-orm`@0.45.2 — https://orm.drizzle.team
 - `reflect-metadata`@0.2.2 — http://rbuckton.github.io/reflect-metadata
 - `typescript`@6.0.3 — https://www.typescriptlang.org/
