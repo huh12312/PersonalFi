@@ -14,6 +14,7 @@
 import type { AppConfig } from '@core/config';
 import type { Database } from '@core/db';
 import type { Clock } from '@core/kernel';
+import type { MonteCarloRunner } from '@ctx/planning';
 import type pg from 'pg';
 import type { Guards } from '../auth/guards.ts';
 import type { DomainRuntime, WalletRpcRuntime } from '../domain.ts';
@@ -55,4 +56,28 @@ export interface RouteDeps {
   readonly walletRpc: WalletRpcRuntime | null;
   /** The connections wiring, or a 503 problem naming why the app is locked. */
   connections(): DomainRuntime;
+  /**
+   * WP 4.8. `@ctx/planning`'s `MonteCarloRunner` port, for an **on-demand**
+   * `POST /plan/scenarios/{id}/projections` or `/plan/compare` request.
+   *
+   * `null` when no return series is on disk (`createMonteCarloRunnerFromCache`
+   * never substitutes the lognormal engine silently — `domain.ts`'s own doc):
+   * routes fall back to the deterministic engine exactly as
+   * `refreshBaseline`'s own rule does, and the response says which method ran.
+   *
+   * A plain field rather than a function, like `config` and `walletRpc`: it
+   * needs no `SecretBox` and is built once, eagerly, at `buildApp` — it does
+   * not depend on the KEK the way `connections()` does. **Decision recorded
+   * in `docs/evidence/phase-4/wp4.8-routes.md`**: the worker process binds a
+   * `MonteCarloRunner` into `ModuleWiringOptions.monteCarlo` for the nightly
+   * `planning.projection_refresh` job (WP 4.w's wiring batch); the api process
+   * was given no equivalent binding, and a `POST .../projections` request has
+   * nowhere to reach a runner without one. Mirroring the worker — the api
+   * builds its own `createMonteCarloRunnerFromCache` — was chosen over adding
+   * an RPC to the worker, because the worker holds no HTTP surface today and
+   * a same-process `worker_thread` (WP 4.5's own resource-limited one) is
+   * exactly what an interactive request wants: bounded, terminable, and not a
+   * round trip through the job queue for a click.
+   */
+  readonly monteCarlo: MonteCarloRunner | null;
 }

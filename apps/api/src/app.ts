@@ -29,6 +29,7 @@ import { seedUserState } from './bootstrap-seed.ts';
 import {
   createConnectorRegistry,
   createDomainRuntime,
+  createMonteCarloRunnerFromCache,
   createWalletRpcRuntime,
   type DomainRuntime,
   type WalletRpcRuntime,
@@ -37,6 +38,8 @@ import { buildLoggerOptions } from './logging.ts';
 import { buildPlatform } from './platform.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
 import { accountRoutes } from './routes/accounts.ts';
+import { advisorGrantRoutes } from './routes/advisor-grants.ts';
+import { assumptionsRoutes } from './routes/assumptions.ts';
 import { authRoutes } from './routes/auth.ts';
 import { budgetRoutes } from './routes/budgets.ts';
 import { categoryRoutes } from './routes/categories.ts';
@@ -44,6 +47,7 @@ import { connectionRoutes } from './routes/connections.ts';
 import type { RouteDeps } from './routes/deps.ts';
 import { eventRoutes } from './routes/events.ts';
 import { exportRoutes } from './routes/export.ts';
+import { goalRoutes } from './routes/goals.ts';
 import { healthRoutes } from './routes/health.ts';
 import { insightRoutes } from './routes/insights.ts';
 import { investmentRoutes } from './routes/investments.ts';
@@ -51,6 +55,7 @@ import { marketDataRoutes } from './routes/market-data.ts';
 import { netWorthRoutes } from './routes/net-worth.ts';
 import { notificationRoutes } from './routes/notifications.ts';
 import { plaidRoutes } from './routes/plaid.ts';
+import { planRoutes } from './routes/plan.ts';
 import { priceRoutes } from './routes/prices.ts';
 import { recurringRoutes } from './routes/recurring.ts';
 import { reportRoutes } from './routes/reports.ts';
@@ -467,6 +472,36 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     });
   let domain: DomainRuntime | null = null;
 
+  /**
+   * WP 4.8. Built once, eagerly — it needs no `SecretBox` and does not
+   * depend on the KEK the way `connections()` does. `createMonteCarloRunnerFromCache`
+   * never substitutes the lognormal engine silently: with no return series on
+   * disk (or a checksum mismatch) it logs and answers `null`, and every route
+   * below treats that exactly as `refreshBaseline` does — fall back to the
+   * deterministic engine and record which one ran, never invent a Monte Carlo
+   * result.
+   *
+   * `config.planning.returnsCacheDir` (`PLANNING_RETURNS_CACHE_DIR`,
+   * `packages/config/src/schema.ts`) landed after `wp4.w-wave-c-wiring.md`
+   * §4.3 was written, with a doc comment saying "only `worker` ever reads
+   * it" — written when only the worker had anywhere to bind a runner. This
+   * process now has somewhere too (an interactive `POST .../projections`),
+   * and reading a *different* cache directory than the worker would mean
+   * the api and the worker could silently disagree about which return
+   * series backs a Monte Carlo run in a deployment that sets the variable —
+   * exactly the kind of drift 07 §7.3's "why did it say $720?" is about. So
+   * this process reads the same config key. The one-line doc fix to that
+   * comment ("only worker" → "worker and api") is `packages/config`'s file
+   * to make, not this WP's; recorded in `docs/evidence/phase-4/
+   * wp4.8-routes.md` "For the orchestrator" for whoever picks it up.
+   */
+  const monteCarlo = createMonteCarloRunnerFromCache({
+    logger: app.log,
+    ...(config.planning.returnsCacheDir === undefined
+      ? {}
+      : { cacheDir: config.planning.returnsCacheDir }),
+  });
+
   const deps: RouteDeps = {
     guards: createGuards(security),
     database,
@@ -474,6 +509,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     clock,
     config,
     walletRpc,
+    monteCarlo,
     connections(): DomainRuntime {
       const secretBox = security.requireSecretBox();
       // Rebuild if the runtime was destroyed and re-initialised: holding an
@@ -513,6 +549,16 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(priceRoutes(deps));
   await app.register(netWorthRoutes(deps));
   await app.register(marketDataRoutes(deps));
+  // WP 4.8. Four routers, matching the dispatch's file split: `goals.ts`
+  // (goals, contribution plans, the risk-profile questionnaire — WP 4.1's
+  // domain), `plan.ts` (scenarios, life events, projections, required
+  // savings, compare — WP 4.4/4.5/4.6), `assumptions.ts` (WP 4.2's cited
+  // file and its overrides), `advisor-grants.ts` (the scope-consent route —
+  // `grantScopes`'s first production caller).
+  await app.register(goalRoutes(deps));
+  await app.register(planRoutes(deps));
+  await app.register(assumptionsRoutes(deps));
+  await app.register(advisorGrantRoutes(deps));
 
   /**
    * Idempotent repair pass for every user that already exists (condition D-6,

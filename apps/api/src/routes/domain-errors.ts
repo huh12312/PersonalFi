@@ -33,7 +33,17 @@
 import { isCategorizationError, type CategorizationErrorCode } from '@ctx/categorization';
 import { ConnectorError, isConnectionsError, type ConnectionsErrorCode } from '@ctx/connections';
 import { isLedgerError, type LedgerErrorCode } from '@ctx/ledger';
-import { MonteCarloRefused } from '@ctx/planning';
+import {
+  AssumptionOverrideRefused,
+  AssumptionsYearUnavailable,
+  isAssumptionsRefusal,
+  isPlanningError,
+  isProjectionRefused,
+  MonteCarloRefused,
+  PLANNING_ERROR_STATUS,
+  PROJECTION_REFUSAL_STATUS,
+  UnknownAssumptionsVersion,
+} from '@ctx/planning';
 import { AppError } from '../problem.ts';
 
 /**
@@ -85,11 +95,31 @@ const CATEGORIZATION_STATUS: Readonly<Record<CategorizationErrorCode, number>> =
   'categorization.system_category_immutable': 409,
 };
 
+/**
+ * WP 4.2/4.8. `isAssumptionsRefusal` (not `instanceof` — the reason its own
+ * doc comment gives) covers three classes with no `status`/`family` of their
+ * own; wp4.2-assumptions.md §9 item 7 states the mapping this table encodes:
+ * `UnknownAssumptionsVersion` is the *state* refusing a delta computed against
+ * a file this build no longer holds (409, `domain`); `AssumptionsYearUnavailable`
+ * is the *content* asking for a year that does not exist (422, `domain`);
+ * `AssumptionOverrideRefused` is malformed input — an unknown path or an
+ * out-of-range value (422, `user`).
+ */
+const ASSUMPTIONS_REFUSAL_STATUS: Readonly<
+  Record<string, { readonly status: number; readonly family: 'domain' | 'user' }>
+> = {
+  'planning.assumptions_version_unknown': { status: 409, family: 'domain' },
+  'planning.assumptions_year_unavailable': { status: 422, family: 'domain' },
+  'planning.assumptions_path_unknown': { status: 422, family: 'user' },
+  'planning.assumptions_value_invalid': { status: 422, family: 'user' },
+};
+
 const TITLES: Readonly<Record<number, string>> = {
   400: 'Bad Request',
   404: 'Not Found',
   409: 'Conflict',
   422: 'Unprocessable Content',
+  500: 'Internal Server Error',
   502: 'Bad Gateway',
   503: 'Service Unavailable',
 };
@@ -157,6 +187,59 @@ export function toDomainProblem(error: unknown): unknown {
       title: titleOf(status),
       detail: error.message,
       family: status === 404 || status === 400 || status === 422 ? 'user' : 'domain',
+    });
+  }
+
+  if (isPlanningError(error)) {
+    // WP 4.1's own table, read with no judgement of this file's — the pattern
+    // its header names ("WP 4.8's `toDomainProblem` arm reads
+    // `PLANNING_ERROR_STATUS` and needs no judgement of its own").
+    const { status, family } = PLANNING_ERROR_STATUS[error.code];
+    return new AppError({
+      status,
+      code: error.code,
+      title: titleOf(status),
+      detail: error.message,
+      family,
+    });
+  }
+
+  if (isProjectionRefused(error)) {
+    // WP 4.6's own table (`PROJECTION_REFUSAL_STATUS`), same shape. `internal`
+    // is a real family here (`monte_carlo_outcome_mismatch`,
+    // `projection_run_incomplete`: the runner answered something other than
+    // what it was asked, which is a bug on our side of the port, not the
+    // caller's) and `AppError`'s own `ErrorFamily` already has a case for it.
+    const { status, family } = PROJECTION_REFUSAL_STATUS[error.code];
+    return new AppError({
+      status,
+      code: error.code,
+      title: titleOf(status),
+      detail: error.message,
+      family,
+    });
+  }
+
+  if (isAssumptionsRefusal(error)) {
+    // `isAssumptionsRefusal`, never `instanceof`: three separate classes
+    // (`UnknownAssumptionsVersion`, `AssumptionsYearUnavailable`,
+    // `AssumptionOverrideRefused`) share no base class of their own, and an
+    // `instanceof` check across two copies of `@ctx/planning` is the failure
+    // `connectorDetail`'s neighbouring comment already warns about for
+    // `ConnectorError`.
+    const code =
+      error instanceof UnknownAssumptionsVersion ||
+      error instanceof AssumptionsYearUnavailable ||
+      error instanceof AssumptionOverrideRefused
+        ? error.code
+        : 'planning.assumptions_refused';
+    const mapped = ASSUMPTIONS_REFUSAL_STATUS[code] ?? { status: 422, family: 'domain' as const };
+    return new AppError({
+      status: mapped.status,
+      code,
+      title: titleOf(mapped.status),
+      detail: error.message,
+      family: mapped.family,
     });
   }
 
