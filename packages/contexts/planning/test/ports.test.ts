@@ -44,6 +44,7 @@ import {
   SNAPSHOT_SCHEDULE_NAME,
   netWorthSnapshotJobHandler,
   projectionRefreshJobHandler,
+  registerProjectionRefreshSchedule,
 } from '../src/jobs.ts';
 import { NetWorthSnapshotTaken, PLANNING_EVENTS } from '../src/events.ts';
 import {
@@ -51,7 +52,7 @@ import {
   GOAL_PACE_CONSUMER_NAME,
 } from '../src/projection-service.ts';
 import type { FxReader, PriceReader, RevealedPorts, SnapshotPorts } from '../src/ports.ts';
-import type { PlanningDatabase } from '../src/store.ts';
+import type { PlanningDatabase, PlanningExecutor } from '../src/store.ts';
 import { portsOf, type FakeWorld } from './fakes.ts';
 
 const USER = 'a1920000-0000-7000-8000-00000000a001';
@@ -539,13 +540,47 @@ describe("portsFor takes the job's holder (WP 4.6, wp3.w §10 item 7)", () => {
       monteCarlo: null,
       timeZone: 'America/New_York',
     });
+    await refresh.handler({}, jobContext(HOLDER_A, PROJECTION_REFRESH_JOB_KIND));
     await expect(
       refresh.handler({}, jobContext(HOLDER_B, PROJECTION_REFRESH_JOB_KIND)),
     ).resolves.toBeUndefined();
-    expect(revealedAskedFor).toEqual([HOLDER_B]);
+    expect(revealedAskedFor).toEqual([HOLDER_A, HOLDER_B]);
   });
 
-  it('registers the 04:30 refresh and the goal-pace consumer under names the platform accepts', () => {
+  it('registers the 04:30 refresh and the goal-pace consumer under names the platform accepts', async () => {
+    // Through the production path: `registerProjectionRefreshSchedule` →
+    // `upsertSchedule`, whose `assertScheduleName` is the guard that turns the
+    // Phase 2 crash-loop into a refusal. The executor records the one INSERT the
+    // guard lets through, so the name, cron and job kind asserted are the ones
+    // that would reach `schedules`.
+    const dialect = new PgDialect();
+    const upserted: unknown[][] = [];
+    const executor = {
+      execute: async (query: SQL) => {
+        const { sql: text, params } = dialect.sqlToQuery(query);
+        if (!text.includes('INSERT INTO schedules')) throw new Error(`unexpected: ${text}`);
+        upserted.push(params);
+        return { rows: [{ id: params[0] }] };
+      },
+    } as unknown as PlanningExecutor;
+    await expect(
+      registerProjectionRefreshSchedule(
+        executor,
+        { userId: USER, timezone: 'America/New_York' },
+        fixedClock('2026-09-26T08:05:00Z'),
+      ),
+    ).resolves.toMatch(/^[0-9a-f-]{36}$/);
+    // (id, user_id, name, cron, timezone, job_kind, …)
+    expect(upserted.map((params) => params.slice(1, 6))).toEqual([
+      [
+        USER,
+        'planning.projection_refresh',
+        '30 4 * * *',
+        'America/New_York',
+        'planning.projection_refresh',
+      ],
+    ]);
+
     expect(SCHEDULE_NAME_CHECK.test(PROJECTION_REFRESH_SCHEDULE_NAME)).toBe(true);
     expect(JOB_KIND_CHECK.test(PROJECTION_REFRESH_JOB_KIND)).toBe(true);
     expect(PROJECTION_REFRESH_SCHEDULE_NAME).toBe('planning.projection_refresh');

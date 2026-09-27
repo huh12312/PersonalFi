@@ -36,7 +36,11 @@ import {
   type ProjectionInputsReader,
   type ProjectionServiceDependencies,
 } from '../../src/projection-service.ts';
-import { insertRun, isProjectionRefused, type ProjectionRefused } from '../../src/projection-store.ts';
+import {
+  insertRun,
+  isProjectionRefused,
+  type ProjectionRefused,
+} from '../../src/projection-store.ts';
 import { saveBaseline, type BaselineProfile } from '../../src/scenarios.ts';
 import { platformOf, sealDay, upsertOpenDay, type PlanningExecutor } from '../../src/store.ts';
 import type { BreakdownEntry, NetWorthSnapshot } from '../../src/net-worth.ts';
@@ -555,13 +559,13 @@ describe.skipIf(NO_DATABASE)('projection_runs and projection_percentiles (0022)'
         sql`SELECT count(*)::text AS n FROM domain_events WHERE event_type = 'planning.GoalOffTrack'`,
       );
     const deliver = () =>
-      database.db.transaction((tx) =>
-        consumer.handler(envelope, {
+      database.db.transaction(async (tx) => {
+        await consumer.handler(envelope, {
           tx: platformOf(tx as unknown as PlanningExecutor),
           logger: silentLogger,
           clock: CLOCK,
-        }),
-      );
+        });
+      });
 
     const before = await offTrack();
     await deliver();
@@ -598,7 +602,7 @@ describe.skipIf(NO_DATABASE)('projection_runs and projection_percentiles (0022)'
       isInvestable: true,
       side: 'asset',
       kind: 'investment',
-      valuation: 'holdings',
+      valuation: 'quantity_times_price',
       stalePrice: false,
     });
     const day = (asOfDate: string, taxable: string, deferred: string): NetWorthSnapshot => {
