@@ -97,16 +97,16 @@ describe('awaitAccountHolder (Phase 3 gate C-1)', () => {
     const start = worker.indexOf('async function main(): Promise<void> {');
     const end = worker.indexOf("if (process.env['VITEST']");
     expect(start, 'apps/api/src/worker.ts has no main() to inspect').toBeGreaterThan(-1);
-    expect(end, "apps/api/src/worker.ts has no VITEST guard to bound main()'s body").toBeGreaterThan(
-      start,
-    );
+    expect(
+      end,
+      "apps/api/src/worker.ts has no VITEST guard to bound main()'s body",
+    ).toBeGreaterThan(start);
     const body = worker.slice(start, end);
 
     // The old defect, restated as a test: a `return` inside the `user === null`
     // branch, before the poll, would restore "idle once, then let main() end".
-    const noHolderBranch = /if \(user === null\) \{([\s\S]*?)\n {2}\}\n\n {2}if \(user === null\)/u.exec(
-      body,
-    )?.[1];
+    const noHolderBranch =
+      /if \(user === null\) \{([\s\S]*?)\n {2}\}\n\n {2}if \(user === null\)/u.exec(body)?.[1];
     expect(noHolderBranch, 'the no-holder branch could not be found').toBeDefined();
     // Strip comment-only lines first: the branch's own prose and log message
     // legitimately say "return" several times (describing the defect this

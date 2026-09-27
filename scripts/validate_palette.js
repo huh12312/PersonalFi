@@ -92,14 +92,8 @@ const DEUTERANOPIA_MATRIX = [
 ];
 
 function simulateDeuteranopia(rgb) {
-  const lin = [
-    srgbToLinearChannel(rgb.r),
-    srgbToLinearChannel(rgb.g),
-    srgbToLinearChannel(rgb.b),
-  ];
-  const out = DEUTERANOPIA_MATRIX.map(
-    (row) => row[0] * lin[0] + row[1] * lin[1] + row[2] * lin[2],
-  );
+  const lin = [srgbToLinearChannel(rgb.r), srgbToLinearChannel(rgb.g), srgbToLinearChannel(rgb.b)];
+  const out = DEUTERANOPIA_MATRIX.map((row) => row[0] * lin[0] + row[1] * lin[1] + row[2] * lin[2]);
   return {
     r: linearToSrgbChannel(out[0]),
     g: linearToSrgbChannel(out[1]),
@@ -213,7 +207,11 @@ function main() {
       if (luminances[i] >= luminances[i - 1]) decreasing = false;
     }
     const monotonic = increasing || decreasing;
-    const direction = increasing ? 'lightest → darkest' : decreasing ? 'darkest → lightest' : 'NOT MONOTONIC';
+    const direction = increasing
+      ? 'lightest → darkest'
+      : decreasing
+        ? 'darkest → lightest'
+        : 'NOT MONOTONIC';
 
     colors.forEach((c, i) => {
       const status = contrasts[i] >= contrastFloor ? 'PASS' : 'WARN';
@@ -278,7 +276,9 @@ function main() {
   const summary =
     (anyCvdFail ? 'FAIL' : 'ALL PASS') +
     ` · worst CVD ΔE ${worstDeutan.toFixed(1)} (deutan) · normal-vision ΔE ${worstNormal.toFixed(1)}` +
-    (warnContrast.length > 0 ? ` · WARN contrast: ${warnContrast.join(', ')} (relief rule: direct labels required)` : '');
+    (warnContrast.length > 0
+      ? ` · WARN contrast: ${warnContrast.join(', ')} (relief rule: direct labels required)`
+      : '');
   process.stdout.write(`  → ${summary}\n`);
 
   if (anyCvdFail) fail('one or more pairs are not separable under simulated deuteranopia');

@@ -80,49 +80,55 @@ describe('assertPoolCoversLeases / WORKER_PINNED_CONNECTIONS (Phase 3 gate C-6)'
     );
   });
 
-  it('SABOTAGE reproduced (S-P1): a check that never returns still throws here — this file is ' +
-    'the direct arithmetic test the string-match test in regate-worker-boot.test.ts is not', () => {
-    // This does not sabotage the source; it documents what S-P1 defeated. The
-    // gate's S-P1 replaced `if (poolMax > pinned) return;` with `if (poolMax >
-    // pinned || true) return;`, i.e. the function always returns before the
-    // `throw`. Reproducing that shape here directly (rather than editing the
-    // file) shows the *consequence* a string-match test cannot see: with S-P1
-    // applied, a deadlocked pool would return normally instead of throwing —
-    // which is exactly why this suite calls the real, unmodified function and
-    // asserts the throw, not the source text.
-    const { logger } = fakeLogger();
-    expect(() => assertPoolCoversLeases(logger, 12, 7)).toThrow();
-  });
+  it(
+    'SABOTAGE reproduced (S-P1): a check that never returns still throws here — this file is ' +
+      'the direct arithmetic test the string-match test in regate-worker-boot.test.ts is not',
+    () => {
+      // This does not sabotage the source; it documents what S-P1 defeated. The
+      // gate's S-P1 replaced `if (poolMax > pinned) return;` with `if (poolMax >
+      // pinned || true) return;`, i.e. the function always returns before the
+      // `throw`. Reproducing that shape here directly (rather than editing the
+      // file) shows the *consequence* a string-match test cannot see: with S-P1
+      // applied, a deadlocked pool would return normally instead of throwing —
+      // which is exactly why this suite calls the real, unmodified function and
+      // asserts the throw, not the source text.
+      const { logger } = fakeLogger();
+      expect(() => assertPoolCoversLeases(logger, 12, 7)).toThrow();
+    },
+  );
 
-  it('SABOTAGE reproduced (S-P2): zeroing WORKER_PINNED_CONNECTIONS\'s consumer term sizes a ' +
-    'pool this check then (correctly) refuses to boot with, at the real numbers', () => {
-    // S-P2 (`worker.ts`'s call site): `WORKER_PINNED_CONNECTIONS`'s per-consumer
-    // term `MODULE_FLAGS.length` → `0 * MODULE_FLAGS.length`. That constant
-    // feeds exactly one thing — `createPool({ max: DATABASE_POOL_MAX +
-    // WORKER_PINNED_CONNECTIONS })` — and `assertPoolCoversLeases` re-derives
-    // `pinned` from the real, post-resolve `consumerCount` independently, so
-    // this test has to model the *call site's* relationship, not the function
-    // in isolation, for the sabotage to have anything to bite on.
-    //
-    // At the real numbers (`.env.example`'s `DATABASE_POOL_MAX`, the real
-    // `MODULE_FLAGS.length` — the worst-case consumer count, since
-    // `modules.consumers.length` can be at most one per module by
-    // `WORKER_PINNED_CONNECTIONS`'s own comment), this genuinely crosses the
-    // line: S-P2's pool is sized as if the reservation covered only the 5
-    // process-wide leases, no consumers at all.
-    const databasePoolMax = defaultDatabasePoolMax();
-    const consumerCount = MODULE_FLAGS.length; // worst case: every module enabled, one consumer each
-    const sabotagedWorkerPinnedConnections = 3 + 2 + 0 * MODULE_FLAGS.length; // S-P2's arithmetic
-    const sabotagedPoolMax = databasePoolMax + sabotagedWorkerPinnedConnections;
+  it(
+    "SABOTAGE reproduced (S-P2): zeroing WORKER_PINNED_CONNECTIONS's consumer term sizes a " +
+      'pool this check then (correctly) refuses to boot with, at the real numbers',
+    () => {
+      // S-P2 (`worker.ts`'s call site): `WORKER_PINNED_CONNECTIONS`'s per-consumer
+      // term `MODULE_FLAGS.length` → `0 * MODULE_FLAGS.length`. That constant
+      // feeds exactly one thing — `createPool({ max: DATABASE_POOL_MAX +
+      // WORKER_PINNED_CONNECTIONS })` — and `assertPoolCoversLeases` re-derives
+      // `pinned` from the real, post-resolve `consumerCount` independently, so
+      // this test has to model the *call site's* relationship, not the function
+      // in isolation, for the sabotage to have anything to bite on.
+      //
+      // At the real numbers (`.env.example`'s `DATABASE_POOL_MAX`, the real
+      // `MODULE_FLAGS.length` — the worst-case consumer count, since
+      // `modules.consumers.length` can be at most one per module by
+      // `WORKER_PINNED_CONNECTIONS`'s own comment), this genuinely crosses the
+      // line: S-P2's pool is sized as if the reservation covered only the 5
+      // process-wide leases, no consumers at all.
+      const databasePoolMax = defaultDatabasePoolMax();
+      const consumerCount = MODULE_FLAGS.length; // worst case: every module enabled, one consumer each
+      const sabotagedWorkerPinnedConnections = 3 + 2 + 0 * MODULE_FLAGS.length; // S-P2's arithmetic
+      const sabotagedPoolMax = databasePoolMax + sabotagedWorkerPinnedConnections;
 
-    expect(() => assertPoolCoversLeases(fakeLogger().logger, sabotagedPoolMax, consumerCount)).toThrow(
-      PoolCannotCoverPinnedConnectionsError,
-    );
+      expect(() =>
+        assertPoolCoversLeases(fakeLogger().logger, sabotagedPoolMax, consumerCount),
+      ).toThrow(PoolCannotCoverPinnedConnectionsError);
 
-    // The unsabotaged constant, at the same real numbers, does not.
-    const correctPoolMax = databasePoolMax + WORKER_PINNED_CONNECTIONS;
-    expect(() =>
-      assertPoolCoversLeases(fakeLogger().logger, correctPoolMax, consumerCount),
-    ).not.toThrow();
-  });
+      // The unsabotaged constant, at the same real numbers, does not.
+      const correctPoolMax = databasePoolMax + WORKER_PINNED_CONNECTIONS;
+      expect(() =>
+        assertPoolCoversLeases(fakeLogger().logger, correctPoolMax, consumerCount),
+      ).not.toThrow();
+    },
+  );
 });

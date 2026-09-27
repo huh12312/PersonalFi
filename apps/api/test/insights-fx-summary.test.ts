@@ -60,7 +60,10 @@ const CAD_SAVINGS: InsightsAccount = {
   closed: false,
 };
 
-function builderWithAccounts(accounts: readonly InsightsAccount[], fx?: Parameters<typeof inMemoryFxPort>[0]) {
+function builderWithAccounts(
+  accounts: readonly InsightsAccount[],
+  fx?: Parameters<typeof inMemoryFxPort>[0],
+) {
   const ports = {
     ...emptyPorts(),
     ledger: inMemoryLedgerPort({ accounts }),

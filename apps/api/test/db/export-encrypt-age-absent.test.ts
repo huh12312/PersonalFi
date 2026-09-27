@@ -46,7 +46,10 @@ describe('encryptWithAge refuses, never falls back to plaintext, when `age` is n
     // `AGE_RECIPIENTS_FILE` and every other mention in RUNBOOK.md/justfile).
     // Content is irrelevant to this test: the refusal under test happens
     // before `age` ever reads it.
-    writeFileSync(join(dir, 'age_recipient'), 'age1notarealrecipientkeyforthistestonly0000000000000000000000');
+    writeFileSync(
+      join(dir, 'age_recipient'),
+      'age1notarealrecipientkeyforthistestonly0000000000000000000000',
+    );
     originalPath = process.env['PATH'];
     // Empty, not merely "missing age's directory": a test host that happens
     // to have `age` installed system-wide must not accidentally pass this by
@@ -61,16 +64,21 @@ describe('encryptWithAge refuses, never falls back to plaintext, when `age` is n
   });
 
   it('rejects with AgeUnavailableError naming the binary, not a bare ENOENT', async () => {
-    const { encryptWithAge, AgeUnavailableError } = await import('../../src/reports/export/bundle.ts');
-    const plaintext = 'this must never be returned — the whole point of ?encrypt=true is that it is not';
+    const { encryptWithAge, AgeUnavailableError } =
+      await import('../../src/reports/export/bundle.ts');
+    const plaintext =
+      'this must never be returned — the whole point of ?encrypt=true is that it is not';
 
-    await expect(encryptWithAge(plaintext, { secretsDir: dir })).rejects.toThrow(AgeUnavailableError);
+    await expect(encryptWithAge(plaintext, { secretsDir: dir })).rejects.toThrow(
+      AgeUnavailableError,
+    );
     await expect(encryptWithAge(plaintext, { secretsDir: dir })).rejects.toThrow(/PATH/);
   });
 
   it('never resolves with the plaintext bytes — the exact downgrade T13-5b sabotaged in', async () => {
     const { encryptWithAge } = await import('../../src/reports/export/bundle.ts');
-    const plaintext = 'this must never be returned — the whole point of ?encrypt=true is that it is not';
+    const plaintext =
+      'this must never be returned — the whole point of ?encrypt=true is that it is not';
 
     let resolved: Buffer | undefined;
     let rejected: unknown;
@@ -79,7 +87,10 @@ describe('encryptWithAge refuses, never falls back to plaintext, when `age` is n
     } catch (error) {
       rejected = error;
     }
-    expect(resolved, 'encryptWithAge resolved instead of rejecting — the T13-5b downgrade').toBeUndefined();
+    expect(
+      resolved,
+      'encryptWithAge resolved instead of rejecting — the T13-5b downgrade',
+    ).toBeUndefined();
     expect(rejected).toBeDefined();
   });
 });
