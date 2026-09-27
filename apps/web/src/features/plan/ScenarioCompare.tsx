@@ -98,32 +98,46 @@ export function ScenarioCompare({
       {compare !== undefined && (
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-md border border-border-hairline p-4" data-testid="compare-a">
-            <h3 className="mb-2 text-small font-semibold text-text-primary">{nameOf(scenarios, a)}</h3>
+            <h3 className="mb-2 text-small font-semibold text-text-primary">
+              {nameOf(scenarios, a)}
+            </h3>
             <StatTile
               label="Success probability"
               value={
                 compare.a.run === null ? (
                   '—'
                 ) : (
-                  <Percent value={ratioToNumber(compare.a.run.successProbability)} signDisplay="never" />
+                  <Percent
+                    value={ratioToNumber(compare.a.run.successProbability)}
+                    signDisplay="never"
+                  />
                 )
               }
             />
-            <p className="mt-1 text-caption text-text-muted">Retirement date: {compare.retirementDate.a}</p>
+            <p className="mt-1 text-caption text-text-muted">
+              Retirement date: {compare.retirementDate.a}
+            </p>
           </div>
           <div className="rounded-md border border-border-hairline p-4" data-testid="compare-b">
-            <h3 className="mb-2 text-small font-semibold text-text-primary">{nameOf(scenarios, b)}</h3>
+            <h3 className="mb-2 text-small font-semibold text-text-primary">
+              {nameOf(scenarios, b)}
+            </h3>
             <StatTile
               label="Success probability"
               value={
                 compare.b.run === null ? (
                   '—'
                 ) : (
-                  <Percent value={ratioToNumber(compare.b.run.successProbability)} signDisplay="never" />
+                  <Percent
+                    value={ratioToNumber(compare.b.run.successProbability)}
+                    signDisplay="never"
+                  />
                 )
               }
             />
-            <p className="mt-1 text-caption text-text-muted">Retirement date: {compare.retirementDate.b}</p>
+            <p className="mt-1 text-caption text-text-muted">
+              Retirement date: {compare.retirementDate.b}
+            </p>
           </div>
           <div className="sm:col-span-2 rounded-md bg-bg-subtle p-4" data-testid="compare-delta">
             <p className="text-small text-text-primary">

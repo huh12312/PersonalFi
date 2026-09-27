@@ -8,8 +8,10 @@ import {
   createPlanScenarioMutation,
   deletePlanLifeEventMutation,
   getAssumptionsOptions,
+  getAssumptionsQueryKey,
   listPlanLifeEventsOptions,
   listPlanScenariosOptions,
+  putAssumptionsOverridesMutation,
   updatePlanLifeEventMutation,
 } from '../../api/generated/@tanstack/react-query.gen.ts';
 import { Sdk } from '../../api/generated/index.ts';
@@ -86,6 +88,23 @@ export function useCompareQuery(a: string | undefined, b: string | undefined) {
 /** `GET /assumptions` — the whole cited file plus the caller's applied overrides. */
 export function useAssumptionsQuery() {
   return useQuery({ ...getAssumptionsOptions(), staleTime: 60_000 });
+}
+
+/**
+ * `PUT /assumptions/overrides` — full-set replacement semantics
+ * (`docs/evidence/phase-4/wp4.8-routes.md` §11 item 4: "replaces the
+ * *override set*"), so the caller must send every currently-applied override
+ * plus its own change, never a single-path patch. Invalidates
+ * `GET /assumptions` on success so the panel re-renders from the server's own
+ * resolved value rather than an optimistic guess — an override is exactly the
+ * kind of number this screen must never restate without the server's say-so.
+ */
+export function useOverrideAssumptionMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    ...putAssumptionsOverridesMutation(),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: getAssumptionsQueryKey() }),
+  });
 }
 
 /** `GET /plan/life-events` — draggable timeline markers. */

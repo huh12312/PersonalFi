@@ -39,9 +39,6 @@ export function BaselinePlanForm({ onSubmit, pending, error }: BaselinePlanFormP
       setFormError('Enter a birth date.');
       return;
     }
-    let annualSpendingInput: CreatePlanScenarioData['body'] extends { kind: 'baseline' }
-      ? never
-      : never;
     let spendingMoney: { minor: string; currency: string } | null = null;
     if (annualSpending.trim() !== '') {
       try {
@@ -51,7 +48,6 @@ export function BaselinePlanForm({ onSubmit, pending, error }: BaselinePlanFormP
         return;
       }
     }
-    void annualSpendingInput;
 
     onSubmit({
       kind: 'baseline',
@@ -118,7 +114,8 @@ export function BaselinePlanForm({ onSubmit, pending, error }: BaselinePlanFormP
       </div>
       <div>
         <Label htmlFor="plan-annual-spending">
-          Annual retirement spending (optional — leave blank to derive it from your observed spending)
+          Annual retirement spending (optional — leave blank to derive it from your observed
+          spending)
         </Label>
         <Input
           id="plan-annual-spending"

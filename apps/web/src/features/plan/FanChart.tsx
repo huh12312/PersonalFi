@@ -60,7 +60,8 @@ function moneyLabel(money: MoneyJson): string {
 
 const margin = { top: 16, right: 16, bottom: 28, left: 16 };
 
-interface Row {
+/** Exported so a unit test can drive `ChartInner` directly with an explicit width — `ParentSize`'s `ResizeObserver` never fires in the happy-dom test environment (`vitest.setup.ts`), so testing through the public `FanChart` component alone would always render nothing. */
+export interface Row {
   readonly year: number;
   readonly p5: number | null;
   readonly p10: number | null;
@@ -100,7 +101,7 @@ function crossingYear(rows: readonly Row[], target: number): number | null {
   return null;
 }
 
-interface ChartInnerProps {
+export interface ChartInnerProps {
   readonly width: number;
   readonly height: number;
   readonly rows: readonly Row[];
@@ -109,7 +110,15 @@ interface ChartInnerProps {
   readonly onGapActivate?: () => void;
 }
 
-function ChartInner({ width, height, rows, currency, goal, onGapActivate }: ChartInnerProps) {
+/** Exported alongside `Row` for the same reason — see `Row`'s own doc comment. */
+export function ChartInner({
+  width,
+  height,
+  rows,
+  currency,
+  goal,
+  onGapActivate,
+}: ChartInnerProps) {
   const { tooltipData, tooltipLeft, tooltipTop, tooltipOpen, showTooltip, hideTooltip } =
     useTooltip<Row>();
 
@@ -153,7 +162,7 @@ function ChartInner({ width, height, rows, currency, goal, onGapActivate }: Char
   const gapTargetRow =
     goal === null || goal === undefined
       ? undefined
-      : rows.find((r) => r.year >= goal.calendarYear) ?? lastRow;
+      : (rows.find((r) => r.year >= goal.calendarYear) ?? lastRow);
   const gapX = gapTargetRow === undefined ? null : xScale(gapTargetRow.year);
   const gapMedianY = gapTargetRow === undefined ? null : yScale(gapTargetRow.p50);
 
@@ -169,7 +178,11 @@ function ChartInner({ width, height, rows, currency, goal, onGapActivate }: Char
         nearest = row;
       }
     }
-    showTooltip({ tooltipData: nearest, tooltipLeft: xScale(nearest.year), tooltipTop: yScale(nearest.p50) });
+    showTooltip({
+      tooltipData: nearest,
+      tooltipLeft: xScale(nearest.year),
+      tooltipTop: yScale(nearest.p50),
+    });
   }
 
   const HIT_WIDTH = 24; // WCAG 2.5.8, ≥24 CSS px
@@ -307,25 +320,28 @@ function ChartInner({ width, height, rows, currency, goal, onGapActivate }: Char
         </Group>
       </svg>
 
-      {tooltipOpen && tooltipData !== undefined && tooltipLeft !== undefined && tooltipTop !== undefined && (
-        <Tooltip
-          left={tooltipLeft + margin.left}
-          top={tooltipTop + margin.top}
-          style={{
-            ...defaultStyles,
-            background: 'var(--bg-surface-raised)',
-            color: 'var(--text-primary)',
-            boxShadow: 'var(--shadow-elev-2)',
-            border: '1px solid var(--border-hairline)',
-            borderRadius: 8,
-            fontSize: 12,
-          }}
-        >
-          {tooltipData.p25 === null
-            ? `By ${String(Math.round(tooltipData.year))}, median projected value is ${moneyLabel({ minor: String(Math.round(tooltipData.p50)), currency })}.`
-            : `By ${String(Math.round(tooltipData.year))} there's a 75% chance you have at least ${moneyLabel({ minor: String(Math.round(tooltipData.p25)), currency })}.`}
-        </Tooltip>
-      )}
+      {tooltipOpen &&
+        tooltipData !== undefined &&
+        tooltipLeft !== undefined &&
+        tooltipTop !== undefined && (
+          <Tooltip
+            left={tooltipLeft + margin.left}
+            top={tooltipTop + margin.top}
+            style={{
+              ...defaultStyles,
+              background: 'var(--bg-surface-raised)',
+              color: 'var(--text-primary)',
+              boxShadow: 'var(--shadow-elev-2)',
+              border: '1px solid var(--border-hairline)',
+              borderRadius: 8,
+              fontSize: 12,
+            }}
+          >
+            {tooltipData.p25 === null
+              ? `By ${String(Math.round(tooltipData.year))}, median projected value is ${moneyLabel({ minor: String(Math.round(tooltipData.p50)), currency })}.`
+              : `By ${String(Math.round(tooltipData.year))} there's a 75% chance you have at least ${moneyLabel({ minor: String(Math.round(tooltipData.p25)), currency })}.`}
+          </Tooltip>
+        )}
 
       {goal !== null &&
         goal !== undefined &&
@@ -441,23 +457,43 @@ export function FanChart({
 
       {showTable && (
         <table className="mt-2 w-full text-caption">
-          <caption className="sr-only">Projected portfolio value by year, at every percentile band</caption>
+          <caption className="sr-only">
+            Projected portfolio value by year, at every percentile band
+          </caption>
           <thead>
             <tr>
-              <th scope="col" className="text-left">Year</th>
-              <th scope="col" className="text-right">p5</th>
-              <th scope="col" className="text-right">p10</th>
-              <th scope="col" className="text-right">p25</th>
-              <th scope="col" className="text-right">p50 (median)</th>
-              <th scope="col" className="text-right">p75</th>
-              <th scope="col" className="text-right">p90</th>
-              <th scope="col" className="text-right">p95</th>
+              <th scope="col" className="text-left">
+                Year
+              </th>
+              <th scope="col" className="text-right">
+                p5
+              </th>
+              <th scope="col" className="text-right">
+                p10
+              </th>
+              <th scope="col" className="text-right">
+                p25
+              </th>
+              <th scope="col" className="text-right">
+                p50 (median)
+              </th>
+              <th scope="col" className="text-right">
+                p75
+              </th>
+              <th scope="col" className="text-right">
+                p90
+              </th>
+              <th scope="col" className="text-right">
+                p95
+              </th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.year}>
-                <th scope="row" className="text-left font-normal">{Math.round(row.year)}</th>
+                <th scope="row" className="text-left font-normal">
+                  {Math.round(row.year)}
+                </th>
                 {[row.p5, row.p10, row.p25, row.p50, row.p75, row.p90, row.p95].map((v, i) => (
                   <td key={i} className="text-right tabular-nums">
                     {v === null ? '—' : moneyLabel({ minor: String(Math.round(v)), currency })}

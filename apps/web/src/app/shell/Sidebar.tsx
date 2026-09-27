@@ -89,7 +89,8 @@ export function Sidebar() {
                         // the label. "Current" is still carried by
                         // `aria-current="page"`, the wash, and the rail —
                         // never by the label's hue alone (1.4.1).
-                        active && 'border-accent bg-accent-wash text-text-primary hover:bg-accent-wash',
+                        active &&
+                          'border-accent bg-accent-wash text-text-primary hover:bg-accent-wash',
                       )}
                       aria-current={active ? 'page' : undefined}
                       title={collapsed ? item.label : undefined}

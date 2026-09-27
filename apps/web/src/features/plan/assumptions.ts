@@ -32,7 +32,7 @@ export interface CitedAssumption {
 function isCitedLeaf(node: unknown): node is Record<string, unknown> {
   if (node === null || typeof node !== 'object' || Array.isArray(node)) return false;
   const record = node as Record<string, unknown>;
-  return typeof record.source === 'string' && typeof record.asOf === 'string';
+  return typeof record['source'] === 'string' && typeof record['asOf'] === 'string';
 }
 
 /** `usEquity` → "US equity"; `expectedReturn` → "Expected return". A tiny, deterministic humaniser — no i18n library for seven-ish words. */
@@ -69,12 +69,12 @@ export function walkCitedAssumptions(file: unknown): readonly CitedAssumption[] 
       out.push({
         path: path.join('.'),
         label: humanizePath(path),
-        kind: typeof node.kind === 'string' ? node.kind : null,
-        value: typeof node.value === 'string' ? node.value : String(node.value ?? ''),
-        basis: typeof node.basis === 'string' ? node.basis : null,
-        source: node.source as string,
-        asOf: node.asOf as string,
-        note: typeof node.note === 'string' ? node.note : null,
+        kind: typeof node['kind'] === 'string' ? node['kind'] : null,
+        value: typeof node['value'] === 'string' ? node['value'] : String(node['value'] ?? ''),
+        basis: typeof node['basis'] === 'string' ? node['basis'] : null,
+        source: node['source'] as string,
+        asOf: node['asOf'] as string,
+        note: typeof node['note'] === 'string' ? node['note'] : null,
       });
       return;
     }

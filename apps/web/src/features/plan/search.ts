@@ -24,7 +24,10 @@ export const planSearchSchema = z.object({
   /** Two scenario ids for the side-by-side compare panel. */
   compareA: z.string().min(1).optional(),
   compareB: z.string().min(1).optional(),
-  goalTargetMinor: z.string().regex(/^-?\d+$/).optional(),
+  goalTargetMinor: z
+    .string()
+    .regex(/^-?\d+$/)
+    .optional(),
   goalCurrency: z.string().length(3).optional(),
   /** `YYYY-MM-DD`. */
   goalDate: z

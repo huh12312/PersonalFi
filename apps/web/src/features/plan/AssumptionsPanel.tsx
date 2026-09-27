@@ -51,91 +51,98 @@ export function AssumptionsPanel({
         Assumptions file version <code className="font-mono">{version}</code>. {cited.length} cited
         figures.
       </p>
-      <div className="max-h-[480px] overflow-y-auto rounded-md border border-border-hairline">
-        <dl className="divide-y divide-border-hairline">
-          {[...groups.entries()].map(([group, items]) => (
-            <div key={group} className="p-3">
-              <h3 className="mb-2 text-small font-semibold text-text-primary">{group}</h3>
-              <div className="flex flex-col gap-3">
-                {items.map((item) => {
-                  const override = overrideByPath.get(item.path);
-                  const canOverride = overridable.has(item.path);
-                  const isEditing = editingPath === item.path;
-                  return (
-                    <div key={item.path} className="grid gap-0.5">
-                      <dt className="text-small text-text-secondary">{item.label}</dt>
-                      <dd className="flex flex-wrap items-baseline gap-2">
-                        {isEditing ? (
-                          <form
-                            className="flex items-center gap-2"
-                            onSubmit={(e) => {
-                              e.preventDefault();
-                              onOverride(item.path, draft);
-                              setEditingPath(null);
-                            }}
+      <div className="max-h-[480px] overflow-y-auto divide-y divide-border-hairline rounded-md border border-border-hairline">
+        {[...groups.entries()].map(([group, items]) => (
+          <div key={group} className="p-3">
+            <h3 className="mb-2 text-small font-semibold text-text-primary">{group}</h3>
+            {/*
+              Each group gets its own `<dl>` rather than one `<dl>` for the
+              whole panel with an `<h3>` interleaved between its dt/dd pairs
+              — a `<dl>`'s only permitted direct children are `<dt>`/`<dd>`,
+              optionally wrapped in a `<div>` that itself contains nothing
+              else (the item-row `<div>` below, `dt` + `dd`* only, satisfies
+              that; the group heading does not, which is exactly what axe's
+              `definition-list`/`dlitem` rules caught here).
+            */}
+            <dl className="flex flex-col gap-3">
+              {items.map((item) => {
+                const override = overrideByPath.get(item.path);
+                const canOverride = overridable.has(item.path);
+                const isEditing = editingPath === item.path;
+                return (
+                  <div key={item.path} className="grid gap-0.5">
+                    <dt className="text-small text-text-secondary">{item.label}</dt>
+                    <dd className="flex flex-wrap items-baseline gap-2">
+                      {isEditing ? (
+                        <form
+                          className="flex items-center gap-2"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            onOverride(item.path, draft);
+                            setEditingPath(null);
+                          }}
+                        >
+                          <Input
+                            aria-label={`Override ${item.label}`}
+                            value={draft}
+                            onChange={(e) => setDraft(e.target.value)}
+                            className="h-8 w-28"
+                            inputMode="decimal"
+                          />
+                          <Button type="submit" size="sm" disabled={savingPath === item.path}>
+                            Save
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingPath(null)}
                           >
-                            <Input
-                              aria-label={`Override ${item.label}`}
-                              value={draft}
-                              onChange={(e) => setDraft(e.target.value)}
-                              className="h-8 w-28"
-                              inputMode="decimal"
-                            />
-                            <Button type="submit" size="sm" disabled={savingPath === item.path}>
-                              Save
-                            </Button>
+                            Cancel
+                          </Button>
+                        </form>
+                      ) : (
+                        <>
+                          <span className="tabular-nums text-body font-medium text-text-primary">
+                            {override !== undefined ? override.value : item.value}
+                            {item.basis === 'inflation_adjusted' ? ' (real)' : ''}
+                          </span>
+                          {override !== undefined && (
+                            <span
+                              className="rounded-full bg-accent-wash px-1.5 py-0.5 text-caption text-text-primary"
+                              data-testid={`assumption-overridden-${item.path}`}
+                            >
+                              overridden — default {item.value}
+                            </span>
+                          )}
+                          {canOverride && (
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
-                              onClick={() => setEditingPath(null)}
+                              onClick={() => {
+                                setDraft(override !== undefined ? override.value : item.value);
+                                setEditingPath(item.path);
+                              }}
                             >
-                              Cancel
+                              Edit
                             </Button>
-                          </form>
-                        ) : (
-                          <>
-                            <span className="tabular-nums text-body font-medium text-text-primary">
-                              {override !== undefined ? override.value : item.value}
-                              {item.basis === 'inflation_adjusted' ? ' (real)' : ''}
-                            </span>
-                            {override !== undefined && (
-                              <span
-                                className="rounded-full bg-accent-wash px-1.5 py-0.5 text-caption text-text-primary"
-                                data-testid={`assumption-overridden-${item.path}`}
-                              >
-                                overridden — default {item.value}
-                              </span>
-                            )}
-                            {canOverride && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  setDraft(override !== undefined ? override.value : item.value);
-                                  setEditingPath(item.path);
-                                }}
-                              >
-                                Edit
-                              </Button>
-                            )}
-                          </>
-                        )}
-                      </dd>
-                      <dd className="text-caption text-text-muted">
-                        Source: {item.source} · As of {item.asOf}
-                      </dd>
-                      {item.note !== null && (
-                        <dd className="text-caption text-text-muted italic">{item.note}</dd>
+                          )}
+                        </>
                       )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </dl>
+                    </dd>
+                    <dd className="text-caption text-text-muted">
+                      Source: {item.source} · As of {item.asOf}
+                    </dd>
+                    {item.note !== null && (
+                      <dd className="text-caption text-text-muted italic">{item.note}</dd>
+                    )}
+                  </div>
+                );
+              })}
+            </dl>
+          </div>
+        ))}
       </div>
     </div>
   );
