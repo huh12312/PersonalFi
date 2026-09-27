@@ -17,11 +17,21 @@ import {
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { createPool } from '@core/db';
 import { recordConfigSnapshot } from '@core/platform';
+import { loadAssumptions } from '@ctx/planning';
 import { buildApp } from './app.ts';
 import { buildPlatform } from './platform.ts';
 
 async function main(): Promise<void> {
   const config = loadConfig();
+
+  // `loadAssumptions()` (`@ctx/planning`) is lazy by design — its own doc says
+  // the composition root should call it at boot so a malformed 07 §5.5/§6.4/
+  // Appendix A file (docs/evidence/phase-4/wp4.2-assumptions.md §9 item 5)
+  // refuses to start the process, rather than surfacing as a 500 on whichever
+  // request happens to read it first. Unguarded on purpose — a bad file must
+  // reach the `catch` below and exit non-zero, not be logged and survived the
+  // way the config snapshot a few lines down deliberately is.
+  loadAssumptions();
 
   const pool = createPool({
     databaseUrl: config.databaseUrl.reveal(),

@@ -127,9 +127,86 @@ export const RiskProfileAnswered = defineEvent({
  */
 export { AssumptionsOverridden };
 
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+/** A dimensionless ratio in [0, 1] as a decimal string — never a JSON number (D3, WP 4.8). */
+const unitRatio = z.string().regex(/^(0(\.\d{1,6})?|1(\.0{1,6})?)$/);
+
+/**
+ * A projection was computed and stored (WP 4.6).
+ *
+ * Emitted **only when a run is freshly computed** — never when an identical
+ * request is re-served from `projection_runs`. Re-announcing a cache hit is the
+ * WP 3.2 defect one context over: a nightly refresh of an unchanged plan would
+ * wake every consumer every night to tell it nothing. Ids, versions and one
+ * ratio; never a balance, a percentile or a path. `successProbability` travels
+ * because R2 ("success below 80%") is a threshold rule and a threshold rule
+ * that had to re-read the run to see whether it was anywhere near would re-read
+ * on every event — the `netWorthMinor` exception above, for the same reason,
+ * and as a decimal string for the same reason.
+ */
+export const ProjectionCompleted = defineEvent({
+  type: 'planning.ProjectionCompleted',
+  aggregateType: 'projection_run',
+  description:
+    'A projection run was computed and stored. Carries the run and scenario ids, whether the ' +
+    'scenario is the baseline or a fork, the method, the starting-balance day, the seed (a ' +
+    'decimal string: it is an unsigned 64-bit integer), the path count, the engine and ' +
+    'assumptions versions, the success probability as a decimal string and the duration. Never ' +
+    'emitted for a request re-served from the cache. Balances and bands are re-read.',
+  schema: z.object({
+    runId: z.uuid(),
+    scenarioId: z.uuid(),
+    scenarioKind: z.enum(['baseline', 'fork']),
+    method: z.enum(['deterministic', 'monte_carlo']),
+    asOfDate: isoDate,
+    seed: z.string().regex(/^\d{1,20}$/),
+    paths: z.int().positive(),
+    engineVersion: z.string().min(1).max(64),
+    assumptionsVersion: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    successProbability: unitRatio,
+    durationMs: z.int().nonnegative(),
+  }),
+});
+
+/**
+ * A goal's funded ratio is below its required-by-date pace (07 R6, WP 4.6).
+ *
+ * **Once per evaluation, never once per delivery.** An evaluation is one
+ * baseline run's `ProjectionCompleted`, and the evaluation claims that run
+ * (`projection_runs.goals_evaluated_at`, stamped once) before it emits
+ * anything — so a redelivered or replayed `ProjectionCompleted` finds the claim
+ * taken and says nothing. That is the WP 3.2 re-delivery defect, not repeated.
+ *
+ * Ratios, not figures: the goal's target, its funded amount and the monthly
+ * contribution R6's copy quotes are re-read through Planning under the
+ * reader's own scope. `fundedSource` says what "funded" was measured from,
+ * because "you have funded 0%" means something different when nothing was
+ * earmarked.
+ */
+export const GoalOffTrack = defineEvent({
+  type: 'planning.GoalOffTrack',
+  aggregateType: 'goal',
+  description:
+    "A goal's funded ratio fell below its required-by-date pace (07 R6): what is funded today " +
+    'plus every contribution the plan schedules before the target date does not reach the ' +
+    'target. Emitted at most once per goal per evaluation (one baseline projection run), never ' +
+    'once per delivery. Carries ratios and the months remaining, never an amount.',
+  schema: z.object({
+    goalId: z.uuid(),
+    evaluationId: z.uuid(),
+    asOfDate: isoDate,
+    fundedRatio: z.string().regex(/^\d+(\.\d{1,6})?$/),
+    requiredPace: unitRatio,
+    monthsRemaining: z.int().nonnegative(),
+    fundedSource: z.enum(['earmarks', 'funding_accounts', 'none']),
+  }),
+});
+
 export const PLANNING_EVENTS: readonly EventDefinition[] = Object.freeze([
   NetWorthSnapshotTaken,
   GoalCreated,
   RiskProfileAnswered,
   AssumptionsOverridden,
+  ProjectionCompleted,
+  GoalOffTrack,
 ]);

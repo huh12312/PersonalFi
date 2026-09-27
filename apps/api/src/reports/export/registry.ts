@@ -284,6 +284,27 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'plan_assumptions',
     'planning (WP 4.2); user deltas against a named version — exported by WP 4.12, assumptions_version verbatim.',
   ],
+  // Phase 4 WP 4.6 (migration 0022). The same deferral, for the same reason:
+  // a saved scenario and a life event are the holder's own plan, and a stored
+  // run's seed + engine_version + assumptions_version is what makes a saved
+  // projection re-openable byte for byte (D20) — so the runs travel with the
+  // scenarios, never recomputed on import.
+  [
+    'plan_scenarios',
+    'planning (WP 4.6); user-authored — exported by WP 4.12 (the baseline profile and lever deltas, verbatim).',
+  ],
+  [
+    'plan_life_events',
+    'planning (WP 4.6); user-authored — exported by WP 4.12 with the Phase 3 batch.',
+  ],
+  [
+    'projection_runs',
+    'planning (WP 4.6); user-authored — exported by WP 4.12 with seed, engine_version and assumptions_version verbatim, never recomputed on import.',
+  ],
+  [
+    'projection_percentiles',
+    'planning (WP 4.6); user-authored — exported by WP 4.12 with the run it belongs to.',
+  ],
   ['advisors', "insights (WP 2.6); not named in this WP's export scope."],
   ['advisor_runs', "insights (WP 2.6); not named in this WP's export scope."],
   ['insights', "insights (WP 2.6); not named in this WP's export scope."],

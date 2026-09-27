@@ -29,11 +29,30 @@ import {
   inMemoryFxStore,
   inMemoryPriceStore,
 } from '@ctx/investments';
+import { fixedClock } from '@core/kernel';
+import { silentLogger, type JobContext } from '@core/platform';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 import { CONSUMED_EVENT_TYPES, CONSUMER_NAME } from '../src/consumer.ts';
-import { SNAPSHOT_CRON, SNAPSHOT_JOB_KIND, SNAPSHOT_SCHEDULE_NAME } from '../src/jobs.ts';
+import {
+  PROJECTION_REFRESH_CRON,
+  PROJECTION_REFRESH_JOB_KIND,
+  PROJECTION_REFRESH_SCHEDULE_NAME,
+  SNAPSHOT_CRON,
+  SNAPSHOT_JOB_KIND,
+  SNAPSHOT_SCHEDULE_NAME,
+  netWorthSnapshotJobHandler,
+  projectionRefreshJobHandler,
+} from '../src/jobs.ts';
 import { NetWorthSnapshotTaken, PLANNING_EVENTS } from '../src/events.ts';
-import type { FxReader, PriceReader } from '../src/ports.ts';
+import {
+  GOAL_PACE_CONSUMED_EVENT_TYPES,
+  GOAL_PACE_CONSUMER_NAME,
+} from '../src/projection-service.ts';
+import type { FxReader, PriceReader, RevealedPorts, SnapshotPorts } from '../src/ports.ts';
+import type { PlanningDatabase } from '../src/store.ts';
+import { portsOf, type FakeWorld } from './fakes.ts';
 
 const USER = 'a1920000-0000-7000-8000-00000000a001';
 
@@ -314,12 +333,15 @@ describe('the names the composition root registers', () => {
     expect(NetWorthSnapshotTaken.type).toBe('planning.NetWorthSnapshotTaken');
     // The registry list `apps/api` iterates; an appended-but-unregistered event
     // is invisible to the pump's upcasting and fails silently.
-    // WP 4.1 appended GoalCreated and RiskProfileAnswered; WP 4.2, AssumptionsOverridden.
+    // WP 4.1 appended GoalCreated and RiskProfileAnswered; WP 4.2, AssumptionsOverridden;
+    // WP 4.6, ProjectionCompleted and GoalOffTrack.
     expect(PLANNING_EVENTS.map((event) => event.type)).toEqual([
       'planning.NetWorthSnapshotTaken',
       'planning.GoalCreated',
       'planning.RiskProfileAnswered',
       'planning.AssumptionsOverridden',
+      'planning.ProjectionCompleted',
+      'planning.GoalOffTrack',
     ]);
     // 0003_platform.sql's `domain_events.event_type` CHECK, read out of the file.
     for (const definition of PLANNING_EVENTS) {
@@ -350,5 +372,189 @@ describe('the names the composition root registers', () => {
     // Hyphens are the specific trap: a UUID is full of them, and the pattern
     // allows underscores only.
     expect(SCHEDULE_NAME_CHECK.test('planning.net-worth-snapshot')).toBe(false);
+  });
+});
+
+// ===========================================================================
+// WP 4.6 — `portsFor(executor, userId)`, and the second Planning job
+// ===========================================================================
+
+const HOLDER_A = 'a1946000-0000-7000-8000-00000000000a';
+const HOLDER_B = 'a1946000-0000-7000-8000-00000000000b';
+const CASH = 'a1946000-0000-7000-8000-0000000000ca';
+
+/** One cash account per holder, with a different balance each, so a mix-up is visible. */
+function worldFor(balanceMinor: string): FakeWorld {
+  return {
+    accounts: [
+      {
+        accountId: CASH,
+        name: 'Checking',
+        kind: 'cash',
+        side: 'asset',
+        currency: 'USD',
+        flags: { onBudget: true, inNetWorth: true, isLiquid: true, isInvestable: false },
+      },
+    ],
+    balances: [
+      { accountId: CASH, date: '2026-09-20', currentMinor: balanceMinor, currency: 'USD' },
+    ],
+  };
+}
+
+const WORLDS: Readonly<Record<string, FakeWorld>> = {
+  [HOLDER_A]: worldFor('100000'),
+  [HOLDER_B]: worldFor('250000'),
+};
+
+/**
+ * A `PlanningDatabase` whose transaction hands the job an executor that answers
+ * exactly the statements `runSnapshot` and `refreshBaseline` issue, the way
+ * Postgres would for a holder with no rows yet — and records what was written
+ * and appended, so the test can see *whose* numbers went where.
+ */
+function recordingDatabase(): {
+  readonly database: PlanningDatabase;
+  readonly written: { userId: string; netWorthMinor: string }[];
+  readonly appended: { userId: string; eventType: string; payload: Record<string, unknown> }[];
+} {
+  const dialect = new PgDialect();
+  const written: { userId: string; netWorthMinor: string }[] = [];
+  const appended: { userId: string; eventType: string; payload: Record<string, unknown> }[] = [];
+  const execute = async (query: SQL) => {
+    const { sql: text, params } = dialect.sqlToQuery(query);
+    if (text.includes('append_domain_event')) {
+      appended.push({
+        userId: String(params[1]),
+        eventType: String(params[4]),
+        payload: JSON.parse(String(params[6])) as Record<string, unknown>,
+      });
+      return { rows: [{ out_seq: BigInt(appended.length), out_recorded_at: new Date() }] };
+    }
+    if (text.includes('INSERT INTO net_worth_daily')) {
+      written.push({ userId: String(params[1]), netWorthMinor: String(params[6]) });
+      return {
+        rows: [
+          {
+            id: params[0],
+            as_of_date: params[2],
+            revision: 1,
+            base_currency: params[3],
+            assets_minor: params[4],
+            liabilities_minor: params[5],
+            net_worth_minor: params[6],
+            liquid_minor: params[7],
+            investable_minor: params[8],
+            on_budget_minor: params[9],
+            source: params[11],
+            stale_price: params[12],
+            dirty: false,
+            sealed_at: null,
+          },
+        ],
+      };
+    }
+    // `openDays`, and `getBaseline` for a holder who has stated none: no rows.
+    if (text.includes('FROM net_worth_daily') || text.includes('FROM plan_scenarios')) {
+      return { rows: [] };
+    }
+    throw new Error(`unexpected statement: ${text}`);
+  };
+  const executor = { execute };
+  const database = {
+    transaction: async <T>(work: (tx: unknown) => Promise<T>) => work(executor),
+  } as unknown as PlanningDatabase;
+  return { database, written, appended };
+}
+
+function jobContext(userId: string, kind: string): JobContext {
+  return {
+    id: `job-${userId.slice(-1)}`,
+    userId,
+    kind,
+    attempt: 1,
+    correlationId: '01920000-0000-7000-8000-0000000000c7',
+    logger: silentLogger,
+    clock: fixedClock('2026-09-26T08:05:00Z'),
+    signal: new AbortController().signal,
+  };
+}
+
+describe("portsFor takes the job's holder (WP 4.6, wp3.w §10 item 7)", () => {
+  it('portsFor takes a userId and a job for a second holder is served, not refused by name', async () => {
+    const { database, written, appended } = recordingDatabase();
+    const snapshotPortsAskedFor: string[] = [];
+    const snapshot = netWorthSnapshotJobHandler({
+      database,
+      portsFor: (_executor, userId): SnapshotPorts => {
+        snapshotPortsAskedFor.push(userId);
+        const world = WORLDS[userId];
+        if (world === undefined) throw new Error(`no world for ${userId}`);
+        return portsOf(world);
+      },
+      timeZone: 'America/New_York',
+      baseCurrency: 'USD',
+    });
+
+    // The first holder, then a second one — through the same registration.
+    await snapshot.handler({}, jobContext(HOLDER_A, SNAPSHOT_JOB_KIND));
+    await expect(
+      snapshot.handler({}, jobContext(HOLDER_B, SNAPSHOT_JOB_KIND)),
+    ).resolves.toBeUndefined();
+
+    // Each job asked for ports for *its* holder…
+    expect(snapshotPortsAskedFor).toEqual([HOLDER_A, HOLDER_B]);
+    // …and each holder's row and event carry that holder's own number: B's net
+    // worth is B's $2,500, not A's $1,000 read through A's price/FX binding.
+    expect(written).toEqual([
+      { userId: HOLDER_A, netWorthMinor: '100000' },
+      { userId: HOLDER_B, netWorthMinor: '250000' },
+    ]);
+    expect(
+      appended.map((event) => [event.userId, event.eventType, event.payload['netWorthMinor']]),
+    ).toEqual([
+      [HOLDER_A, NetWorthSnapshotTaken.type, '100000'],
+      [HOLDER_B, NetWorthSnapshotTaken.type, '250000'],
+    ]);
+
+    // The second Planning job has the same signature and the same property.
+    const revealedAskedFor: string[] = [];
+    const refresh = projectionRefreshJobHandler({
+      database,
+      portsFor: (_executor, userId): RevealedPorts => {
+        revealedAskedFor.push(userId);
+        return {
+          cashflow: {
+            accounts: async () => [],
+            historyStarts: async () => new Map(),
+            inflows: async () => [],
+          },
+          spending: {
+            listBudgets: async () => [],
+            listPeriods: async () => [],
+            getPeriod: async () => null,
+          },
+        };
+      },
+      monteCarlo: null,
+      timeZone: 'America/New_York',
+    });
+    await expect(
+      refresh.handler({}, jobContext(HOLDER_B, PROJECTION_REFRESH_JOB_KIND)),
+    ).resolves.toBeUndefined();
+    expect(revealedAskedFor).toEqual([HOLDER_B]);
+  });
+
+  it('registers the 04:30 refresh and the goal-pace consumer under names the platform accepts', () => {
+    expect(SCHEDULE_NAME_CHECK.test(PROJECTION_REFRESH_SCHEDULE_NAME)).toBe(true);
+    expect(JOB_KIND_CHECK.test(PROJECTION_REFRESH_JOB_KIND)).toBe(true);
+    expect(PROJECTION_REFRESH_SCHEDULE_NAME).toBe('planning.projection_refresh');
+    expect(PROJECTION_REFRESH_JOB_KIND).toBe('planning.projection_refresh');
+    // 04:30 local: after the 04:00 snapshot and the 02:00 seal.
+    expect(PROJECTION_REFRESH_CRON).toBe('30 4 * * *');
+    expect(SCHEDULE_NAME_CHECK.test('planning.projection-refresh')).toBe(false);
+
+    expect(GOAL_PACE_CONSUMER_NAME).toBe('planning.goal_pace@v1');
+    expect([...GOAL_PACE_CONSUMED_EVENT_TYPES]).toEqual(['planning.ProjectionCompleted']);
   });
 });

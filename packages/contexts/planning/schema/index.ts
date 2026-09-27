@@ -68,3 +68,4 @@ export type NetWorthSource = (typeof NET_WORTH_SOURCES)[number];
 
 export * from './goals.ts';
 export * from './assumptions.ts';
+export * from './projections.ts';

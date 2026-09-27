@@ -327,3 +327,105 @@ export { trailingWindow, type OneOffThresholds, type TrailingWindow } from './wi
 // --- WP 4.4: the deterministic projection engine (pure; the number boundary
 // lives in engine/boundary.ts and nowhere else) --------------------------------
 export * from './engine/index.ts';
+
+// --- WP 4.6: projection service, scenarios, life events, store (0022) -------
+// `planning.projection_refresh` (04:30), `planning.goal_pace@v1`, the
+// `MonteCarloRunner` port the composition root binds to WP 4.5's worker host,
+// and `SnapshotJobDependencies.portsFor(executor, userId)`.
+export { GoalOffTrack, ProjectionCompleted } from './events.ts';
+export {
+  type MonteCarloOutcome,
+  type MonteCarloPeriod,
+  type MonteCarloRequest,
+  type MonteCarloRunner,
+} from './ports.ts';
+export {
+  PROJECTION_REFRESH_CRON,
+  PROJECTION_REFRESH_JOB_KIND,
+  PROJECTION_REFRESH_SCHEDULE_NAME,
+  projectionRefreshJobHandler,
+  registerProjectionRefreshSchedule,
+  type ProjectionRefreshJobDependencies,
+} from './jobs.ts';
+export {
+  PROJECTION_REFUSAL_STATUS,
+  ProjectionRefused,
+  isProjectionRefused,
+  type ProjectionRefusalCodeWp46,
+  type ProjectionRefusalStatus,
+  type StoredPercentile,
+  type StoredRun,
+} from './projection-store.ts';
+export {
+  DEFAULT_MONTE_CARLO_PATHS,
+  GOAL_PACE_CONSUMED_EVENT_TYPES,
+  GOAL_PACE_CONSUMER_NAME,
+  INPUT_DOCUMENT_SCHEMA,
+  MAX_STORED_PATHS,
+  assembleBaselinePlan,
+  assembleInput,
+  cacheKeyOf,
+  compareScenarios,
+  createGoalPaceConsumer,
+  createProjectionInputsReader,
+  evaluateGoalPace,
+  goalEvaluationStoreOf,
+  inputDigestOf,
+  readProjection,
+  refreshBaseline,
+  runGoalEvaluation,
+  runProjection,
+  type CacheKeyParts,
+  type DerivedInputs,
+  type GoalEvaluationStore,
+  type GoalFacts,
+  type GoalPaceVerdict,
+  type ProjectionInputsReader,
+  type ProjectionOutcome,
+  type ProjectionRequest,
+  type ProjectionServiceDependencies,
+  type RefreshOutcome,
+  type ScenarioComparison,
+  type Staleness,
+} from './projection-service.ts';
+export {
+  LEVER_KEYS,
+  SCENARIO_NAME_MAX_LENGTH,
+  createScenario,
+  defaultSeedFor,
+  deleteScenario,
+  diffLevers,
+  getBaseline,
+  getScenario,
+  listScenarios,
+  profileFromJson,
+  profileToJson,
+  saveBaseline,
+  updateScenarioLevers,
+  type BaselineProfile,
+  type BaselineScenario,
+  type ForkScenario,
+  type Scenario,
+  type ScenarioLevers,
+} from './scenarios.ts';
+export {
+  LIFE_EVENT_NAME_MAX_LENGTH,
+  LIFE_EVENT_SIGN,
+  createLifeEvent,
+  deleteLifeEvent,
+  lifeEventsForPlan,
+  listLifeEvents,
+  updateLifeEvent,
+  validateLifeEvent,
+  type LifeEvent,
+  type NewLifeEventInput,
+  type UnappliedReason,
+} from './life-events.ts';
+export {
+  LIFE_EVENT_KINDS,
+  PROJECTION_METHODS,
+  SCENARIO_KINDS,
+  type LifeEventKind,
+  type ProjectionMethod,
+  type ScenarioKind,
+} from '../schema/projections.ts';

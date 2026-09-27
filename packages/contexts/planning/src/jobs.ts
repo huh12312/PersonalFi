@@ -32,7 +32,11 @@
  */
 import { systemClock, type Clock } from '@core/kernel';
 import { defineJob, upsertSchedule, type JobHandlerRegistration } from '@core/platform';
-import type { SnapshotPorts } from './ports.ts';
+import { isProjectionInputRefused } from './engine/boundary.ts';
+import type { AssumptionsRegistry } from './assumptions.ts';
+import type { MonteCarloRunner, RevealedPorts, SnapshotPorts } from './ports.ts';
+import { createProjectionInputsReader, refreshBaseline } from './projection-service.ts';
+import { isProjectionRefused } from './projection-store.ts';
 import { runSnapshot, type SnapshotContext } from './snapshot.ts';
 import { platformOf, type PlanningDatabase, type PlanningExecutor } from './store.ts';
 
@@ -47,8 +51,16 @@ export interface SnapshotJobDependencies {
    * Built per run rather than closed over once, so the readers see the job's own
    * transaction. The composition root supplies the adapters
    * (`apps/api/src/domain.ts`); this context never learns what is behind them.
+   *
+   * **Takes the job's `userId`** (WP 4.6; wp3.w-wiring.md §10 item 7). Two of
+   * the four ports — `PriceReader.price` and `FxReader.rate` — take no user id
+   * per call, so the holder has to be bound when the ports are built; until
+   * this signature carried it, the composition root bound *one* holder for the
+   * process and `planningModule` refused, by name, a job for anyone else. A
+   * second Planning job (`planning.projection_refresh`) inheriting that binding
+   * would have been a multi-user bug D6 says must be additive, not structural.
    */
-  readonly portsFor: (executor: PlanningExecutor) => SnapshotPorts;
+  readonly portsFor: (executor: PlanningExecutor, userId: string) => SnapshotPorts;
   readonly timeZone: string;
   readonly baseCurrency: string;
 }
@@ -82,7 +94,11 @@ export function netWorthSnapshotJobHandler(
           baseCurrency: dependencies.baseCurrency,
           correlationId: context.correlationId,
         };
-        await runSnapshot(executor, dependencies.portsFor(executor), snapshotContext);
+        await runSnapshot(
+          executor,
+          dependencies.portsFor(executor, context.userId),
+          snapshotContext,
+        );
       });
     },
     // One snapshot in flight at a time. Two concurrent runs would both try to
@@ -126,6 +142,145 @@ export function registerNetWorthSnapshotSchedule(
       // app in the morning — and larger than zero for 08 §3.7's reason: one
       // install firing at exactly 04:00:00 looks like a cron job, and every
       // install doing it looks like a botnet to whatever they are all calling.
+      jitterSeconds: 10 * 60,
+    },
+    clock,
+  );
+}
+
+// ===========================================================================
+// WP 4.6 — the 04:30 baseline projection refresh
+// ===========================================================================
+//
+// ## 04:30 local, and why that number
+//
+// After `planning.net_worth_snapshot` at 04:00 and the 02:00 seal (08 §3.5),
+// so the day the snapshotter just sealed is the day the baseline starts from.
+// The projection reads its starting balances from the newest **sealed**
+// `net_worth_daily` row, never the open day; firing before the snapshot would
+// start from the day before yesterday for no reason.
+//
+// ## The name
+//
+// `planning.projection_refresh`, matching `^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$`
+// — the Phase 2 worker crash-loop, again. `test/ports.test.ts` asserts it
+// against the CHECK read out of 0003_platform.sql.
+//
+// ## Recomputes the baseline and nothing else
+//
+// A fork is recomputed when it is opened (the dispatch's rule): recomputing
+// every what-if a holder ever saved, every night, is Monte Carlo work nobody
+// looks at. An unchanged baseline over an unchanged day is a cache hit, which
+// runs no engine and announces nothing.
+
+export const PROJECTION_REFRESH_JOB_KIND = 'planning.projection_refresh';
+export const PROJECTION_REFRESH_SCHEDULE_NAME = 'planning.projection_refresh';
+/** 04:30 local — after the 04:00 snapshot and the 02:00 seal. */
+export const PROJECTION_REFRESH_CRON = '30 4 * * *';
+
+export interface ProjectionRefreshJobDependencies {
+  readonly database: PlanningDatabase;
+  /**
+   * The revealed-behaviour ports for **this job's holder**, over the job's own
+   * transaction — `planningRevealedPortsFor(executor, { userId, timeZone })` at
+   * the composition root (WP 4.3's binding). Same signature as the snapshot's
+   * `portsFor`, for the same reason.
+   */
+  readonly portsFor: (executor: PlanningExecutor, userId: string) => RevealedPorts;
+  /** WP 4.5's worker host once bound; `null` runs the deterministic baseline and says so. */
+  readonly monteCarlo: MonteCarloRunner | null;
+  readonly timeZone: string;
+  /** Monte Carlo path count for the nightly baseline. Default 10,000 (08 §7.2). */
+  readonly paths?: number;
+  /** Assumption versions this build resolves. Default: the checked-in file. */
+  readonly registry?: () => AssumptionsRegistry;
+}
+
+/**
+ * One baseline refresh per fan-out job, in one transaction: the run, its bands
+ * and `planning.ProjectionCompleted` land together or not at all.
+ *
+ * A **domain** refusal — no sealed day yet, no spending to plan against, the
+ * holder's overrides against a retired assumptions version — is logged and the
+ * job completes. Retrying it five times with backoff would change nothing and
+ * dead-letter a job that did exactly what it should: decline to invent a
+ * number. Anything else propagates and retries.
+ */
+export function projectionRefreshJobHandler(
+  dependencies: ProjectionRefreshJobDependencies,
+): JobHandlerRegistration {
+  return defineJob(
+    PROJECTION_REFRESH_JOB_KIND,
+    async (_payload, context) => {
+      await dependencies.database.transaction(async (tx) => {
+        const executor = tx as unknown as PlanningExecutor;
+        const ports = dependencies.portsFor(executor, context.userId);
+        try {
+          const outcome = await refreshBaseline(
+            executor,
+            {
+              inputs: createProjectionInputsReader(executor, ports),
+              monteCarlo: dependencies.monteCarlo,
+              clock: context.clock,
+              timeZone: dependencies.timeZone,
+              ...(dependencies.registry === undefined ? {} : { registry: dependencies.registry() }),
+            },
+            {
+              userId: context.userId,
+              correlationId: context.correlationId,
+              ...(dependencies.paths === undefined ? {} : { paths: dependencies.paths }),
+            },
+          );
+          context.logger.info(
+            {
+              job: PROJECTION_REFRESH_JOB_KIND,
+              status: outcome.status,
+              ...('run' in outcome && outcome.run !== null
+                ? { runId: outcome.run.id, method: outcome.run.method }
+                : {}),
+              ...(outcome.status === 'stale' ? { staleness: outcome.staleness } : {}),
+            },
+            outcome.status === 'stale'
+              ? 'baseline not recomputed: its assumptions version no longer resolves'
+              : `baseline projection ${outcome.status}`,
+          );
+        } catch (error) {
+          const refused =
+            (isProjectionRefused(error) && error.family === 'domain') ||
+            isProjectionInputRefused(error);
+          if (!refused) throw error;
+          context.logger.warn(
+            { job: PROJECTION_REFRESH_JOB_KIND, code: (error as { code: string }).code },
+            `baseline projection refused: ${(error as Error).message}`,
+          );
+        }
+      });
+    },
+    // One refresh in flight: a Monte Carlo run is the most expensive thing this
+    // process does, and two for one holder would race for one cache key.
+    { concurrency: 1 },
+  );
+}
+
+/** Declare the 04:30 schedule. Not called when `module.planning` is off. */
+export function registerProjectionRefreshSchedule(
+  executor: PlanningExecutor,
+  input: { readonly userId: string; readonly timezone: string; readonly cron?: string },
+  clock: Clock = systemClock,
+): Promise<string> {
+  return upsertSchedule(
+    platformOf(executor),
+    {
+      userId: input.userId,
+      name: PROJECTION_REFRESH_SCHEDULE_NAME,
+      cron: input.cron ?? PROJECTION_REFRESH_CRON,
+      timezone: input.timezone,
+      jobKind: PROJECTION_REFRESH_JOB_KIND,
+      jobPayload: {},
+      enabled: true,
+      // Ten minutes, 08 §3.7's reason: every install firing at 04:30:00 sharp is
+      // a thundering herd for nobody's benefit. Up to 04:40 still lands well
+      // before the morning the fan chart is opened.
       jitterSeconds: 10 * 60,
     },
     clock,

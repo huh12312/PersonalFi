@@ -47,6 +47,7 @@
  * second. `docs/evidence/phase-3/wp3.8-net-worth.md` §7 records the gap.
  */
 import type { DateOnly, Money } from '@core/kernel';
+import type { AssumptionsLike, ProjectionPlan } from './engine/boundary.ts';
 
 /** The account classes the interpolation policy and the flag defaults turn on. */
 export const ACCOUNT_KINDS = [
@@ -492,4 +493,73 @@ export interface SpendingReader {
 export interface RevealedPorts {
   readonly cashflow: CashflowReader;
   readonly spending: SpendingReader;
+}
+
+// ===========================================================================
+// WP 4.6 — the Monte Carlo port
+// ===========================================================================
+//
+// WP 4.5 builds the Monte Carlo in a `worker_thread` (`src/engine/worker-host.ts`)
+// concurrently with WP 4.6, so the projection service is written against this
+// port — the consumer's description of its need, the `ports.ts` rule — and the
+// composition root binds it to 4.5's worker host once that lands
+// (`docs/evidence/phase-4/wp4.6-projection-service.md`, "For the orchestrator").
+// Until then `MonteCarloRunner | null` is `null` in production and a
+// Monte Carlo request is refused by name rather than quietly answered by the
+// deterministic engine.
+//
+// The request is plain data and structured-cloneable end to end (Money is a
+// bigint and a string; DateOnly is a string; the assumptions file is a frozen
+// plain object), so the worker host can post it as-is. The outcome is **bands,
+// never paths** (08 §7.2) and every amount in it is `Money`, already through
+// `fromEngineAmount` on the worker's side of the boundary.
+
+/** What one Monte Carlo run is asked. */
+export interface MonteCarloRequest {
+  readonly plan: ProjectionPlan;
+  /** The resolved assumptions: the file's version, with the holder's overrides applied. */
+  readonly assumptions: AssumptionsLike;
+  /** Unsigned 64-bit. The only source of randomness the run may use. */
+  readonly seed: bigint;
+  readonly paths: number;
+}
+
+/** One projected year's band: end-of-year wealth in today's dollars. */
+export interface MonteCarloPeriod {
+  readonly index: number;
+  readonly age: number;
+  readonly calendarYear: number;
+  readonly p5: Money;
+  readonly p10: Money;
+  readonly p25: Money;
+  readonly p50: Money;
+  readonly p75: Money;
+  readonly p90: Money;
+  readonly p95: Money;
+}
+
+/** What one Monte Carlo run answers. `seed`, `paths` and `engineVersion` are echoed and checked. */
+export interface MonteCarloOutcome {
+  readonly engineVersion: string;
+  readonly seed: bigint;
+  readonly paths: number;
+  /** A decimal string in [0, 1] (`fromEngineRatio`), never a float. */
+  readonly successProbability: string;
+  readonly periods: readonly MonteCarloPeriod[];
+}
+
+/**
+ * WP 4.5's Monte Carlo, as the projection service needs it.
+ *
+ * `engineVersion` is a property rather than only a field of the outcome
+ * because it is an input to the **cache key**: the service must know which
+ * engine would answer before it can decide whether it already has the answer.
+ * An outcome whose echoed version, seed or path count differs from the request
+ * is refused (`planning.monte_carlo_outcome_mismatch`) — a runner that
+ * silently ignored the seed is exactly the failure "identical seed ⇒ identical
+ * bytes" exists to catch.
+ */
+export interface MonteCarloRunner {
+  readonly engineVersion: string;
+  run(request: MonteCarloRequest): Promise<MonteCarloOutcome>;
 }

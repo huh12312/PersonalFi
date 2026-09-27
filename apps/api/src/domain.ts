@@ -75,6 +75,7 @@ import {
   Money,
   Quantity,
   currency as toCurrency,
+  isUuid,
   minorUnitScale,
   newId,
   systemClock,
@@ -178,33 +179,48 @@ import {
 } from '@connector/walletrpc';
 import {
   defaultFlagsFor,
+  defaultTaxBucketFor,
+  liveEarmarksByAccount,
   type AccountKind as PlanningAccountKind,
   type BalanceObservation as PlanningBalanceObservation,
   type BalancesReader as PlanningBalancesReader,
+  type CashflowAccount as PlanningCashflowAccount,
+  type CashflowInflow as PlanningCashflowInflow,
+  type CashflowReader as PlanningCashflowReader,
   type HoldingObservation as PlanningHoldingObservation,
   type HoldingsReader as PlanningHoldingsReader,
   type PlanningAccount,
   type PlanningExecutor,
+  type RevealedPorts as PlanningRevealedPorts,
   type SnapshotPorts,
+  type SpendingReader as PlanningSpendingReader,
 } from '@ctx/planning';
 import {
   DEFAULT_LADDERS,
   LONG_TERM_HOLDING_DAYS,
   allocationOf,
+  cashByAccount,
+  cashPositionFor,
+  cashSnapshotHistory,
   concentrationOf,
   createFxReader,
   createPriceReader,
   createSecurityResolver,
+  drizzleAllocationTargetsStore,
   drizzleFxStore,
   drizzleLotStore,
   drizzlePriceStore,
   drizzleSecurityStore,
+  drizzleSecurityTagsStore,
   feeDragOf,
+  idleCash,
   marketValueOf,
   ratioOfMoney,
+  valueByAccount,
   valueHoldings,
   ladderRows,
   outboxOf as investmentsOutboxOf,
+  type CashPosition,
   type FigiMapper,
   type InvestmentSyncPort,
   type InvestmentsExecutor,
@@ -946,30 +962,38 @@ type CustodyClass = 'exchange' | 'self_custody' | 'unknown';
  * to say, because the builder turns `null` into **no key** and an advisor
  * cannot tell an empty portfolio from no portfolio.
  *
- * Three figures this port deliberately does **not** produce, each because the
- * data does not exist rather than because it was hard:
+ * Three figures used to be unconditional stand-ins — `targets: []`,
+ * `idleCash: null`, `employerStock: false` — each with its own reason (no
+ * `allocation_targets` table, no dwell history, no employer-tag column;
+ * `wp3.9-routes.md` §8, `wp3.10a-snapshot-readers.md` §7.2). WP 4.7
+ * (`@ctx/investments`' `targets.ts`, `tags.ts`, `dwell.ts`, migration 0026) gave
+ * all three a real source, and this function composes them
+ * (docs/evidence/phase-4/wp4.7-gap-fields.md §7.1):
  *
- *   * **`idleCash` is always `null`.** `idleCash(...)` is pure over a supplied
- *     `idleDays` — "an input, not a guess", says its own doc — and nothing in
- *     this repository holds how long a brokerage cash balance has been sitting.
- *     Inventing a dwell time would make I3 fire on a balance that arrived
- *     yesterday.
- *   * **`targets` is always `[]`.** There is no `allocation_targets` table
- *     (wp3.9-routes.md §8 item 1) and §8 Q9 forbids an implied 60/40, so I1
- *     withholds rather than drifting from a benchmark nobody set.
- *   * **`employerStock` is always `false`.** 07 I5 is explicit that the flag is
- *     *the user's own tag* and that this app never infers an employer; no
- *     column carries one, and deriving it from a ticker matching an employer
- *     name would be exactly the inference the rule forbids.
- *
- * Each is why its rule ships off in `BUILTIN_CATALOGUE`, with the field named
- * in `disabledReason` rather than the effort.
+ *   * **`targets`** reads `allocation_targets` through
+ *     `drizzleAllocationTargetsStore` — empty when the holder has set none,
+ *     never a default 60/40 (§8 Q9 still forbids implying one).
+ *   * **`employerStock`** reads `security_tags` through
+ *     `drizzleSecurityTagsStore` — set explicitly by the holder, never
+ *     inferred from a ticker or a name (07 I5's own rule, unchanged; only the
+ *     source of the flag moved from "no column" to "a column nothing writes
+ *     without being asked").
+ *   * **`idleCash`** composes this context's own `cashSnapshotHistory` /
+ *     `cashPositionFor` (the dwell history `idleCash(...)`'s own doc says it
+ *     cannot derive itself) with `@ctx/planning`'s `liveEarmarksByAccount` —
+ *     read here, at the one place both contexts are in scope, and nowhere
+ *     inside either context.
  */
 export function createInsightsInvestmentsPort(
   database: Database,
   clock: Clock,
 ): InsightsInvestmentsPort {
   const lotStore = drizzleLotStore(database, clock);
+  // WP 4.7's two gap-field stores, over `allocation_targets` and
+  // `security_tags` (migration 0026) — see this function's header and
+  // docs/evidence/phase-4/wp4.7-gap-fields.md §7.1.
+  const targetsStore = drizzleAllocationTargetsStore(database, clock);
+  const tagsStore = drizzleSecurityTagsStore(database, clock);
 
   /**
    * `last_known`, not `as_of_now`.
@@ -1043,6 +1067,46 @@ export function createInsightsInvestmentsPort(
       const fees = feeDragOf(set, valuation);
       const facts = await accountFacts(input.userId);
       const readById = new Map(reads.map((read) => [read.holdingId, read]));
+      const asOf = DateOnly.parse(input.asOf);
+
+      // --- WP 4.7's gap-field sources: targets, employer tags, idle cash -----
+      //
+      // `targets` and `employerStock` read `@ctx/investments`' own new stores
+      // (`allocation_targets`, `security_tags`); idle cash composes this
+      // context's own dwell history (`cashSnapshotHistory` + `cashPositionFor`)
+      // with `@ctx/planning`'s earmark reader (`liveEarmarksByAccount`) — this
+      // file is the composition root, so it may read both contexts even though
+      // neither of them reads the other. Exact composition:
+      // docs/evidence/phase-4/wp4.7-gap-fields.md §7.1.
+      const targets = await targetsStore.listAll(input.userId);
+      const securityIds = [...new Set(reads.map((read) => read.securityId))];
+      const tagsBySecurity = await tagsStore.listForMany(input.userId, securityIds);
+      const employerStockOf = (securityId: string): boolean =>
+        tagsBySecurity.get(securityId)?.has('employer_stock') ?? false;
+
+      const earmarksByAccount = await liveEarmarksByAccount(database, input.userId);
+      const cashPositions: CashPosition[] = await Promise.all(
+        [...cashByAccount(set).entries()].map(async ([accountId, cash]) => {
+          const history = await cashSnapshotHistory(database, {
+            userId: input.userId,
+            accountId,
+            asOfDate: asOf,
+            currency: BASE_CURRENCY,
+          });
+          return cashPositionFor(
+            {
+              accountId,
+              asOfDate: asOf,
+              cash,
+              accountValue: valueByAccount(set).get(accountId) ?? cash,
+              earmarkedAmount: earmarksByAccount.get(accountId) ?? Money.zero(BASE_CURRENCY),
+            },
+            history,
+          );
+        }),
+      );
+      const idle =
+        cashPositions.length === 0 ? null : idleCash(cashPositions, { currency: BASE_CURRENCY });
 
       // --- account_type_mix: value by tax treatment ÷ total ------------------
       const byTreatment = new Map<string, MoneyType>();
@@ -1126,7 +1190,6 @@ export function createInsightsInvestmentsPort(
         groups.set(key, group);
       }
 
-      const asOf = DateOnly.parse(input.asOf);
       const positions: InsightsPosition[] = [];
       for (const group of groups.values()) {
         const point = portfolio.points.get(
@@ -1154,9 +1217,9 @@ export function createInsightsInvestmentsPort(
           isCrypto: group.read.assetClass === 'CRYPTO',
           isStablecoin:
             group.read.symbol !== null && STABLECOIN_SYMBOLS.has(group.read.symbol.toUpperCase()),
-          // 07 I5: the holder's own tag, and there is no column for one. See
-          // this function's header.
-          employerStock: false,
+          // 07 I5: the holder's own tag, over `security_tags` (WP 4.7,
+          // migration 0026) — set explicitly, never inferred.
+          employerStock: employerStockOf(group.read.securityId),
           expenseRatio: ratioNumberOrNull(group.read.expenseRatio),
           // No comparable-fund table exists in any Phase 3 source, so I2 fires
           // on the absolute `high_fee` trigger and never on the relative one.
@@ -1211,14 +1274,25 @@ export function createInsightsInvestmentsPort(
                 set.valued.find((entry) => entry.holding.securityId === position.securityId)
                   ?.holding.holdingId ?? '',
               )?.assetClass ?? 'UNCLASSIFIED',
-            employerStock: false,
+            employerStock: employerStockOf(position.securityId),
             isCrypto:
               set.valued.find((entry) => entry.holding.securityId === position.securityId)?.holding
                 .assetClass === 'CRYPTO',
           })),
-          targets: [],
+          targets: targets.map((target) => ({
+            assetClass: target.assetClass,
+            weight: Number(target.targetWeight),
+          })),
           accountTypeMix,
-          idleCash: null,
+          idleCash:
+            idle === null
+              ? null
+              : {
+                  total: idle.idleTotal,
+                  floor: idle.floor,
+                  minDays: idle.minDays,
+                  longestIdleDays: idle.rows.reduce((max, row) => Math.max(max, row.idleDays), 0),
+                },
           cryptoCustody: anyCrypto
             ? {
                 exchangeValue: custody.exchange,
@@ -2632,6 +2706,158 @@ export function planningPortsFor(
       clock,
     }),
     fx: createFxReader({ store: drizzleFxStore(executor), userId: options.userId, clock }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// WP 4.3 — `@ctx/planning`'s two revealed-behaviour ports
+// ---------------------------------------------------------------------------
+//
+// `docs/evidence/phase-4/wp4.3-revealed.md` §8. `CashflowReader` respects
+// 08 §1.6's plan → ledger arrow; `SpendingReader` exists because there is **no**
+// plan → budg arrow, so budgeting's NEED-class answer arrives here, at the one
+// place both contexts are in scope.
+
+/**
+ * One bound `uuid[]` parameter, as a Postgres array literal. Drizzle's `sql`
+ * template expands an interpolated JavaScript array into a row constructor, not
+ * an array parameter (`packages/contexts/categorization/src/seed-taxonomy.ts`
+ * found this the hard way), so the ids travel as one text parameter and are
+ * checked to be UUIDs first.
+ */
+function uuidArrayParameter(ids: readonly string[]): string {
+  for (const id of ids) {
+    if (!isUuid(id)) throw new Error(`not a UUID: ${JSON.stringify(id)}`);
+  }
+  return `{${ids.join(',')}}`;
+}
+
+/**
+ * `@ctx/planning`'s `CashflowReader`, over `@ctx/ledger`.
+ *
+ * The roster **is** WP 3.8's `BalancesReader.accounts()` — the same
+ * `planningKindOf` mapping, the same `defaultFlagsFor` narrowed by budgeting's
+ * off-budget list — plus the tax bucket, derived by `@ctx/planning`'s own
+ * `defaultTaxBucketFor` from the provider subtype. Two derivations of
+ * `onBudget` would be two answers to one question.
+ *
+ * Both queries drop what never moved money — pending rows, superseded
+ * duplicates, provider tombstones — and keep what the user excluded and what
+ * the pairing matched, because the derivation must *name* those and cannot name
+ * what it never saw. The counterpart account is the other leg of the row's own
+ * `transfer_link_id`, read through `transfer_links` exactly as Phase 1 wrote it.
+ */
+export function planningCashflowReaderFor(
+  executor: PlanningExecutor,
+  options: PlanningPortOptions,
+): PlanningCashflowReader {
+  const roster = planningPortsFor(executor, options).balances;
+  return {
+    async accounts(userId: string, asOf: string): Promise<readonly PlanningCashflowAccount[]> {
+      const [accounts, rows] = await Promise.all([
+        roster.accounts(userId, asOf),
+        listAccounts(executor, { userId, includeClosed: true }),
+      ]);
+      const subtypeOf = new Map(rows.map((row) => [row.id, row.subtype] as const));
+      return accounts.map((account) => ({
+        ...account,
+        taxBucket: defaultTaxBucketFor(account.kind, subtypeOf.get(account.accountId) ?? null),
+      }));
+    },
+
+    async historyStarts(userId, accountIds) {
+      if (accountIds.length === 0) return new Map();
+      const result = await executor.execute<{ account_id: string; first_date: string }>(sql`
+        SELECT account_id::text AS account_id,
+               to_char(MIN(effective_date), 'YYYY-MM-DD') AS first_date
+          FROM transactions
+         WHERE user_id = ${userId}::uuid
+           AND account_id = ANY(${uuidArrayParameter(accountIds)}::uuid[])
+           AND pending = false
+           AND superseded_by_id IS NULL
+           AND removed_at IS NULL
+         GROUP BY account_id
+      `);
+      return new Map(
+        result.rows.map((row) => [row.account_id, DateOnly.parse(row.first_date)] as const),
+      );
+    },
+
+    async inflows(userId, accountIds, from, to): Promise<readonly PlanningCashflowInflow[]> {
+      if (accountIds.length === 0) return [];
+      const result = await executor.execute<{
+        id: string;
+        account_id: string;
+        effective_date: string;
+        amount_minor: string;
+        currency: string;
+        label: string;
+        user_excluded: boolean;
+        is_refund: boolean;
+        counterpart_account_id: string | null;
+      }>(sql`
+        SELECT t.id::text AS id,
+               t.account_id::text AS account_id,
+               to_char(t.effective_date, 'YYYY-MM-DD') AS effective_date,
+               t.effective_amount_minor::text AS amount_minor,
+               t.effective_currency AS currency,
+               t.effective_name AS label,
+               t.user_excluded,
+               (t.refund_of_id IS NOT NULL) AS is_refund,
+               other.account_id::text AS counterpart_account_id
+          FROM transactions t
+          LEFT JOIN transfer_links l
+                 ON l.id = t.transfer_link_id
+                AND l.user_id = t.user_id
+          LEFT JOIN transactions other
+                 ON other.user_id = t.user_id
+                AND other.id = CASE WHEN l.inflow_transaction_id = t.id
+                                    THEN l.outflow_transaction_id
+                                    ELSE l.inflow_transaction_id END
+         WHERE t.user_id = ${userId}::uuid
+           AND t.account_id = ANY(${uuidArrayParameter(accountIds)}::uuid[])
+           AND t.effective_date BETWEEN ${from}::date AND ${to}::date
+           AND t.effective_amount_minor > 0
+           AND t.pending = false
+           AND t.superseded_by_id IS NULL
+           AND t.removed_at IS NULL
+         ORDER BY t.effective_date, t.id
+      `);
+      return result.rows.map((row) => ({
+        transactionId: row.id,
+        accountId: row.account_id,
+        date: DateOnly.parse(row.effective_date),
+        amount: Money.of(BigInt(row.amount_minor), row.currency),
+        label: row.label,
+        userExcluded: row.user_excluded,
+        isRefund: row.is_refund,
+        transferCounterpartAccountId: row.counterpart_account_id,
+      }));
+    },
+  };
+}
+
+/**
+ * `@ctx/planning`'s `SpendingReader`, over `@ctx/budgeting` — the executor
+ * closed over and **no field mapped**. `packages/contexts/planning/test/ports.test.ts`
+ * type-checks this exact shape against both packages on every run.
+ */
+export function planningSpendingReaderFor(executor: PlanningExecutor): PlanningSpendingReader {
+  return {
+    listBudgets: (input) => listBudgets(executor, input),
+    listPeriods: (input) => listPeriods(executor, input),
+    getPeriod: (input) => getPeriod(executor, input),
+  };
+}
+
+/** Both revealed-behaviour ports, per transaction — `planningPortsFor`'s shape and reason. */
+export function planningRevealedPortsFor(
+  executor: PlanningExecutor,
+  options: PlanningPortOptions,
+): PlanningRevealedPorts {
+  return {
+    cashflow: planningCashflowReaderFor(executor, options),
+    spending: planningSpendingReaderFor(executor),
   };
 }
 

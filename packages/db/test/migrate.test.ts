@@ -346,6 +346,14 @@ describeWithDb('runMigrations', () => {
       //   (WP 4.2). Stores only the user's deltas against a named
       //   `assumptions_version` (the content hash of the checked-in file),
       //   never a copy of the defaults.
+      // 0022_plan_projections: four @ctx/planning tables — plan_scenarios
+      //   (lever deltas against a baseline, never a copy of the plan),
+      //   plan_life_events (dated, typed, signed Money), projection_runs
+      //   (seed, engine_version, assumptions_version, input_digest — the
+      //   cache key's inputs, every one NOT NULL) and projection_percentiles
+      //   (p5…p95 per period). WP 4.6. A run whose assumptions_version no
+      //   longer resolves reads back stale with its version named, never
+      //   recomputed against today's defaults.
       // 0025_investments_security_scoping: no table. Composite
       //   (user_id, security_id) FKs on holdings, cost_basis_lots,
       //   investment_transactions and prices (Phase 3 gate C-14);
@@ -413,10 +421,14 @@ describeWithDb('runMigrations', () => {
         'notification_outbox',
         'notification_rules',
         'plan_assumptions',
+        'plan_life_events',
+        'plan_scenarios',
         'price_change_events',
         'price_source_priority',
         'prices',
         'processed_events',
+        'projection_percentiles',
+        'projection_runs',
         'provider_category_map',
         'recovery_codes',
         'recurring_candidates',

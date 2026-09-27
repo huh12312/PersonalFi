@@ -46,29 +46,28 @@
  * above it proving the same run is **not** silent for I4 — otherwise a broken
  * port would pass it for the wrong reason.
  *
- * ## WP 4.7 — the silence test, re-derived
+ * ## WP 4.7 — the silence test, re-derived, then re-derived again
  *
  * `allocation_targets`, `security_tags` and idle-cash dwell now exist
  * (`packages/contexts/investments/src/{targets,tags,dwell}.ts`, migration
- * `0026_allocation_targets.sql`), so the day one of these three gains a
- * source is this day. **This work package does not own
- * `apps/api/src/domain.ts`**, so `createInsightsInvestmentsPort` itself still
- * hardcodes `targets: []`, `idleCash: null` and `employerStock: false` at this
- * commit — the composition WP 4.7's evidence specifies for the orchestrator's
- * wiring batch has not landed there yet. Rather than leave the silence test
- * standing (which would now be *wrong*, not merely stale) or delete it (which
- * would lose the control), `'I1, I3 and I5 now fire on the seed, and the
- * rules with no field behind them are exactly the ones still named'` drives
- * the real advisor rules against a **decorated** port: the real
- * `createInsightsInvestmentsPort` result, with its three gap fields replaced
- * by real reads through the new investments readers over the same seeded
- * rows. Every other field — the account facts, the valuation, the liability
- * crossing — is untouched, real, and still the thing this suite's other tests
- * exercise. When the orchestrator's wiring batch lands the identical
- * composition in `domain.ts`, this decoration becomes redundant with
- * production and may be deleted in favour of calling the real port directly;
- * until then it is the only way to prove the *rule* fires on the *reader*
- * without this work package touching a file it does not own.
+ * `0026_allocation_targets.sql`). WP 4.7 could not own `apps/api/src/domain.ts`,
+ * so its own evidence (`docs/evidence/phase-4/wp4.7-gap-fields.md` §7.1)
+ * specified the composition and this file drove the real advisor rules against
+ * a **decorated** port — the real `createInsightsInvestmentsPort` result with
+ * its three gap fields replaced by a test-local `wrapWithGapFieldSources`,
+ * exactly so a rule could be shown firing on the reader before the wiring
+ * batch that owns `domain.ts` existed.
+ *
+ * **The Wave B wiring batch composed the identical thing in `domain.ts`**
+ * (targets and employer tags from `@ctx/investments`' new stores; idle cash
+ * from this context's own `cashSnapshotHistory`/`cashPositionFor` plus
+ * `@ctx/planning`'s `liveEarmarksByAccount`, both read only here at the
+ * composition root). `wrapWithGapFieldSources` is retired: `'I1, I3 and I5 now
+ * fire on the seed, and the rules with no field behind them are exactly the
+ * ones still named'` below calls `createInsightsInvestmentsPort` directly, with
+ * no decoration, so it is now a proof about production and not about a
+ * stand-in for it — the thing WP 4.7's own evidence named as the point where
+ * the decoration "becomes redundant with production."
  */
 import {
   ATTRIBUTIONS,
@@ -79,7 +78,7 @@ import {
   jsonResponse,
   policyFor,
 } from '@ctx/integrations';
-import { DateOnly, Money, currency, money, newId, systemClock } from '@core/kernel';
+import { DateOnly, money, newId, systemClock } from '@core/kernel';
 import {
   SnapshotBuilder,
   createBuiltinRegistry,
@@ -90,15 +89,8 @@ import {
   parsePath,
   runAdvisors,
   type InsightsDependencies,
-  type InvestmentsPort as InsightsInvestmentsPort,
 } from '@ctx/insights';
-import {
-  cashPositionFor,
-  cashSnapshotHistory,
-  drizzleAllocationTargetsStore,
-  drizzleSecurityTagsStore,
-  idleCash,
-} from '@ctx/investments';
+import { drizzleAllocationTargetsStore, drizzleSecurityTagsStore } from '@ctx/investments';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -231,81 +223,6 @@ describe.skipIf(NO_DATABASE)('the nightly advisor run over a synced portfolio (W
         ${isoDay(input.offsetDays)}::date, ${input.quantity}, ${input.institutionValueMinor}, 'USD'
       )
     `);
-  }
-
-  /**
-   * WP 4.7's decoration of the real port, for `'I1, I3 and I5 now fire on the
-   * seed…'` below. See the file header's "WP 4.7" section: this work package
-   * does not own `apps/api/src/domain.ts`, so the composition it specifies for
-   * that file's `createInsightsInvestmentsPort` is applied here instead, over
-   * the same real port and the same real rows — every field this function
-   * does not name is the base port's own answer, untouched.
-   */
-  function wrapWithGapFieldSources(base: InsightsInvestmentsPort): InsightsInvestmentsPort {
-    return {
-      ...base,
-      async holdings(input) {
-        const result = await base.holdings(input);
-        if (result === null) return null;
-
-        const targets = await drizzleAllocationTargetsStore(h.database.db, systemClock).listAll(
-          h.userId,
-        );
-
-        const securityIds = [...new Set(result.positions.map((position) => position.securityId))];
-        const tagsBySecurity = await drizzleSecurityTagsStore(
-          h.database.db,
-          systemClock,
-        ).listForMany(h.userId, securityIds);
-        const employerStockOf = (securityId: string): boolean =>
-          tagsBySecurity.get(securityId)?.has('employer_stock') ?? false;
-
-        const asOfDate = DateOnly.parse(isoDay(0));
-        const usd = currency('USD');
-        const history = await cashSnapshotHistory(h.database.db, {
-          userId: h.userId,
-          accountId: brokerageAccountId,
-          asOfDate,
-          currency: usd,
-        });
-        const cashPosition = cashPositionFor(
-          {
-            accountId: brokerageAccountId,
-            asOfDate,
-            cash: money(1_200_000n, 'USD'),
-            accountValue: money(3_700_000n, 'USD'),
-            earmarkedAmount: Money.zero('USD'),
-          },
-          history,
-        );
-        const idle = idleCash([cashPosition], { currency: usd });
-
-        return {
-          ...result,
-          aggregate: {
-            ...result.aggregate,
-            targets: targets.map((target) => ({
-              assetClass: target.assetClass,
-              weight: Number(target.targetWeight),
-            })),
-            idleCash: {
-              total: idle.idleTotal,
-              floor: idle.floor,
-              minDays: idle.minDays,
-              longestIdleDays: idle.rows.reduce((max, row) => Math.max(max, row.idleDays), 0),
-            },
-            positions: result.aggregate.positions.map((position) => ({
-              ...position,
-              employerStock: employerStockOf(position.securityId),
-            })),
-          },
-          positions: result.positions.map((position) => ({
-            ...position,
-            employerStock: employerStockOf(position.securityId),
-          })),
-        };
-      },
-    };
   }
 
   /**
@@ -614,6 +531,18 @@ describe.skipIf(NO_DATABASE)('the nightly advisor run over a synced portfolio (W
       expenseRatio: null,
     });
     await insertPrice({ securityId: cashSecurityId, close: '1.00' });
+    // A live `holdings` row too, not only history: the real composition
+    // (apps/api/src/domain.ts, WP 4.7 §7.1) derives today's cash from
+    // `cashByAccount(set)` over the same valued live holdings `readHoldings`
+    // returns — `holdings_snapshots` alone feeds the *dwell* history
+    // (`cashSnapshotHistory` / `idleDaysOf`), never today's balance.
+    await insertHolding({
+      accountId: brokerageAccountId,
+      securityId: cashSecurityId,
+      quantity: '12000.000000000000000000',
+      costBasisMinor: null,
+      institutionValueMinor: 1_200_000n,
+    });
     for (const offsetDays of [-20, -10, 0]) {
       await insertHoldingsSnapshot({
         accountId: brokerageAccountId,
@@ -624,14 +553,13 @@ describe.skipIf(NO_DATABASE)('the nightly advisor run over a synced portfolio (W
       });
     }
 
-    const baseDependencies = dependenciesOf({ withFred: true });
-    const dependencies: InsightsDependencies = {
-      ...baseDependencies,
-      ports: {
-        ...baseDependencies.ports,
-        investments: wrapWithGapFieldSources(baseDependencies.ports.investments),
-      },
-    };
+    // Wave B's wiring batch composed WP 4.7's dwell + earmark reads (and its
+    // targets/tags stores) straight into `createInsightsInvestmentsPort`
+    // (apps/api/src/domain.ts) — the identical composition this suite used to
+    // apply here as `wrapWithGapFieldSources`, now retired: `dependenciesOf`
+    // builds the *real* port and this test runs it directly, so this is now
+    // a proof about production rather than about a stand-in for it.
+    const dependencies: InsightsDependencies = dependenciesOf({ withFred: true });
 
     const context = {
       userId: h.userId,

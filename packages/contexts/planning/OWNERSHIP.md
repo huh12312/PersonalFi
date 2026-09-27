@@ -25,6 +25,7 @@ Tables listed here are _claimed_; most do not exist yet. Claiming early is the p
 - `risk_profile`
 - `cash_earmarks`
 - `plan_scenarios`
+- `plan_life_events`
 - `plan_assumptions`
 - `projection_runs`
 - `projection_percentiles`

@@ -25,6 +25,7 @@ import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { systemClock } from '@core/kernel';
 import { SecretBox } from '@core/secretbox';
 import { UserService } from '@ctx/identity';
+import { loadAssumptions } from '@ctx/planning';
 import {
   createConsumerPump,
   createJobRunner,
@@ -133,6 +134,16 @@ function assertPoolCoversLeases(logger: pino.Logger, poolMax: number, consumerCo
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = pino({ ...buildLoggerOptions(config), base: { service: 'worker' } });
+
+  // See apps/api/src/main.ts's identical call for why: `loadAssumptions()`
+  // (`@ctx/planning`) is lazy by design, so nothing forces the checked-in
+  // assumptions file to validate until whatever first reads it needs it. The
+  // worker is the process that runs `planning.projection_refresh` and the
+  // Monte Carlo job, both of which resolve assumptions per run — a malformed
+  // file should refuse to start the worker, not fail the first job to touch
+  // it five hours after a bad release. Unguarded: the throw must reach the
+  // `catch` at the bottom of this file and exit non-zero.
+  loadAssumptions();
 
   const pool = createPool({
     databaseUrl: config.databaseUrl.reveal(),

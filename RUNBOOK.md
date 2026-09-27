@@ -208,6 +208,16 @@ chmod 444 secrets/tiingo_api_key secrets/fred_api_key secrets/coingecko_api_key 
 #                            by name (CONFIG_ERROR naming this file) rather
 #                            than dialling.
 #
+#    Watch-only wallets, independent of any key above (Phase 3 gate C-2,
+#    closed by WP 4.12a): a funded wallet's HOLDINGS sync and value — the
+#    on-chain quantity, priced through the same ladder a Coinbase sighting of
+#    the same asset joins onto. Its account BALANCE still cannot sync:
+#    `syncBalances` has no fiat quote for a wallet and refuses any non-zero
+#    balance rather than fabricate one, so the account's own balance figure
+#    (as opposed to its holdings and their value, which are correct) stays
+#    unset until `ProviderBalanceFact.current` is widened or the
+#    account-balance path is changed to value from holdings instead.
+#
 #    To enable any of them, write the real value and re-run `just
 #    harden-secrets` (it covers all seven):
 #      echo -n '<token>' > secrets/tiingo_api_key
