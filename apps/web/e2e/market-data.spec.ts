@@ -108,7 +108,10 @@ test('the CoinGecko attribution is present on every screen showing a crypto pric
   await expect(providerAttribution.getByText('Data provided by CoinGecko')).toBeVisible();
   const providerLink = providerAttribution.getByRole('link');
   await expect(providerLink).toHaveAttribute('href', 'https://www.coingecko.com');
-  await expect(providerLink.locator('svg')).toHaveCount(1); // the logo glyph
+  // The logo is CoinGecko's own gecko mark, self-hosted (WP 4.12c, C-15 —
+  // `public/icons/coingecko-symbol.png`); before 4.12c it was a generic
+  // inline SVG glyph, which is what this line used to look for.
+  await expect(providerLink.locator('img[src="/icons/coingecko-symbol.png"]')).toHaveCount(1);
 
   // Screen 2: the test-fetch result, which shows an actual crypto price
   // pulled live from CoinGecko. The attribution must travel with it.
