@@ -29,6 +29,7 @@ import { LifeEventForm } from './LifeEventForm.tsx';
 import { LifeEventsTimeline } from './LifeEventsTimeline.tsx';
 import { ScenarioCompare } from './ScenarioCompare.tsx';
 import { DEFAULT_GOAL_CURRENCY, type PlanSearch } from './search.ts';
+import { GoalSliders } from './sliders/GoalSliders.tsx';
 
 /** `$2,000` in minor units — the required-savings solver's ceiling when a goal is set but the ceiling field was somehow skipped. `GoalControls` always sets all three fields together, so this is a defensive fallback, not a real default. */
 const FALLBACK_MAX_MONTHLY_MINOR = '200000';
@@ -253,6 +254,8 @@ export function PlanScreen({ search, onSearchChange }: PlanScreenProps) {
           </div>
         )}
       </section>
+
+      <GoalSliders scenario={baseline} />
 
       <section aria-label="Life events" className="flex flex-col gap-3">
         <h2 className="text-h3 font-semibold text-text-primary">Life events</h2>

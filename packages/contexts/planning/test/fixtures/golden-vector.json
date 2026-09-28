@@ -1,0 +1,71 @@
+{
+  "description": "WP 4.11 golden vector — one lognormal-engine Monte Carlo job, produced once by the server engine (packages/contexts/planning/src/engine/montecarlo.ts runMonteCarlo + serialiseResult) and reproduced byte-for-byte by the client worker kernel port (apps/web/src/workers/kernel/montecarlo.ts) and by the server engine itself. No crypto, no Social Security/pension/other income, constant_real policy — the client kernel scoped subset (see apps/web/src/workers/kernel/deterministic.ts header).",
+  "seed": "20260928",
+  "paths": 1000,
+  "plan": {
+    "startAge": 55,
+    "retireAge": 65,
+    "endAge": 90,
+    "startYear": 2026,
+    "wealth0": [200000, 150000, 50000, 10000],
+    "contribution0": [10000, 8000, 4000, 1000],
+    "glidepaths": [
+      {
+        "kind": "age_based"
+      },
+      {
+        "kind": "target_date"
+      },
+      {
+        "kind": "rising_equity"
+      },
+      {
+        "kind": "static",
+        "equityShare": 0.6
+      }
+    ],
+    "contributionGrowth": 0.02,
+    "spending": 40000,
+    "inflation": 0.025,
+    "equityNominal": 0.065,
+    "bondNominal": 0.045,
+    "taxDeferredRate": 0.15,
+    "withdrawalOrder": [0, 1, 2, 3],
+    "policy": {
+      "kind": "constant_real"
+    },
+    "socialSecurity": null,
+    "socialSecurityRules": null,
+    "pensions": [],
+    "otherIncome": [],
+    "extraBucket": 0
+  },
+  "volatility": {
+    "equity": 0.17,
+    "bond": 0.06,
+    "inflation": 0.015
+  },
+  "correlation": {
+    "assets": ["USEQ", "INTL", "EM", "BOND", "TIPS", "REIT", "CASH", "CRYPTO"],
+    "matrix": [
+      [1, 0.85, 0.75, 0.1, 0, 0.7, -0.05, 0.4],
+      [0.85, 1, 0.85, 0.1, 0.05, 0.65, -0.05, 0.35],
+      [0.75, 0.85, 1, 0.05, 0.05, 0.6, -0.05, 0.4],
+      [0.1, 0.1, 0.05, 1, 0.7, 0.25, 0.2, 0.05],
+      [0, 0.05, 0.05, 0.7, 1, 0.25, 0.25, 0.05],
+      [0.7, 0.65, 0.6, 0.25, 0.25, 1, 0, 0.3],
+      [-0.05, -0.05, -0.05, 0.2, 0.25, 0, 1, 0],
+      [0.4, 0.35, 0.4, 0.05, 0.05, 0.3, 0, 1]
+    ]
+  },
+  "extra": {
+    "annual": 0,
+    "untilAge": 0
+  },
+  "expected": {
+    "successCount": 509,
+    "bytesLength": 2783,
+    "sha256": "f95d38a1df2ec51b680fc50c202b6c2b29c5009e8378ffafc7b90853c0c57c33",
+    "bytesBase64": "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"
+  }
+}

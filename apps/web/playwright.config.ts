@@ -62,7 +62,20 @@ interface ColdStartOptions {
   readonly coldStart: { readonly baseURL?: string; readonly registerURL?: string };
 }
 
-export default defineConfig<ColdStartOptions>({
+/**
+ * C-16, O-3 (`gate-security-review.md`: "running `just verify`/Playwright
+ * rewrites committed evidence screenshots"). `undefined` (the default) means
+ * every evidence-screenshot spec writes to a gitignored output directory
+ * instead of the committed one — `e2e/support/screenshot-dir.ts`'s own
+ * header explains why the value is read here and handed down as an option
+ * rather than read from `e2e/` directly. Set `PLAYWRIGHT_EVIDENCE_DIR` to
+ * the real evidence directory to deliberately regenerate the committed set.
+ */
+interface EvidenceDirOptions {
+  readonly evidenceDir?: string;
+}
+
+export default defineConfig<ColdStartOptions & EvidenceDirOptions>({
   testDir: './e2e',
   fullyParallel: true,
   forbidOnly: isCI,
@@ -75,8 +88,17 @@ export default defineConfig<ColdStartOptions>({
     {
       name: 'chromium',
       testMatch:
-        /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan)\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:5183' },
+        /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan|plan-sliders)\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'http://localhost:5183',
+        // Spread rather than assigned: under `exactOptionalPropertyTypes`
+        // an explicit `undefined` is not an absent optional (the same
+        // reason `coldStart`'s own `use` block below does this).
+        ...(process.env['PLAYWRIGHT_EVIDENCE_DIR'] === undefined
+          ? {}
+          : { evidenceDir: process.env['PLAYWRIGHT_EVIDENCE_DIR'] }),
+      },
     },
     {
       name: 'csp',

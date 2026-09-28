@@ -150,11 +150,17 @@ interface MutableMarket {
   inflation: number;
 }
 
-function fillMarket(into: MutableMarket, shocks: ShockMatrix, cell: number, f: ShockTransform): void {
+function fillMarket(
+  into: MutableMarket,
+  shocks: ShockMatrix,
+  cell: number,
+  f: ShockTransform,
+): void {
   const e = shocks.equity[cell] ?? 0;
   const b = shocks.bond[cell] ?? 0;
   const i = shocks.inflation[cell] ?? 0;
-  into.equityReal = f.equityMean + (1 + f.equityMean) * Math.expm1(f.equityLogSigma * e + f.equityShift);
+  into.equityReal =
+    f.equityMean + (1 + f.equityMean) * Math.expm1(f.equityLogSigma * e + f.equityShift);
   into.bondReal = f.bondMean + (1 + f.bondMean) * Math.expm1(f.bondLogSigma * b + f.bondShift);
   into.inflation = f.inflationMean + f.inflationSigma * i;
 }
@@ -186,7 +192,10 @@ export function newSimulationBuffers(paths: number, years: number): SimulationBu
   };
 }
 
-export function sequenceWindow(plan: EnginePlan): { readonly start: number; readonly length: number } {
+export function sequenceWindow(plan: EnginePlan): {
+  readonly start: number;
+  readonly length: number;
+} {
   const years = yearsOf(plan);
   const start = Math.max(0, plan.retireAge - plan.startAge);
   return { start, length: Math.max(0, Math.min(SEQUENCE_WINDOW_YEARS, years - start)) };
@@ -328,7 +337,12 @@ export interface MonteCarloResult {
   readonly withoutCrypto: null;
 }
 
-function bandsOf(checkpoints: Float64Array, paths: number, years: number, scratch: Float64Array): Float64Array {
+function bandsOf(
+  checkpoints: Float64Array,
+  paths: number,
+  years: number,
+  scratch: Float64Array,
+): Float64Array {
   const bands = new Float64Array(PERCENTILE_LEVELS.length * years);
   for (let t = 0; t < years; t += 1) {
     scratch.set(checkpoints.subarray(t * paths, (t + 1) * paths));
@@ -344,7 +358,12 @@ function medianOf(scratch: Float64Array, n: number): number {
   return out[0] ?? Number.NaN;
 }
 
-function failureOf(buffers: SimulationBuffers, plan: EnginePlan, paths: number, scratch: Float64Array): FailureSummary {
+function failureOf(
+  buffers: SimulationBuffers,
+  plan: EnginePlan,
+  paths: number,
+  scratch: Float64Array,
+): FailureSummary {
   let n = 0;
   for (let i = 0; i < paths; i += 1) {
     const age = buffers.depletedAtAge[i] ?? -1;
@@ -370,7 +389,11 @@ function failureOf(buffers: SimulationBuffers, plan: EnginePlan, paths: number, 
   };
 }
 
-function sequenceOf(buffers: SimulationBuffers, plan: EnginePlan, paths: number): SequenceTable | null {
+function sequenceOf(
+  buffers: SimulationBuffers,
+  plan: EnginePlan,
+  paths: number,
+): SequenceTable | null {
   const window = sequenceWindow(plan);
   if (window.length === 0 || paths < SEQUENCE_DECILES) return null;
   const r = buffers.sequenceReturn;
