@@ -42,7 +42,7 @@
  * the compose stack, against the dev Postgres at `127.0.0.1:5433`.
  */
 import { EventEmitter } from 'node:events';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { DateOnly, Money, money, newId, systemClock, type Money as MoneyType } from '@core/kernel';
 import { createConsumerPump } from '@core/platform';
@@ -186,6 +186,21 @@ function capturingLogger(): { readonly logger: unknown; readonly logs: Logged[] 
 function jobContext(userId: string, logger: unknown): unknown {
   return { userId, correlationId: newId(), clock: systemClock, logger };
 }
+
+/**
+ * WP 4.5's return series is fetched, not vendored (data/returns/PROVENANCE.md),
+ * so a fresh checkout — CI's runner on 2026-09-27 — has no
+ * `data/returns/cache/shiller-monthly.csv`. The two tests that need the REAL
+ * bootstrap engine skip by name where it is absent rather than fail; the
+ * refusal path (`null`, never a silent lognormal) is still proven below on
+ * every machine. Same guard as `projection-perf.test.ts`.
+ */
+const REAL_SERIES_PRESENT = existsSync(
+  new URL(
+    '../../../../packages/contexts/planning/data/returns/cache/shiller-monthly.csv',
+    import.meta.url,
+  ),
+);
 
 describe.skipIf(NO_DATABASE)(
   'Phase 4 Wave C wiring batch (apps/api/src/{modules,domain}.ts — WP 4.5/4.6)',
@@ -549,7 +564,7 @@ describe.skipIf(NO_DATABASE)(
       60_000,
     );
 
-    it(
+    it.skipIf(!REAL_SERIES_PRESENT)(
       "createMonteCarloRunner runs a real Monte Carlo through WP 4.5's real worker, echoes a " +
         'seed above 2^63 unsigned, and regroups the seven bands into one monotone period per year',
       async () => {
@@ -674,7 +689,7 @@ describe.skipIf(NO_DATABASE)(
       10_000,
     );
 
-    it(
+    it.skipIf(!REAL_SERIES_PRESENT)(
       "worker.ts's own boot path binds a non-null Monte Carlo runner when a return series is " +
         'present and null when it is not (WP 4.12b, the Wave C wiring handover §4.2/§4.4)',
       () => {

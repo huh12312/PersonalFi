@@ -649,6 +649,14 @@ describe.skipIf(NO_DATABASE)('the WP 4.8 plan surface, over a real database', ()
         session: h.stale,
         body: { method: 'monte_carlo', paths: 200 },
       });
+      if (response.statusCode === 409) {
+        // No return series cached in this checkout (CI's runner: the series is
+        // fetched, not vendored — wp4.5-montecarlo.md §6). The honest answer is
+        // a named refusal, never a silent lognormal or a silent deterministic
+        // run dressed as Monte Carlo.
+        expect(response.json()).toMatchObject({ code: 'planning.monte_carlo_unavailable' });
+        return;
+      }
       expectStatus(response, 200);
       const outcome = response.json() as OutcomeWire;
       expect(['deterministic', 'monte_carlo']).toContain(outcome.run?.method);

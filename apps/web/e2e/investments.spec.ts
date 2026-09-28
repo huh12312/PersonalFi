@@ -324,7 +324,7 @@ test.describe('investments screen (WP 3.11)', () => {
     expect(decodeURIComponent(page.url())).toContain('target=["US_EQUITY:0.6"');
   });
 
-  test('the one dark-mode axe violation is the shared sidebar, not this screen', async ({
+  test('the untouched dashboard is axe clean in dark mode now that the shared sidebar is fixed', async ({
     page,
   }) => {
     await installFakeWebAuthnAssertion(page);
@@ -337,23 +337,20 @@ test.describe('investments screen (WP 3.11)', () => {
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
     await setTheme(page, 'dark');
 
-    // The Dashboard is not this work package's screen. An unfiltered axe run
-    // there, in dark mode, finds exactly one thing — and it is the sidebar's
-    // active nav link, which is why `expectNoAxeViolationsOutsideSharedSidebar`
-    // excludes that node on the investments screens rather than this work
-    // package owning the fix.
+    // The Dashboard is not this work package's screen. When WP 3.11 wrote this
+    // test an unfiltered axe run here, in dark mode, found exactly one thing —
+    // the sidebar's active nav link at 4.28:1 — and this test pinned it so the
+    // `expectNoAxeViolationsOutsideSharedSidebar` exclusion could be seen to
+    // hide that one node and nothing else. WP 4.10 fixed the token pair
+    // (15.58:1, wp4.10-plan-ui.md), so the pin flipped: the unfiltered run must
+    // now find nothing at all, and the exclusion below is proven inert.
     await injectAxe(page);
     const violations: AxeViolation[] = await page.evaluate(
       async () => (await window.axe.run('#app-content')).violations,
     );
-    expect(violations.map((violation) => violation.id)).toEqual(['color-contrast']);
-    const targets = violations.flatMap((violation) =>
-      violation.nodes.flatMap((node) => node.target),
-    );
-    expect(targets.every((target) => target.includes('bg-accent-wash'))).toBe(true);
+    expect(violations.map((violation) => violation.id)).toEqual([]);
 
-    // And with that one shared node excluded, the untouched Dashboard is clean
-    // — so the exclusion is not hiding anything else.
+    // And with the (now redundant) shared node excluded, the same answer.
     await expectNoAxeViolationsOutsideSharedSidebar(page, 'dashboard (dark, control)');
   });
 
