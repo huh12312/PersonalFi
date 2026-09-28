@@ -19,6 +19,7 @@ import {
   holdingsResponse,
   marketDataSettingsResponse,
   performanceResponse,
+  unresolvedSecurity,
 } from './fixtures.ts';
 import type { InvestmentsSearch } from './search.ts';
 
@@ -125,6 +126,30 @@ describe('InvestmentsScreen', () => {
     // `total` = 17_649_960 minor = the committed fixture's last_known TOTAL.
     expect(await screen.findByTestId('portfolio-total')).toHaveTextContent('$176,499.60');
     expect(screen.getByTestId('holdings-unclassified-pct')).toHaveTextContent('1.7%');
+  });
+
+  it('shows a position the resolver could not identify, rather than nothing (C-8, G3-11)', async () => {
+    stubFetchRoutes(
+      routesFor({
+        holdings: { ...holdingsResponse(), unresolved: [unresolvedSecurity()] },
+      }),
+    );
+
+    renderScreen();
+
+    const notice = await screen.findByTestId('unresolved-securities');
+    expect(notice).toHaveTextContent('1 position could not be identified');
+    expect(notice).toHaveTextContent('Mystery Fund');
+    expect(notice).toHaveTextContent('plaid');
+  });
+
+  it('shows nothing when every position resolved', async () => {
+    stubFetchRoutes(routesFor());
+
+    renderScreen();
+
+    await screen.findByTestId('portfolio-total');
+    expect(screen.queryByTestId('unresolved-securities')).not.toBeInTheDocument();
   });
 
   it('aggregates by ticker and expands into the accounts holding it', async () => {

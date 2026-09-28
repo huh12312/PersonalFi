@@ -87,3 +87,20 @@ export function latestValued(points: readonly RawSeriesPoint[]): RawSeriesPoint 
 export function interpolatedCount(points: readonly RawSeriesPoint[]): number {
   return points.filter((point) => point.source === 'interpolated').length;
 }
+
+/**
+ * Days with no net-worth value at all (`netWorth === null`) — the '—' rows
+ * `RecentDayDetail` renders. C-9 (gate-security-review.md G3-12): before
+ * this, `NetWorthFullView`'s "every day has a value" caption was derived
+ * only from {@link interpolatedCount}, which counts `source === 'interpolated'`
+ * and nothing else — so a day with no row at all (`source: null`, never
+ * written by the snapshot job, e.g. because it failed on a missing FX rate)
+ * counted as zero "interpolated" days while still showing '—' in the table
+ * beneath a caption claiming full coverage. This counts the thing the
+ * caption is actually claiming: does every day have *some* value, observed,
+ * interpolated, or corrected — not just "is it not specifically the
+ * interpolated label".
+ */
+export function missingCount(points: readonly RawSeriesPoint[]): number {
+  return points.filter((point) => point.netWorth === null).length;
+}

@@ -224,6 +224,27 @@ chmod 444 secrets/tiingo_api_key secrets/fred_api_key secrets/coingecko_api_key 
 #
 #    `CRYPTO_ALLOWED_HOSTS` and `MARKET_DATA_ALLOWED_HOSTS` in `.env` can only
 #    NARROW which hosts these adapters may reach; neither can add one.
+#
+#    Watch-only wallet privacy (Phase 3 gate C-13,
+#    docs/evidence/phase-3/gate-security-review.md §4.1(c)): every address
+#    this connector derives from a linked xpub/ypub/zpub, and every 0x
+#    address linked directly, is queried against `blockstream.info` from
+#    THIS HOST'S IP over its public Esplora API — there is no self-hosted
+#    Esplora option today. Blockstream can therefore link every derived
+#    address of every watch-only wallet an install has ever linked to that
+#    IP. This is inherent to the watch-only design, not a bug this release
+#    fixes; an operator who needs to avoid it needs a self-hosted or
+#    Tor-routed block explorer, which is out of scope here.
+#
+#    `wallet_addresses.descriptor` (the xpub/ypub/zpub or 0x address) is
+#    sealed with SecretBox once a KEK is threaded into the composition
+#    root's `createWalletRpcRuntime` calls (migration 0027; not done by
+#    default in this release — see `docs/evidence/phase-4/
+#    wp4.12c-gate-conditions.md` §1). Until an operator's deployment applies
+#    that wiring, a newly linked wallet's descriptor is stored in the clear,
+#    exactly as every watch-only wallet's descriptor has been since WP 3.6 —
+#    a database dump or backup carries it, and with it every address that
+#    wallet has ever used or will use.
 ```
 
 #### Secret file modes: 0444 by default, 0400 via `just harden-secrets`

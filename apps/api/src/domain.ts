@@ -3521,7 +3521,82 @@ interface WalletConnectionRow extends Record<string, unknown> {
   user_id: string;
 }
 
-export function createWalletAddressStore(database: Database): DurableWalletAddressStore {
+/**
+ * Phase 3 gate C-13 (`docs/evidence/phase-3/gate-security-review.md`
+ * §4.1(c); migration 0027): the AAD `wallet_addresses.descriptor_sealed`
+ * seals under, named once so a seal and the matching unseal can never
+ * disagree — the same discipline `@ctx/connections`' `createConnection`
+ * uses inline for `sealed_credentials`.
+ *
+ * This lives here rather than in `@ctx/investments` (the table's schema
+ * owner, per `OWNERSHIP.md`) for one reason: `packages/contexts/investments/
+ * package.json` does not depend on `@core/secretbox` the way
+ * `@ctx/connections`/`@ctx/notifications`/`@ctx/identity` do, and this work
+ * package's rules forbid a `package.json`/lockfile edit to add one.
+ * `apps/api` already depends on `@core/secretbox` (every other sealed column
+ * this file touches goes through it), so the AAD policy for this one column
+ * is stated here instead — recorded as a deviation, not silently taken, in
+ * `docs/evidence/phase-4/wp4.12c-gate-conditions.md` §1.
+ */
+const WALLET_DESCRIPTOR_SEAL_REF = {
+  table: 'wallet_addresses',
+  column: 'descriptor_sealed',
+} as const;
+
+function sealWalletDescriptor(
+  secretBox: SecretBox,
+  rowId: string,
+  descriptor: string,
+): Promise<Uint8Array> {
+  return secretBox.sealText({ ...WALLET_DESCRIPTOR_SEAL_REF, rowId }, descriptor);
+}
+
+function unsealWalletDescriptor(
+  secretBox: SecretBox,
+  rowId: string,
+  sealed: Uint8Array,
+): Promise<string> {
+  return secretBox.openText({ ...WALLET_DESCRIPTOR_SEAL_REF, rowId }, sealed);
+}
+
+interface WalletDescriptorRow {
+  readonly id: string;
+  readonly descriptor: string | null;
+  readonly descriptor_sealed: Uint8Array | null;
+}
+
+/**
+ * The one place `descriptor`/`descriptor_sealed` are reconciled into the
+ * single string `WalletAddressRecord.descriptor` carries. Prefers the
+ * sealed column — once a row has one, it is the current value (see `write`
+ * below, which never populates both). A sealed row with no `SecretBox`
+ * available is a configuration bug this store must not paper over by
+ * returning an empty or truncated descriptor to a connector that will go on
+ * to derive addresses from it.
+ */
+async function walletDescriptorOf(
+  row: WalletDescriptorRow,
+  secretBox: SecretBox | undefined,
+): Promise<string> {
+  if (row.descriptor_sealed !== null) {
+    if (secretBox === undefined) {
+      throw new Error(
+        `wallet_addresses row ${row.id} is sealed but no SecretBox was supplied to read it ` +
+          '(createWalletRpcRuntime was built with no secretBox — see migration 0027’s header).',
+      );
+    }
+    return unsealWalletDescriptor(secretBox, row.id, Buffer.from(row.descriptor_sealed));
+  }
+  if (row.descriptor !== null) return row.descriptor;
+  // 0027's own CHECK (wallet_addresses_descriptor_has_a_representation)
+  // forbids both being NULL; reaching here means that constraint is gone.
+  throw new Error(`wallet_addresses row ${row.id} has neither descriptor nor descriptor_sealed`);
+}
+
+export function createWalletAddressStore(
+  database: Database,
+  secretBox?: SecretBox,
+): DurableWalletAddressStore {
   /** Staged by `connect()`, drained by `persistPending`. Never a cache: `get` does not read it. */
   const pending = new Map<string, WalletAddressRecord>();
 
@@ -3543,36 +3618,74 @@ export function createWalletAddressStore(database: Database): DurableWalletAddre
     userId: string,
     record: WalletAddressRecord,
   ): Promise<void> => {
+    // The row's own id, resolved *before* sealing rather than generated and
+    // possibly discarded: `SecretBox`'s AAD binds to this id
+    // (`WALLET_DESCRIPTOR_SEAL_REF`), and an `INSERT ... ON CONFLICT
+    // (connection_id) DO UPDATE` that also carried a fresh random id in its
+    // VALUES would collide with the primary key on a re-link (a *different*
+    // constraint than the one the ON CONFLICT clause names, so Postgres
+    // would refuse the statement outright) — and sealing against an id that
+    // never becomes the row's own would produce a ciphertext no later read
+    // could open. An explicit branch, rather than one upsert statement, is
+    // what keeps the id sealed against the same as the id stored.
+    const existing = await database.execute<{ id: string }>(sql`
+      SELECT id FROM wallet_addresses WHERE connection_id = ${connectionId}::uuid LIMIT 1
+    `);
+    const id = existing.rows[0]?.id ?? newId();
+
+    // Seals when a `SecretBox` is available; otherwise behaves exactly as
+    // before (plaintext `descriptor`, `descriptor_sealed` left NULL) — see
+    // `createWalletRpcRuntime`'s `secretBox` option for why that is common
+    // today. Never both columns for the same write: a plaintext `descriptor`
+    // sitting beside its own sealed copy would be "sealed" in name only.
+    const sealed =
+      secretBox === undefined
+        ? null
+        : Buffer.from(await sealWalletDescriptor(secretBox, id, record.descriptor));
+    const descriptorColumn = sealed === null ? record.descriptor : null;
+
+    if (existing.rows[0] !== undefined) {
+      await database.execute(sql`
+        UPDATE wallet_addresses SET
+          chain = ${record.chain},
+          descriptor = ${descriptorColumn},
+          descriptor_sealed = ${sealed},
+          derivation_scheme = ${record.derivationScheme},
+          label = ${record.label},
+          updated_at = now()
+        WHERE id = ${id}::uuid
+      `);
+      return;
+    }
+
     await database.execute(sql`
       INSERT INTO wallet_addresses (
-        id, user_id, connection_id, chain, descriptor, derivation_scheme, label,
-        external_highest_used_index, internal_highest_used_index
+        id, user_id, connection_id, chain, descriptor, descriptor_sealed, derivation_scheme,
+        label, external_highest_used_index, internal_highest_used_index
       ) VALUES (
-        ${newId()}::uuid, ${userId}::uuid, ${connectionId}::uuid, ${record.chain},
-        ${record.descriptor}, ${record.derivationScheme}, ${record.label},
+        ${id}::uuid, ${userId}::uuid, ${connectionId}::uuid, ${record.chain},
+        ${descriptorColumn}, ${sealed}, ${record.derivationScheme}, ${record.label},
         ${record.scanState.externalHighestUsedIndex}, ${record.scanState.internalHighestUsedIndex}
       )
-      ON CONFLICT (connection_id) DO UPDATE SET
-        chain = excluded.chain,
-        descriptor = excluded.descriptor,
-        derivation_scheme = excluded.derivation_scheme,
-        label = excluded.label,
-        updated_at = now()
     `);
   };
 
   return {
     async get(providerConnectionId: string): Promise<WalletAddressRecord | null> {
       const result = await database.execute<{
+        id: string;
         chain: 'bitcoin' | 'ethereum';
-        descriptor: string;
+        descriptor: string | null;
+        descriptor_sealed: Uint8Array | null;
         derivation_scheme: 'bip44' | 'bip49' | 'bip84' | null;
         label: string;
         external_highest_used_index: number | null;
         internal_highest_used_index: number | null;
       }>(sql`
-        SELECT w.chain,
+        SELECT w.id,
+               w.chain,
                w.descriptor,
+               w.descriptor_sealed,
                w.derivation_scheme,
                w.label,
                w.external_highest_used_index,
@@ -3588,7 +3701,7 @@ export function createWalletAddressStore(database: Database): DurableWalletAddre
       return {
         providerConnectionId,
         chain: row.chain,
-        descriptor: row.descriptor,
+        descriptor: await walletDescriptorOf(row, secretBox),
         derivationScheme: row.derivation_scheme,
         label: row.label,
         scanState: {
@@ -3733,13 +3846,33 @@ export function createWalletRpcRuntime(options: {
   readonly allowedHosts: readonly string[];
   /** `config.secrets.etherscan_api_key`. Absent is an ordinary install (BTC-only). */
   readonly etherscanApiKey?: Redacted<string> | undefined;
+  /**
+   * WP 4.12c, C-13. When supplied, every `descriptor` this store writes from
+   * now on is sealed (`WALLET_DESCRIPTOR_SEAL_REF`, migration 0027) rather
+   * than written in the clear, and a row already sealed by a previous write
+   * is read back through it.
+   *
+   * **Optional, and neither call site passes it today.** `app.ts` builds
+   * this runtime before a `SecretBox` exists at all (it is lazy behind
+   * `security.requireSecretBox()`, later, inside `deps.connections()`), and
+   * `worker.ts` builds it inside `resolveModules` where a `SecretBox` *is*
+   * already in scope — wiring the latter is one line, wiring the former
+   * needs the store's own seal calls to stay lazy the way `get`/`put`
+   * already are, which is why this option takes a value and not (yet) a
+   * thunk. Both are one-line, precisely specified edits outside this work
+   * package's granted files; see `docs/evidence/phase-4/
+   * wp4.12c-gate-conditions.md` §1 "For the orchestrator". Absent, this
+   * store's behaviour is unchanged from before 0027: plaintext `descriptor`,
+   * `descriptor_sealed` always NULL.
+   */
+  readonly secretBox?: SecretBox;
 }): WalletRpcRuntime {
   const transport = createNodeTransport();
   const esploraPolicy = cryptoPolicyFor(ESPLORA_HOST, options.allowedHosts);
   const etherscanPolicy = cryptoPolicyFor(ETHERSCAN_HOST, options.allowedHosts);
 
   return {
-    store: createWalletAddressStore(options.database),
+    store: createWalletAddressStore(options.database, options.secretBox),
     esploraTransport: async (request) => {
       const url = `https://${ESPLORA_HOST}${request.path}`;
       return cryptoGet(transport, esploraPolicy, url);

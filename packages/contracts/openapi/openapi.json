@@ -92,6 +92,61 @@
         ],
         "description": "An amount of money. Negative is an outflow."
       },
+      "UnresolvedSecurityInput": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "providerSecurityId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "abstentions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tier": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "tier",
+                "reason",
+                "detail"
+              ]
+            }
+          },
+          "observedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "providerSecurityId",
+          "name",
+          "abstentions",
+          "observedAt"
+        ]
+      },
       "PriceQuoteInput": {
         "type": "object",
         "properties": {
@@ -3737,6 +3792,21 @@
           "capabilities",
           "budget",
           "attribution"
+        ]
+      },
+      "SnapshotFxFailureInput": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "occurredAt"
         ]
       },
       "NetWorthSeriesPointInput": {
@@ -7436,6 +7506,63 @@
         ],
         "additionalProperties": false,
         "description": "An amount of money. Negative is an outflow."
+      },
+      "UnresolvedSecurity": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "providerSecurityId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "abstentions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tier": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "tier",
+                "reason",
+                "detail"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "observedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "providerSecurityId",
+          "name",
+          "abstentions",
+          "observedAt"
+        ],
+        "additionalProperties": false
       },
       "PriceQuote": {
         "type": "object",
@@ -11152,6 +11279,22 @@
           "capabilities",
           "budget",
           "attribution"
+        ],
+        "additionalProperties": false
+      },
+      "SnapshotFxFailure": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "occurredAt"
         ],
         "additionalProperties": false
       },
@@ -25591,7 +25734,7 @@
         "tags": [
           "investments"
         ],
-        "description": "One row per security, summed over every account that holds it. `unclassifiedPct` and each row’s `stale` are fields, not inferences: 07 §4.3 makes the first normative and 07 §6.1 makes the second a statement about the clock at read time.",
+        "description": "One row per security, summed over every account that holds it. `unclassifiedPct` and each row’s `stale` are fields, not inferences: 07 §4.3 makes the first normative and 07 §6.1 makes the second a statement about the clock at read time. `unresolved` (C-8, G3-11) lists positions the resolver could not identify at all — user-wide rather than aggregated by security, because there is no security to key them by; the event never carries an account id either, so this list is the same on every account’s own holdings response.",
         "parameters": [
           {
             "schema": {
@@ -25698,6 +25841,12 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "unresolved": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UnresolvedSecurity"
+                      }
                     }
                   },
                   "required": [
@@ -25707,7 +25856,8 @@
                     "total",
                     "unclassifiedPct",
                     "holdings",
-                    "excluded"
+                    "excluded",
+                    "unresolved"
                   ],
                   "additionalProperties": false
                 }
@@ -25744,7 +25894,7 @@
         "tags": [
           "investments"
         ],
-        "description": "Per-position lots with their ages, basis source, and an `unavailable` unrealized gain where the basis is unknown — 04 §5.5’s rule, carried onto the wire rather than computed from a zero.",
+        "description": "Per-position lots with their ages, basis source, and an `unavailable` unrealized gain where the basis is unknown — 04 §5.5’s rule, carried onto the wire rather than computed from a zero. `unresolved` (C-8, G3-11) is the same user-wide list `GET /holdings` carries, not filtered to this account: the resolution-failure event never carries an account id, so there is nothing to filter by.",
         "parameters": [
           {
             "schema": {
@@ -26082,6 +26232,12 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "unresolved": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UnresolvedSecurity"
+                      }
                     }
                   },
                   "required": [
@@ -26092,7 +26248,8 @@
                     "total",
                     "unclassifiedPct",
                     "positions",
-                    "excluded"
+                    "excluded",
+                    "unresolved"
                   ],
                   "additionalProperties": false
                 }
@@ -27470,7 +27627,7 @@
         "tags": [
           "planning"
         ],
-        "description": "One row per calendar day between `from` and `to`, from the migration’s own spine function — a day with no data comes back with `null` totals rather than being absent, because \"we did not know\" and \"it was zero\" are different facts. `sealed`, `revision`, `source` and `stalePrice` are fields: a chart cannot infer any of them.",
+        "description": "One row per calendar day between `from` and `to`, from the migration’s own spine function — a day with no data comes back with `null` totals rather than being absent, because \"we did not know\" and \"it was zero\" are different facts. `sealed`, `revision`, `source` and `stalePrice` are fields: a chart cannot infer any of them. `lastSnapshotFailure` (C-9, G3-12) is non-null exactly when the most recent nightly snapshot attempt failed on a missing FX rate — 08 §6.6’s manual-entry affordance is `POST /net-worth/fx-rates`.",
         "parameters": [
           {
             "schema": {
@@ -27517,13 +27674,24 @@
                       "items": {
                         "$ref": "#/components/schemas/NetWorthSeriesPoint"
                       }
+                    },
+                    "lastSnapshotFailure": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/SnapshotFxFailure"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "required": [
                     "from",
                     "to",
                     "baseCurrency",
-                    "points"
+                    "points",
+                    "lastSnapshotFailure"
                   ],
                   "additionalProperties": false
                 }
@@ -27541,6 +27709,130 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/net-worth/fx-rates": {
+      "post": {
+        "operationId": "setManualFxRate",
+        "summary": "08 §6.6’s manual-entry affordance: enter an FX rate the scheduled job could not fetch",
+        "tags": [
+          "planning"
+        ],
+        "description": "Writes `fx_rates` with `source: \"user_override\"` — already ranked ahead of any provider on the same date by `drizzleFxStore`’s own read order (a rate the user typed in meant it; a later provider fetch for the same day must not silently overwrite it). Needs a fresh session for the reason `POST /net-worth/corrections` does: the very next snapshot retry can use this rate to recompute a day whose total the user will see change.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "base": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  },
+                  "quote": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  },
+                  "rateDate": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "rate": {
+                    "type": "string",
+                    "description": "A positive decimal string, e.g. \"1.0842\". Never a JSON number (D3)."
+                  }
+                },
+                "required": [
+                  "base",
+                  "quote",
+                  "rateDate",
+                  "rate"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    },
+                    "quote": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    },
+                    "rateDate": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "rate": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "base",
+                    "quote",
+                    "rateDate",
+                    "rate"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
             "description": "Default Response",
             "content": {
               "application/json": {

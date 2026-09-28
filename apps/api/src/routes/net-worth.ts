@@ -41,9 +41,11 @@
  * ports are satisfied in `domain.ts` and nowhere else, so this route asks for
  * them there rather than growing a fifth copy.
  */
+import { newId } from '@core/kernel';
 import {
   InterpolationRefused,
   SealedRowImmutable,
+  SNAPSHOT_JOB_KIND,
   correctDay,
   isFxRateUnavailable,
   readSeries,
@@ -113,6 +115,73 @@ async function readDetail(
   return new Map(result.rows.map((row) => [String(row.as_of_date).slice(0, 10), row]));
 }
 
+// ---------------------------------------------------------------------------
+// C-9 (gate-security-review.md G3-12): a missing FX rate is refused
+// correctly at write time, but until now nothing on screen said so — the
+// nightly snapshot job retried silently and the chart just kept the last
+// written day.
+// ---------------------------------------------------------------------------
+
+export interface SnapshotFxFailure {
+  /** `FxRateUnavailable`'s own message — names the pair and the date (`@ctx/investments`' `fx.ts`). */
+  readonly message: string;
+  readonly occurredAt: string;
+}
+
+interface JobLastErrorRow {
+  last_error: { name?: string; message?: string } | null;
+  updated_at: Date;
+}
+
+/**
+ * Whether the most recent attempt at `planning.net_worth_snapshot` failed on
+ * a missing FX rate — read from `jobs` (a `@core/platform` table) directly
+ * rather than adding a reader to `@ctx/planning`: `last_error` is already
+ * the durable "did the last attempt fail, and why" for *any* job kind
+ * (`packages/platform/src/jobs/runner.ts`'s `finish` clears it to `NULL` on
+ * success and sets it on every failed or still-retrying attempt), so a
+ * planning-owned copy of the same fact would be a second, driftable one.
+ *
+ * The schedule enqueues a fresh `jobs` row each firing (WP 3.8's
+ * `registerNetWorthSnapshotSchedule`), so "most recent by `created_at`" is
+ * last night's attempt, not a stale failure from weeks ago that has since
+ * succeeded — a `NULL` `last_error` on the latest row means the most recent
+ * attempt was clean, regardless of how many nights before it failed.
+ */
+async function readLastSnapshotFxFailure(
+  pool: RouteDeps['pool'],
+  userId: string,
+): Promise<SnapshotFxFailure | null> {
+  const result = await pool.query<JobLastErrorRow>(
+    `SELECT last_error, updated_at
+       FROM jobs
+      WHERE kind = $1 AND user_id = $2
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [SNAPSHOT_JOB_KIND, userId],
+  );
+  const row = result.rows[0];
+  if (row === undefined || row.last_error === null || row.last_error.name !== 'FxRateUnavailable') {
+    return null;
+  }
+  return {
+    message:
+      typeof row.last_error.message === 'string'
+        ? row.last_error.message
+        : 'a scheduled net worth snapshot failed on a missing FX rate',
+    occurredAt: new Date(row.updated_at).toISOString(),
+  };
+}
+
+const snapshotFxFailureWire = z
+  .object({ message: z.string(), occurredAt: z.string() })
+  .meta({ id: 'SnapshotFxFailure' });
+
+/** A positive decimal string — `\d*\.?\d+` alone also accepts "0" and "0.00", neither a rate. */
+function isPositiveDecimalString(value: string): boolean {
+  return /^\d*\.?\d+$/u.test(value) && /[1-9]/u.test(value);
+}
+
 const moneyWire = z.object({ minor: z.string(), currency: z.string().length(3) });
 
 const seriesPointWire = z
@@ -165,7 +234,10 @@ export const netWorthRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             'One row per calendar day between `from` and `to`, from the migration’s own spine ' +
             'function — a day with no data comes back with `null` totals rather than being ' +
             'absent, because "we did not know" and "it was zero" are different facts. `sealed`, ' +
-            '`revision`, `source` and `stalePrice` are fields: a chart cannot infer any of them.',
+            '`revision`, `source` and `stalePrice` are fields: a chart cannot infer any of them. ' +
+            '`lastSnapshotFailure` (C-9, G3-12) is non-null exactly when the most recent nightly ' +
+            'snapshot attempt failed on a missing FX rate — 08 §6.6’s manual-entry affordance is ' +
+            '`POST /net-worth/fx-rates`.',
           tags: ['planning'],
           querystring: z.object({ from: dateOnly.optional(), to: dateOnly.optional() }),
           response: {
@@ -174,6 +246,7 @@ export const netWorthRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               to: dateOnly,
               baseCurrency: z.string().length(3),
               points: z.array(seriesPointWire),
+              lastSnapshotFailure: snapshotFxFailureWire.nullable(),
             }),
             ...problems(400, 401, 503),
           },
@@ -210,9 +283,10 @@ export const netWorthRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           });
         }
 
-        const [spine, detail] = await Promise.all([
+        const [spine, detail, lastSnapshotFailure] = await Promise.all([
           readSeries(database, { userId: session.userId, from, to }),
           readDetail(database, session.userId, from, to),
+          readLastSnapshotFxFailure(deps.pool, session.userId),
         ]);
 
         // `base_currency` is per row. The window's currency is whatever the
@@ -259,7 +333,91 @@ export const netWorthRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               correctionReason: row?.correction_reason ?? null,
             };
           }),
+          lastSnapshotFailure,
         };
+      },
+    );
+
+    app.post(
+      '/net-worth/fx-rates',
+      {
+        schema: {
+          operationId: 'setManualFxRate',
+          summary:
+            '08 §6.6’s manual-entry affordance: enter an FX rate the scheduled job could not fetch',
+          description:
+            'Writes `fx_rates` with `source: "user_override"` — already ranked ahead of any ' +
+            'provider on the same date by `drizzleFxStore`’s own read order (a rate the user ' +
+            'typed in meant it; a later provider fetch for the same day must not silently ' +
+            'overwrite it). Needs a fresh session for the reason `POST /net-worth/corrections` ' +
+            'does: the very next snapshot retry can use this rate to recompute a day whose ' +
+            'total the user will see change.',
+          tags: ['planning'],
+          body: z.object({
+            base: z.string().length(3),
+            quote: z.string().length(3),
+            rateDate: dateOnly,
+            rate: z
+              .string()
+              .describe('A positive decimal string, e.g. "1.0842". Never a JSON number (D3).'),
+          }),
+          response: {
+            200: z.object({
+              base: z.string().length(3),
+              quote: z.string().length(3),
+              rateDate: dateOnly,
+              rate: z.string(),
+            }),
+            ...problems(400, 401, 403, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireFreshSession(request);
+        const base = request.body.base.trim().toUpperCase();
+        const quote = request.body.quote.trim().toUpperCase();
+        if (!/^[A-Z]{3}$/u.test(base) || !/^[A-Z]{3}$/u.test(quote)) {
+          throw new AppError({
+            status: 400,
+            code: 'planning.fx_rate_bad_currency',
+            title: 'Bad Request',
+            detail: 'base and quote must each be a 3-letter ISO-4217 alphabetic code',
+            family: 'user',
+          });
+        }
+        if (base === quote) {
+          throw new AppError({
+            status: 400,
+            code: 'planning.fx_rate_same_currency',
+            title: 'Bad Request',
+            detail: 'base and quote must differ (fx_rates_is_a_real_pair)',
+            family: 'user',
+          });
+        }
+        if (!isPositiveDecimalString(request.body.rate)) {
+          throw new AppError({
+            status: 400,
+            code: 'planning.fx_rate_not_positive',
+            title: 'Bad Request',
+            detail: `${JSON.stringify(request.body.rate)} is not a positive decimal (fx_rates_rate_is_positive)`,
+            family: 'user',
+          });
+        }
+
+        await database.execute(sql`
+          INSERT INTO fx_rates (
+            id, user_id, base_currency, quote_currency, rate_date, source, rate, observed_at
+          ) VALUES (
+            ${newId()}::uuid, ${session.userId}::uuid, ${base}, ${quote},
+            ${request.body.rateDate}::date, 'user_override', ${request.body.rate}::numeric, now()
+          )
+          ON CONFLICT (user_id, base_currency, quote_currency, rate_date, source) DO UPDATE SET
+            rate = excluded.rate,
+            observed_at = now(),
+            updated_at = now()
+        `);
+
+        return { base, quote, rateDate: request.body.rateDate, rate: request.body.rate };
       },
     );
 

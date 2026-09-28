@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 
-import { colorForIndex, groupByCurrency, interpolatedCount, latestValued } from './series.ts';
+import {
+  colorForIndex,
+  groupByCurrency,
+  interpolatedCount,
+  latestValued,
+  missingCount,
+} from './series.ts';
 import type { RawSeriesPoint } from './series.ts';
 import { windowForRange } from './search.ts';
 
@@ -121,6 +127,43 @@ describe('interpolatedCount', () => {
       point({ asOfDate: '2026-09-04', source: 'interpolated' }),
     ];
     expect(interpolatedCount(points)).toBe(2);
+  });
+});
+
+describe('missingCount', () => {
+  it('counts every day with no net worth value, not only the ones labelled interpolated (C-9, G3-12)', () => {
+    const points = [
+      point({
+        asOfDate: '2026-09-01',
+        netWorth: { minor: '100000', currency: 'USD' },
+        source: 'observed',
+      }),
+      // No row at all — the snapshot job never wrote this day (e.g. it
+      // failed on a missing FX rate). `source` is null, not 'interpolated',
+      // so `interpolatedCount` alone would miss it.
+      point({ asOfDate: '2026-09-02', netWorth: null, source: null }),
+      point({
+        asOfDate: '2026-09-03',
+        netWorth: { minor: '100200', currency: 'USD' },
+        source: 'interpolated',
+      }),
+    ];
+    // interpolatedCount only ever sees the one labelled row…
+    expect(interpolatedCount(points)).toBe(1);
+    // …but missingCount sees the genuinely valueless day too.
+    expect(missingCount(points)).toBe(1);
+  });
+
+  it('is zero when every day has a value, interpolated or not', () => {
+    const points = [
+      point({ asOfDate: '2026-09-01', netWorth: { minor: '100000', currency: 'USD' } }),
+      point({
+        asOfDate: '2026-09-02',
+        netWorth: { minor: '100100', currency: 'USD' },
+        source: 'interpolated',
+      }),
+    ];
+    expect(missingCount(points)).toBe(0);
   });
 });
 

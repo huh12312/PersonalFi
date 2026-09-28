@@ -39,13 +39,36 @@
  * that the renderer handles the payload shape WP 2.6's dispatch entry
  * specifies. Until that event is registered no envelope of that type can reach
  * the pump, so the code is inert rather than speculative.
+ *
+ * ## `investments.SecurityResolutionFailed`, and the default-rule-seeding
+ * decision (WP 4.12c, C-8's UI half; G3-11)
+ *
+ * `docs/evidence/phase-4/wp4.12b-gate-conditions.md` §8.2 investigated this
+ * and left one decision for whoever builds it: a render case alone changes
+ * nothing for a user, because **every `notification_rules` row in this
+ * application is user-created** — there is no bootstrap or seeding path that
+ * gives a fresh install a default rule for anything, and building one would
+ * be a cross-cutting change (a bootstrap/seed concern, not a rendering one)
+ * touching files this condition does not grant.
+ *
+ * **The decision: do not build default-rule-seeding in this pass.** The
+ * holdings-response half of C-8
+ * (`apps/api/src/routes/investments.ts`'s `unresolved` field) is the surface
+ * that actually satisfies the condition's own words — "so a position the app
+ * could not identify is visible rather than missing" — with **zero**
+ * configuration: it is read directly from `domain_events`, not filtered
+ * through whether a rule exists. This render case is real, sabotage-tested
+ * infrastructure for the day a user (or a future default-rule-seeding
+ * change) creates a rule for `investments.SecurityResolutionFailed`, but it
+ * is not, by itself, sufficient — and is not claimed to be. Known gap,
+ * carried rather than silently declared closed.
  */
 import type { NotificationPriority } from '../schema/index.ts';
 
 /**
  * The event types this context reacts to.
  *
- * Four exist today. `insights.InsightProposed` is WP 2.6's and is listed so the
+ * Five exist today. `insights.InsightProposed` is WP 2.6's and is listed so the
  * consumer is already subscribed when it lands — see the header.
  */
 export const CONSUMED_EVENT_TYPES = [
@@ -53,6 +76,13 @@ export const CONSUMED_EVENT_TYPES = [
   'recurring.PriceChangeDetected',
   'connections.ConnectionStatusChanged',
   'connections.SyncRunCompleted',
+  // WP 4.12c, C-8's UI half (gate-security-review.md G3-11): before this, a
+  // position the resolver could not identify was invisible everywhere —
+  // `investments.SecurityResolutionFailed` had no render case, no route and
+  // no consumer at all. This is the "somewhere a person reads it" half; the
+  // route half (`unresolved` on GET /holdings and GET /accounts/:id/holdings`,
+  // which needs no rule to exist) is `apps/api/src/routes/investments.ts`.
+  'investments.SecurityResolutionFailed',
   // TODO(WP 2.6): `insights.InsightProposed` is defined by the insights
   // platform and is not yet registered in `apps/api/src/platform.ts`. The
   // subscription is declared now so the wiring is this package's concern and
@@ -163,6 +193,36 @@ export function renderNotification(
         bodyMd: `The ${str(payload, 'trigger')} sync finished ${status}.`,
         priority: 'low',
         deepLink: `/settings/connections?connection=${encodeURIComponent(str(payload, 'connectionId'))}`,
+      };
+    }
+
+    case 'investments.SecurityResolutionFailed': {
+      // Payload shape is `@ctx/investments`' `SecurityResolutionFailed`
+      // (`packages/contexts/investments/src/events.ts`), copied as a string
+      // per this file's header — provider, syncRunId, providerSecurityId,
+      // identifiers[], abstentions[], name.
+      const provider = str(payload, 'provider');
+      const providerSecurityId = str(payload, 'providerSecurityId');
+      const name = str(payload, 'name');
+      const displayName = name !== '' ? name : 'A position';
+      // De-duped on the *identity* of the failure (provider + whichever of
+      // providerSecurityId/name it had), not on the event id: the upstream
+      // event may legitimately fire again for the same still-unresolved
+      // position on a later sync (its own doc says so), and re-notifying
+      // every night for an unresolved position nobody has acted on yet
+      // would train a user to ignore this the way a chatty monitor always
+      // does.
+      const identity = providerSecurityId !== '' ? providerSecurityId : displayName;
+      return {
+        dedupeKey: `investments.resolution-failed:${provider}:${identity}`,
+        groupKey: 'investments.resolution-failures',
+        title: 'A position could not be identified',
+        bodyMd:
+          `${displayName} from ${provider} could not be matched to a security in your ` +
+          'portfolio, so it is not included in your holdings yet. See the holdings screen ' +
+          'for what is missing.',
+        priority: 'normal',
+        deepLink: '/investments',
       };
     }
 

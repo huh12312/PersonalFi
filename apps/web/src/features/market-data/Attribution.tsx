@@ -26,19 +26,37 @@ export interface ProviderAttributionProps {
  * yfinance) — callers don't need to check `attribution.required` themselves
  * before rendering this.
  *
- * The logo is a generic, monochrome coin glyph (`lucide-react`'s `Coins`,
- * already a dependency), not CoinGecko's actual trademarked mark: this
- * deployment has no licence to redistribute that asset, and fetching it from
- * CoinGecko's own host would need a new `img-src` CSP entry — D26 says no
- * new directive, so that trade was never available. Recorded here rather
- * than silently approximated as "the real logo."
+ * ## The CoinGecko logo (WP 4.12c, C-15; G3-8)
+ *
+ * `public/icons/coingecko-symbol.png` is CoinGecko's own gecko mark,
+ * self-hosted — served from this origin, so `img-src 'self'` (already the
+ * policy, `docker/Caddyfile`) covers it with **no CSP change**, refuting the
+ * reason a generic glyph was used instead (`gate-security-review.md` G3-8:
+ * "justified by a CSP reason that does not apply to a self-hosted asset").
+ * Sourced from CoinGecko's own published brand microsite
+ * (`brand.coingecko.com`'s "Symbol" page — the icon-only mark, not the full
+ * wordmark or lockup) and cropped from that page's auto-generated cover
+ * image down to the circular mark itself, then alpha-masked to the same
+ * circle so it composites cleanly against any background — no colour,
+ * proportion, or content change from the source. The brand site's own
+ * downloadable "Brand Kit" zip is the pristine original of the same asset,
+ * gated behind an interactive JS download flow this host could not
+ * complete; the crop is the closest reachable equivalent, not a redraw.
+ * Every other provider keeps the generic `Coins` glyph unless it publishes
+ * its own attribution asset the same way.
  */
 export function ProviderAttribution({ attribution, className }: ProviderAttributionProps) {
   if (!attribution.required) return null;
 
+  const logo = !attribution.logoRequired ? null : attribution.provider === 'coingecko' ? (
+    <img src="/icons/coingecko-symbol.png" alt="" width={14} height={14} className="rounded-full" />
+  ) : (
+    <Coins size={14} aria-hidden="true" />
+  );
+
   const content = (
     <span className="inline-flex items-center gap-1.5">
-      {attribution.logoRequired && <Coins size={14} aria-hidden="true" />}
+      {logo}
       <span>{attribution.text}</span>
     </span>
   );

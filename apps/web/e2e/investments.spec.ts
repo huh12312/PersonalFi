@@ -2,13 +2,14 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { expect, test } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 
 import { injectAxe } from './support/axe.ts';
 import type { AxeViolation } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installInvestmentsMocks } from './support/mock-investments.ts';
+import { screenshotDir } from './support/screenshot-dir.ts';
 
 /**
  * WP 3.11's exit tests, verbatim from `docs/plan/03-phase-3-dispatch.md` §3,
@@ -28,9 +29,21 @@ const EXPECTED_CSV = fileURLToPath(
   ),
 );
 
-const SCREENSHOT_DIR = fileURLToPath(
-  new URL('../../../docs/evidence/phase-3/screenshots/', import.meta.url),
-);
+/**
+ * `evidenceDir` arrives as a test option set in `playwright.config.ts`'s
+ * `chromium` project (the repo-wide `process.env` ban exempts the config,
+ * not `e2e/`). C-16, O-3: a gitignored output directory by default;
+ * `PLAYWRIGHT_EVIDENCE_DIR` names the real evidence directory
+ * (`docs/evidence/phase-3/screenshots`) for a deliberate regeneration — see
+ * `support/screenshot-dir.ts`'s header.
+ */
+interface EvidenceDirOptions {
+  readonly evidenceDir?: string;
+}
+
+const test = base.extend<EvidenceDirOptions>({
+  evidenceDir: [undefined, { option: true }],
+});
 
 interface ExpectedSlice {
   readonly key: string;
@@ -145,8 +158,11 @@ async function expectNoAxeViolationsOutsideSharedSidebar(
   }
 }
 
-async function shoot(page: Page, name: string): Promise<void> {
-  await page.screenshot({ path: `${SCREENSHOT_DIR}wp3.11-${name}.png`, fullPage: true });
+async function shoot(page: Page, evidenceDir: string | undefined, name: string): Promise<void> {
+  await page.screenshot({
+    path: `${screenshotDir(evidenceDir)}wp3.11-${name}.png`,
+    fullPage: true,
+  });
 }
 
 test.describe('investments screen (WP 3.11)', () => {
@@ -354,7 +370,7 @@ test.describe('investments screen (WP 3.11)', () => {
     await expectNoAxeViolationsOutsideSharedSidebar(page, 'dashboard (dark, control)');
   });
 
-  test('every investments screen is axe clean in both themes', async ({ page }) => {
+  test('every investments screen is axe clean in both themes', async ({ page, evidenceDir }) => {
     await installFakeWebAuthnAssertion(page);
     await installInvestmentsMocks(page);
     await loginAndReachInvestments(page);
@@ -368,7 +384,7 @@ test.describe('investments screen (WP 3.11)', () => {
       await expect(page.getByTestId('holding-accounts-VTI')).toBeVisible();
       await injectAxe(page);
       await expectNoAxeViolationsOutsideSharedSidebar(page, `investments holdings (${theme})`);
-      await shoot(page, `holdings-${theme}`);
+      await shoot(page, evidenceDir, `holdings-${theme}`);
 
       await page.getByRole('button', { name: 'Taxable brokerage' }).first().click();
       await expect(page.getByTestId('position-VTI')).toBeVisible();
@@ -377,14 +393,14 @@ test.describe('investments screen (WP 3.11)', () => {
         page,
         `investments account detail (${theme})`,
       );
-      await shoot(page, `account-detail-${theme}`);
+      await shoot(page, evidenceDir, `account-detail-${theme}`);
       await page.getByRole('button', { name: 'All accounts' }).click();
 
       await page.getByRole('tab', { name: 'Allocation' }).click();
       await expect(page.getByTestId('allocation-legend')).toBeVisible();
       await injectAxe(page);
       await expectNoAxeViolationsOutsideSharedSidebar(page, `investments allocation (${theme})`);
-      await shoot(page, `allocation-${theme}`);
+      await shoot(page, evidenceDir, `allocation-${theme}`);
 
       await page.getByRole('radio', { name: 'Sector' }).click();
       await expect(page.getByTestId('allocation-slice-Diversified')).toBeVisible();
@@ -402,7 +418,7 @@ test.describe('investments screen (WP 3.11)', () => {
         page,
         `investments drift empty state (${theme})`,
       );
-      await shoot(page, `drift-empty-${theme}`);
+      await shoot(page, evidenceDir, `drift-empty-${theme}`);
 
       await page.getByRole('button', { name: 'Use an example target' }).click();
       await expect(page.getByTestId('drift-table')).toBeVisible();
@@ -411,14 +427,14 @@ test.describe('investments screen (WP 3.11)', () => {
         page,
         `investments drift with targets (${theme})`,
       );
-      await shoot(page, `drift-${theme}`);
+      await shoot(page, evidenceDir, `drift-${theme}`);
       await page.getByRole('button', { name: 'Clear target' }).click();
 
       await page.getByRole('tab', { name: 'Performance' }).click();
       await expect(page.getByTestId('twr-block')).toBeVisible();
       await injectAxe(page);
       await expectNoAxeViolationsOutsideSharedSidebar(page, `investments performance (${theme})`);
-      await shoot(page, `performance-${theme}`);
+      await shoot(page, evidenceDir, `performance-${theme}`);
     }
   });
 

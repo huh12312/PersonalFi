@@ -20,12 +20,13 @@ import { CONSUMED_EVENT_TYPES, renderNotification } from '../src/render.ts';
 import type { NotificationsDatabase } from '../src/db.ts';
 
 describe('the consumer’s subscriptions', () => {
-  it('subscribes to all five event types, including the unwired insights one', () => {
+  it('subscribes to all six event types, including the unwired insights one', () => {
     expect([...CONSUMED_EVENT_TYPES]).toEqual([
       'budgeting.BudgetThresholdCrossed',
       'recurring.PriceChangeDetected',
       'connections.ConnectionStatusChanged',
       'connections.SyncRunCompleted',
+      'investments.SecurityResolutionFailed',
       'insights.InsightProposed',
     ]);
 
@@ -35,7 +36,8 @@ describe('the consumer’s subscriptions', () => {
     });
     expect(consumer.name).toBe(CONSUMER_NAME);
     expect(consumer.filter).toContain('insights.InsightProposed');
-    expect(consumer.filter).toHaveLength(5);
+    expect(consumer.filter).toContain('investments.SecurityResolutionFailed');
+    expect(consumer.filter).toHaveLength(6);
   });
 
   it('renders an insights.InsightProposed payload of the shape WP 2.6 specifies', () => {
@@ -48,6 +50,60 @@ describe('the consumer’s subscriptions', () => {
     expect(rendered?.dedupeKey).toBe('insights.insight:01920000-0000-7000-8000-0000000000a1');
     expect(rendered?.groupKey).toBe('insights.proposed');
     expect(rendered?.deepLink).toContain('01920000-0000-7000-8000-0000000000a1');
+  });
+
+  it('renders investments.SecurityResolutionFailed so a person reads it (C-8’s UI half, G3-11)', () => {
+    const rendered = renderNotification('investments.SecurityResolutionFailed', {
+      provider: 'plaid',
+      syncRunId: '01920000-0000-7000-8000-0000000000b1',
+      providerSecurityId: 'sec-plaid-9f2c',
+      identifiers: [{ kind: 'ticker', value: 'ZZZQ', chain: null, mic: null }],
+      abstentions: [{ tier: 'cusip', reason: 'not_provided', detail: null }],
+      name: 'Mystery Fund',
+    });
+    expect(rendered).not.toBeNull();
+    expect(rendered?.title).toContain('could not be identified');
+    expect(rendered?.bodyMd).toContain('Mystery Fund');
+    expect(rendered?.bodyMd).toContain('plaid');
+    expect(rendered?.deepLink).toBe('/investments');
+    expect(rendered?.priority).toBe('normal');
+  });
+
+  it('the resolution-failure dedupe key is the identity of the failure, not the sync run', () => {
+    // The upstream event may fire again for the *same* still-unresolved
+    // position on a later sync run (its own doc: "a later sync that fails
+    // the same way emits again"). If the notification's dedupe key included
+    // syncRunId, every night's retry would notify again — the render case
+    // would exist and still fail C-8's "visible" bar by drowning it in
+    // repeats.
+    const night1 = renderNotification('investments.SecurityResolutionFailed', {
+      provider: 'plaid',
+      syncRunId: 'run-1',
+      providerSecurityId: 'sec-9f2c',
+      identifiers: [],
+      abstentions: [{ tier: 'cusip', reason: 'not_provided', detail: null }],
+      name: 'Mystery Fund',
+    });
+    const night2 = renderNotification('investments.SecurityResolutionFailed', {
+      provider: 'plaid',
+      syncRunId: 'run-2',
+      providerSecurityId: 'sec-9f2c',
+      identifiers: [],
+      abstentions: [{ tier: 'cusip', reason: 'not_provided', detail: null }],
+      name: 'Mystery Fund',
+    });
+    expect(night1?.dedupeKey).toBe(night2?.dedupeKey);
+
+    // A genuinely different position is a different dedupe key.
+    const otherSecurity = renderNotification('investments.SecurityResolutionFailed', {
+      provider: 'plaid',
+      syncRunId: 'run-2',
+      providerSecurityId: 'sec-different',
+      identifiers: [],
+      abstentions: [{ tier: 'cusip', reason: 'not_provided', detail: null }],
+      name: 'A Different Fund',
+    });
+    expect(night1?.dedupeKey).not.toBe(otherSecurity?.dedupeKey);
   });
 
   it('an unsubscribed event type renders nothing rather than throwing', () => {

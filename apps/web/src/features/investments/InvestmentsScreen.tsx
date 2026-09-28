@@ -14,6 +14,7 @@ import { AllocationPanel } from './AllocationPanel.tsx';
 import { DriftPanel } from './DriftPanel.tsx';
 import { HoldingsTable } from './HoldingsTable.tsx';
 import { PerformancePanel } from './PerformancePanel.tsx';
+import { UnresolvedSecuritiesNotice } from './UnresolvedSecuritiesNotice.tsx';
 import {
   useAccountHoldingsQuery,
   useAccountsHoldingsQueries,
@@ -213,6 +214,7 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
                 onOpenAccount={(accountId) => update({ account: accountId })}
                 coinGeckoAttribution={coinGeckoAttribution}
               />
+              <UnresolvedSecuritiesNotice unresolved={holdings?.unresolved ?? []} />
               {holdings !== undefined && holdings.excluded.length > 0 && (
                 <p className="flex items-start gap-2 text-caption text-text-muted">
                   <Info size={14} aria-hidden="true" className="mt-0.5 shrink-0" />

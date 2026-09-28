@@ -146,6 +146,27 @@ export function holdingsResponse(
     unclassifiedPct: '0.0174504645',
     holdings: [...holdings],
     excluded: [],
+    unresolved: [],
+  };
+}
+
+/**
+ * A position `investments.SecurityResolutionFailed` (C-8, G3-11):
+ * `openfigi.test.ts` sends when a bare ticker with no key configured
+ * never resolves. Exported for `InvestmentsScreen.test.tsx`/
+ * `HoldingsTable.test.tsx` to prove the holdings screen shows "a position
+ * the app could not identify" rather than nothing.
+ */
+export function unresolvedSecurity(
+  overrides: Partial<ListHoldingsResponse['unresolved'][number]> = {},
+): ListHoldingsResponse['unresolved'][number] {
+  return {
+    provider: 'plaid',
+    providerSecurityId: 'sec-plaid-9f2c',
+    name: 'Mystery Fund',
+    abstentions: [{ tier: 'cusip', reason: 'not_provided', detail: null }],
+    observedAt: '2026-09-27T04:00:00.000Z',
+    ...overrides,
   };
 }
 
@@ -276,6 +297,7 @@ export function accountHoldingsResponse(
       },
     ],
     excluded: [],
+    unresolved: [],
     ...overrides,
   };
 }

@@ -375,6 +375,13 @@ describeWithDb('runMigrations', () => {
       //   investments analytic. `security_tags` references securities by the
       //   composite (user_id, id) key 0025 introduced; the employer tag is
       //   set by the holder and never inferred (07 I5).
+      // 0027_wallet_addresses_seal_descriptor: no new table. Phase 3 gate
+      //   C-13 (gate-security-review.md §4.1(c)): adds nullable
+      //   `wallet_addresses.descriptor_sealed BYTEA`, drops `descriptor`'s
+      //   NOT NULL, and a CHECK that one of the two is always present.
+      //   Expand only — `docs/CONVENTIONS.md`'s backfill and contract steps
+      //   are later releases; see the migration's own header and
+      //   `docs/evidence/phase-4/wp4.12c-gate-conditions.md` §1.
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',

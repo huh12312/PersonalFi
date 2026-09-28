@@ -14,6 +14,7 @@ import type {
 } from '../../api/generated/types.gen.ts';
 import { BasisMethodControl } from './BasisMethodControl.tsx';
 import { StaleBadge } from './StaleBadge.tsx';
+import { UnresolvedSecuritiesNotice } from './UnresolvedSecuritiesNotice.tsx';
 import { MoneyOrUnavailable, Unavailable, UnrealizedCell } from './UnavailableValue.tsx';
 import { assetClassLabel, exclusionReasonLabel, ratioToNumber } from './labels.ts';
 import type { BasisMethodElection } from './api.ts';
@@ -236,6 +237,8 @@ export function AccountPositionsPanel({
           </ul>
         </div>
       )}
+
+      <UnresolvedSecuritiesNotice unresolved={data.unresolved} />
 
       {hasCoinGeckoPrice && coinGeckoAttribution !== undefined && (
         <ProviderAttribution attribution={coinGeckoAttribution} />

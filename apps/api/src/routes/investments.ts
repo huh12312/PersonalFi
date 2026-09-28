@@ -68,6 +68,7 @@ import {
   drizzleLotStore,
   drizzlePriceStore,
   effectiveClassificationOf,
+  identifierKeyOf,
   marketValueOf,
   moneyWeightedReturn,
   portfolioDollarGain,
@@ -83,6 +84,7 @@ import {
   type DerivedClassification,
   type DollarGain,
   type ExternalFlow,
+  type IdentifierKind,
   type Lot,
   type MoneyWeightedReturn,
   type PricePoint,
@@ -227,6 +229,150 @@ export async function readHoldings(
   `);
   return result.rows.map(effectiveHoldingOf);
 }
+
+// ---------------------------------------------------------------------------
+// C-8's UI half (gate-security-review.md G3-11): a position the resolver
+// could not identify, surfaced on the holdings response rather than being
+// invisible. The other half — a notifications `render.ts` case — is
+// `@ctx/notifications`' `src/render.ts`; that surface needs a rule the user
+// created, this one needs nothing.
+// ---------------------------------------------------------------------------
+
+/** One `investments.SecurityResolutionFailed` payload's shape, off the wire (`@ctx/investments`' `events.ts`). */
+interface UnresolvedEventRow extends Record<string, unknown> {
+  provider: string;
+  provider_security_id: string | null;
+  name: string | null;
+  identifiers: readonly {
+    readonly kind: string;
+    readonly value: string;
+    readonly chain: string | null;
+    readonly mic: string | null;
+  }[];
+  abstentions: readonly {
+    readonly tier: string;
+    readonly reason: string;
+    readonly detail: string | null;
+  }[];
+  observed_at: Date;
+}
+
+export interface UnresolvedSecurity {
+  readonly provider: string;
+  readonly providerSecurityId: string | null;
+  readonly name: string | null;
+  readonly abstentions: readonly {
+    readonly tier: string;
+    readonly reason: string;
+    readonly detail: string | null;
+  }[];
+  readonly observedAt: string;
+}
+
+/** How many failure events to read before dedupe-by-identity, and how many unresolved positions to show. */
+const MAX_UNRESOLVED_EVENTS = 200;
+const MAX_UNRESOLVED_SECURITIES = 25;
+
+/**
+ * True when at least one identifier the failed event carried now has a
+ * matching `security_identifiers` row — i.e. a later sync resolved it, so
+ * this is not a *current* gap even though the event is still in
+ * `domain_events` (append-only; nothing here rewrites or expires it).
+ */
+async function anyIdentifierNowResolved(
+  database: Database,
+  userId: string,
+  provider: string,
+  identifiers: UnresolvedEventRow['identifiers'],
+): Promise<boolean> {
+  if (identifiers.length === 0) return false;
+  const keys = identifiers.map((identifier) =>
+    identifierKeyOf({
+      kind: identifier.kind as IdentifierKind,
+      value: identifier.value,
+      chain: identifier.chain,
+      mic: identifier.mic,
+      provider,
+    }),
+  );
+  const result = await database.execute<{ resolved: boolean }>(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM security_identifiers
+       WHERE user_id = ${userId}::uuid
+         AND identifier_key = ANY(${keys}::text[])
+    ) AS resolved
+  `);
+  return result.rows[0]?.resolved ?? false;
+}
+
+/**
+ * The most recent `investments.SecurityResolutionFailed` per distinct
+ * failure — `(provider, providerSecurityId ?? name)`, since
+ * `providerSecurityId` is legitimately absent for some abstain reasons and a
+ * bare `DISTINCT ON` with SQL NULL would collapse every nameless failure
+ * from one provider into one row — for positions that have not since
+ * resolved (see {@link anyIdentifierNowResolved}).
+ *
+ * User-wide, not account-scoped: the event never carries an account id (by
+ * design — see the event's own doc: "what it does not carry: … any account
+ * id"), so `readHoldings`'s per-account `accountId` filter has nothing to
+ * join against here. Both `GET /holdings` and `GET /accounts/:id/holdings`
+ * show the same list for that reason, stated in each route's own
+ * description.
+ */
+export async function readUnresolvedSecurities(
+  database: Database,
+  userId: string,
+): Promise<readonly UnresolvedSecurity[]> {
+  const result = await database.execute<UnresolvedEventRow>(sql`
+    SELECT DISTINCT ON (payload ->> 'provider', coalesce(payload ->> 'providerSecurityId', payload ->> 'name', ''))
+           payload ->> 'provider'           AS provider,
+           payload ->> 'providerSecurityId' AS provider_security_id,
+           payload ->> 'name'               AS name,
+           coalesce(payload -> 'identifiers', '[]'::jsonb) AS identifiers,
+           coalesce(payload -> 'abstentions', '[]'::jsonb) AS abstentions,
+           occurred_at                      AS observed_at
+      FROM domain_events
+     WHERE user_id = ${userId}::uuid
+       AND event_type = 'investments.SecurityResolutionFailed'
+     ORDER BY payload ->> 'provider',
+              coalesce(payload ->> 'providerSecurityId', payload ->> 'name', ''),
+              seq DESC
+     LIMIT ${MAX_UNRESOLVED_EVENTS}
+  `);
+
+  const unresolved: UnresolvedSecurity[] = [];
+  for (const row of result.rows) {
+    if (unresolved.length >= MAX_UNRESOLVED_SECURITIES) break;
+    const resolved = await anyIdentifierNowResolved(
+      database,
+      userId,
+      row.provider,
+      row.identifiers,
+    );
+    if (resolved) continue;
+    unresolved.push({
+      provider: row.provider,
+      providerSecurityId: row.provider_security_id,
+      name: row.name,
+      abstentions: row.abstentions,
+      observedAt: new Date(row.observed_at).toISOString(),
+    });
+  }
+  return unresolved;
+}
+
+const unresolvedSecurityWire = z
+  .object({
+    provider: z.string(),
+    providerSecurityId: z.string().nullable(),
+    name: z.string().nullable(),
+    abstentions: z.array(
+      z.object({ tier: z.string(), reason: z.string(), detail: z.string().nullable() }),
+    ),
+    observedAt: z.string(),
+  })
+  .meta({ id: 'UnresolvedSecurity' });
 
 function effectiveHoldingOf(row: HoldingRow): HoldingRead {
   const derived: DerivedClassification = {
@@ -961,7 +1107,11 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           description:
             'One row per security, summed over every account that holds it. `unclassifiedPct` ' +
             'and each row’s `stale` are fields, not inferences: 07 §4.3 makes the first ' +
-            'normative and 07 §6.1 makes the second a statement about the clock at read time.',
+            'normative and 07 §6.1 makes the second a statement about the clock at read time. ' +
+            '`unresolved` (C-8, G3-11) lists positions the resolver could not identify at all — ' +
+            'user-wide rather than aggregated by security, because there is no security to key ' +
+            'them by; the event never carries an account id either, so this list is the same on ' +
+            'every account’s own holdings response.',
           tags: ['investments'],
           querystring: z.object({ asOf: dateOnly.optional(), basis: basisQuery }),
           response: {
@@ -973,6 +1123,7 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               unclassifiedPct: z.string(),
               holdings: z.array(aggregatedHoldingWire),
               excluded: z.array(excludedWire),
+              unresolved: z.array(unresolvedSecurityWire),
             }),
             ...problems(401, 503),
           },
@@ -1068,6 +1219,8 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           };
         });
 
+        const unresolved = await readUnresolvedSecurities(database, session.userId);
+
         return {
           asOf,
           basis,
@@ -1076,6 +1229,10 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           unclassifiedPct: allocation.unclassifiedPct,
           holdings,
           excluded: set.excluded.map((row) => ({ ...row })),
+          unresolved: unresolved.map((row) => ({
+            ...row,
+            abstentions: row.abstentions.map((a) => ({ ...a })),
+          })),
         };
       },
     );
@@ -1089,7 +1246,9 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           description:
             'Per-position lots with their ages, basis source, and an `unavailable` unrealized ' +
             'gain where the basis is unknown — 04 §5.5’s rule, carried onto the wire rather ' +
-            'than computed from a zero.',
+            'than computed from a zero. `unresolved` (C-8, G3-11) is the same user-wide list ' +
+            '`GET /holdings` carries, not filtered to this account: the resolution-failure event ' +
+            'never carries an account id, so there is nothing to filter by.',
           tags: ['investments'],
           params: z.object({ accountId: z.uuid() }),
           querystring: z.object({ asOf: dateOnly.optional(), basis: basisQuery }),
@@ -1131,6 +1290,7 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
                 }),
               ),
               excluded: z.array(excludedWire),
+              unresolved: z.array(unresolvedSecurityWire),
             }),
             ...problems(401, 404, 503),
           },
@@ -1213,6 +1373,8 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           });
         }
 
+        const unresolved = await readUnresolvedSecurities(database, session.userId);
+
         return {
           accountId: request.params.accountId,
           asOf,
@@ -1222,6 +1384,10 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           unclassifiedPct: allocation.unclassifiedPct,
           positions,
           excluded: set.excluded.map((row) => ({ ...row })),
+          unresolved: unresolved.map((row) => ({
+            ...row,
+            abstentions: row.abstentions.map((a) => ({ ...a })),
+          })),
         };
       },
     );

@@ -376,6 +376,7 @@ function holdingsResponse() {
       stale: holding.stale,
     })),
     excluded: [],
+    unresolved: [],
   };
 }
 
@@ -744,6 +745,7 @@ function accountHoldingsResponse(accountId: string) {
       })),
     })),
     excluded: [],
+    unresolved: [],
   };
 }
 
@@ -799,6 +801,7 @@ function allocationReport(dimension: 'asset_class' | 'region' | 'sector') {
     unclassifiedPct: UNCLASSIFIED[dimension].pct,
     unclassifiedValue: usd(UNCLASSIFIED[dimension].minor),
     excluded: [],
+    unresolved: [],
     includesCash: true,
     lookThrough: 'fund_level_only',
   };
@@ -832,6 +835,7 @@ function driftResponse(targets: readonly string[]) {
     proposalsWithheld: null,
     allocation: allocationReport('asset_class'),
     excluded: [],
+    unresolved: [],
   };
   if (targets.length === 0) {
     return { ...base, targetsSet: false, rows: [] };

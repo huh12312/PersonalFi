@@ -20,6 +20,7 @@ function seriesResponse(
     source?: string | null;
     correctionReason?: string | null;
   }>,
+  lastSnapshotFailure: { message: string; occurredAt: string } | null = null,
 ) {
   return {
     from: points[0]?.asOfDate ?? '2026-07-03',
@@ -43,6 +44,7 @@ function seriesResponse(
       accountsUnvalued: 0,
       correctionReason: p.correctionReason ?? null,
     })),
+    lastSnapshotFailure,
   };
 }
 
@@ -102,7 +104,7 @@ describe('NetWorthFullView', () => {
 
     renderFullView();
 
-    await screen.findByText('Every day in this window has an observed or corrected value.');
+    await screen.findByText('Every day in this window has a value.');
     expect(screen.queryByText(/never summed into one total/)).not.toBeInTheDocument();
   });
 
@@ -123,11 +125,42 @@ describe('NetWorthFullView', () => {
 
     renderFullView();
 
+    // Two independent claims in the same caption now (C-9, G3-12): whether
+    // any day is genuinely missing a value (it is not, here — both days
+    // have one) and, separately, how many were interpolated rather than
+    // observed or corrected.
+    expect(await screen.findByText(/^Every day in this window has a value\./)).toBeInTheDocument();
     expect(
-      await screen.findByText(
-        '1 day has no observation in this window and is interpolated from neighbouring days.',
+      screen.getByText(
+        /1 day is interpolated from neighbouring days rather than observed or corrected\./,
       ),
     ).toBeInTheDocument();
+  });
+
+  it('the caption names a genuinely missing day even when nothing is labelled interpolated', async () => {
+    stubFetchRoutes([
+      {
+        match: '/api/net-worth/series',
+        method: 'GET',
+        handle: () =>
+          jsonResponse(
+            seriesResponse([
+              { asOfDate: '2026-09-01', currency: 'USD', minor: '100000', source: 'observed' },
+              // No row at all for this day — `source` stays null (the shape
+              // a scheduled snapshot failure leaves behind), never
+              // 'interpolated'.
+              { asOfDate: '2026-09-02', minor: undefined, source: null },
+            ]),
+          ),
+      },
+    ]);
+
+    renderFullView();
+
+    expect(
+      await screen.findByText('1 day has no recorded value in this window.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/interpolated from neighbouring days/)).not.toBeInTheDocument();
   });
 
   it("distinguishes a sealed day from today's live (unsealed) row in the recent-day table", async () => {
@@ -214,11 +247,78 @@ describe('NetWorthFullView', () => {
     renderFullView();
     const user = userEvent.setup();
 
-    await screen.findByText('Every day in this window has an observed or corrected value.');
+    await screen.findByText('Every day in this window has a value.');
     expect(calls).toBe(1);
 
     await user.click(screen.getByRole('button', { name: 'Refresh' }));
 
     await waitFor(() => expect(calls).toBe(2));
+  });
+
+  it('surfaces a failed snapshot’s missing FX rate and lets the user enter it manually (C-9, G3-12)', async () => {
+    let posted: unknown = null;
+    stubFetchRoutes([
+      {
+        match: '/api/net-worth/series',
+        method: 'GET',
+        handle: () =>
+          jsonResponse(
+            seriesResponse([{ asOfDate: '2026-09-01', currency: 'USD', minor: '100000' }], {
+              message:
+                'no FX rate for CAD/USD on or before 2026-09-20 (consulted CAD/USD, USD/CAD).',
+              occurredAt: '2026-09-21T04:00:00.000Z',
+            }),
+          ),
+      },
+      {
+        match: '/api/net-worth/fx-rates',
+        method: 'POST',
+        handle: async ({ request }) => {
+          posted = await request.json();
+          return jsonResponse({ base: 'CAD', quote: 'USD', rateDate: '2026-09-20', rate: '1.35' });
+        },
+      },
+    ]);
+
+    renderFullView();
+    const user = userEvent.setup();
+
+    expect(
+      await screen.findByText(/Last night.s net worth snapshot could not run/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/no FX rate for CAD\/USD on or before 2026-09-20/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Enter this rate manually' }));
+
+    // Pre-filled from the parsed message — the user should not have to
+    // retype what the app already knows.
+    expect(screen.getByLabelText('Base')).toHaveValue('CAD');
+    expect(screen.getByLabelText('Quote')).toHaveValue('USD');
+    expect(screen.getByLabelText('Date')).toHaveValue('2026-09-20');
+
+    await user.type(screen.getByLabelText(/1 CAD =/), '1.35');
+    await user.click(screen.getByRole('button', { name: 'Save rate' }));
+
+    await waitFor(() =>
+      expect(posted).toEqual({ base: 'CAD', quote: 'USD', rateDate: '2026-09-20', rate: '1.35' }),
+    );
+  });
+
+  it('shows no FX-failure banner when the last snapshot succeeded', async () => {
+    stubFetchRoutes([
+      {
+        match: '/api/net-worth/series',
+        method: 'GET',
+        handle: () =>
+          jsonResponse(
+            seriesResponse([{ asOfDate: '2026-09-01', currency: 'USD', minor: '100000' }]),
+          ),
+      },
+    ]);
+
+    renderFullView();
+
+    await screen.findByText('Every day in this window has a value.');
+    expect(screen.queryByText(/net worth snapshot could not run/)).not.toBeInTheDocument();
   });
 });

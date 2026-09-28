@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { getNetWorthSeriesOptions } from '../../api/generated/@tanstack/react-query.gen.ts';
+import {
+  getNetWorthSeriesOptions,
+  setManualFxRateMutation,
+} from '../../api/generated/@tanstack/react-query.gen.ts';
 import { type NetWorthRange, windowForRange } from './search.ts';
 
 /** Today, UTC, date-only — matches `apps/api/src/routes/investments.ts`'s `todayFor` shape closely enough for a client-side default window. */
@@ -19,5 +22,23 @@ export function useNetWorthSeriesQuery(range: NetWorthRange) {
   return useQuery({
     ...getNetWorthSeriesOptions({ query: { from, to } }),
     staleTime: 10_000,
+  });
+}
+
+/**
+ * `POST /net-worth/fx-rates` — 08 §6.6's manual-entry affordance (C-9,
+ * G3-12): the form `NetWorthFullView` shows when `lastSnapshotFailure` names
+ * a missing rate. Invalidates every `GET /net-worth/series` query (not just
+ * the caller's own range) so a re-fetched window picks up the new rate on
+ * the very next scheduled or manually retried snapshot, whichever range the
+ * user is looking at.
+ */
+export function useSetManualFxRateMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    ...setManualFxRateMutation(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: getNetWorthSeriesOptions().queryKey });
+    },
   });
 }
