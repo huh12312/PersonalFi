@@ -17,22 +17,45 @@
  * side-effect-free function — no `expect` inside — so a **second** consumer
  * can run the same check the production engines are held to without
  * re-deriving the math. `test/reference.test.ts` is that second consumer: it
- * runs invariant 1 against WP 4.14's own cases D and E, which did not exist
- * when WP 4.5's suite was written and so are not covered by it. Every
- * function here calls the same production entry points WP 4.5 built
- * (`runMonteCarlo`, `projectDeterministic`, `toMonteCarloJob`,
- * `toMonteCarloSummary`) — nothing here reimplements engine math, which is
- * the "not duplicating" half of the dispatch's instruction.
+ * runs invariant 1 (`zeroVolatilityGap`) against WP 4.14's own cases D and E,
+ * which did not exist when WP 4.5's suite was written and so are not covered
+ * by it, and invariant 2 (`monotoneLeverCheck`) against case D over **both**
+ * `EngineKind`s. Invariant 1 itself is `'lognormal'`-only, by construction,
+ * not by an omission here: `montecarlo.ts`'s bootstrap draw takes its shock
+ * size from the return series' own variance
+ * (`equityShockSd = sqrt(12 * series.equityVariance)`), never from
+ * `capitalMarket.*.volatility`, so `withZeroVolatility` overrides an
+ * assumption `'bootstrap'` does not read and the invariant cannot hold there
+ * — confirmed empirically (a multi-hundred-thousand-dollar gap, `successMatches`
+ * false) before `test/reference.test.ts` was written to only claim
+ * `'lognormal'` for it, matching `src/engine/invariants.test.ts`'s own choice.
+ * Invariant 2 has no such constraint, which is where "both engines run" is
+ * actually exercised, against the synthetic series for `'bootstrap'` (never
+ * the fetched Shiller cache — the same reasoning WP 4.5's own suite and WP
+ * 4.13's perf seed use, so this reproduces on a fresh clone and in CI).
+ * `test/golden-drift.test.ts` is a further consumer, reusing `successCountFor`
+ * rather than re-deriving a success count from `runMonteCarlo`/
+ * `toMonteCarloJob` by hand. Every function here calls the same production
+ * entry points WP 4.5 built (`runMonteCarlo`, `projectDeterministic`,
+ * `toMonteCarloJob`, `toMonteCarloSummary`) — nothing here reimplements
+ * engine math, which is the "not duplicating" half of the dispatch's
+ * instruction. `series` is threaded through as an optional parameter
+ * (default `null`, `'lognormal'`-safe) precisely so a `'bootstrap'` caller
+ * does not hit `montecarlo.ts`'s `'the bootstrap engine needs a return
+ * series'` guard — the gap this module had when the killed session left it:
+ * every function below accepted an `EngineKind` but had no way to satisfy
+ * `'bootstrap'`'s one hard requirement.
  *
  * A future landing that refactors `src/engine/invariants.test.ts` to import
  * from here (rather than keep its own inline copies) is the natural next
  * step and is recorded as an open item in `wp4.14-quality.md`.
  */
 import { DateOnly } from '@core/kernel';
-import { applyOverrides, type Assumptions, type AssumptionsLike } from '../../src/assumptions.ts';
-import type { ProjectionPlan } from '../../src/engine/boundary.ts';
+import { applyOverrides, type Assumptions } from '../../src/assumptions.ts';
+import type { AssumptionsLike, ProjectionPlan } from '../../src/engine/boundary.ts';
+import type { ReturnSeries } from '../../src/engine/bootstrap.ts';
 import { projectDeterministic } from '../../src/engine/project.ts';
-import { PERCENTILE_LEVELS, runMonteCarlo, type EngineKind } from '../../src/engine/montecarlo.ts';
+import { runMonteCarlo, type EngineKind } from '../../src/engine/montecarlo.ts';
 import { toMonteCarloJob, type MonteCarloRequest } from '../../src/engine/worker-host.ts';
 
 /** 07 §8.4 invariant 1's setup: every capital-market volatility pinned to zero. */
@@ -65,7 +88,13 @@ export interface ZeroVolatilityGap {
 export function zeroVolatilityGap(
   plan: ProjectionPlan,
   assumptions: Assumptions,
-  options: { readonly seed: bigint; readonly paths: number; readonly engine: EngineKind },
+  options: {
+    readonly seed: bigint;
+    readonly paths: number;
+    readonly engine: EngineKind;
+    /** Required when `engine` is `'bootstrap'` (`montecarlo.ts` throws on `null`); ignored by `'lognormal'`. */
+    readonly series?: ReturnSeries | null;
+  },
 ): ZeroVolatilityGap {
   const still = withZeroVolatility(assumptions, DateOnly.parse('2026-09-26'));
   const request: MonteCarloRequest = {
@@ -74,6 +103,7 @@ export function zeroVolatilityGap(
     seed: options.seed,
     engine: options.engine,
     paths: options.paths,
+    series: options.series ?? null,
   };
   const result = runMonteCarlo(toMonteCarloJob(request));
   const deterministic = projectDeterministic(plan, still);
@@ -105,8 +135,10 @@ export function successCountFor(
   seed: bigint,
   engine: EngineKind,
   paths: number,
+  series: ReturnSeries | null = null,
 ): number {
-  return runMonteCarlo(toMonteCarloJob({ plan, assumptions, seed, engine, paths })).successCount;
+  return runMonteCarlo(toMonteCarloJob({ plan, assumptions, seed, engine, paths, series }))
+    .successCount;
 }
 
 export interface MonotoneCheck {
@@ -130,9 +162,10 @@ export function monotoneLeverCheck(
   engine: EngineKind,
   paths: number,
   direction: 'not_less' | 'not_more',
+  series: ReturnSeries | null = null,
 ): MonotoneCheck {
-  const base = successCountFor(basePlan, assumptions, seed, engine, paths);
-  const lever = successCountFor(leverPlan, assumptions, seed, engine, paths);
+  const base = successCountFor(basePlan, assumptions, seed, engine, paths, series);
+  const lever = successCountFor(leverPlan, assumptions, seed, engine, paths, series);
   return {
     base,
     lever,
@@ -159,9 +192,12 @@ export function p5RelativeStandardError(
   engine: EngineKind,
   seeds: readonly bigint[],
   paths: number,
+  series: ReturnSeries | null = null,
 ): P5Stability {
   const p5ByYear: number[][] = seeds.map((seed) => {
-    const result = runMonteCarlo(toMonteCarloJob({ plan, assumptions, seed, engine, paths }));
+    const result = runMonteCarlo(
+      toMonteCarloJob({ plan, assumptions, seed, engine, paths, series }),
+    );
     return Array.from(result.bands.subarray(0, result.years));
   });
   const years = p5ByYear[0]?.length ?? 0;

@@ -513,6 +513,26 @@ node scripts/check-numeric-boundaries.ts --self-test # fixtures only
 node scripts/check-numeric-boundaries.ts --explain   # list every exemption used
 ```
 
+**The alias hole, closed (WP 4.14).** Phase 4 is the first phase where `number`
+is legal _somewhere_ — the Monte Carlo/deterministic kernel's interior,
+reached through exactly one named pair of functions in
+`packages/contexts/planning/src/engine/boundary.ts` (`toEngineAmount` /
+`fromEngineAmount`, dispatch §5 risk 1). Before WP 4.14 the check was purely
+syntactic on `ts.SyntaxKind.NumberKeyword` and could not see `type
+EngineDollars = number` used as a return or property type — a same-file type
+alias hid the crossing from the checker entirely, so nothing forced it onto
+the `ALLOW_LIST`. `checkSource` now collects every local `type X = <TypeNode>`
+alias up front and resolves it (cycle-safe, however many hops) wherever a
+`number`-shaped type is checked, so `EngineDollars` is seen through and must
+be named on the `ALLOW_LIST` like anything else. Two entries were added: the
+boundary functions themselves, and a pre-existing, previously-invisible
+crossing in `packages/connectors/csv/src/csv.ts` (`ColumnRef = string |
+number`, which names _which column_ holds an amount, never the amount).
+`check-numeric-boundaries.test.ts` → `'a float assigned to a value inside the
+engine but outside the named boundary fails the check'` proves the resolution
+is not a blanket exemption for the file: a second, un-allow-listed file under
+`engine/` with the same alias shape still fails.
+
 ## Investments perf budgets, over real HTTP
 
 `apps/api/test/db/investments-perf.test.ts` (WP 3.14) measures `GET /holdings`,
@@ -584,3 +604,91 @@ Two perf files read it:
   (a one-dollar-larger `annual_spending` lever each time) so the service's own
   cache — proven in `wp4.6-projection-service.md` §2 — never turns a sample
   into a no-op.
+
+## The reference fixtures and the shared invariants module (WP 4.14)
+
+The §5 exit criterion — _"deterministic output within 1% of an independent
+reference calculator on the shipped fixtures"_ — is
+`packages/contexts/planning/test/reference.test.ts`, not a claim in a
+document. Two committed, independent references feed it, neither sharing code
+with the TypeScript engine or with each other:
+
+- **WP 4.4's `test/engine/fixtures/reference-projection.{csv,md,py}`** —
+  cases A, B, C, read through `test/engine/support.ts`'s
+  `referencePlan`/`referenceRows` rather than duplicated.
+- **WP 4.14's own `test/reference/independent-cases.{csv,md,py}`** — cases D
+  (a CPI-indexed pension offsetting spending) and E (the solver's `nominal`
+  target basis), each exercising an engine path A/B/C do not. Both a Python
+  `decimal` script and the literal OpenDocument `FV`/`PMT` formula text ship
+  beside the CSV (`independent-cases.md`), the same pattern
+  `wp3.14-quality.md` §4 and WP 4.4's own fixture established — a reference
+  nobody can re-derive is a claim, not a reference.
+
+**Why `reference.test.ts` lives at `test/reference.test.ts`, not
+`test/reference/reference.test.ts`.** The dispatch's literal path is the
+latter; the `planning` vitest project's `include` is `src/**/*.test.ts` and
+`test/*.test.ts` (a single `*`), so a spec nested under `test/reference/`
+is never collected — verified with `vitest list --project planning` both
+before and after. The fixtures (data, not specs) stay under `test/reference/`
+where the dispatch and this repo's `test/engine/fixtures/` precedent both put
+them; only the runnable spec moved up one level. `golden-drift.test.ts`
+(below) follows the same reasoning.
+
+**The control.** `'a deliberately wrong engine constant pushes a case outside
+1% and the test goes red'` sabotages the _assumptions_ input WP 4.2 exposes
+for exactly this (`diffOverrides`/`applyOverrides` — U.S. equity expected
+return, 0.065 → 0.30, case A's most leveraged constant since it is 100%
+equity), never engine source, so the tree is untouched after the test
+finishes — a tolerance nobody has watched fail is not a tolerance.
+
+**The shared invariants module.** 07 §8.4's engine invariants are already
+implemented, inline, by WP 4.5's `src/engine/invariants.test.ts` — outside WP
+4.14's ownership, and not edited here. `test/reference/invariants.ts` factors
+each invariant's _computation_ (no `expect` inside) out of that suite's
+shape into reusable, exported functions — `zeroVolatilityGap`,
+`successCountFor`, `monotoneLeverCheck`, `p5RelativeStandardError` — every
+one of which calls the same production entry points WP 4.5 built
+(`runMonteCarlo`, `toMonteCarloJob`, `projectDeterministic`), so nothing
+re-derives engine math. `test/reference.test.ts` is the module's first
+consumer: invariant 1 (zero volatility ⇒ MC median == deterministic path)
+against cases D and E, which did not exist when WP 4.5's suite was written;
+invariant 2 (success is monotone in savings rate) against case D, over
+**both** `EngineKind`s. Invariant 1 itself only runs `'lognormal'` — not an
+omission but the engine's own shape: `montecarlo.ts`'s bootstrap draw takes
+its shock size from the return series' own variance, never from
+`capitalMarket.*.volatility`, so a zero-volatility override is a no-op for
+`'bootstrap'` and the invariant cannot hold there (confirmed empirically,
+not asserted from the design doc alone, before the test was narrowed to
+`'lognormal'`). Invariant 2 has no such constraint, and is where "both
+engines" is genuinely exercised, against
+`test/engine/fixtures/synthetic-series.ts` for `'bootstrap'` — never the
+fetched Shiller cache, so it reproduces on a fresh clone and in CI.
+`test/golden-drift.test.ts` reuses `successCountFor` as a third consumer.
+
+## MC golden-value drift (WP 4.14)
+
+07 §8.5's release gate lists _"MC golden-value tests drift > 0.5pp"_ as a
+merge-blocking condition. `packages/contexts/planning/test/golden-drift.test.ts`
+wires it as a real CI assertion, not a document line: one fixed plan and
+seed, one committed "golden" success probability per `EngineKind`
+(`'lognormal'` parametric; `'bootstrap'` against the synthetic series, same
+reasoning as above), each run's current success probability compared to the
+committed constant and asserted within 0.5 percentage points.
+
+This is **not** a correctness control — `reference.test.ts` above already
+owns "is the number right." It is a **regression** control: the engine's own
+success probability, on a fixed plan and fixed shocks, should not move from
+release to release except when someone deliberately changes it, in which case
+the constant moves in the same commit with a note on why (07 §7.3's "why did
+it say $720" standard, applied to the engine's own baseline). It is also a
+**different** control from WP 4.11's `test/fixtures/golden-vector.json`
+(client projection worker vs. server engine, a parity check between two
+implementations of the same seed at one instant) — the two are not merged.
+
+The control test sabotages the same equity-return constant
+`reference.test.ts` does, through the same override path, and observes the
+0.5pp assertion go red before trusting it green.
+
+```bash
+pnpm exec vitest run --project planning test/reference.test.ts test/golden-drift.test.ts
+```

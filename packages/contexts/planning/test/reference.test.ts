@@ -43,9 +43,12 @@ import { describe, expect, it } from 'vitest';
 import { DateOnly } from '@core/kernel';
 import { applyOverrides, diffOverrides, loadAssumptions } from '../src/assumptions.ts';
 import type { ProjectionPlan } from '../src/engine/boundary.ts';
+import type { EngineKind } from '../src/engine/montecarlo.ts';
 import { projectDeterministic } from '../src/engine/project.ts';
 import { solveRequiredSavings } from '../src/engine/solve.ts';
 import { BASE, fixtureText, referencePlan, referenceRows, usd } from './engine/support.ts';
+import { syntheticSeries } from './engine/fixtures/synthetic-series.ts';
+import { monotoneLeverCheck, zeroVolatilityGap } from './reference/invariants.ts';
 
 const REFERENCE_DIR = join(dirname(fileURLToPath(import.meta.url)), 'reference');
 const assumptions = loadAssumptions();
@@ -240,5 +243,82 @@ describe('the committed references (the §5 exit criterion)', () => {
     const script = readFileSync(join(REFERENCE_DIR, 'independent-cases.py'), 'utf8');
     expect(script).not.toMatch(/from\s+deterministic|import\s+deterministic/);
     expect(script).not.toMatch(/^\s*(?:from|import)\s+.*reference[-_]projection/m);
+  });
+});
+
+describe("07 §8.4 invariant 1, against WP 4.14's own cases D and E (test/reference/invariants.ts)", () => {
+  // "zero volatility ⇒ Monte Carlo median == deterministic path (to floating
+  // tolerance)" — 07 §8.4 item 2, already proven for WP 4.4's cases A, B and
+  // a guardrails plan by `src/engine/invariants.test.ts` (bitwise, at the
+  // Money level, `engine: 'lognormal'` only — that file never asserts this
+  // invariant for `'bootstrap'`, because it structurally cannot hold there:
+  // `montecarlo.ts`'s `drawBootstrapYear` draws its shocks from the return
+  // series' own variance (`equityShockSd = sqrt(12 * series.equityVariance)`),
+  // not from `capitalMarket.*.volatility` — `withZeroVolatility` overrides an
+  // assumption the bootstrap engine never reads, so its median keeps the
+  // series' real spread even at "zero volatility". Confirmed empirically
+  // here first (`successMatches` false, a multi-hundred-thousand-dollar gap)
+  // before this file was written to only claim `'lognormal'`; the same
+  // both-engines exercise for this case pair runs invariant 2 below instead,
+  // which *does* hold for `'bootstrap'`.
+  //
+  // This block runs the same invariant's *computation* — the shared module
+  // `test/reference/invariants.ts` this WP wrote — against cases D (a CPI
+  // pension) and E (a `nominal` solver target), which WP 4.5's suite does not
+  // cover. The tolerance is wider than WP 4.5's bitwise check because
+  // `zeroVolatilityGap` recomputes a Money value from the summary's float
+  // band (`Math.round(x * 100)`, the module's own header names this an
+  // approximation) rather than comparing engine floats directly.
+  it('case D (CPI pension): the MC median agrees with the deterministic path', () => {
+    const gap = zeroVolatilityGap(planD(), assumptions, {
+      seed: 41n,
+      paths: 101,
+      engine: 'lognormal',
+    });
+    expect(gap.years).toBeGreaterThan(0);
+    expect(gap.successMatches).toBe(true);
+    expect(gap.maxAbsMinorDifference).toBeLessThan(200n); // under $2 across the whole horizon.
+  });
+
+  it('case E (nominal solver target): the MC median agrees with the deterministic path', () => {
+    const gap = zeroVolatilityGap(planE(), assumptions, {
+      seed: 43n,
+      paths: 101,
+      engine: 'lognormal',
+    });
+    expect(gap.years).toBeGreaterThan(0);
+    expect(gap.successMatches).toBe(true);
+    expect(gap.maxAbsMinorDifference).toBeLessThan(200n);
+  });
+});
+
+describe("07 §8.4 invariant 2, against WP 4.14's own case D (test/reference/invariants.ts, both engines)", () => {
+  // "success rate is monotone in savings rate" — the half of invariant 2 that
+  // does not need zero volatility, so unlike invariant 1 above it genuinely
+  // runs under both `EngineKind`s: `'lognormal'` parametric and `'bootstrap'`
+  // against the synthetic series (never the fetched Shiller cache, so this
+  // reproduces on a fresh clone and in CI, WP 4.5/4.13's precedent).
+  // `monotoneLeverCheck` compares the same seed's shocks (common random
+  // numbers), so the comparison holds exactly even at a small path count.
+  const engines: readonly EngineKind[] = ['lognormal', 'bootstrap'];
+
+  it.each(engines)('a larger contribution never lowers success — %s', (engine) => {
+    const lever: ProjectionPlan = {
+      ...planD(),
+      buckets: [
+        { bucket: 'TAX_DEFERRED', startingBalance: usd('90000'), annualContribution: usd('15000') },
+      ],
+    };
+    const result = monotoneLeverCheck(
+      planD(),
+      lever,
+      assumptions,
+      47n,
+      engine,
+      101,
+      'not_less',
+      engine === 'bootstrap' ? syntheticSeries() : null,
+    );
+    expect(result.holds, `base ${String(result.base)}, lever ${String(result.lever)}`).toBe(true);
   });
 });

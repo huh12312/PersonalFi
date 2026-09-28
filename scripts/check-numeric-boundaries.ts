@@ -265,7 +265,7 @@ const ALLOW_LIST: readonly AllowEntry[] = [
   {
     file: 'packages/contexts/planning/src/engine/boundary.ts',
     identifier: 'toEngineAmount',
-    why: "the named boundary-crossing function itself (dispatch §5 risk 1, WP 4.4's `boundary.ts` header): converts Money -> `EngineDollars`, the interior alias for `number`, at the single legal seam, rounded once on the way back out through `fromEngineAmount`. `fromEngineAmount` takes `EngineDollars` as its `dollars` parameter rather than returning it, and `dollars` does not match the magnitude pattern, so it needs no entry of its own — the crossing is still exactly one named pair. `boundary.test.ts`'s fast-check property is the proof that Money survives the round trip; `test/reference/reference.test.ts` (WP 4.14) is the proof that the numbers it produces are right.",
+    why: "the named boundary-crossing function itself (dispatch §5 risk 1, WP 4.4's `boundary.ts` header): converts Money -> `EngineDollars`, the interior alias for `number`, at the single legal seam, rounded once on the way back out through `fromEngineAmount`. `fromEngineAmount` takes `EngineDollars` as its `dollars` parameter rather than returning it, and `dollars` does not match the magnitude pattern, so it needs no entry of its own — the crossing is still exactly one named pair. `boundary.test.ts`'s fast-check property is the proof that Money survives the round trip; `test/reference.test.ts` (WP 4.14) is the proof that the numbers it produces are right.",
   },
 ];
 

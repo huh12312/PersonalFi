@@ -93,6 +93,25 @@ describe('check-numeric-boundaries, against fixtures', () => {
   it('runs its own --self-test clean', () => {
     expect(runSelfTest(REPO_ROOT)).toEqual([]);
   });
+
+  it('a float assigned to a value inside the engine but outside the named boundary fails the check', () => {
+    // The dispatch's own exit test (§3 WP 4.14) for the alias-aware extension:
+    // `boundary.ts`'s `EngineDollars = number` is legal only at the one named
+    // crossing (the ALLOW_LIST entry added above for `toEngineAmount`). A
+    // second file under `engine/` that declares the same kind of alias and
+    // hangs a `value` off it — never itself allow-listed — must still fail,
+    // proving the alias resolution added for `boundary.ts` does not amount to
+    // a blanket exemption for the file's *shape*, only for the one named file
+    // and identifier `checkTree` actually allow-lists.
+    const result = checkSource(
+      'packages/contexts/planning/src/engine/fake-crossing.ts',
+      ['type EngineDollars = number;', 'export interface Q { readonly value: EngineDollars }'].join(
+        '\n',
+      ),
+    );
+    expect(result.violations.map((violation) => violation.identifier)).toEqual(['value']);
+    expect(result.violations[0]?.kind).toBe('number-at-a-magnitude-boundary');
+  });
 });
 
 describe('check-numeric-boundaries, against the real tree', () => {
