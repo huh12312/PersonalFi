@@ -1,21 +1,40 @@
 // SPDX-License-Identifier: MIT
-import { fileURLToPath } from 'node:url';
 
-import { expect, test } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 import { injectAxe } from './support/axe.ts';
 import type { AxeViolation } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installNetworthMocks, SYNTHETIC_KEY_MARKER } from './support/mock-networth.ts';
+import { screenshotDir } from './support/screenshot-dir.ts';
 
-/** Same location `networth.spec.ts` and WP 3.11's `investments.spec.ts` write their own evidence screenshots to. */
-const SCREENSHOT_DIR = fileURLToPath(
-  new URL('../../../docs/evidence/phase-3/screenshots/', import.meta.url),
-);
+/**
+ * C-16, O-3 (WP 4.12c closed it for `networth.spec.ts` and
+ * `investments.spec.ts`; this file kept its own hardcoded evidence path and
+ * rewrote four committed `wp3.12-*.png` on every run — the hole the Phase 5
+ * planner noticed on 2026-09-28). Same mechanism as the other two specs: the
+ * `evidenceDir` test option from `playwright.config.ts`, a gitignored output
+ * directory by default, `PLAYWRIGHT_EVIDENCE_DIR` for a deliberate regeneration.
+ */
+interface EvidenceDirOptions {
+  readonly evidenceDir?: string;
+}
+
+const test = base.extend<EvidenceDirOptions>({
+  evidenceDir: [undefined, { option: true }],
+});
+
+let currentEvidenceDir: string | undefined;
+test.beforeEach(({ evidenceDir }) => {
+  currentEvidenceDir = evidenceDir;
+});
 
 async function shoot(page: Page, name: string): Promise<void> {
-  await page.screenshot({ path: `${SCREENSHOT_DIR}wp3.12-${name}.png`, fullPage: true });
+  await page.screenshot({
+    path: `${screenshotDir(currentEvidenceDir)}wp3.12-${name}.png`,
+    fullPage: true,
+  });
 }
 
 /**
