@@ -1,0 +1,8 @@
+case,age_in_final_year,years_from_start,measure,reference,formula
+D,44,10,wealth_end_real,247600.47,D_acc
+D,54,20,wealth_end_real,457902.50,D_acc
+D,64,30,wealth_end_real,738529.46,D_acc
+D,74,40,wealth_end_real,662944.96,D_dec
+D,84,50,wealth_end_real,562085.02,D_dec
+D,94,60,wealth_end_real,427497.54,D_dec
+E,64,30,required_monthly_real,1277.95,E_pmt

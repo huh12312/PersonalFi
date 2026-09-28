@@ -255,6 +255,18 @@ const ALLOW_LIST: readonly AllowEntry[] = [
     identifier: 'priceIncreaseAtMonth',
     why: 'a month index into the seed window (0-based), not a price.',
   },
+  // --- WP 4.14: alias resolution now sees through `type X = number` (and
+  // unions containing it), which surfaces two crossings invisible before.
+  {
+    file: 'packages/connectors/csv/src/csv.ts',
+    identifier: 'amount',
+    why: 'CsvColumnMapping.amount names WHICH column (by header text or 0-based index — `ColumnRef = string | number`) holds the signed amount for a row; it is the column reference, never the amount itself. Same shape as the `test/config.test.ts` mapping-literal exemption above, now caught on the source-side interface too because the check resolves the `ColumnRef` alias.',
+  },
+  {
+    file: 'packages/contexts/planning/src/engine/boundary.ts',
+    identifier: 'toEngineAmount',
+    why: "the named boundary-crossing function itself (dispatch §5 risk 1, WP 4.4's `boundary.ts` header): converts Money -> `EngineDollars`, the interior alias for `number`, at the single legal seam, rounded once on the way back out through `fromEngineAmount`. `fromEngineAmount` takes `EngineDollars` as its `dollars` parameter rather than returning it, and `dollars` does not match the magnitude pattern, so it needs no entry of its own — the crossing is still exactly one named pair. `boundary.test.ts`'s fast-check property is the proof that Money survives the round trip; `test/reference/reference.test.ts` (WP 4.14) is the proof that the numbers it produces are right.",
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -309,19 +321,64 @@ function exemptionFor(file: string, identifier: string, isParameter = false): st
   return null;
 }
 
-/** `number`, `number | null`, `number[]`, `readonly number[]`, `Record<K, number>`, `(number)`. */
-function mentionsNumber(type: ts.TypeNode | undefined): boolean {
+/**
+ * Every `type X = <TypeNode>` declared in this file, name → its right-hand
+ * side. Local only — a syntactic pass has no module graph to resolve an
+ * imported alias, which is why `boundary.ts`'s `EngineDollars` (declared and
+ * used in the same file) is exactly the case this closes and an alias
+ * re-exported from elsewhere is not: see the file header on the alias hole.
+ */
+function collectTypeAliases(source: ts.SourceFile): ReadonlyMap<string, ts.TypeNode> {
+  const aliases = new Map<string, ts.TypeNode>();
+  function visit(node: ts.Node): void {
+    if (ts.isTypeAliasDeclaration(node)) aliases.set(node.name.text, node.type);
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return aliases;
+}
+
+/**
+ * `number`, `number | null`, `number[]`, `readonly number[]`, `Record<K, number>`,
+ * `(number)` — **and, since WP 4.14, a local type alias that resolves to any
+ * of those**, however many hops away (cycle-safe via `seen`).
+ *
+ * Before WP 4.14 this was purely syntactic on `ts.SyntaxKind.NumberKeyword`
+ * and could not see `type EngineDollars = number` used as a return type: the
+ * "alias hole" the Phase 4 dispatch (§5 risk 1) names by name. WP 4.4's
+ * `boundary.ts` is the one place that hole is meant to be walked through on
+ * purpose, which is why closing it here does not delete the crossing — it
+ * turns it into a visible, written-down `ALLOW_LIST` entry instead of an
+ * invisible one.
+ */
+function mentionsNumber(
+  type: ts.TypeNode | undefined,
+  aliases: ReadonlyMap<string, ts.TypeNode> = new Map(),
+  seen: ReadonlySet<string> = new Set(),
+): boolean {
   if (type === undefined) return false;
   if (type.kind === ts.SyntaxKind.NumberKeyword) return true;
-  if (ts.isParenthesizedTypeNode(type)) return mentionsNumber(type.type);
+  if (ts.isParenthesizedTypeNode(type)) return mentionsNumber(type.type, aliases, seen);
   if (ts.isUnionTypeNode(type) || ts.isIntersectionTypeNode(type)) {
-    return type.types.some((member) => mentionsNumber(member));
+    return type.types.some((member) => mentionsNumber(member, aliases, seen));
   }
-  if (ts.isArrayTypeNode(type)) return mentionsNumber(type.elementType);
-  if (ts.isTypeOperatorNode(type)) return mentionsNumber(type.type);
-  if (ts.isTypeReferenceNode(type) && type.typeArguments !== undefined) {
-    // Record<string, number>, Map<string, number>, ReadonlyArray<number>, ...
-    return type.typeArguments.some((argument) => mentionsNumber(argument));
+  if (ts.isArrayTypeNode(type)) return mentionsNumber(type.elementType, aliases, seen);
+  if (ts.isTypeOperatorNode(type)) return mentionsNumber(type.type, aliases, seen);
+  if (ts.isTypeReferenceNode(type)) {
+    if (
+      type.typeArguments !== undefined &&
+      // Record<string, number>, Map<string, number>, ReadonlyArray<number>, ...
+      type.typeArguments.some((argument) => mentionsNumber(argument, aliases, seen))
+    ) {
+      return true;
+    }
+    const name = ts.isIdentifier(type.typeName) ? type.typeName.text : null;
+    if (name !== null && !seen.has(name)) {
+      const resolved = aliases.get(name);
+      if (resolved !== undefined) {
+        return mentionsNumber(resolved, aliases, new Set([...seen, name]));
+      }
+    }
   }
   return false;
 }
@@ -350,6 +407,9 @@ export function checkSource(file: string, text: string): CheckResult {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const violations: Violation[] = [];
   const exemptions: Exemption[] = [];
+  // Collected once, up front, so a `type X = number` alias is seen through
+  // regardless of whether its declaration appears above or below its use.
+  const aliases = collectTypeAliases(source);
 
   function lineOf(node: ts.Node): number {
     return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
@@ -375,7 +435,7 @@ export function checkSource(file: string, text: string): CheckResult {
     ) {
       const identifier = nameTextOf(node.name);
       if (identifier !== null) {
-        if (mentionsNumber(node.type)) {
+        if (mentionsNumber(node.type, aliases)) {
           report(
             node,
             identifier,
@@ -403,7 +463,7 @@ export function checkSource(file: string, text: string): CheckResult {
       (ts.isFunctionDeclaration(node) ||
         ts.isMethodDeclaration(node) ||
         ts.isMethodSignature(node)) &&
-      mentionsNumber(node.type)
+      mentionsNumber(node.type, aliases)
     ) {
       const identifier = nameTextOf(node.name);
       if (identifier !== null) {
@@ -417,7 +477,7 @@ export function checkSource(file: string, text: string): CheckResult {
     }
 
     // --- `type Price = number`.
-    if (ts.isTypeAliasDeclaration(node) && mentionsNumber(node.type)) {
+    if (ts.isTypeAliasDeclaration(node) && mentionsNumber(node.type, aliases)) {
       report(
         node,
         node.name.text,
