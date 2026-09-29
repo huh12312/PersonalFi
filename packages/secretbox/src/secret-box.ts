@@ -69,6 +69,26 @@ const KEYRING_COLUMN = 'wrapped_key';
 const KEK_SCOPE = 'kek';
 
 /**
+ * `encryption_keys_scope_version_key` (migration 0002): `UNIQUE (user_id,
+ * kind, scope, version)`. Two processes racing `unlock()` on a cold install
+ * both find no KEK row, both derive a KEK under their own random salt, and
+ * both attempt `INSERT ... version = 1` — G4-2
+ * (`docs/evidence/phase-4/gate-security-review.md` §3.2, §6 row **C-2**).
+ * `pg`'s unique-violation error carries this exact index name as `.constraint`
+ * (duck-typed, not `instanceof`, for the same reason `isAssumptionsRefusal`
+ * gives: the queryable is `SecretBoxQueryable`, not `pg.Pool`, and a second
+ * copy of `pg` in the tree must not defeat this check).
+ */
+const KEK_RACE_CONSTRAINT = 'encryption_keys_scope_version_key';
+
+function isKeyringRaceLoss(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const code = (error as { code?: unknown }).code;
+  const constraint = (error as { constraint?: unknown }).constraint;
+  return code === '23505' && constraint === KEK_RACE_CONSTRAINT;
+}
+
+/**
  * The constant a KEK row seals so `unlock` can tell "right passphrase" from
  * "wrong passphrase" without touching a DEK. It is public; its confidentiality is
  * irrelevant, only the authenticity of its tag matters.
@@ -147,9 +167,19 @@ export class SecretBox {
     const existing = await findActiveKeyByScope(this.#db, this.#userId, 'kek', KEK_SCOPE);
     if (existing === null) {
       await this.#initialiseKeyring(passphrase);
-      return this.#kek.state();
+    } else {
+      await this.#unlockAgainstRow(existing, passphrase);
     }
+    return this.#kek.state();
+  }
 
+  /**
+   * Derive against a KEK row already on disk, verify, and install — the
+   * "someone already initialised this keyring" half of `unlock()`, factored
+   * out so `#initialiseKeyring`'s race-recovery path (C-2) can reach it too
+   * once it has re-read the winner's row.
+   */
+  async #unlockAgainstRow(existing: EncryptionKeyRow, passphrase: string): Promise<void> {
     if (existing.salt === null || existing.params === null) {
       throw new SecretBoxError('envelope_malformed', 'KEK row is missing its salt or parameters');
     }
@@ -166,7 +196,7 @@ export class SecretBox {
     if (opened === null) {
       wipe(derived.key);
       this.#kek.lock('passphrase_mismatch');
-      return this.#kek.state();
+      return;
     }
 
     const belowFloor = !this.#meetsFloor(existing.params);
@@ -176,7 +206,6 @@ export class SecretBox {
       { ...existing.params, durationMs: derived.durationMs },
       belowFloor,
     );
-    return this.#kek.state();
   }
 
   unlockState(): UnlockState {
@@ -376,17 +405,43 @@ export class SecretBox {
     const derived = await deriveKek(passphrase, salt, this.#kdfParams, () => this.#clock.nowMs());
     const id = newId();
     const verifier = this.#wrapUnder(derived.key, id, version, new Uint8Array(KEK_VERIFIER));
-    await insertKey(this.#db, {
-      id,
-      userId: this.#userId,
-      kind: 'kek',
-      scope: KEK_SCOPE,
-      version,
-      wrappedKey: verifier,
-      kekVersion: version,
-      salt,
-      params: this.#kdfParams,
-    });
+    try {
+      await insertKey(this.#db, {
+        id,
+        userId: this.#userId,
+        kind: 'kek',
+        scope: KEK_SCOPE,
+        version,
+        wrappedKey: verifier,
+        kekVersion: version,
+        salt,
+        params: this.#kdfParams,
+      });
+    } catch (error) {
+      wipe(derived.key);
+      if (!isKeyringRaceLoss(error)) throw error;
+      // G4-2 / C-2: another process (another `unlock()`, or `bootstrap-user`
+      // itself) already inserted generation `version` for this scope between
+      // our read above and our INSERT — certain rather than rare, because
+      // Argon2id derivation (seconds) outlasts a cold-install race window by
+      // orders of magnitude. The loser never installed a KEK that disagrees
+      // with the stored verifier (this catch runs before `this.#kek.install`
+      // above), so re-reading the winner's row and deriving against *its*
+      // salt is safe: both processes end up agreeing with the one row that
+      // exists, instead of the loser crashing and Compose restarting it.
+      const winner = await findActiveKeyByScope(this.#db, this.#userId, 'kek', KEK_SCOPE);
+      if (winner === null) {
+        // The winner's row is gone by the time we looked (retired between
+        // its INSERT and our SELECT) — a state stranger than the race this
+        // guards, refused rather than looped.
+        throw new SecretBoxError(
+          'envelope_malformed',
+          `lost the keyring-initialisation race on ${KEK_RACE_CONSTRAINT} but no active KEK row exists to recover from`,
+        );
+      }
+      await this.#unlockAgainstRow(winner, passphrase);
+      return;
+    }
     this.#kek.install(
       derived.key,
       version,

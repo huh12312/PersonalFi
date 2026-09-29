@@ -126,6 +126,16 @@ export interface EnsureOptions {
    * which egress policy); omitted, a missing cache is a refusal.
    */
   readonly download?: () => Promise<Uint8Array>;
+  /**
+   * The derivation step, injected for the same reason `download` is: a test
+   * proving CK2's fetch-side pin refusal (the gate's `bad-download-fetch.test.ts`,
+   * `docs/evidence/phase-5/wp5.13-carry-overs.md` §1) needs a download that
+   * **parses and derives successfully to the wrong bytes**, not one that
+   * fails to parse at all — building a real BIFF8 workbook is out of
+   * proportion to that one branch. Omitted, the real `deriveShillerMonthly`
+   * runs, exactly as production always calls it.
+   */
+  readonly derive?: (file: Uint8Array) => { readonly csv: string };
 }
 
 /** Fetch-on-first-run: load the cache, or fill it from the downloader and verify against the pin. */
@@ -135,7 +145,8 @@ export async function ensureReturnSeries(options: EnsureOptions = {}): Promise<R
   if (existsSync(join(cacheDir, SERIES_FILE)) || options.download === undefined) {
     return loadReturnSeries(cacheDir, checksumFile);
   }
-  const derived = deriveShillerMonthly(await options.download());
+  const derive = options.derive ?? deriveShillerMonthly;
+  const derived = derive(await options.download());
   const actual = sha256Hex(derived.csv);
   const pinned = pinnedSha256(checksumFile);
   if (actual !== pinned) {

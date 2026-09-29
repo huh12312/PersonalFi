@@ -1621,6 +1621,23 @@ async function newestNetWorthDay(
  * holder and the baseline scenario — and `readProjection` then re-reads the run
  * by `(user_id, id)`, a third. A fork's run is a what-if and never the plan
  * R2 speaks about.
+ *
+ * C-1 (G4-1)/§3.11: ordered `method = 'monte_carlo'` first, then `createdAt`
+ * within each tier — never plain `createdAt` alone. The nightly
+ * `planning.projection_refresh` writes a `monte_carlo` baseline run once a
+ * process has a series bound; the api's own interactive
+ * `POST …/projections` (no explicit `method`) still writes a `deterministic`
+ * run on every reload (`projection-service.ts`'s default). Ordering by
+ * `createdAt` alone means the next reload's deterministic run — newer by
+ * definition — permanently outranks the nightly Monte Carlo run for R2 (and
+ * every other reader of this port), so the one real probability figure the
+ * install has computed is hidden behind a one-path 0/1 the moment anyone
+ * looks at the plan screen again. A `monte_carlo` run, however old, is
+ * preferred over any `deterministic` run; recency only breaks ties inside one
+ * method. This is a *preference*, not a staleness filter — `readProjection`
+ * already answers `stale` when the run's assumptions version or overrides no
+ * longer match, and that check runs unchanged after this function returns an
+ * id.
  */
 async function newestBaselineRunId(
   database: Database,
@@ -1631,7 +1648,11 @@ async function newestBaselineRunId(
     .select({ id: projectionRuns.id })
     .from(projectionRuns)
     .where(and(eq(projectionRuns.userId, userId), eq(projectionRuns.scenarioId, baselineId)))
-    .orderBy(desc(projectionRuns.createdAt), desc(projectionRuns.id))
+    .orderBy(
+      sql`case when ${projectionRuns.method} = 'monte_carlo' then 0 else 1 end`,
+      desc(projectionRuns.createdAt),
+      desc(projectionRuns.id),
+    )
     .limit(1);
   return rows[0]?.id ?? null;
 }

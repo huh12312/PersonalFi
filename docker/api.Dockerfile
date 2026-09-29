@@ -126,6 +126,17 @@ RUN apk add --no-cache tini age=1.3.1-r6 && \
     addgroup -g 10001 -S app && \
     adduser -u 10001 -S -G app -H -D -s /sbin/nologin app
 
+# C-1 (G4-1). `returns_cache` is an *empty* named volume on a cold `compose up`
+# (compose.yml mounts it on both `api` and `worker`): Docker seeds a fresh
+# volume's ownership from whatever already exists at the mount point inside
+# the image at the moment it is first bound, and nothing created this
+# directory, so it inherited root:root 0755 and the worker (uid 10001) could
+# never write the fetched series to it (`EACCES`, reproduced in
+# docs/evidence/phase-5/wp5.13-carry-overs.md §1). Creating the directory here,
+# owned by 10001:10001, means the volume inherits that ownership instead — no
+# `chown`, no root exec, no `--user` needed at fetch time (C-1 (b)).
+RUN mkdir -p /var/lib/personalfi/returns && chown 10001:10001 /var/lib/personalfi/returns
+
 WORKDIR /app
 ENV NODE_ENV=production \
     TZ=UTC \
