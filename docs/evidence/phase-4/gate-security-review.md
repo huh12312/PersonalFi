@@ -341,7 +341,9 @@ went red on the first try every time they were aimed at a named exit test (30 of
 greens cluster in three places: (i) **scoping predicates** whose only tests are
 route-level and which sit on the first read of their path (G4-4); (ii) the **4.12c
 surfaces** (C-8/C-9 route halves, C-13) whose evidence says, honestly, that no test could
-be written in the granted files — and whose commit message says the opposite (G4-2, G4-5);
+be written in the granted files — and whose commit message says the opposite (G4-5, G4-8;
+_renumbered by the finishing reviewer — this line said "G4-2" before §3.2 assigned that
+number to the KEK race_);
 (iii) two "never" claims whose tests look in the wrong place (employer stock at the
 composition root, G4-7; the imported alias, G4-6). This gate wrote no permanent test.
 
@@ -410,6 +412,244 @@ row is written. The C-1 test (`worker-account-holder-poll.test.ts`) drives a fak
 either: its worker only ever came back after the row existed. Not fixed in place — the fix
 is in key custody (on a unique violation, re-read the winner's row and unlock against its
 salt), and a gate does not edit the KEK path; → C-2.
+
+**Resume (finishing reviewer, 2026-09-28 ~21:00 EDT).** The first reviewer was killed by an
+account limit here. A second Opus `security-engineer` continued from this file with the stack
+still up (all five services `healthy`, ~5 h; `RestartCount` unchanged since §3.2), the
+override, the `returns_cache` volume and `/tmp/gate4/` intact. Nothing was rebuilt; the
+cold-boot observations above stand as recorded. The walk driver is
+`/tmp/gate4/walk/lib.mjs` (Playwright Chromium, persistent profile, the CDP virtual
+authenticator re-imported from the credential saved at enrolment). One harness change:
+`waitUntil: 'networkidle'` never settles because the shell holds `GET /api/sync/stream`
+(SSE) open, so every probe waits for `load` plus a fixed 6 s.
+
+### 3.3 `/plan` as a fresh install sees it
+
+| Observation | Result |
+| --- | --- |
+| nav | `Plan` present in the Wealth group, active state on `/plan` |
+| first paint, zero accounts, no baseline | an empty state, **"Start your plan"** — plan name (`My plan`), birth date, retirement age `65`, plan end age `95`, annual retirement spending "optional — leave blank to derive it from your observed spending". No fan chart, no fabricated number, no error banner |
+| API calls on load | `GET /auth/session`, `/sync/stream`, `/plan/life-events`, `/assumptions`, `/connections`, `/plan/scenarios` — **all 200, zero 4xx/5xx** (every one of the five new Phase 4 prefixes that the screen touches reaches the api through Caddy, not the SPA shell) |
+| screenshot | `gate-03-plan-fresh.png` |
+
+### 3.4 Baseline through the UI; what the screen does with a 409
+
+Submitted the empty-state form (birth date 1980-06-15, the other fields as defaulted,
+spending blank → "derive"). `POST /plan/scenarios` **201**; the baseline reads back with a
+stored `seed` (`"13551924450590139445"` — a string, never a JSON number), `annualSpending:
+null`, `withdrawalPolicy: guardrails`, `taxDeferredRate: "0.22"`. The screen then posts
+`POST /plan/scenarios/{id}/projections` **twice, both 409**:
+`planning.projection_no_balances` — "no sealed net-worth day exists yet; a projection starts
+from a sealed day (08 §3.5)". The server is right: this install has no sealed
+`net_worth_daily` row, and refusing is the §5 "never reads a live balance" control behaving
+as designed.
+
+**What the user sees** (`gate-04-plan-baseline.png`): the headline **"Projecting your
+plan…" indefinitely**, an empty chart frame with the band legend, and — directly below it —
+the "Try adjustments" panel showing **"Median at age 94: $177,339 — 61% of simulated paths
+succeed"**, computed in the browser from a **$250,000 starting balance, $1,500/month
+savings and $40,000/year spending that this user never entered** (the install has zero
+accounts). Two findings:
+
+- **G4-10 (Medium) — the plan screen swallows every projection error.**
+  `PlanScreen.tsx` branches on `projectionQuery.isLoading` and `run !== null` only; the
+  query's `isError` is never read. Every refusal the server words carefully —
+  `projection_no_balances` here, `planning.monte_carlo_unavailable` on every install that has
+  not run the operator fetch (§3.9, G4-1), `projection_balances_unsealed` — becomes a spinner
+  sentence that never resolves. This is the "silent false state" shape Phases 1 and 3 each
+  shipped once (the SPA-shell 200s; the placeholder hero net worth). Not fixed in place: the
+  honest rendering needs copy per problem code and a test per state, a WP not a one-liner.
+- **G4-11 (Medium) — the slider preview presents a success rate computed from placeholder
+  money.** `sliders/buildPreviewJob.ts:57–59` seeds `DEFAULT_STARTING_BALANCE = 250_000`,
+  `DEFAULT_MONTHLY_SAVINGS = 1_500`, `DEFAULT_ANNUAL_SPENDING = 40_000` whenever the profile
+  is silent, and the starting balance **always** (the header discloses it: "seeded from a
+  placeholder default when nothing better is known"). The panel's caption says it is "a
+  quick, local what-if preview", but the sentence it renders — a median in dollars and "61% of
+  simulated paths succeed" — reads as the user's number, and on this install it is the only
+  number on the screen. The Phase 3 gate's G3-2 (`$88,904.00` placeholder hero) is the
+  precedent. Remedy: seed the starting balance from the sealed net-worth figure the
+  projection uses (or show no preview until one exists), and label placeholder levers as such.
+
+**Also observed here (feeds G4-10):** the plan screen never sends `allowOpenDay`, and a
+fresh install has no sealed day until the first `planning.net_worth_snapshot` that runs
+after 02:00 local on the **following** day (`seal.ts` `isSealable`). So the fan chart of a
+genuinely new install is empty until roughly 04:00 the next morning, with nothing on screen
+saying why. There is no user-authored goal or questionnaire on screen at all — see §3.6.
+
+### 3.5 The operator series fetch — why it failed, reproduced
+
+RUNBOOK.md has **no step** for the return series (grep: no "return series", "returns",
+"Monte Carlo" or `fetch.ts` anywhere in it). The only instructions are the fetch script's
+own header and a compose comment ("An operator fetches WP 4.5's pinned return series onto
+it once"). Run as documented, inside the worker (the one service that mounts the volume):
+
+```
+docker compose exec -T worker node packages/contexts/planning/data/returns/fetch.ts --cache-dir /var/lib/personalfi/returns
+source last-modified: Wed, 02 Sep 2026 17:51:53 GMT
+source sha256:       044196da… (1674752 bytes; not pinned)
+window:              1871-02..2024-12, 1847 months
+cross-check vs Shiller's index columns: equity 4.44e-16, bond 4.44e-16
+derived sha256:      cbdefda1752eac2bd393efbae29a8dfb8d0af2b79a9d7cf2baa5f0e292851e80
+matches the pin
+Error: EACCES: permission denied, open '/var/lib/personalfi/returns/shiller-monthly.csv'
+```
+
+The download, the derivation and the checksum pin all work from this host. **The write
+fails because Docker created the `returns_cache` named volume `root:root 0755`** (the mount
+point does not exist in the image, so nothing seeds its ownership) and the worker runs as
+`10001:10001`. This is the first attempt's failure, now with its reason. It is not host
+state: it happens on every compose install. Together with the facts below it forms
+**G4-1**:
+
+- **(a)** the worker, the only service with the volume, cannot write it (above);
+- **(b)** the **api has neither the volume nor `PLANNING_RETURNS_CACHE_DIR`** (`compose.yml`
+  mounts `returns_cache` on `worker` only; its comment says "`api` binds no `monteCarlo`"),
+  yet `app.ts:498` builds the interactive route's runner from that variable. So every
+  interactive `POST /plan/scenarios/{id}/projections` asking for Monte Carlo is bound to
+  `null` on every compose install, whatever an operator fetches;
+- **(c)** `createMonteCarloRunnerFromCache` reads the series **once at process start**, so
+  a successful fetch has no effect until a restart, and no document says so;
+- **(d)** RUNBOOK has no step at all.
+
+Consequence: exit criterion "10k paths ≤ 800 ms" is met by the engine, but **no shipped
+install can serve a Monte Carlo projection to the user**. Severity is ruled in §4
+(`HIGH` candidate: it is the phase's headline feature, and it fails silently on screen per
+G4-10). Not fixable in place in one file: the remedy spans `docker/api.Dockerfile` (create
+`/var/lib/personalfi/returns` owned by 10001 — the image has no `mkdir`/`chown` for it today so an empty volume inherits it), `compose.yml`
+(mount it read-only on `api` with the variable), and a RUNBOOK step including the restart →
+C-1.
+
+### 3.6 A goal and the risk questionnaire — through the API, because there is no screen
+
+**There is no screen for either.** `apps/web/src` has no file that calls `/goals`,
+`/goals/{id}/contributions` or `/risk-profile` (grep over every non-generated `.ts`/`.tsx`;
+the word "risk" appears only in `recurring`'s `AT_RISK` and two comments). The plan
+screen's "Set goal" form writes `goalTargetMinor`/`goalDate` into the **URL**
+(`features/plan/search.ts`, a disclosed WP 4.10 simplification: "building a full
+goal-management screen is outside this WP's five named exit tests"). WP 4.10's brief in 04 §3
+never asked for a questionnaire screen, yet 04 §5 item 3 makes "the questionnaire is
+answered inconsistently and the score moves conservative **on screen**" a walk step. A
+user of the UI alone therefore never creates a `goals` row, so `GoalOffTrack` (and every
+R-rule reading `goals.list`) can never fire for them, and never has a risk profile. →
+**G4-12 (Medium)**: the phase's user-authored planning inputs (goals, contributions, risk
+questionnaire, earmarks) are API-only; the gate step is unwalkable on screen. This is a
+planning gap between 04 §3 and 04 §5, not a WP failing its brief.
+
+Walked instead through the same session in the real browser (same-origin `fetch` with the
+CSRF echo, through Caddy):
+
+| Step | Result |
+| --- | --- |
+| `GET /risk-profile` | 200, instrument `risk-v1`, six items — three dispositions (drawdown, volatility, risk identity) each asked twice, `stated` and `revealed`; every `revealed` item has a `no_evidence` option with `points: null`. `current: null` |
+| `PUT /risk-profile`, consistent (stated 5 / revealed 5 ×3) | 200 — `aggressive`, composite **30**/30, penalty **0**, "Your answers were consistent." |
+| `PUT /risk-profile`, **inconsistent** (stated 5 ×3; revealed `sold_all` 1, `stocks_under_20` 1, `mostly_safe` 2), with an income of $140,000 single | 200 — **`conservative`, composite 8**, unpenalised 19, **penalty 11**, `toleranceIfAveraged: moderate`. Every disposition's sentence names both answers: "…The score takes the more conservative answer, 1, not the average, 3. Penalty 4." Total: "Averaging the two framings would have given 19 (moderate); the 11-point consistency penalty is the difference." **The score moved conservative, and the penalty is shown in words** |
+| stored `risk_profile` rows | two rows (history kept); `tax_bracket_band` `22-32` on the second, `NULL` on the first (income declined). **The income never reaches the row**: `row_to_json(t)::text ~ '14000000'` is false on both |
+| `POST /goals` retirement, $3,000,000 by 2045-06-15, priority 1, funded from the three investment accounts | 201, `status: active` |
+
+### 3.7 Balances, a sealed day, and the first projection on the shipped api
+
+**Seed.** One manual connection (`POST /connections`, provider `manual`, step-up — 201):
+checking $30,000, brokerage $180,000, 401k $320,000, Roth IRA $60,000, balances recorded
+through `POST /accounts/{id}/balance` (200 ×4) with `asOf` 2026-09-26T16:00Z.
+
+**First snapshot tick.** `UPDATE schedules SET next_run_at = now()` on
+`planning.net_worth_snapshot` (the Phase 3 precedent — the real scheduler then enqueues and
+the real runner executes). The scheduler enqueued at 00:52:24Z with `run_after` 01:00:06Z;
+the job `succeeded` at 01:00:09Z. `net_worth_daily` 2026-09-28, revision 1, **open**,
+`net_worth_minor 3000000`, `accounts_counted 1`, **`accounts_unvalued 3`**: an investment
+account is valued only as Σ quantity × price (`net-worth.ts` `valueByQuantityTimesPrice`,
+"never backfilled by transaction subtraction"), and a manual investment account has no
+holdings, so its hand-entered balance — accepted with 200 — counts nowhere. Honest by the
+module's own rule (unvalued, not zero), and observation **O-2**: nothing on the balance
+route or the plan screen tells a user that the $560,000 they just typed is outside the
+projection.
+
+**Walk accommodation — one row's date.** Sealing needs a snapshot after 02:00 local on the
+following day (§3.4), about seven hours away. The gate moved the one open row's
+`as_of_date` from 2026-09-28 to 2026-09-27 (`UPDATE net_worth_daily … WHERE sealed_at IS
+NULL`) — the row the real snapshot would have written had it run on the 27th, since every
+balance was observed on the 26th — and fired the schedule again. The **real code** then
+sealed 2026-09-27 (`sealed_at 01:08:39Z`) and computed 2026-09-28 as the new open day
+(job `succeeded` 01:08:39Z). No other row was written by hand at any point in the walk.
+
+**What the screen and the api did next:**
+
+| Request | Result |
+| --- | --- |
+| `/plan` reload (the UI's own call, body `{}`) | **422 ×2 `planning.projection_spending_unknown`** — "the baseline states no retirement spending and none could be derived from twelve months of spending (09 GOAL-4); state it in the baseline". The empty-state form's own hint ("leave blank to derive it from your observed spending") leads straight here on any install without twelve months of history, and **once a baseline exists the UI has no field to state spending** (the form renders only in the empty state). Screen: "Projecting your plan…" again (`gate-05-plan-sealed-no-series.png`) → adds to G4-10 |
+| baseline upsert via API (spending $60,000; contributions TAX_DEFERRED $23,000, ROTH $7,000, TAXABLE $6,000; SS PIA $2,800 at 67y0m, `stressAfter2034`) | 201, **same id and seed** (`13551924450590139445`) — the upsert keeps both, as documented |
+| `POST …/projections` `{}` | **200 `computed`**, `method: deterministic`, `paths: 1`, `engineVersion personalfi.deterministic/1`, `asOfDate 2026-09-27`, **`balancesSealed: true`**, `assumptionsVersion sha256:d2947…`, `successProbability: "1.000000"` (a string), 11 ms |
+| `POST …/projections` `{"method":"monte_carlo","paths":10000}` | **409 `planning.monte_carlo_unavailable`** — "no Monte Carlo engine is bound in this process (WP 4.5); the deterministic projection is available, and is never substituted silently" — the honest refusal, on the shipped wiring (G4-1 (b)) |
+| `/plan` reload | the chart draws (`gate-06-plan-deterministic.png`): one line, **labelled "median" in words on the line itself and in the legend**; x-axis 2030…2070; the three band swatches in the legend with no bands drawn |
+
+**G4-13 (Medium) — the headline states a deterministic path as a probability.** The
+headline reads **"You're on track for +$46,821.89 at age 94 — 100% of plans succeed."** The
+run behind it is `method: deterministic, paths: 1`: its `successProbability` can only be 0
+or 1, and "100% of plans succeed" presents that as a Monte Carlo result. Nothing on the
+screen names the engine (`PlanScreen.tsx`/`FanChart.tsx` never read `run.method`; the page
+text contains "determin…" nowhere). Directly below, the slider panel says **"65% of
+simulated paths succeed"** from its placeholder $250,000 (G4-11). One screen, two
+success figures, neither honestly labelled — and because of G4-1 the deterministic one is
+what **every** shipped install shows. The server keeps its promise ("never substituted
+silently"); the screen breaks it one layer up. The "on track" wording also ignores the
+active $3,000,000 goal, which this run cannot meet (§3.8).
+
+### 3.8 The dotted gap line, and every assumption cited
+
+Driven in the browser (`/tmp/gate4/walk/08-gap.mjs`):
+
+| Step | Result |
+| --- | --- |
+| "Set goal" $3,000,000 by 2045-06-15, ceiling $5,000/mo | the dotted gap line renders; accessible name "Calculate the monthly saving required to close the gap between the projected path and your goal" |
+| gap line clicked | `POST /plan/required-savings` **200** → **"Save an additional $3,642.27 per month to reach this goal."** (`gate-07-required-savings.png`). The `Money` component prints it as "+$3,642.27" — a sign on a required amount, cosmetic (O-3) |
+| "Set goal" $10,000,000 by 2027-01-01, ceiling $2,000 → gap clicked | 200 → **"This goal is unreachable: the target date is less than a year away: there is no whole year left in which an additional contribution could be made and grow"** — the constraint named in words; **0** `.money-sensitive` elements inside the unreachable block; no "Save an additional" (`gate-08-required-savings-unreachable.png`) |
+| the goal's persistence | the URL now carries `goalTargetMinor="1000000000"&goalDate=2027-01-01…`; nothing was written to `goals` (G4-12) |
+| assumptions panel, no click | header "Assumptions file version sha256:d294715e…. 92 cited figures." **92 `Source:` lines, 92 with `· As of YYYY-MM-DD`**, five distinct dates (2025-12-31 … 2026-09-24); 0 `<details>`, 0 collapsed buttons; 17 `Edit` affordances (the overridable paths) (`gate-09-assumptions.png`) |
+
+The server-side gap computations are the deterministic engine's (every install, G4-1).
+
+### 3.9 Sliders, a life event by keyboard, scenario compare
+
+**Harness note.** Two scripts failed at login here with `POST /auth/login/verify` **429** —
+the harness opened a fresh browser process per step and Chromium does not persist session
+cookies across processes, so every step re-authenticated and the api's login throttle
+tripped. That is the control working, not a defect. The harness now persists the cookie
+jar (0600, never printed) and the gate waited the lockout out (4 min) before one retry.
+
+**Sliders (WP 4.11), real pointer drag on "Monthly savings"** (`10-sliders.mjs`, a request
+listener registered after the mount's own 250-path preview had resolved):
+
+| Observation | Result |
+| --- | --- |
+| at rest | "Preview based on 250 simulated paths" |
+| mid-drag (mouse down, 12 intermediate moves, not released) | median **$461,380 → $3,039,504** — the bands reshaped; **0 requests of any kind** (not only `/api/`) during the drag (`gate-10-slider-dragging.png`) |
+| on release | status sequence **"Refining…" → "Preview based on 5,000 simulated paths"**; **0 `/api/` requests** after release either — the preview is worker-local and the saved plan untouched, as the caption says (`gate-11-slider-refined.png`) |
+
+The panel's caption says the saved plan "is unchanged until you act on it", but the panel
+has **no action** (no button, no mutation in `GoalSliders.tsx`) — part of G4-12.
+
+**Life event, keyboard only** (`11-events.mjs`): created through the "Add a life event"
+form (Inheritance, "Aunt estate", 2034-03-01, $50,000) → `POST /plan/life-events` **201**.
+The timeline's native range input focused; ten `ArrowRight` and one `PageUp`, no pointer
+event → `aria-valuetext` **"Mar 1, 2034" → "Feb 3, 2039"**, `PATCH
+/plan/life-events/{id}` **200**, `occursOn: 2039-02-03` read back from `GET` — persisted
+(`gate-12-life-event-keyboard.png`).
+
+**Scenario compare.** The UI has **no way to create a fork** (the only `'fork'` in
+`features/plan` is a test fixture; G4-12), so "Retire at 62" (`levers: {retireAge: 62}`) was
+created via `POST /plan/scenarios` (201; the stored fork holds only that lever). Then, in
+the browser, Scenario A "My plan", Scenario B "Retire at 62" → `GET /plan/compare?a=&b=` 200:
+
+| | |
+| --- | --- |
+| A | My plan — success probability **100%**, retirement date 2045-06-15 |
+| B | Retire at 62 — success probability **0%**, retirement date 2042-06-15 |
+| delta | "Δ success probability: −100%"; "Δ retirement date: **-36 months earlier**" |
+
+(`gate-13-scenario-compare.png`.) Two side by side with the delta — the step is met. Two
+remarks: the 100% / 0% / −100% are deterministic outcomes shown as probabilities (G4-13 — a
+compare between two single paths can only ever say 0, 100 or ±100); "-36 months earlier" is a
+double negative (O-4, cosmetic).
 
 ---
 
