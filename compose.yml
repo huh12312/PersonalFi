@@ -332,17 +332,23 @@ services:
       # keep the two in agreement; see `.env.example`.
       PLAID_ENABLED: ${PLAID_ENABLED:-false}
       PLAID_REDIRECT_URI: ${PLAID_REDIRECT_URI:-}
-    # WP 3.4's four market-data keys and WP 3.5's CDP pair join the list here
-    # and on `worker` — and on neither `migrator` nor `proxy` nor `backup`.
-    # Kept in step with `just harden-secrets`, in the same edit (N-1).
-    #
-    # `age_recipient` joins the list here too (WP 4.12b, C-5; G3-4): `GET
-    # /export?encrypt=true` runs in this container
-    # (`apps/api/src/routes/export.ts`), and `encryptWithAge` reads the
-    # recipients file from `SECRETS_DIR` directly — it is the same *public*
-    # key the `backup` service already holds below, read-only, never the
-    # matching identity (private key), which never exists in this compose
-    # file at all (RUNBOOK.md's "Export and import").
+      # WP 3.4's four market-data keys and WP 3.5's CDP pair join the list here
+      # and on `worker` — and on neither `migrator` nor `proxy` nor `backup`.
+      # Kept in step with `just harden-secrets`, in the same edit (N-1).
+      #
+      # `age_recipient` joins the list here too (WP 4.12b, C-5; G3-4): `GET
+      # /export?encrypt=true` runs in this container
+      # (`apps/api/src/routes/export.ts`), and `encryptWithAge` reads the
+      # recipients file from `SECRETS_DIR` directly — it is the same *public*
+      # key the `backup` service already holds below, read-only, never the
+      # matching identity (private key), which never exists in this compose
+      # file at all (RUNBOOK.md's "Export and import").
+      # Phase 4 gate C-1 (G4-1, HIGH): the interactive projection route
+      # (`app.ts`'s `createMonteCarloRunnerFromCache`) reads the same series
+      # the worker fetches, so `api` needs the same path — read-only, below.
+      # Without it every `POST …/projections {"method":"monte_carlo"}` on a
+      # compose install was bound to `null` whatever an operator fetched.
+      PLANNING_RETURNS_CACHE_DIR: /var/lib/personalfi/returns
     secrets:
       [
         database_url,
@@ -362,6 +368,11 @@ services:
       ]
     networks: [frontend, backend]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
+    # Phase 4 gate C-1: the fetched return series, read-only — `worker` is
+    # still the one writer (`scripts/compose-hardening-check.sh`'s
+    # `WRITABLE_NAMED_VOLUMES`); `api` only ever reads what it fetched.
+    volumes:
+      - returns_cache:/var/lib/personalfi/returns:ro
     user: '10001:10001'
     depends_on:
       db: { condition: service_healthy }
@@ -431,8 +442,11 @@ services:
       SCHEDULER_INTERVAL_MS: ${SCHEDULER_INTERVAL_MS:-30000}
       # WP 4.5/4.6, the Wave C wiring handover §4.3/§4.4: `worker` is the one
       # process with a job runner, so it is the one process that constructs
-      # `createMonteCarloRunnerFromCache` and the one process that needs this
-      # volume mounted read-write — `api` binds no `monteCarlo`. Points at the
+      # `createMonteCarloRunnerFromCache` for the nightly refresh and the one
+      # process that needs this volume mounted read-write — `api` mounts the
+      # same volume read-only for the interactive route (Phase 4 gate C-1;
+      # the earlier "api binds no monteCarlo" here was wrong, `app.ts` always
+      # did). Points at the
       # named volume below, not the package's own default cache directory
       # (inside the image, and this rootfs is read-only — `x-common` above).
       PLANNING_RETURNS_CACHE_DIR: /var/lib/personalfi/returns
@@ -459,8 +473,9 @@ services:
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
     # WP 4.5/4.6 (WP 4.12b, the Wave C wiring handover §4.4): the only named,
     # writable volume this service mounts, and the only service that mounts
-    # `returns_cache` at all (`scripts/compose-hardening-check.sh`'s
-    # `WRITABLE_NAMED_VOLUMES` names `worker` as its one owner). An operator
+    # `returns_cache` writable (`scripts/compose-hardening-check.sh`'s
+    # `WRITABLE_NAMED_VOLUMES` names `worker` as its one owner; `api` mounts
+    # it `:ro` since the Phase 4 gate's C-1). An operator
     # fetches WP 4.5's pinned return series onto it once
     # (`packages/contexts/planning/data/returns/fetch.ts`); this batch never
     # fetches on the process's own behalf.

@@ -147,8 +147,9 @@ const WRITABLE_NAMED_VOLUMES = new Map([
   [
     'returns_cache:worker',
     "WP 4.5's fetched-once, checksum-pinned return series (WP 4.12b, the Wave C " +
-      'wiring handover §4.4); the api runs no jobs and binds no Monte Carlo runner, ' +
-      'so it never mounts this volume.',
+      'wiring handover §4.4); the api serves the interactive projection route from ' +
+      'the same series and mounts this volume read-only (Phase 4 gate C-1) — a ' +
+      'writable mount on any service but the worker is still a finding.',
   ],
 ]);
 
