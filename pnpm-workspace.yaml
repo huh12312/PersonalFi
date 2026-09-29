@@ -8,6 +8,12 @@ packages:
   # `@ctx/connections` because `personalfi/layer-imports` denies
   # `packages/connectors/*` -> `@ctx/*`: see packages/connectors/port/OWNERSHIP.md.
   - packages/connectors/*
+  # Phase 5 (05-phase-5-dispatch.md §4 item 2). One package per model runtime —
+  # `@advisor/local-model` is the first — same shape as `packages/connectors/*`
+  # above and for the same reason: `personalfi/layer-imports` denies
+  # `packages/advisors/*` -> `@ctx/*`, so a model adapter cannot become the LLM
+  # client `@ctx/insights`'s own layer comment promises it will never be.
+  - packages/advisors/*
 
 # Decision D14: a package must have been public for seven days before we will
 # install it. The May 2026 TanStack worm shipped with valid SLSA attestations;

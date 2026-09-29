@@ -891,6 +891,173 @@ describe('PLANNING_RETURNS_CACHE_DIR', () => {
 });
 
 /**
+ * `ADVISORS_ENABLED` (05-phase-5-dispatch.md §2/§4 item 9): kill switch 1 of
+ * WP 5.1's four-level ladder. `advisorsEnabled: true` was a literal in both
+ * places a run was assembled; this key replaces it.
+ */
+describe('ADVISORS_ENABLED', () => {
+  it('defaults to true', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+    expect(config.env.ADVISORS_ENABLED).toBe(true);
+  });
+
+  it('an explicit false is read through', () => {
+    const config = loadConfig({
+      env: env({ ADVISORS_ENABLED: 'false' }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.env.ADVISORS_ENABLED).toBe(false);
+  });
+});
+
+/**
+ * `MONTE_CARLO_MAX_CONCURRENT` (05-phase-5-dispatch.md §2/§4 item 9; wp4.5
+ * §4.5, wp4.w-wave-c §5 item 1): replaces the
+ * `MAX_CONCURRENT_MONTE_CARLO_RUNS = 8` literal in `apps/api/src/domain.ts`
+ * one-for-one, so the default below must match what it replaces.
+ */
+describe('MONTE_CARLO_MAX_CONCURRENT', () => {
+  it('defaults to 8, unchanged from the literal it replaces', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+    expect(config.planning.monteCarloMaxConcurrent).toBe(8);
+  });
+
+  it('a non-default value passes through', () => {
+    const config = loadConfig({
+      env: env({ MONTE_CARLO_MAX_CONCURRENT: '4' }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.planning.monteCarloMaxConcurrent).toBe(4);
+  });
+
+  it('rejects a value below 1', () => {
+    expect(() =>
+      loadConfig({ env: env({ MONTE_CARLO_MAX_CONCURRENT: '0' }), readSecret: secretsFrom({}) }),
+    ).toThrow(ConfigError);
+  });
+});
+
+/**
+ * The `local_model` advisor kind's endpoint (05-phase-5-dispatch.md §2/§4
+ * item 9; WP 5.1/5.2). Feature-detected exactly the way Plaid is —
+ * `resolveLocalModel`'s own doc comment draws the parallel — so this suite
+ * mirrors the shape of the Plaid describe block below: an empty/absent
+ * endpoint is not a problem, a present-but-partial one is, and the digest is
+ * checked for shape (never for whether it is the digest actually served —
+ * that is WP 5.2's own check, at the point of use).
+ */
+describe('the local model (05 §4 item 9)', () => {
+  const VALID_DIGEST = `sha256:${'a'.repeat(64)}`;
+
+  it('empty endpoint ⇒ localModel undefined', () => {
+    const config = loadConfig({
+      env: env({ LOCAL_MODEL_ENDPOINT: '' }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.localModel).toBeUndefined();
+  });
+
+  it('an absent endpoint (the default) also leaves localModel undefined', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+    expect(config.localModel).toBeUndefined();
+  });
+
+  it('a fully configured endpoint resolves, with the configured timeout and allowRemote', () => {
+    const config = loadConfig({
+      env: env({
+        LOCAL_MODEL_ENDPOINT: 'ollama:11434',
+        LOCAL_MODEL_NAME: 'qwen2.5:7b-instruct',
+        LOCAL_MODEL_DIGEST: VALID_DIGEST,
+        LOCAL_MODEL_TIMEOUT_MS: '60000',
+        LOCAL_MODEL_ALLOW_REMOTE: 'true',
+      }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.localModel).toEqual({
+      endpoint: 'ollama:11434',
+      name: 'qwen2.5:7b-instruct',
+      digest: VALID_DIGEST,
+      timeoutMs: 60_000,
+      allowRemote: true,
+    });
+  });
+
+  it('name required when the endpoint is set', () => {
+    expect(() =>
+      loadConfig({
+        env: env({ LOCAL_MODEL_ENDPOINT: 'ollama:11434', LOCAL_MODEL_DIGEST: VALID_DIGEST }),
+        readSecret: secretsFrom({}),
+      }),
+    ).toThrow(ConfigError);
+  });
+
+  it('digest required when the endpoint is set', () => {
+    let caught: ConfigError | undefined;
+    try {
+      loadConfig({
+        env: env({ LOCAL_MODEL_ENDPOINT: 'ollama:11434', LOCAL_MODEL_NAME: 'qwen2.5:7b-instruct' }),
+        readSecret: secretsFrom({}),
+      });
+    } catch (error) {
+      caught = error as ConfigError;
+    }
+    expect(caught).toBeInstanceOf(ConfigError);
+    expect(caught?.problems.map((p) => p.key)).toContain('LOCAL_MODEL_DIGEST');
+  });
+
+  it('a malformed digest is refused, even when non-empty', () => {
+    expect(() =>
+      loadConfig({
+        env: env({
+          LOCAL_MODEL_ENDPOINT: 'ollama:11434',
+          LOCAL_MODEL_NAME: 'qwen2.5:7b-instruct',
+          LOCAL_MODEL_DIGEST: 'sha256:not-hex',
+        }),
+        readSecret: secretsFrom({}),
+      }),
+    ).toThrow(ConfigError);
+  });
+
+  it('LOCAL_MODEL_TIMEOUT_MS defaults to 180000 once the endpoint is configured', () => {
+    const config = loadConfig({
+      env: env({
+        LOCAL_MODEL_ENDPOINT: 'ollama:11434',
+        LOCAL_MODEL_NAME: 'qwen2.5:7b-instruct',
+        LOCAL_MODEL_DIGEST: VALID_DIGEST,
+      }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.localModel?.timeoutMs).toBe(180_000);
+  });
+
+  it('LOCAL_MODEL_TIMEOUT_MS never exceeds PLATFORM_LIMITS.timeoutMs (300000)', () => {
+    expect(() =>
+      loadConfig({
+        env: env({
+          LOCAL_MODEL_ENDPOINT: 'ollama:11434',
+          LOCAL_MODEL_NAME: 'qwen2.5:7b-instruct',
+          LOCAL_MODEL_DIGEST: VALID_DIGEST,
+          LOCAL_MODEL_TIMEOUT_MS: '300001',
+        }),
+        readSecret: secretsFrom({}),
+      }),
+    ).toThrow(ConfigError);
+  });
+
+  it('LOCAL_MODEL_ALLOW_REMOTE defaults to false once the endpoint is configured', () => {
+    const config = loadConfig({
+      env: env({
+        LOCAL_MODEL_ENDPOINT: 'ollama:11434',
+        LOCAL_MODEL_NAME: 'qwen2.5:7b-instruct',
+        LOCAL_MODEL_DIGEST: VALID_DIGEST,
+      }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.localModel?.allowRemote).toBe(false);
+  });
+});
+
+/**
  * `coinbase_key_name` / `coinbase_private_key` (wp3.5-coinbase.md §8.1).
  *
  * Feature-detected exactly as the Plaid pair is, and — the half that earns

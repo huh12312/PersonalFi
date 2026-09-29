@@ -502,6 +502,18 @@ importers:
         specifier: 7.4.1
         version: 7.4.1
 
+  packages/advisors/local-model:
+    dependencies:
+      '@core/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
+      '@core/kernel':
+        specifier: workspace:*
+        version: link:../../kernel
+      '@core/platform':
+        specifier: workspace:*
+        version: link:../../platform
+
   packages/config:
     dependencies:
       '@core/kernel':

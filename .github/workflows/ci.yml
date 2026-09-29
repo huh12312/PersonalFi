@@ -32,7 +32,7 @@
 #     ledger, categorization, connector-port, connector-manual, connector-csv,
 #     connector-plaid, connections, recurring, budgeting, notifications,
 #     insights, investments, integrations, planning, connector-coinbase,
-#     connector-walletrpc, scripts, planning-perf
+#     connector-walletrpc, scripts, planning-perf, advisor-local-model
 #
 #   `planning-perf` (WP 4.5) is the Monte Carlo 800 ms p95 timing test in its
 #   own project so nothing else in the planning suite shares the box while it
@@ -83,6 +83,14 @@
 # vs not). It does not replace this comment — a human still has to say *why*
 # a project is where it is, which the check cannot know — only the "is
 # everything actually listed somewhere" half.
+#
+# Phase 5 (05-phase-5-dispatch.md §4 item 6), landed in the pre-dispatch
+# shared-file batch (W-A0): one new project, `advisor-local-model`
+# (`packages/advisors/local-model`), the `local_model` advisor kind's Ollama
+# adapter (WP 5.2). It needs no Postgres — an adapter holds no database
+# handle, same reasoning as every `connector-*` project above — so it joins
+# `test`, not `migration-test`. Landed the day the project was created, same
+# rule WP 2.12 states above: 41 root projects at `088fe4d` become 42.
 name: CI
 
 on:
@@ -204,7 +212,7 @@ jobs:
             --project ledger --project categorization \
             --project connector-port --project connector-manual \
             --project connector-csv --project connector-plaid --project connector-coinbase \
-            --project connector-walletrpc \
+            --project connector-walletrpc --project advisor-local-model \
             --project connections --project recurring --project budgeting \
             --project notifications --project insights --project investments \
             --project integrations --project planning --project planning-perf --project scripts

@@ -118,6 +118,15 @@ export const MODULE_FLAGS: readonly FlagDefinition[] = Object.freeze([
     // effect in the shipped stack today regardless of its value. `true` here
     // is what "on" means the day that secret and its compose mount land,
     // without a second code change to flip it.
+    //
+    // Phase 5 (05-phase-5-dispatch.md §4 item 3): this module now also covers
+    // the `local_model` advisor kind's narration, the Weekly Advisory Brief
+    // and the health score — every one of them still gated a level down by
+    // its own switch (`advisors.kind.local_model` below for the local model;
+    // `LOCAL_MODEL_ENDPOINT`/`LOCAL_MODEL_DIGEST` for whether one is even
+    // configured), so this flag's own meaning is unchanged: off is every
+    // advisor, every narration, the Brief and the health score, all at once.
+    // It stays `true`.
     defaultEnabled: true,
     owner: 'insights',
     removeWhen:
@@ -207,6 +216,35 @@ export const MODULE_FLAGS: readonly FlagDefinition[] = Object.freeze([
   }),
 ]);
 
+/**
+ * Advisor-kind kill switches (05-phase-5-dispatch.md §3 WP 5.1's four-level
+ * ladder, level 2). Declared here rather than folded into `MODULE_FLAGS`
+ * above on purpose: `module.insights`'s doc comment calls `MODULE_FLAGS` "the
+ * module flags", `apps/api/test/worker-pool-guard.test.ts` sizes the worker's
+ * pinned pool as `MODULE_FLAGS.length` — one consumer per *module*, worst
+ * case — and a kind flag registers no consumer of its own, so it must never
+ * silently inflate that arithmetic. `buildPlatform` below merges this array
+ * into the same `FlagService` alongside `PLATFORM_FLAGS` and `MODULE_FLAGS`;
+ * `FlagDefinition.key` need not start with `module.`, only be unique.
+ *
+ * `advisors.kind.local_model` is `false` by default: level 2 of the ladder
+ * (05 §3 WP 5.1) is "every `local_model` advisor", off until an operator (or
+ * a user's step-up) opts in, on top of `LOCAL_MODEL_ENDPOINT` /
+ * `LOCAL_MODEL_DIGEST` actually being configured (kill switch 1's sibling —
+ * "found while writing this file", 05 §2: both hardcoded `true`s this flag
+ * replaces are named there). WP 5.1 is the first reader; this entry exists
+ * now so the flag has a coded default the day that read lands, rather than
+ * an unknown key that fails closed by accident.
+ */
+export const ADVISOR_KIND_FLAGS: readonly FlagDefinition[] = Object.freeze([
+  Object.freeze({
+    key: 'advisors.kind.local_model',
+    defaultEnabled: false,
+    owner: 'insights',
+    removeWhen: "never — this is kill level 2 (05 §3 WP 5.1's ladder)",
+  }),
+]);
+
 export interface Platform {
   readonly db: TransactionalExecutor;
   readonly metrics: Metrics;
@@ -224,7 +262,10 @@ export function buildPlatform(options: BuildPlatformOptions): Platform {
   return {
     db,
     metrics: createMetrics(),
-    flags: createFlagService({ db, defaults: [...PLATFORM_FLAGS, ...MODULE_FLAGS] }),
+    flags: createFlagService({
+      db,
+      defaults: [...PLATFORM_FLAGS, ...MODULE_FLAGS, ...ADVISOR_KIND_FLAGS],
+    }),
     registry: createEventRegistry(),
   };
 }

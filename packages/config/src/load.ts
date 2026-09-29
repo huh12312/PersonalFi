@@ -108,6 +108,30 @@ export interface AllowedHostsConfig {
  */
 export interface PlanningConfig {
   readonly returnsCacheDir: string | undefined;
+  /** `MONTE_CARLO_MAX_CONCURRENT` (05-phase-5-dispatch.md §4 item 9). */
+  readonly monteCarloMaxConcurrent: number;
+}
+
+/**
+ * The `local_model` advisor kind's endpoint, resolved and validated at boot —
+ * or absent (05-phase-5-dispatch.md §2/§4 item 9; WP 5.1/5.2).
+ *
+ * `AppConfig.localModel` is `undefined` whenever `LOCAL_MODEL_ENDPOINT` is
+ * missing or empty: the deployment simply has not configured a local model,
+ * which is not a configuration *error* — the same feature-detection shape as
+ * `PlaidConfig` above. `name` and `digest` are both required the moment the
+ * endpoint is set (`resolveLocalModel`), because a half-configured local
+ * model is not "the local model is off", it is a run that would fail after
+ * the fact with no prompt ever sent — the exact failure `resolvePlaid`'s
+ * present-but-partial case exists to catch, one context over.
+ */
+export interface LocalModelConfig {
+  readonly endpoint: string;
+  readonly name: string;
+  /** `sha256:` + 64 lowercase hex characters. The model is pinned by digest like an image. */
+  readonly digest: string;
+  readonly timeoutMs: number;
+  readonly allowRemote: boolean;
 }
 
 /**
@@ -147,6 +171,8 @@ export interface AppConfig {
   readonly crypto: AllowedHostsConfig;
   /** `PLANNING_RETURNS_CACHE_DIR`. Empty/absent ⇒ `returnsCacheDir` is `undefined`. */
   readonly planning: PlanningConfig;
+  /** `undefined` when `LOCAL_MODEL_ENDPOINT` is empty or absent (§ `resolveLocalModel`). */
+  readonly localModel: LocalModelConfig | undefined;
   readonly isProduction: boolean;
   readonly isTest: boolean;
 }
@@ -319,6 +345,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   // at once" — not as a second exception a moment later.
   const plaid = resolvePlaid(secrets, env, problems);
   const coinbase = resolveCoinbase(secrets, problems);
+  const localModel = resolveLocalModel(env, problems);
 
   if (problems.length > 0) throw new ConfigError(problems);
   if (databaseUrl === undefined) throw new ConfigError(problems); // unreachable; narrows the type
@@ -343,7 +370,9 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     planning: Object.freeze({
       returnsCacheDir:
         env.PLANNING_RETURNS_CACHE_DIR === '' ? undefined : env.PLANNING_RETURNS_CACHE_DIR,
+      monteCarloMaxConcurrent: env.MONTE_CARLO_MAX_CONCURRENT,
     }),
+    localModel,
     isProduction,
     isTest: env.NODE_ENV === 'test',
   });
@@ -789,6 +818,78 @@ function resolveCoinbase(
   }
 
   return { configured: true };
+}
+
+/** `sha256:` followed by exactly 64 lowercase hex characters. */
+const SHA256_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
+
+/**
+ * Feature-detect `LOCAL_MODEL_ENDPOINT`, the same shape as `resolvePlaid`:
+ * empty/absent means the local model is simply not configured, and
+ * present-but-partial (an endpoint with no name or no digest) is a boot
+ * problem rather than a `local_model` advisor that registers and then can
+ * never run (05-phase-5-dispatch.md §2/§4 item 9).
+ *
+ * The digest is checked for *shape* here (`sha256:` + 64 lowercase hex) —
+ * whether the served model's digest actually equals it is WP 5.2's own
+ * check, at the point of use (`GET /api/tags`, before any prompt is sent),
+ * the same division of labour `resolveCoinbase`'s doc comment draws for the
+ * Ed25519 key: `packages/config` can catch a malformed value, never a wrong
+ * one.
+ */
+function resolveLocalModel(
+  env: EnvironmentConfig,
+  problems: ConfigProblem[],
+): LocalModelConfig | undefined {
+  const endpoint = env.LOCAL_MODEL_ENDPOINT.trim();
+  if (endpoint.length === 0) return undefined;
+
+  const name = env.LOCAL_MODEL_NAME.trim();
+  const digest = env.LOCAL_MODEL_DIGEST.trim();
+  let valid = true;
+
+  if (name.length === 0) {
+    valid = false;
+    problems.push({
+      key: 'LOCAL_MODEL_NAME',
+      problem:
+        'is missing, but LOCAL_MODEL_ENDPOINT is set — a local model needs a name to log and preview',
+      hint:
+        'set LOCAL_MODEL_NAME to the model pulled through the local-llm-pull profile, or clear ' +
+        'LOCAL_MODEL_ENDPOINT to leave the local model unconfigured',
+    });
+  }
+
+  if (digest.length === 0) {
+    valid = false;
+    problems.push({
+      key: 'LOCAL_MODEL_DIGEST',
+      problem:
+        'is missing, but LOCAL_MODEL_ENDPOINT is set — the model is pinned by digest like an ' +
+        'image (05-phase-5-dispatch.md §3 WP 5.2) and boot refuses to leave that pin unset',
+      hint:
+        'set LOCAL_MODEL_DIGEST to sha256:<64 lowercase hex characters>, the digest GET ' +
+        '/api/tags reports for the pulled model, or clear LOCAL_MODEL_ENDPOINT to leave the ' +
+        'local model unconfigured',
+    });
+  } else if (!SHA256_DIGEST_PATTERN.test(digest)) {
+    valid = false;
+    problems.push({
+      key: 'LOCAL_MODEL_DIGEST',
+      problem: `is "${digest}", which is not sha256: followed by 64 lowercase hex characters`,
+      hint: 'copy the digest verbatim from GET /api/tags — no tag, no uppercase, no truncation',
+    });
+  }
+
+  if (!valid) return undefined;
+
+  return {
+    endpoint,
+    name,
+    digest,
+    timeoutMs: env.LOCAL_MODEL_TIMEOUT_MS,
+    allowRemote: env.LOCAL_MODEL_ALLOW_REMOTE,
+  };
 }
 
 function kekFloorProblems(

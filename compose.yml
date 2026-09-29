@@ -349,6 +349,16 @@ services:
       # Without it every `POST …/projections {"method":"monte_carlo"}` on a
       # compose install was bound to `null` whatever an operator fetched.
       PLANNING_RETURNS_CACHE_DIR: /var/lib/personalfi/returns
+      # 05-phase-5-dispatch.md §4 item 9: kill switch 1 of WP 5.1's
+      # four-level advisor ladder. `api` gets only this one this batch — the
+      # `LOCAL_MODEL_*` keys and `MONTE_CARLO_MAX_CONCURRENT` join `worker`'s
+      # environment, below, because `worker` is the process that runs the
+      # `local_model` advisor and the nightly Monte Carlo baseline; whether
+      # `api`'s own interactive projection route also needs the concurrency
+      # cap is for the wave that wires `config.planning.monteCarloMaxConcurrent`
+      # into `apps/api/src/domain.ts` to decide (05 §4 item 4, W-B), not this
+      # shared-file batch.
+      ADVISORS_ENABLED: ${ADVISORS_ENABLED:-true}
     secrets:
       [
         database_url,
@@ -450,6 +460,20 @@ services:
       # named volume below, not the package's own default cache directory
       # (inside the image, and this rootfs is read-only — `x-common` above).
       PLANNING_RETURNS_CACHE_DIR: /var/lib/personalfi/returns
+      # 05-phase-5-dispatch.md §4 item 9. `worker` is the process that runs
+      # the `local_model` advisor's `insights.run_local` lane and the nightly
+      # Monte Carlo baseline, so it gets every new key this batch adds;
+      # `api` gets only `ADVISORS_ENABLED`, above. Every default below
+      # matches `packages/config/src/schema.ts`'s own — an operator who sets
+      # nothing here gets exactly what `@core/config` would default to
+      # anyway; this block only has to agree, never invent.
+      ADVISORS_ENABLED: ${ADVISORS_ENABLED:-true}
+      LOCAL_MODEL_ENDPOINT: ${LOCAL_MODEL_ENDPOINT:-}
+      LOCAL_MODEL_NAME: ${LOCAL_MODEL_NAME:-}
+      LOCAL_MODEL_DIGEST: ${LOCAL_MODEL_DIGEST:-}
+      LOCAL_MODEL_TIMEOUT_MS: ${LOCAL_MODEL_TIMEOUT_MS:-180000}
+      LOCAL_MODEL_ALLOW_REMOTE: ${LOCAL_MODEL_ALLOW_REMOTE:-false}
+      MONTE_CARLO_MAX_CONCURRENT: ${MONTE_CARLO_MAX_CONCURRENT:-8}
     # WP 3.4's four market-data keys and WP 3.5's CDP pair join the list here
     # and on `worker` — and on neither `migrator` nor `proxy` nor `backup`.
     # Kept in step with `just harden-secrets`, in the same edit (N-1).

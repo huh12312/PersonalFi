@@ -19,6 +19,17 @@ function nullableUrlEnv() {
 }
 
 /**
+ * Ceiling for `LOCAL_MODEL_TIMEOUT_MS` (05-phase-5-dispatch.md §4 item 9):
+ * never above `PLATFORM_LIMITS.timeoutMs`
+ * (`packages/contexts/insights/src/contract/manifest.ts:43`, currently
+ * `300_000`). `@core/config` may import nothing but `@core/kernel` — the
+ * dependency rule (`docs/CONVENTIONS.md`) — so this is a repeated literal,
+ * not an import, and `packages/contexts/insights/test/platform-limits-config.test.ts`
+ * pins the two equal so the repetition cannot drift unnoticed.
+ */
+export const LOCAL_MODEL_TIMEOUT_MS_CEILING = 300_000;
+
+/**
  * Non-secret deployment configuration. Env vars only.
  *
  * User *preferences* (base currency, budget period start, quiet hours, feature
@@ -274,6 +285,79 @@ export const environmentSchema = z.object({
   // with a job runner, so it is the one process that constructs
   // `createMonteCarloRunnerFromCache`; `api` never binds `monteCarlo`.
   PLANNING_RETURNS_CACHE_DIR: z.string().default(''),
+
+  /**
+   * The Monte Carlo concurrency cap (05-phase-5-dispatch.md §2/§4 item 9;
+   * wp4.5 §4.5, wp4.w-wave-c §5 item 1): `MAX_CONCURRENT_MONTE_CARLO_RUNS = 8`
+   * was a literal in `apps/api/src/domain.ts:3309`, load-tested per worker
+   * (WP 4.5) but never per process. Replaces that literal one-for-one; the
+   * default is unchanged from what it replaces.
+   */
+  MONTE_CARLO_MAX_CONCURRENT: z.coerce.number().int().min(1).default(8),
+
+  // -------------------------------------------------------------- advisors
+  //
+  // Phase 5 (05-phase-5-dispatch.md §2, "found while writing this file"):
+  // kill switch 1 of WP 5.1's four-level ladder had no config key —
+  // `advisorsEnabled: true` was a literal in both places a run is assembled.
+  // This is that key. `true` by default: off is the global kill switch for
+  // every advisor, builtin or local-model, and a fresh install should be a
+  // working application.
+  ADVISORS_ENABLED: z.stringbool().default(true),
+
+  // ----------------------------------------------------------- local model
+  //
+  // The `local_model` advisor kind's endpoint (05-phase-5-dispatch.md §2/§4
+  // item 9; WP 5.1/5.2). Feature-detected exactly the way Plaid is:
+  // `load.ts`'s `resolveLocalModel` reads these four together and
+  // `AppConfig.localModel` is `undefined` whenever `LOCAL_MODEL_ENDPOINT` is
+  // empty or absent — this deployment has simply not configured a local
+  // model, which is not an error.
+  //
+  // A single-label compose service name and port (e.g. `ollama:11434`),
+  // unless `LOCAL_MODEL_ALLOW_REMOTE` is set, in which case only over
+  // `https` (05 §6 Q2). WP 5.2's `createLocalEndpointPolicy` enforces the
+  // address itself — every resolved address must classify `loopback` or
+  // `private`, and any public address refuses the whole destination; this
+  // schema only shapes the string.
+  LOCAL_MODEL_ENDPOINT: z.string().default(''),
+  /**
+   * Required once `LOCAL_MODEL_ENDPOINT` is set — boot refuses otherwise,
+   * named (`load.ts`'s `resolveLocalModel`). Ignored, like every optional
+   * value in this file, while the endpoint itself is unset.
+   */
+  LOCAL_MODEL_NAME: z.string().default(''),
+  /**
+   * Required once `LOCAL_MODEL_ENDPOINT` is set, shaped `sha256:` followed by
+   * 64 lowercase hex characters — the model is pinned by digest like an
+   * image (05 §3 WP 5.2): before a run, the served model's digest must equal
+   * this value or the run refuses `model_digest_mismatch` without sending a
+   * prompt. Validated in `load.ts`'s `resolveLocalModel`, not here, because
+   * "required conditional on a sibling field" is not a single-field zod
+   * constraint.
+   */
+  LOCAL_MODEL_DIGEST: z.string().default(''),
+  /**
+   * Never above `LOCAL_MODEL_TIMEOUT_MS_CEILING` below, which mirrors
+   * `PLATFORM_LIMITS.timeoutMs`
+   * (`packages/contexts/insights/src/contract/manifest.ts:43`) — `@core/config`
+   * may import nothing but `@core/kernel`, so that ceiling is repeated here
+   * as a literal rather than imported; the two are pinned equal by
+   * `packages/contexts/insights/test/platform-limits-config.test.ts`.
+   */
+  LOCAL_MODEL_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(LOCAL_MODEL_TIMEOUT_MS_CEILING)
+    .default(180_000),
+  /**
+   * Off by default (05 §6 Q2): Ollama stays on this host, on an internal
+   * compose network, unless an operator explicitly opts a LAN box in — and
+   * then only over `https`, enforced by WP 5.2's local-endpoint policy, not
+   * by this flag.
+   */
+  LOCAL_MODEL_ALLOW_REMOTE: z.stringbool().default(false),
 
   // -------------------------------------------------------------------- crypto
   //

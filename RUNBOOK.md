@@ -348,6 +348,30 @@ tried during the Phase 2 gate walk, was refused `private_address` — so this
 setting can only ever widen reach to a **public** host, and only to one you
 actually operate or otherwise trust with that data.
 
+**Phase 5 (05-phase-5-dispatch.md §2/§4 item 9)** adds seven keys, all
+optional and all defaulted for a deployment that has not opted into the
+local model yet — see `.env.example`'s own "Phase 5 wiring" section for each
+one's default:
+
+- `ADVISORS_ENABLED` — kill switch 1 of WP 5.1's four-level advisor ladder,
+  the global on/off for every advisor. Defaults to `true`.
+- `LOCAL_MODEL_ENDPOINT` — the `local_model` advisor kind's endpoint,
+  feature-detected the same way Plaid is: leave it unset and no local model
+  advisor is registered (kill level 2). A single-label compose service name
+  and port, e.g. `ollama:11434`.
+- `LOCAL_MODEL_NAME` and `LOCAL_MODEL_DIGEST` — both **required** once
+  `LOCAL_MODEL_ENDPOINT` is set; `@core/config` refuses to boot otherwise.
+  The digest is `sha256:` followed by 64 lowercase hex characters, copied
+  from what `GET /api/tags` reports for the pulled model — the model is
+  pinned by digest like an image (05 §3 WP 5.2).
+- `LOCAL_MODEL_TIMEOUT_MS` — defaults to `180000`; never configurable above
+  the platform's own advisor-run ceiling of `300000`.
+- `LOCAL_MODEL_ALLOW_REMOTE` — defaults to `false`; Ollama stays on this
+  host unless explicitly allowed off it, and then only over `https` (05 §6
+  Q2).
+- `MONTE_CARLO_MAX_CONCURRENT` — the Monte Carlo concurrency cap. Defaults
+  to `8`.
+
 ### 4. Bring the stack up
 
 ```bash

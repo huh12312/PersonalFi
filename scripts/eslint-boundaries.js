@@ -467,6 +467,36 @@ const LAYERS = [
       'confined here. @core/testkit and @core/seed are dev-only, used only from test/.',
   },
   {
+    // Phase 5 (05-phase-5-dispatch.md §4 item 2), landed in the pre-dispatch
+    // shared-file batch (W-A0) so WP 5.1 and WP 5.2 have a real layer to
+    // compile and lint against from their first commit. `@advisor/local-model`
+    // is a package per model runtime, the `@connector/*` shape: it may reach
+    // `@core/kernel`, `@core/platform` (the adapter's *only* path to the
+    // network — the transport, under WP 5.2's local-endpoint egress policy —
+    // never a bare `fetch`/`WebSocket`, which `eslint.config.js`'s
+    // `no-restricted-globals` entry for this same prefix refuses; a
+    // layer-imports rule cannot see a global) and `@core/contracts` (the
+    // Advisor request/response shapes it must produce), and nothing else.
+    // `allowNodeBuiltins: false`: the adapter touches neither the filesystem
+    // nor a process, only the network.
+    //
+    // Placed here, immediately before the `insights` entry below, on purpose:
+    // the `insights` layer's allow-list gains nothing for this package. A
+    // context that could import `@advisor/local-model` directly would let
+    // `@ctx/insights` become the LLM client its own layer comment ("no LLM
+    // client") promises it will never be; the composition root binds the
+    // adapter to the `Advisor` interface from outside instead.
+    name: 'advisor-local-model',
+    prefix: 'packages/advisors/local-model/',
+    allow: ['@core/kernel', '@core/platform', '@core/contracts', ...UNIVERSAL],
+    allowNodeBuiltins: false,
+    why:
+      "The local-model adapter reaches Ollama only through @core/platform's transport, under " +
+      "WP 5.2's local-endpoint egress policy, and produces @core/contracts' Advisor shapes. It " +
+      'may not import an @ctx/* context: the composition root binds it to the Advisor interface ' +
+      'from outside, so @ctx/insights never gains an LLM client.',
+  },
+  {
     // Phase 2 WP 2.6/2.7 (docs/plan/02-phase-2-dispatch.md §4 shared files).
     // Insights reads a minimised snapshot built in apps/api through a port and
     // validates advisor output against @core/contracts' Advisor schema; it

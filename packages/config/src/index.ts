@@ -15,9 +15,11 @@ export {
   type CoinbaseConfig,
   type KekConfig,
   type LoadConfigOptions,
+  type LocalModelConfig,
   type NotificationsConfig,
   type PlaidCallableEnvironment,
   type PlaidConfig,
+  type PlanningConfig,
   type PublicEnvironmentConfig,
 } from './load.ts';
 export {
@@ -33,6 +35,7 @@ export {
   environmentSchema,
   SECRET_SPECS,
   KEK_ARGON2_FLOORS,
+  LOCAL_MODEL_TIMEOUT_MS_CEILING,
   type Argon2Params,
   type EnvironmentConfig,
   type SecretName,

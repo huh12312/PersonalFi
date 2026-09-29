@@ -13,12 +13,17 @@ coverage
 .env
 .env.*
 !.env.example
+compose.override.yml
 secrets
 .drizzle
 docs
 *.md
 !README.md
 !THIRD_PARTY.md
+
+# Phase 4 gate G4-21: an agent's local Claude Code project state has no
+# business in an image built from this tree.
+.claude
 
 # WP 4.5: the Monte Carlo return series is downloaded on first run (neither
 # Shiller nor Damodaran grants redistribution — data/returns/PROVENANCE.md) and

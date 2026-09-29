@@ -255,6 +255,25 @@ export default defineConfig({
         },
       },
       {
+        // Phase 5 (05-phase-5-dispatch.md §4 item 1), landed in the pre-dispatch
+        // shared-file batch (W-A0) so WP 5.1 and WP 5.2 can compile and test
+        // against it from their first commit. `@advisor/local-model` is the
+        // `local_model` advisor kind's Ollama adapter — a package per model
+        // runtime, the `@connector/*` shape, denied `@ctx/*` by
+        // `scripts/eslint-boundaries.js`'s `advisor-local-model` layer. No
+        // Postgres: the adapter holds no database handle, same as a connector.
+        // Currently a stub (WP 5.2 fills it); this project exists now so the
+        // vitest project count and the CI project list are never behind the
+        // package that needs them.
+        root: './packages/advisors/local-model',
+        test: {
+          name: 'advisor-local-model',
+          include: ['src/**/*.test.ts', 'test/*.test.ts'],
+          environment: 'node',
+          testTimeout: 30_000,
+        },
+      },
+      {
         // Phase 3 WP 3.1/3.2/3.3: the resolver's merge rules, lot maths and
         // portfolio analytics are pure over Quantity + Money; they run here.
         root: './packages/contexts/investments',

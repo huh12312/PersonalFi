@@ -195,6 +195,33 @@ export default tseslint.config(
     },
   },
 
+  // Phase 5 (05-phase-5-dispatch.md §4 item 2). The local-model adapter's only
+  // path to the network is @core/platform's transport, under WP 5.2's
+  // local-endpoint egress policy — never a bare global. A layer-imports rule
+  // cannot see a global (it walks import specifiers), so this is the second
+  // line beside `scripts/eslint-boundaries.js`'s `advisor-local-model` layer,
+  // and WP 5.2's own `structure.test.ts` is the third.
+  {
+    files: ['packages/advisors/local-model/**/*.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'fetch',
+          message:
+            "Reach the network only through @core/platform's transport, under WP 5.2's " +
+            'local-endpoint egress policy — never a bare fetch.',
+        },
+        {
+          name: 'WebSocket',
+          message:
+            "Reach the network only through @core/platform's transport, under WP 5.2's " +
+            'local-endpoint egress policy — never a bare WebSocket.',
+        },
+      ],
+    },
+  },
+
   {
     files: [
       '**/*.test.ts',
