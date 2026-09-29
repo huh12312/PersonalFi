@@ -42,6 +42,7 @@ import {
   insightEvidence,
   insights,
   type InsightStatus,
+  snapshotGrants,
 } from '../schema/index.ts';
 import type { Severity } from './contract/response.ts';
 
@@ -355,9 +356,28 @@ export async function advisorHealth(
     .from(advisorRuns)
     .where(eq(advisorRuns.userId, userId));
 
+  // The grants in force, one query for every advisor — never the manifest's
+  // `requires_scopes`, which is what the advisor *asked* for (G4-17: the
+  // consent summary said "granted" for every request, and a revocation did
+  // not change it).
+  const liveGrants = await executor
+    .select({ advisorId: snapshotGrants.advisorId, scope: snapshotGrants.scope })
+    .from(snapshotGrants)
+    .where(and(eq(snapshotGrants.userId, userId), sql`${snapshotGrants.revokedAt} IS NULL`))
+    .orderBy(asc(snapshotGrants.advisorId), asc(snapshotGrants.scope));
+  const grantsByAdvisor = new Map<string, string[]>();
+  for (const grant of liveGrants) {
+    const list = grantsByAdvisor.get(grant.advisorId) ?? [];
+    list.push(grant.scope);
+    grantsByAdvisor.set(grant.advisorId, list);
+  }
+
   const lastByAdvisor = new Map<string, { status: string; rejectedCount: number }>();
   for (const run of latest) {
-    if (run.rank !== 1) continue;
+    // `row_number()` is `bigint`, which `@core/db` parses to a `BigInt`: `1n
+    // !== 1`, so a strict comparison skipped every run and both fields read
+    // null for ever (Phase 4 gate G4-17). Compare the number.
+    if (Number(run.rank) !== 1) continue;
     lastByAdvisor.set(run.advisorId, { status: run.status, rejectedCount: run.rejectedCount });
   }
 
@@ -373,7 +393,7 @@ export async function advisorHealth(
       quarantineReason: row.quarantineReason,
       consecutiveFailures: row.consecutiveFailures,
       lastRunAt: row.lastRunAt,
-      grantedScopes: row.requiresScopes,
+      grantedScopes: grantsByAdvisor.get(row.advisorId) ?? [],
       lastRunStatus: last?.status ?? null,
       lastRunRejected: last?.rejectedCount ?? null,
     };

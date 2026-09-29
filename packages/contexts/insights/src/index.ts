@@ -321,17 +321,58 @@ export {
 } from './policy/alert-budget.ts';
 
 export {
+  BREAKER_THRESHOLDS,
   CONSECUTIVE_FAILURE_LIMIT,
+  KIND_FLAG_KEYS,
+  LADDER_LEVEL,
+  MODULE_FLAG_KEY,
   REJECTION_QUARANTINE_FLOOR,
   REJECTION_QUARANTINE_RATE,
+  createRunSwitches,
+  decideContinue,
   decideRun,
   shouldQuarantine,
+  staticRunSwitches,
   type BreakerInputs,
+  type BreakerThresholds,
+  type CancelReason,
+  type FlagReader,
   type KillSwitchInputs,
   type QuarantineReason,
   type RunDecision,
   type RunRefusal,
+  type RunSwitchSources,
+  type RunSwitches,
 } from './policy/kill-switches.ts';
+
+// WP 5.1: the run watcher, the prompt port, and the payload preview gate.
+export {
+  RUN_WATCH_POLL_MS,
+  RunCancelled,
+  watchRun,
+  type RunWatch,
+  type RunWatchOptions,
+} from './policy/run-watch.ts';
+
+export type { PromptRenderer, RenderedPrompt } from './ports.ts';
+
+export {
+  PreviewError,
+  approvePayload,
+  buildAdvisorRequest,
+  effectiveRunScopes,
+  hasLiveApproval,
+  inspectRunPayload,
+  previewRequest,
+  queryShape,
+  requiresPayloadApproval,
+  revokePayloadApprovals,
+  shapeFor,
+  type BuiltRequest,
+  type PayloadPreview,
+  type QueryShapeInput,
+  type RetainedPayloadInspection,
+} from './preview.ts';
 
 // --- The registry ----------------------------------------------------------
 
@@ -404,6 +445,7 @@ export {
 // --- Events, consumer, jobs ------------------------------------------------
 
 export {
+  AdvisorRunCancelled,
   AdvisorRunCompleted,
   AdvisorRunFailed,
   AdvisorRunStarted,
@@ -426,21 +468,30 @@ export {
   DEFAULT_ADVISOR_CRON,
   RUN_ALL_JOB_KIND,
   RUN_JOB_KIND,
+  RUN_LOCAL_JOB_KIND,
   SCHEDULE_NAME,
   createRunAllJob,
   createRunJob,
+  createRunLocalJob,
   insightsJobs,
+  jobKindFor,
   registerNightlySchedule,
+  requestAdvisorRuns,
   type JobDependencies,
+  type QueuedAdvisorRun,
+  type RequestedAdvisorRun,
   type RunJobPayload,
 } from './jobs.ts';
 
 // --- Services and read models ----------------------------------------------
 
 export {
+  LaneViolation,
+  laneOf,
   reviewInsight,
   runAdvisor,
   runAdvisors,
+  type RunLane,
   type InsightsDependencies,
   type InsightsSettings,
   type RunAdvisorInput,
@@ -462,20 +513,30 @@ export {
 
 export {
   INSIGHTS_ADVISORY_LOCK_CLASS,
+  RUN_PAYLOAD_RETENTION_DAYS,
   clearQuarantine,
   findAdvisor,
   findInsight,
+  findRun,
+  findRunPayload,
   grantScopes,
   latestRuns,
   listAdvisors,
   listGrants,
   loadSuppression,
   loadSuppressions,
+  lockAdvisor,
+  pruneRunPayloads,
   quarantineAdvisor,
   recordFeedback,
+  recordRunModel,
   registerAdvisor,
+  rejectionsSince,
+  requestRunCancel,
+  retainRunPayload,
   revokeScopes,
   setAdvisorEnabled,
+  type CancelRequestOutcome,
   type FeedbackInput,
   type FeedbackResult,
   type RegisterAdvisorInput,

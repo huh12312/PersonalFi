@@ -382,9 +382,30 @@ describeWithDb('runMigrations', () => {
       //   Expand only — `docs/CONVENTIONS.md`'s backfill and contract steps
       //   are later releases; see the migration's own header and
       //   `docs/evidence/phase-4/wp4.12c-gate-conditions.md` §1.
+      // 0028_advisor_run_control: two @ctx/insights tables —
+      //   advisor_payload_approvals (the payload preview gate, 03 §8.3: one
+      //   row per approved query shape, composite FK to advisors (user_id,
+      //   advisor_id)) and advisor_run_payloads (the request a local_model or
+      //   external run sent, bounded to 30 days by a CHECK, composite FK to
+      //   advisor_runs (user_id, id) — the UNIQUE index it needs is created
+      //   in the same file). advisor_runs gains cancel_requested_at,
+      //   cancel_reason, llm_model, llm_prompt_hash and status `cancelled`;
+      //   the refusal CHECK gains kind_disabled and payload_not_approved;
+      //   advisors gains enabled_source (default | user | feedback). WP 5.1;
+      //   references only 0012-era objects or its own (05 §4).
+      // 0034_securities_composite_fks: no new table. Phase 4 gate G4-23
+      //   (C-14's clause, WP 5.13a): the five `REFERENCES securities (id)`
+      //   that 0025/0026 left bare — security_identifiers, security_overlay,
+      //   holdings_snapshots, basis_method_elections and
+      //   securities.merged_into_id — re-pointed at
+      //   `securities_user_id_id_uniq (user_id, id)` so a row can never name
+      //   another user's security; applied twice for idempotency, the
+      //   cross-user merge sabotage red (wp5.13-carry-overs.md §3).
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
+        'advisor_payload_approvals',
+        'advisor_run_payloads',
         'advisor_runs',
         'advisors',
         'allocation_targets',

@@ -281,6 +281,22 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
   ],
   ['advisors', "insights (WP 2.6); not named in this WP's export scope."],
   ['advisor_runs', "insights (WP 2.6); not named in this WP's export scope."],
+  // WP 5.1 (migration 0028). Both deferred on the reason, not on scope:
+  // an approval is consent to one payload shape on this install — like
+  // `snapshot_grants` above it is re-given, not restored, and a restored
+  // approval would let a model receive a shape nobody on the new instance
+  // previewed. A retained payload exists only to be inspected for 30 days;
+  // carrying it into a bundle would outlive the bound the table's own CHECK
+  // enforces, and it is a copy of a snapshot, the most sensitive object the
+  // app builds.
+  [
+    'advisor_payload_approvals',
+    'consent to a payload shape on this install; re-given after a restore, never restored (WP 5.1).',
+  ],
+  [
+    'advisor_run_payloads',
+    'a 30-day retention of what an advisor was sent; exporting it would outlive its own bound (WP 5.1).',
+  ],
   ['insights', "insights (WP 2.6); not named in this WP's export scope."],
   ['insight_evidence', "insights (WP 2.6); not named in this WP's export scope."],
   ['insight_actions', "insights (WP 2.6); not named in this WP's export scope."],

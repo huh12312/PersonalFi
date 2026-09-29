@@ -874,6 +874,99 @@ one the identity context actually implements, not a file swap.
 
 ---
 
+## Advisor kill switches
+
+Four independent ways to stop an advisor (WP 5.1; 05-phase-5-dispatch.md §3). Any one of them is
+enough, and each is checked **three times per run**: before it starts, **once a second while it is in
+flight** (the run watcher aborts the call), and at the **write barrier** — under a row lock, just before
+anything is written — so a kill that lands between the model's reply and the insert still writes
+nothing. A refused or cancelled run always names the **broadest** level that applied.
+
+| Level | Mechanism | Scope | Default | Who flips it | Survives restart |
+| --- | --- | --- | --- | --- | --- |
+| 1 Module | `ADVISORS_ENABLED` (env) **and** `module.insights` (flag) | every advisor | on | operator / user | yes |
+| 2 Kind | `advisors.kind.local_model` (flag) **and** `LOCAL_MODEL_ENDPOINT` set | every `local_model` advisor | **off** | user, step-up / operator | yes |
+| 3 Advisor | `advisors.enabled` **and** the breaker's `quarantined_at` | one advisor | off | user, step-up / the app | yes — rows |
+| 4 Run | `advisor_runs.cancel_requested_at`; the run's deadline | one run | — | user, step-up / the clock | n/a |
+
+Under all four sits `docker compose stop ollama`. It is not a level — nothing records it — but it stops
+the model container outright; a run waiting on it fails fast (WP 5.2) and the rest of the app is
+unaffected.
+
+The database commands below use `psql` on the production stack:
+`docker compose exec db psql -U personalfi -d personalfi`. The UI for levels 2–4 (the advisor-management
+screen, the per-run cancel button) is WP 5.10/5.12's; until it ships, SQL is the screen.
+
+**Level 1 — everything off.**
+
+- Operator, whole deployment: set `ADVISORS_ENABLED=false` in `.env`, then
+  `docker compose up -d api worker`. The restart ends any in-flight run with its process; nothing runs
+  again until it is `true`.
+- User, this account: turn the module flag off. Takes effect **within one second** on a run in flight —
+  flags are read uncached on the run path.
+  ```sql
+  INSERT INTO feature_flags (user_id, key, enabled)
+  SELECT id, 'module.insights', false FROM users
+  ON CONFLICT (user_id, key) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = now();
+  ```
+  `POST /advisors/run` then answers **409 `insights.module_disabled`** and runs nothing. The worker stops
+  registering the nightly schedule and the insights consumer at its next start.
+
+**Level 2 — every local model off** (the built-in rules keep running).
+
+- User: `advisors.kind.local_model` → `false` (same statement, that key). It ships `false`.
+- Operator: leave `LOCAL_MODEL_ENDPOINT` empty. With no endpoint no local advisor is registered, and the
+  kind is off whatever its flag says.
+
+**Level 3 — one advisor off.** `POST /advisors/{advisorId}/enabled` `{"enabled": false}` (step-up), or:
+
+```sql
+UPDATE advisors SET enabled = false, enabled_source = 'user', updated_at = now()
+ WHERE advisor_id = '<advisor id>';
+```
+
+`enabled_source = 'user'` matters: a row still marked `default` follows the catalogue, and the next
+api start would put the catalogue's value back. The **breaker** pulls this level on its own —
+`quarantined_at` set, `quarantine_reason` `consecutive_failures` or `rejection_rate` — at **3** consecutive
+failures or **5** validator rejections in a rolling 24 h for a `local_model` advisor, and at **5**
+consecutive failures or one run ≥ 50 % refused (with ≥ 4 proposals) for a built-in. A quarantine never
+decays; clear it with `{"enabled": true, "clearQuarantine": true}` on the same route, after reading why.
+
+**Level 4 — one run.** Find it, then ask it to stop; it closes within about a second:
+
+```sql
+SELECT id, advisor_id, started_at FROM advisor_runs WHERE status = 'started' ORDER BY started_at;
+UPDATE advisor_runs SET cancel_requested_at = now() WHERE id = '<run id>' AND status = 'started';
+```
+
+(WP 5.10's `POST /advisors/runs/{runId}/cancel` does the same under the advisor's row lock.) The
+deadline is the other half of this level: a run past its manifest's `timeout_ms` (never above 300 s; a
+local model's is `LOCAL_MODEL_TIMEOUT_MS`) is aborted by us.
+
+**What each looks like in `advisor_runs`.**
+
+```sql
+SELECT advisor_id, status, refusal, cancel_reason, cancel_requested_at, error_code,
+       llm_model, started_at, finished_at
+  FROM advisor_runs ORDER BY started_at DESC LIMIT 20;
+```
+
+| Situation | `status` | `refusal` / `cancel_reason` / `error_code` |
+| --- | --- | --- |
+| Level 1 off before the run | `refused` | `refusal = advisors_disabled` or `module_disabled` |
+| Level 2 off before the run | `refused` | `refusal = kind_disabled` |
+| Level 3 off / quarantined before the run | `refused` | `refusal = advisor_disabled` / `advisor_quarantined` |
+| Local model whose payload shape was never approved | `refused` | `refusal = payload_not_approved` |
+| Any level flipped **during** the run, or between the reply and the write | `cancelled` | `cancel_reason` = the broadest level's name; `run_cancelled` for level 4, with `cancel_requested_at` set |
+| The deadline | `failed` | `error_code = advisor_timeout` (counts toward the breaker; a kill does not) |
+| A process killed mid-run | `started`, no `finished_at` | — (what an interrupted run looks like) |
+
+A refused run has no `input_digest`: nothing was built. A cancelled one keeps the digest of what was
+sent before it was stopped, and `insights.AdvisorRunCancelled` names the level and whether the watcher
+(`in_flight`) or the barrier (`write_barrier`) caught it. Either way, **no insight is written**.
+
+---
+
 ## Panic button (outline)
 
 For "I think this box or a provider credential is compromised, stop

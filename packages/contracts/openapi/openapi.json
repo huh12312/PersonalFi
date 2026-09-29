@@ -24452,7 +24452,7 @@
         "tags": [
           "insights"
         ],
-        "description": "Needs a step-up assertion. 503 when no `advisor_token_secret` is configured.",
+        "description": "Needs a step-up assertion. 409 naming kill level 1 (`insights.advisors_disabled`, `insights.module_disabled`) when advisors or the module are switched off — nothing runs. 503 when no `advisor_token_secret` is configured. Built-in advisors run inline; a `local_model` advisor is queued in its own lane (`insights.run_local`) and answered `queued` with its job id.",
         "requestBody": {
           "required": true,
           "content": {
@@ -24482,9 +24482,16 @@
                         "type": "object",
                         "properties": {
                           "runId": {
-                            "type": "string",
-                            "format": "uuid",
-                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "advisorId": {
                             "type": "string"
@@ -24494,13 +24501,33 @@
                             "enum": [
                               "completed",
                               "failed",
-                              "refused"
+                              "refused",
+                              "cancelled",
+                              "queued"
                             ]
                           },
                           "refusal": {
                             "type": [
                               "string",
                               "null"
+                            ]
+                          },
+                          "cancelReason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "jobId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                              },
+                              {
+                                "type": "null"
+                              }
                             ]
                           },
                           "proposed": {
@@ -24537,6 +24564,8 @@
                           "advisorId",
                           "status",
                           "refusal",
+                          "cancelReason",
+                          "jobId",
                           "proposed",
                           "accepted",
                           "rejected",
@@ -24567,6 +24596,16 @@
             }
           },
           "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "Default Response",
             "content": {
               "application/json": {

@@ -3,16 +3,24 @@
  * One advisor run, end to end — and the order of its steps is the design.
  *
  * ```
- * kill switches → open the run → build the snapshot → invoke → validate
- *              → drop what is suppressed → upsert → close the run
+ * kill switches → open the run → build the snapshot → [retain the payload]
+ *   → invoke, watched → validate → write barrier → drop what is suppressed
+ *   → upsert → close the run
  * ```
  *
- * Three things about that order are load-bearing:
+ * Five things about that order are load-bearing:
  *
  *   * **The switches come first, before the snapshot exists.** A quarantined or
  *     disabled advisor is not handed data and then ignored; it is never handed
  *     data. That is why `"a quarantined advisor's output never reaches
  *     pending_review"` is true for a stronger reason than "we drop its output".
+ *   * **The switches are read three times, not once** (WP 5.1). Before the run
+ *     (transaction 1); while the untrusted call is in flight, by the run
+ *     watcher, at most once a second (`policy/run-watch.ts`); and at the write
+ *     barrier — transaction 2 re-reads every switch under a row lock on the
+ *     `advisors` row before it writes, so a run killed between the reply and
+ *     the insert lands nothing and closes `cancelled` with the level named.
+ *     Every one of the three asks `decideRun`; there is no fourth.
  *   * **Validation comes before suppression, and both come before the write.**
  *     A fabricated number is rejected whether or not the user would have seen
  *     the insight, so the rejection counter — and therefore the breaker — is
@@ -24,15 +32,24 @@
  *     So the run is two transactions with an untrusted call in between, and
  *     `advisor_runs` is what ties them together: a crash in the middle leaves a
  *     row with `status = 'started'` and no `finished_at`, which is exactly what
- *     an interrupted run should look like.
+ *     an interrupted run should look like. The watcher's reads borrow a pooled
+ *     connection per tick and return it — nothing is held across the call.
+ *   * **A `local_model` advisor runs only in its own lane** (WP 5.1). It is
+ *     executed by the `insights.run_local` job and nowhere else — never by
+ *     `insights.run` (whose concurrency of 1 would queue every built-in behind
+ *     a three-minute model call) and never inline in the API.
+ *     `runAdvisor` refuses to execute one unless the caller says it is that
+ *     lane; `jobs.ts` is the only caller that does.
  *
  * ## The deadline is ours
  *
  * 08 §4.4: "Hard timeout, enforced by us." The `AbortSignal` passed to
- * `Advisor.run` is created here from `resolveLimits`, and the `Promise.race`
- * below means a built-in that ignores the signal still cannot hold the worker —
- * it can only leak its own continuation, which is a bug in that advisor and not
- * an outage.
+ * `Advisor.run` is created here, aborted by the deadline or by the watcher,
+ * and the race below means an advisor that ignores the signal still cannot
+ * hold the worker — it can only leak its own continuation, which is a bug in
+ * that advisor and not an outage. A deadline is a *failure* (the breaker
+ * counts it: the advisor did not answer in time); a kill is a *cancellation*
+ * (it does not: the holder or the operator stopped it).
  *
  * ## Suppression drops proposals; it does not delete rows
  *
@@ -43,13 +60,18 @@
  * advisor found nothing" and "the advisor found six things you have already
  * refused" are different situations and only one of them is worth acting on.
  */
-import { newId, todayIn, type Clock } from '@core/kernel';
-import { appendEvent } from '@core/platform';
+import type { Clock } from '@core/kernel';
+import { appendEvent, canonicalJson } from '@core/platform';
 import type { AdvisorKind, AdvisorScope } from './contract/scopes.ts';
 import type { AdvisorRequest } from './contract/request.ts';
-import { ADVISOR_CONTRACT_MAJOR } from './contract/version.ts';
-import { platformOf, type InsightsContext, type InsightsDatabase } from './db.ts';
 import {
+  platformOf,
+  type InsightsContext,
+  type InsightsDatabase,
+  type InsightsExecutor,
+} from './db.ts';
+import {
+  AdvisorRunCancelled,
   AdvisorRunCompleted,
   AdvisorRunFailed,
   AdvisorRunStarted,
@@ -58,21 +80,45 @@ import {
   InsightProposed,
   InsightReviewed,
 } from './events.ts';
-import { decideRun, shouldQuarantine, type RunRefusal } from './policy/kill-switches.ts';
+import {
+  LADDER_LEVEL,
+  decideContinue,
+  decideRun,
+  shouldQuarantine,
+  staticRunSwitches,
+  type CancelReason,
+  type KillSwitchInputs,
+  type RunRefusal,
+  type RunSwitches,
+} from './policy/kill-switches.ts';
+import { RunCancelled, RUN_WATCH_POLL_MS, watchRun } from './policy/run-watch.ts';
 import { isSuppressed } from './policy/cooldown.ts';
-import type { AdvisorRegistry } from './registry.ts';
-import { SnapshotBuilder } from './snapshot/builder.ts';
+import type { PromptRenderer } from './ports.ts';
+import {
+  buildAdvisorRequest,
+  effectiveRunScopes,
+  hasLiveApproval,
+  requiresPayloadApproval,
+  shapeFor,
+} from './preview.ts';
+import type { AdvisorManifest } from './contract/manifest.ts';
+import type { AdvisorRegistry, RegisteredAdvisor } from './registry.ts';
+import type { BuiltSnapshot } from './snapshot/builder.ts';
 import type { SnapshotPorts } from './snapshot/ports.ts';
-import { deriveTokenKey } from './snapshot/tokens.ts';
 import {
   finishRun,
   findAdvisor,
   findInsight,
+  findRun,
   listGrants,
   loadSuppressions,
+  lockAdvisor,
   recordFeedback,
   recordRunHealth,
+  recordRunModel,
+  rejectionsSince,
   quarantineAdvisor,
+  retainRunPayload,
   startRun,
   upsertInsight,
   type FeedbackInput,
@@ -81,10 +127,15 @@ import { validateResponse, type InsightRejection } from './validate/pipeline.ts'
 
 /** Deployment-level settings a run needs. Supplied by the composition root. */
 export interface InsightsSettings {
-  /** Kill switch 1. `ADVISORS_ENABLED`. */
-  readonly advisorsEnabled: boolean;
-  /** The `module.insights` feature flag, resolved for this user. */
-  readonly moduleEnabled: boolean;
+  /**
+   * @deprecated Kill level 1 is read through `InsightsDependencies.switches`
+   * (WP 5.1). Consulted only when no `switches` port is bound — the worker's
+   * `modules.ts` until the W-A wiring batch replaces its literal `true` — and
+   * then an absent value is `false`: fail closed.
+   */
+  readonly advisorsEnabled?: boolean;
+  /** @deprecated As `advisorsEnabled`: the `module.insights` flag, read through `switches`. */
+  readonly moduleEnabled?: boolean;
   /** IANA zone. Every "today" in a snapshot is computed in it. */
   readonly timeZone: string;
   readonly baseCurrency: string;
@@ -103,19 +154,75 @@ export interface InsightsDependencies {
   readonly registry: AdvisorRegistry;
   readonly ports: SnapshotPorts;
   readonly settings: InsightsSettings;
+  /**
+   * Kill levels 1 and 2, read live (WP 5.1). Bound by the composition root to
+   * `config.env.ADVISORS_ENABLED`, an **uncached** flag reader, and which
+   * kinds are configured (`createRunSwitches`). Absent ⇒ the deprecated
+   * booleans on `settings`, fail-closed, and no kind but `builtin`.
+   */
+  readonly switches?: RunSwitches;
+  /**
+   * WP 5.2's prompt construction, bound by the composition root. Needed by a
+   * `local_model` run (the prompt hash and model it records) and by the
+   * payload preview (the template hash in the query shape). Absent ⇒ a
+   * `local_model` advisor has no approvable shape and never runs.
+   */
+  readonly promptRenderer?: PromptRenderer;
+  /** The run watcher's interval. Tests only; production is `RUN_WATCH_POLL_MS`. */
+  readonly runWatchPollMs?: number;
+}
+
+/**
+ * Which job lane may execute an advisor of this kind.
+ *
+ * `builtin` runs in `insights.run` (or inline, for the API's button); every
+ * other kind runs only in `insights.run_local`. `external` has no advisor
+ * until Phase 6 and is put in the untrusted lane by default rather than the
+ * built-in one: the failure to avoid is a slow, untrusted call queued in
+ * front of the deterministic rules.
+ */
+export type RunLane = 'builtin' | 'local';
+
+export function laneOf(kind: AdvisorKind): RunLane {
+  return kind === 'builtin' ? 'builtin' : 'local';
+}
+
+/** Thrown — a wiring bug, not a refusal — when an advisor is executed outside its lane. */
+export class LaneViolation extends Error {
+  constructor(advisorId: string, kind: AdvisorKind, lane: RunLane) {
+    super(
+      `advisor ${advisorId} is a ${kind} advisor and runs only in the ${laneOf(kind)} lane ` +
+        `(insights.run_local); it was asked to run in the ${lane} lane`,
+    );
+    this.name = 'LaneViolation';
+  }
 }
 
 export interface RunAdvisorInput {
   readonly advisorId: string;
   readonly trigger: 'schedule' | 'event' | 'manual' | 'backfill';
   readonly triggerEventType?: string | null;
+  /**
+   * The lane executing this run. Default `builtin`. Only the
+   * `insights.run_local` job handler passes `local`.
+   */
+  readonly lane?: RunLane;
+  /**
+   * `requiresPerRunConsent` scopes the holder consented to for **this** run
+   * (Phase 4 gate G4-22). A standing grant of such a scope is dropped without
+   * one. Nothing supplies it yet — WP 5.10's route does — so today such a
+   * scope is never emitted.
+   */
+  readonly perRunConsent?: readonly AdvisorScope[];
 }
 
 export interface RunAdvisorResult {
   readonly runId: string;
   readonly advisorId: string;
-  readonly status: 'completed' | 'failed' | 'refused';
+  readonly status: 'completed' | 'failed' | 'refused' | 'cancelled';
   readonly refusal: RunRefusal | null;
+  /** Set exactly when `status` is `cancelled`: the broadest level that applied. */
+  readonly cancelReason: CancelReason | null;
   readonly proposed: number;
   readonly accepted: number;
   readonly rejected: number;
@@ -130,6 +237,7 @@ export interface RunAdvisorResult {
 }
 
 const EMPTY_RESULT = {
+  cancelReason: null,
   proposed: 0,
   accepted: 0,
   rejected: 0,
@@ -141,23 +249,95 @@ const EMPTY_RESULT = {
   rejections: [] as readonly InsightRejection[],
 } as const;
 
-/** `AbortSignal.timeout` plus a race, so an advisor that ignores it still ends. */
-async function withDeadline<T>(
-  work: (signal: AbortSignal) => Promise<T>,
+function switchesOf(dependencies: InsightsDependencies): RunSwitches {
+  return dependencies.switches ?? staticRunSwitches(dependencies.settings);
+}
+
+// ---------------------------------------------------------------------------
+// The gate: one read of every switch, used before, during and at the barrier
+// ---------------------------------------------------------------------------
+
+interface GateRead {
+  readonly inputs: KillSwitchInputs;
+  readonly cancelRequestedAt: Date | null;
+}
+
+/**
+ * Read every input `decideRun` needs, for one advisor (and, once it exists,
+ * one run). `lock` takes the `advisors` row `FOR UPDATE` — the write barrier's
+ * form; the watcher and transaction 1 read without it.
+ */
+async function readGate(
+  executor: InsightsExecutor,
+  switches: RunSwitches,
+  input: {
+    readonly userId: string;
+    readonly manifest: AdvisorManifest;
+    readonly runId: string | null;
+    readonly shape: string | null;
+    readonly lock: boolean;
+  },
+): Promise<GateRead> {
+  const { userId, manifest } = input;
+  const [advisorsEnabled, moduleEnabled, kindEnabled] = await Promise.all([
+    switches.advisorsEnabled(),
+    switches.moduleEnabled(userId),
+    switches.kindEnabled(userId, manifest.kind),
+  ]);
+  const row = input.lock
+    ? await lockAdvisor(executor, userId, manifest.advisor_id)
+    : await findAdvisor(executor, userId, manifest.advisor_id);
+  const payloadApproved =
+    !requiresPayloadApproval(manifest.kind) ||
+    (input.shape !== null &&
+      (await hasLiveApproval(executor, userId, manifest.advisor_id, input.shape)));
+  const run = input.runId === null ? null : await findRun(executor, userId, input.runId);
+  return {
+    inputs: {
+      advisorsEnabled,
+      moduleEnabled,
+      kindEnabled,
+      // An advisor with no registry row has not been turned on. The default is
+      // off (the DDL says so too), so "never registered" and "registered and
+      // disabled" behave identically rather than the first one being a hole.
+      advisorEnabled: row?.enabled ?? false,
+      quarantinedAt: row?.quarantinedAt ?? null,
+      payloadApproved,
+    },
+    cancelRequestedAt: run?.cancelRequestedAt ?? null,
+  };
+}
+
+/**
+ * The advisor call, raced against our deadline and against the watcher's
+ * abort. An advisor that ignores its signal still ends here — it can only
+ * leak its own continuation.
+ */
+async function invoke(
+  registered: RegisteredAdvisor,
+  request: AdvisorRequest,
+  controller: AbortController,
   timeoutMs: number,
-): Promise<T> {
-  const controller = new AbortController();
+): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_resolve, rejectPromise) => {
+  let onAbort: (() => void) | undefined;
+  const stopped = new Promise<never>((_resolve, rejectPromise) => {
     timer = setTimeout(() => {
-      controller.abort();
+      controller.abort(new Error('advisor_timeout'));
       rejectPromise(new Error('advisor_timeout'));
     }, timeoutMs);
+    onAbort = () => {
+      const reason: unknown = controller.signal.reason;
+      rejectPromise(reason instanceof Error ? reason : new Error('advisor_aborted'));
+    };
+    if (controller.signal.aborted) onAbort();
+    else controller.signal.addEventListener('abort', onAbort, { once: true });
   });
   try {
-    return await Promise.race([work(controller.signal), deadline]);
+    return await Promise.race([registered.advisor.run(request, controller.signal), stopped]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    if (onAbort !== undefined) controller.signal.removeEventListener('abort', onAbort);
   }
 }
 
@@ -176,19 +356,29 @@ export async function runAdvisor(
     throw new Error(`advisor ${input.advisorId} is not registered`);
   }
   const { manifest, limits } = registered;
+  const lane = input.lane ?? 'builtin';
+  if (laneOf(manifest.kind) !== lane) {
+    // Before anything is opened or read: the lane is a property of the call
+    // site, and the wrong call site gets no `advisor_runs` row to hide in.
+    throw new LaneViolation(manifest.advisor_id, manifest.kind, lane);
+  }
+  const switches = switchesOf(dependencies);
 
   // --- transaction 1: the switches, and the run row -------------------------
   const opened = await database.transaction(async (tx) => {
-    const row = await findAdvisor(tx, context.userId, manifest.advisor_id);
-    const decision = decideRun({
-      advisorsEnabled: dependencies.settings.advisorsEnabled,
-      moduleEnabled: dependencies.settings.moduleEnabled,
-      // An advisor with no registry row has not been turned on. The default is
-      // off (the DDL says so too), so "never registered" and "registered and
-      // disabled" behave identically rather than the first one being a hole.
-      advisorEnabled: row?.enabled ?? false,
-      quarantinedAt: row?.quarantinedAt ?? null,
+    const grants = await listGrants(tx, context.userId, manifest.advisor_id);
+    const scopes = effectiveRunScopes(manifest, grants, input.perRunConsent ?? []);
+    const shape = requiresPayloadApproval(manifest.kind)
+      ? shapeFor(manifest, scopes, dependencies)
+      : null;
+    const gate = await readGate(tx, switches, {
+      userId: context.userId,
+      manifest,
+      runId: null,
+      shape,
+      lock: false,
     });
+    const decision = decideRun(gate.inputs);
 
     const run = await startRun(tx, context, {
       advisorId: manifest.advisor_id,
@@ -204,7 +394,7 @@ export async function runAdvisor(
         refusal: decision.refusal,
         durationMs: 0,
       });
-      return { runId: run.id, refusal: decision.refusal, grants: [] as readonly AdvisorScope[] };
+      return { runId: run.id, refusal: decision.refusal, scopes, shape };
     }
 
     await appendEvent(
@@ -227,11 +417,7 @@ export async function runAdvisor(
       ),
     );
 
-    return {
-      runId: run.id,
-      refusal: null,
-      grants: await listGrants(tx, context.userId, manifest.advisor_id),
-    };
+    return { runId: run.id, refusal: null, scopes, shape };
   });
 
   if (opened.refusal !== null) {
@@ -244,53 +430,69 @@ export async function runAdvisor(
     };
   }
 
-  // --- outside any transaction: build, invoke, validate ---------------------
+  // --- outside any transaction: build, retain, invoke (watched), validate ---
   // The injected clock, not `Date.now()`: every duration this module records
   // comes from the same source as every timestamp it writes, so a fixed clock
   // in a test produces a run whose `duration_ms` is 0 rather than a few
   // milliseconds of wall time that make a golden comparison flaky.
   const clock: Clock = context.clock;
   const startedAt = clock.now().getTime();
-  const today = todayIn(clock, dependencies.settings.timeZone);
+  let built: BuiltSnapshot | null = null;
 
   try {
-    const builder = new SnapshotBuilder(dependencies.ports);
-    const built = await builder.build({
-      userId: context.userId,
-      kind: manifest.kind,
-      // The intersection of what the user granted and what this advisor asked
-      // for. A grant the manifest never requested is not silently used: the
-      // manifest is the artefact a human reviewed and it is the narrower claim.
-      grantedScopes: opened.grants.filter((scope) => manifest.requires_scopes.includes(scope)),
-      today,
-      baseCurrency: dependencies.settings.baseCurrency,
-      tokenKey: deriveTokenKey(dependencies.settings.tokenSecret, context.userId),
-    });
+    const prepared = await buildAdvisorRequest(dependencies, context, registered, opened.scopes);
+    built = prepared.built;
+    const { request } = prepared;
 
-    const request: AdvisorRequest = {
-      contract_version: ADVISOR_CONTRACT_MAJOR,
-      request_id: newId(),
-      advisor_id: manifest.advisor_id,
-      advisor_version: manifest.version,
-      kind: manifest.kind,
-      generated_at: clock.now().toISOString(),
-      base_currency: dependencies.settings.baseCurrency,
-      time_zone: dependencies.settings.timeZone,
-      today,
-      granted_scopes: [...built.grantedScopes],
-      input_digest: built.inputDigest,
-      limits: {
-        max_insights: limits.maxInsights,
-        max_response_bytes: limits.maxResponseBytes,
-        deadline: new Date(clock.now().getTime() + limits.timeoutMs).toISOString(),
+    // What a local model or an external advisor is sent is retained for the
+    // run inspector (30 days), and a local model's prompt hash and pinned
+    // model are recorded — before the call, so a run that never returns
+    // still says what it was waiting on. A short transaction of its own.
+    if (requiresPayloadApproval(manifest.kind) && opened.shape !== null) {
+      const shape = opened.shape;
+      const prompt =
+        manifest.kind === 'local_model' ? dependencies.promptRenderer?.render(request) : undefined;
+      const canonical = canonicalJson(request);
+      await database.transaction(async (tx) => {
+        await retainRunPayload(tx, context, {
+          runId: opened.runId,
+          advisorId: manifest.advisor_id,
+          queryShape: shape,
+          payload: JSON.parse(canonical) as Record<string, unknown>,
+          payloadBytes: new TextEncoder().encode(canonical).byteLength,
+        });
+        if (prompt !== undefined && dependencies.promptRenderer !== undefined) {
+          await recordRunModel(tx, context, {
+            runId: opened.runId,
+            llmModel: dependencies.promptRenderer.model,
+            llmPromptHash: prompt.hash,
+          });
+        }
+      });
+    }
+
+    const controller = new AbortController();
+    const watch = watchRun({
+      controller,
+      pollMs: dependencies.runWatchPollMs ?? RUN_WATCH_POLL_MS,
+      probe: async () => {
+        // Short reads on the pool — no transaction, nothing held between ticks.
+        const gate = await readGate(database, switches, {
+          userId: context.userId,
+          manifest,
+          runId: opened.runId,
+          shape: opened.shape,
+          lock: false,
+        });
+        return decideContinue({ ...gate.inputs, cancelRequestedAt: gate.cancelRequestedAt });
       },
-      snapshot: built.snapshot,
-    };
-
-    const body = await withDeadline(
-      (signal) => registered.advisor.run(request, signal),
-      limits.timeoutMs,
-    );
+    });
+    let body: unknown;
+    try {
+      body = await invoke(registered, request, controller, limits.timeoutMs);
+    } finally {
+      await watch.stop();
+    }
 
     const outcome = validateResponse({ request, manifest, limits, body });
     if (!outcome.ok) {
@@ -301,16 +503,41 @@ export async function runAdvisor(
       return await failRun(database, context, {
         runId: opened.runId,
         advisorId: manifest.advisor_id,
+        kind: manifest.kind,
         errorCode: `${outcome.rejection.step}:${outcome.rejection.reason}`,
         durationMs: clock.now().getTime() - startedAt,
-        inputDigest: built.inputDigest,
-        grantedScopes: built.grantedScopes,
-        emittedScopes: built.emittedScopes,
+        inputDigest: prepared.built.inputDigest,
+        grantedScopes: prepared.built.grantedScopes,
+        emittedScopes: prepared.built.emittedScopes,
       });
     }
 
-    // --- transaction 2: suppression, the writes, the close -------------------
-    return await database.transaction(async (tx) => {
+    // --- transaction 2: the write barrier, suppression, the writes, the close
+    const snapshot = prepared.built;
+    return await database.transaction(async (tx): Promise<RunAdvisorResult> => {
+      // The write barrier. Every switch, re-read under the `advisors` row lock
+      // every level-3/4 writer also takes, before anything is written. A kill
+      // that landed after the watcher's last tick — between the reply and this
+      // line — is seen here, and the run writes nothing.
+      const gate = await readGate(tx, switches, {
+        userId: context.userId,
+        manifest,
+        runId: opened.runId,
+        shape: opened.shape,
+        lock: true,
+      });
+      const stop = decideContinue({ ...gate.inputs, cancelRequestedAt: gate.cancelRequestedAt });
+      if (stop !== null) {
+        return closeCancelled(tx, context, {
+          runId: opened.runId,
+          advisorId: manifest.advisor_id,
+          reason: stop,
+          stage: 'write_barrier',
+          durationMs: clock.now().getTime() - startedAt,
+          built: snapshot,
+        });
+      }
+
       const outbox = platformOf(tx);
       const suppressions = await loadSuppressions(tx, context.userId, manifest.advisor_id);
       const now = clock.now();
@@ -329,7 +556,7 @@ export async function runAdvisor(
           advisorId: manifest.advisor_id,
           advisorVersion: manifest.version,
           runId: opened.runId,
-          inputDigest: built.inputDigest,
+          inputDigest: snapshot.inputDigest,
         });
         written += 1;
         if (!result.inserted) continue;
@@ -367,9 +594,9 @@ export async function runAdvisor(
       await finishRun(tx, context, {
         runId: opened.runId,
         status: 'completed',
-        inputDigest: built.inputDigest,
-        grantedScopes: built.grantedScopes,
-        emittedScopes: built.emittedScopes,
+        inputDigest: snapshot.inputDigest,
+        grantedScopes: snapshot.grantedScopes,
+        emittedScopes: snapshot.emittedScopes,
         proposedCount: outcome.response.insights.length,
         acceptedCount: outcome.accepted.length,
         rejectedCount: outcome.rejected.length,
@@ -379,13 +606,19 @@ export async function runAdvisor(
 
       await recordRunHealth(tx, context, manifest.advisor_id, true);
 
-      // The breaker's second trigger: a run whose output the validator mostly
-      // refused. An advisor having a bad night fails; an advisor whose output
-      // is mostly unciteable is not having a bad night.
+      // The breaker's second trigger, per kind: a built-in whose run the
+      // validator mostly refused; a local model with five refusals in a
+      // rolling 24 h (08 §4.4). This run's row is already closed above, so
+      // the window includes it.
       const trip = shouldQuarantine({
+        kind: manifest.kind,
         consecutiveFailures: 0,
         accepted: outcome.accepted.length,
         rejected: outcome.rejected.length,
+        rejectionsIn24h:
+          manifest.kind === 'builtin'
+            ? 0
+            : await rejectionsSince(tx, context.userId, manifest.advisor_id, dayBefore(now)),
       });
       if (trip !== null) await quarantineAdvisor(tx, context, manifest.advisor_id, trip);
 
@@ -395,11 +628,11 @@ export async function runAdvisor(
           {
             runId: opened.runId,
             advisorId: manifest.advisor_id,
-            inputDigest: built.inputDigest,
+            inputDigest: snapshot.inputDigest,
             proposed: outcome.response.insights.length,
             accepted: outcome.accepted.length,
             rejected: outcome.rejected.length,
-            emittedScopes: [...built.emittedScopes],
+            emittedScopes: [...snapshot.emittedScopes],
             durationMs,
           },
           {
@@ -417,33 +650,117 @@ export async function runAdvisor(
         advisorId: manifest.advisor_id,
         status: 'completed' as const,
         refusal: null,
+        cancelReason: null,
         proposed: outcome.response.insights.length,
         accepted: written,
         rejected: outcome.rejected.length,
         suppressed,
         inserted,
-        emittedScopes: built.emittedScopes,
-        inputDigest: built.inputDigest,
+        emittedScopes: snapshot.emittedScopes,
+        inputDigest: snapshot.inputDigest,
         quarantined: trip !== null,
         rejections: outcome.rejected,
       };
     });
   } catch (error) {
+    if (error instanceof RunCancelled) {
+      // The watcher stopped it in flight. Not a failure: nothing was wrong
+      // with the advisor, somebody switched it off.
+      const cancelledBuilt = built;
+      return await database.transaction((tx) =>
+        closeCancelled(tx, context, {
+          runId: opened.runId,
+          advisorId: manifest.advisor_id,
+          reason: error.reason,
+          stage: 'in_flight',
+          durationMs: clock.now().getTime() - startedAt,
+          built: cancelledBuilt,
+        }),
+      );
+    }
     return await failRun(database, context, {
       runId: opened.runId,
       advisorId: manifest.advisor_id,
+      kind: manifest.kind,
       errorCode: error instanceof Error ? error.message.slice(0, 120) : 'unknown_error',
       durationMs: clock.now().getTime() - startedAt,
-      inputDigest: null,
-      grantedScopes: [],
-      emittedScopes: [],
+      inputDigest: built?.inputDigest ?? null,
+      grantedScopes: built?.grantedScopes ?? [],
+      emittedScopes: built?.emittedScopes ?? [],
     });
   }
+}
+
+function dayBefore(now: Date): Date {
+  return new Date(now.getTime() - 86_400_000);
+}
+
+interface CloseCancelledInput {
+  readonly runId: string;
+  readonly advisorId: string;
+  readonly reason: CancelReason;
+  readonly stage: 'in_flight' | 'write_barrier';
+  readonly durationMs: number;
+  readonly built: BuiltSnapshot | null;
+}
+
+/**
+ * Close a run as `cancelled`, naming the level, and say so. In the caller's
+ * transaction: at the barrier that is transaction 2, which then commits this
+ * and nothing else. The breaker is not touched — a kill is not the advisor's
+ * failure — and the digest of what was sent is kept, so the inspector can
+ * still answer "what did it see before we stopped it?".
+ */
+async function closeCancelled(
+  tx: InsightsExecutor,
+  context: InsightsContext,
+  input: CloseCancelledInput,
+): Promise<RunAdvisorResult> {
+  await finishRun(tx, context, {
+    runId: input.runId,
+    status: 'cancelled',
+    cancelReason: input.reason,
+    inputDigest: input.built?.inputDigest ?? null,
+    grantedScopes: input.built?.grantedScopes ?? [],
+    emittedScopes: input.built?.emittedScopes ?? [],
+    durationMs: input.durationMs,
+  });
+  await appendEvent(
+    platformOf(tx),
+    AdvisorRunCancelled.create(
+      {
+        runId: input.runId,
+        advisorId: input.advisorId,
+        reason: input.reason,
+        level: LADDER_LEVEL[input.reason],
+        stage: input.stage,
+        durationMs: input.durationMs,
+      },
+      {
+        userId: context.userId,
+        aggregateId: input.runId,
+        correlationId: context.correlationId,
+        causationId: context.causationId ?? null,
+      },
+      context.clock,
+    ),
+  );
+  return {
+    ...EMPTY_RESULT,
+    runId: input.runId,
+    advisorId: input.advisorId,
+    status: 'cancelled',
+    refusal: null,
+    cancelReason: input.reason,
+    inputDigest: input.built?.inputDigest ?? null,
+    emittedScopes: input.built?.emittedScopes ?? [],
+  };
 }
 
 interface FailRunInput {
   readonly runId: string;
   readonly advisorId: string;
+  readonly kind: AdvisorKind;
   readonly errorCode: string;
   readonly durationMs: number;
   readonly inputDigest: string | null;
@@ -453,7 +770,7 @@ interface FailRunInput {
 
 /**
  * Close a run as failed, advance the failure streak, trip the breaker if the
- * streak has reached its limit, and say so.
+ * streak has reached its kind's limit, and say so.
  *
  * Module-private rather than a method, because both call sites in `runAdvisor`
  * want the same five side effects in the same order and a second ordering is
@@ -475,7 +792,21 @@ async function failRun(
       durationMs: input.durationMs,
     });
     const consecutiveFailures = await recordRunHealth(tx, context, input.advisorId, false);
-    const trip = shouldQuarantine({ consecutiveFailures, accepted: 0, rejected: 0 });
+    const trip = shouldQuarantine({
+      kind: input.kind,
+      consecutiveFailures,
+      accepted: 0,
+      rejected: 0,
+      rejectionsIn24h:
+        input.kind === 'builtin'
+          ? 0
+          : await rejectionsSince(
+              tx,
+              context.userId,
+              input.advisorId,
+              dayBefore(context.clock.now()),
+            ),
+    });
     if (trip !== null) await quarantineAdvisor(tx, context, input.advisorId, trip);
 
     await appendEvent(
@@ -512,7 +843,7 @@ async function failRun(
 }
 
 /**
- * Run every advisor a trigger names, sequentially.
+ * Run every advisor a trigger names, sequentially, in the built-in lane.
  *
  * Sequential on purpose. Each run assembles the whole snapshot in memory, and
  * the snapshot is the most sensitive object this application constructs;
@@ -520,6 +851,10 @@ async function failRun(
  * once for no wall-clock gain worth having on a single-user install. One
  * advisor's failure does not stop the next — the result list carries each
  * outcome, and `AdvisorRunFailed` is already on the outbox by then.
+ *
+ * A caller with a mixed list — the API's button — wants `requestAdvisorRuns`
+ * in `jobs.ts`, which runs the built-ins here and queues the rest in their
+ * lane; handing a `local_model` id to this function throws `LaneViolation`.
  */
 export async function runAdvisors(
   database: InsightsDatabase,

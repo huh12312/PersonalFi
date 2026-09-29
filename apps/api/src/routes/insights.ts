@@ -26,22 +26,41 @@
  * `config.secrets.advisor_token_secret`, which is absent until an operator
  * opts in. Absent here means a 503 naming why, not a run with a secret nobody
  * chose.
+ *
+ * ## Kill level 1 is read, not assumed (WP 5.1, Phase 4 gate C-7 / G4-9)
+ *
+ * Until WP 5.1 this file built `InsightsSettings` with `advisorsEnabled: true,
+ * moduleEnabled: true` as literals, so with `module.insights` off the button
+ * still ran every advisor (the gate's probe: 31 `completed`). The run now
+ * reads both halves of level 1 — `config.env.ADVISORS_ENABLED` and the
+ * `module.insights` flag — and level 2, through `createRunSwitches` over an
+ * **uncached** flag reader (`ttlMs: 0`): the same port the run watcher polls
+ * once a second while a run is in flight, so a 30-second flag cache cannot
+ * stand between a kill and the run it kills. `POST /advisors/run` checks level
+ * 1 before anything else and answers 409 naming it, running nothing; every
+ * run the service starts re-checks all four levels itself.
+ *
+ * A `local_model` advisor is never executed here: `requestAdvisorRuns` queues
+ * it as `insights.run_local` and the response says `queued`.
  */
+import { PLATFORM_FLAGS, createFlagService, platformExecutor } from '@core/platform';
 import {
   advisorHealth,
   clearQuarantine,
   createBuiltinRegistry,
+  createRunSwitches,
   findAdvisor,
   findInsight,
   insightFeed,
   listInsights,
+  requestAdvisorRuns,
   reviewInsight,
-  runAdvisor,
-  runAdvisors,
   setAdvisorEnabled,
+  type AdvisorKind,
   type InsightsContext,
   type InsightsDependencies,
   type InsightView,
+  type RunSwitches,
 } from '@ctx/insights';
 import { INSIGHT_STATUSES, type InsightStatus } from '@ctx/insights/schema';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
@@ -54,6 +73,7 @@ import {
   createInsightsMarketDataPort,
   createInsightsRecurringPort,
 } from '../domain.ts';
+import { ADVISOR_KIND_FLAGS, MODULE_FLAGS } from '../platform.ts';
 import { AppError, problems } from '../problem.ts';
 import { isoInstant, moneyOrNull } from '../wire.ts';
 import type { RouteDeps } from './deps.ts';
@@ -179,8 +199,65 @@ function contextOf(
   return { userId, clock: deps.clock, correlationId: String(request.id) };
 }
 
+/**
+ * Kill levels 1 and 2 for this process, read live.
+ *
+ * `ttlMs: 0` — every read goes to `feature_flags`. The run watcher polls this
+ * once a second for the one run in flight; the platform's default 30-second
+ * cache would make a flipped `module.insights` take up to 30 s to stop it.
+ * `configuredKinds`: a `local_model` advisor is on only when this deployment
+ * has a local model configured (`LOCAL_MODEL_ENDPOINT` with its name and
+ * digest — `config.localModel`), whatever its flag says.
+ */
+function runSwitchesOf(deps: RouteDeps): RunSwitches {
+  const configuredKinds = new Set<AdvisorKind>(['builtin']);
+  if (deps.config.localModel !== undefined) configuredKinds.add('local_model');
+  return createRunSwitches({
+    advisorsEnabled: deps.config.env.ADVISORS_ENABLED,
+    flags: createFlagService({
+      db: platformExecutor(deps.database),
+      defaults: [...PLATFORM_FLAGS, ...MODULE_FLAGS, ...ADVISOR_KIND_FLAGS],
+      ttlMs: 0,
+    }),
+    configuredKinds,
+  });
+}
+
+/**
+ * Level 1, before anything else: a run with the module off is refused, named,
+ * and nothing is started — not even a refused `advisor_runs` row per advisor,
+ * because a disabled module contributes nothing (`resolveModules`, MF1).
+ */
+async function assertLevelOneOn(switches: RunSwitches, userId: string): Promise<void> {
+  if (!(await switches.advisorsEnabled())) {
+    throw new AppError({
+      status: 409,
+      code: 'insights.advisors_disabled',
+      title: 'Conflict',
+      detail:
+        'Advisors are switched off for this deployment (ADVISORS_ENABLED=false, kill level 1); ' +
+        'nothing was run.',
+      family: 'domain',
+    });
+  }
+  if (!(await switches.moduleEnabled(userId))) {
+    throw new AppError({
+      status: 409,
+      code: 'insights.module_disabled',
+      title: 'Conflict',
+      detail:
+        'The insights module is switched off (module.insights, kill level 1); nothing was run.',
+      family: 'domain',
+    });
+  }
+}
+
 /** Feature-detected, the same way `modules.ts`'s `insightsModule` is. */
-function dependenciesOf(deps: RouteDeps, timeZone: string): InsightsDependencies {
+function dependenciesOf(
+  deps: RouteDeps,
+  timeZone: string,
+  switches: RunSwitches,
+): InsightsDependencies {
   const tokenSecret = deps.config.secrets.advisor_token_secret;
   if (tokenSecret === undefined) {
     throw new AppError({
@@ -213,9 +290,11 @@ function dependenciesOf(deps: RouteDeps, timeZone: string): InsightsDependencies
       planning: createInsightsPlanningPort(deps.database, deps.clock, { timeZone }),
       marketData: createInsightsMarketDataPort({ source: undefined }),
     },
+    // Levels 1 and 2 are read live through `switches`; there is no literal
+    // `true` here any more (G4-9). No `promptRenderer`: this process never
+    // executes a `local_model` advisor, it queues one (`requestAdvisorRuns`).
+    switches,
     settings: {
-      advisorsEnabled: true,
-      moduleEnabled: true,
       timeZone,
       baseCurrency: 'USD',
       tokenSecret: tokenSecret.reveal(),
@@ -246,6 +325,7 @@ const statusList = z
 
 export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
+  const switches = runSwitchesOf(deps);
 
   return async (app) => {
     app.get(
@@ -465,17 +545,24 @@ export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           summary:
             'Manually trigger the nightly advisor pass, for one advisor or every registered one',
           description:
-            'Needs a step-up assertion. 503 when no `advisor_token_secret` is configured.',
+            'Needs a step-up assertion. 409 naming kill level 1 (`insights.advisors_disabled`, ' +
+            '`insights.module_disabled`) when advisors or the module are switched off — nothing ' +
+            'runs. 503 when no `advisor_token_secret` is configured. Built-in advisors run inline; ' +
+            'a `local_model` advisor is queued in its own lane (`insights.run_local`) and answered ' +
+            '`queued` with its job id.',
           tags: ['insights'],
           body: z.object({ advisorId: z.string().optional() }),
           response: {
             200: z.object({
               results: z.array(
                 z.object({
-                  runId: z.uuid(),
+                  /** `null` for a `queued` run: it has no `advisor_runs` row until the lane starts it. */
+                  runId: z.uuid().nullable(),
                   advisorId: z.string(),
-                  status: z.enum(['completed', 'failed', 'refused']),
+                  status: z.enum(['completed', 'failed', 'refused', 'cancelled', 'queued']),
                   refusal: z.string().nullable(),
+                  cancelReason: z.string().nullable(),
+                  jobId: z.uuid().nullable(),
                   proposed: z.int().nonnegative(),
                   accepted: z.int().nonnegative(),
                   rejected: z.int().nonnegative(),
@@ -485,44 +572,57 @@ export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
                 }),
               ),
             }),
-            ...problems(401, 403, 503),
+            ...problems(401, 403, 409, 503),
           },
         },
       },
       async (request) => {
         const session = await guards.requireFreshSession(request);
+        await assertLevelOneOn(switches, session.userId);
         const timezone = await timezoneOf(deps);
-        const dependencies = dependenciesOf(deps, timezone);
+        const dependencies = dependenciesOf(deps, timezone, switches);
         const context = contextOf(deps, session.userId, request);
 
-        const results =
-          request.body.advisorId === undefined
-            ? await runAdvisors(database, context, dependencies, {
-                advisorIds: (await advisorHealth(database, session.userId)).map(
-                  (row) => row.advisorId,
-                ),
-                trigger: 'manual',
-              })
-            : [
-                await runAdvisor(database, context, dependencies, {
-                  advisorId: request.body.advisorId,
-                  trigger: 'manual',
-                }),
-              ];
+        const results = await requestAdvisorRuns(database, context, dependencies, {
+          advisorIds:
+            request.body.advisorId === undefined
+              ? (await advisorHealth(database, session.userId)).map((row) => row.advisorId)
+              : [request.body.advisorId],
+          trigger: 'manual',
+        });
 
         return {
-          results: results.map((result) => ({
-            runId: result.runId,
-            advisorId: result.advisorId,
-            status: result.status,
-            refusal: result.refusal,
-            proposed: result.proposed,
-            accepted: result.accepted,
-            rejected: result.rejected,
-            suppressed: result.suppressed,
-            inserted: result.inserted,
-            quarantined: result.quarantined,
-          })),
+          results: results.map((result) =>
+            result.status === 'queued'
+              ? {
+                  runId: null,
+                  advisorId: result.advisorId,
+                  status: result.status,
+                  refusal: null,
+                  cancelReason: null,
+                  jobId: result.jobId,
+                  proposed: 0,
+                  accepted: 0,
+                  rejected: 0,
+                  suppressed: 0,
+                  inserted: 0,
+                  quarantined: false,
+                }
+              : {
+                  runId: result.runId,
+                  advisorId: result.advisorId,
+                  status: result.status,
+                  refusal: result.refusal,
+                  cancelReason: result.cancelReason,
+                  jobId: null,
+                  proposed: result.proposed,
+                  accepted: result.accepted,
+                  rejected: result.rejected,
+                  suppressed: result.suppressed,
+                  inserted: result.inserted,
+                  quarantined: result.quarantined,
+                },
+          ),
         };
       },
     );

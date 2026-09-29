@@ -177,11 +177,16 @@ describe('the cooldown ladder', () => {
 });
 
 describe('the kill switches', () => {
+  // WP 5.1 added level 2 (`kindEnabled`) and the payload preview gate
+  // (`payloadApproved`); the property over every combination is
+  // `kill-switches.test.ts`.
   const on = {
     advisorsEnabled: true,
     moduleEnabled: true,
+    kindEnabled: true,
     advisorEnabled: true,
     quarantinedAt: null,
+    payloadApproved: true,
   };
 
   it('any one of the three is enough to stop a run', () => {
@@ -212,8 +217,10 @@ describe('the kill switches', () => {
       decideRun({
         advisorsEnabled: false,
         moduleEnabled: false,
+        kindEnabled: false,
         advisorEnabled: false,
         quarantinedAt: new Date(),
+        payloadApproved: false,
       }),
     ).toEqual({ run: false, refusal: 'advisors_disabled' });
   });

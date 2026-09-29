@@ -15,6 +15,8 @@ import { DateOnly, money, newId, systemClock } from '@core/kernel';
 import {
   createBuiltinRegistry,
   grantScopes,
+  registerAdvisor,
+  revokeScopes,
   runAdvisor,
   type InsightsDependencies,
 } from '@ctx/insights';
@@ -309,4 +311,201 @@ describe.skipIf(NO_DATABASE)('/insights and /advisors (WP 2.r)', () => {
     });
     expect(review.statusCode).toBe(404);
   });
+});
+
+/**
+ * WP 5.1 — kill level 1 on the on-demand path (Phase 4 gate C-7, finding
+ * G4-9).
+ *
+ * The Phase 4 gate's probe (gate-security-review.md §2.6): with
+ * `module.insights = false` stored for the holder, `POST /advisors/run`
+ * answered 200 and ran 31 advisors, because `routes/insights.ts` built
+ * `InsightsSettings` with `advisorsEnabled: true, moduleEnabled: true` as
+ * literals. Registration honoured the flag (`resolveModules`, MF1); the button
+ * did not. This suite needs an `advisor_token_secret` — without one the route
+ * 503s before it reaches the switches, which is the suite above's claim.
+ */
+describe.skipIf(NO_DATABASE)('POST /advisors/run and kill level 1 (WP 5.1, C-7)', () => {
+  let h: ApiHarness;
+
+  beforeAll(async () => {
+    h = await createApiHarness({
+      suite: 'wp51-level1',
+      extraSecrets: { advisor_token_secret: 'wp51-level1-token-secret-0123456789abcdef' },
+    });
+    // Something that *would* run and write if the switch were ignored: the
+    // cash advisor, enabled (it ships on) and granted its two scopes.
+    await grantScopes(
+      h.database.db,
+      { userId: h.userId, clock: systemClock, correlationId: newId() },
+      CASH_ADVISOR_ID,
+      ['cash.summary', 'cashflow.monthly'],
+    );
+  }, 120_000);
+
+  afterAll(async () => {
+    await h.close();
+  }, 60_000);
+
+  it('POST /advisors/run with module.insights off refuses and runs nothing', async () => {
+    await h.database.pool.query(
+      `INSERT INTO feature_flags (user_id, key, enabled) VALUES ($1, 'module.insights', false)
+       ON CONFLICT (user_id, key) DO UPDATE SET enabled = EXCLUDED.enabled`,
+      [h.userId],
+    );
+    try {
+      const response = await h.request({
+        method: 'POST',
+        url: '/advisors/run',
+        session: h.fresh,
+        body: {},
+      });
+      const single = await h.request({
+        method: 'POST',
+        url: '/advisors/run',
+        session: h.fresh,
+        body: { advisorId: CASH_ADVISOR_ID },
+      });
+
+      // Nothing ran: not one advisor_runs row got past the switches, and no
+      // insight exists. Asserted before the status so a red names the damage.
+      const ran = await h.database.pool.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM advisor_runs
+          WHERE user_id = $1 AND status <> 'refused'`,
+        [h.userId],
+      );
+      const written = await h.database.pool.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM insights WHERE user_id = $1`,
+        [h.userId],
+      );
+      expect(ran.rows[0]?.n).toBe('0');
+      expect(written.rows[0]?.n).toBe('0');
+
+      // Refused, and named: the broadest level that applied.
+      for (const answer of [response, single]) {
+        expect(answer.statusCode).toBe(409);
+        expect(problemOf(answer)['code']).toBe('insights.module_disabled');
+      }
+    } finally {
+      await h.database.pool.query(
+        `DELETE FROM feature_flags WHERE user_id = $1 AND key = 'module.insights'`,
+        [h.userId],
+      );
+    }
+  }, 60_000);
+
+  /**
+   * Phase 4 gate G4-17 (C-12, the grants half): `GET /advisors` answered
+   * `grantedScopes` from the manifest's *request* (`read.ts:376`,
+   * `row.requiresScopes`), so every scope every advisor asked for read as
+   * granted and a revocation changed nothing; and `lastRunStatus` /
+   * `lastRunRejected` were always null because `row_number()` arrives as a
+   * `bigint` and `1n !== 1`.
+   */
+  it('GET /advisors reports the stored grants and the last run, not the manifest request (C-12, G4-17)', async () => {
+    const run = await h.request({
+      method: 'POST',
+      url: '/advisors/run',
+      session: h.fresh,
+      body: { advisorId: CASH_ADVISOR_ID },
+    });
+    expectStatus(run, 200);
+
+    const listed = async () => {
+      const response = await h.request({ method: 'GET', url: '/advisors', session: h.stale });
+      expectStatus(response, 200);
+      return (
+        response.json() as {
+          advisors: {
+            advisorId: string;
+            grantedScopes: string[];
+            lastRunStatus: string | null;
+            lastRunRejected: number | null;
+          }[];
+        }
+      ).advisors;
+    };
+
+    const before = await listed();
+    const cash = before.find((a) => a.advisorId === CASH_ADVISOR_ID);
+    expect(cash?.grantedScopes).toEqual(['cash.summary', 'cashflow.monthly']);
+    expect(cash?.lastRunStatus).toBe('completed');
+    expect(cash?.lastRunRejected).toBe(0);
+    // Nobody granted the retirement advisor anything: it must not read as granted.
+    const goalPace = before.find((a) => a.advisorId === 'builtin.retirement.goal_pace');
+    expect(goalPace?.grantedScopes).toEqual([]);
+
+    // A revocation is visible.
+    await revokeScopes(
+      h.database.db,
+      { userId: h.userId, clock: systemClock, correlationId: newId() },
+      CASH_ADVISOR_ID,
+      ['cashflow.monthly'],
+    );
+    const after = await listed();
+    expect(after.find((a) => a.advisorId === CASH_ADVISOR_ID)?.grantedScopes).toEqual([
+      'cash.summary',
+    ]);
+  }, 60_000);
+
+  /**
+   * WP 5.1's lane, at the HTTP boundary: the api process has no local model
+   * (it binds no `PromptRenderer` and registers no narrator) and must never
+   * try — a `local_model` advisor asked for by the button is queued as
+   * `insights.run_local` for the worker, and the answer says so.
+   */
+  it('POST /advisors/run queues a local_model advisor and never runs it inline', async () => {
+    const localId = 'local.narrator.route_test';
+    await registerAdvisor(
+      h.database.db,
+      { userId: h.userId, clock: systemClock, correlationId: newId() },
+      {
+        manifest: {
+          advisor_id: localId,
+          version: '1.0.0',
+          contract_version: 1,
+          kind: 'local_model',
+          display_name: 'Route-test narrator',
+          purpose: 'Stands in for the Phase 5 narrator at the route boundary.',
+          requires_scopes: ['cash.summary'],
+          triggers: [],
+          capabilities: {
+            deterministic: false,
+            produces_impact: false,
+            narrates_only: true,
+            max_severity: 'notable',
+          },
+          limits: { timeout_ms: 180_000, max_insights: 5, max_response_bytes: 65_536 },
+          egress_allowlist: [],
+        },
+        enabled: true,
+      },
+    );
+
+    const response = await h.request({
+      method: 'POST',
+      url: '/advisors/run',
+      session: h.fresh,
+      body: { advisorId: localId },
+    });
+    expectStatus(response, 200);
+    const { results } = response.json() as {
+      results: { advisorId: string; status: string; runId: string | null; jobId: string | null }[];
+    };
+    expect(results).toEqual([
+      expect.objectContaining({ advisorId: localId, status: 'queued', runId: null }),
+    ]);
+
+    const jobs = await h.database.pool.query<{ kind: string }>(
+      `SELECT kind FROM jobs WHERE user_id = $1 AND payload->>'advisorId' = $2`,
+      [h.userId, localId],
+    );
+    expect(jobs.rows).toEqual([{ kind: 'insights.run_local' }]);
+    expect(results[0]?.jobId).toMatch(/^[0-9a-f-]{36}$/);
+    const runs = await h.database.pool.query(
+      `SELECT 1 FROM advisor_runs WHERE user_id = $1 AND advisor_id = $2`,
+      [h.userId, localId],
+    );
+    expect(runs.rows).toEqual([]);
+  }, 60_000);
 });

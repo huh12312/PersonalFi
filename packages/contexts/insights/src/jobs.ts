@@ -1,9 +1,29 @@
 // SPDX-License-Identifier: MIT
 /**
- * The two jobs, and the nightly schedule that starts them.
+ * The three jobs, and the nightly schedule that starts them.
  *
- * `insights.run` runs **one** advisor. `insights.run_all` enqueues one
- * `insights.run` per scheduled advisor and returns.
+ * `insights.run` runs **one** built-in advisor. `insights.run_local` runs
+ * **one** `local_model` advisor (WP 5.1). `insights.run_all` enqueues one run
+ * per scheduled advisor, each in its own lane, and returns.
+ *
+ * ## Two lanes, because a model call takes minutes
+ *
+ * `insights.run` has concurrency 1. A three-minute model call in it would
+ * queue every built-in behind it — the nightly pass, and every event-triggered
+ * rule, waiting on a narration. So a `local_model` advisor runs only as
+ * `insights.run_local`, also concurrency 1, which is one slot of the runner's
+ * global four (`@core/platform`'s `createJobRunner`): at most one model call
+ * at a time, and the built-in lane unaffected by it. `service.ts`'s
+ * `runAdvisor` refuses to execute a `local_model` advisor outside that lane;
+ * an `insights.run` job that is handed one (the event consumer enqueues
+ * `insights.run` for whatever a trigger names) re-queues it in its lane and
+ * runs nothing. The API never executes one inline: `requestAdvisorRuns`
+ * queues it and answers `queued`.
+ *
+ * `insights.run_local` is **declared** here and not included in
+ * `insightsJobs()`: registering it is the composition root's act (W-A wiring,
+ * with `assertPoolCoversLeases` re-checked for the new kind), and the exact
+ * lines are in docs/evidence/phase-5/wp5.1-run-control.md.
  *
  * That split is the same one `@ctx/connections` makes between `sync.connection`
  * and `sync.all`, and for the same reason: a schedule row per advisor means the
@@ -42,12 +62,27 @@ import {
   type JobContext,
   type JobHandlerRegistration,
 } from '@core/platform';
-import { platformOf, type InsightsDatabase } from './db.ts';
+import type { AdvisorKind } from './contract/scopes.ts';
+import { platformOf, type InsightsContext, type InsightsDatabase } from './db.ts';
 import type { AdvisorRegistry } from './registry.ts';
-import { runAdvisor, type InsightsDependencies } from './service.ts';
+import {
+  laneOf,
+  runAdvisor,
+  type InsightsDependencies,
+  type RunAdvisorInput,
+  type RunAdvisorResult,
+} from './service.ts';
+import { findAdvisor, pruneRunPayloads } from './store.ts';
 
 export const RUN_JOB_KIND = 'insights.run';
 export const RUN_ALL_JOB_KIND = 'insights.run_all';
+/** The local-model lane (WP 5.1). Concurrency 1; declared here, registered by the composition root. */
+export const RUN_LOCAL_JOB_KIND = 'insights.run_local';
+
+/** The job kind that may execute an advisor of this kind. */
+export function jobKindFor(kind: AdvisorKind): typeof RUN_JOB_KIND | typeof RUN_LOCAL_JOB_KIND {
+  return laneOf(kind) === 'builtin' ? RUN_JOB_KIND : RUN_LOCAL_JOB_KIND;
+}
 
 /** 04:15 local. After the nightly sync, before anyone is awake. */
 export const DEFAULT_ADVISOR_CRON = '15 4 * * *';
@@ -79,6 +114,28 @@ export function createRunJob(input: JobDependencies): JobHandlerRegistration {
     RUN_JOB_KIND,
     async (payload: RunJobPayload, context: JobContext) => {
       const clock = input.clock ?? systemClock;
+      const registered = input.dependencies.registry.get(payload.advisorId);
+      if (registered !== undefined && laneOf(registered.manifest.kind) !== 'builtin') {
+        // Not this lane's to run. Re-queue it where it belongs and return: the
+        // built-in lane never waits on a model call.
+        const queued = await enqueueJob(platformOf(input.database), {
+          kind: RUN_LOCAL_JOB_KIND,
+          userId: context.userId,
+          payload,
+          dedupeKey: `${RUN_LOCAL_JOB_KIND}:${payload.advisorId}`,
+          correlationId: context.correlationId,
+        });
+        context.logger.info(
+          {
+            job: RUN_JOB_KIND,
+            advisorId: payload.advisorId,
+            rerouted: RUN_LOCAL_JOB_KIND,
+            jobId: queued.id,
+          },
+          'advisor belongs to the local-model lane; re-queued there',
+        );
+        return;
+      }
       const result = await runAdvisor(
         input.database,
         {
@@ -124,6 +181,69 @@ export function createRunJob(input: JobDependencies): JobHandlerRegistration {
 }
 
 /**
+ * `insights.run_local` — one `local_model` advisor, one run, in its own lane.
+ *
+ * `concurrency: 1`: one model call at a time on this host, and one slot of the
+ * runner's four, so the built-in lane always has the other three. Before each
+ * run it deletes retained payloads past their 30-day bound — the retention is
+ * enforced by the lane that creates it, not by a schedule somebody has to
+ * remember to register.
+ *
+ * A `builtin` advisor handed to this lane is refused by `runAdvisor`
+ * (`LaneViolation`), which fails the job: that is a wiring bug and should be
+ * loud.
+ */
+export function createRunLocalJob(input: JobDependencies): JobHandlerRegistration {
+  return defineJob<RunJobPayload>(
+    RUN_LOCAL_JOB_KIND,
+    async (payload: RunJobPayload, context: JobContext) => {
+      const clock = input.clock ?? systemClock;
+      const pruned = await pruneRunPayloads(input.database, context.userId, clock.now());
+      const result = await runAdvisor(
+        input.database,
+        {
+          userId: context.userId,
+          clock,
+          correlationId: context.correlationId,
+          causationId: null,
+        },
+        input.dependencies,
+        {
+          advisorId: payload.advisorId,
+          trigger: payload.trigger,
+          triggerEventType: payload.triggerEventType ?? null,
+          lane: 'local',
+        },
+      );
+
+      context.logger.info(
+        {
+          job: RUN_LOCAL_JOB_KIND,
+          advisorId: result.advisorId,
+          runId: result.runId,
+          status: result.status,
+          refusal: result.refusal,
+          cancelReason: result.cancelReason,
+          proposed: result.proposed,
+          accepted: result.accepted,
+          rejected: result.rejected,
+          quarantined: result.quarantined,
+          prunedPayloads: pruned,
+        },
+        'local-model advisor run finished',
+      );
+
+      // As `insights.run`: a failure fails the job so the queue retries it; a
+      // refusal or a cancellation is the ladder working, not a failure.
+      if (result.status === 'failed') {
+        throw new Error(`advisor ${result.advisorId} run failed`);
+      }
+    },
+    { concurrency: 1 },
+  );
+}
+
+/**
  * `insights.run_all` — the fan-out.
  *
  * Reads the registry, not the database: the catalogue is what this process can
@@ -147,14 +267,17 @@ export function createRunAllJob(input: {
           advisorId: entry.manifest.advisor_id,
           trigger: 'schedule',
         };
+        // Each advisor in its own lane: a local model never joins the
+        // built-in queue, even for one hop.
+        const kind = jobKindFor(entry.manifest.kind);
         // The pool, not a transaction: a job handler is not given one, and the
         // fan-out is idempotent by dedupe key — a crash halfway re-enqueues the
         // same keys on retry and the queue returns the existing ids.
         await enqueueJob(platformOf(input.database), {
-          kind: RUN_JOB_KIND,
+          kind,
           userId: context.userId,
           payload,
-          dedupeKey: `${RUN_JOB_KIND}:${entry.manifest.advisor_id}`,
+          dedupeKey: `${kind}:${entry.manifest.advisor_id}`,
           correlationId: context.correlationId,
         });
       }
@@ -193,7 +316,64 @@ export async function registerNightlySchedule(
   );
 }
 
-/** Both handlers, for the composition root's `appModules` entry. */
+/** A run the API queued in its lane rather than executing inline. */
+export interface QueuedAdvisorRun {
+  readonly advisorId: string;
+  readonly status: 'queued';
+  readonly jobKind: typeof RUN_LOCAL_JOB_KIND;
+  readonly jobId: string;
+}
+
+export type RequestedAdvisorRun = RunAdvisorResult | QueuedAdvisorRun;
+
+/**
+ * The on-demand entry point — the API's "run advisors" button.
+ *
+ * Built-ins run inline, sequentially, as `runAdvisors` does. Every other kind
+ * is **queued** in its lane and answered `queued`: a request handler never
+ * waits on a model, and a model call never runs outside `insights.run_local`.
+ * An id this process has no advisor for is queued in the local lane when its
+ * `advisors` row says it is not a built-in (the worker, which registers the
+ * local model, will run it) and is otherwise a wiring bug, as before.
+ */
+export async function requestAdvisorRuns(
+  database: InsightsDatabase,
+  context: InsightsContext,
+  dependencies: InsightsDependencies,
+  input: {
+    readonly advisorIds: readonly string[];
+    readonly trigger: RunAdvisorInput['trigger'];
+  },
+): Promise<readonly RequestedAdvisorRun[]> {
+  const results: RequestedAdvisorRun[] = [];
+  for (const advisorId of input.advisorIds) {
+    const registered = dependencies.registry.get(advisorId);
+    const kind =
+      registered?.manifest.kind ?? (await findAdvisor(database, context.userId, advisorId))?.kind;
+    if (kind !== undefined && laneOf(kind) !== 'builtin') {
+      const payload: RunJobPayload = { advisorId, trigger: input.trigger };
+      const queued = await enqueueJob(platformOf(database), {
+        kind: RUN_LOCAL_JOB_KIND,
+        userId: context.userId,
+        payload,
+        dedupeKey: `${RUN_LOCAL_JOB_KIND}:${advisorId}`,
+        correlationId: context.correlationId,
+      });
+      results.push({ advisorId, status: 'queued', jobKind: RUN_LOCAL_JOB_KIND, jobId: queued.id });
+      continue;
+    }
+    results.push(
+      await runAdvisor(database, context, dependencies, { advisorId, trigger: input.trigger }),
+    );
+  }
+  return results;
+}
+
+/**
+ * `insights.run` and `insights.run_all`, for the composition root's
+ * `appModules` entry. `insights.run_local` is deliberately not here — see this
+ * file's header: the composition root adds `createRunLocalJob` itself.
+ */
 export function insightsJobs(input: JobDependencies): readonly JobHandlerRegistration[] {
   return [
     createRunJob(input),

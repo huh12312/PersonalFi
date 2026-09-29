@@ -37,6 +37,14 @@ export type AdvisorKindValue = (typeof ADVISOR_KIND_VALUES)[number];
 export const SEVERITY_VALUES = ['info', 'notable', 'warning', 'urgent'] as const;
 export type SeverityValue = (typeof SEVERITY_VALUES)[number];
 
+/**
+ * Who last decided `advisors.enabled` (migration 0028). Only a `default` row
+ * follows the catalogue when it is re-registered; `user` is a human through
+ * the step-up route, `feedback` is WP 5.9's dismiss-reason loop.
+ */
+export const ENABLED_SOURCES = ['default', 'user', 'feedback'] as const;
+export type EnabledSource = (typeof ENABLED_SOURCES)[number];
+
 /** Why the breaker tripped, or that a human did it. */
 export const QUARANTINE_REASONS = ['consecutive_failures', 'rejection_rate', 'manual'] as const;
 export type QuarantineReasonValue = (typeof QUARANTINE_REASONS)[number];
@@ -72,6 +80,8 @@ export const advisors = pgTable(
 
     /** Kill switch 2. Defaults false in DDL; a row must be turned on. */
     enabled: flagColumn('enabled').notNull(),
+    /** Who last set `enabled`. `default` rows follow the catalogue (0028). */
+    enabledSource: text('enabled_source').$type<EnabledSource>().notNull(),
     /** Kill switch 3. Non-null means tripped. */
     quarantinedAt: instantColumn('quarantined_at'),
     quarantineReason: text('quarantine_reason').$type<QuarantineReasonValue>(),
@@ -125,16 +135,31 @@ export type NewSnapshotGrantRow = typeof snapshotGrants.$inferInsert;
 export const RUN_TRIGGERS = ['schedule', 'event', 'manual', 'backfill'] as const;
 export type RunTrigger = (typeof RUN_TRIGGERS)[number];
 
-export const RUN_STATUSES = ['started', 'completed', 'failed', 'refused'] as const;
+/**
+ * `cancelled` (0028): allowed to start, then stopped by a kill level in flight
+ * or at the write barrier. Not `failed` — the breaker does not count it.
+ */
+export const RUN_STATUSES = ['started', 'completed', 'failed', 'refused', 'cancelled'] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
+/**
+ * Blast-radius order: level 1 (global, module), level 2 (kind), level 3
+ * (advisor, quarantine), then the payload preview gate. 0028's CHECK carries
+ * the same list.
+ */
 export const RUN_REFUSALS = [
   'advisors_disabled',
   'module_disabled',
+  'kind_disabled',
   'advisor_disabled',
   'advisor_quarantined',
+  'payload_not_approved',
 ] as const;
 export type RunRefusalValue = (typeof RUN_REFUSALS)[number];
+
+/** A refusal's vocabulary, plus level 4: the holder's own per-run cancel. */
+export const CANCEL_REASONS = [...RUN_REFUSALS, 'run_cancelled'] as const;
+export type CancelReasonValue = (typeof CANCEL_REASONS)[number];
 
 export const advisorRuns = pgTable(
   'advisor_runs',
@@ -164,12 +189,78 @@ export const advisorRuns = pgTable(
     startedAt: instantColumn('started_at').notNull(),
     finishedAt: instantColumn('finished_at'),
     createdAt: createdAtColumn(),
+    /** Kill level 4 (0028): when the holder asked this run to stop. Polled. */
+    cancelRequestedAt: instantColumn('cancel_requested_at'),
+    /** Set exactly when `status = 'cancelled'`: the broadest level that applied. */
+    cancelReason: text('cancel_reason').$type<CancelReasonValue>(),
+    /** A `local_model` run's pinned model, `name@sha256:…`. */
+    llmModel: text('llm_model'),
+    /** `sha256:` of the exact prompt bytes a `local_model` run sent. */
+    llmPromptHash: text('llm_prompt_hash'),
   },
   (table) => [
     index('advisor_runs_user_advisor_idx').on(table.userId, table.advisorId, table.startedAt),
     index('advisor_runs_failed_idx').on(table.userId, table.startedAt),
+    uniqueIndex('advisor_runs_user_id_idx').on(table.userId, table.id),
   ],
 );
 
 export type AdvisorRunRow = typeof advisorRuns.$inferSelect;
 export type NewAdvisorRunRow = typeof advisorRuns.$inferInsert;
+
+/**
+ * The payload preview gate (0028; 03 §8.3). One row per approved query shape;
+ * `revokedAt` non-null means the approval no longer stands.
+ */
+export const advisorPayloadApprovals = pgTable(
+  'advisor_payload_approvals',
+  {
+    id: idColumn(),
+    userId: userIdColumn(),
+    advisorId: text('advisor_id').notNull(),
+    /** `sha256:` over the canonical shape — see `src/preview.ts`. */
+    queryShape: text('query_shape').notNull(),
+    advisorVersion: text('advisor_version').notNull(),
+    kind: text('kind').$type<Exclude<AdvisorKindValue, 'builtin'>>().notNull(),
+    scopes: text('scopes').array().notNull(),
+    promptTemplateHash: text('prompt_template_hash'),
+    approvedAt: instantColumn('approved_at').notNull(),
+    revokedAt: instantColumn('revoked_at'),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn(),
+  },
+  (table) => [
+    uniqueIndex('advisor_payload_approvals_user_advisor_shape_idx').on(
+      table.userId,
+      table.advisorId,
+      table.queryShape,
+    ),
+  ],
+);
+
+export type AdvisorPayloadApprovalRow = typeof advisorPayloadApprovals.$inferSelect;
+export type NewAdvisorPayloadApprovalRow = typeof advisorPayloadApprovals.$inferInsert;
+
+/**
+ * What a `local_model` or `external` run was sent, for at most 30 days (0028).
+ * No digest column on purpose: the inspector re-digests `payload.snapshot`
+ * against `advisor_runs.input_digest`, the authority computed before the call.
+ */
+export const advisorRunPayloads = pgTable(
+  'advisor_run_payloads',
+  {
+    runId: uuid('run_id').primaryKey(),
+    userId: userIdColumn(),
+    advisorId: text('advisor_id').notNull(),
+    queryShape: text('query_shape').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    payloadBytes: integer('payload_bytes').notNull(),
+    retainedAt: instantColumn('retained_at').notNull(),
+    expiresAt: instantColumn('expires_at').notNull(),
+    createdAt: createdAtColumn(),
+  },
+  (table) => [index('advisor_run_payloads_expiry_idx').on(table.userId, table.expiresAt)],
+);
+
+export type AdvisorRunPayloadRow = typeof advisorRunPayloads.$inferSelect;
+export type NewAdvisorRunPayloadRow = typeof advisorRunPayloads.$inferInsert;

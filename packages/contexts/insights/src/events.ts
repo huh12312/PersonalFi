@@ -104,6 +104,35 @@ export const AdvisorRunFailed = defineEvent({
   }),
 });
 
+export const AdvisorRunCancelled = defineEvent({
+  type: 'insights.AdvisorRunCancelled',
+  aggregateType: 'advisor_run',
+  description:
+    'A run the switches allowed to start was stopped before it wrote anything (WP 5.1): a kill ' +
+    'level flipped while the advisor was in flight (`stage: in_flight`, noticed by the run ' +
+    'watcher within a second) or between its reply and the insert (`stage: write_barrier`, ' +
+    'noticed under the row lock). `reason` names the broadest level that applied, in the ' +
+    "refusal vocabulary plus `run_cancelled` (level 4, the holder's own cancel); `level` is that " +
+    "reason's ladder level, null for the payload preview gate, which is not a level. Not a " +
+    'failure: the breaker does not count it.',
+  schema: z.object({
+    runId: uuid,
+    advisorId: z.string(),
+    reason: z.enum([
+      'advisors_disabled',
+      'module_disabled',
+      'kind_disabled',
+      'advisor_disabled',
+      'advisor_quarantined',
+      'payload_not_approved',
+      'run_cancelled',
+    ]),
+    level: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).nullable(),
+    stage: z.enum(['in_flight', 'write_barrier']),
+    durationMs: z.int().nonnegative(),
+  }),
+});
+
 export const InsightProposed = defineEvent({
   type: 'insights.InsightProposed',
   aggregateType: 'insight',
@@ -190,6 +219,7 @@ export const INSIGHTS_EVENTS: readonly EventDefinition[] = Object.freeze([
   AdvisorRunStarted,
   AdvisorRunCompleted,
   AdvisorRunFailed,
+  AdvisorRunCancelled,
   InsightProposed,
   InsightAccepted,
   InsightDismissed,

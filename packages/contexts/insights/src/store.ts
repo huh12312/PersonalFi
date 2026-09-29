@@ -40,11 +40,12 @@
  */
 import { newId } from '@core/kernel';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import type { InsightsContext, InsightsExecutor } from './db.ts';
+import type { InsightsContext, InsightsDatabase, InsightsExecutor } from './db.ts';
 import type { AdvisorManifest } from './contract/manifest.ts';
 import type { AdvisorScope } from './contract/scopes.ts';
 import type { ValidatedInsight } from './validate/pipeline.ts';
 import {
+  advisorRunPayloads,
   advisorRuns,
   advisors,
   insightActions,
@@ -54,7 +55,10 @@ import {
   insights,
   snapshotGrants,
   type AdvisorRow,
+  type AdvisorRunPayloadRow,
   type AdvisorRunRow,
+  type CancelReasonValue,
+  type EnabledSource,
   type FeedbackAction,
   type InsightDismissalRow,
   type InsightRow,
@@ -102,12 +106,38 @@ export async function listAdvisors(
     .orderBy(asc(advisors.advisorId));
 }
 
+/**
+ * The `advisors` row for one advisor, locked `FOR UPDATE` until the caller's
+ * transaction ends.
+ *
+ * The write barrier's lock (WP 5.1). Every writer of a level-3 or level-4
+ * switch — `setAdvisorEnabled`, `quarantineAdvisor`, `requestRunCancel`, an
+ * approval change — updates or locks this same row, so a barrier holding it
+ * and a kill arriving at the same moment are serialised: either the barrier
+ * reads the kill and writes nothing, or the kill waits and lands after the
+ * insert has committed. There is no third interleaving.
+ */
+export async function lockAdvisor(
+  executor: InsightsExecutor,
+  userId: string,
+  advisorId: string,
+): Promise<AdvisorRow | null> {
+  const rows = await executor
+    .select()
+    .from(advisors)
+    .where(and(eq(advisors.userId, userId), eq(advisors.advisorId, advisorId)))
+    .for('update');
+  return rows[0] ?? null;
+}
+
 export interface RegisterAdvisorInput {
   readonly manifest: AdvisorManifest;
   /**
-   * Whether to turn it on. Absent means "leave whatever is there", which is
-   * what a boot-time re-registration wants: restarting the API must not
-   * re-enable an advisor the user switched off.
+   * The catalogue's default for this advisor. On a new row it is the value;
+   * on an existing row it is applied **only while `enabled_source` is
+   * `default`** — nobody has touched it — so a wave released later reaches an
+   * existing install and a human's switch survives every restart. Absent
+   * means "leave `enabled` alone" on an existing row, and off on a new one.
    */
   readonly enabled?: boolean;
 }
@@ -116,10 +146,15 @@ export interface RegisterAdvisorInput {
  * Write the registry row for a manifest, creating or refreshing it.
  *
  * The conflict target is `(user_id, advisor_id)` and the update deliberately
- * does not touch `enabled`, `quarantined_at` or `consecutive_failures`: those
- * are *operational* state about this deployment's experience of the advisor,
- * and a version bump is not a reason to forget that the breaker tripped last
- * night. Only an explicit `enabled` in the input moves the switch.
+ * does not touch `quarantined_at` or `consecutive_failures`: those are
+ * *operational* state about this deployment's experience of the advisor, and a
+ * version bump is not a reason to forget that the breaker tripped last night.
+ *
+ * `enabled` moves only on a row whose `enabled_source` is still `default`
+ * (migration 0028). Before WP 5.1 this branch wrote `input.enabled`
+ * unconditionally, and `apps/api`'s boot pass passes the catalogue default
+ * every boot — so a restart undid the holder's own switch
+ * (docs/evidence/phase-5/wp5.1-run-control.md §7).
  */
 export async function registerAdvisor(
   executor: InsightsExecutor,
@@ -147,6 +182,7 @@ export async function registerAdvisor(
       narratesOnly: manifest.capabilities.narrates_only,
       egressAllowlist: [...manifest.egress_allowlist],
       enabled: input.enabled ?? false,
+      enabledSource: 'default',
       consecutiveFailures: 0,
       createdAt: now,
       updatedAt: now,
@@ -166,7 +202,14 @@ export async function registerAdvisor(
         producesImpact: manifest.capabilities.produces_impact,
         narratesOnly: manifest.capabilities.narrates_only,
         egressAllowlist: [...manifest.egress_allowlist],
-        ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+        ...(input.enabled === undefined
+          ? {}
+          : {
+              // The existing row's own columns, qualified, against the
+              // proposed row's `excluded` value: only an untouched default
+              // follows the catalogue.
+              enabled: sql`CASE WHEN "advisors"."enabled_source" = 'default' THEN excluded."enabled" ELSE "advisors"."enabled" END`,
+            }),
         updatedAt: now,
       },
     })
@@ -176,15 +219,21 @@ export async function registerAdvisor(
   return row;
 }
 
+/**
+ * Kill switch level 3, set by someone: a human through the step-up route
+ * (`user`, the default) or WP 5.9's feedback loop (`feedback`). Either way the
+ * row stops following the catalogue — see `registerAdvisor`.
+ */
 export async function setAdvisorEnabled(
   executor: InsightsExecutor,
   context: InsightsContext,
   advisorId: string,
   enabled: boolean,
+  source: Exclude<EnabledSource, 'default'> = 'user',
 ): Promise<void> {
   await executor
     .update(advisors)
-    .set({ enabled, updatedAt: context.clock.now() })
+    .set({ enabled, enabledSource: source, updatedAt: context.clock.now() })
     .where(and(eq(advisors.userId, context.userId), eq(advisors.advisorId, advisorId)));
 }
 
@@ -371,8 +420,10 @@ export async function startRun(
 
 export interface FinishRunInput {
   readonly runId: string;
-  readonly status: 'completed' | 'failed' | 'refused';
+  readonly status: 'completed' | 'failed' | 'refused' | 'cancelled';
   readonly refusal?: RunRefusalValue | null;
+  /** Exactly when `status` is `cancelled`: the broadest level that applied. */
+  readonly cancelReason?: CancelReasonValue | null;
   readonly inputDigest?: string | null;
   readonly grantedScopes?: readonly string[];
   readonly emittedScopes?: readonly string[];
@@ -394,6 +445,7 @@ export async function finishRun(
     .set({
       status: input.status,
       refusal: input.refusal ?? null,
+      cancelReason: input.cancelReason ?? null,
       inputDigest: input.inputDigest ?? null,
       grantedScopes: [...(input.grantedScopes ?? [])],
       emittedScopes: [...(input.emittedScopes ?? [])],
@@ -406,6 +458,171 @@ export async function finishRun(
       finishedAt: context.clock.now(),
     })
     .where(and(eq(advisorRuns.userId, context.userId), eq(advisorRuns.id, input.runId)));
+}
+
+export async function findRun(
+  executor: InsightsExecutor,
+  userId: string,
+  runId: string,
+): Promise<AdvisorRunRow | null> {
+  const rows = await executor
+    .select()
+    .from(advisorRuns)
+    .where(and(eq(advisorRuns.userId, userId), eq(advisorRuns.id, runId)));
+  return rows[0] ?? null;
+}
+
+/**
+ * What a `local_model` run sent its prompt to, and the hash of the prompt —
+ * written before the call, so a run that never returns still says which model
+ * it was waiting on.
+ */
+export async function recordRunModel(
+  executor: InsightsExecutor,
+  context: InsightsContext,
+  input: { readonly runId: string; readonly llmModel: string; readonly llmPromptHash: string },
+): Promise<void> {
+  await executor
+    .update(advisorRuns)
+    .set({ llmModel: input.llmModel, llmPromptHash: input.llmPromptHash })
+    .where(and(eq(advisorRuns.userId, context.userId), eq(advisorRuns.id, input.runId)));
+}
+
+export type CancelRequestOutcome = 'requested' | 'not_found' | 'not_running';
+
+/**
+ * Kill level 4: ask one run to stop.
+ *
+ * Its own transaction, and it takes the `advisors` row lock first — the same
+ * lock the write barrier holds — so a cancel and a barrier are serialised: a
+ * cancel that commits first is seen by the barrier; one that waits finds the
+ * run already `completed` and changes nothing (`not_running`). The run itself
+ * notices within a second through the run watcher and closes `cancelled`
+ * with `run_cancelled`. A second request on a run already cancelling keeps
+ * the first request's timestamp.
+ */
+export async function requestRunCancel(
+  database: InsightsDatabase,
+  context: InsightsContext,
+  runId: string,
+): Promise<CancelRequestOutcome> {
+  return database.transaction(async (tx) => {
+    const run = await findRun(tx, context.userId, runId);
+    if (run === null) return 'not_found';
+    await lockAdvisor(tx, context.userId, run.advisorId);
+    const updated = await tx
+      .update(advisorRuns)
+      .set({
+        cancelRequestedAt: sql`COALESCE(${advisorRuns.cancelRequestedAt}, ${context.clock.now()})`,
+      })
+      .where(
+        and(
+          eq(advisorRuns.userId, context.userId),
+          eq(advisorRuns.id, runId),
+          eq(advisorRuns.status, 'started'),
+        ),
+      )
+      .returning({ id: advisorRuns.id });
+    return updated.length === 0 ? 'not_running' : 'requested';
+  });
+}
+
+/**
+ * Validator rejections for one advisor in `[since, ∞)`: refused insights
+ * (steps 4–7, `rejected_count`) plus whole responses refused at steps 1–3
+ * (a `failed` run whose `error_code` names one of those steps). The rolling
+ * 24 h input of the `local_model` breaker (08 §4.4's "5 schema violations in
+ * 24h").
+ */
+export async function rejectionsSince(
+  executor: InsightsExecutor,
+  userId: string,
+  advisorId: string,
+  since: Date,
+): Promise<number> {
+  const rows = await executor
+    .select({
+      insights: sql<string>`COALESCE(SUM(${advisorRuns.rejectedCount}), 0)::text`,
+      responses: sql<string>`COUNT(*) FILTER (WHERE ${advisorRuns.status} = 'failed'
+        AND ${advisorRuns.errorCode} ~ '^(transport|schema|envelope):')::text`,
+    })
+    .from(advisorRuns)
+    .where(
+      and(
+        eq(advisorRuns.userId, userId),
+        eq(advisorRuns.advisorId, advisorId),
+        sql`${advisorRuns.startedAt} >= ${since}`,
+      ),
+    );
+  const row = rows[0];
+  return row === undefined ? 0 : Number(row.insights) + Number(row.responses);
+}
+
+// ---------------------------------------------------------------------------
+// advisor_run_payloads — what a local_model / external run was sent (0028)
+// ---------------------------------------------------------------------------
+
+/** 05 §3 WP 5.1: thirty days, and the table's CHECK refuses more. */
+export const RUN_PAYLOAD_RETENTION_DAYS = 30;
+
+export async function retainRunPayload(
+  executor: InsightsExecutor,
+  context: InsightsContext,
+  input: {
+    readonly runId: string;
+    readonly advisorId: string;
+    readonly queryShape: string;
+    readonly payload: Record<string, unknown>;
+    readonly payloadBytes: number;
+  },
+): Promise<void> {
+  const now = context.clock.now();
+  await executor.insert(advisorRunPayloads).values({
+    runId: input.runId,
+    userId: context.userId,
+    advisorId: input.advisorId,
+    queryShape: input.queryShape,
+    payload: input.payload,
+    payloadBytes: input.payloadBytes,
+    retainedAt: now,
+    expiresAt: new Date(now.getTime() + RUN_PAYLOAD_RETENTION_DAYS * 86_400_000),
+    createdAt: now,
+  });
+}
+
+/** The retained payload, or `null` when there is none or it has expired. */
+export async function findRunPayload(
+  executor: InsightsExecutor,
+  userId: string,
+  runId: string,
+  now: Date,
+): Promise<AdvisorRunPayloadRow | null> {
+  const rows = await executor
+    .select()
+    .from(advisorRunPayloads)
+    .where(
+      and(
+        eq(advisorRunPayloads.userId, userId),
+        eq(advisorRunPayloads.runId, runId),
+        sql`${advisorRunPayloads.expiresAt} > ${now}`,
+      ),
+    );
+  return rows[0] ?? null;
+}
+
+/** Delete what has outlived its bound. The local lane calls it before every run. */
+export async function pruneRunPayloads(
+  executor: InsightsExecutor,
+  userId: string,
+  now: Date,
+): Promise<number> {
+  const deleted = await executor
+    .delete(advisorRunPayloads)
+    .where(
+      and(eq(advisorRunPayloads.userId, userId), sql`${advisorRunPayloads.expiresAt} <= ${now}`),
+    )
+    .returning({ runId: advisorRunPayloads.runId });
+  return deleted.length;
 }
 
 export async function latestRuns(
