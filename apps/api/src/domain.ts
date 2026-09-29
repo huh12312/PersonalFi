@@ -3445,13 +3445,43 @@ export function createMonteCarloRunner(options: {
  * Carlo run of the real thing (`wp4.6-projection-service.md` §10.2,
  * `wp4.5-montecarlo.md` §10 item 4).
  *
- * Called once at worker boot (`worker.ts` — see this WP's evidence for the
- * exact line; not this file's to add) and handed to `appModules` as
- * `ModuleWiringOptions.monteCarlo`. Uses `loadReturnSeries` rather than
- * `ensureReturnSeries`: this process never downloads Shiller's workbook on the
- * holder's behalf — that is `data/returns/fetch.ts`, an operator command run
- * once and reviewed (`wp4.5-montecarlo.md` §6's licence verdict) — it only
- * reads whatever an operator has already fetched onto the cache volume.
+ * Called once at worker/api boot (`worker.ts`, `app.ts` — see this WP's
+ * evidence for the exact lines; not this file's to add) and handed to
+ * `appModules` as `ModuleWiringOptions.monteCarlo` / `RouteDeps.monteCarlo`.
+ * Uses `loadReturnSeries` rather than `ensureReturnSeries`: this process never
+ * downloads Shiller's workbook on the holder's behalf — that is
+ * `data/returns/fetch.ts`, an operator command run once and reviewed
+ * (`wp4.5-montecarlo.md` §6's licence verdict) — it only reads whatever an
+ * operator has already fetched onto the cache volume.
+ *
+ * **C-1(c)** (`docs/evidence/phase-4/gate-security-review.md` §3.5 G4-1(c),
+ * §6 row C-1) named this function's *call sites* — `app.ts` and `worker.ts`
+ * each call it exactly once, at boot, and hold the result for the life of
+ * the process (`RouteDeps.monteCarlo`, `ModuleWiringOptions.monteCarlo`) — as
+ * the reason a successful operator fetch has no effect until a restart. This
+ * function itself has always re-read the cache directory on **every call**
+ * it is given (there is no caching inside it; `carry-c1-monte-carlo-retry
+ * .test.ts` proves it: called once against an empty cache it answers `null`,
+ * and called again after the series is written it answers a bound runner —
+ * "the next call succeeds," with no restart, exactly as the condition asks).
+ * The gap is that neither call site ever makes that second call. A design
+ * that makes *this* function itself never answer `null` (so the one call
+ * `app.ts`/`worker.ts` each make returns a self-retrying object instead) was
+ * built and rejected: `defaultMethodFor` (`routes/plan.ts`) and
+ * `refreshBaseline`'s own method choice (`projection-service.ts:973`) both
+ * decide "deterministic vs. Monte Carlo" from a bare `=== null` check on the
+ * exact same stored value this function returns, with no seam this WP's
+ * ownership can reach to tell "attempt eagerly" apart from "gracefully skip
+ * until fetched" — so a never-`null` return made every un-fetched install's
+ * *nightly* baseline refresh stop writing any run at all (proved red against
+ * `apps/api/test/db/phase4-wiring.test.ts`'s existing coverage, not mine to
+ * carry) instead of the deterministic one it writes today. Reverted before
+ * that regression landed. C-1's exit condition allows a second path — "a
+ * successful fetch is picked up without a restart (re-read on a miss, **or a
+ * documented restart step**)" — and RUNBOOK.md's new "Monte Carlo return
+ * series" section takes the second: the operator fetch is followed by a
+ * `docker compose restart worker api` (or `docker compose up -d --force-recreate
+ * api worker`) line, stated plainly, with the reason.
  */
 export function createMonteCarloRunnerFromCache(options: {
   readonly cacheDir?: string;

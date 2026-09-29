@@ -20,11 +20,16 @@
  * that nothing lands on disk when it does, which is the property WP 4.5 §6
  * ("a bad download → nothing cached") names.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { SERIES_FILE, ensureReturnSeries, pinnedSha256, sha256Hex } from '../data/returns/series.ts';
+import {
+  SERIES_FILE,
+  ensureReturnSeries,
+  pinnedSha256,
+  sha256Hex,
+} from '../data/returns/series.ts';
 
 describe('CK2 — the fetch-side pin refusal, on a download that parses (carry-c1)', () => {
   it('a download that derives successfully to the wrong bytes is refused, and nothing is cached', async () => {
@@ -36,7 +41,8 @@ describe('CK2 — the fetch-side pin refusal, on a download that parses (carry-c
       writeFileSync(sums, `${'0'.repeat(64)}  ${SERIES_FILE}\n`);
       expect(pinnedSha256(sums)).toBe('0'.repeat(64));
 
-      const wrongCsv = 'month,equity_real,bond_real,inflation\n1871-02,0.010000000000,0.000000000000,0.000000000000\n';
+      const wrongCsv =
+        'month,equity_real,bond_real,inflation\n1871-02,0.010000000000,0.000000000000,0.000000000000\n';
       let derivedFrom: Uint8Array | undefined;
 
       await expect(
@@ -45,7 +51,8 @@ describe('CK2 — the fetch-side pin refusal, on a download that parses (carry-c
           checksumFile: sums,
           // A "download" that succeeds and produces bytes distinguishable
           // from garbage — the parse step is not what refuses here.
-          download: () => Promise.resolve(new TextEncoder().encode('a workbook the derivation accepts')),
+          download: () =>
+            Promise.resolve(new TextEncoder().encode('a workbook the derivation accepts')),
           // Stands in for `deriveShillerMonthly`: parses without throwing,
           // derives to `wrongCsv`, whose hash is not the pin above.
           derive: (file) => {

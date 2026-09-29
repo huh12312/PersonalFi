@@ -128,7 +128,7 @@ export interface EnsureOptions {
   readonly download?: () => Promise<Uint8Array>;
   /**
    * The derivation step, injected for the same reason `download` is: a test
-   * proving CK2's fetch-side pin refusal (the gate's `bad-download-fetch.test.ts`,
+   * proving CK2's fetch-side pin refusal (`returns-fetch-checksum.test.ts`,
    * `docs/evidence/phase-5/wp5.13-carry-overs.md` §1) needs a download that
    * **parses and derives successfully to the wrong bytes**, not one that
    * fails to parse at all — building a real BIFF8 workbook is out of

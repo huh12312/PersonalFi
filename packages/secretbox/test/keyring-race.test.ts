@@ -84,7 +84,10 @@ describeWithDb('the keyring-initialisation race (carry-c2)', () => {
       // attempt to INSERT generation 1 — the exact race G4-2 observed, driven
       // here without a second process because the property is the database's
       // unique index, not process boundaries.
-      const [stateA, stateB] = await Promise.all([boxA.unlock(PASSPHRASE), boxB.unlock(PASSPHRASE)]);
+      const [stateA, stateB] = await Promise.all([
+        boxA.unlock(PASSPHRASE),
+        boxB.unlock(PASSPHRASE),
+      ]);
 
       expect(stateA.state).toBe('unlocked');
       expect(stateB.state).toBe('unlocked');

@@ -462,6 +462,88 @@ recipe falls back to the host and the local dev database, which is what
 
 ---
 
+## Monte Carlo return series (condition C-1)
+
+The interactive and nightly Monte Carlo projection resamples a real historical
+monthly return series (Shiller's US stock/bond dataset, cross-checked against
+Damodaran's annual series — `packages/contexts/planning/data/returns/
+PROVENANCE.md`). **Neither source grants redistribution**, so this repository
+never ships the series: the image carries the fetch/derive/verify code and the
+pinned checksum, never the data itself (`data/returns/cache/` is git-ignored
+and absent from every built image). Until an operator runs the command below,
+`POST /plan/scenarios/{id}/projections {"method":"monte_carlo"}` refuses
+honestly rather than substituting a different engine silently.
+
+Run it once, inside the `worker` service — the one container that mounts the
+`returns_cache` named volume read-write (`compose.yml`) and, since
+`docker/api.Dockerfile` creates `/var/lib/personalfi/returns` owned by
+`10001:10001` before the volume is ever bound, needs no `chown` and no root
+execution: the image's own `USER 10001:10001` is already the fetch's user.
+
+```bash
+docker compose run --rm --no-deps --entrypoint node worker \
+  packages/contexts/planning/data/returns/fetch.ts \
+  --cache-dir /var/lib/personalfi/returns
+```
+
+**`--entrypoint node` is not optional.** The image's `ENTRYPOINT` is fixed to
+`tini -- node /app/entrypoint.mjs`, and `entrypoint.mjs` dispatches on the
+`ROLE` env var alone — it never reads its own `argv`, so `docker compose run
+--rm --no-deps worker node packages/.../fetch.ts …` **silently ignores** the
+command you typed and starts an ordinary, idle `worker` instead (found live
+while writing this section — it looked like nothing happened because nothing
+had). Overriding the entrypoint replaces `tini -- node /app/entrypoint.mjs`
+outright, so the trailing arguments become `node`'s own, exactly as typed.
+
+Expect output naming the source, its last-modified date, the derived window
+(1871-02..2024-12) and a line reading `matches the pin` before it writes
+`shiller-monthly.csv`. The command derives the workbook into a canonical CSV
+and **refuses to write anything** if that CSV's SHA-256 does not match the
+value committed in `packages/contexts/planning/data/returns/SHA256SUMS`
+(`REFUSED: the derived series hashes to …, the pin is …. Review, then
+--pin.`) — a defence against an upstream file that has quietly changed shape,
+not against Shiller re-uploading routinely (the raw file's own hash is
+printed but not pinned; only the derived, window-bounded bytes are). The same
+pin is checked again on every read (`loadReturnSeries`), so a cache file
+edited, truncated or swapped out from under a running container is refused
+the same way, never served as a silent, different distribution. A successful
+fetch's checksum prefix travels into every Monte Carlo run's
+`engine_version` column, so a stored run names the series that produced it.
+
+**A restart is required after the fetch — this build does not re-read the
+cache on its own.** Both the `api` and the `worker` process read the volume
+exactly once, at boot, and hold whatever they found (or didn't) for the rest
+of the process's life:
+
+```bash
+docker compose restart worker api
+```
+
+(A re-read-on-every-call design was prototyped for this condition and
+rejected: it made the nightly `planning.projection_refresh` job stop writing
+_any_ baseline run — not even the deterministic one it writes today — on an
+install that has not yet fetched the series, because the nightly job's own
+"deterministic or Monte Carlo" choice reads the same bound-or-not signal the
+interactive route does. A documented restart is condition C-1's other named
+exit, and the one this build takes; see `docs/evidence/phase-5/
+wp5.13-carry-overs.md` §1 for the sabotage that proved the rejected design
+regressed the nightly path.)
+
+**What a missing series looks like.** Before the fetch (or before the
+restart that follows it), `POST /plan/scenarios/{id}/projections
+{"method":"monte_carlo"}` answers **409** with
+`{"code":"planning.monte_carlo_unavailable", ...}` — never a 500, never a
+silently substituted lognormal or deterministic result dressed up as Monte
+Carlo. The nightly refresh keeps producing its usual deterministic baseline
+run in the meantime (`method: "deterministic"` in `projection_runs`), and the
+retirement-wave advisors that read the newest _Monte Carlo_ baseline
+(`newestBaselineRunId`, C-1) simply have nothing to prefer yet. On the plan
+screen this reads as the ordinary deterministic headline (see G4-13's open
+finding, C-8, for why that headline currently overstates itself as a
+probability) — there is no dedicated "Monte Carlo unavailable" banner today.
+
+---
+
 ## Export and import (condition C-4)
 
 `GET /export` (step-up required) downloads the whole database as a JSONL
