@@ -1,25 +1,74 @@
 // SPDX-License-Identifier: MIT
 /**
  * `@advisor/local-model` — the Ollama adapter for the `local_model` advisor
- * kind (docs/plan/05-phase-5-dispatch.md WP 5.2).
+ * kind (05-phase-5-dispatch.md §3 WP 5.2 part 2).
  *
- * This is a stub, landed ahead of Wave A so `pnpm-workspace.yaml`,
- * `vitest.config.ts`'s `advisor-local-model` project, the
- * `scripts/eslint-boundaries.js` layer and `.github/workflows/ci.yml` all
- * exist before WP 5.1 and WP 5.2 start, rather than being built by the same
- * agent that has to prove the sandbox. **WP 5.2 fills this package**:
- * `renderPrompt`, the untrusted-block sanitisation, the `POST /api/chat`
- * client over `@core/platform`'s local-endpoint egress policy, and the
- * digest pin described in 05 §3 WP 5.2. Until then, this file exports
- * nothing but its own name, so the vitest project it belongs to is never
- * empty and the package is never unimportable.
+ * A package per model runtime, the `@connector/*` shape. Its layer
+ * (`scripts/eslint-boundaries.js`, `advisor-local-model`) allows
+ * `@core/kernel`, `@core/platform` and `@core/contracts` and **no node
+ * builtin**; `eslint.config.js` bans the `fetch` and `WebSocket` globals here;
+ * `test/structure.test.ts` is the third line. The only network path is
+ * `@core/platform`'s local-endpoint transport.
  *
- * Declared but not yet imported: `@core/kernel`, `@core/platform` and
- * `@core/contracts` are this package's `dependencies` (05 §4 item 10 — no
- * external dependency, ever; the Ollama client is `@core/platform`'s
- * transport, not the `ollama` npm package). They are not imported from this
- * file yet on purpose — the orchestrator updates the lockfile
- * (`pnpm install --offline`) after this batch lands, and this package must
- * type-check and test green without it in the meantime.
+ * What the composition root uses:
+ *
+ *   * `createLocalModelAdapter(config.localModel, { logger, clock })` — in
+ *     `apps/api/src/worker.ts`, only when `config.localModel` is defined
+ *     (W-C). Its `run(request, signal)` is the `Advisor.run` WP 5.3's narrator
+ *     wraps with its manifest.
+ *   * `renderPrompt` — the `PromptRenderer` port WP 5.1 declares, for the
+ *     payload preview: the exact bytes, without invoking anything.
+ *   * `PROMPT_TEMPLATE_HASH` — for WP 5.1's query shape.
  */
 export const PACKAGE_NAME = '@advisor/local-model';
+
+export {
+  createLocalModelAdapter,
+  type LocalModelAdapter,
+  type LocalModelAdapterConfig,
+  type LocalModelAdapterDeps,
+  type LocalModelLogger,
+  type LocalModelResponse,
+} from './adapter.ts';
+export {
+  LocalModelError,
+  isLocalModelError,
+  LOCAL_MODEL_ERROR_CODES,
+  type LocalModelErrorCode,
+} from './errors.ts';
+export { NARRATION_FORMAT } from './format.ts';
+export {
+  createOllamaClient,
+  DEFAULT_GENERATION_OPTIONS,
+  normaliseDigest,
+  type ChatRequest,
+  type ChatResult,
+  type GenerationOptions,
+  type LocalModelTransport,
+  type OllamaClient,
+  type PinnedModel,
+} from './ollama-client.ts';
+export {
+  escapeForBlock,
+  FENCE_CLOSE,
+  FENCE_OPEN,
+  PROMPT_TEMPLATE_HASH,
+  PROMPT_TEMPLATE_VERSION,
+  renderPrompt,
+  SYSTEM_PROMPT,
+  USER_TRAILER,
+  type PromptMessage,
+  type RenderedPrompt,
+} from './prompt.ts';
+export type { LocalModelRequest } from './request.ts';
+export {
+  CODE_POINT_CLASSES,
+  countFlags,
+  INJECTION_PATTERNS,
+  SANITISER_FLAG_KINDS,
+  sanitiseString,
+  sanitiseTree,
+  type SanitiserFlag,
+  type SanitiserFlagKind,
+} from './sanitise.ts';
+export { capFor, DEFAULT_STRING_CAP, FREE_TEXT_CAPS, RECORD_KEY_CAP } from './caps.ts';

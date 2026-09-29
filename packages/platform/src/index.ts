@@ -213,5 +213,29 @@ export {
   type TransportRequest,
   type TransportResponse,
 } from './egress/transport.ts';
+// WP 5.2 (05-phase-5-dispatch.md §3): the *inverse* policy, as a second type
+// rather than a switch on the one above — loopback/private only, one host and
+// port, for `@advisor/local-model`'s Ollama client. `@core/platform`'s
+// `exports` map is closed, so this block is the adapter's only way to reach it.
+export {
+  checkLocalEndpoint,
+  createLocalEndpointPolicy,
+  createLocalEndpointTransport,
+  guardLocalEndpoint,
+  isLocalEndpointRefusedError,
+  LocalEndpointRefusedError,
+  LOCAL_ENDPOINT_REFUSAL_CODES,
+  DEFAULT_LOCAL_MAX_RESPONSE_BYTES,
+  DEFAULT_LOCAL_TIMEOUT_MS,
+  type LocalAddressDecision,
+  type LocalEndpointDecision,
+  type LocalEndpointPolicy,
+  type LocalEndpointPolicyInput,
+  type LocalEndpointRefusalCode,
+  type LocalEndpointRequest,
+  type LocalEndpointResponse,
+  type LocalEndpointTransport,
+  type LocalEndpointTransportOptions,
+} from './egress/local-endpoint.ts';
 
 export * from './schema/index.ts';

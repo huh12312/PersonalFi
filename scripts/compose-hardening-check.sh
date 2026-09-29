@@ -93,6 +93,39 @@ EXPECTED_RULES=(
   missing-cap-drop-all
   missing-no-new-privileges
   root-user
+  # WP 5.2: the local-model sandbox (`ollama`, `ollama-pull`, the `llm` network).
+  ollama-network
+  ollama-published-port
+  ollama-secret
+  ollama-image-unpinned
+  ollama-debug-logging
+  ollama-missing-limits
+  ollama-missing-healthcheck
+  ollama-missing-profile
+  llm-network-not-internal
+  llm-network-member
+  ollama-pull-network-shared
+)
+
+# WP 5.2: rule ids alone could all fire on one service and still leave a
+# hazard unproved *where it matters*. These "service<TAB>rule" pairs must each
+# fire on the named hostile service — in particular the brief's four: an
+# `ollama` on `backend`, publishing a port, running as root, mounting a secret.
+EXPECTED_SERVICE_RULES=(
+  $'ollama\tollama-network'
+  $'ollama\tollama-published-port'
+  $'ollama\troot-user'
+  $'ollama\tollama-secret'
+  $'ollama\tollama-image-unpinned'
+  $'ollama\tollama-debug-logging'
+  $'ollama\tollama-missing-limits'
+  $'ollama\tollama-missing-healthcheck'
+  $'ollama\tollama-missing-profile'
+  $'ollama\twritable-volume-wrong-service'
+  $'hostile-api-on-llm\tllm-network-member'
+  $'ollama-pull\tollama-pull-network-shared'
+  $'ollama-pull\tollama-missing-profile'
+  $'hostile-pull-peer\tollama-pull-network-shared'
 )
 
 EVALUATOR="$(mktemp -t compose-hardening-XXXXXX.mjs)"
@@ -150,6 +183,11 @@ const WRITABLE_NAMED_VOLUMES = new Map([
       'wiring handover §4.4); the api serves the interactive projection route from ' +
       'the same series and mounts this volume read-only (Phase 4 gate C-1) — a ' +
       'writable mount on any service but the worker is still a finding.',
+  ],
+  [
+    'ollama_models:ollama-pull',
+    "WP 5.2: the one-shot model pull writes the store; the `ollama` runtime mounts it " +
+      'read-only, so a compromised runtime cannot alter the weights it serves next.',
   ],
 ]);
 
@@ -376,6 +414,105 @@ for (const [service, spec] of Object.entries(services)) {
   }
 }
 
+// ---------- WP 5.2: the local-model sandbox ----------
+//
+// Identified by image *or* name, so renaming the service does not escape the
+// rules and neither does swapping the image under the old name. A "pull"
+// service is the one-shot `ollama-pull` (or anything in the `local-llm-pull`
+// profile); every other ollama service is a runtime.
+const OLLAMA_IMAGE_RE = /^(?:docker\.io\/)?ollama\/ollama(?:[:@]|$)/;
+const LLM_NETWORK = 'llm';
+const LLM_MEMBERS = new Set(['ollama', 'worker']);
+const declaredNetworks = doc.networks ?? {};
+
+function isOllama(name, spec) {
+  return OLLAMA_IMAGE_RE.test(String(spec.image ?? '')) || /^ollama(?:-|$)/.test(name);
+}
+function isPull(name, spec) {
+  return name === 'ollama-pull' || (spec.profiles ?? []).includes('local-llm-pull');
+}
+function networksOf(spec) {
+  const nets = spec.networks ?? {};
+  return Array.isArray(nets) ? nets : Object.keys(nets);
+}
+const membersOf = new Map();
+for (const [service, spec] of Object.entries(services)) {
+  for (const net of networksOf(spec)) {
+    if (!membersOf.has(net)) membersOf.set(net, []);
+    membersOf.get(net).push(service);
+  }
+}
+
+// Any service on `llm` other than the runtime and the worker: `api` (runs no
+// local model), `db`, a sidecar. `db` on `llm` would undo P0-8 for Ollama.
+for (const service of membersOf.get(LLM_NETWORK) ?? []) {
+  if (!LLM_MEMBERS.has(service)) {
+    report(service, 'llm-network-member', `joins "${LLM_NETWORK}", whose only members may be ollama and worker`);
+  }
+}
+if (declaredNetworks[LLM_NETWORK] !== undefined && declaredNetworks[LLM_NETWORK].internal !== true) {
+  report('(networks)', 'llm-network-not-internal', `network "${LLM_NETWORK}" is not internal: true — it would route off the host`);
+}
+
+for (const [service, spec] of Object.entries(services)) {
+  if (!isOllama(service, spec)) continue;
+  const pull = isPull(service, spec);
+  const nets = networksOf(spec);
+
+  if (!/@sha256:[0-9a-f]{64}$/.test(String(spec.image ?? ''))) {
+    report(service, 'ollama-image-unpinned', `image ${JSON.stringify(spec.image ?? null)} is not pinned by digest`);
+  }
+  if ((spec.ports ?? []).length > 0) {
+    report(service, 'ollama-published-port', `publishes ${(spec.ports ?? []).length} port(s); the model is reached over "${LLM_NETWORK}" only`);
+  }
+  if ((spec.secrets ?? []).length > 0) {
+    report(service, 'ollama-secret', `mounts ${(spec.secrets ?? []).length} secret(s); a local model needs no credential`);
+  }
+  const debug = (spec.environment ?? {}).OLLAMA_DEBUG;
+  if (debug !== undefined && debug !== null && !['', '0', 'false'].includes(String(debug).trim().toLowerCase())) {
+    report(service, 'ollama-debug-logging', `OLLAMA_DEBUG=${JSON.stringify(debug)} logs prompt content to the host disk`);
+  }
+  const limits = spec.deploy?.resources?.limits ?? {};
+  const missing = [];
+  if (limits.memory === undefined && spec.mem_limit === undefined) missing.push('memory');
+  if (limits.cpus === undefined && spec.cpus === undefined) missing.push('cpus');
+  if (limits.pids === undefined && spec.pids_limit === undefined) missing.push('pids');
+  if (missing.length > 0) {
+    report(service, 'ollama-missing-limits', `no ${missing.join(', ')} limit`);
+  }
+
+  const profiles = spec.profiles ?? [];
+  if (pull) {
+    if (!profiles.includes('local-llm-pull') || profiles.includes('local-llm') || profiles.length !== 1) {
+      report(service, 'ollama-missing-profile', `profiles ${JSON.stringify(profiles)}: the pull must be only in "local-llm-pull"`);
+    }
+    // The one container with internet access shares a network with nothing.
+    for (const net of nets) {
+      const others = (membersOf.get(net) ?? []).filter((other) => other !== service);
+      if (others.length > 0 || net === 'backend' || net === LLM_NETWORK || declaredNetworks[net]?.internal === true) {
+        report(service, 'ollama-pull-network-shared', `network "${net}" is shared with ${JSON.stringify(others)} or is backend/${LLM_NETWORK}/internal`);
+        for (const other of others) {
+          report(other, 'ollama-pull-network-shared', `shares network "${net}" with the model pull, which reaches the internet`);
+        }
+      }
+    }
+    if (spec.network_mode !== undefined) {
+      report(service, 'ollama-pull-network-shared', `network_mode ${JSON.stringify(spec.network_mode)}`);
+    }
+  } else {
+    if (!profiles.includes('local-llm')) {
+      report(service, 'ollama-missing-profile', `profiles ${JSON.stringify(profiles)}: the runtime must be profile-gated under "local-llm"`);
+    }
+    if (spec.network_mode !== undefined || nets.length !== 1 || nets[0] !== LLM_NETWORK) {
+      report(service, 'ollama-network', `networks ${JSON.stringify(nets)}${spec.network_mode ? ` network_mode ${spec.network_mode}` : ''}: the runtime joins "${LLM_NETWORK}" and nothing else`);
+    }
+    const healthcheck = spec.healthcheck;
+    if (healthcheck === undefined || healthcheck.disable === true || (healthcheck.test ?? []).length === 0) {
+      report(service, 'ollama-missing-healthcheck', 'no healthcheck');
+    }
+  }
+}
+
 for (const v of violations) {
   process.stdout.write(`${v.rule}\t${v.service}\t${v.detail}\n`);
   process.stderr.write(`    FAIL ${label}: ${v.service}: ${v.rule}: ${v.detail}\n`);
@@ -482,6 +619,18 @@ self_test() {
     rc=1
   fi
   echo "  fixture triggered $(wc -l <<<"$fired") distinct rule(s): $(tr '\n' ' ' <<<"$fired")" >&2
+  # WP 5.2: each named hostile service must trip each named rule.
+  local pairs missing_pairs=()
+  pairs="$(printf '%s' "$json" | node "$EVALUATOR" "$FIXTURE" 2>/dev/null | awk -F '\t' '{ print $2 "\t" $1 }' | sort -u || true)"
+  for pair in "${EXPECTED_SERVICE_RULES[@]}"; do
+    grep -qxF "$pair" <<<"$pairs" || missing_pairs+=("${pair//$'\t'/:}")
+  done
+  if [ "${#missing_pairs[@]}" -ne 0 ]; then
+    echo "compose-hardening-check: SELF-TEST FAILED: these service:rule pairs did not fire: ${missing_pairs[*]}" >&2
+    rc=1
+  else
+    echo "  ollama sandbox: all ${#EXPECTED_SERVICE_RULES[@]} service:rule pairs fired" >&2
+  fi
   if [ "$rc" -eq 0 ]; then
     echo "compose-hardening-check: SELF-TEST PASS (all ${#EXPECTED_RULES[@]} rules fire on a hostile file)" >&2
   fi

@@ -859,21 +859,126 @@ been seen failing something.
 
 ---
 
+## Local model (profile `local-llm`)
+
+The optional `local_model` advisor runs against **Ollama on this host**, in its own container on its
+own internal network (WP 5.2; 05-phase-5-dispatch.md §3, §6 Q1–Q2). Nothing here is needed for the
+rest of the app: with `LOCAL_MODEL_ENDPOINT` empty (the default) no local advisor is registered and
+none of this runs. Budget: **~5 GB of RAM and 4 of 8 threads** while a model is loaded (limit 8G);
+Ollama unloads an idle model after 5 minutes.
+
+The sandbox, in one paragraph: `ollama` joins only the `llm` network, which is `internal: true`
+(no route off the host) and whose only other member is `worker`; `api` and `db` are not on it. It
+runs as uid 10003 on a read-only root filesystem with every capability dropped, no secret, no
+published port, the model store mounted **read-only**, and debug logging off (at debug level Ollama
+logs prompt content). The adapter in `worker` reaches it only through the local-endpoint policy —
+a single-label name that must resolve to a private or loopback address, never a public one — and
+refuses to send a prompt unless the served model's digest is the one pinned below.
+`bash scripts/compose-hardening-check.sh` enforces the compose half on every commit.
+
+### Pull (the only time the model runtime touches the internet)
+
+1. Choose the model. The reference is **`qwen2.5:7b-instruct-q4_K_M`** (Apache-2.0, 7.6B, 4-bit,
+   ~4.7 GB). With less than 16 GB of RAM, a 3–4B model is the fallback (05 §6 Q1); the ≥95%
+   narration criterion is measured on whatever you choose.
+2. In `.env`: `LOCAL_MODEL_NAME=qwen2.5:7b-instruct-q4_K_M`.
+3. Pull, with the one-shot service in its own profile, on its own network that reaches neither
+   `backend` nor `llm`:
+   ```bash
+   docker compose --profile local-llm-pull run --rm ollama-pull
+   ```
+   It pulls into the `ollama_models` volume and ends by printing one line per model:
+   `<64 hex>  /var/tmp/ollama/models/manifests/registry.ollama.ai/library/qwen2.5/7b-instruct-q4_K_M`.
+
+### Pin
+
+4. `LOCAL_MODEL_DIGEST=sha256:<the 64 hex on your model's line>`. For the reference model that is
+   `sha256:845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e` — if the pull prints
+   anything else, the tag has moved upstream: stop and decide whether to adopt the new model (and
+   re-run the narration evaluation, WP 5.3) before changing the pin. The digest is the sha256 of the
+   model's manifest, which is exactly what `GET /api/tags` reports, and the adapter checks it
+   **before and after every run**: a different digest refuses the run `model_digest_mismatch`
+   without sending a prompt.
+
+### Configure
+
+5. In `.env` (all read by `worker` only):
+   ```bash
+   LOCAL_MODEL_ENDPOINT=ollama:11434        # a single-label compose name; http is fine on `llm`
+   LOCAL_MODEL_NAME=qwen2.5:7b-instruct-q4_K_M
+   LOCAL_MODEL_DIGEST=sha256:845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e
+   LOCAL_MODEL_TIMEOUT_MS=180000            # our deadline; never above 300000
+   LOCAL_MODEL_ALLOW_REMOTE=false
+   ```
+   `@core/config` refuses to boot with an endpoint but no name or digest. The adapter refuses to
+   build (and so the worker to boot) on an endpoint the policy rejects: a dotted name, an IP literal,
+   a path, or credentials in the URL.
+   **A LAN box instead of this host** (05 §6 Q2): only behind TLS —
+   `LOCAL_MODEL_ENDPOINT=https://llm.lan:443` with `LOCAL_MODEL_ALLOW_REMOTE=true`; plain `http` is
+   refused once remote is allowed, and the name must still resolve to a private address (a Tailscale
+   100.64/10 address is CGNAT, not private, and is refused).
+6. The kill ladder's level 2 ships **off**: turn `advisors.kind.local_model` on (and the advisor's own
+   switch, level 3) as "Advisor kill switches" above describes, and approve its payload preview.
+
+### Start
+
+7. ```bash
+   docker compose --profile local-llm up -d ollama
+   docker compose up -d worker            # picks up the LOCAL_MODEL_* values
+   docker compose ps ollama               # healthy after the first `ollama list` succeeds
+   ```
+   The first request after a start loads the model (tens of seconds on this CPU) inside the run's own
+   deadline.
+
+### Stop
+
+8. `docker compose stop ollama` — the model container stops; the rest of the app is unchanged. A local
+   run in flight fails **at once** (its connection resets) and a new one fails in milliseconds
+   (`model_unavailable`: the name no longer resolves), recorded as a failure that counts toward the
+   advisor's breaker. To turn the feature off rather than pause it, clear `LOCAL_MODEL_ENDPOINT` and
+   `docker compose up -d worker`.
+
+### What each kill looks like from here
+
+| Kill                                                                      | What the model container sees                           | What the run records                     |
+| ------------------------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------- |
+| Level 1–3 flipped mid-run (watcher, ≤ 1 s)                                | the chat connection closes mid-stream; generation stops | `cancelled`, `cancel_reason` = the level |
+| Level 4, `cancel_requested_at`                                            | the same                                                | `cancelled`, `run_cancelled`             |
+| Our deadline (`LOCAL_MODEL_TIMEOUT_MS` / the request's `limits.deadline`) | the connection closes                                   | `failed`, the adapter's `model_timeout`  |
+| `docker compose stop ollama`                                              | — (it is gone)                                          | `failed`, `model_unavailable`            |
+| A re-tagged or re-pulled model                                            | a `GET /api/tags`, **no** chat request                  | `failed`, `model_digest_mismatch`        |
+| A reply that will not stop                                                | the connection closes at 512 KiB of stream              | `failed`, `model_reply_too_large`        |
+
+The adapter's log lines (`event: local_model.run` / `local_model.failed` in `worker`'s log) carry
+sizes, the digest, token counts and durations, never prompt or reply text. `docker compose logs
+ollama` should never show one either; if it does, `OLLAMA_DEBUG` is on and that is a finding.
+
+### Upgrading the image
+
+The image is pinned by digest in `compose.yml` (`ollama/ollama:0.34.2@sha256:da6e0dc5…`), not by tag.
+To move it: pick a release at least seven days old, `docker buildx imagetools inspect
+ollama/ollama:<version>`, replace the digest, update `THIRD_PARTY.md`, run
+`bash scripts/compose-hardening-check.sh`, and repeat the live checks in
+`docs/evidence/phase-5/wp5.2-local-model.md` §8 on the new image.
+
+---
+
 ## Resource envelope
 
 Limits are set per service in `compose.yml` (`deploy.resources.limits`). They
 are _limits_, not reservations — steady-state usage is far below these — but
 the sum is what the host must be able to give up at once.
 
-| Service      | CPU | Memory    | Why that number                                                                                                                                                                                                                                                                     |
-| ------------ | --- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api`        | 2.0 | **1536M** | Argon2id KEK derivation allocates 1 GiB in one buffer at boot (P0-2 floor). At 768M the kernel OOM-killed it at exit 137 with no output, and because `/auth/unlock-state` derives lazily, an unauthenticated GET was a remote kill switch.                                          |
-| `worker`     | 1.0 | **512M**  | Does **not** derive the KEK today — `apps/api/src/worker.ts` constructs no `SecurityRuntime`. **Raise to 1536M in the same PR that makes the worker unlock the keyring** (first sync job that decrypts a provider credential), or it will OOM at exit 137 exactly like the api did. |
-| `db`         | 2.0 | 1G        | `shared_buffers=256MB`, `max_connections=40`, plus 256M `shm_size`.                                                                                                                                                                                                                 |
-| `proxy`      | 0.5 | 128M      | Caddy plus a static bundle.                                                                                                                                                                                                                                                         |
-| `backup`     | 0.5 | 256M      | `pg_dump` + `age`; the plaintext dump lives in a 256M tmpfs.                                                                                                                                                                                                                        |
-| `migrator`   | —   | —         | Runs to completion before api/worker start; no limit set.                                                                                                                                                                                                                           |
-| placeholders | 0.1 | 32M       | `sleep infinity`, profile-gated, off by default.                                                                                                                                                                                                                                    |
+| Service      | CPU | Memory    | Why that number                                                                                                                                                                                                                                                                                 |
+| ------------ | --- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api`        | 2.0 | **1536M** | Argon2id KEK derivation allocates 1 GiB in one buffer at boot (P0-2 floor). At 768M the kernel OOM-killed it at exit 137 with no output, and because `/auth/unlock-state` derives lazily, an unauthenticated GET was a remote kill switch.                                                      |
+| `worker`     | 1.0 | **512M**  | Does **not** derive the KEK today — `apps/api/src/worker.ts` constructs no `SecurityRuntime`. **Raise to 1536M in the same PR that makes the worker unlock the keyring** (first sync job that decrypts a provider credential), or it will OOM at exit 137 exactly like the api did.             |
+| `db`         | 2.0 | 1G        | `shared_buffers=256MB`, `max_connections=40`, plus 256M `shm_size`.                                                                                                                                                                                                                             |
+| `proxy`      | 0.5 | 128M      | Caddy plus a static bundle.                                                                                                                                                                                                                                                                     |
+| `backup`     | 0.5 | 256M      | `pg_dump` + `age`; the plaintext dump lives in a 256M tmpfs.                                                                                                                                                                                                                                    |
+| `migrator`   | —   | —         | Runs to completion before api/worker start; no limit set.                                                                                                                                                                                                                                       |
+| placeholders | 0.1 | 32M       | `sleep infinity`, profile-gated, off by default.                                                                                                                                                                                                                                                |
+| `ollama`     | 4.0 | 8G        | Profile `local-llm`, off by default (WP 5.2). A 7–8B model at 4-bit holds ~5 GiB resident and saturates the cores it is given; `pids: 256`. Not in the steady-state sum below — when it runs, the whole-stack target in master plan §3.4 is knowingly exceeded on this host. See "Local model". |
 
 Worst case with everything running and api cold-starting: ~3.4 GiB of limits,
 of which the real simultaneous peak is api's 1 GiB Argon2 spike plus Postgres's

@@ -67,6 +67,72 @@ services:
       - scratch:/scratch # writable named volume outside the documented set
       - pgdata:/stolen-pgdata # documented volume, wrong (non-owning) service
 
+  # WP 5.2 — the local-model sandbox, broken every way the gate refuses.
+  # The runtime: on `backend` as well as `llm` (reaches db), publishing its
+  # port (explicit bind address, so only the ollama rule fires, not
+  # port-bind-address), running as root, mounting a secret, a floating tag,
+  # debug logging (prompt content in the host's logs), no limits, no
+  # healthcheck, no profile (starts on every `up`), and the model store
+  # writable (the runtime could rewrite the weights it serves next).
+  ollama:
+    image: ollama/ollama:latest
+    user: '0:0'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    networks: [backend, llm]
+    ports:
+      - '127.0.0.1:11434:11434'
+    secrets: [hostile_secret]
+    environment:
+      OLLAMA_DEBUG: '1'
+    volumes:
+      - ollama_models:/var/tmp
+
+  # `api` has no business on `llm`: it runs no local model.
+  hostile-api-on-llm:
+    image: alpine:3.24
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    command: ['sleep', 'infinity']
+    networks: [llm]
+
+  # The pull: in the runtime's profile as well as its own (so a plain
+  # `--profile local-llm up` would reach the internet), and on a network it
+  # shares with another service.
+  ollama-pull:
+    image: ollama/ollama:0.34.2@sha256:da6e0dc5651df159e45686fd663c4dbe1624a52c44d7280eeac1551d8f865532
+    profiles: ['local-llm', 'local-llm-pull']
+    user: '10003:10003'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    networks: [llm-pull]
+    deploy:
+      resources: { limits: { cpus: '1.0', memory: 1G, pids: 256 } }
+
+  hostile-pull-peer:
+    image: alpine:3.24
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    command: ['sleep', 'infinity']
+    networks: [llm-pull]
+
+networks:
+  backend: {}
+  # Not internal: the model's network would route off the host.
+  llm: {}
+  llm-pull: {}
+
+secrets:
+  hostile_secret:
+    file: ./hostile-secret-never-created
+
 volumes:
   scratch: {}
   pgdata: {}
+  ollama_models: {}

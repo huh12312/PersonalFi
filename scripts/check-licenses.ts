@@ -258,6 +258,14 @@ function renderThirdParty(prodReport: LicenseReport, generatedAt: string): strin
     'upstream project (MIT) distributed as its own container image; its dependencies are not',
     'part of PersonalFi’s dependency tree and are not listed here.',
     '',
+    'The optional `ollama` local-model runtime (Phase 5, profile `local-llm`) is the upstream',
+    '`ollama/ollama` image (MIT), pinned by digest in `compose.yml`',
+    '(`ollama/ollama:0.34.2@sha256:da6e0dc5651df159e45686fd663c4dbe1624a52c44d7280eeac1551d8f865532`),',
+    'distributed as its own container image; its dependencies are not part of PersonalFi’s',
+    'dependency tree and are not listed here. The model weights it serves are data the operator',
+    'pulls (`local-llm-pull`), not something this repository redistributes; the reference model,',
+    '`qwen2.5:7b-instruct-q4_K_M`, is Apache-2.0.',
+    '',
   ];
 
   const entries = Object.entries(prodReport).sort(([a], [b]) => a.localeCompare(b));
