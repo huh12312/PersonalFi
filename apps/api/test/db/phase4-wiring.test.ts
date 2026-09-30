@@ -229,6 +229,10 @@ describe.skipIf(NO_DATABASE)(
         secretBox: h.security.requireSecretBox(),
       });
       return appModules({
+        // W-A wiring (WP 5.1): the two operator halves of the kill ladder the
+        // real worker reads from config; a test wires them as the defaults do.
+        advisorsEnabled: true,
+        localModelConfigured: false,
         database: h.database.db,
         userId: h.userId,
         orchestrator: runtime.orchestrator,

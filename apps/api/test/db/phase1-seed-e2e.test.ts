@@ -316,6 +316,10 @@ describe.skipIf(NO_DATABASE)('Phase 1 seed-based end-to-end proof', () => {
     });
     const egressPolicy = createEgressPolicy({ allowedHosts: [] });
     const modules = appModules({
+      // W-A wiring (WP 5.1): the two operator halves of the kill ladder the
+      // real worker reads from config; a test wires them as the defaults do.
+      advisorsEnabled: true,
+      localModelConfigured: false,
       database: h.database.db,
       userId: h.userId,
       orchestrator: runtime.orchestrator,

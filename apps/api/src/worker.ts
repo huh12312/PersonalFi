@@ -56,6 +56,7 @@ import {
   resealPlaintextWalletDescriptors,
 } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
+import { createLocalModelAdapter } from '@advisor/local-model';
 import { appModules } from './modules.ts';
 import { MODULE_FLAGS, buildPlatform, resolveModules } from './platform.ts';
 
@@ -414,6 +415,26 @@ async function main(): Promise<void> {
       }
     }
 
+    // WP 5.2 (the W-A wiring batch): the local-model adapter, built once per
+    // process from `config.localModel` — which is `undefined` unless
+    // `LOCAL_MODEL_ENDPOINT`, `LOCAL_MODEL_NAME` and `LOCAL_MODEL_DIGEST` are
+    // all set (the Plaid feature-detection shape). A throw here (a malformed
+    // digest, a host the local-endpoint policy refuses) fails boot on purpose:
+    // an operator who configured a model and got a silently absent one would
+    // have no way to tell. The worker is the ONLY process that ever talks to
+    // the model (`insights.run_local`, concurrency 1); the api queues such a
+    // run and binds no adapter (`modules.ts`'s `ModuleWiringOptions`).
+    const localModel =
+      config.localModel === undefined
+        ? undefined
+        : createLocalModelAdapter(config.localModel, { logger, clock: systemClock });
+    if (localModel !== undefined) {
+      logger.info(
+        { model: localModel.model.name, digest: localModel.model.digest },
+        'local model adapter bound (WP 5.2); runs go through insights.run_local',
+      );
+    }
+
     // WP 3.4 (docs/evidence/phase-3/wp3.w-wiring.md). Built once per process,
     // in the worker only: the API runs no job runner and no scheduler, so a
     // market-data runtime there would be four adapters nobody can invoke —
@@ -526,6 +547,13 @@ async function main(): Promise<void> {
                 createNotificationEgressPolicy(config),
               ),
               secretBox,
+              // WP 5.1 (W-A wiring): kill levels 1 and 2's operator halves, read
+              // from config here and never as literals in `modules.ts` again
+              // (the Phase 4 gate's G4-9), plus WP 5.2's renderer when a model
+              // is configured.
+              advisorsEnabled: config.env.ADVISORS_ENABLED,
+              localModelConfigured: config.localModel !== undefined,
+              ...(localModel === undefined ? {} : { promptRenderer: localModel.promptRenderer }),
               // wp2.6-insights.md §6 open item 5: absent until an operator
               // writes `${SECRETS_DIR}/advisor_token_secret`; `module.insights`
               // then registers no consumer, no job and no schedule (see

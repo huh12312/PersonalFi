@@ -18,7 +18,7 @@
  * | `module.budgeting`      | 5      | `budgeting.actuals@v1`             | —                                              | —                   |
  * | `module.recurring`      | 5      | `recurring.detection@v1`           | —                                              | —                   |
  * | `module.notifications`  | 3      | `notifications.render@v1`          | `notifications.deliver`, `notifications.digest` | weekly digest       |
- * | `module.insights`       | 7      | `insights.dispatch@v1`             | `insights.run`, `insights.run_all`             | nightly (04:15)     |
+ * | `module.insights`       | 7      | `insights.dispatch@v1`             | `insights.run`, `insights.run_all`, `insights.run_local` | nightly (04:15)     |
  * | `module.investments`    | 5      | `investments.lots@v1`              | —                                              | —                   |
  * | `module.integrations`   | 2      | —                                   | `integrations.price_refresh`                   | daily (03:45)       |
  * | `module.planning`       | 1      | `planning.net_worth@v1`            | `planning.net_worth_snapshot`                  | daily (04:00)       |
@@ -56,7 +56,11 @@ import { BUDGETING_EVENTS, createBudgetingConsumer, type BudgetingDatabase } fro
 import {
   createBuiltinRegistry,
   createInsightsConsumer,
+  createRunLocalJob,
+  createRunSwitches,
   insightsJobs,
+  type AdvisorKind,
+  type PromptRenderer,
   registerAdvisor,
   registerNightlySchedule as registerInsightsNightlySchedule,
   BUILTIN_CATALOGUE,
@@ -104,7 +108,13 @@ import {
   type RefreshPlan,
 } from '@ctx/integrations';
 import { systemClock, type Clock } from '@core/kernel';
-import { defineJob, platformExecutor, upsertSchedule } from '@core/platform';
+import {
+  PLATFORM_FLAGS,
+  createFlagService,
+  defineJob,
+  platformExecutor,
+  upsertSchedule,
+} from '@core/platform';
 import type { SecretBox } from '@core/secretbox';
 import {
   createBudgetingLedgerPort,
@@ -122,7 +132,7 @@ import {
   type MarketDataRuntime,
 } from './domain.ts';
 import type { InvestmentSyncPort } from '@ctx/investments';
-import type { ModuleRegistration } from './platform.ts';
+import { ADVISOR_KIND_FLAGS, MODULE_FLAGS, type ModuleRegistration } from './platform.ts';
 
 export interface ModuleWiringOptions {
   /**
@@ -142,6 +152,25 @@ export interface ModuleWiringOptions {
     InvestmentsDatabase &
     PlanningDatabase;
   readonly orchestrator: SyncOrchestrator;
+  /**
+   * WP 5.1 kill level 1, the operator half: `config.env.ADVISORS_ENABLED`.
+   * Static per process — a change is a restart. Read through the
+   * `RunSwitches` port `insightsModule` builds (W-A wiring), never a literal.
+   */
+  readonly advisorsEnabled: boolean;
+  /**
+   * WP 5.1 kill level 2, the operator half: `config.localModel !== undefined`
+   * (an endpoint, a name and a digest all set). A kind nothing is configured
+   * to serve is off whatever its `advisors.kind.local_model` flag says.
+   */
+  readonly localModelConfigured: boolean;
+  /**
+   * WP 5.2's adapter bound to `@ctx/insights`' `PromptRenderer` port: the
+   * exact prompt bytes for the preview gate and the run inspector, invoking
+   * nothing. Absent in the api process (it never runs a local model —
+   * `POST /advisors/run` queues one) and in a worker with no local model.
+   */
+  readonly promptRenderer?: PromptRenderer;
   /**
    * The account holder these modules are being built for — the same id
    * `resolveModules(platform, userId, …)` is called with.
@@ -776,8 +805,27 @@ function insightsModule(
   }
 
   const registry = createBuiltinRegistry();
+  // WP 5.1 (W-A wiring): levels 1 and 2 of the kill ladder as a port. The
+  // run watcher reads these once a second while a run is in flight and the
+  // write barrier reads them again before the insert, so the flag reader
+  // here is deliberately UNCACHED (`ttlMs: 0`) — the shared `FlagService`'s
+  // 30 s backstop cache would make a flipped `module.insights` take up to
+  // 30 s to stop a run, and 05 §3 WP 5.1's exit is "within two seconds".
+  const switches = createRunSwitches({
+    advisorsEnabled: options.advisorsEnabled,
+    flags: createFlagService({
+      db: platformExecutor(database),
+      defaults: [...PLATFORM_FLAGS, ...MODULE_FLAGS, ...ADVISOR_KIND_FLAGS],
+      ttlMs: 0,
+    }),
+    configuredKinds: new Set<AdvisorKind>(
+      options.localModelConfigured ? ['builtin', 'local_model'] : ['builtin'],
+    ),
+  });
   const dependencies: InsightsDependencies = {
     registry,
+    switches,
+    ...(options.promptRenderer === undefined ? {} : { promptRenderer: options.promptRenderer }),
     ports: {
       ledger: createInsightsLedgerPort(database, clock),
       budget: createInsightsBudgetPort(database),
@@ -804,11 +852,8 @@ function insightsModule(
       }),
     },
     settings: {
-      // Kill switch 1 (`ADVISORS_ENABLED`) has no config key yet — open item;
-      // `module.insights` is the switch this batch actually wires. See the
-      // note on `ModuleWiringOptions.advisorTokenSecret`.
-      advisorsEnabled: true,
-      moduleEnabled: true,
+      // Kill switches 1 and 2 are read through `switches` above (WP 5.1);
+      // the two literals that used to sit here were the Phase 4 gate's G4-9.
       timeZone: options.timezone,
       // No config key yet either (wp2.6-insights.md §6 open item 3); every
       // seed and every account in this deployment is USD today.
@@ -821,7 +866,13 @@ function insightsModule(
     flagKey: 'module.insights',
     events: INSIGHTS_EVENTS,
     consumers: [createInsightsConsumer({ registry })],
-    jobs: insightsJobs({ database, dependencies, clock }),
+    jobs: [
+      ...insightsJobs({ database, dependencies, clock }),
+      // WP 5.1's local-model lane: `insights.run_local`, concurrency 1, so a
+      // three-minute model call never queues every builtin behind it in
+      // `insights.run`, and the api never executes one inline.
+      createRunLocalJob({ database, dependencies, clock }),
+    ],
     schedules: async (userId: string): Promise<void> => {
       await registerInsightsNightlySchedule(
         database,

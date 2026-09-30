@@ -89,6 +89,11 @@ function wiringOptions(
     } as unknown as ModuleWiringOptions['database'],
     // D6's one holder, which `module.planning` binds its price/FX readers to.
     userId: 'user-1',
+    // W-A wiring (WP 5.1): the two operator halves of the kill ladder, as
+    // the real worker reads them from config; `insightsModule` builds its
+    // `RunSwitches` from these (with an uncached flag reader over `database`).
+    advisorsEnabled: true,
+    localModelConfigured: false,
     orchestrator: {
       jobHandler: () => ({ kind: 'connections.sync', handler: noop }),
       registerNightlySchedule: async () => undefined,
@@ -327,6 +332,27 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     expect(planning?.jobs?.[0]?.concurrency).toBe(1);
     expect(planning?.jobs?.[1]?.concurrency).toBe(1);
     expect(planning?.schedules).toBeDefined();
+  });
+
+  it('module.insights registers the insights.run_local lane (concurrency 1) beside insights.run and insights.run_all — WP 5.1, the W-A wiring', () => {
+    // 05 §4's shared-files item 4: the lane is a job kind the composition
+    // root registers, so a three-minute model call never queues every
+    // builtin behind it in `insights.run`, and the api never runs one inline.
+    const insights = appModules(wiringOptions({ advisorTokenSecret: 'registration-shape' })).find(
+      (module) => module.flagKey === 'module.insights',
+    );
+    expect(insights).toBeDefined();
+    const kinds = (insights?.jobs ?? []).map((job) => job.kind);
+    expect(kinds).toContain('insights.run');
+    expect(kinds).toContain('insights.run_all');
+    expect(kinds).toContain('insights.run_local');
+    const lane = insights?.jobs?.find((job) => job.kind === 'insights.run_local');
+    expect(lane?.concurrency).toBe(1);
+
+    // Without the advisor token secret the module registers nothing — the
+    // feature-detection shape wp2.6 §6 item 5 chose, unchanged by the wiring.
+    const dark = appModules(wiringOptions()).find((module) => module.flagKey === 'module.insights');
+    expect(dark?.jobs ?? []).toHaveLength(0);
   });
 
   it('the net-worth job kind, schedule name and cron are the documented ones', () => {
