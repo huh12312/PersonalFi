@@ -83,6 +83,27 @@ describe('WalletWatchOnlyForm', () => {
     await waitFor(() => expect(onDone).toHaveBeenCalled());
   });
 
+  it(
+    'states the Etherscan requirement in words for Ethereum, and shows nothing of the kind for Bitcoin ' +
+      '(C-13/G4-20)',
+    async () => {
+      renderForm();
+      const user = userEvent.setup();
+
+      expect(
+        screen.queryByText(/Etherscan API key/),
+        'Bitcoin is the default chain and needs no Etherscan key',
+      ).not.toBeInTheDocument();
+
+      await user.selectOptions(screen.getByLabelText('Chain'), 'ethereum');
+      expect(screen.getByText(/Etherscan API key/)).toBeInTheDocument();
+      expect(screen.getByText(/etherscan_api_key/)).toBeInTheDocument();
+
+      await user.selectOptions(screen.getByLabelText('Chain'), 'bitcoin');
+      expect(screen.queryByText(/Etherscan API key/)).not.toBeInTheDocument();
+    },
+  );
+
   it('switches the field label and placeholder for Ethereum, and submits chain: "ethereum"', async () => {
     let createBody: unknown = null;
     stubFetchRoutes([

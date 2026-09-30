@@ -53,6 +53,7 @@ import {
   drizzleTransactionalExecutor,
   createNotificationEgressPolicy,
   hydrateMarketDataBudgets,
+  resealPlaintextWalletDescriptors,
 } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { appModules } from './modules.ts';
@@ -389,6 +390,29 @@ async function main(): Promise<void> {
     }
 
     const database = createDatabase(pool);
+
+    // WP 5.13b carry C-4/G4-8: the boot-time call `domain.ts`'s own doc
+    // comment on `resealPlaintextWalletDescriptors` named as still owed (its
+    // "Built, and deliberately not wired to run anywhere" paragraph, and
+    // docs/evidence/phase-5/wp5.13-carry-overs.md §4.2's "Needs the
+    // orchestrator"). Runs once, here, after the SecretBox is unlocked and
+    // before any sync claims a job — exactly the "before either process
+    // serves a request or claims a job" placement that comment asked for.
+    // Best-effort: a read/seal failure here must not stop the worker
+    // booting, the same posture `hydrateMarketDataBudgets` below takes for
+    // the same reason (a fresh install with no rows to reseal is the common
+    // case, not an error).
+    if (secretBox !== null) {
+      try {
+        const resealed = await resealPlaintextWalletDescriptors(database, secretBox);
+        logger.info(
+          { resealed },
+          'wallet descriptors: re-sealed at boot (C-4/G4-8, resealPlaintextWalletDescriptors)',
+        );
+      } catch (error) {
+        logger.warn({ err: error }, 'wallet descriptors: could not re-seal at boot');
+      }
+    }
 
     // WP 3.4 (docs/evidence/phase-3/wp3.w-wiring.md). Built once per process,
     // in the worker only: the API runs no job runner and no scheduler, so a

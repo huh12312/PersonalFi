@@ -753,6 +753,8 @@ export class SyncOrchestrator {
         },
         'balances sync failed',
       );
+      // WP 5.13b carry C-13/G4-20: see `#markLegConfigError`'s own doc.
+      await this.#markLegConfigError(database, input.connectionId, 'balances', failure, context);
     }
   }
 
@@ -944,6 +946,13 @@ export class SyncOrchestrator {
         },
         'dataset leg failed',
       );
+      // WP 5.13b carry C-13/G4-20: `holdings` only — see `#markLegConfigError`'s
+      // own doc for why `investment_txns`/`liabilities` are deliberately left
+      // out (this file's own "not a broken connection" comment for a leg a
+      // provider simply does not offer).
+      if (leg.operation === 'holdings') {
+        await this.#markLegConfigError(database, input.connectionId, 'holdings', failure, context);
+      }
     }
   }
 
@@ -1297,6 +1306,59 @@ export class SyncOrchestrator {
         reason: failure.kind,
         providerCode: failure.providerCode,
         lastError: { ...errorDetailOf(failure), userActionRequired: policy.userActionRequired },
+      },
+      context,
+    );
+  }
+
+  /**
+   * WP 5.13b carry C-13 (G4-20, `docs/evidence/phase-4/gate-security-review.md`
+   * §3.17): a leg-specific failure the connection cannot heal by retrying.
+   *
+   * `#settleStatus` above only ever sees the **transactions** leg's own
+   * `failure` (its one call site is line ~546, inside `syncConnection`,
+   * before invariants 6 and 7 even run) — a balances or holdings leg that
+   * fails afterwards never touches the connection's status at all. G4-20's
+   * live finding was exactly this: a watch-only Ethereum wallet with no
+   * `etherscan_api_key` configured syncs `transactions: success` (there is
+   * nothing to page for a wallet) and then fails `balances` and `holdings`
+   * with `CONFIG_ERROR` on every attempt, forever — and the connection
+   * stayed `active`, `errorSince`/`lastErrorKind` stayed `null`, and the
+   * screen read "Connected · Synced 1 minute ago" beside an account that
+   * will never have a balance, naming nothing.
+   *
+   * Deliberately narrower than "any non-retryable leg failure": only
+   * `invalid_input` (`CONFIG_ERROR`'s own kind, `KIND_OF_CONDITION` in
+   * `@connector/port`'s `errors.ts`) moves the connection. `permanent`-kind
+   * failures on these same legs — `INSUFFICIENT_SCOPE`, `DATA_UNAVAILABLE` —
+   * are handled elsewhere (`#clearCapability`, `INSUFFICIENT_SCOPE`'s own
+   * narrowing branch a few lines below in `#datasetLeg`) or are, by this
+   * file's own header comment above the holdings/liabilities legs, "not a
+   * broken connection": a provider that does not offer a dataset for one
+   * connection is a different fact from a connection that cannot answer at
+   * all, and this function must not conflate the two.
+   */
+  async #markLegConfigError(
+    executor: ConnectionsExecutor,
+    connectionId: string,
+    operation: 'balances' | 'holdings',
+    failure: ConnectorError,
+    context: ConnectionsContext,
+  ): Promise<void> {
+    const policy = failure.policy();
+    if (policy.retryable || failure.kind !== 'invalid_input') return;
+    await setConnectionStatus(
+      executor,
+      {
+        connectionId,
+        to: 'error',
+        reason: failure.kind,
+        providerCode: failure.providerCode,
+        lastError: {
+          ...errorDetailOf(failure),
+          userActionRequired: policy.userActionRequired,
+          operation,
+        },
       },
       context,
     );

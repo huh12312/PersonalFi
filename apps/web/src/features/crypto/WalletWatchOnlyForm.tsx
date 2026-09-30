@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 
@@ -100,6 +100,24 @@ export function WalletWatchOnlyForm({ onDone }: WalletWatchOnlyFormProps) {
           <option value="ethereum">Ethereum</option>
         </select>
       </div>
+
+      {chain === 'ethereum' && (
+        // C-13 (G4-20, docs/evidence/phase-4/gate-security-review.md §3.17):
+        // syncing this wallet's balance needs an Etherscan API key configured
+        // on the server (`etherscan_api_key`, RUNBOOK.md). Without one the
+        // wallet still links, but its balance and holdings will fail to sync
+        // every time, silently, until a key is added — stated here in words
+        // rather than left for the connections screen to explain after the
+        // fact.
+        <div className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-small text-text-primary">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <p>
+            Syncing an Ethereum balance needs an <strong>Etherscan API key</strong> configured on
+            the server (<code>etherscan_api_key</code>). This wallet will still link without one,
+            but its balance won&rsquo;t sync until a key is added.
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="wallet-value">

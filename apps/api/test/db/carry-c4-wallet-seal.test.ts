@@ -68,166 +68,169 @@ const FAST_KDF = { memoryKiB: 8_192, timeCost: 2, parallelism: 1 } as const;
 const WATCH_ONLY_ZPUB =
   'zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs';
 
-describe.skipIf(NO_DATABASE)('WP 5.13b carry C-4 — the wallet descriptor is sealed, real api', () => {
-  let database: TestDatabase;
-  let secrets: TempSecrets;
-  let app: Awaited<ReturnType<typeof buildApp>>['app'];
-  let session: TestSession;
+describe.skipIf(NO_DATABASE)(
+  'WP 5.13b carry C-4 — the wallet descriptor is sealed, real api',
+  () => {
+    let database: TestDatabase;
+    let secrets: TempSecrets;
+    let app: Awaited<ReturnType<typeof buildApp>>['app'];
+    let session: TestSession;
 
-  async function buildSealedApp(walletSecretBox: SecretBox | undefined): Promise<{
-    app: Awaited<ReturnType<typeof buildApp>>['app'];
-    session: TestSession;
-  }> {
-    const walletRpc: WalletRpcRuntime = createWalletRpcRuntime({
-      database: database.db,
-      allowedHosts: [],
-      // WP 5.13b carry C-4: this is the exact option `app.ts` cannot yet
-      // pass a value to (§4.2's "Needs the orchestrator"). Passed directly
-      // here, through the same `createWalletRpcRuntime` production code.
-      ...(walletSecretBox === undefined ? {} : { secretBox: walletSecretBox }),
-    });
-    const registry = new ConnectorRegistry([
-      {
-        connector: new WalletRpcConnector({
-          store: walletRpc.store,
-          esploraTransport: walletRpc.esploraTransport,
-          etherscanTransport: walletRpc.etherscanTransport,
-          etherscanApiKey: walletRpc.etherscanApiKey,
-          clock: systemClock,
-        }),
-        manifest: WALLETRPC_MANIFEST,
-      },
-    ]);
+    async function buildSealedApp(walletSecretBox: SecretBox | undefined): Promise<{
+      app: Awaited<ReturnType<typeof buildApp>>['app'];
+      session: TestSession;
+    }> {
+      const walletRpc: WalletRpcRuntime = createWalletRpcRuntime({
+        database: database.db,
+        allowedHosts: [],
+        // WP 5.13b carry C-4: this is the exact option `app.ts` cannot yet
+        // pass a value to (§4.2's "Needs the orchestrator"). Passed directly
+        // here, through the same `createWalletRpcRuntime` production code.
+        ...(walletSecretBox === undefined ? {} : { secretBox: walletSecretBox }),
+      });
+      const registry = new ConnectorRegistry([
+        {
+          connector: new WalletRpcConnector({
+            store: walletRpc.store,
+            esploraTransport: walletRpc.esploraTransport,
+            etherscanTransport: walletRpc.etherscanTransport,
+            etherscanApiKey: walletRpc.etherscanApiKey,
+            clock: systemClock,
+          }),
+          manifest: WALLETRPC_MANIFEST,
+        },
+      ]);
 
-    const config = loadConfig({
-      env: {
-        NODE_ENV: 'test',
-        LOG_LEVEL: 'silent',
-        DATABASE_URL: database.url,
-        SECRETS_DIR: secrets.dir,
-        BASE_URL: TEST_ORIGIN,
-        AUTH_ALLOWED_ORIGINS: TEST_ORIGIN,
-        AUTH_RP_ID: '127.0.0.1',
-        KEK_ARGON2_MEMORY_KIB: '8192',
-        KEK_ARGON2_TIME_COST: '2',
-        KEK_ARGON2_PARALLELISM: '1',
-      },
-    });
+      const config = loadConfig({
+        env: {
+          NODE_ENV: 'test',
+          LOG_LEVEL: 'silent',
+          DATABASE_URL: database.url,
+          SECRETS_DIR: secrets.dir,
+          BASE_URL: TEST_ORIGIN,
+          AUTH_ALLOWED_ORIGINS: TEST_ORIGIN,
+          AUTH_RP_ID: '127.0.0.1',
+          KEK_ARGON2_MEMORY_KIB: '8192',
+          KEK_ARGON2_TIME_COST: '2',
+          KEK_ARGON2_PARALLELISM: '1',
+        },
+      });
 
-    const built = await buildApp({
-      config,
-      pool: database.pool,
-      connectorRegistry: registry,
-      walletRpc,
-    });
-    const state = await built.security.initialise();
-    if (state.state !== 'unlocked') {
-      throw new Error(`could not unlock the test application: ${JSON.stringify(state)}`);
-    }
-    await built.app.ready();
+      const built = await buildApp({
+        config,
+        pool: database.pool,
+        connectorRegistry: registry,
+        walletRpc,
+      });
+      const state = await built.security.initialise();
+      if (state.state !== 'unlocked') {
+        throw new Error(`could not unlock the test application: ${JSON.stringify(state)}`);
+      }
+      await built.app.ready();
 
-    const identity = built.security.requireIdentity();
-    const issued = await identity.sessions.issue({
-      userId: database.userId,
-      authMethod: 'webauthn',
-      fresh: true,
-    });
-    return {
-      app: built.app,
-      session: {
-        accessToken: issued.accessToken,
-        csrf: 'wp513b-carry-c4-test-csrf-token-value-000000',
+      const identity = built.security.requireIdentity();
+      const issued = await identity.sessions.issue({
+        userId: database.userId,
+        authMethod: 'webauthn',
         fresh: true,
-      },
-    };
-  }
-
-  beforeAll(async () => {
-    database = await createTestDatabase('personalfi_wp513b_c4');
-    secrets = createTempSecrets();
-
-    const walletSecretBox = new SecretBox({
-      db: database.pool,
-      userId: database.userId,
-      clock: systemClock,
-      kdfParams: FAST_KDF,
-      kdfFloor: FAST_KDF,
-    });
-    // The same passphrase `security.initialise()` will use below (`master_key`,
-    // via `SECRETS_DIR`): both `SecretBox` instances derive against the *same*
-    // `encryption_keys` row (same user, same database), so they must agree on
-    // the passphrase or the second unlock refuses with `passphrase_mismatch`.
-    const unlocked = await walletSecretBox.unlock(secrets.masterKey);
-    if (unlocked.state !== 'unlocked') {
-      throw new Error(`could not unlock the wallet SecretBox: ${JSON.stringify(unlocked)}`);
+      });
+      return {
+        app: built.app,
+        session: {
+          accessToken: issued.accessToken,
+          csrf: 'wp513b-carry-c4-test-csrf-token-value-000000',
+          fresh: true,
+        },
+      };
     }
 
-    const built = await buildSealedApp(walletSecretBox);
-    app = built.app;
-    session = built.session;
-  }, 120_000);
+    beforeAll(async () => {
+      database = await createTestDatabase('personalfi_wp513b_c4');
+      secrets = createTempSecrets();
 
-  afterAll(async () => {
-    await app?.close();
-    secrets?.dispose();
-    await database?.drop();
-  }, 30_000);
+      const walletSecretBox = new SecretBox({
+        db: database.pool,
+        userId: database.userId,
+        clock: systemClock,
+        kdfParams: FAST_KDF,
+        kdfFloor: FAST_KDF,
+      });
+      // The same passphrase `security.initialise()` will use below (`master_key`,
+      // via `SECRETS_DIR`): both `SecretBox` instances derive against the *same*
+      // `encryption_keys` row (same user, same database), so they must agree on
+      // the passphrase or the second unlock refuses with `passphrase_mismatch`.
+      const unlocked = await walletSecretBox.unlock(secrets.masterKey);
+      if (unlocked.state !== 'unlocked') {
+        throw new Error(`could not unlock the wallet SecretBox: ${JSON.stringify(unlocked)}`);
+      }
 
-  it('a watch-only wallet link seals descriptor: the plaintext column is NULL, the sealed column is not, and the value round-trips through the real read path', async () => {
-    // The same cookie/header shape `api-harness.ts`'s own `request()` sends
-    // (`__Host-pfi_session`, `__Host-pfi_csrf` + `x-csrf-token`,
-    // `sec-fetch-site: same-origin`) — this suite builds its own app rather
-    // than using the harness (§ this file's header), but the session ceremony
-    // itself is unchanged production code and must be driven the same way.
-    const response = await app.inject({
-      method: 'POST',
-      url: '/connections',
-      headers: {
-        'sec-fetch-site': 'same-origin',
-        origin: TEST_ORIGIN,
-        cookie: `__Host-pfi_session=${session.accessToken}; __Host-pfi_csrf=${session.csrf}`,
-        'x-csrf-token': session.csrf,
-      },
-      payload: {
-        provider: WALLETRPC_PROVIDER,
-        input: { chain: 'bitcoin', value: WATCH_ONLY_ZPUB, label: 'Sealed cold storage' },
-      },
-    });
-    expectStatus(response, 201);
+      const built = await buildSealedApp(walletSecretBox);
+      app = built.app;
+      session = built.session;
+    }, 120_000);
 
-    const rows = await database.db.execute<{
-      descriptor: string | null;
-      descriptor_sealed: Uint8Array | null;
-    }>(sql`
+    afterAll(async () => {
+      await app?.close();
+      secrets?.dispose();
+      await database?.drop();
+    }, 30_000);
+
+    it('a watch-only wallet link seals descriptor: the plaintext column is NULL, the sealed column is not, and the value round-trips through the real read path', async () => {
+      // The same cookie/header shape `api-harness.ts`'s own `request()` sends
+      // (`__Host-pfi_session`, `__Host-pfi_csrf` + `x-csrf-token`,
+      // `sec-fetch-site: same-origin`) — this suite builds its own app rather
+      // than using the harness (§ this file's header), but the session ceremony
+      // itself is unchanged production code and must be driven the same way.
+      const response = await app.inject({
+        method: 'POST',
+        url: '/connections',
+        headers: {
+          'sec-fetch-site': 'same-origin',
+          origin: TEST_ORIGIN,
+          cookie: `__Host-pfi_session=${session.accessToken}; __Host-pfi_csrf=${session.csrf}`,
+          'x-csrf-token': session.csrf,
+        },
+        payload: {
+          provider: WALLETRPC_PROVIDER,
+          input: { chain: 'bitcoin', value: WATCH_ONLY_ZPUB, label: 'Sealed cold storage' },
+        },
+      });
+      expectStatus(response, 201);
+
+      const rows = await database.db.execute<{
+        descriptor: string | null;
+        descriptor_sealed: Uint8Array | null;
+      }>(sql`
       SELECT descriptor, descriptor_sealed FROM wallet_addresses
        WHERE user_id = ${database.userId}::uuid
     `);
-    expect(rows.rows).toHaveLength(1);
-    // The custody claim itself: the plaintext column carries nothing once a
-    // SecretBox is available to the runtime that wrote this row.
-    expect(rows.rows[0]?.descriptor).toBeNull();
-    expect(rows.rows[0]?.descriptor_sealed).not.toBeNull();
-    // And the sealed bytes are not merely non-null — the raw column literally
-    // never carries the xpub in any recoverable form.
-    const sealedText = Buffer.from(rows.rows[0]?.descriptor_sealed ?? new Uint8Array()).toString(
-      'latin1',
-    );
-    expect(sealedText).not.toContain(WATCH_ONLY_ZPUB);
+      expect(rows.rows).toHaveLength(1);
+      // The custody claim itself: the plaintext column carries nothing once a
+      // SecretBox is available to the runtime that wrote this row.
+      expect(rows.rows[0]?.descriptor).toBeNull();
+      expect(rows.rows[0]?.descriptor_sealed).not.toBeNull();
+      // And the sealed bytes are not merely non-null — the raw column literally
+      // never carries the xpub in any recoverable form.
+      const sealedText = Buffer.from(rows.rows[0]?.descriptor_sealed ?? new Uint8Array()).toString(
+        'latin1',
+      );
+      expect(sealedText).not.toContain(WATCH_ONLY_ZPUB);
 
-    // The real read path (GET, through the connector's own `store.get`) still
-    // unseals correctly — sealing is not a one-way trip.
-    const listed = await app.inject({
-      method: 'GET',
-      url: '/connections',
-      headers: {
-        'sec-fetch-site': 'same-origin',
-        origin: TEST_ORIGIN,
-        cookie: `__Host-pfi_session=${session.accessToken}; __Host-pfi_csrf=${session.csrf}`,
-      },
+      // The real read path (GET, through the connector's own `store.get`) still
+      // unseals correctly — sealing is not a one-way trip.
+      const listed = await app.inject({
+        method: 'GET',
+        url: '/connections',
+        headers: {
+          'sec-fetch-site': 'same-origin',
+          origin: TEST_ORIGIN,
+          cookie: `__Host-pfi_session=${session.accessToken}; __Host-pfi_csrf=${session.csrf}`,
+        },
+      });
+      expectStatus(listed, 200);
     });
-    expectStatus(listed, 200);
-  });
-});
+  },
+);
 
 describe.skipIf(NO_DATABASE)('WP 5.13b carry C-4 — resealPlaintextWalletDescriptors', () => {
   let database: TestDatabase;
@@ -270,7 +273,9 @@ describe.skipIf(NO_DATABASE)('WP 5.13b carry C-4 — resealPlaintextWalletDescri
     const beforeReseal = await database.db.execute<{
       descriptor: string | null;
       descriptor_sealed: Uint8Array | null;
-    }>(sql`SELECT descriptor, descriptor_sealed FROM wallet_addresses WHERE connection_id = ${connectionId}::uuid`);
+    }>(
+      sql`SELECT descriptor, descriptor_sealed FROM wallet_addresses WHERE connection_id = ${connectionId}::uuid`,
+    );
     expect(beforeReseal.rows[0]?.descriptor).toBe(WATCH_ONLY_ZPUB);
     expect(beforeReseal.rows[0]?.descriptor_sealed).toBeNull();
 
@@ -292,7 +297,9 @@ describe.skipIf(NO_DATABASE)('WP 5.13b carry C-4 — resealPlaintextWalletDescri
     const afterFirst = await database.db.execute<{
       descriptor: string | null;
       descriptor_sealed: Uint8Array | null;
-    }>(sql`SELECT descriptor, descriptor_sealed FROM wallet_addresses WHERE connection_id = ${connectionId}::uuid`);
+    }>(
+      sql`SELECT descriptor, descriptor_sealed FROM wallet_addresses WHERE connection_id = ${connectionId}::uuid`,
+    );
     expect(afterFirst.rows[0]?.descriptor).toBeNull();
     expect(afterFirst.rows[0]?.descriptor_sealed).not.toBeNull();
 
