@@ -63,10 +63,13 @@ import {
   type InsightDismissalRow,
   type InsightRow,
   type QuarantineReasonValue,
+  type ReasonCode,
   type RunRefusalValue,
   type RunTrigger,
 } from '../schema/index.ts';
-import { afterDismissal, afterSnooze, type SuppressionState } from './policy/cooldown.ts';
+import type { SuppressionState } from './policy/cooldown.ts';
+import { decideFeedbackEffects, reasonCodeForPreset } from './policy/feedback.ts';
+import { recordOutcomeOnAccept } from './policy/outcomes.ts';
 
 /**
  * Advisory-lock class for this context.
@@ -876,23 +879,79 @@ export interface FeedbackInput {
   readonly insightId: string;
   readonly action: FeedbackAction;
   readonly reason?: string | null;
+  /**
+   * The 07 §8.3 taxonomy. When omitted, `reason` is matched against the
+   * three presets `DismissReasonDialog.tsx` has been storing
+   * (`policy/feedback.ts`'s `reasonCodeForPreset`) — the same mapping
+   * migration `0030_insight_feedback_reasons.sql` applies once to rows
+   * already written. Anything else keeps its text with no code.
+   */
+  readonly reasonCode?: ReasonCode | null;
   /** Required for `snooze`, forbidden otherwise. The schema enforces both. */
   readonly snoozeUntil?: Date | null;
+  /** Verification horizon for `accept`. Defaults to `policy/outcomes.ts`'s. */
+  readonly outcomeHorizonDays?: number;
 }
 
 export interface FeedbackResult {
   readonly status: string;
   readonly suppression: SuppressionState | null;
+  /** What the reason resolved to — explicit, or matched from a preset, or `null`. */
+  readonly reasonCode: ReasonCode | null;
+  /** `true` when this event crossed the `NOT_TRUE` threshold and quarantined it. */
+  readonly quarantined: boolean;
+  /** `true` when `DONT_CARE` switched the rule off for this holder. */
+  readonly ruleDisabledForHolder: boolean;
 }
 
 /**
- * Record what the user did, in one transaction: the log, the row's status, and
- * the ladder.
+ * How many `dismiss` responses this advisor has already received from this
+ * holder, and how many of those carried `NOT_TRUE` — the denominator and
+ * numerator `policy/feedback.ts`'s quarantine check needs, read fresh so a
+ * concurrent second dismissal cannot under-count. Excludes the row this call
+ * is about to write; `decideFeedbackEffects` adds it back in.
+ */
+async function priorDismissFirings(
+  executor: InsightsExecutor,
+  userId: string,
+  advisorId: string,
+): Promise<{ readonly priorDismissTotal: number; readonly priorNotTrue: number }> {
+  const rows = await executor
+    .select({
+      total: sql<number>`count(*)`,
+      notTrue: sql<number>`count(*) filter (where ${insightFeedback.reasonCode} = 'NOT_TRUE')`,
+    })
+    .from(insightFeedback)
+    .where(
+      and(
+        eq(insightFeedback.userId, userId),
+        eq(insightFeedback.advisorId, advisorId),
+        eq(insightFeedback.action, 'dismiss'),
+      ),
+    );
+  const row = rows[0];
+  return {
+    priorDismissTotal: Number(row?.total ?? 0),
+    priorNotTrue: Number(row?.notTrue ?? 0),
+  };
+}
+
+/**
+ * Record what the user did, in one transaction: the log, the row's status,
+ * the ladder, and — WP 5.9 — the dismiss-reason taxonomy's effects.
  *
- * The three are inseparable. A dismissal that advanced the ladder but left
- * `insights.status` at `pending_review` would show the user a finding they had
- * just refused; a status change with no ladder row would offer it again
- * tomorrow. Doing them in one call is how "dismiss" has one meaning.
+ * The log, the status change and the ladder are inseparable, as they were
+ * before this migration: a dismissal that advanced the ladder but left
+ * `insights.status` at `pending_review` would show the user a finding they
+ * had just refused; a status change with no ladder row would offer it again
+ * tomorrow. The reason-code effects join the same transaction for the same
+ * reason — `DONT_CARE` writing `enabled_source` in a second call could land
+ * after a crash between the two and leave the rule showing as still on.
+ *
+ * Every ladder decision and every side effect (quarantine, `enabled_source`)
+ * is decided by `policy/feedback.ts`'s pure `decideFeedbackEffects`; this
+ * function only reads the state that function needs and writes what it
+ * returns.
  */
 export async function recordFeedback(
   executor: InsightsExecutor,
@@ -903,6 +962,9 @@ export async function recordFeedback(
   const insight = await findInsight(executor, context.userId, input.insightId);
   if (insight === null) throw new Error(`no insight ${input.insightId}`);
 
+  const resolvedReasonCode: ReasonCode | null =
+    input.reasonCode ?? reasonCodeForPreset(input.reason ?? null);
+
   await executor.insert(insightFeedback).values({
     id: newId(),
     userId: context.userId,
@@ -911,6 +973,7 @@ export async function recordFeedback(
     insightKey: insight.key,
     action: input.action,
     reason: input.reason ?? null,
+    reasonCode: input.action === 'dismiss' || input.action === 'snooze' ? resolvedReasonCode : null,
     snoozeUntil: input.action === 'snooze' ? (input.snoozeUntil ?? now) : null,
     correlationId: context.correlationId,
     createdAt: now,
@@ -938,18 +1001,32 @@ export async function recordFeedback(
     .where(and(eq(insights.userId, context.userId), eq(insights.id, insight.id)));
 
   if (input.action === 'accept') {
-    return { status, suppression: null };
+    await recordOutcomeOnAccept(executor, context, insight, now, input.outcomeHorizonDays);
+    return {
+      status,
+      suppression: null,
+      reasonCode: null,
+      quarantined: false,
+      ruleDisabledForHolder: false,
+    };
   }
 
-  const previous = await loadSuppression(executor, context.userId, insight.advisorId, insight.key);
-  const next =
-    input.action === 'dismiss'
-      ? afterDismissal(previous, now)
-      : input.action === 'snooze'
-        ? afterSnooze(previous, input.snoozeUntil ?? now)
-        : // `reopen`: the user took it back. The count stays — three refusals
-          // are three refusals — but nothing is silenced right now.
-          { dismissCount: previous?.dismissCount ?? 0, suppressedUntil: null, permanent: false };
+  const [previous, advisor, firings] = await Promise.all([
+    loadSuppression(executor, context.userId, insight.advisorId, insight.key),
+    findAdvisor(executor, context.userId, insight.advisorId),
+    priorDismissFirings(executor, context.userId, insight.advisorId),
+  ]);
+
+  const effects = decideFeedbackEffects({
+    action: input.action,
+    reasonCode: resolvedReasonCode,
+    previousSuppression: previous,
+    now,
+    snoozeUntil: input.snoozeUntil ?? null,
+    advisorQuarantined: advisor !== null && advisor.quarantinedAt !== null,
+    firings,
+  });
+  const next = effects.suppression;
 
   await executor
     .insert(insightDismissals)
@@ -978,5 +1055,24 @@ export async function recordFeedback(
       },
     });
 
-  return { status, suppression: next };
+  if (effects.setEnabled !== null) {
+    await setAdvisorEnabled(
+      executor,
+      context,
+      insight.advisorId,
+      effects.setEnabled.enabled,
+      effects.setEnabled.source,
+    );
+  }
+  if (effects.quarantine !== null) {
+    await quarantineAdvisor(executor, context, insight.advisorId, effects.quarantine.reason);
+  }
+
+  return {
+    status,
+    suppression: next,
+    reasonCode: resolvedReasonCode,
+    quarantined: effects.quarantine !== null,
+    ruleDisabledForHolder: effects.setEnabled !== null,
+  };
 }

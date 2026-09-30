@@ -302,6 +302,10 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
   ['insight_actions', "insights (WP 2.6); not named in this WP's export scope."],
   ['insight_dismissals', "insights (WP 2.6); not named in this WP's export scope."],
   ['insight_feedback', "insights (WP 2.6); not named in this WP's export scope."],
+  [
+    'insight_outcomes',
+    "insights (WP 2.6); not named in this WP's export scope. Outcome-verification state derived from insights and insight_feedback, both already exempt here (WP 5.9).",
+  ],
   ['notification_channels', "notifications (WP 2.4); not named in this WP's export scope."],
   ['notification_rules', "notifications (WP 2.4); not named in this WP's export scope."],
   ['notification_outbox', "notifications (WP 2.4); not named in this WP's export scope."],

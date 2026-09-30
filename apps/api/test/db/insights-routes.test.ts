@@ -509,3 +509,107 @@ describe.skipIf(NO_DATABASE)('POST /advisors/run and kill level 1 (WP 5.1, C-7)'
     expect(runs.rows).toEqual([]);
   }, 60_000);
 });
+
+/**
+ * The review route's `reasonCode` field (WP 5.9): `DONT_CARE` reaching
+ * `POST /advisors/{id}/enabled`'s own effect through a different door.
+ * `test/feedback.test.ts` proves `decideFeedbackEffects`'s pure arithmetic;
+ * this is the one end-to-end proof that the wire field the route now accepts
+ * actually reaches it, through a real dismissal on a real insight.
+ */
+describe.skipIf(NO_DATABASE)('POST /insights/:id/review with reasonCode (WP 5.9)', () => {
+  let h: ApiHarness;
+
+  beforeAll(async () => {
+    h = await createApiHarness({ suite: 'wp59-reasoncode' });
+
+    await linkManual(h, {
+      providerConnectionId: 'wp59-conn',
+      displayName: 'WP 5.9 Test Bank',
+      accounts: [
+        { providerAccountId: 'checking', name: 'Checking', type: 'depository', currency: 'USD' },
+      ],
+      batch: {
+        balances: [
+          {
+            providerAccountId: 'checking',
+            current: money(12_000n, 'USD'),
+            available: null,
+            limit: null,
+            asOf: systemClock.now(),
+          },
+        ],
+        added: [
+          manualTransaction({
+            providerAccountId: 'checking',
+            providerTransactionId: 'wp59-spend',
+            amount: money(-6_000n, 'USD'),
+            postedDate: DateOnly.addDays(
+              DateOnly.parse(systemClock.now().toISOString().slice(0, 10)),
+              -3,
+            ),
+            name: 'GROCERY WAREHOUSE',
+          }),
+        ],
+      },
+    });
+
+    await grantScopes(
+      h.database.db,
+      { userId: h.userId, clock: systemClock, correlationId: newId() },
+      CASH_ADVISOR_ID,
+      ['cash.summary', 'cashflow.monthly'],
+    );
+
+    const result = await runAdvisor(
+      h.database.db,
+      { userId: h.userId, clock: systemClock, correlationId: newId(), causationId: null },
+      dependenciesOf(h),
+      { advisorId: CASH_ADVISOR_ID, trigger: 'manual' },
+    );
+    expect(result.status).toBe('completed');
+    expect(result.proposed).toBeGreaterThan(0);
+  }, 120_000);
+
+  afterAll(async () => {
+    await h.close();
+  }, 60_000);
+
+  async function enabledOf(): Promise<boolean | undefined> {
+    const response = await h.request({ method: 'GET', url: '/advisors', session: h.stale });
+    expectStatus(response, 200);
+    const { advisors } = response.json() as { advisors: WireAdvisor[] };
+    return advisors.find((a) => a.advisorId === CASH_ADVISOR_ID)?.enabled;
+  }
+
+  it('DONT_CARE turns the rule off, and a human can turn it back on', async () => {
+    const feed = await h.request({ method: 'GET', url: '/insights', session: h.stale });
+    expectStatus(feed, 200);
+    const body = feed.json() as { dashboard: WireInsight[]; list: WireInsight[] };
+    const found = [...body.dashboard, ...body.list].find((i) => i.advisorId === CASH_ADVISOR_ID);
+    expect(found).toBeDefined();
+    if (found === undefined) return;
+
+    expect(await enabledOf()).toBe(true);
+
+    const review = await h.request({
+      method: 'POST',
+      url: `/insights/${found.id}/review`,
+      session: h.stale,
+      body: { action: 'dismiss', reasonCode: 'DONT_CARE' },
+    });
+    expectStatus(review, 200);
+
+    expect(await enabledOf()).toBe(false);
+
+    // A human's own switch, over the pre-existing route, still wins.
+    const humanOverride = await h.request({
+      method: 'POST',
+      url: `/advisors/${CASH_ADVISOR_ID}/enabled`,
+      session: h.fresh,
+      body: { enabled: true },
+    });
+    expectStatus(humanOverride, 200);
+    expect(await enabledOf()).toBe(true);
+  });
+});

@@ -45,8 +45,19 @@ export type SeverityValue = (typeof SEVERITY_VALUES)[number];
 export const ENABLED_SOURCES = ['default', 'user', 'feedback'] as const;
 export type EnabledSource = (typeof ENABLED_SOURCES)[number];
 
-/** Why the breaker tripped, or that a human did it. */
-export const QUARANTINE_REASONS = ['consecutive_failures', 'rejection_rate', 'manual'] as const;
+/**
+ * Why the breaker tripped, or that a human did it. `not_true_rate` (0030,
+ * WP 5.9): the feedback loop's own trip, when the `NOT_TRUE` dismiss rate
+ * exceeds 0.2 over at least five firings — "disable the rule; it's broken,
+ * not noisy" (07 §8.3), the same breaker WP 5.1 built, tripped by a different
+ * signal.
+ */
+export const QUARANTINE_REASONS = [
+  'consecutive_failures',
+  'rejection_rate',
+  'manual',
+  'not_true_rate',
+] as const;
 export type QuarantineReasonValue = (typeof QUARANTINE_REASONS)[number];
 
 export const advisors = pgTable(

@@ -17,6 +17,22 @@
  * the night an insight was proposed, which is the one thing about it that
  * should not be historical.
  *
+ * ## The feed ranks with the learned dismiss penalty (WP 5.9)
+ *
+ * `insightFeed` composed `applyAlertBudget` (`policy/alert-budget.ts`'s
+ * `rank()`) — the platform's ranking, with no catalogue factors — even after
+ * WP 2.7 shipped `advisors/ranking.ts`'s `rankBuiltin`/`applyCatalogueBudget`,
+ * which multiply it by actionability, urgency and `(1 − 0.5·dismiss_rate)`.
+ * The result: 07 §3.2's learned suppression was computed, tested
+ * (`test/ranking.test.ts`), and never read on the one path a holder actually
+ * sees (found while writing 05-phase-5-dispatch.md, `read.ts:307`, §2's row).
+ * `rankFeed` is the fix, split from its IO so it can be tested without a
+ * database: it takes the views `listInsights` already loaded and a per-advisor
+ * dismiss-rate lookup, and calls `applyCatalogueBudget`. An advisor with no
+ * feedback history yet is not in the map, `dismissRateOf` answers `0`, and it
+ * ranks on `rankBuiltin`'s neutral value — on its merits, exactly as WP 2.7's
+ * header promised.
+ *
  * ## Suppression is checked here too, and that is not redundant
  *
  * `service.ts` refuses to *propose* a suppressed finding. This refuses to
@@ -28,18 +44,21 @@
 import { Money } from '@core/kernel';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { InsightsExecutor } from './db.ts';
-import {
-  applyAlertBudget,
-  type BudgetedFeed,
-  type RankableInsight,
-} from './policy/alert-budget.ts';
+import { type RankableInsight } from './policy/alert-budget.ts';
 import { isSuppressed } from './policy/cooldown.ts';
+import {
+  applyCatalogueBudget,
+  rankableBuiltinOf,
+  type BudgetedFeed,
+  type RankableFeedRow,
+} from './advisors/ranking.ts';
 import {
   advisorRuns,
   advisors,
   insightActions,
   insightDismissals,
   insightEvidence,
+  insightFeedback,
   insights,
   type InsightStatus,
   snapshotGrants,
@@ -292,8 +311,71 @@ export function rankableOf(view: InsightView): RankableInsight {
   };
 }
 
+function rankableFeedRowOf(view: InsightView): RankableFeedRow {
+  return {
+    key: view.key,
+    severity: view.severity,
+    confidence: view.confidence,
+    annualizedImpact: view.annualizedImpact,
+    oneTimeImpact: view.oneTimeImpact,
+    horizon: view.horizon,
+    actions: view.actions,
+  };
+}
+
 /**
- * The feed with the alert budget applied.
+ * The catalogue's ranking (07 §3.2) applied to views already fetched, over a
+ * dismiss-rate lookup already loaded — pure, so `test/ranking.test.ts` can
+ * assert the feed's ordering without a database.
+ *
+ * `dismissRateOf` answering `0` for an advisor with no entry is what makes a
+ * newly registered rule rank on its merits: `rankBuiltin`'s penalty term is
+ * `(1 − 0.5 × 0) = 1`, the neutral value.
+ */
+export function rankFeed(
+  views: readonly InsightView[],
+  dismissRateOf: (advisorId: string) => number,
+  currencyCode: string,
+): BudgetedFeed<InsightView> {
+  return applyCatalogueBudget(
+    views,
+    (view) => rankableBuiltinOf(rankableFeedRowOf(view), dismissRateOf(view.advisorId)),
+    currencyCode,
+  );
+}
+
+/**
+ * Per-advisor learned dismiss rate: dismissed ÷ (dismissed + accepted) over
+ * this holder's `insight_feedback` history. Absent from the map — not `0` in
+ * it — for an advisor with no accept or dismiss on record, so `rankFeed`'s
+ * `dismissRateOf` can tell "no history" from "dismissed nothing" if it ever
+ * needs to; today both read `0`.
+ */
+async function loadDismissRates(
+  executor: InsightsExecutor,
+  userId: string,
+): Promise<ReadonlyMap<string, number>> {
+  const rows = await executor
+    .select({
+      advisorId: insightFeedback.advisorId,
+      dismissed: sql<number>`count(*) filter (where ${insightFeedback.action} = 'dismiss')`,
+      total: sql<number>`count(*) filter (where ${insightFeedback.action} IN ('dismiss', 'accept'))`,
+    })
+    .from(insightFeedback)
+    .where(eq(insightFeedback.userId, userId))
+    .groupBy(insightFeedback.advisorId);
+
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const total = Number(row.total);
+    if (total <= 0) continue;
+    map.set(row.advisorId, Number(row.dismissed) / total);
+  }
+  return map;
+}
+
+/**
+ * The feed with the alert budget applied, ranked by 07 §3.2's full formula.
  *
  * Returns all four slices rather than just the visible one, so a UI can say
  * "and 14 more" and a diagnostic screen can show what the floor excluded — the
@@ -304,8 +386,11 @@ export async function insightFeed(
   executor: InsightsExecutor,
   input: FeedInput & { readonly currency: string },
 ): Promise<BudgetedFeed<InsightView>> {
-  const views = await listInsights(executor, input);
-  return applyAlertBudget(views, rankableOf, input.currency);
+  const [views, dismissRates] = await Promise.all([
+    listInsights(executor, input),
+    loadDismissRates(executor, input.userId),
+  ]);
+  return rankFeed(views, (advisorId) => dismissRates.get(advisorId) ?? 0, input.currency);
 }
 
 export interface AdvisorHealthView {

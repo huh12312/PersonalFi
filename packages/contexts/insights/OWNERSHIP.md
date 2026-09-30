@@ -9,8 +9,9 @@ Everyone else goes through this context's published interface or a read model. T
 `pnpm lint:schema-ownership` check parses the list below, so it is the contract, not
 a comment: a table defined outside its owning package, or claimed twice, fails CI.
 
-The first eight tables below exist as of migration `0012_insights.sql` (WP 2.6); the last two as of
-`0028_advisor_run_control.sql` (WP 5.1), each with a user-scoped composite FK into this context's own tables. None of
+The first eight tables below exist as of migration `0012_insights.sql` (WP 2.6); the next two as of
+`0028_advisor_run_control.sql` (WP 5.1); the last as of `0030_insight_feedback_reasons.sql` (WP 5.9),
+each with a user-scoped composite FK into this context's own tables. None of
 them carries a foreign key into another context's schema: an insight's link back to
 the data is `insight_evidence.source_ref`, a path into the snapshot we sent, resolved
 by the API at render time. That is not squeamishness about joins — it is what makes
@@ -35,3 +36,4 @@ data the advisor never received would _resolve_.
 - `snapshot_grants`
 - `advisor_payload_approvals`
 - `advisor_run_payloads`
+- `insight_outcomes`

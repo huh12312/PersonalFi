@@ -393,6 +393,18 @@ describeWithDb('runMigrations', () => {
       //   the refusal CHECK gains kind_disabled and payload_not_approved;
       //   advisors gains enabled_source (default | user | feedback). WP 5.1;
       //   references only 0012-era objects or its own (05 §4).
+      // 0030_insight_feedback_reasons: one @ctx/insights table —
+      //   insight_outcomes (outcome verification and forward validation, 09
+      //   ADV-4, 05 §1 cut line 2; one row per acceptance, composite FK to
+      //   advisors (user_id, advisor_id), evaluated at most once —
+      //   insight_outcomes_evaluated_has_outcome and
+      //   insight_outcomes_evaluated_after_due pair outcome/evaluated_at and
+      //   forbid evaluating before the horizon). insight_feedback gains
+      //   reason_code (07 §8.3's seven-value taxonomy, backfilled from the
+      //   three preset strings the web dialog stores, by exact match);
+      //   advisors.quarantine_reason widened for the feedback loop's own
+      //   trip, not_true_rate. WP 5.9; references only 0012-era objects or
+      //   its own (05 §4).
       // 0034_securities_composite_fks: no new table. Phase 4 gate G4-23
       //   (C-14's clause, WP 5.13a): the five `REFERENCES securities (id)`
       //   that 0025/0026 left bare — security_identifiers, security_overlay,
@@ -442,6 +454,7 @@ describeWithDb('runMigrations', () => {
         'insight_dismissals',
         'insight_evidence',
         'insight_feedback',
+        'insight_outcomes',
         'insights',
         'investment_transactions',
         'job_runs',

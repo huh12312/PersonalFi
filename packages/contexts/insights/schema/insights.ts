@@ -196,6 +196,36 @@ export type NewInsightActionRow = typeof insightActions.$inferInsert;
 export const FEEDBACK_ACTIONS = ['accept', 'dismiss', 'snooze', 'reopen'] as const;
 export type FeedbackAction = (typeof FEEDBACK_ACTIONS)[number];
 
+/**
+ * The dismiss-reason taxonomy (07 §8.3; migration `0030_insight_feedback_
+ * reasons.sql`; WP 5.9). Beside the free-text `reason`, which stays the note —
+ * expand, never contract. Each code's effect is in
+ * `src/policy/feedback.ts`'s header; the short version:
+ *
+ *   * `NOT_TRUE` — the facts are wrong. Counts toward the rule's rate; over
+ *     0.2 across five or more firings it quarantines the advisor
+ *     (`not_true_rate`, widened onto `advisors.quarantine_reason` below).
+ *   * `ALREADY_KNOW` — true but known. Skips straight to the 90-day rung.
+ *   * `NOT_ACTIONABLE` — true, can't act. Feeds the ordinary dismiss penalty.
+ *   * `DONT_CARE` — true, don't value it. Turns the rule off for this holder
+ *     (`advisors.enabled_source = 'feedback'`), undoable by a human.
+ *   * `WRONG_AMOUNT` — right finding, wrong number. Flags the insight's
+ *     derivations and digest for review on rule health.
+ *   * `INTENTIONAL` — "I meant to do that." That entity is suppressed
+ *     permanently, immediately — not earned over three dismissals.
+ *   * `LATER` — a snooze, paired with `action = 'snooze'`.
+ */
+export const REASON_CODES = [
+  'NOT_TRUE',
+  'ALREADY_KNOW',
+  'NOT_ACTIONABLE',
+  'DONT_CARE',
+  'WRONG_AMOUNT',
+  'INTENTIONAL',
+  'LATER',
+] as const;
+export type ReasonCode = (typeof REASON_CODES)[number];
+
 export const insightFeedback = pgTable(
   'insight_feedback',
   {
@@ -207,6 +237,8 @@ export const insightFeedback = pgTable(
     insightKey: text('insight_key').notNull(),
     action: text('action').$type<FeedbackAction>().notNull(),
     reason: text('reason'),
+    /** The taxonomy above. `NULL` for free text that matched no preset. */
+    reasonCode: text('reason_code').$type<ReasonCode | null>(),
     snoozeUntil: instantColumn('snooze_until'),
     correlationId: uuid('correlation_id').notNull(),
     createdAt: createdAtColumn(),
@@ -219,11 +251,63 @@ export const insightFeedback = pgTable(
       table.insightKey,
       table.createdAt,
     ),
+    // Rule health and the NOT_TRUE-rate check both group by advisor.
+    index('insight_feedback_reason_idx').on(table.userId, table.advisorId, table.reasonCode),
   ],
 );
 
 export type InsightFeedbackRow = typeof insightFeedback.$inferSelect;
 export type NewInsightFeedbackRow = typeof insightFeedback.$inferInsert;
+
+/**
+ * Outcome verification (09 ADV-4) and forward validation (05 §1 cut line 2):
+ * one row per acceptance, evaluated exactly once at its horizon.
+ *
+ * `insights.last_proposed_at` is the only signal available without a
+ * bitemporal store: an advisor's nightly re-run upserts the same identity row
+ * and advances it whether or not the row is `accepted` (`store.ts`'s
+ * `upsertInsight` — status is deliberately left alone by a re-proposal). So
+ * "was this finding proposed again after its horizon?" is exactly "did
+ * `last_proposed_at` move past `due_at`?", and evaluating it is forward-only
+ * *by construction*: the only value read is a timestamp that can only ever
+ * advance, and it is compared against `due_at`, which was fixed at
+ * acceptance — never against anything that predates it. A reader that
+ * substituted `insights.first_proposed_at` (frozen at the *first* proposal,
+ * always earlier than the acceptance that created this row) would leak the
+ * past into the verdict, which is exactly the failure a bitemporal store
+ * exists to prevent and exactly what `policy/outcomes.ts` is written not to
+ * do.
+ */
+export const OUTCOME_VALUES = ['ACTED', 'INCOMPLETE'] as const;
+export type OutcomeValue = (typeof OUTCOME_VALUES)[number];
+
+export const insightOutcomes = pgTable(
+  'insight_outcomes',
+  {
+    id: idColumn(),
+    userId: userIdColumn(),
+    insightId: uuid('insight_id').notNull(),
+    /** Denormalised, the `insight_feedback` precedent: no join for a read. */
+    advisorId: text('advisor_id').notNull(),
+    insightKey: text('insight_key').notNull(),
+    /** When the user accepted it — the forward-validation reference point. */
+    acceptedAt: instantColumn('accepted_at').notNull(),
+    horizonDays: integer('horizon_days').notNull(),
+    dueAt: instantColumn('due_at').notNull(),
+    /** `NULL` until evaluated. Set at most once — see `evaluateDueOutcomes`. */
+    outcome: text('outcome').$type<OutcomeValue | null>(),
+    evaluatedAt: instantColumn('evaluated_at'),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn(),
+  },
+  (table) => [
+    uniqueIndex('insight_outcomes_user_insight_idx').on(table.userId, table.insightId),
+    index('insight_outcomes_due_idx').on(table.userId, table.dueAt),
+  ],
+);
+
+export type InsightOutcomeRow = typeof insightOutcomes.$inferSelect;
+export type NewInsightOutcomeRow = typeof insightOutcomes.$inferInsert;
 
 export const insightDismissals = pgTable(
   'insight_dismissals',

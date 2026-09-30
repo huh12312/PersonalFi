@@ -26,6 +26,7 @@ import {
   type RankableBuiltin,
 } from '../src/advisors/ranking.ts';
 import { ALERT_BUDGET, effectiveImpactMinor, rank } from '../src/policy/alert-budget.ts';
+import { rankFeed, type InsightView } from '../src/read.ts';
 
 const USD = 'USD';
 
@@ -177,5 +178,82 @@ describe('the alert budget', () => {
     const twice = applyCatalogueBudget([...rows].reverse(), (item) => item, USD);
     expect(once.list.map((item) => item.key)).toEqual(['alpha', 'bravo']);
     expect(twice.list.map((item) => item.key)).toEqual(['alpha', 'bravo']);
+  });
+});
+
+/**
+ * WP 5.9: `read.ts:307` composed `applyAlertBudget` (`policy/alert-budget.ts`'s
+ * `rank()`, no catalogue factors at all) rather than `applyCatalogueBudget`
+ * over `rankBuiltin`, so 07 §3.2's learned `(1 − 0.5·dismiss_rate)` penalty —
+ * proved correct just above, in `rankBuiltin`'s own tests — was never read on
+ * the feed a holder actually sees (found while writing
+ * 05-phase-5-dispatch.md, §2's row). `rankFeed` is `read.ts`'s fix; this
+ * describes it as `insightFeed` will call it, over `InsightView`s rather than
+ * bare `RankableBuiltin` rows.
+ */
+describe('the feed applies the learned dismiss penalty (WP 5.9)', () => {
+  function view(overrides: Partial<InsightView> = {}): InsightView {
+    return {
+      id: overrides.key ?? 'id',
+      advisorId: 'builtin.example',
+      advisorVersion: '1.0.0',
+      key: 'k',
+      period: 'all_time',
+      type: 'example.finding',
+      severity: 'notable',
+      severityClamped: false,
+      title: 't',
+      summaryMd: 's',
+      confidence: 1,
+      confidenceBasis: 'deterministic',
+      horizon: 'this_year',
+      status: 'pending_review',
+      annualizedImpact: Money.of(40_000n, USD),
+      oneTimeImpact: null,
+      impactBasis: 'b',
+      caveats: [],
+      inputDigest: 'sha256:' + '0'.repeat(64),
+      firstProposedAt: new Date('2026-09-01T00:00:00.000Z'),
+      lastProposedAt: new Date('2026-09-01T00:00:00.000Z'),
+      expiresAt: null,
+      evidence: [],
+      actions: [],
+      ...overrides,
+    };
+  }
+
+  it('the feed ranks with the learned dismiss penalty, and a rule with no history ranks on its merits', () => {
+    const heavy = view({
+      id: 'heavy',
+      key: 'heavy',
+      advisorId: 'builtin.heavy_dismisser',
+    });
+    const fresh = view({
+      id: 'fresh',
+      key: 'fresh',
+      advisorId: 'builtin.never_dismissed',
+    });
+
+    const rates = new Map<string, number>([['builtin.heavy_dismisser', 0.9]]);
+    const feed = rankFeed([heavy, fresh], (advisorId) => rates.get(advisorId) ?? 0, USD);
+
+    // Same impact, same everything but the learned history — the
+    // heavily-dismissed rule ranks behind the one with no history at all.
+    expect(feed.list.map((row) => row.advisorId)).toEqual([
+      'builtin.never_dismissed',
+      'builtin.heavy_dismisser',
+    ]);
+
+    // And it is not a second formula: it matches rankBuiltin's own arithmetic.
+    const heavyRow = rankableBuiltinOf({ ...heavy, actions: [] }, 0.9);
+    const freshRow = rankableBuiltinOf({ ...fresh, actions: [] }, 0);
+    expect(rankBuiltin(heavyRow)).toBeLessThan(rankBuiltin(freshRow));
+  });
+
+  it('an advisor absent from the dismiss-rate lookup ranks as if it had never been dismissed', () => {
+    const untouched = view({ id: 'u', key: 'u', advisorId: 'builtin.brand_new' });
+    const feed = rankFeed([untouched], () => 0, USD);
+    expect(feed.dashboard).toHaveLength(1);
+    expect(feed.dashboard[0]?.advisorId).toBe('builtin.brand_new');
   });
 });

@@ -545,3 +545,37 @@ export {
 } from './store.ts';
 
 export type { InsightsContext, InsightsDatabase, InsightsExecutor } from './db.ts';
+
+// WP 5.9 — the dismiss-reason feedback loop, outcome verification, forward
+// validation and rule health (05-phase-5-dispatch.md §3). Appended, not
+// merged into the blocks above: this file is shared with WP 5.7, and each
+// package's own labelled block is how two agents editing it at once never
+// collide on the same lines.
+export { rankFeed } from './read.ts';
+
+export { afterAlreadyKnow, afterIntentional } from './policy/cooldown.ts';
+
+export {
+  NOT_TRUE_MIN_FIRINGS,
+  NOT_TRUE_RATE_THRESHOLD,
+  PRESET_REASON_CODES,
+  decideFeedbackEffects,
+  notTrueRate,
+  reasonCodeForPreset,
+  shouldQuarantineForNotTrue,
+  type FeedbackFirings,
+  type ReasonEffectInput,
+  type ReasonEffectResult,
+} from './policy/feedback.ts';
+
+export {
+  OUTCOME_HORIZON_DAYS_DEFAULT,
+  evaluateDueOutcomes,
+  horizonDueAt,
+  isForwardProposal,
+  recordOutcomeOnAccept,
+  verdictFor,
+  type OutcomeCounts,
+} from './policy/outcomes.ts';
+
+export { ruleHealth, type RuleHealthView, type WrongAmountFlag } from './policy/rule-health.ts';

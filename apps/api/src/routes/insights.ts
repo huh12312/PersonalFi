@@ -62,7 +62,7 @@ import {
   type InsightView,
   type RunSwitches,
 } from '@ctx/insights';
-import { INSIGHT_STATUSES, type InsightStatus } from '@ctx/insights/schema';
+import { INSIGHT_STATUSES, REASON_CODES, type InsightStatus } from '@ctx/insights/schema';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
@@ -409,12 +409,18 @@ export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           summary: 'Accept, dismiss, snooze or reopen an insight',
           description:
             'A dismissal starts the 30/90/permanent cooldown ladder — the third dismissal of the ' +
-            "same finding suppresses it permanently (`@ctx/insights`'s `policy/cooldown.ts`).",
+            "same finding suppresses it permanently (`@ctx/insights`'s `policy/cooldown.ts`). " +
+            "An optional `reasonCode` (07 §8.3's seven-value taxonomy, WP 5.9) drives the feedback " +
+            "loop: NOT_TRUE counts toward the rule's quarantine rate, ALREADY_KNOW skips to the " +
+            '90-day rung, DONT_CARE turns the rule off for this holder, INTENTIONAL suppresses the ' +
+            'entity permanently. Omitted, the three legacy preset strings in `reason` are still ' +
+            'matched by exact text.',
           tags: ['insights'],
           params: z.object({ insightId: z.uuid() }),
           body: z.object({
             action: z.enum(FEEDBACK_ACTIONS),
             reason: z.string().nullable().optional(),
+            reasonCode: z.enum(REASON_CODES).nullable().optional(),
             snoozeUntil: isoInstant.nullable().optional(),
           }),
           response: {
@@ -445,6 +451,7 @@ export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           insightId: request.params.insightId,
           action: request.body.action,
           reason: request.body.reason ?? null,
+          reasonCode: request.body.reasonCode ?? null,
           snoozeUntil:
             request.body.snoozeUntil === undefined || request.body.snoozeUntil === null
               ? null

@@ -92,6 +92,47 @@ export function afterSnooze(previous: SuppressionState | null, until: Date): Sup
   };
 }
 
+/**
+ * `ALREADY_KNOW` (07 §8.3, WP 5.9): "skips to the 90-day rung."
+ *
+ * A dismissal, so it still advances `dismissCount` — this is a refusal like
+ * any other, and it must still be able to earn the permanent rung on a later
+ * dismissal. What it does *not* do is make the user sit through the 30-day
+ * rung first: the second element of `COOLDOWN_LADDER_DAYS` is read directly
+ * rather than through `rungFor`, so "I already knew that" always buys 90 days
+ * of silence on its first use, not whatever rung the raw count would have
+ * landed on.
+ *
+ * A finding already at the permanent rung stays there — there is no rung
+ * above it to skip to, and `dismissCount` does not move, matching
+ * `insight_dismissals_permanent_is_earned`'s promise that permanence, once
+ * reached, never depends on what happens next.
+ */
+export function afterAlreadyKnow(previous: SuppressionState | null, now: Date): SuppressionState {
+  if (previous?.permanent === true) return previous;
+  const dismissCount = Math.max((previous?.dismissCount ?? 0) + 1, 2);
+  const days = COOLDOWN_LADDER_DAYS[1] ?? 90;
+  const until = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+  return { dismissCount, suppressedUntil: until, permanent: false };
+}
+
+/**
+ * `INTENTIONAL` (07 §8.3, WP 5.9): "that entity suppressed permanently" —
+ * on the first refusal, not earned over three.
+ *
+ * `insight_dismissals_permanent_is_earned` requires `dismiss_count >= 3` on
+ * any row with `permanent = TRUE`; rather than widen that CHECK for one
+ * reason code, this forces the count to the rung that already means
+ * permanent (`PERMANENT_AFTER_DISMISSALS`), which is the honest count of
+ * "how many refusals does this finding show" once this one is included, and
+ * keeps the ladder's one written invariant true for every row regardless of
+ * which reason reached it.
+ */
+export function afterIntentional(previous: SuppressionState | null, _now: Date): SuppressionState {
+  const dismissCount = Math.max((previous?.dismissCount ?? 0) + 1, PERMANENT_AFTER_DISMISSALS);
+  return { dismissCount, suppressedUntil: null, permanent: true };
+}
+
 /** Is this finding silenced at `now`? The one question the feed asks. */
 export function isSuppressed(state: SuppressionState | null, now: Date): boolean {
   if (state === null) return false;
