@@ -22,9 +22,15 @@
 
 /** `maxLength` of every free-text (no `pattern`, no `enum`) string in `AdvisorRequest.snapshot`. */
 export const FREE_TEXT_CAPS: Readonly<Record<string, number>> = Object.freeze({
+  // Contract 1.5.0 (WP 5.3): the findings envelope a narrates_only advisor
+  // receives — per finding its title, summary, evidence rows (label, value),
+  // derived values and impact display strings (annualized, one_time, basis).
+  // Every one is free text the model sees, so every one is capped here too.
+  annualized: 64,
   asset_class: 32,
   attribution: 320,
   attribution_url: 2048,
+  basis: 240,
   cadence: 32,
   category_slug: 96,
   // Contract 1.4.0 (WP 5.7): `transactions.anomalies` rows and `fees.summary`
@@ -32,17 +38,22 @@ export const FREE_TEXT_CAPS: Readonly<Record<string, number>> = Object.freeze({
   // the moment 1.4.0 landed — exactly the drift it exists to catch.
   fee_type: 64,
   kind: 32,
+  label: 160,
   name: 96,
+  one_time: 64,
   period_kind: 32,
   status: 32,
+  summary_md: 2000,
   symbol: 16,
   symbols: 16,
   tax_bracket_band: 16,
+  title: 160,
   tolerance: 32,
   // Widest `type` site in the schema: contract 1.4.0's `fees.summary` rows
   // name a fee type up to 64 characters beside the 32-character account types.
   type: 64,
   units: 48,
+  value: 160,
 });
 
 /** `holdings_aggregate.account_type_mix`'s `propertyNames.maxLength`: the one record whose keys are data. */
