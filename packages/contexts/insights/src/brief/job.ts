@@ -17,7 +17,12 @@
  * **after** publication, never awaited: the Brief is a deterministic
  * assembly over stored rows and a Money-facing engine call, and nothing in
  * it depends on the local model. `local.narrator` (WP 5.3) decides for
- * itself what it can narrate; this job only asks it to run.
+ * itself what it can narrate; this job only asks it to run — and only when
+ * `BriefJobDependencies.narratorConfigured` is true (W-C's decision,
+ * `apps/api/src/modules.ts`'s `insightsModule`, the same flag that decides
+ * whether the narrator is registered at all). With no model configured this
+ * job enqueues nothing for it: publishing does not depend on the model, and
+ * neither does the choice of whether to ask it to say anything.
  */
 import { systemClock, todayIn, type Clock } from '@core/kernel';
 import {
@@ -64,6 +69,18 @@ export interface BriefJobDependencies {
   readonly timeZone: string;
   readonly currencyCode: string;
   readonly clock?: Clock;
+  /**
+   * Whether `local.narrator` is registered this boot — the same flag
+   * `insightsModule` reads to decide whether to register it at all (W-C,
+   * 05-phase-5-dispatch.md §4 W-C; this package's own §8 "Needs the
+   * orchestrator" item 2 named the choice and left it to the composition
+   * root). `false` (the default, matching kill level 2's own default):
+   * nothing is enqueued on `insights.run_local` for the narrator, because
+   * nothing would claim it — a bounded but real `job_runs` failure every
+   * week otherwise, "unknown advisor local.narrator", `service.ts`'s
+   * `runAdvisor` refusing what nothing has a handler for.
+   */
+  readonly narratorConfigured?: boolean;
 }
 
 /**
@@ -159,18 +176,25 @@ export function createBriefJob(input: BriefJobDependencies): JobHandlerRegistrat
 
       // The Brief never waits on the model (05 §3 WP 5.6): enqueued, not
       // awaited, in the narrator's own lane so a slow or unavailable model
-      // never delays a publish that has already happened.
-      await enqueueJob(platformOf(input.database), {
-        kind: RUN_LOCAL_JOB_KIND,
-        userId: context.userId,
-        payload: {
-          advisorId: WEEKLY_BRIEF_NARRATOR_ADVISOR_ID,
-          trigger: 'event',
-          triggerEventType: BriefPublished.type,
-        },
-        dedupeKey: `${RUN_LOCAL_JOB_KIND}:${WEEKLY_BRIEF_NARRATOR_ADVISOR_ID}:${isoWeek}`,
-        correlationId: context.correlationId,
-      });
+      // never delays a publish that has already happened. Gated on
+      // `narratorConfigured` (W-C's decision, §8 item 2 of this package's
+      // own evidence): with no model configured, `local.narrator` is never
+      // registered (`insightsModule`), and enqueueing for it anyway would be
+      // a job nothing claims — bounded, but a named failure every week on
+      // every install with the local model off, which is the default.
+      if (input.narratorConfigured ?? false) {
+        await enqueueJob(platformOf(input.database), {
+          kind: RUN_LOCAL_JOB_KIND,
+          userId: context.userId,
+          payload: {
+            advisorId: WEEKLY_BRIEF_NARRATOR_ADVISOR_ID,
+            trigger: 'event',
+            triggerEventType: BriefPublished.type,
+          },
+          dedupeKey: `${RUN_LOCAL_JOB_KIND}:${WEEKLY_BRIEF_NARRATOR_ADVISOR_ID}:${isoWeek}`,
+          correlationId: context.correlationId,
+        });
+      }
     },
     { concurrency: 1 },
   );

@@ -435,6 +435,16 @@ async function main(): Promise<void> {
       );
     }
 
+    // WP 5.3 / W-C: the narrator's model port, built from the same adapter
+    // instance `promptRenderer` above comes from — `LocalModelAdapter.run`
+    // already satisfies `NarratorModelPort` structurally (`packages/contexts/
+    // insights/src/advisors/local/narrator.ts`'s own header), so there is
+    // nothing to adapt: the object itself is what `insightsModule` binds.
+    // `undefined` with `localModel`, which is exactly when `insightsModule`
+    // must not register `local.narrator` either (`ModuleWiringOptions
+    // .narratorModel`'s own doc: the two are read together, never one alone).
+    const narratorModel = localModel;
+
     // WP 3.4 (docs/evidence/phase-3/wp3.w-wiring.md). Built once per process,
     // in the worker only: the API runs no job runner and no scheduler, so a
     // market-data runtime there would be four adapters nobody can invoke —
@@ -556,6 +566,9 @@ async function main(): Promise<void> {
               advisorsEnabled: config.env.ADVISORS_ENABLED,
               localModelConfigured: config.localModel !== undefined,
               ...(localModel === undefined ? {} : { promptRenderer: localModel.promptRenderer }),
+              // WP 5.3 / W-C: `local.narrator` is registered in
+              // `insightsModule` only when this is present too.
+              ...(narratorModel === undefined ? {} : { narratorModel }),
               // wp2.6-insights.md §6 open item 5: absent until an operator
               // writes `${SECRETS_DIR}/advisor_token_secret`; `module.insights`
               // then registers no consumer, no job and no schedule (see
@@ -582,6 +595,13 @@ async function main(): Promise<void> {
             }),
           );
     logger.info({ enabled: modules.enabled, disabled: modules.disabled }, 'modules resolved');
+    // Re-checked for Phase 5 (05 §4 item 4, W-C): `insights.brief` and
+    // `insights.run_local` are job *kinds*, not consumers — `resolveModules`
+    // still registers exactly one consumer for `module.insights`
+    // (`createInsightsConsumer`) whether or not the narrator or the Brief
+    // are wired in, so `WORKER_PINNED_CONNECTIONS`'s per-consumer term and
+    // the call below are unchanged by this phase. Recorded, not merely
+    // asserted, in `docs/evidence/phase-5/wave-c-wiring.md`.
     assertPoolCoversLeases(
       logger,
       config.env.DATABASE_POOL_MAX + WORKER_PINNED_CONNECTIONS,

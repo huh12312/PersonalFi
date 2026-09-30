@@ -42,7 +42,13 @@ import {
   LOTS_CONSUMER_NAME,
 } from '@ctx/investments';
 import { NET_WORTH_CONSUMED_EVENT_TYPES, PLANNING_EVENTS } from '@ctx/planning';
-import { ADVISOR_SCOPES, BUILTIN_CATALOGUE, INSIGHTS_EVENTS, SCOPE_CATALOGUE } from '@ctx/insights';
+import {
+  ADVISOR_SCOPES,
+  BUILTIN_CATALOGUE,
+  INSIGHTS_EVENTS,
+  SCOPE_CATALOGUE,
+  type NarratorModelPort,
+} from '@ctx/insights';
 import { describe, expect, it } from 'vitest';
 import {
   GOAL_PACE_CONSUMER_NAME,
@@ -353,6 +359,78 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     // feature-detection shape wp2.6 §6 item 5 chose, unchanged by the wiring.
     const dark = appModules(wiringOptions()).find((module) => module.flagKey === 'module.insights');
     expect(dark?.jobs ?? []).toHaveLength(0);
+  });
+
+  it('module.insights registers insights.brief (concurrency 1) — WP 5.6, the W-C wiring', () => {
+    // 05 §4 W-C: `insights.brief`'s job body also folds in WP 5.9's outcome
+    // check (`evaluateDueOutcomes`), which this file cannot observe without a
+    // database — that half is `apps/api/test/db/phase5-wiring.test.ts`'s.
+    // What is checkable here, with no Postgres, is the registration shape:
+    // one job kind, present whether or not a local model is configured
+    // (`insightsModule`'s `weeklyJob` is built unconditionally; only the
+    // narrator's own registration and the Brief's narration enqueue are
+    // gated on `localModelConfigured`/`narratorModel`).
+    const insights = appModules(wiringOptions({ advisorTokenSecret: 'registration-shape' })).find(
+      (module) => module.flagKey === 'module.insights',
+    );
+    const brief = insights?.jobs?.find((job) => job.kind === 'insights.brief');
+    expect(brief).toBeDefined();
+    expect(brief?.concurrency).toBe(1);
+  });
+
+  it('local.narrator registers into the catalogue with no conflict only when localModelConfigured and narratorModel are both supplied — WP 5.3, the W-C wiring', () => {
+    // `insightsModule` calls `registry.assertRegistered(createNarratorAdvisor(...))`
+    // synchronously inside `appModules()` itself (before any database is
+    // touched), so a manifest that collides with the fourteen-rule catalogue's
+    // ids, or that asks for a scope its kind may not hold, throws right here —
+    // this is the one narrator-registration claim provable with no Postgres.
+    // Whether the row actually lands (`enabled_source`, the catalogue
+    // default) is `phase5-wiring.test.ts`'s, against a real database.
+    const fakeNarratorModel: NarratorModelPort = {
+      run: () => Promise.reject(new Error('not called by a registration-shape test')),
+    };
+
+    // Both present: registers without throwing.
+    expect(() =>
+      appModules(
+        wiringOptions({
+          advisorTokenSecret: 'registration-shape',
+          localModelConfigured: true,
+          narratorModel: fakeNarratorModel,
+        }),
+      ),
+    ).not.toThrow();
+
+    // `localModelConfigured: false` (the default — kill level 2 is off by
+    // default) with a `narratorModel` still supplied: `insightsModule` reads
+    // the two together, never either alone (`ModuleWiringOptions.narratorModel`'s
+    // own doc), so this must not throw or register anything either.
+    expect(() =>
+      appModules(
+        wiringOptions({
+          advisorTokenSecret: 'registration-shape',
+          localModelConfigured: false,
+          narratorModel: fakeNarratorModel,
+        }),
+      ),
+    ).not.toThrow();
+
+    // No narratorModel at all (the api process's own shape — it never runs a
+    // local model): also fine, and the job/schedule shape is identical either
+    // way — only the registry's contents differ, which this file cannot see.
+    const withNoModel = appModules(
+      wiringOptions({ advisorTokenSecret: 'registration-shape', localModelConfigured: true }),
+    ).find((module) => module.flagKey === 'module.insights');
+    const withModel = appModules(
+      wiringOptions({
+        advisorTokenSecret: 'registration-shape',
+        localModelConfigured: true,
+        narratorModel: fakeNarratorModel,
+      }),
+    ).find((module) => module.flagKey === 'module.insights');
+    expect((withNoModel?.jobs ?? []).map((job) => job.kind)).toEqual(
+      (withModel?.jobs ?? []).map((job) => job.kind),
+    );
   });
 
   it('INSIGHTS_EVENTS is pinned, so an event added to @ctx/insights without a line in modules.ts is a failure here', () => {

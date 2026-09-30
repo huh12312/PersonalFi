@@ -18,7 +18,7 @@
  * | `module.budgeting`      | 5      | `budgeting.actuals@v1`             | —                                              | —                   |
  * | `module.recurring`      | 5      | `recurring.detection@v1`           | —                                              | —                   |
  * | `module.notifications`  | 3      | `notifications.render@v1`          | `notifications.deliver`, `notifications.digest` | weekly digest       |
- * | `module.insights`       | 7      | `insights.dispatch@v1`             | `insights.run`, `insights.run_all`, `insights.run_local` | nightly (04:15)     |
+ * | `module.insights`       | 9      | `insights.dispatch@v1`             | `insights.run`, `insights.run_all`, `insights.run_local`, `insights.brief` | nightly (04:15), weekly Brief (Sun 06:00) |
  * | `module.investments`    | 5      | `investments.lots@v1`              | —                                              | —                   |
  * | `module.integrations`   | 2      | —                                   | `integrations.price_refresh`                   | daily (03:45)       |
  * | `module.planning`       | 1      | `planning.net_worth@v1`            | `planning.net_worth_snapshot`                  | daily (04:00)       |
@@ -54,17 +54,23 @@ import {
 } from '@ctx/connections';
 import { BUDGETING_EVENTS, createBudgetingConsumer, type BudgetingDatabase } from '@ctx/budgeting';
 import {
+  createBriefJob,
   createBuiltinRegistry,
   createInsightsConsumer,
+  createNarratorAdvisor,
   createRunLocalJob,
   createRunSwitches,
+  evaluateDueOutcomes,
   insightsJobs,
+  registerWeeklyBriefSchedule,
   type AdvisorKind,
+  type NarratorModelPort,
   type PromptRenderer,
   registerAdvisor,
   registerNightlySchedule as registerInsightsNightlySchedule,
   BUILTIN_CATALOGUE,
   INSIGHTS_EVENTS,
+  NARRATOR_MANIFEST,
   type InsightsDatabase,
   type InsightsDependencies,
 } from '@ctx/insights';
@@ -107,7 +113,7 @@ import {
   type PriceSource,
   type RefreshPlan,
 } from '@ctx/integrations';
-import { systemClock, type Clock } from '@core/kernel';
+import { newId, systemClock, type Clock } from '@core/kernel';
 import {
   PLATFORM_FLAGS,
   createFlagService,
@@ -125,6 +131,7 @@ import {
   createInsightsLedgerPort,
   createInsightsMarketDataPort,
   createInsightsRecurringPort,
+  createInsightsRetirementImpactPort,
   createRecurringLedgerPort,
   assertDrizzleTransaction,
   planningPortsFor,
@@ -171,6 +178,21 @@ export interface ModuleWiringOptions {
    * `POST /advisors/run` queues one) and in a worker with no local model.
    */
   readonly promptRenderer?: PromptRenderer;
+  /**
+   * WP 5.3's narrator, bound to WP 5.2's adapter (W-C wiring;
+   * 05-phase-5-dispatch.md §4 W-C). `createLocalModelAdapter(...)`'s own
+   * `run(request, signal)` already satisfies this port structurally — see
+   * `worker.ts`, which passes the same object it built `promptRenderer` from.
+   *
+   * `local.narrator` is registered in `insightsModule` **only when** this and
+   * `localModelConfigured` are both present: a model bound with nothing
+   * pointed at it (`localModelConfigured: false`, the default — kill level 2
+   * is off by default) must never advertise an advisor nobody can run, and a
+   * `narratorModel` with `localModelConfigured: false` would be exactly that
+   * — the two are read together, not either alone. The api process supplies
+   * neither: it never runs a local model (`POST /advisors/run` queues one).
+   */
+  readonly narratorModel?: NarratorModelPort;
   /**
    * The account holder these modules are being built for — the same id
    * `resolveModules(platform, userId, …)` is called with.
@@ -795,23 +817,27 @@ function fredSourceOf(sources: readonly PriceSource[] | undefined): FredSource |
   );
 }
 
-function insightsModule(
+/**
+ * WP 5.1 (W-A wiring): levels 1 and 2 of the kill ladder as a port. The run
+ * watcher reads these once a second while a run is in flight and the write
+ * barrier reads them again before the insert, so the flag reader here is
+ * deliberately UNCACHED (`ttlMs: 0`) — the shared `FlagService`'s 30 s
+ * backstop cache would make a flipped `module.insights` take up to 30 s to
+ * stop a run, and 05 §3 WP 5.1's exit is "within two seconds".
+ *
+ * Exported — not merely called inline — so that claim has a **behavioural**
+ * test rather than only an inspection of this file: `wave-a-wiring.md` §4
+ * named "the composition root's cache setting is proved only by inspection
+ * until W-C lands", and `apps/api/test/db/phase5-wiring.test.ts` calls this
+ * exact function to build the switches its kill-ladder cases run against, so
+ * a sabotage of `ttlMs: 0` here is a sabotage of what that test exercises,
+ * not of a second, parallel construction that could quietly drift from it.
+ */
+export function insightsRunSwitches(
   database: ModuleWiringOptions['database'],
-  options: ModuleWiringOptions,
-  clock: Clock,
-): ModuleRegistration {
-  if (options.advisorTokenSecret === undefined) {
-    return { flagKey: 'module.insights', events: INSIGHTS_EVENTS };
-  }
-
-  const registry = createBuiltinRegistry();
-  // WP 5.1 (W-A wiring): levels 1 and 2 of the kill ladder as a port. The
-  // run watcher reads these once a second while a run is in flight and the
-  // write barrier reads them again before the insert, so the flag reader
-  // here is deliberately UNCACHED (`ttlMs: 0`) — the shared `FlagService`'s
-  // 30 s backstop cache would make a flipped `module.insights` take up to
-  // 30 s to stop a run, and 05 §3 WP 5.1's exit is "within two seconds".
-  const switches = createRunSwitches({
+  options: Pick<ModuleWiringOptions, 'advisorsEnabled' | 'localModelConfigured'>,
+) {
+  return createRunSwitches({
     advisorsEnabled: options.advisorsEnabled,
     flags: createFlagService({
       db: platformExecutor(database),
@@ -822,6 +848,30 @@ function insightsModule(
       options.localModelConfigured ? ['builtin', 'local_model'] : ['builtin'],
     ),
   });
+}
+
+function insightsModule(
+  database: ModuleWiringOptions['database'],
+  options: ModuleWiringOptions,
+  clock: Clock,
+): ModuleRegistration {
+  if (options.advisorTokenSecret === undefined) {
+    return { flagKey: 'module.insights', events: INSIGHTS_EVENTS };
+  }
+
+  const registry = createBuiltinRegistry();
+  // WP 5.3 / W-C: `local.narrator` is registered in this registry **only**
+  // when both halves of kill level 2's operator side are present — a model
+  // endpoint bound (`localModelConfigured`) *and* a port to call it through
+  // (`narratorModel`, W-C's own binding in `worker.ts`). The api process
+  // supplies neither, so it never advertises an advisor it cannot run and
+  // `POST /advisors/run` for `local.narrator` there refuses the same way any
+  // other unregistered advisor id does.
+  const narratorConfigured = options.localModelConfigured && options.narratorModel !== undefined;
+  if (narratorConfigured && options.narratorModel !== undefined) {
+    registry.assertRegistered(createNarratorAdvisor({ model: options.narratorModel }));
+  }
+  const switches = insightsRunSwitches(database, options);
   const dependencies: InsightsDependencies = {
     registry,
     switches,
@@ -862,6 +912,46 @@ function insightsModule(
     },
   };
 
+  // WP 5.6 / W-C: the weekly Brief job, `insights.brief` — the retirement
+  // effect through `createInsightsRetirementImpactPort` over WP 5.5's solver
+  // (§3's own arrows-point-down rule: `@ctx/insights` never imports
+  // `@ctx/planning`). No currency config key yet, the same reason
+  // `settings.baseCurrency` above has none (wp2.6-insights.md §6 open item 3).
+  const briefJob = createBriefJob({
+    database,
+    retirementImpactPort: createInsightsRetirementImpactPort(database, {
+      timeZone: options.timezone,
+    }),
+    timeZone: options.timezone,
+    currencyCode: 'USD',
+    clock,
+    // W-C's decision (wp5.6-brief.md §8 item 2): gate the narration enqueue
+    // on the same flag the narrator's own registration above reads, rather
+    // than leave a Brief queue `insights.run_local` for an advisor nobody
+    // registered.
+    narratorConfigured,
+  });
+  // WP 5.9's outcome check (`evaluateDueOutcomes`) is exported as a plain
+  // function, not a job step of its own (§4 W-C: "the outcome check ...
+  // folded into the weekly job") — so it is folded in here, after the
+  // Brief's own work, rather than given a schedule nothing in 05 names. A
+  // wrapper rather than an edit to `brief/job.ts`: `createBriefJob` already
+  // returns a complete `JobHandlerRegistration`, and composing one job kind
+  // out of two steps is exactly what a composition root does with what a
+  // package exports.
+  const weeklyJob = defineJob(
+    briefJob.kind,
+    async (payload: unknown, context) => {
+      await briefJob.handler(payload, context);
+      await evaluateDueOutcomes(
+        database,
+        { userId: context.userId, clock: context.clock, correlationId: context.correlationId },
+        context.clock.now(),
+      );
+    },
+    briefJob.concurrency === undefined ? {} : { concurrency: briefJob.concurrency },
+  );
+
   return {
     flagKey: 'module.insights',
     events: INSIGHTS_EVENTS,
@@ -872,6 +962,8 @@ function insightsModule(
       // three-minute model call never queues every builtin behind it in
       // `insights.run`, and the api never executes one inline.
       createRunLocalJob({ database, dependencies, clock }),
+      // WP 5.6's `insights.brief`, WP 5.9's outcome check folded in (above).
+      weeklyJob,
     ],
     schedules: async (userId: string): Promise<void> => {
       await registerInsightsNightlySchedule(
@@ -879,6 +971,23 @@ function insightsModule(
         { userId, timezone: options.timezone },
         clock,
       );
+      // WP 5.3 / W-C: through the same `registerAdvisor` path
+      // `registerBuiltinAdvisors` uses for the catalogue (`app.ts`'s onReady
+      // hook), so `enabled_source`/`enabled` follow the same rules — a
+      // restart cannot re-enable an advisor a human (or WP 5.9's feedback
+      // loop) switched off, and a later release reaches an existing install.
+      // Default off, matching kill level 3's own default (05 §3 WP 5.1's
+      // ladder table).
+      if (narratorConfigured) {
+        await registerAdvisor(
+          database,
+          { userId, clock, correlationId: newId() },
+          { manifest: NARRATOR_MANIFEST, enabled: false },
+        );
+      }
+      // WP 5.6's Sunday 06:00 local schedule, after the 04:15 advisor pass
+      // and the 04:30 projection refresh.
+      await registerWeeklyBriefSchedule(database, { userId, timezone: options.timezone }, clock);
     },
   };
 }
