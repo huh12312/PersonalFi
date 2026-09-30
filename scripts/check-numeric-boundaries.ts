@@ -136,6 +136,11 @@ const ALLOW_LIST: readonly AllowEntry[] = [
     identifier: 'WRONG_AMOUNT',
     why: 'A per-reason dismissal COUNT keyed by the reason code `WRONG_AMOUNT` (WP 5.9 rule health); the zero is "no dismissals with this reason yet", never an amount.',
   },
+  {
+    file: 'packages/advisors/local-model/src/caps.ts',
+    identifier: 'value',
+    why: "A string LENGTH cap (`maxLength` of the findings envelope's evidence `value` display string, contract 1.5.0) in the adapter's sanitiser table — a character count, never an amount; the table's parity test compares it to the published schema.",
+  },
   // --- the provider seam: a JSON number arrives and is converted immediately.
   {
     file: 'packages/connectors/plaid/src/amount.ts',

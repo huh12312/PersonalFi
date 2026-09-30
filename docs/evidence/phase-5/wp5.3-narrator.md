@@ -61,18 +61,17 @@ Computed from the code (`validate/numerals.ts`'s `traceContext`/`untraceableNume
 `SnapshotBuilder`, for the subscription price-rise finding (`subscription.price_increase…`, summary
 _"A subscription went from $15.99 to $18.99 on 2026-06-01 — about $36.00 more a year."_), 2026-09-30:
 
-| | Before: snapshot-wide (every advisor, and a narrator until WP 5.3) | After: narrow (a `narrates_only` advisor) |
-| --- | --- | --- |
-| Candidate values | **168** distinct numeric values in the snapshot (30,066 bytes), each under **6 renderings** (`v`, `\|v\|`, `×100`, `\|v\|×100`, `÷100`, `\|v\|÷100`) at the numeral's own decimals; 299 string literals masked | **3** figures, verbatim: `15.99`, `18.99`, `36.00` — the finding's own rendered numerals (evidence values, title/summary/basis, impact display strings, re-computed derivation values); dates and pseudonyms masked whole in both the finding and the narration |
-| Integers 1–100 a narrator could write and pass | **49** | **0** |
-| Integers 1–9,999 | **119** | **0** |
-| Money `$0.01`–`$999.99` (at cents) | **281** | **3** (`$15.99`, `$18.99`, `$36.00`) |
-| Percentages `0.1%`–`100.0%` (one decimal) | **76** | **0** |
-| `$5,400.00` (August's income, §1's misattribution) | passes (`540000 ÷ 100`) | refused, `numeral_not_in_finding` |
-| `2026` alone (a date's year lifted out) | passes (measured: some snapshot value renders to it) | refused — the date is quotable only as the date |
+|                                                    | Before: snapshot-wide (every advisor, and a narrator until WP 5.3)                                                                                                                                             | After: narrow (a `narrates_only` advisor)                                                                                                                                                                                                                       |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Candidate values                                   | **168** distinct numeric values in the snapshot (30,066 bytes), each under **6 renderings** (`v`, `\|v\|`, `×100`, `\|v\|×100`, `÷100`, `\|v\|÷100`) at the numeral's own decimals; 299 string literals masked | **3** figures, verbatim: `15.99`, `18.99`, `36.00` — the finding's own rendered numerals (evidence values, title/summary/basis, impact display strings, re-computed derivation values); dates and pseudonyms masked whole in both the finding and the narration |
+| Integers 1–100 a narrator could write and pass     | **49**                                                                                                                                                                                                         | **0**                                                                                                                                                                                                                                                           |
+| Integers 1–9,999                                   | **119**                                                                                                                                                                                                        | **0**                                                                                                                                                                                                                                                           |
+| Money `$0.01`–`$999.99` (at cents)                 | **281**                                                                                                                                                                                                        | **3** (`$15.99`, `$18.99`, `$36.00`)                                                                                                                                                                                                                            |
+| Percentages `0.1%`–`100.0%` (one decimal)          | **76**                                                                                                                                                                                                         | **0**                                                                                                                                                                                                                                                           |
+| `$5,400.00` (August's income, §1's misattribution) | passes (`540000 ÷ 100`)                                                                                                                                                                                        | refused, `numeral_not_in_finding`                                                                                                                                                                                                                               |
+| `2026` alone (a date's year lifted out)            | passes (measured: some snapshot value renders to it)                                                                                                                                                           | refused — the date is quotable only as the date                                                                                                                                                                                                                 |
 
-Across all 38 laundered `drift` findings the narrow context holds **1–7 figures per finding (median
-4)**. What a narrator gains in exchange for the 168×6: nothing it needs — it is quoting a finding,
+Across all 38 laundered `drift` findings the narrow context holds **1–7 figures per finding (median 4)**. What a narrator gains in exchange for the 168×6: nothing it needs — it is quoting a finding,
 and every figure the finding showed the holder is available to it exactly as shown. Matching is
 verbatim: `$36` does not stand for `$36.00`, `5,400` does not stand for `5,400.00`, and no rescaling is
 tried (`test/narrator.test.ts`'s first case holds both the misattribution and the rounding).
@@ -88,14 +87,14 @@ A finding enters a narrator's request only if **every scope its source run emitt
 `advisor_runs.emitted_scopes`, not its manifest's request) is in the narrator's effective grant.
 `launderFindings` is pure; `assembleFindings` feeds it from the database.
 
-| Finding (built-in) | Its source run emitted | Narrator's effective grant | Enters? | Why |
-| --- | --- | --- | --- | --- |
-| `cash.yield_spread` | `cash.summary`, `market.rates` | `cash.summary`, `market.rates` | **yes** | ⊆ |
-| `cash.yield_spread` | `cash.summary`, `market.rates` | `cash.summary` | no — `scope_not_granted: market.rates` | subset, not overlap |
-| `investing.expense_ratio` | `holdings.detail` | `cash.summary`, `market.rates` | no — `scope_not_granted: holdings.detail` | the §3 WP 5.3 case: a cash narrator never reads positions through a finding |
-| any, `insights.run_id` pruned (`SET NULL`) | unknown | anything | no — `source_run_unknown` | fail closed |
-| `spending.duplicate_charge`, `subscriptions.duplicate_service`, `spending.uncategorised` | include `transactions.raw` | the narrator's full bound (`NARRATOR_SCOPES`) | **never** | the manifest does not ask for `transactions.raw`, so no grant can admit it (and the built-ins read 14 scopes; the manifest ceiling is 13) |
-| `cash.account_count` (DB test) | `cash.summary` | `recurring.list` | no — the run completes with 0 proposals and **0 model calls** | the service short-circuits an empty envelope |
+| Finding (built-in)                                                                       | Its source run emitted         | Narrator's effective grant                    | Enters?                                                       | Why                                                                                                                                       |
+| ---------------------------------------------------------------------------------------- | ------------------------------ | --------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `cash.yield_spread`                                                                      | `cash.summary`, `market.rates` | `cash.summary`, `market.rates`                | **yes**                                                       | ⊆                                                                                                                                         |
+| `cash.yield_spread`                                                                      | `cash.summary`, `market.rates` | `cash.summary`                                | no — `scope_not_granted: market.rates`                        | subset, not overlap                                                                                                                       |
+| `investing.expense_ratio`                                                                | `holdings.detail`              | `cash.summary`, `market.rates`                | no — `scope_not_granted: holdings.detail`                     | the §3 WP 5.3 case: a cash narrator never reads positions through a finding                                                               |
+| any, `insights.run_id` pruned (`SET NULL`)                                               | unknown                        | anything                                      | no — `source_run_unknown`                                     | fail closed                                                                                                                               |
+| `spending.duplicate_charge`, `subscriptions.duplicate_service`, `spending.uncategorised` | include `transactions.raw`     | the narrator's full bound (`NARRATOR_SCOPES`) | **never**                                                     | the manifest does not ask for `transactions.raw`, so no grant can admit it (and the built-ins read 14 scopes; the manifest ceiling is 13) |
+| `cash.account_count` (DB test)                                                           | `cash.summary`                 | `recurring.list`                              | no — the run completes with 0 proposals and **0 model calls** | the service short-circuits an empty envelope                                                                                              |
 
 The table's first three rows and the fifth are `test/narrator.test.ts` →
 `'a finding whose source scopes the narrator was not granted never enters its request'`; the sixth is
@@ -120,17 +119,16 @@ untouched — step 7 still the snapshot-wide trace, step 4 knowing only `knownFi
 
 The first line is 05 §1 exactly: a narration of the subscription price rise that says _"about
 $5,400.00 more a year"_ — `$5,400.00` being August's income (`cashflow_monthly.months[14].income`,
-`"540000"` minor units), a real figure under the wrong label — passes all seven steps, because
-`540000 ÷ 100` renders `5400.00`. The faithful control (only `$15.99`, `$18.99`, the date) was
+`"540000"`minor units), a real figure under the wrong label — passes all seven steps, because`540000 ÷ 100`renders`5400.00`. The faithful control (only `$15.99`, `$18.99`, the date) was
 accepted in the same run, so the red is the trace and not a harness that refuses everything. The
 second red is the 1:1 gap: a known `type` under a key the built-ins never used was accepted.
 
 ## 7. Sabotage log (recorded as run; each restored by editing the text back, confirmed by `sha256sum -c` against the pre-sabotage hashes and `grep -c SABOTAGE` = 0)
 
-| # | Sabotage | Observed | First try |
-| --- | --- | --- | --- |
-| A | **The narrow trace widened back to the snapshot** — `checkNumerals`' `if (finding !== null)` made `if (finding !== null && false)`, so a narrator is traced snapshot-wide under six renderings again | `test/narrator.test.ts` → `× a narration may use only the figures of the finding it narrates…` — `expected [ 'accepted' ] to deeply equal [ 'numerals:numeral_not_in_finding' ]`: the §1 fabricated-but-traceable `$5,400.00` passes; 1 failed / 3 passed | red |
-| B | **The 1:1 key check removed** — `narratedFindingFor` resolves by `type` alone (`findings.find(entry => entry.type === narration.type)`) instead of `finding:<key>` | `× a narration of a finding the builtins did not make is rejected` — `expected [ 'accepted' ] …`: a narration under the key `…2026-06-01.second`, a finding the built-ins never made, passes (it cites the real finding's refs and quotes only its figures, so no later step catches it); 1 failed / 3 passed | red |
+| #   | Sabotage                                                                                                                                                                                             | Observed                                                                                                                                                                                                                                                                                                      | First try |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| A   | **The narrow trace widened back to the snapshot** — `checkNumerals`' `if (finding !== null)` made `if (finding !== null && false)`, so a narrator is traced snapshot-wide under six renderings again | `test/narrator.test.ts` → `× a narration may use only the figures of the finding it narrates…` — `expected [ 'accepted' ] to deeply equal [ 'numerals:numeral_not_in_finding' ]`: the §1 fabricated-but-traceable `$5,400.00` passes; 1 failed / 3 passed                                                     | red       |
+| B   | **The 1:1 key check removed** — `narratedFindingFor` resolves by `type` alone (`findings.find(entry => entry.type === narration.type)`) instead of `finding:<key>`                                   | `× a narration of a finding the builtins did not make is rejected` — `expected [ 'accepted' ] …`: a narration under the key `…2026-06-01.second`, a finding the built-ins never made, passes (it cites the real finding's refs and quotes only its figures, so no later step catches it); 1 failed / 3 passed | red       |
 
 ## 4. Linked, never ranked — migration 0031 and the write path
 
@@ -184,15 +182,16 @@ No table is added, so the alphabetical table list does not change. Insert betwee
 blocks:
 
 ```ts
-      // 0031_insight_narrations: no new table. insights gains
-      //   narrates_insight_id (WP 5.3: a narration — alternative wording a
-      //   narrates_only advisor wrote — links to the finding it narrates and
-      //   is never ranked; NULL is a finding), a user-scoped composite FK
-      //   (user_id, narrates_insight_id) → insights (user_id, id) ON DELETE
-      //   CASCADE over the UNIQUE index insights_narration_target_idx it
-      //   creates, a not-self CHECK and a partial index for the card's lookup.
-      //   references only 0012-era insights (05 §4).
+// 0031_insight_narrations: no new table. insights gains
+//   narrates_insight_id (WP 5.3: a narration — alternative wording a
+//   narrates_only advisor wrote — links to the finding it narrates and
+//   is never ranked; NULL is a finding), a user-scoped composite FK
+//   (user_id, narrates_insight_id) → insights (user_id, id) ON DELETE
+//   CASCADE over the UNIQUE index insights_narration_target_idx it
+//   creates, a not-self CHECK and a partial index for the card's lookup.
+//   references only 0012-era insights (05 §4).
 ```
+
 | C | **The laundering rule removed** — `launderFindings`' `if (ungranted.length > 0)` made `if (false && …)`, so a finding enters whatever scopes built it | `test/narrator.test.ts` → `× a finding whose source scopes the narrator was not granted never enters its request` — `expected [ …(2) ] to deeply equal [ 'cash.yield_spread.acct-checking' ]`: the `holdings.detail` expense-ratio finding is admitted to a narrator granted `cash.summary` + `market.rates`. And through the real service: `test/db/narration-link.test.ts` → `× a narrator whose grant does not cover a finding's source scopes is never called` — `expected 1 to be +0`: the `recurring.list`-granted narrator was handed the `cash.summary` finding and the model was called | red (both) |
 | D | **A retry loop added** — `runNarratorEval` re-asks the model (up to 3 more calls) for any request whose narrations were not all accepted, and keeps the later verdict | `test/eval-harness.test.ts` → `× the harness counts first-attempt acceptance per step, and a scripted one-in-ten fabricator reads 90%` — `expected 31 to be 27` (four extra calls). The same sabotaged harness run directly over the same 20 drift findings: **steps 1–7 read `40/40 = 100%`** where the first-attempt truth is `36/40 = 90%`; restored, the same script reads `27` calls and `0.9`. The retry launders exactly the rate the criterion measures | red |
 
@@ -283,3 +282,33 @@ Three calibration requests in total (5 narrations) preceded the counted run, eac
 _request shape or reply format_ — never the validator, and never by re-asking: the counted run
 below begins from request 0 on the final shape, and its first attempt at each request is the only
 one recorded (`--finalise` ignores any later line for an index already present).
+
+### The counted run
+
+**Constants of the run.** Model `qwen2.5:7b-instruct-q4_K_M`, digest
+`sha256:845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e` (pinned by WP 5.2's adapter
+and checked against `GET /api/tags` before every request — a mismatch is a `model_error`, not a
+silent substitution); `temperature: 0`, `seed: 20260929`, `num_ctx: 8192`, `num_predict: 1024`
+(`DEFAULT_GENERATION_OPTIONS`); Ollama `ollama/ollama:0.34.2@sha256:da6e0dc5…8865532`, container
+started 12:31:26Z; reply format `NARRATOR_REPLY_FORMAT`; request shape as §8's calibration left it.
+84 requests planned (56 alone, 28 pairs), 112 narrations.
+
+**Session 1 (the killed agent), 2026-09-30 ~12:49Z–13:00Z:** requests 0–3 recorded, each a single
+finding; the fourth line is complete JSON (checked by parsing every line). 3 accepted through step 7;
+request 1 (`subscription.share_of_income`) `no_narration` — the reply's narration named another key
+(counted as 1 extra), so it passed steps 1–3 and failed at 4. Nothing was recorded after 13:00Z.
+
+**Session 2 (this agent), resumed 2026-09-30 21:55Z** from `--from 4` with the §8 command unchanged
+except `--budget-ms 250000` (the budget is when the loop stops _starting_ requests, not part of any
+request; 250 s + a 300 s worst-case request fits the 600 s foreground ceiling, which 540 s did not).
+At resume: load average 1.74 / 0.83 / 0.41, host 22 GiB total / 15 GiB available, Ollama container
+RSS **22 MiB — the model had been unloaded by keep-alive**, so request 4 includes a cold load.
+
+Running counts, appended after every chunk (cumulative, first attempt, from `live.jsonl`):
+
+| After chunk  | Requests recorded | Narrations | Distinct findings | Steps 1–5 accepted | Steps 1–7 accepted | Load avg (1 min) at chunk end | Ollama RSS |
+| ------------ | ----------------- | ---------- | ----------------- | ------------------ | ------------------ | ----------------------------- | ---------- |
+| session 1    | 0–3 (4)           | 4          | 4                 | 3                  | 3                  | —                             | —          |
+| 2.1 (22:00Z) | 0–4 (5)           | 5          | 5                 | 4                  | 4                  | 4.82                          | 5.25 GiB   |
+| 2.2 (22:07Z) | 0–7 (8)           | 8          | 8                 | 6                  | 6                  | 5.04                          | 5.37 GiB   |
+| 2.3 (22:12Z) | 0–8 (9)           | 9          | 9                 | 6                  | 6                  | 4.08                          | 5.38 GiB   |
