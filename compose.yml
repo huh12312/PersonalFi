@@ -362,6 +362,11 @@ services:
       # Without it every `POST …/projections {"method":"monte_carlo"}` on a
       # compose install was bound to `null` whatever an operator fetched.
       PLANNING_RETURNS_CACHE_DIR: /var/lib/personalfi/returns
+      # W-B wiring (05 §4 item 9): the api serves the interactive Monte Carlo
+      # route from the same runner as the worker's nightly baseline, so it
+      # reads the concurrency cap too — the question the comment below left
+      # open, decided when `domain.ts` took the value from config.
+      MONTE_CARLO_MAX_CONCURRENT: ${MONTE_CARLO_MAX_CONCURRENT:-8}
       # 05-phase-5-dispatch.md §4 item 9: kill switch 1 of WP 5.1's
       # four-level advisor ladder. `api` gets only this one this batch — the
       # `LOCAL_MODEL_*` keys and `MONTE_CARLO_MAX_CONCURRENT` join `worker`'s

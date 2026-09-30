@@ -130,6 +130,12 @@ interface AllowEntry {
  * was read at its declaration, not pattern-matched.
  */
 const ALLOW_LIST: readonly AllowEntry[] = [
+  // --- counters keyed by a name the scanner reads as a magnitude.
+  {
+    file: 'packages/contexts/insights/src/policy/rule-health.ts',
+    identifier: 'WRONG_AMOUNT',
+    why: 'A per-reason dismissal COUNT keyed by the reason code `WRONG_AMOUNT` (WP 5.9 rule health); the zero is "no dismissals with this reason yet", never an amount.',
+  },
   // --- the provider seam: a JSON number arrives and is converted immediately.
   {
     file: 'packages/connectors/plaid/src/amount.ts',

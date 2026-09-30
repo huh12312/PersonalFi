@@ -478,6 +478,8 @@ async function main(): Promise<void> {
         ? {}
         : { cacheDir: config.planning.returnsCacheDir }),
       logger,
+      // `MONTE_CARLO_MAX_CONCURRENT` (W-B wiring, 05 §4 item 9).
+      maxConcurrent: config.planning.monteCarloMaxConcurrent,
     });
 
     const modules =

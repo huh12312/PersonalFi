@@ -500,6 +500,9 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     ...(config.planning.returnsCacheDir === undefined
       ? {}
       : { cacheDir: config.planning.returnsCacheDir }),
+    // `MONTE_CARLO_MAX_CONCURRENT` (W-B wiring, 05 §4 item 9): the api serves
+    // the interactive route from this runner too, so it reads the cap as well.
+    maxConcurrent: config.planning.monteCarloMaxConcurrent,
   });
 
   const deps: RouteDeps = {

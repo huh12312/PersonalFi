@@ -224,6 +224,7 @@ import {
   type RevealedPorts as PlanningRevealedPorts,
   type SnapshotPorts,
   type SpendingReader as PlanningSpendingReader,
+  guardrailReferenceRate,
 } from '@ctx/planning';
 import {
   DEFAULT_LADDERS,
@@ -637,6 +638,10 @@ export function createInsightsLedgerPort(
               ? null
               : (slugOf.get(row.effective.categoryId) ?? null),
           amount: row.effective.amount,
+          // WP 5.7: `fees.summary`'s by-account breakdown. `LedgerTransaction`
+          // already carries it (`packages/contexts/ledger/src/types.ts`); this
+          // is the one select the dispatch names.
+          accountId: row.accountId,
         });
       }
       if (page.nextCursor === null) break;
@@ -1554,14 +1559,11 @@ type InsightsPlanningPort = NonNullable<InsightsSnapshotPorts['planning']>;
 type InsightsGoalRow = NonNullable<Awaited<ReturnType<InsightsPlanningPort['goals']>>>[number];
 type InsightsPlanProjection = NonNullable<Awaited<ReturnType<InsightsPlanningPort['projection']>>>;
 
-/**
- * 07 §5.6's `initial_wr = 0.045 # user-settable`: the rate the guardrail band
- * is drawn around for R7. The multiples are WP 4.4's `GUYTON_KLINGER`; this is
- * the one number the band needs that WP 4.2's assumptions file does not carry.
- * **Carried:** 07 marks it user-settable, so it belongs in the assumptions file
- * as an overridable, cited value — recorded in `wp4.9-advisor-catalog-v3.md`.
- */
-const GUARDRAIL_REFERENCE_RATE = '0.045';
+// 07 §5.6's `initial_wr = 0.045 # user-settable`, the rate R7's guardrail band
+// is drawn around, lived here as a literal from WP 4.9 until WP 5.5 moved it
+// into the assumptions file as a cited, overridable value
+// (`guardrailReferenceRate(resolved)`); the W-B wiring batch replaced the
+// literal's two uses in `guardrailOf` below.
 
 /** Six-place fixed point for the ratios below. Never a float. */
 const MICRO = 1_000_000n;
@@ -1774,13 +1776,20 @@ function guardrailOf(
   const drawn = Money.subtract(first.spending, income);
   if (drawn.minor <= 0n || first.startWealth.minor <= 0n) return null;
   const withdrawalRate = ratioText(drawn.minor, first.startWealth.minor, 4);
-  const reference = toMicros(GUARDRAIL_REFERENCE_RATE);
+  // 07 §5.6's initial_wr, cited in the assumptions file and overridable by the
+  // holder (WP 5.5): `resolved` is the holder's own resolved set, so an
+  // override reaches R7 with no further plumbing, and a set resolved against
+  // the retained predecessor answers the pre-5.5 literal 0.045 from the frozen
+  // module. An override may carry up to 12 decimals and `toMicros` keeps 6 —
+  // harmless for a band reference.
+  const referenceRate = guardrailReferenceRate(resolved).value;
+  const reference = toMicros(referenceRate);
   const lower = (reference * toMicros(GUYTON_KLINGER.lowerMultiple)) / MICRO;
   const upper = (reference * toMicros(GUYTON_KLINGER.upperMultiple)) / MICRO;
   const rate = toMicros(withdrawalRate);
   return {
     withdrawalRate,
-    referenceRate: GUARDRAIL_REFERENCE_RATE,
+    referenceRate,
     lower: fromMicros(lower),
     upper: fromMicros(upper),
     position: rate > upper ? 'above' : rate < lower ? 'below' : 'within',
@@ -3178,9 +3187,14 @@ export function planningCashflowReaderFor(
         listAccounts(executor, { userId, includeClosed: true }),
       ]);
       const subtypeOf = new Map(rows.map((row) => [row.id, row.subtype] as const));
+      const typeOf = new Map(rows.map((row) => [row.id, row.type] as const));
       return accounts.map((account) => ({
         ...account,
         taxBucket: defaultTaxBucketFor(account.kind, subtypeOf.get(account.accountId) ?? null),
+        // WP 5.5 (W-B wiring): Ledger's `crypto` accounts reach the Monte Carlo
+        // as their own sleeve (07 §6.4, never folded into equity). Before this
+        // line crypto stayed in TAXABLE exactly as WP 4.6 left it.
+        sleeve: typeOf.get(account.accountId) === 'crypto' ? ('crypto' as const) : null,
       }));
     },
 
@@ -3323,9 +3337,11 @@ function createSemaphore(limit: number): { acquire(): Promise<void>; release(): 
  * WP 4.5 measured ~30–45 MB per concurrent Monte Carlo worker (10k–20k paths)
  * against a 512 MB container (`wp4.5-montecarlo.md` §4.5, §10 open items): ten
  * at once exhausts it. Eight is comfortably under that (~360 MB at the high
- * end) while still letting more than one request run at a time. **Not a
- * config value yet** — `packages/config` is outside this WP's ownership; see
- * this WP's evidence for the key an operator would tune this with.
+ * end) while still letting more than one request run at a time. Since the W-B
+ * wiring batch (05 §4 item 9) the operator's value is `MONTE_CARLO_MAX_CONCURRENT`
+ * (`config.planning.monteCarloMaxConcurrent`, default 8), passed by both
+ * `worker.ts` and `app.ts` through `createMonteCarloRunnerFromCache`; this
+ * literal is only the fallback for a caller that passes nothing (tests).
  */
 const MAX_CONCURRENT_MONTE_CARLO_RUNS = 8;
 
@@ -3398,6 +3414,10 @@ export function createMonteCarloRunner(options: {
             // A 64-bit pattern already (0022 stores it unsigned) — no
             // asIntN/asUintN conversion; see this function's header, item 1.
             seed: request.seed,
+            // WP 5.5 (W-B wiring): the crypto sleeve reaches the worker. Without
+            // this line the port field stopped here and the stored run's input
+            // said `own_sleeve` while the worker simulated crypto at zero.
+            cryptoHolding: request.cryptoHolding ?? null,
             paths: request.paths,
             engine: 'bootstrap',
             series: options.series,
@@ -3486,10 +3506,19 @@ export function createMonteCarloRunner(options: {
 export function createMonteCarloRunnerFromCache(options: {
   readonly cacheDir?: string;
   readonly logger: PlatformLogger;
+  /**
+   * `MONTE_CARLO_MAX_CONCURRENT` (05 §4 item 9), `config.planning.monteCarloMaxConcurrent`:
+   * concurrent Monte Carlo workers per process. Both processes pass it — `app.ts`
+   * serves the interactive route from the same runner (Phase 4 gate C-1).
+   */
+  readonly maxConcurrent?: number;
 }): MonteCarloRunner | null {
   try {
     const series = loadReturnSeries(options.cacheDir);
-    return createMonteCarloRunner({ series });
+    return createMonteCarloRunner({
+      series,
+      ...(options.maxConcurrent === undefined ? {} : { maxConcurrent: options.maxConcurrent }),
+    });
   } catch (error) {
     if (error instanceof ReturnSeriesRefused) {
       options.logger.warn(
