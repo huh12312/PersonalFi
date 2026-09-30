@@ -39,8 +39,10 @@ import { buildPlatform } from './platform.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
 import { accountRoutes } from './routes/accounts.ts';
 import { advisorGrantRoutes } from './routes/advisor-grants.ts';
+import { advisorRunRoutes } from './routes/advisor-runs.ts';
 import { assumptionsRoutes } from './routes/assumptions.ts';
 import { authRoutes } from './routes/auth.ts';
+import { briefRoutes } from './routes/brief.ts';
 import { budgetRoutes } from './routes/budgets.ts';
 import { categoryRoutes } from './routes/categories.ts';
 import { connectionRoutes } from './routes/connections.ts';
@@ -562,6 +564,15 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(planRoutes(deps));
   await app.register(assumptionsRoutes(deps));
   await app.register(advisorGrantRoutes(deps));
+  // WP 5.10 (05-phase-5-dispatch.md §3). Two routers, matching the dispatch's
+  // file split: `brief.ts` (the Weekly Advisory Brief and the health-score
+  // stub, under the existing `/insights` prefix) and `advisor-runs.ts` (the
+  // run inspector, cancel, the payload preview/approval gate, the kind
+  // switch and rule health, under the existing `/advisors` prefix). No
+  // `docker/Caddyfile` edit needed — both prefixes already route to this
+  // process (`scripts/check-proxy-routes.ts`).
+  await app.register(briefRoutes(deps));
+  await app.register(advisorRunRoutes(deps));
 
   /**
    * Idempotent repair pass for every user that already exists (condition D-6,

@@ -893,9 +893,10 @@ Under all four sits `docker compose stop ollama`. It is not a level — nothing 
 the model container outright; a run waiting on it fails fast (WP 5.2) and the rest of the app is
 unaffected.
 
-The database commands below use `psql` on the production stack:
-`docker compose exec db psql -U personalfi -d personalfi`. The UI for levels 2–4 (the advisor-management
-screen, the per-run cancel button) is WP 5.10/5.12's; until it ships, SQL is the screen.
+Levels 2–4 each have a route now (WP 5.10); the database commands below use `psql` on the production
+stack (`docker compose exec db psql -U personalfi -d personalfi`) only where no route covers the case —
+level 3's breaker-driven quarantine is read-only from SQL, and there is still no screen for any of this
+(the advisor-management UI is WP 5.12's, not yet landed).
 
 **Level 1 — everything off.**
 
@@ -914,7 +915,9 @@ screen, the per-run cancel button) is WP 5.10/5.12's; until it ships, SQL is the
 
 **Level 2 — every local model off** (the built-in rules keep running).
 
-- User: `advisors.kind.local_model` → `false` (same statement, that key). It ships `false`.
+- User: `PUT /advisors/kinds/local_model/enabled` `{"enabled": false}` (step-up). It ships `false`. The
+  route only accepts a kind with a declared flag — today that is `local_model` alone — and answers 404
+  `insights.kind_flag_not_found` for any other.
 - Operator: leave `LOCAL_MODEL_ENDPOINT` empty. With no endpoint no local advisor is registered, and the
   kind is off whatever its flag says.
 
@@ -932,16 +935,19 @@ failures or **5** validator rejections in a rolling 24 h for a `local_model` adv
 consecutive failures or one run ≥ 50 % refused (with ≥ 4 proposals) for a built-in. A quarantine never
 decays; clear it with `{"enabled": true, "clearQuarantine": true}` on the same route, after reading why.
 
-**Level 4 — one run.** Find it, then ask it to stop; it closes within about a second:
+**Level 4 — one run.** `GET /advisors/{advisorId}/runs` to find it (or `GET /advisors/runs/{runId}` for
+one already known), then `POST /advisors/runs/{runId}/cancel` (step-up) to ask it to stop; it closes
+within about a second under the advisor's row lock, naming `cancel_reason = run_cancelled`. 404 if the
+run is not the caller's, 409 `insights.run_not_in_flight` if it has already finished. Directly, when
+neither route is reachable:
 
 ```sql
 SELECT id, advisor_id, started_at FROM advisor_runs WHERE status = 'started' ORDER BY started_at;
 UPDATE advisor_runs SET cancel_requested_at = now() WHERE id = '<run id>' AND status = 'started';
 ```
 
-(WP 5.10's `POST /advisors/runs/{runId}/cancel` does the same under the advisor's row lock.) The
-deadline is the other half of this level: a run past its manifest's `timeout_ms` (never above 300 s; a
-local model's is `LOCAL_MODEL_TIMEOUT_MS`) is aborted by us.
+The deadline is the other half of this level: a run past its manifest's `timeout_ms` (never above 300 s;
+a local model's is `LOCAL_MODEL_TIMEOUT_MS`) is aborted by us.
 
 **What each looks like in `advisor_runs`.**
 
