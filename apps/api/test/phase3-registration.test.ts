@@ -42,7 +42,7 @@ import {
   LOTS_CONSUMER_NAME,
 } from '@ctx/investments';
 import { NET_WORTH_CONSUMED_EVENT_TYPES, PLANNING_EVENTS } from '@ctx/planning';
-import { ADVISOR_SCOPES, BUILTIN_CATALOGUE, SCOPE_CATALOGUE } from '@ctx/insights';
+import { ADVISOR_SCOPES, BUILTIN_CATALOGUE, INSIGHTS_EVENTS, SCOPE_CATALOGUE } from '@ctx/insights';
 import { describe, expect, it } from 'vitest';
 import {
   GOAL_PACE_CONSUMER_NAME,
@@ -353,6 +353,19 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     // feature-detection shape wp2.6 §6 item 5 chose, unchanged by the wiring.
     const dark = appModules(wiringOptions()).find((module) => module.flagKey === 'module.insights');
     expect(dark?.jobs ?? []).toHaveLength(0);
+  });
+
+  it('INSIGHTS_EVENTS is pinned, so an event added to @ctx/insights without a line in modules.ts is a failure here', () => {
+    // `apps/api/src/modules.ts` forwards the whole array (`events:
+    // INSIGHTS_EVENTS`) rather than naming each event — which is right, and
+    // is exactly why nothing here proves an added event reaches the pump; it
+    // proves the count is a deliberate edit rather than a drift. WP 5.1 added
+    // AdvisorRunCancelled (05-phase-5-dispatch.md §2's "kill switch 1" row);
+    // WP 5.6 adds BriefPublished (§4 item 5, this pin named as WP 5.6's).
+    expect(INSIGHTS_EVENTS).toHaveLength(9);
+    expect(INSIGHTS_EVENTS.map((definition) => definition.type)).toContain(
+      'insights.BriefPublished',
+    );
   });
 
   it('the net-worth job kind, schedule name and cron are the documented ones', () => {

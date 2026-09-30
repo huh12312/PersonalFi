@@ -209,6 +209,33 @@ export const InsightReviewed = defineEvent({
   }),
 });
 
+// WP 5.6 — the Weekly Advisory Brief (05-phase-5-dispatch.md §3, §4 item 5).
+// Appended rather than inserted among the review events above: this file is
+// shared with WP 5.3 this wave, and each package's own labelled block is how
+// two agents editing it at once never collide on the same lines.
+
+export const BriefPublished = defineEvent({
+  type: 'insights.BriefPublished',
+  aggregateType: 'advisory_brief',
+  description:
+    'A Weekly Advisory Brief was published for one ISO week. Emitted once per (user, iso_week) ' +
+    "from the insert branch of publishWeeklyBrief's idempotent write, never on a tick that found " +
+    'the week already published — so replaying the job or a schedule that ticks twice announces ' +
+    'nothing twice, the same edge-triggered discipline InsightProposed keeps. The payload is ids ' +
+    'and counts, never a headline or a dollar figure: a consumer that wants either re-reads the ' +
+    'Brief, which is also how it sees whatever the holder has since accepted or dismissed. ' +
+    '09 NOT-1/NOT-6: this is the one hook a notification renderer needs to deliver the Brief by a ' +
+    'channel, which Phase 5 itself does not add (05 §6 Q3, default in-app only).',
+  schema: z.object({
+    briefId: uuid,
+    isoWeek: z.string().regex(/^[0-9]{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$/),
+    rankedCount: z.int().nonnegative(),
+    attentionCount: z.int().nonnegative(),
+    nothingMaterial: z.boolean(),
+    coldStart: z.boolean(),
+  }),
+});
+
 /**
  * Registered at the composition root. Exported as a list so `apps/api` cannot
  * forget one: an event type that is appended but not registered is invisible to
@@ -224,4 +251,5 @@ export const INSIGHTS_EVENTS: readonly EventDefinition[] = Object.freeze([
   InsightAccepted,
   InsightDismissed,
   InsightReviewed,
+  BriefPublished,
 ]);

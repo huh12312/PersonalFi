@@ -414,6 +414,18 @@ describeWithDb('runMigrations', () => {
       //   advisors.quarantine_reason widened for the feedback loop's own
       //   trip, not_true_rate. WP 5.9; references only 0012-era objects or
       //   its own (05 §4).
+      // 0032_advisory_briefs: two @ctx/insights tables — advisory_briefs (one
+      //   row per (user, ISO week), inserted once and never updated: the
+      //   `advisory_briefs_user_week_idx` unique index is the idempotency and
+      //   immutability boundary `src/brief/store.ts#publishWeeklyBrief`'s
+      //   `ON CONFLICT DO NOTHING` depends on) and advisory_brief_items (the
+      //   ≤5 dollar-ranked actions and the urgent no-dollar attention strip,
+      //   every displayed field snapshotted at publish time rather than
+      //   joined — a Brief is a record of what was said, 07 §7.3 — composite
+      //   FK to advisory_briefs (user_id, id); insight_id is nullable and
+      //   ON DELETE SET NULL, the click-through only, never the source of a
+      //   displayed field). WP 5.6; references only 0012-era objects or its
+      //   own (05 §4).
       // 0034_securities_composite_fks: no new table. Phase 4 gate G4-23
       //   (C-14's clause, WP 5.13a): the five `REFERENCES securities (id)`
       //   that 0025/0026 left bare — security_identifiers, security_overlay,
@@ -429,6 +441,8 @@ describeWithDb('runMigrations', () => {
         'advisor_run_payloads',
         'advisor_runs',
         'advisors',
+        'advisory_brief_items',
+        'advisory_briefs',
         'allocation_targets',
         'auth_attempts',
         'auth_lockouts',

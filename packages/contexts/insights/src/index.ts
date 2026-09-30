@@ -588,3 +588,33 @@ export { ruleHealth, type RuleHealthView, type WrongAmountFlag } from './policy/
 // collide on the same lines.
 export { TransactionsAnomaliesSchema, FeesSummarySchema } from './contract/snapshot.ts';
 export { isP0Safety } from './policy/alert-budget.ts';
+
+// WP 5.6 — the Weekly Advisory Brief (05-phase-5-dispatch.md §3, migration
+// 0032_advisory_briefs.sql). Appended rather than folded into the blocks
+// above: this file is shared with WP 5.3 this wave, and each package's own
+// labelled block is how two agents editing it at once never collide on the
+// same lines.
+export {
+  NO_DOLLAR_FIGURE_ANSWER,
+  RETIREMENT_EFFECT_ASSUMPTION,
+  type MonthsOfSpendingEffect,
+  type RetirementActionInput,
+  type RetirementAgeEffect,
+  type RetirementEffect,
+  type RetirementImpactAnswer,
+  type RetirementImpactNotComputableReason,
+  type RetirementImpactPort,
+  type RetirementImpactRequest,
+} from './brief/ports.ts';
+
+export {
+  BRIEF_JOB_KIND,
+  DEFAULT_WEEKLY_BRIEF_CRON,
+  WEEKLY_BRIEF_NARRATOR_ADVISOR_ID,
+  WEEKLY_BRIEF_SCHEDULE_NAME,
+  createBriefJob,
+  registerWeeklyBriefSchedule,
+  type BriefJobDependencies,
+} from './brief/job.ts';
+
+export { BriefPublished } from './events.ts';

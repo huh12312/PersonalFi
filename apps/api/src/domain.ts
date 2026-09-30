@@ -116,7 +116,11 @@ import {
   type BudgetingDatabase,
   type LedgerPort as BudgetingLedgerPort,
 } from '@ctx/budgeting';
-import { PERCENT_PER_ANNUM, percentStringToRatio } from '@ctx/insights';
+import {
+  PERCENT_PER_ANNUM,
+  RETIREMENT_EFFECT_ASSUMPTION,
+  percentStringToRatio,
+} from '@ctx/insights';
 import type {
   AccountTaxTreatment,
   BudgetPort as InsightsBudgetPort,
@@ -135,7 +139,11 @@ import type {
   MarketDataPort as InsightsMarketDataPort,
   MarketRateKind,
   MonthlyCashflowRow,
+  MonthsOfSpendingEffect as InsightsMonthsOfSpendingEffect,
   RecurringPort as InsightsRecurringPort,
+  RetirementAgeEffect as InsightsRetirementAgeEffect,
+  RetirementImpactAnswer as InsightsRetirementImpactAnswer,
+  RetirementImpactPort as InsightsRetirementImpactPort,
   SnapshotPorts as InsightsSnapshotPorts,
 } from '@ctx/insights';
 import { createNtfyChannel, createSmtpChannel, type ChannelRegistry } from '@ctx/notifications';
@@ -192,22 +200,28 @@ import {
   defaultFlagsFor,
   defaultTaxBucketFor,
   evaluateGoalPace,
+  assembleInput,
   getBaseline,
   goalEvaluationStoreOf,
   isAssumptionsRefusal,
   isProjectionInputRefused,
   isProjectionRefused,
+  listLifeEvents,
   liveEarmarksByAccount,
   loadReturnSeries,
   projectDeterministic,
   readProjection,
   resolveForUser,
   runMonteCarloInWorker,
+  solveRetirementImpact,
   taxYear,
   type BaselineProfile,
   type DerivedInputs,
+  type MonthsOfSpending,
   type ProjectionPlan,
   type ResolvedAssumptions,
+  type RetirementAgeAnswer,
+  type RetirementImpactAction,
   type AccountKind as PlanningAccountKind,
   type BalanceObservation as PlanningBalanceObservation,
   type BalancesReader as PlanningBalancesReader,
@@ -1923,6 +1937,117 @@ export function createInsightsPlanningPort(
             ? null
             : await orNull(() => guardrailOf(plan, resolved)),
       };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// WP 5.6 — `@ctx/insights`' `RetirementImpactPort`
+// ---------------------------------------------------------------------------
+//
+// The same arrangement as `createInsightsPlanningPort` above, one port over:
+// `@ctx/insights` declares `RetirementImpactPort` in `brief/ports.ts` and may
+// not import `@ctx/planning`; this file binds it over WP 5.5's
+// `solveRetirementImpact` -- the Money-facing entry point --
+// **never `earliestRetirementAge`**, the engine-unit function an adapter must
+// not call because it would have to cross the numeric boundary itself
+// (docs/evidence/phase-5/wp5.5-planning.md §8.5).
+//
+// The plan is assembled one step past `createInsightsPlanningPort`'s: through
+// `assembleInput` rather than `assembleBaselinePlan` alone, so a holder's
+// stored one-off outflows (WP 5.5's life-events carry) reach the plan the
+// retirement effect is computed against -- the same plan `prepareProjection`
+// runs for a real, stored projection.
+
+function retirementAgeEffectOf(answer: RetirementAgeAnswer): InsightsRetirementAgeEffect {
+  if (answer.kind === 'earliest') {
+    return { kind: 'earliest', age: answer.age, engineRuns: answer.engineRuns };
+  }
+  return {
+    kind: 'unreachable',
+    reason: answer.constraint.name,
+    detail: answer.constraint.detail,
+  };
+}
+
+function monthsOfSpendingEffectOf(value: MonthsOfSpending): InsightsMonthsOfSpendingEffect {
+  if (value.months === null) return { months: null, reason: value.reason };
+  return {
+    months: value.months,
+    atAge: value.atAge,
+    wealthDifference: value.wealthDifference,
+    firstYearSpending: value.firstYearSpending,
+    derivation: value.derivation,
+  };
+}
+
+/**
+ * `@ctx/insights`' read-only view of Planning's earliest-retirement solver.
+ *
+ * `not_computable('no_baseline')` before any engine work when the holder has
+ * stated no baseline plan; any refusal the assembly or resolution step raises
+ * (`isPlanningRefusal`, the same predicate `createInsightsPlanningPort` above
+ * uses) is carried through by its own code rather than swallowed into a
+ * generic reason — "why couldn't it compute this?" should name the actual
+ * refusal, not restate that there was one.
+ */
+export function createInsightsRetirementImpactPort(
+  database: Database,
+  options: { readonly timeZone: string },
+): InsightsRetirementImpactPort {
+  return {
+    async effectOf(input): Promise<InsightsRetirementImpactAnswer> {
+      const baseline = await getBaseline(database, input.userId);
+      if (baseline === null) {
+        return { kind: 'not_computable', reason: 'no_baseline' };
+      }
+
+      try {
+        const resolved = await resolveForUser(database, {
+          userId: input.userId,
+          timeZone: options.timeZone,
+        });
+        const derived = await createProjectionInputsReader(
+          database,
+          planningRevealedPortsFor(database, {
+            userId: input.userId,
+            timeZone: options.timeZone,
+            clock: systemClock,
+          }),
+        ).derivedInputs({ userId: input.userId, asOf: null, allowOpenDay: false });
+        const lifeEvents = await listLifeEvents(database, input.userId);
+        const assembled = assembleInput({
+          scenario: baseline,
+          baseline,
+          derived,
+          lifeEvents,
+          method: 'deterministic',
+          paths: 1,
+        });
+
+        const action: RetirementImpactAction =
+          input.action.kind === 'extra_annual'
+            ? { kind: 'extra_annual', annual: input.action.annual }
+            : { kind: 'one_off', lump: input.action.lump };
+        const impact = solveRetirementImpact(assembled.plan, resolved, action);
+        return {
+          kind: 'computed',
+          engineVersion: impact.engineVersion,
+          assumptionsVersion: impact.assumptionsVersion,
+          plannedRetirementAge: impact.plannedRetirementAge,
+          baseline: retirementAgeEffectOf(impact.baseline),
+          withAction: retirementAgeEffectOf(impact.withAction),
+          yearsEarlier: impact.yearsEarlier,
+          monthsOfSpending: monthsOfSpendingEffectOf(impact.monthsOfSpending),
+          assumption: RETIREMENT_EFFECT_ASSUMPTION,
+        };
+      } catch (error) {
+        if (isPlanningRefusal(error)) {
+          const code = (error as { code?: unknown }).code;
+          return { kind: 'not_computable', reason: typeof code === 'string' ? code : 'refused' };
+        }
+        throw error;
+      }
     },
   };
 }

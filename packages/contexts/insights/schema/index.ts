@@ -89,3 +89,15 @@ export {
   type ProposedActionKindValue,
   type ReasonCode,
 } from './insights.ts';
+
+// WP 5.6 — the Weekly Advisory Brief (migration 0032_advisory_briefs.sql).
+export {
+  BRIEF_ITEM_SECTIONS,
+  advisoryBriefItems,
+  advisoryBriefs,
+  type AdvisoryBriefItemRow,
+  type AdvisoryBriefRow,
+  type BriefItemSection,
+  type NewAdvisoryBriefItemRow,
+  type NewAdvisoryBriefRow,
+} from './briefs.ts';
