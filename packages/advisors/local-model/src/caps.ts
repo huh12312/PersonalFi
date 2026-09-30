@@ -27,6 +27,10 @@ export const FREE_TEXT_CAPS: Readonly<Record<string, number>> = Object.freeze({
   attribution_url: 2048,
   cadence: 32,
   category_slug: 96,
+  // Contract 1.4.0 (WP 5.7): `transactions.anomalies` rows and `fees.summary`
+  // carry a fee type. The parity test caught this table lagging the schema
+  // the moment 1.4.0 landed — exactly the drift it exists to catch.
+  fee_type: 64,
   kind: 32,
   name: 96,
   period_kind: 32,
@@ -35,7 +39,9 @@ export const FREE_TEXT_CAPS: Readonly<Record<string, number>> = Object.freeze({
   symbols: 16,
   tax_bracket_band: 16,
   tolerance: 32,
-  type: 32,
+  // Widest `type` site in the schema: contract 1.4.0's `fees.summary` rows
+  // name a fee type up to 64 characters beside the 32-character account types.
+  type: 64,
   units: 48,
 });
 
