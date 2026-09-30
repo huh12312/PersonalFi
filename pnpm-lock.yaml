@@ -211,6 +211,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@advisor/local-model':
+        specifier: workspace:*
+        version: link:../../packages/advisors/local-model
       '@connector/coinbase':
         specifier: workspace:*
         version: link:../../packages/connectors/coinbase

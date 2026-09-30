@@ -17,6 +17,7 @@
     "@connector/manual": "workspace:*",
     "@connector/coinbase": "workspace:*",
     "@connector/plaid": "workspace:*",
+    "@advisor/local-model": "workspace:*",
     "@connector/walletrpc": "workspace:*",
     "@core/config": "workspace:*",
     "@core/contracts": "workspace:*",
