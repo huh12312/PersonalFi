@@ -20,14 +20,30 @@ import { BUILTIN_CATALOGUE } from '../src/advisors/catalogue.ts';
 import type { AdvisorSnapshot } from '../src/contract/snapshot.ts';
 import { TODAY, USD, seedSnapshot, type SeedCase } from './advisors/seed.ts';
 
-function evaluate(ruleId: string, snapshot: AdvisorSnapshot) {
-  const entry = BUILTIN_CATALOGUE.find((item) => item.ruleId === ruleId);
-  if (entry === undefined) throw new Error(`no rule ${ruleId}`);
+/**
+ * Keyed on `advisorId`, not `ruleId`. WP 5.7's fee hunter
+ * (`builtin.spending.fee_hunter`) is registered in the catalogue under the
+ * same `ruleId` — `'S7'` — as the pre-existing `builtin.spending.fees`: 07 §3.3
+ * has one fee rule, and the fee hunter is that rule read from a richer scope,
+ * not a new numbered one (`catalogue.ts`'s own comment beside the two `S7`
+ * entries). A `ruleId`-keyed `.find()` can only ever resolve to the first of
+ * two same-`ruleId` entries, so it silently addresses `builtin.spending.fees`
+ * for every lookup meant for the fee hunter. `advisorId` is unique per entry —
+ * `catalog.test.ts`'s own uniqueness invariant — so it is what this harness
+ * addresses advisors by. `ruleId` is kept on `Golden` purely as the 07-numbered
+ * label a reviewer recognises; it is never used to look anything up.
+ */
+function evaluate(advisorId: string, snapshot: AdvisorSnapshot) {
+  const entry = BUILTIN_CATALOGUE.find((item) => item.advisorId === advisorId);
+  if (entry === undefined) throw new Error(`no advisor ${advisorId}`);
   return entry.rule.evaluate({ snapshot, today: TODAY, period: '2026-09', baseCurrency: USD });
 }
 
 interface Golden {
+  /** 07 §3.3's label, for a reader's benefit only — never the lookup key. */
   readonly ruleId: string;
+  /** The unique key `evaluate()` looks the entry up by. */
+  readonly advisorId: string;
   readonly seedCase: SeedCase;
   /** Every key the rule should produce on that case, in order. */
   readonly keys: readonly string[];
@@ -37,11 +53,25 @@ interface Golden {
   /** `null` when the rule claims no dollar figure. Minor units. */
   readonly annualized: string | null;
   readonly oneTime?: string | null;
+  /**
+   * The keys the rule should produce on the `control` case, when that is not
+   * the empty array every other row expects. S5 (`builtin.spending
+   * .new_merchant_high_charge`) is the one row that needs this: `CONTROL_LEDGER`'s
+   * `txn-ctl-rent` is a genuine, literal first-time charge over $250 at a
+   * merchant (`merchant-ctl-landlord`) that appears nowhere else in the
+   * fixture, and S5's trigger — proven correct in `test/anomaly.test.ts` and
+   * not S5's or this row's to redefine — has no clause that would ever tell
+   * "a healthy financial life's rent" apart from a first-time high charge
+   * worth flagging. Left undefined (the default for every other row), the
+   * loop below still asserts `[]`.
+   */
+  readonly controlKeys?: readonly string[];
 }
 
 const GOLDEN: readonly Golden[] = [
   {
     ruleId: 'U2',
+    advisorId: 'builtin.subscriptions.price_increase',
     seedCase: 'drift',
     keys: ['subscription.price_increase.MERCHANT_6fbb93c8e9d3.2026-06-01'],
     summary: 'A subscription went from $15.99 to $18.99 on 2026-06-01 — about $36.00 more a year.',
@@ -50,6 +80,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'U3',
+    advisorId: 'builtin.subscriptions.duplicate_service',
     seedCase: 'drift',
     keys: ['subscription.duplicate_service.entertainment.streaming'],
     summary:
@@ -60,6 +91,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'U7',
+    advisorId: 'builtin.subscriptions.share_of_income',
     seedCase: 'drift',
     keys: ['subscription.share_of_income'],
     summary: 'Your subscriptions come to about $632.98 a month. Income in 2026-08 was $5,400.00.',
@@ -68,6 +100,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'C1',
+    advisorId: 'builtin.cash.idle_above_cushion',
     seedCase: 'drift',
     keys: ['cash.idle_above_cushion'],
     // WP 3.10: the sentence C1 has been withholding since Phase 2. The rate is
@@ -81,6 +114,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'C2',
+    advisorId: 'builtin.cash.yield_spread',
     seedCase: 'drift',
     keys: ['cash.yield_spread.acct-checking'],
     // WP 3.10: the benchmark is now the published rate rather than the best
@@ -95,6 +129,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'C3',
+    advisorId: 'builtin.cash.projected_shortfall',
     seedCase: 'tight',
     keys: ['cash.projected_shortfall'],
     summary:
@@ -105,6 +140,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'C4',
+    advisorId: 'builtin.cash.emergency_fund_short',
     seedCase: 'tight',
     keys: ['cash.emergency_fund_short'],
     summary:
@@ -115,6 +151,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'C7',
+    advisorId: 'builtin.cash.large_bill_due',
     seedCase: 'tight',
     keys: ['cash.large_bill_due.series-rent', 'cash.large_bill_due.series-power'],
     summary:
@@ -125,6 +162,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'S2',
+    advisorId: 'builtin.spending.category_creep',
     seedCase: 'drift',
     keys: ['spending.category_creep.dining.restaurants'],
     summary:
@@ -135,6 +173,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'S3',
+    advisorId: 'builtin.spending.uncategorised',
     seedCase: 'drift',
     keys: ['spending.uncategorised'],
     summary:
@@ -145,6 +184,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'S6',
+    advisorId: 'builtin.spending.duplicate_charge',
     seedCase: 'drift',
     keys: ['spending.duplicate_charge.txn-market-first.txn-market-second'],
     summary:
@@ -155,6 +195,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'S7',
+    advisorId: 'builtin.spending.fees',
     seedCase: 'drift',
     keys: ['spending.fees'],
     summary:
@@ -164,6 +205,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'S9',
+    advisorId: 'builtin.spending.negative_month',
     seedCase: 'drift',
     keys: ['spending.negative_month.2026-08'],
     summary: 'In 2026-08, spending ran about $700.00 ahead of income.',
@@ -173,6 +215,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'S10',
+    advisorId: 'builtin.spending.annual_bills_ahead',
     seedCase: 'drift',
     keys: ['spending.annual_bills_ahead'],
     summary:
@@ -188,6 +231,7 @@ const GOLDEN: readonly Golden[] = [
   // reviewer sees 'would have earned' become 'will earn' in a diff. ------
   {
     ruleId: 'D1',
+    advisorId: 'builtin.debt.payoff_order',
     seedCase: 'drift',
     keys: ['debt.payoff_order'],
     summary:
@@ -200,6 +244,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'D2',
+    advisorId: 'builtin.debt.rate_above_market',
     seedCase: 'drift',
     keys: ['debt.rate_above_market.LIAB_a1b2c3d4e5f6', 'debt.rate_above_market.LIAB_c3d4e5f6a1b2'],
     summary:
@@ -212,6 +257,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'D3',
+    advisorId: 'builtin.debt.minimum_only',
     seedCase: 'drift',
     keys: ['debt.minimum_only.LIAB_a1b2c3d4e5f6'],
     summary:
@@ -223,6 +269,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'D4',
+    advisorId: 'builtin.debt.promo_ending',
     seedCase: 'drift',
     keys: ['debt.promo_ending.LIAB_b2c3d4e5f6a1'],
     summary:
@@ -234,6 +281,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'D5',
+    advisorId: 'builtin.debt.principal_against_market',
     seedCase: 'drift',
     keys: [
       'debt.principal_against_market.LIAB_a1b2c3d4e5f6',
@@ -251,6 +299,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'D6',
+    advisorId: 'builtin.debt.missed_payment',
     seedCase: 'drift',
     keys: ['debt.missed_payment.LIAB_a1b2c3d4e5f6'],
     summary:
@@ -262,6 +311,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'I1',
+    advisorId: 'builtin.investing.drift',
     seedCase: 'drift',
     keys: ['investing.drift.US_EQUITY', 'investing.drift.US_BOND', 'investing.drift.CRYPTO'],
     summary:
@@ -273,6 +323,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'I2',
+    advisorId: 'builtin.investing.expense_ratio',
     seedCase: 'drift',
     keys: ['investing.expense_ratio.OLDFUND'],
     summary:
@@ -285,6 +336,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'I3',
+    advisorId: 'builtin.investing.idle_cash',
     seedCase: 'drift',
     keys: ['investing.idle_cash'],
     summary:
@@ -295,6 +347,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'I4',
+    advisorId: 'builtin.investing.concentration',
     seedCase: 'drift',
     keys: ['investing.concentration.VTI'],
     summary:
@@ -307,6 +360,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'I5',
+    advisorId: 'builtin.investing.employer_stock',
     seedCase: 'drift',
     keys: ['investing.employer_stock.ACME'],
     summary:
@@ -319,6 +373,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'I6',
+    advisorId: 'builtin.investing.loss_lot',
     seedCase: 'drift',
     keys: ['investing.loss_lot.ACME.0'],
     summary:
@@ -330,6 +385,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'X1',
+    advisorId: 'builtin.crypto.net_worth_share',
     seedCase: 'drift',
     keys: ['crypto.net_worth_share'],
     summary:
@@ -341,6 +397,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'X2',
+    advisorId: 'builtin.crypto.exchange_custody',
     seedCase: 'drift',
     keys: ['crypto.exchange_custody'],
     summary:
@@ -352,6 +409,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'X3',
+    advisorId: 'builtin.crypto.idle_stablecoins',
     seedCase: 'drift',
     keys: ['crypto.idle_stablecoins.USDC'],
     summary:
@@ -363,6 +421,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'X5',
+    advisorId: 'builtin.crypto.loss_lot',
     seedCase: 'drift',
     keys: ['crypto.loss_lot.BTC.0'],
     summary:
@@ -373,6 +432,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'X6',
+    advisorId: 'builtin.crypto.missing_basis',
     seedCase: 'drift',
     keys: ['crypto.missing_basis.USDC'],
     summary:
@@ -388,6 +448,7 @@ const GOLDEN: readonly Golden[] = [
   //     each pair is a real negative rather than an empty snapshot.
   {
     ruleId: 'R1',
+    advisorId: 'builtin.retirement.savings_rate',
     seedCase: 'tight',
     keys: ['retirement.savings_rate.baseline'],
     summary:
@@ -399,6 +460,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'R2',
+    advisorId: 'builtin.retirement.success_probability',
     seedCase: 'drift',
     keys: ['retirement.success_probability.baseline'],
     summary:
@@ -410,6 +472,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'R3',
+    advisorId: 'builtin.retirement.rmd_window',
     seedCase: 'drift',
     keys: ['retirement.rmd_window.2035'],
     summary:
@@ -421,6 +484,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'R4',
+    advisorId: 'builtin.retirement.claiming_age',
     seedCase: 'drift',
     keys: ['retirement.claiming_age.67_0'],
     summary:
@@ -432,6 +496,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'R6',
+    advisorId: 'builtin.retirement.goal_pace',
     seedCase: 'drift',
     keys: ['retirement.goal_pace.GOAL_6deb4f359d91'],
     summary:
@@ -443,6 +508,7 @@ const GOLDEN: readonly Golden[] = [
   },
   {
     ruleId: 'R7',
+    advisorId: 'builtin.retirement.withdrawal_guardrail',
     seedCase: 'drift',
     keys: ['retirement.withdrawal_guardrail.above'],
     summary:
@@ -453,19 +519,74 @@ const GOLDEN: readonly Golden[] = [
     severity: 'urgent',
     annualized: null,
   },
+  // --- WP 5.7, anomalies. S1 and S5 read `transactions.anomalies`; the fee
+  //     hunter reads `fees.summary`. All three fire on `drift`, extended for
+  //     exactly these cases (`test/advisors/seed.ts` §"WP 5.7", and
+  //     `docs/evidence/phase-5/wp5.7-anomaly-fees.md` §6 for the worked JSON).
+  {
+    ruleId: 'S1',
+    advisorId: 'builtin.spending.category_anomaly',
+    seedCase: 'drift',
+    keys: ['spending.category_anomaly.txn-movies-outlier'],
+    summary:
+      "A entertainment.movies charge of $150.00 on 2026-09-15 is well above the category's " +
+      'usual $20.50.',
+    severity: 'notable',
+    annualized: null,
+  },
+  {
+    ruleId: 'S5',
+    advisorId: 'builtin.spending.new_merchant_high_charge',
+    seedCase: 'drift',
+    keys: ['spending.new_merchant_high_charge.txn-software-0'],
+    summary:
+      'A $599.00 charge on 2026-07-12 is the first charge seen from this merchant in the last ' +
+      'twelve months.',
+    severity: 'warning',
+    annualized: null,
+    // See `Golden.controlKeys`'s own doc comment. `CONTROL_LEDGER`'s
+    // `txn-ctl-rent` — $2,000.00, 2026-09-02, the only appearance of
+    // `merchant-ctl-landlord` in that fixture — is a genuine first-time charge
+    // over $250 at an unseen merchant, so S5 correctly fires on it. `tight`
+    // was checked as the alternative anchor and is worse, not better: it has
+    // two such charges (`txn-tight-rent` at $1,450.00 and `txn-tight-power` at
+    // $800.00, both first and only appearances of their merchants there), so
+    // it does not give S5 a clean silent case either. This is not a defect in
+    // S5 — `test/anomaly.test.ts` proves the rule correct on its own
+    // dedicated fixture — it is `CONTROL_LEDGER`'s rent payment never having
+    // been designed with a merchant-history-aware rule in mind, and this row
+    // says so with an assertion rather than a false "and not on the control".
+    controlKeys: ['spending.new_merchant_high_charge.txn-ctl-rent'],
+  },
+  {
+    ruleId: 'S7',
+    advisorId: 'builtin.spending.fee_hunter',
+    seedCase: 'drift',
+    keys: ['spending.fee_hunter'],
+    summary: 'Avoidable fees came to about $7.00 over the last year, led by ATM fees at $7.00.',
+    severity: 'warning',
+    annualized: '700',
+  },
 ];
 
 describe('each rule on the seed case it was designed for', () => {
   it('covers every rule in the catalogue', () => {
-    expect(GOLDEN.map((row) => row.ruleId).sort()).toEqual(
-      BUILTIN_CATALOGUE.map((entry) => entry.ruleId).sort(),
+    expect(GOLDEN.map((row) => row.advisorId).sort()).toEqual(
+      BUILTIN_CATALOGUE.map((entry) => entry.advisorId).sort(),
     );
   });
 
   for (const golden of GOLDEN) {
-    it(`${golden.ruleId} fires on the ${golden.seedCase} case and not on the control`, async () => {
+    const controlKeys = golden.controlKeys ?? [];
+    const title =
+      controlKeys.length === 0
+        ? `${golden.ruleId} (${golden.advisorId}) fires on the ${golden.seedCase} case and not on the control`
+        : `${golden.ruleId} (${golden.advisorId}) fires on the ${golden.seedCase} case, and on ` +
+          'the control for the reason recorded on the row';
+
+    it(title, async () => {
       const snapshot = await seedSnapshot(golden.seedCase);
-      const output = evaluate(golden.ruleId, snapshot);
+      const output = evaluate(golden.advisorId, snapshot);
 
       expect(output.insights.map((insight) => insight.key)).toEqual(golden.keys);
       const first = output.insights[0];
@@ -479,7 +600,9 @@ describe('each rule on the seed case it was designed for', () => {
       expect(first.requires_review).toBe(true);
 
       const control = await seedSnapshot('control');
-      expect(evaluate(golden.ruleId, control).insights).toEqual([]);
+      expect(evaluate(golden.advisorId, control).insights.map((insight) => insight.key)).toEqual(
+        controlKeys,
+      );
     });
   }
 });

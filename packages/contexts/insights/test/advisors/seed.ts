@@ -12,7 +12,7 @@
  *
  * | Case | What it is | What should fire |
  * | --- | --- | --- |
- * | `drift` | Cash-heavy, three subscriptions, a price rise, a creeping category, a month in the red; **a 66-year-old retiree** whose plan is below target, drawing above the guardrail band, inside the RMD window and claiming before seventy, with one goal off pace | U2, U3, U7, C1, C2, S2, S3, S6, S7, S9, S10; R2, R3, R4, R6, R7 |
+ * | `drift` | Cash-heavy, three subscriptions, a price rise, a creeping category, a month in the red, a $150.00 movie charge miles above four ordinary ones, and a first-time $599.00 software charge; **a 66-year-old retiree** whose plan is below target, drawing above the guardrail band, inside the RMD window and claiming before seventy, with one goal off pace | U2, U3, U7, C1, C2, S1, S2, S3, S5, S6, S7, S9, S10; R2, R3, R4, R6, R7 |
  * | `tight` | One thin current account with two large bills landing inside a fortnight; **a 34-year-old** whose stated plan assumes more saving than is observed | C3, C4, C7; R1 |
  * | `control` | The same person, with none of the problems; a plan on target, contributions derived, every goal on pace | nothing |
  *
@@ -278,6 +278,71 @@ const DRIFT_TRANSACTIONS: readonly InsightsTransaction[] = [
     categorySlug: null,
     amount: usd(-2_500),
   })),
+  // WP 5.7, S1's case: a category needs at least five outflows before
+  // `transactions.anomalies` will found a baseline on it (no existing
+  // category here had five), and one genuine outlier among them. Four
+  // ordinary charges (median 2050, MAD 50) and one at 150.00 — a deviation of
+  // 12950, comfortably over `3 × MAD` (150) and the $25 floor (2500).
+  {
+    id: 'txn-movies-0',
+    date: date('2026-06-15'),
+    merchantId: 'merchant-movies',
+    accountId: 'acct-checking',
+    categorySlug: 'entertainment.movies',
+    amount: usd(-2_000),
+  },
+  {
+    id: 'txn-movies-1',
+    date: date('2026-07-15'),
+    merchantId: 'merchant-movies',
+    accountId: 'acct-checking',
+    categorySlug: 'entertainment.movies',
+    amount: usd(-2_100),
+  },
+  {
+    id: 'txn-movies-2',
+    date: date('2026-08-15'),
+    merchantId: 'merchant-movies',
+    accountId: 'acct-checking',
+    categorySlug: 'entertainment.movies',
+    amount: usd(-1_900),
+  },
+  {
+    id: 'txn-movies-3',
+    date: date('2026-09-01'),
+    merchantId: 'merchant-movies',
+    accountId: 'acct-checking',
+    categorySlug: 'entertainment.movies',
+    amount: usd(-2_050),
+  },
+  {
+    id: 'txn-movies-outlier',
+    date: date('2026-09-15'),
+    merchantId: 'merchant-movies',
+    accountId: 'acct-checking',
+    categorySlug: 'entertainment.movies',
+    amount: usd(-15_000),
+  },
+  // WP 5.7, `fees.summary`'s case: the fee hunter reads raw fee-category rows
+  // (`categorySpend`'s aggregate is `builtin.spending.fees`' own source, a
+  // different scope). Two ATM fees, months apart — the `0-10` amount band is
+  // outside S6's `DUPLICATE_BANDS`, so this pair is not read as a duplicate.
+  {
+    id: 'txn-atm-fee-0',
+    date: date('2026-04-10'),
+    merchantId: 'merchant-atm',
+    accountId: 'acct-checking',
+    categorySlug: 'fees_and_services.atm_fees',
+    amount: usd(-350),
+  },
+  {
+    id: 'txn-atm-fee-1',
+    date: date('2026-07-10'),
+    merchantId: 'merchant-atm',
+    accountId: 'acct-checking',
+    categorySlug: 'fees_and_services.atm_fees',
+    amount: usd(-350),
+  },
 ];
 
 const DRIFT_LEDGER: FakeLedgerData = {
