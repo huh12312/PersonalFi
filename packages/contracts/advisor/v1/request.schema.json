@@ -4,7 +4,7 @@
   "title": "PersonalFi AdvisorRequest v1",
   "description": "What crosses the boundary to an advisor: a minimised, read-only snapshot with one key per granted scope, the digest we stored, and the limits we enforce. One-way — there is no return channel, no token and no handle (08 §4.1).",
   "contractVersion": 1,
-  "artefactVersion": "1.4.0",
+  "artefactVersion": "1.5.0",
   "type": "object",
   "properties": {
     "contract_version": {
@@ -2696,6 +2696,142 @@
       },
       "additionalProperties": false,
       "description": "The minimised, read-only view an advisor receives. One key per granted scope."
+    },
+    "findings": {
+      "minItems": 1,
+      "maxItems": 5,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "^[A-Za-z0-9_.:-]+$"
+          },
+          "period": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_.-]+$"
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["info", "notable", "warning", "urgent"]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "summary_md": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "evidence": {
+            "minItems": 1,
+            "maxItems": 32,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 160
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_ref": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "pattern": "^(snapshot:[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+|\\[\\d{1,4}\\])*|external:https:\\/\\/\\S+)$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["label", "value", "source_ref"],
+              "additionalProperties": false
+            }
+          },
+          "derived": {
+            "maxItems": 32,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^-?\\d+(\\.\\d+)?$"
+            }
+          },
+          "impact": {
+            "type": "object",
+            "properties": {
+              "annualized": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "one_time": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "basis": {
+                "type": "string",
+                "maxLength": 240
+              }
+            },
+            "required": ["annualized", "one_time", "basis"],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "key",
+          "period",
+          "type",
+          "severity",
+          "title",
+          "summary_md",
+          "evidence",
+          "derived",
+          "impact"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [

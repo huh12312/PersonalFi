@@ -4,7 +4,7 @@
   "title": "PersonalFi Advisor contract",
   "description": "The index of the Advisor contract bundle (08 §4). Built-in rules, a local model (Phase 5) and the Vibe-Trading sidecar (Phase 6) all deliver through it, which is why it is versioned independently of the HTTP API. The normative documents are the three files under v1/; this file names them and states the wire version. An advisor pins a major and must reject anything it does not understand. The invariant the bundle exists to carry: an advisor receives a minimised, read-only snapshot over a one-way channel and returns proposals — it has no database handle, no token, no write port, and no value it can return that causes an action.",
   "contractVersion": 1,
-  "artefactVersion": "1.4.0",
+  "artefactVersion": "1.5.0",
   "supportedContractVersions": [1],
   "documents": {
     "request": { "$ref": "https://personalfi.local/contracts/advisor/v1/request.schema.json" },
@@ -19,7 +19,8 @@
     "confidence is required; confidence_basis 'deterministic' is reserved for builtin advisors and is checked, not trusted.",
     "the snapshot carries only granted scopes, minimised per the scope catalogue: tokenised merchants, bucketed amounts where the scope says so, no PII, no raw descriptors, no credentials.",
     "transactions.raw is never emitted to an external advisor, whatever the grant table says.",
-    "transactions.anomalies is never emitted to an external advisor, whatever the grant table says, and never carries an unflagged row."
+    "transactions.anomalies is never emitted to an external advisor, whatever the grant table says, and never carries an unflagged row.",
+    "findings (1.5.0) is present only for a narrates_only advisor, whose snapshot is then empty: a finding enters only if the scopes its source run emitted are a subset of the narrator's effective grant; a narration carries its finding's key, type and period, cites only that finding's evidence refs, sits at or below its severity, and every numeral it writes is one its finding rendered, verbatim."
   ],
   "type": "object",
   "properties": {

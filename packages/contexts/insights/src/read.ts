@@ -42,7 +42,7 @@
  * run. Two checks, two moments, one predicate (`policy/cooldown.ts`).
  */
 import { Money } from '@core/kernel';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { InsightsExecutor } from './db.ts';
 import { type RankableInsight } from './policy/alert-budget.ts';
 import { isSuppressed } from './policy/cooldown.ts';
@@ -165,7 +165,11 @@ export async function listInsights(
   input: FeedInput,
 ): Promise<readonly InsightView[]> {
   const statuses = input.statuses ?? (['pending_review'] as const);
-  const conditions = [eq(insights.userId, input.userId)];
+  // WP 5.3: a narration (`narrates_insight_id` set) is wording for a finding,
+  // not a finding. It never takes a feed, dashboard or Brief slot of its own —
+  // every reader that ranks or budgets reads through here, so it is excluded
+  // here, once, whatever statuses or advisors the caller asked for.
+  const conditions = [eq(insights.userId, input.userId), isNull(insights.narratesInsightId)];
   if (statuses.length > 0) conditions.push(inArray(insights.status, [...statuses]));
   if (input.advisorIds !== undefined) {
     if (input.advisorIds.length === 0) return [];

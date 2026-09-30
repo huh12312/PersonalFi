@@ -86,16 +86,9 @@ describe('contract parity', () => {
    * appended after `plan.projection`, so every position a 1.3.0 reader relied
    * on is where it was.
    */
-  it('the published schemas match the source at 1.4.0', () => {
-    expect(ADVISOR_ARTEFACT_VERSION).toBe('1.4.0');
-    for (const document of advisorSchemaDocuments()) {
-      const onDisk = JSON.parse(readContract('v1', document.file)) as Record<string, unknown>;
-      expect(onDisk['artefactVersion'], document.file).toBe('1.4.0');
-      expect(serialiseSchema(document.document), document.file).toBe(serialiseSchema(onDisk));
-    }
-    const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
-    expect(index['artefactVersion']).toBe('1.4.0');
-
+  it('the published schemas match the source at 1.4.0 (historical)', () => {
+    // Superseded by 1.5.0 below; kept as the record of what 1.4.0 added,
+    // checked against fields that are still present and unmoved.
     // The additions 1.4.0 is for, present in the published request schema:
     // the two scopes in the wire enum and their blocks.
     const request = readContract('v1', 'request.schema.json');
@@ -110,6 +103,53 @@ describe('contract parity', () => {
     // the order they were appended, so every position a 1.3.0 reader relied
     // on is where it was.
     expect(ADVISOR_SCOPES[ADVISOR_SCOPES.length - 2]).toBe('transactions.anomalies');
+    expect(ADVISOR_SCOPES[ADVISOR_SCOPES.length - 1]).toBe('fees.summary');
+  });
+
+  /**
+   * WP 5.3's bump. `AdvisorRequest.findings` — the narration envelope a
+   * `narrates_only` advisor is handed — is an **envelope field, not a scope**,
+   * so 1.5.0 ships alone: no migration widens `snapshot_grants_scope_check`,
+   * and the scope enum is exactly 1.4.0's (the second half below). Strictly
+   * additive: `findings` is optional, so every 1.4.0 request is a 1.5.0
+   * request.
+   */
+  it('the published schemas match the source at 1.5.0', () => {
+    expect(ADVISOR_ARTEFACT_VERSION).toBe('1.5.0');
+    for (const document of advisorSchemaDocuments()) {
+      const onDisk = JSON.parse(readContract('v1', document.file)) as Record<string, unknown>;
+      expect(onDisk['artefactVersion'], document.file).toBe('1.5.0');
+      expect(serialiseSchema(document.document), document.file).toBe(serialiseSchema(onDisk));
+    }
+    const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
+    expect(index['artefactVersion']).toBe('1.5.0');
+
+    // The envelope, as a sidecar author would read it off the published file:
+    // optional (not in `required`), at most five, each finding a strict object
+    // carrying what a narration must match.
+    const request = JSON.parse(readContract('v1', 'request.schema.json')) as {
+      properties: Record<string, Record<string, unknown>>;
+      required: readonly string[];
+    };
+    const findings = request.properties['findings'] as {
+      type: string;
+      minItems: number;
+      maxItems: number;
+      items: { required: readonly string[]; additionalProperties: boolean };
+    };
+    expect(findings.type).toBe('array');
+    expect(findings.minItems).toBe(1);
+    expect(findings.maxItems).toBe(5);
+    expect(request.required).not.toContain('findings');
+    expect(findings.items.additionalProperties).toBe(false);
+    for (const field of ['key', 'period', 'type', 'severity', 'evidence', 'derived', 'impact']) {
+      expect(findings.items.required, field).toContain(field);
+    }
+
+    // An envelope field, not a scope: the wire enum is 1.4.0's, unchanged,
+    // which is why there is no 0029-style migration beside this bump
+    // (`apps/api/test/phase3-registration.test.ts` tracks scopes only).
+    expect(ADVISOR_SCOPES).toHaveLength(18);
     expect(ADVISOR_SCOPES[ADVISOR_SCOPES.length - 1]).toBe('fees.summary');
   });
 

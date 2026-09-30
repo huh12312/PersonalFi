@@ -618,3 +618,46 @@ export {
 } from './brief/job.ts';
 
 export { BriefPublished } from './events.ts';
+
+// WP 5.3 — The narrator: grounded narration only (advisor contract 1.5.0,
+// migration 0031). Appended as its own labelled block: this file is shared
+// with WP 5.6 this wave, and each package appends rather than edits another's
+// lines. `createNarratorAdvisor` is what the composition root registers (W-C,
+// feature-detected on LOCAL_MODEL_ENDPOINT and LOCAL_MODEL_DIGEST), bound to
+// WP 5.2's adapter; `narrationsFor` is the card's read for WP 5.10/5.11.
+// `NARRATOR_ADVISOR_ID` is exported above by WP 5.6's block (`brief/job.ts`,
+// the same `'local.narrator'`); `advisors/local/manifest.ts` holds this
+// package's, and the two are one string until the orchestrator folds them.
+export { NARRATOR_MANIFEST, NARRATOR_SCOPES, NARRATOR_VERSION } from './advisors/local/manifest.ts';
+export {
+  createNarratorAdvisor,
+  type NarratorModelPort,
+  type NarratorOptions,
+} from './advisors/local/narrator.ts';
+export { narrationsFor, type NarrationView } from './advisors/local/link.ts';
+export { NARRATOR_REPLY_FORMAT } from './advisors/local/format.ts';
+export {
+  assembleFindings,
+  launderFindings,
+  redactDigitRuns,
+  redactFreeText,
+  type AssembledFindings,
+  type LaunderingVerdict,
+} from './advisors/local/findings.ts';
+export {
+  MAX_NARRATED_FINDINGS,
+  NarratedFindingSchema,
+  type NarratedFinding,
+} from './contract/request.ts';
+export {
+  evalRequest,
+  findingsFromSnapshot,
+  judgeReply,
+  planRequests,
+  runNarratorEval,
+  summarise,
+  type EvalCase,
+  type EvalReport,
+  type EvalRequestSpec,
+  type NarrationVerdict,
+} from './advisors/local/eval.ts';

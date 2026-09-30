@@ -104,6 +104,15 @@ export const insights = pgTable(
     derivations: jsonb('derivations').$type<readonly Record<string, unknown>[]>().notNull(),
     caveats: jsonb('caveats').$type<readonly string[]>().notNull(),
 
+    /**
+     * WP 5.3, migration `0031_insight_narrations.sql`. `null` for a finding;
+     * set on a narration — alternative wording of the finding it names (same
+     * user, composite FK, cascades with its finding). A narration is never
+     * ranked, never shown on its own and emits no `InsightProposed`:
+     * `read.ts`'s `listInsights` reads only rows where this is `null`.
+     */
+    narratesInsightId: uuid('narrates_insight_id'),
+
     /** What this insight stood on when it was last proposed. */
     inputDigest: text('input_digest').notNull(),
     firstProposedAt: instantColumn('first_proposed_at').notNull(),
@@ -117,6 +126,9 @@ export const insights = pgTable(
     uniqueIndex('insights_identity_idx').on(table.userId, table.advisorId, table.key, table.period),
     index('insights_feed_idx').on(table.userId, table.status, table.severity, table.lastProposedAt),
     index('insights_advisor_idx').on(table.userId, table.advisorId),
+    // 0031: the composite FK's target, and the card's narration lookup.
+    uniqueIndex('insights_narration_target_idx').on(table.userId, table.id),
+    index('insights_narrates_idx').on(table.userId, table.narratesInsightId),
   ],
 );
 

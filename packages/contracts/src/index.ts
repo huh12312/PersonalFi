@@ -41,7 +41,10 @@ export const OPENAPI_CONTRACT_VERSION = '0.1.0';
 // 1.4.0 (WP 5.7): the `transactions.anomalies` and `fees.summary` scopes,
 // strictly additive; migration 0029 widens `snapshot_grants_scope_check` to
 // match, in the same commit — 05-phase-5-dispatch.md §4's non-negotiable rule.
-export const ADVISOR_CONTRACT_VERSION = '1.4.0';
+// 1.5.0 (WP 5.3): the optional `AdvisorRequest.findings` narration envelope,
+// present only for `narrates_only` advisors; strictly additive, and an envelope
+// field rather than a scope, so no `snapshot_grants` migration accompanies it.
+export const ADVISOR_CONTRACT_VERSION = '1.5.0';
 
 /**
  * The integer that crosses the wire, as distinct from the artefact version

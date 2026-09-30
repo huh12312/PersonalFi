@@ -124,6 +124,9 @@ import {
   type FeedbackInput,
 } from './store.ts';
 import { validateResponse, type InsightRejection } from './validate/pipeline.ts';
+// WP 5.3 — the narrator's findings envelope and its link-not-rank write.
+import { linkNarration } from './advisors/local/link.ts';
+import { buildNarrationRequest, type NarrationRequest } from './advisors/local/request.ts';
 
 /** Deployment-level settings a run needs. Supplied by the composition root. */
 export interface InsightsSettings {
@@ -214,6 +217,12 @@ export interface RunAdvisorInput {
    * scope is never emitted.
    */
   readonly perRunConsent?: readonly AdvisorScope[];
+  /**
+   * WP 5.3. For a `narrates_only` advisor: the built-in insights to narrate —
+   * the Brief's items, which WP 5.6 / W-C enqueue. Absent ⇒ the feed's own top
+   * findings. Ignored for every other advisor.
+   */
+  readonly narrateInsightIds?: readonly string[];
 }
 
 export interface RunAdvisorResult {
@@ -440,9 +449,32 @@ export async function runAdvisor(
   let built: BuiltSnapshot | null = null;
 
   try {
-    const prepared = await buildAdvisorRequest(dependencies, context, registered, opened.scopes);
+    // WP 5.3: a narrator is sent the findings envelope (laundered against its
+    // effective grant) and an empty snapshot; everything else is sent its
+    // granted snapshot. `narration` is non-null exactly for a narrator run.
+    const narration: NarrationRequest | null = manifest.capabilities.narrates_only
+      ? await buildNarrationRequest(
+          database,
+          dependencies,
+          context,
+          registered,
+          opened.scopes,
+          input.narrateInsightIds,
+        )
+      : null;
+    const prepared =
+      narration ?? (await buildAdvisorRequest(dependencies, context, registered, opened.scopes));
     built = prepared.built;
     const { request } = prepared;
+    if (narration !== null && narration.findingCount === 0) {
+      // Nothing the narrator may see: no prompt, no model call, no payload.
+      return await closeNothingToNarrate(database, context, {
+        runId: opened.runId,
+        advisorId: manifest.advisor_id,
+        durationMs: clock.now().getTime() - startedAt,
+        built: prepared.built,
+      });
+    }
 
     // What a local model or an external advisor is sent is retained for the
     // run inspector (30 days), and a local model's prompt hash and pinned
@@ -494,7 +526,18 @@ export async function runAdvisor(
       await watch.stop();
     }
 
-    const outcome = validateResponse({ request, manifest, limits, body });
+    const outcome = validateResponse({
+      request,
+      manifest,
+      limits,
+      body,
+      // Never supplied before WP 5.3, so every narration was refused at step
+      // 4 and the narration path had never run once (05 §2). The coarse half
+      // of "restate, never introduce"; the 1:1 match is the fine half.
+      ...(narration === null
+        ? {}
+        : { knownFindingTypes: new Set(request.findings?.map((finding) => finding.type) ?? []) }),
+    });
     if (!outcome.ok) {
       // An envelope-level rejection is a failed run, not a run that proposed
       // nothing: there is no partial result to keep and the breaker should
@@ -558,6 +601,18 @@ export async function runAdvisor(
           runId: opened.runId,
           inputDigest: snapshot.inputDigest,
         });
+        if (narration !== null) {
+          // Linked, never ranked (0031): the narration becomes wording on its
+          // finding's card, in this transaction, and emits no InsightProposed
+          // — a narration is not a finding. A finding gone since assembly
+          // takes its narration with it.
+          const findingId = narration.insightIdByKey.get(validated.insight.key);
+          const linked =
+            findingId !== undefined &&
+            (await linkNarration(tx, context.userId, result.insightId, findingId));
+          if (linked) written += 1;
+          continue;
+        }
         written += 1;
         if (!result.inserted) continue;
         inserted += 1;
@@ -755,6 +810,67 @@ async function closeCancelled(
     inputDigest: input.built?.inputDigest ?? null,
     emittedScopes: input.built?.emittedScopes ?? [],
   };
+}
+
+/**
+ * WP 5.3: a narrator run whose envelope came out empty — nothing pending, or
+ * nothing its grant launders. Completed with zero proposals: nothing was sent,
+ * nothing was retained, no model was called, and the breaker is not touched.
+ */
+async function closeNothingToNarrate(
+  database: InsightsDatabase,
+  context: InsightsContext,
+  input: {
+    readonly runId: string;
+    readonly advisorId: string;
+    readonly durationMs: number;
+    readonly built: BuiltSnapshot;
+  },
+): Promise<RunAdvisorResult> {
+  return database.transaction(async (tx) => {
+    await finishRun(tx, context, {
+      runId: input.runId,
+      status: 'completed',
+      inputDigest: input.built.inputDigest,
+      grantedScopes: input.built.grantedScopes,
+      emittedScopes: [],
+      proposedCount: 0,
+      acceptedCount: 0,
+      rejectedCount: 0,
+      rejections: [],
+      durationMs: input.durationMs,
+    });
+    await appendEvent(
+      platformOf(tx),
+      AdvisorRunCompleted.create(
+        {
+          runId: input.runId,
+          advisorId: input.advisorId,
+          inputDigest: input.built.inputDigest,
+          proposed: 0,
+          accepted: 0,
+          rejected: 0,
+          emittedScopes: [],
+          durationMs: input.durationMs,
+        },
+        {
+          userId: context.userId,
+          aggregateId: input.runId,
+          correlationId: context.correlationId,
+          causationId: context.causationId ?? null,
+        },
+        context.clock,
+      ),
+    );
+    return {
+      ...EMPTY_RESULT,
+      runId: input.runId,
+      advisorId: input.advisorId,
+      status: 'completed' as const,
+      refusal: null,
+      inputDigest: input.built.inputDigest,
+    };
+  });
 }
 
 interface FailRunInput {

@@ -185,11 +185,43 @@ describe('pending review', () => {
       expect(introduced.rejected[0]?.reason).toBe('narrator_introduced_finding');
     }
 
+    // WP 5.3 made "restate" mean something checkable: a known type is the
+    // coarse half, and the fine half is 1:1 — the request's `findings`
+    // envelope (contract 1.5.0) carries the finding, and the narration names
+    // it by key, type and period, cites only its refs, and carries no action,
+    // derivation or impact of its own (`test/narrator.test.ts` holds each).
+    // Before 5.3 this case passed on `knownFindingTypes` alone, with the
+    // built-in's actions and derivation attached — the gap 5.3 closes.
+    const finding = {
+      key: 'subscription.annual_cost.MERCHANT_a7f31c9d0e42',
+      period: '2026-09',
+      type: 'subscription.annual_cost',
+      severity: 'notable' as const,
+      title: 'A monthly subscription adds up',
+      summary_md: 'At $18.99 a month, this subscription costs $227.88 a year.',
+      evidence: [
+        {
+          label: 'Monthly charge',
+          value: '$18.99',
+          source_ref: 'snapshot:recurring_list.streams[0].typical_amount',
+        },
+      ],
+      derived: ['22788'],
+      impact: { annualized: '$227.88', one_time: null, basis: 'The monthly charge, annualised.' },
+    };
+    const narration = baseInsight({
+      confidence_basis: 'model',
+      confidence: 0.6,
+      summary_md: 'This subscription is $18.99 a month, or $227.88 over a year.',
+      impact: { annualized: null, one_time: null, basis: '', derivation_id: null },
+      derivations: [],
+      proposed_actions: [],
+    });
     const restated = validateResponse({
-      request: bundle.request,
+      request: { ...bundle.request, findings: [finding] },
       manifest: bundle.manifest,
       limits: LIMITS,
-      body: bundle.response,
+      body: { ...bundle.response, insights: [narration] },
       knownFindingTypes: new Set(['subscription.annual_cost']),
     });
     expect(restated.ok).toBe(true);

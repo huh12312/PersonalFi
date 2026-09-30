@@ -34,6 +34,7 @@
  * would otherwise resolve to something, and "something" is what a check like
  * this must never return.
  */
+import type { NarratedFinding } from '../contract/request.ts';
 import type { AdvisorSnapshot } from '../contract/snapshot.ts';
 
 export type RefResolution =
@@ -186,4 +187,84 @@ export function evidenceValueAgrees(claimed: string | null, resolved: unknown): 
   const right = normalise(displayValue(resolved));
   if (left.length === 0 || right.length === 0) return left === right;
   return left.includes(right) || right.includes(left);
+}
+
+// ---------------------------------------------------------------------------
+// The `finding:` namespace (contract 1.5.0, WP 5.3)
+// ---------------------------------------------------------------------------
+//
+// A `narrates_only` advisor's citations are resolved **through the finding it
+// narrates**, never through a snapshot. `finding:<key>` names one entry of the
+// request's `findings` envelope; a narration's `snapshot:` ref is then valid
+// only if that finding cited exactly the same ref, and it resolves to what the
+// finding said was there. Two consequences are the point:
+//
+//   * a narration cannot cite anything its finding did not — a real snapshot
+//     path the finding never used is refused even though it resolves, which is
+//     "cite a subset of the finding's own evidence refs" made mechanical;
+//   * the narrator's own snapshot (empty in production) is never consulted, so
+//     nothing about a narration's validity depends on what else was sent.
+//
+// The prefix is a resolution namespace rather than a string a narration
+// writes: `SourceRefSchema` accepts `snapshot:` and `external:` only, and the
+// narration names its finding by `key`, which the 1:1 check pins.
+
+export const FINDING_REF_PREFIX = 'finding:';
+
+/** `finding:<key>` — the handle a narration's key resolves through. */
+export function findingRef(key: string): string {
+  return `${FINDING_REF_PREFIX}${key}`;
+}
+
+/** The envelope entry `finding:<key>` names, or `null`. Exact key match; no prefix games. */
+export function resolveFindingRef(
+  findings: readonly NarratedFinding[] | undefined,
+  ref: string,
+): NarratedFinding | null {
+  if (findings === undefined || !ref.startsWith(FINDING_REF_PREFIX)) return null;
+  const key = ref.slice(FINDING_REF_PREFIX.length);
+  for (const finding of findings) {
+    if (finding.key === key) return finding;
+  }
+  return null;
+}
+
+/**
+ * The finding a narration narrates — **1:1**: the same key, the same type and
+ * the same period, or none. A narration whose key names no finding, or names
+ * one under a different type or period, narrates nothing the built-ins made.
+ */
+export function narratedFindingFor(
+  narration: { readonly key: string; readonly type: string; readonly period: string },
+  findings: readonly NarratedFinding[] | undefined,
+): NarratedFinding | null {
+  const finding = resolveFindingRef(findings, findingRef(narration.key));
+  if (finding === null) return null;
+  if (finding.type !== narration.type || finding.period !== narration.period) return null;
+  return finding;
+}
+
+export type NarratedRefResolution =
+  | { readonly ok: true; readonly value: string | null }
+  | { readonly ok: false; readonly reason: 'not_in_finding' };
+
+/** Resolve a narration's `snapshot:` ref through its finding's own evidence rows. */
+export function resolveNarratedRef(finding: NarratedFinding, ref: string): NarratedRefResolution {
+  for (const row of finding.evidence) {
+    if (row.source_ref === ref) return { ok: true, value: row.value };
+  }
+  return { ok: false, reason: 'not_in_finding' };
+}
+
+/**
+ * A narration's evidence `value` against its finding's. **Equality after
+ * formatting**, not `evidenceValueAgrees`' containment: containment would let
+ * `$5` stand for `$5,400.00`, and a narrator is quoting, not summarising. A
+ * `null` claim is always fine (the row is a citation without a restatement);
+ * a claim where the finding stated nothing is not — there is nothing to quote.
+ */
+export function narratedValueAgrees(claimed: string | null, stated: string | null): boolean {
+  if (claimed === null) return true;
+  if (stated === null) return false;
+  return normalise(claimed) === normalise(stated);
 }

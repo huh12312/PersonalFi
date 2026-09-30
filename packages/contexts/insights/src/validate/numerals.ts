@@ -44,6 +44,7 @@
  * tolerance would let a fabricated number pass by being close to a real one,
  * which is the failure mode of every plausible-sounding hallucination.
  */
+import type { NarratedFinding } from '../contract/request.ts';
 import type { AdvisorSnapshot } from '../contract/snapshot.ts';
 import * as decimal from './decimal.ts';
 
@@ -226,4 +227,97 @@ export function traceContext(input: TraceInput): TraceContext {
 export function untraceableNumerals(text: string, context: TraceContext): readonly Numeral[] {
   const masked = maskLiterals(stripUrls(text), context.literals);
   return extractNumerals(masked).filter((numeral) => !isTraceable(numeral, context.candidates));
+}
+
+// ---------------------------------------------------------------------------
+// The narrow trace (WP 5.3): a narrator's figures are its finding's, verbatim
+// ---------------------------------------------------------------------------
+//
+// Everything above is the right check for an advisor that computes, and the
+// wrong one for an advisor that narrates. 05 §1 states the failure: a
+// language model that writes "you could save $1,899 a year", where 1899 is
+// some other row's minor units, passes a snapshot-wide trace — and under the
+// six renderings almost any small integer it invents does too, because a
+// snapshot of a few hundred values times six renderings covers most of them.
+// The Phase 2 ceiling finding was the same shape (wp2.7: a poisoned figure
+// passed all seven steps *because it was faithfully traceable*).
+//
+// For a `narrates_only` advisor, therefore, the candidates are **the figures
+// its narrated finding rendered**, and a numeral matches only if it is one of
+// them **as written** — same digits, same number of decimals, same percent
+// sign. No `×100`, no `÷100`, no absolute value, no derivation of the
+// narrator's own (step 4 refuses those). The texts the figures are harvested
+// from are all the finding's own, all already validated when the built-in
+// proposed it: its evidence labels and values, its title, summary and impact
+// basis, its impact display strings, and its re-computed derivation values.
+// A narrator may quote its finding. It may not round it, rescale it, or import
+// a figure from anywhere else — including from the snapshot it was sent.
+
+/** Tokens a finding quotes whole: dates, months and `MERCHANT_…`-style pseudonyms. */
+const DATE_TOKEN = /\b\d{4}-\d{2}(?:-\d{2})?\b/g;
+const PSEUDONYM_TOKEN = /\b[A-Z]{2,}_[0-9A-Za-z]{6,}\b/g;
+
+export interface FindingTraceContext {
+  /** `normalized` + `%` when a percentage: the exact forms the finding wrote. */
+  readonly figures: ReadonlySet<string>;
+  /** Masked whole before extraction, longest first — the `maskLiterals` vocabulary. */
+  readonly literals: readonly string[];
+}
+
+function figureId(numeral: Numeral): string {
+  return numeral.isPercent ? `${numeral.normalized}%` : numeral.normalized;
+}
+
+/** Every text of the finding a figure can be quoted from. Exported for the evidence count. */
+export function findingFigureTexts(finding: NarratedFinding): readonly string[] {
+  return [
+    finding.title,
+    finding.summary_md,
+    finding.impact.basis,
+    ...(finding.impact.annualized === null ? [] : [finding.impact.annualized]),
+    ...(finding.impact.one_time === null ? [] : [finding.impact.one_time]),
+    ...finding.evidence.flatMap((row) =>
+      row.value === null ? [row.label] : [row.label, row.value],
+    ),
+    ...finding.derived,
+  ];
+}
+
+/**
+ * Build the narrow context for one narrated finding.
+ *
+ * Dates, months and pseudonyms are masked whole in the finding's own texts
+ * **before** its figures are harvested, exactly as they are in the narration:
+ * `2026-06-01` is a date the finding quoted, not three figures `2026`, `-06`
+ * and `-01` a narrator may scatter. A narration may repeat the date; it may
+ * not lift its year out as a number.
+ */
+export function findingTraceContext(finding: NarratedFinding): FindingTraceContext {
+  const texts = findingFigureTexts(finding);
+  const tokens = new Set<string>([finding.key, finding.period]);
+  for (const text of [finding.key, ...texts]) {
+    for (const match of text.matchAll(DATE_TOKEN)) tokens.add(match[0]);
+    for (const match of text.matchAll(PSEUDONYM_TOKEN)) tokens.add(match[0]);
+  }
+  const tokenList = [...tokens].sort((left, right) => right.length - left.length);
+  const figures = new Set<string>();
+  for (const text of texts) {
+    const masked = maskLiterals(stripUrls(text), tokenList);
+    for (const numeral of extractNumerals(masked)) figures.add(figureId(numeral));
+  }
+  const literals = new Set<string>(tokenList);
+  for (const row of finding.evidence) if (row.value !== null) literals.add(row.value);
+  return {
+    figures,
+    literals: [...literals].sort((left, right) => right.length - left.length).slice(0, 512),
+  };
+}
+
+/** The numerals in `text` that are not, verbatim, a figure the finding rendered. */
+export function untraceableInFinding(
+  text: string,
+  context: FindingTraceContext,
+): readonly Numeral[] {
+  const masked = maskLiterals(stripUrls(text), context.literals);
+  return extractNumerals(masked).filter((numeral) => !context.figures.has(figureId(numeral)));
 }

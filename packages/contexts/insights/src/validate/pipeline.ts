@@ -22,6 +22,29 @@
  * | 6 | `derivations` | arithmetic that does not produce the value it claims, a literal outside the allow-list, an `impact.derivation_id` naming a derivation that failed |
  * | 7 | `numerals` | a figure in any rendered field that is in neither the snapshot nor an accepted derivation; Markdown outside the permitted subset |
  *
+ * ## A narrator is held to its finding (WP 5.3)
+ *
+ * For a `narrates_only` advisor three steps change what they measure against,
+ * and each change is narrower, never wider:
+ *
+ *   * **Step 4** resolves the narration to exactly one finding in the request's
+ *     `findings` envelope — the same `key`, `type` and `period`
+ *     (`narratedFindingFor`, 1:1) — and refuses a narration that has none, is
+ *     not `confidence_basis: 'model'`, declares a derivation, proposes an
+ *     action, or sits above its finding's severity. A severity above the
+ *     finding's is **refused**, not clamped: the clamp exists so a real finding
+ *     is not lost for shouting, and a narration is not a finding.
+ *   * **Step 5** resolves every citation *through the finding*: a narration may
+ *     cite only refs its finding cited, and each value must equal what the
+ *     finding said was there. The snapshot is not consulted.
+ *   * **Step 7** traces every numeral against the finding's own rendered
+ *     figures, verbatim (`findingTraceContext`) — not every number in the
+ *     snapshot under six renderings, which is 05 §1's hole.
+ *
+ * There is no retry. A narration refused here is refused; the built-in's text
+ * stands (07 §7.5 rule 1) and the run records the step. Re-asking until the
+ * validator agrees would launder the very rate the ≥95% criterion measures.
+ *
  * Steps 1–3 reject the **response**: there is nothing partial to keep when the
  * envelope is wrong, and half-trusting a payload whose `request_id` does not
  * match is how a stale run lands in this run's queue. Steps 4–7 reject the
@@ -48,7 +71,7 @@
  * product argument without anybody touching the first.
  */
 import type { AdvisorManifest, ResolvedLimits } from '../contract/manifest.ts';
-import type { AdvisorRequest } from '../contract/request.ts';
+import type { AdvisorRequest, NarratedFinding } from '../contract/request.ts';
 import {
   AdvisorResponseSchema,
   severityRank,
@@ -60,10 +83,23 @@ import type { AdvisorSnapshot } from '../contract/snapshot.ts';
 import { SUPPORTED_CONTRACT_MAJORS } from '../contract/version.ts';
 import * as decimal from './decimal.ts';
 import { evaluateDerivation } from './derivations.ts';
-import { displayValue, evidenceValueAgrees, isSnapshotRef, resolveSourceRef } from './evidence.ts';
+import {
+  displayValue,
+  evidenceValueAgrees,
+  isSnapshotRef,
+  narratedFindingFor,
+  narratedValueAgrees,
+  resolveNarratedRef,
+  resolveSourceRef,
+} from './evidence.ts';
 import { checkLink, externalUrlOf } from './links.ts';
 import { markdownViolations, renderableStrings } from './markdown.ts';
-import { traceContext, untraceableNumerals } from './numerals.ts';
+import {
+  findingTraceContext,
+  traceContext,
+  untraceableInFinding,
+  untraceableNumerals,
+} from './numerals.ts';
 
 export const VALIDATION_STEPS = [
   'transport',
@@ -151,11 +187,12 @@ export interface ValidationInput {
   /**
    * Insight `type`s already proposed for this period, by any advisor.
    *
-   * Only `narrates_only` advisors read it, and it is the whole of what
-   * "may restate a finding another advisor made and may not introduce a new
-   * one" can mean operationally: a narrator that emits a `type` nobody else
-   * found is introducing a finding. Empty for every advisor in Phase 2, because
-   * none of them is a narrator; Phase 5's local model is the first.
+   * Only `narrates_only` advisors read it: a narrator that emits a `type`
+   * nobody else found is introducing a finding. `service.ts` supplies it for a
+   * narrator run — the types of the findings in the request's envelope (WP 5.3;
+   * it never did before, so the narration path had never run once). It is the
+   * coarse half of the check; the 1:1 key/type/period match against the
+   * envelope (`narratedFindingFor`) is the fine half, and both must pass.
    */
   readonly knownFindingTypes?: ReadonlySet<string>;
 }
@@ -265,6 +302,8 @@ function checkEnvelope(
 interface CapabilityVerdict {
   readonly severity: Severity;
   readonly clamped: boolean;
+  /** For a `narrates_only` advisor, the one finding this narration narrates. */
+  readonly finding: NarratedFinding | null;
 }
 
 function checkCapability(
@@ -289,10 +328,34 @@ function checkCapability(
   ) {
     return { reason: 'impact_not_claimed', detail: manifest.advisor_id };
   }
+  let finding: NarratedFinding | null = null;
   if (manifest.capabilities.narrates_only) {
     const known = input.knownFindingTypes ?? new Set<string>();
     if (!known.has(insight.type)) {
       return { reason: 'narrator_introduced_finding', detail: insight.type };
+    }
+    // 1:1 — the same key, type and period as one finding we sent, or nothing.
+    finding = narratedFindingFor(insight, input.request.findings);
+    if (finding === null) {
+      return { reason: 'narration_finding_mismatch', detail: `${insight.key}@${insight.period}` };
+    }
+    if (insight.confidence_basis !== 'model') {
+      return { reason: 'narration_basis_not_model', detail: insight.confidence_basis };
+    }
+    if (insight.proposed_actions.length > 0) {
+      return { reason: 'narrator_proposed_action', detail: manifest.advisor_id };
+    }
+    if (insight.derivations.length > 0) {
+      // A narrator computes nothing: every figure it may write is one its
+      // finding already rendered. A derivation of its own would be a new
+      // candidate for step 7 — exactly the door the narrow trace closes.
+      return { reason: 'narrator_declared_derivation', detail: manifest.advisor_id };
+    }
+    if (severityRank(insight.severity) > severityRank(finding.severity)) {
+      return {
+        reason: 'narration_above_finding_severity',
+        detail: `${insight.severity} > ${finding.severity}`,
+      };
     }
   }
 
@@ -302,7 +365,7 @@ function checkCapability(
   // degradation a requirement, and dropping a real finding because it shouted
   // is worse than showing it quietly. The clamp is recorded on the row, so
   // "this advisor keeps trying to shout" stays answerable.
-  return { severity: clamped ? ceiling : insight.severity, clamped };
+  return { severity: clamped ? ceiling : insight.severity, clamped, finding };
 }
 
 // ---------------------------------------------------------------------------
@@ -393,6 +456,54 @@ function resolveEvidence(
   return { ok: true, rows };
 }
 
+/**
+ * Step 5 for a narrator: every citation through its finding (`finding:<key>`),
+ * never through a snapshot. A subset of the finding's own refs, each value
+ * equal to what the finding said, no URL (a narrator has no egress and its
+ * wording links to nothing).
+ */
+function resolveNarratedEvidence(
+  insight: Insight,
+  finding: NarratedFinding,
+):
+  | { readonly ok: true; readonly rows: readonly ResolvedEvidenceRow[] }
+  | { readonly ok: false; readonly reason: string; readonly detail: string } {
+  const rows: ResolvedEvidenceRow[] = [];
+  for (const [position, row] of insight.evidence.entries()) {
+    const where = `evidence[${String(position)}]`;
+    if (row.source_ref === null) {
+      return { ok: false, reason: 'evidence_without_ref', detail: where };
+    }
+    if (row.url !== null) {
+      return { ok: false, reason: 'narration_carries_url', detail: where };
+    }
+    const resolution = resolveNarratedRef(finding, row.source_ref);
+    if (!resolution.ok) {
+      return {
+        ok: false,
+        reason: 'narration_ref_not_in_finding',
+        detail: `${where} ${row.source_ref}`,
+      };
+    }
+    if (!narratedValueAgrees(row.value, resolution.value)) {
+      return {
+        ok: false,
+        reason: 'narration_value_disagrees',
+        detail: `${where} claimed ${row.value ?? 'null'}`,
+      };
+    }
+    rows.push({
+      kind: row.kind,
+      label: row.label,
+      value: row.value,
+      sourceRef: row.source_ref,
+      href: null,
+      resolvedDisplay: resolution.value,
+    });
+  }
+  return { ok: true, rows };
+}
+
 // ---------------------------------------------------------------------------
 // Step 6: derivations
 // ---------------------------------------------------------------------------
@@ -437,6 +548,7 @@ function checkNumerals(
   insight: Insight,
   snapshot: AdvisorSnapshot,
   derived: ReadonlyMap<string, decimal.Decimal>,
+  finding: NarratedFinding | null,
 ): { readonly reason: string; readonly detail: string } | null {
   const fields = {
     title: insight.title,
@@ -463,6 +575,19 @@ function checkNumerals(
   const impactStrings = [insight.impact.annualized, insight.impact.one_time].flatMap((money) =>
     money === null ? [] : [money.minor],
   );
+
+  if (finding !== null) {
+    // The narrow trace. A narrator's candidates are its finding's rendered
+    // figures, verbatim — never the snapshot, whatever the request carried.
+    const narrow = findingTraceContext(finding);
+    for (const text of [...renderableStrings(fields), ...impactStrings]) {
+      const first = untraceableInFinding(text, narrow)[0];
+      if (first !== undefined) {
+        return { reason: 'numeral_not_in_finding', detail: `${first.raw} in ${text.slice(0, 80)}` };
+      }
+    }
+    return null;
+  }
 
   const context = traceContext({ snapshot, derived: [...derived.values()] });
   for (const text of [...renderableStrings(fields), ...impactStrings]) {
@@ -517,8 +642,11 @@ export function validateResponse(input: ValidationInput): ValidationOutcome {
       continue;
     }
 
-    // Step 5 — evidence.
-    const evidence = resolveEvidence(insight, snapshot, input.manifest);
+    // Step 5 — evidence. A narrator's citations resolve through its finding.
+    const evidence =
+      capability.finding === null
+        ? resolveEvidence(insight, snapshot, input.manifest)
+        : resolveNarratedEvidence(insight, capability.finding);
     if (!evidence.ok) {
       rejected.push({
         step: 'evidence',
@@ -544,7 +672,7 @@ export function validateResponse(input: ValidationInput): ValidationOutcome {
     }
 
     // Step 7 — numerals.
-    const numerals = checkNumerals(insight, snapshot, derivations.derived);
+    const numerals = checkNumerals(insight, snapshot, derivations.derived, capability.finding);
     if (numerals !== null) {
       rejected.push({ step: 'numerals', index, key: insight.key, ...numerals });
       continue;
