@@ -124,7 +124,19 @@ FROM ${NODE_IMAGE} AS runtime
 RUN apk add --no-cache tini age=1.3.1-r6 && \
     apk upgrade --no-cache libssl3 libcrypto3 && \
     addgroup -g 10001 -S app && \
-    adduser -u 10001 -S -G app -H -D -s /sbin/nologin app
+    adduser -u 10001 -S -G app -H -D -s /sbin/nologin app && \
+    # The runtime never runs npm: the entrypoint is `node`, every dependency
+    # arrived through pnpm in the deploy stage, and nothing installs at
+    # start. The npm the base image bundles is therefore an unused tool with
+    # its own dependency tree — and that tree is where CI's trivy image scan
+    # found `brace-expansion` CVE-2026-102276 and `undici` CVE-2026-19534
+    # (2026-09-30) *after* the workspace lockfile had been bumped clean:
+    # `/usr/local/lib/node_modules/npm/node_modules/...`, not ours to pin.
+    # Removed rather than snoozed: a package that is not in the image cannot
+    # be exploited in it, and the next base-image bump (Renovate, 06 §5.6)
+    # brings a fresh npm to be removed again by this same line.
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+           /opt/yarn-v* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
 # C-1 (G4-1). `returns_cache` is an *empty* named volume on a cold `compose up`
 # (compose.yml mounts it on both `api` and `worker`): Docker seeds a fresh
