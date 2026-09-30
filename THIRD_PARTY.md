@@ -5,7 +5,7 @@
 # Third-Party Notices
 
 PersonalFi is MIT-licensed. This file lists the runtime (production) dependency tree —
-`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:bff8e1abb55a7718.
+`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:40e815fd17968a09.
 devDependencies (build tooling, test frameworks) are not distributed and are not listed
 here; see `licenses.policy.yaml` for the policy that governs both.
 
@@ -331,7 +331,7 @@ pulls (`local-llm-pull`), not something this repository redistributes; the refer
 
 ## MIT-0
 
-- `nodemailer`@10.0.2 — https://nodemailer.com/
+- `nodemailer`@10.0.6 — https://nodemailer.com/
 
 ## Python-2.0
 
