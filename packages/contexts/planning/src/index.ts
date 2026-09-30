@@ -59,6 +59,7 @@ export {
   compareDecimal,
   currentRegistry,
   diffOverrides,
+  guardrailReferenceRate,
   isAssumptionsRefusal,
   loadAssumptions,
   loadOverrides,
@@ -327,6 +328,21 @@ export { trailingWindow, type OneOffThresholds, type TrailingWindow } from './wi
 // --- WP 4.4: the deterministic projection engine (pure; the number boundary
 // lives in engine/boundary.ts and nowhere else) --------------------------------
 export * from './engine/index.ts';
+// WP 5.5: the earliest-retirement solver. `solveRetirementImpact` is the Money-facing entry
+// point WP 5.6's `RetirementImpactPort` binds (W-C); `earliestRetirementAge` is the engine-unit
+// one the dispatch names.
+export {
+  LATEST_SEARCHED_RETIREMENT_AGE,
+  MONTHS_OF_SPENDING_DERIVATION,
+  earliestRetirementAge,
+  solveRetirementImpact,
+  type MonthsOfSpending,
+  type RetirementAction,
+  type RetirementAgeAnswer,
+  type RetirementImpact,
+  type RetirementImpactAction,
+  type RetirementImpactRun,
+} from './engine/retirement-date.ts';
 
 // --- WP 4.6: projection service, scenarios, life events, store (0022) -------
 // `planning.projection_refresh` (04:30), `planning.goal_pace@v1`, the

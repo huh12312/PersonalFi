@@ -40,6 +40,21 @@
  *     portfolio keeps running on income alone and the unfunded spending is
  *     accumulated as `shortfallTotal`, so the result reports magnitude, not a
  *     boolean.
+ *   * **Dated one-off flows** (WP 5.5, on WP 4.5's design — wp4.5 §10 item
+ *     10): a signed `oneOffByYear`, built once by `preparePlan` from the
+ *     plan's `oneOffs` (which `boundary.ts#toEnginePlan` converts from Money,
+ *     the one crossing), read once per year. **Before retirement** an inflow
+ *     joins `TAXABLE`'s contribution under the mid-year convention (exactly as
+ *     income does); an outflow is drawn at mid-year through the withdrawal
+ *     order, `TAXABLE` first, a `TAX_DEFERRED` draw grossed up by the blended
+ *     rate. **In retirement** the flow is added to the year's need *outside*
+ *     the spending policy — the guardrails never see a house purchase as
+ *     spending, and never cut or raise around it. An outflow the buckets
+ *     cannot fund is a **shortfall** like any other unfunded dollar, and dates
+ *     depletion: WP 4.5 left that undecided, and a plan that cannot pay for
+ *     the house it has planned does not sustain. A plan with no one-offs reads
+ *     zeros and computes byte-identically to one without the field — the
+ *     reference cases, golden drift and the golden vector are the proof.
  *
  * Interior module: `number` only, no money type. Money enters and leaves in
  * `boundary.ts`, and nowhere else.
@@ -66,7 +81,18 @@ import {
   type SocialSecurityRules,
 } from './social-security.ts';
 
-/** Recorded on every run (WP 4.6's `projection_runs.engine_version`). Bump on any change to the recursion. */
+/**
+ * Recorded on every run (WP 4.6's `projection_runs.engine_version`). Bump on any change that moves
+ * an output for an input the engine already accepted.
+ *
+ * WP 5.5 added an *input* (`oneOffs`) and did not bump it: for every plan expressible before, the
+ * recursion computes byte-identically (the one-off reads 0) — WP 4.14's reference cases, the golden
+ * drift and WP 4.11's golden vector are unchanged to the bit — and a plan that now carries a
+ * one-off has a different input digest, so the cache can never serve it an older answer. A bump
+ * would also break WP 4.11's golden-vector pair on a string while every float agrees: the
+ * serialised Monte Carlo header embeds this version, and the client kernel
+ * (`apps/web/src/workers/kernel/deterministic.ts`, which does not model one-offs) says `/1`.
+ */
 export const ENGINE_VERSION = 'personalfi.deterministic/1';
 
 /** Interior bucket order. The Money-side names are `PROJECTION_BUCKETS` in `boundary.ts`. */
@@ -112,6 +138,19 @@ export interface EnginePlan {
   readonly otherIncome: readonly EngineIncomeStream[];
   /** Where a solved additional contribution goes. */
   readonly extraBucket: number;
+  /**
+   * Dated one-off flows, today's dollars, signed: positive arrives, negative
+   * leaves. Optional so an `EnginePlan` written before WP 5.5 (WP 4.11's
+   * golden-vector fixture, the client kernel's port) still describes the
+   * same plan.
+   */
+  readonly oneOffs?: readonly EngineOneOff[];
+}
+
+/** One dated flow: the age in whose year it lands, and its signed real size. */
+export interface EngineOneOff {
+  readonly age: number;
+  readonly real: number;
 }
 
 /** One year of market outcomes, after inflation. Deterministic: constant. Monte Carlo: drawn. */
@@ -138,6 +177,8 @@ export interface PreparedPlan {
   readonly socialSecurityByYear: Float64Array;
   readonly pensionByYear: Float64Array;
   readonly otherByYear: Float64Array;
+  /** Signed one-off flows per year (WP 5.5): the sum of every `oneOffs` entry in that year. */
+  readonly oneOffByYear: Float64Array;
   readonly socialSecurity: SocialSecurityDerivation | null;
 }
 
@@ -162,6 +203,14 @@ export function preparePlan(plan: EnginePlan): PreparedPlan {
   const socialSecurityByYear = new Float64Array(years);
   const pensionByYear = new Float64Array(years);
   const otherByYear = new Float64Array(years);
+  const oneOffByYear = new Float64Array(years);
+  for (const flow of plan.oneOffs ?? []) {
+    const t = flow.age - plan.startAge;
+    if (!Number.isInteger(t) || t < 0 || t >= years || !Number.isFinite(flow.real)) {
+      throw new RangeError(`a one-off at age ${String(flow.age)} is outside the plan's years`);
+    }
+    oneOffByYear[t] = (oneOffByYear[t] ?? 0) + flow.real;
+  }
   let socialSecurity: SocialSecurityDerivation | null = null;
   if (plan.socialSecurity !== null && plan.socialSecurityRules !== null) {
     socialSecurity = deriveSocialSecurity(plan.socialSecurity, plan.socialSecurityRules);
@@ -195,6 +244,7 @@ export function preparePlan(plan: EnginePlan): PreparedPlan {
     socialSecurityByYear,
     pensionByYear,
     otherByYear,
+    oneOffByYear,
     socialSecurity,
   };
 }
@@ -266,6 +316,27 @@ function sumOf(slots: Float64Array): number {
 }
 
 /**
+ * A working year's contribution into bucket `b`: the plan's own (wage-grown),
+ * the solver's extra, and — into `TAXABLE` — income and an arriving one-off,
+ * under the mid-year convention. A plain function rather than a closure, so the
+ * Monte Carlo's year loop still allocates nothing.
+ */
+function workingContribution(
+  plan: EnginePlan,
+  b: number,
+  growth: number,
+  age: number,
+  extra: ExtraContribution,
+  income: number,
+  oneOff: number,
+): number {
+  let c = (plan.contribution0[b] ?? 0) * growth;
+  if (b === plan.extraBucket && age < extra.untilAge) c += extra.annual;
+  if (b === TAXABLE) c += oneOff > 0 ? income + oneOff : income;
+  return c;
+}
+
+/**
  * One year of the recursion. Mutates `state`; returns the record when asked for
  * one. The Monte Carlo passes `record = false` and a drawn `market`.
  */
@@ -296,6 +367,8 @@ export function stepYear(
   const pension = prepared.pensionByYear[t] ?? 0;
   const other = prepared.otherByYear[t] ?? 0;
   const income = socialSecurity + pension + other;
+  // WP 5.5: this year's signed one-off; 0 for every plan without one.
+  const oneOff = prepared.oneOffByYear[t] ?? 0;
 
   let spending = 0;
   let shortfall = 0;
@@ -307,17 +380,41 @@ export function stepYear(
 
   if (!retired) {
     const growth = (1 + plan.contributionGrowth) ** t;
+    // An outflow is drawn at mid-year, in the withdrawal order, from what each
+    // bucket holds then: its start grown half a year plus its contribution —
+    // so no draw can take a bucket below zero at the year-end.
+    let owed = oneOff < 0 ? -oneOff : 0;
+    if (owed > 0) {
+      for (const b of plan.withdrawalOrder) {
+        if (owed <= 0) break;
+        const available =
+          (wealth[b] ?? 0) * Math.sqrt(1 + (returns[b] ?? 0)) +
+          workingContribution(plan, b, growth, age, extra, income, oneOff);
+        if (available <= 0) continue;
+        const keep = b === TAX_DEFERRED ? 1 - plan.taxDeferredRate : 1;
+        const gross = Math.min(available, owed / keep);
+        withdrawn[b] = gross;
+        if (b === TAX_DEFERRED) tax += gross * plan.taxDeferredRate;
+        owed -= gross * keep;
+      }
+      shortfall = owed > SHORTFALL_TOLERANCE ? owed : 0;
+    }
     for (let b = 0; b < BUCKET_SLOTS; b += 1) {
       const r = returns[b] ?? 0;
-      let c = (plan.contribution0[b] ?? 0) * growth;
-      if (b === plan.extraBucket && age < extra.untilAge) c += extra.annual;
-      if (b === TAXABLE) c += income;
+      const c = workingContribution(plan, b, growth, age, extra, income, oneOff);
       if (contribution !== null) contribution[b] = c;
+      // The net mid-year flow: the contribution less any one-off drawn from this bucket (0 unless
+      // this year carries an outflow, so a plan without one computes exactly what it did before).
+      const net = c - (withdrawn[b] ?? 0);
       const start = wealth[b] ?? 0;
       // 07 §5.2: B_{t+1} = B_t (1 + r) + C_t (1 + r)^0.5 — the mid-year contribution convention.
-      wealth[b] = start * (1 + r) + c * Math.sqrt(1 + r);
-      grownFrom += start + c;
+      wealth[b] = start * (1 + r) + net * Math.sqrt(1 + r);
+      grownFrom += start + net;
       grownTo += wealth[b] ?? 0;
+    }
+    if (shortfall > 0) {
+      state.shortfallTotal += shortfall;
+      if (state.depletedAtAge < 0) state.depletedAtAge = age;
     }
   } else {
     const portfolio = sumOf(wealth);
@@ -340,8 +437,9 @@ export function stepYear(
     }
     state.retiredYears += 1;
 
-    // W_t = spend_t − SS_t − pension_t − other_t.
-    let need = spending - income;
+    // W_t = spend_t − SS_t − pension_t − other_t, and (WP 5.5) minus this
+    // year's signed one-off — outside `spending`, so no guardrail reads it.
+    let need = spending - income - oneOff;
     if (need < 0) {
       wealth[TAXABLE] = (wealth[TAXABLE] ?? 0) - need;
       if (contribution !== null) contribution[TAXABLE] = -need;

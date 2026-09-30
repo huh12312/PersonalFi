@@ -37,7 +37,10 @@
  *     replace, so an unchanged default is never pinned: when the file's default
  *     moves, the user follows it. `resolveOverrides` refuses a version it does
  *     not hold rather than applying a delta to a file it was not computed
- *     against. `plan_assumptions` (migration 0021) is the storage, and its CHECK
+ *     against. When a change moves the version, the previous file is **retained
+ *     frozen** (`../data/assumptions-retained.ts`, WP 5.5) so the overrides
+ *     saved against it still resolve; no run is computed on a retained version,
+ *     and a run stored against one reads back stale with the version named. `plan_assumptions` (migration 0021) is the storage, and its CHECK
  *     refuses anything but a flat `path → decimal string` object, so a copy of
  *     the file cannot even be expressed in the column.
  *
@@ -62,6 +65,7 @@ import {
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { ASSUMPTIONS_FILE } from '../data/assumptions.ts';
+import { RETAINED_ASSUMPTIONS_FILES } from '../data/assumptions-retained.ts';
 import { platformOf, type PlanningExecutor } from './store.ts';
 
 // ---------------------------------------------------------------------------
@@ -389,6 +393,14 @@ export const assumptionsFileSchema = z.strictObject({
     equityRiskPremiumCrossCheck: citedRate,
   }),
   correlation: citedCorrelation,
+  /**
+   * WP 5.5. Optional **in the schema only** so the frozen predecessor
+   * (`data/assumptions-retained.ts`), which predates it, still validates and
+   * still hashes to its own version. The current file cannot omit it:
+   * `parseAssumptions` refuses a file missing any `OVERRIDABLE_PATHS` node, and
+   * this is one.
+   */
+  withdrawalPolicy: z.strictObject({ guardrailReferenceRate: citedRate }).optional(),
   socialSecurityStress: z.strictObject({ fromCalendarYear: citedInteger, payableRatio: citedRate }),
   marketReference: z.strictObject({
     treasuryBill3Month: citedRate,
@@ -413,6 +425,7 @@ export type UsTaxYearInput = z.input<typeof usTaxYearSchema>;
 export type AssumptionsFile = z.output<typeof assumptionsFileSchema>;
 export type UsTaxYear = z.output<typeof usTaxYearSchema>;
 export type CitedRate = z.output<typeof citedRate>;
+export type CitedRateInput = z.input<typeof citedRate>;
 
 // ---------------------------------------------------------------------------
 // Load, hash, freeze
@@ -421,6 +434,17 @@ export type CitedRate = z.output<typeof citedRate>;
 export interface Assumptions {
   readonly version: AssumptionsVersion;
   readonly file: AssumptionsFile;
+  /**
+   * Present on a **retained predecessor** only (WP 5.5): a superseded file this
+   * build still holds so a stored override against it resolves. A run is never
+   * computed on a retained version, and one stored against it reads back stale
+   * with the version named (`projection-service.ts`).
+   */
+  readonly retained?: {
+    readonly retiredOn: string;
+    readonly supersededBecause: string;
+    readonly guardrailReferenceRate: CitedRate;
+  };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -490,6 +514,44 @@ export function loadAssumptions(): Assumptions {
 /** The current file's content hash. What every projection run records (07 §7.3). */
 export function assumptionsVersion(): AssumptionsVersion {
   return loadAssumptions().version;
+}
+
+let retained: readonly Assumptions[] | null = null;
+
+/**
+ * The frozen predecessors (`data/assumptions-retained.ts`), validated, each
+ * **re-hashed and refused unless it reproduces the version it is named by** —
+ * a retained file that drifted would resolve a holder's overrides against
+ * content they were never computed on. Once per process, like the current file.
+ */
+export function retainedAssumptions(): readonly Assumptions[] {
+  retained ??= Object.freeze(
+    RETAINED_ASSUMPTIONS_FILES.map((entry) => {
+      const file = deepFreeze(assumptionsFileSchema.parse(entry.file));
+      const version = versionOf(file);
+      if (version !== entry.version) {
+        throw new Error(
+          `the retained assumptions file named ${entry.version} hashes to ${version}: a frozen ` +
+            'predecessor was edited, and overrides saved against it would resolve against ' +
+            'content they were never computed on — restore it byte for byte',
+        );
+      }
+      if (version === loadAssumptions().version) {
+        throw new Error(`the retained assumptions file ${version} is the current file`);
+      }
+      const guardrailReferenceRate = citedRate.parse(entry.supplements.guardrailReferenceRate);
+      return Object.freeze({
+        version,
+        file,
+        retained: deepFreeze({
+          retiredOn: entry.retiredOn,
+          supersededBecause: entry.supersededBecause,
+          guardrailReferenceRate,
+        }),
+      });
+    }),
+  );
+  return retained;
 }
 
 // ---------------------------------------------------------------------------
@@ -588,6 +650,11 @@ export function taxYear(assumptions: Assumptions, year: number): UsTaxYear {
  * a different contribution limit is a new file version, not a preference — and
  * the correlation matrix is not overridable cell by cell because an edited cell
  * can make it non-positive-definite, which WP 4.5's Cholesky cannot factor.
+ *
+ * One exception to "capital-market only", WP 5.5: the **guardrail reference
+ * rate** — 07 §5.6's `initial_wr = 0.045 # user-settable`, the withdrawal rate
+ * R7's Guyton-Klinger band is drawn around. 07 marks it user-settable in so
+ * many words; until WP 5.5 it was a literal in the composition root.
  */
 export const OVERRIDABLE_PATHS = [
   'capitalMarket.usEquity.expectedReturn',
@@ -607,6 +674,7 @@ export const OVERRIDABLE_PATHS = [
   'capitalMarket.inflation.mean',
   'capitalMarket.inflation.volatility',
   'capitalMarket.wageGrowth.spreadOverInflation',
+  'withdrawalPolicy.guardrailReferenceRate',
 ] as const;
 export type OverridablePath = (typeof OVERRIDABLE_PATHS)[number];
 
@@ -614,6 +682,7 @@ const OVERRIDABLE = new Set<string>(OVERRIDABLE_PATHS);
 
 /** Inclusive sanity bounds, as decimal strings. A volatility is never negative. */
 function boundsFor(path: string): readonly [string, string] {
+  if (path === 'withdrawalPolicy.guardrailReferenceRate') return ['0', '1'];
   return path.endsWith('.volatility') ? ['0', '2'] : ['-1', '1'];
 }
 
@@ -669,6 +738,15 @@ export function diffOverrides(
       );
     }
     const overridable = path as OverridablePath;
+    if (!isCitedRate(nodeAt(assumptions.file, path))) {
+      // A retained predecessor predates a path added since (WP 5.5's guardrail
+      // rate): no override could have been saved against it there.
+      throw new AssumptionOverrideRefused(
+        'planning.assumptions_path_unknown',
+        path,
+        `not an assumption of file version ${assumptions.version}`,
+      );
+    }
     if (typeof raw !== 'string' || !DECIMAL_PATTERN.test(raw) || fractionDigits(raw) > 12) {
       throw new AssumptionOverrideRefused(
         'planning.assumptions_value_invalid',
@@ -734,12 +812,64 @@ export function applyOverrides(
   return deepFreeze({ version: assumptions.version, file, overrides });
 }
 
-/** Versions this build can resolve a delta against. Today: the checked-in file, and only it. */
+/**
+ * Versions this build can resolve a delta against: the checked-in file, and
+ * — since WP 5.5 — its frozen predecessors, each marked `retained`.
+ */
 export type AssumptionsRegistry = ReadonlyMap<string, Assumptions>;
 
+/**
+ * The current file first, then every retained predecessor. A holder's override
+ * against a retained version resolves; a run is computed only on a version
+ * `computableVersions` names.
+ */
 export function currentRegistry(): AssumptionsRegistry {
   const assumptions = loadAssumptions();
-  return new Map([[assumptions.version, assumptions]]);
+  return new Map<string, Assumptions>([
+    [assumptions.version, assumptions],
+    ...retainedAssumptions().map((entry) => [entry.version, entry] as const),
+  ]);
+}
+
+/**
+ * The versions a run may be **computed** on: every registry entry that is not
+ * a retained predecessor. This is what a refusal or a stale label calls
+ * `known` — the versions a holder's plan can move onto.
+ */
+export function computableVersions(registry: AssumptionsRegistry): readonly string[] {
+  return [...registry.entries()]
+    .filter(([, entry]) => entry.retained === undefined)
+    .map(([version]) => version);
+}
+
+/** `true` when `version` is held only as a frozen predecessor: resolvable, never computed on. */
+export function isRetainedVersion(registry: AssumptionsRegistry, version: string): boolean {
+  return registry.get(version)?.retained !== undefined;
+}
+
+/**
+ * The guardrail reference rate a set of assumptions carries — 07 §5.6's
+ * `initial_wr`, cited, with the holder's override applied when there is one
+ * (`applyOverrides` replaces the node's value and its citation). WP 5.5's
+ * replacement for the composition root's `GUARDRAIL_REFERENCE_RATE` literal.
+ *
+ * A retained predecessor predates the node; its runs were computed with the
+ * literal it then lived in, which the frozen module records beside the file.
+ * Takes a registry entry or a resolved set; for a resolved set against a
+ * retained version, pass the registry so the predecessor's figure is found.
+ */
+export function guardrailReferenceRate(
+  assumptions: { readonly version: string; readonly file: AssumptionsFile },
+  registry: AssumptionsRegistry = currentRegistry(),
+): CitedRate {
+  const node = assumptions.file.withdrawalPolicy?.guardrailReferenceRate;
+  if (node !== undefined) return node;
+  const predecessor = registry.get(assumptions.version)?.retained;
+  if (predecessor !== undefined) return predecessor.guardrailReferenceRate;
+  throw new Error(
+    `assumptions version ${assumptions.version} carries no guardrail reference rate and is not a ` +
+      'retained predecessor that records one',
+  );
 }
 
 /**
@@ -755,7 +885,7 @@ export function resolveOverrides(
 ): ResolvedAssumptions {
   const assumptions = registry.get(stored.assumptionsVersion);
   if (assumptions === undefined) {
-    throw new UnknownAssumptionsVersion(stored.assumptionsVersion, [...registry.keys()]);
+    throw new UnknownAssumptionsVersion(stored.assumptionsVersion, computableVersions(registry));
   }
   // Re-validate on the way in: the column's CHECK is structural, this is semantic.
   const checked = diffOverrides(assumptions, stored.deltas);

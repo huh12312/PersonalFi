@@ -22,11 +22,13 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { assumptionsVersion, saveOverrides } from '../../src/assumptions.ts';
 import type { AssumptionsLike, ProjectionPlan } from '../../src/engine/boundary.ts';
-import { ENGINE_VERSION } from '../../src/engine/deterministic.ts';
+import { ENGINE_VERSION, TAXABLE } from '../../src/engine/deterministic.ts';
+import { runMonteCarlo } from '../../src/engine/montecarlo.ts';
+import { toMonteCarloJob } from '../../src/engine/worker-host.ts';
 import { projectDeterministic } from '../../src/engine/project.ts';
 import { addContribution, createGoal } from '../../src/goals.ts';
 import { createLifeEvent } from '../../src/life-events.ts';
-import type { MonteCarloRunner } from '../../src/ports.ts';
+import type { MonteCarloRequest, MonteCarloRunner } from '../../src/ports.ts';
 import {
   createGoalPaceConsumer,
   createProjectionInputsReader,
@@ -738,5 +740,219 @@ describe.skipIf(NO_DATABASE)('projection_runs and projection_percentiles (0022)'
       })
       .catch((error: unknown) => error);
     expect((refused as ProjectionRefused).code).toBe('planning.projection_balances_unsealed');
+  });
+  it('a stored negative life event is applied and no longer listed as unapplied', async () => {
+    // WP 5.5 (wp4.6 §11 item 1, on wp4.5 §10 item 10's design): an outflow in the plan's range is a
+    // dated one-off, drawn in its year; before WP 5.5 it was stored, named `outflow_not_modelled`,
+    // and left out of the number.
+    const plan = await baseline();
+    const engine = countingDeterministic();
+    const dependencies: ProjectionServiceDependencies = {
+      inputs: fakeInputs({ revision: 1 }),
+      monteCarlo: null,
+      clock: CLOCK,
+      timeZone: ZONE,
+      deterministic: engine.engine,
+    };
+    const without = await project(dependencies, { scenarioId: plan.id, method: 'deterministic' });
+    const addEvent = (event: { kind: string; name: string; occursOn: string; amount: Money }) =>
+      database.db.transaction((tx) =>
+        createLifeEvent(tx as unknown as PlanningExecutor, {
+          userId: database.userId,
+          event,
+          clock: CLOCK,
+        }),
+      );
+    const house = await addEvent({
+      kind: 'home_purchase',
+      name: 'Home purchase',
+      occursOn: '2029-04-01',
+      amount: usd('-60000'),
+    });
+    // Already happened: its effect is in the sealed balances, so it stays set aside, named.
+    const past = await addEvent({
+      kind: 'college',
+      name: 'Last term',
+      occursOn: '2026-01-15',
+      amount: usd('-8000'),
+    });
+    const withIt = await project(dependencies, { scenarioId: plan.id, method: 'deterministic' });
+    expect(withIt.status).toBe('computed');
+    expect(withIt.run?.id).not.toBe(without.run?.id);
+
+    const input = withIt.run?.input as {
+      lifeEvents: { applied: unknown[]; unapplied: unknown[] };
+      plan: { oneOffs?: unknown[] };
+    };
+    console.log(JSON.stringify({ lifeEvents: input.lifeEvents, oneOffs: input.plan.oneOffs }));
+    // Applied, at the holder's age on its date (born 1986-03-15: 43 on 2029-04-01)…
+    expect(input.lifeEvents.applied).toEqual([{ id: house.id, age: '43' }]);
+    // …and no longer listed as unapplied; only the dated-before-the-plan one is.
+    expect(input.lifeEvents.unapplied).toEqual([{ id: past.id, reason: 'before_as_of' }]);
+    expect(JSON.stringify(input.lifeEvents)).not.toContain('outflow_not_modelled');
+    expect(input.plan.oneOffs).toEqual([
+      {
+        name: `life_event:${house.id}`,
+        occursOn: '2029-04-01',
+        amount: { minor: '-6000000', currency: 'USD' },
+      },
+    ]);
+
+    // The engine drew it: every year before 2029 is the same, and from 2029 on the plan holds less.
+    const before = without.percentiles;
+    const after = withIt.percentiles;
+    expect(after).toHaveLength(before.length);
+    for (const [index, year] of after.entries()) {
+      const was = before[index];
+      if (was === undefined || year.p50 === null || was.p50 === null) throw new Error('no band');
+      if (year.calendarYear < 2029) expect(year.p50, String(year.calendarYear)).toEqual(was.p50);
+      else expect(Money.compare(year.p50, was.p50), String(year.calendarYear)).toBeLessThan(0);
+    }
+    // In the 2029 year-end, by more than the $60,000 itself (it was drawn at mid-year and would have
+    // grown half a year) and by less than it plus a whole year's growth at any plausible rate.
+    const at2029 = (rows: typeof after) => rows.find((row) => row.calendarYear === 2029)?.p50;
+    const gap = Money.subtract(at2029(before) ?? usd('0'), at2029(after) ?? usd('0'));
+    expect(gap.minor).toBeGreaterThan(6_000_000n);
+    expect(gap.minor).toBeLessThan(6_300_000n);
+  });
+
+  it('a crypto holding reaches the Monte Carlo as its own sleeve', async () => {
+    // WP 5.5 (wp4.6 §11 item 4): the bucket split in `derivedFromDay` and the port field. Real
+    // `net_worth_daily` rows through the real reader; a Monte Carlo runner that records what it is
+    // asked and answers through WP 4.5's own kernel, in-process.
+    const brokerage = 'a1946000-0000-7000-8000-0000000000c1';
+    const exchange = 'a1946000-0000-7000-8000-0000000000c2';
+    const entry = (accountId: string, minor: string): BreakdownEntry => ({
+      accountId,
+      currency: 'USD',
+      nativeMinor: minor,
+      baseMinor: minor,
+      fxRate: '1',
+      fxRateDate: '2026-09-24',
+      onBudget: false,
+      inNetWorth: true,
+      isLiquid: false,
+      isInvestable: true,
+      side: 'asset',
+      kind: 'investment',
+      valuation: 'quantity_times_price',
+      stalePrice: false,
+    });
+    await database.db.transaction(async (tx) => {
+      const executor = tx as unknown as PlanningExecutor;
+      await upsertOpenDay(executor, {
+        userId: database.userId,
+        snapshot: {
+          asOfDate: '2026-09-24',
+          baseCurrency: 'USD',
+          assetsMinor: 12_000_000n,
+          liabilitiesMinor: 0n,
+          netWorthMinor: 12_000_000n,
+          liquidMinor: 0n,
+          investableMinor: 12_000_000n,
+          onBudgetMinor: 0n,
+          breakdown: [entry(brokerage, '10000000'), entry(exchange, '2000000')],
+          source: 'observed',
+          stalePrice: false,
+          accountsCounted: 2,
+          accountsUnvalued: 0,
+          unvalued: [],
+        },
+        clock: CLOCK,
+      });
+      await sealDay(executor, { userId: database.userId, asOfDate: '2026-09-24', clock: CLOCK });
+    });
+    const plan = await database.db.transaction((tx) =>
+      saveBaseline(tx as unknown as PlanningExecutor, {
+        userId: database.userId,
+        name: 'My plan',
+        profile: { ...PROFILE, annualSpending: usd('60000'), spendingFloor: 'none' },
+        clock: CLOCK,
+      }),
+    );
+    // Ledger's `crypto` account type reaches Planning as `investment` (so `TAXABLE`); the
+    // composition root marks it `sleeve: 'crypto'`, and that is what splits it out.
+    const revealed = revealedPorts(
+      [
+        account(brokerage, 'Brokerage', 'investment'),
+        { ...account(exchange, 'Exchange', 'investment'), sleeve: 'crypto' },
+      ],
+      [],
+    );
+    const asked: MonteCarloRequest[] = [];
+    const engineVersion = 'kernel.inprocess/1';
+    const runner: MonteCarloRunner = {
+      engineVersion,
+      async run(request) {
+        asked.push(request);
+        const job = toMonteCarloJob({
+          plan: request.plan,
+          assumptions: request.assumptions,
+          seed: request.seed,
+          paths: request.paths,
+          engine: 'lognormal',
+          cryptoHolding: request.cryptoHolding ?? null,
+        });
+        const result = runMonteCarlo(job);
+        const mark = fakeMonteCarlo(engineVersion).runner;
+        return {
+          ...(await mark.run(request)),
+          successProbability: (result.successCount / result.paths).toFixed(6),
+        };
+      },
+    };
+    const outcome = await database.db.transaction((tx) => {
+      const executor = tx as unknown as PlanningExecutor;
+      return runProjection(
+        executor,
+        {
+          inputs: createProjectionInputsReader(executor, revealed),
+          monteCarlo: runner,
+          clock: CLOCK,
+          timeZone: ZONE,
+        },
+        {
+          userId: database.userId,
+          scenarioId: plan.id,
+          method: 'monte_carlo',
+          paths: 500,
+          correlationId: CORRELATION_ID,
+        },
+      );
+    });
+    expect(outcome.status).toBe('computed');
+    const [request] = asked;
+    if (request === undefined) throw new Error('the runner was never asked');
+    // The sleeve, through the port: $20,000 of crypto, and TAXABLE without it.
+    expect(request.cryptoHolding).toEqual(usd('20000'));
+    expect(request.plan.buckets.map((bucket) => [bucket.bucket, bucket.startingBalance])).toEqual([
+      ['TAXABLE', usd('100000')],
+    ]);
+    // …and through WP 4.5's own conversion into its own sleeve: a crypto draw, never a bucket.
+    const job = toMonteCarloJob({
+      ...request,
+      engine: 'lognormal',
+      cryptoHolding: request.cryptoHolding ?? null,
+    });
+    expect(job.crypto.holding).toBe(20_000);
+    expect(job.plan.wealth0[TAXABLE]).toBe(100_000);
+    const result = runMonteCarlo(job);
+    expect(result.withoutCrypto).not.toBeNull();
+    // The stored input says what each engine did with it, so the digest describes the run.
+    const input = outcome.run?.input as { crypto?: unknown };
+    expect(input.crypto).toEqual({
+      holding: { minor: '2000000', currency: 'USD' },
+      monteCarlo: 'own_sleeve',
+      deterministic: 'valued_at_zero',
+    });
+    console.log(
+      JSON.stringify({
+        cryptoHolding: request.cryptoHolding?.minor.toString(),
+        taxable: request.plan.buckets[0]?.startingBalance.minor.toString(),
+        jobCrypto: job.crypto,
+        withCryptoSuccess: result.successCount,
+        withoutCryptoSuccess: result.withoutCrypto?.successCount,
+      }),
+    );
   });
 });

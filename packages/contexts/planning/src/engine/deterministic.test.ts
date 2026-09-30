@@ -13,7 +13,13 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { DateOnly, Money } from '@core/kernel';
 import { applyOverrides, diffOverrides, loadAssumptions } from '../assumptions.ts';
-import { ProjectionInputRefused, PROJECTION_BUCKETS, type ProjectionPlan } from './boundary.ts';
+import {
+  ProjectionInputRefused,
+  PROJECTION_BUCKETS,
+  toEnginePlan,
+  type ProjectionPlan,
+} from './boundary.ts';
+import { preparePlan, runDeterministic, wealthAt } from './deterministic.ts';
 import {
   AGE_BASED_RULE,
   ageBasedEquity,
@@ -265,6 +271,82 @@ describe('the recursion, per tax bucket', () => {
     expect(last?.pension).toEqual(usd('10000'));
     expect(last?.shortfall).toEqual(usd('30000'));
     expect(result.totalShortfall.minor).toBeGreaterThan(6n * 3_000_000n);
+  });
+
+  it('a dated one-off outflow reduces wealth by exactly its amount grown from its year', () => {
+    // WP 5.5, on WP 4.5's design (wp4.5 §10 item 10). One bucket, a static 60/40, so every year's
+    // real return is the same r and the closed form is exact: an outflow X drawn at mid-year while
+    // working costs X·√(1+r) by that year-end; one drawn at the start of a retired year costs
+    // X·(1+r). Either then compounds at (1+r) — and nothing before its year moves at all.
+    const plan: ProjectionPlan = {
+      ...BASE,
+      buckets: [
+        { bucket: 'TAXABLE', startingBalance: usd('500000'), annualContribution: usd('10000') },
+      ],
+      contributionGrowth: 'flat',
+      glidepath: { kind: 'static', equityShare: '0.6' },
+      annualSpending: usd('40000'),
+    };
+    const house = usd('-40000'); // age 39 (2030-06-01), working
+    const college = usd('-25000'); // age 70 (2061-03-01), retired
+    const withFlows: ProjectionPlan = {
+      ...plan,
+      oneOffs: [
+        { name: 'Home purchase', occursOn: DateOnly.parse('2030-06-01'), amount: house },
+        { name: 'College', occursOn: DateOnly.parse('2061-03-01'), amount: college },
+      ],
+    };
+    const run = (p: ProjectionPlan) => {
+      const prepared = preparePlan(toEnginePlan(p, assumptions));
+      return { prepared, path: runDeterministic(prepared) };
+    };
+    const without = run(plan);
+    const withIt = run(withFlows);
+    // Through the one crossing: the engine sees each flow once, at the holder's age on its date.
+    expect(withIt.prepared.plan.oneOffs).toEqual([
+      { age: 39, real: -40_000 },
+      { age: 70, real: -25_000 },
+    ]);
+    const r = without.path.records[0]?.realReturn[0] ?? Number.NaN;
+    expect(r).toBeCloseTo(0.6 * (1.065 / 1.025 - 1) + 0.4 * (1.045 / 1.025 - 1), 12);
+
+    const houseYear = 39 - 35;
+    const collegeYear = 70 - 35;
+    for (let t = 0; t < without.path.records.length; t += 1) {
+      const gap = wealthAt(without.path.records, t) - wealthAt(withIt.path.records, t);
+      let expected = 0;
+      if (t >= houseYear) expected += 40_000 * Math.sqrt(1 + r) * (1 + r) ** (t - houseYear);
+      if (t >= collegeYear) expected += 25_000 * (1 + r) ** (t - collegeYear + 1);
+      if (expected === 0) {
+        expect(gap, `year ${String(t)} precedes every flow`).toBe(0);
+      } else {
+        expect(Math.abs(gap - expected) / expected, `year ${String(t)}`).toBeLessThan(1e-9);
+      }
+    }
+    // Both plans sustain: an outflow is drawn from wealth, never recorded as unfunded spending.
+    expect(withIt.path.state.shortfallTotal).toBe(0);
+
+    // The Money result shows each outflow where it was drawn: a TAXABLE withdrawal in its year,
+    // outside the spending line (the guardrails never see a house as spending).
+    const years = projectDeterministic(withFlows, assumptions).years;
+    expect(years[houseYear]?.buckets[0]?.withdrawal).toEqual(usd('40000'));
+    expect(years[houseYear]?.spending).toEqual(usd('0'));
+    expect(years[collegeYear]?.spending).toEqual(usd('40000'));
+    expect(years[collegeYear]?.buckets[0]?.withdrawal).toEqual(usd('65000'));
+
+    // An outflow the buckets cannot fund is unfunded, like any other dollar the plan needs.
+    const broke = projectDeterministic(
+      {
+        ...plan,
+        buckets: [
+          { bucket: 'TAXABLE', startingBalance: usd('1000'), annualContribution: usd('0') },
+        ],
+        oneOffs: [{ name: 'Home purchase', occursOn: DateOnly.parse('2026-06-01'), amount: house }],
+      },
+      assumptions,
+    );
+    expect(broke.success).toBe(false);
+    expect(broke.depletionAge).toBe(35);
   });
 
   it('a pension without a COLA loses real value every year; a CPI-indexed one does not', () => {

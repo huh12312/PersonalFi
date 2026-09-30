@@ -42,15 +42,16 @@
  */
 import { Worker, type WorkerOptions } from 'node:worker_threads';
 import type { Money } from '@core/kernel';
-import type { CitedRate } from '../assumptions.ts';
 import {
   ProjectionInputRefused,
   fromEngineRatio,
+  monteCarloMarketFrom,
   monthlyFromAnnual,
   annualFromMonthly,
   planCurrency,
   solverMoney,
   toEngineCeiling,
+  toEngineCryptoHolding,
   toEnginePlan,
   toEngineRate,
   toEngineTarget,
@@ -381,26 +382,6 @@ export async function probeWorker(
 // The Money-facing side
 // ---------------------------------------------------------------------------
 
-/**
- * The text of a cited node's decimal or fact. A cited node carries it under a
- * property whose name WP 4.4's interior grep (`boundary.test.ts`) bans as an
- * identifier anywhere in `src/engine/` but `boundary.ts`; the key is therefore
- * spelled once, here, as a string. What it reads is a **decimal string** (or a
- * fact's text) that goes straight into `toEngineRate` — never a float, never
- * Money. Declared in the WP 4.5 evidence; the proper home is a
- * `monteCarloMarketFrom(assumptions)` in `boundary.ts` (WP 4.14 / the boundary's
- * owner), after which this accessor goes.
- */
-const CITED = 'value';
-type Cited<T> = { readonly [CITED]: T };
-function citedOf<T>(node: Cited<T>): T {
-  return node[CITED];
-}
-
-function rateOf(node: CitedRate, field: string): number {
-  return toEngineRate(citedOf(node), field);
-}
-
 export interface MonteCarloRequest {
   readonly plan: ProjectionPlan;
   readonly assumptions: AssumptionsLike;
@@ -416,48 +397,22 @@ export interface MonteCarloRequest {
   readonly cryptoHolding?: Money | null;
 }
 
-/** Convert once: the plan through `toEnginePlan`, the market parameters from the assumptions file. */
+/**
+ * Convert once: the plan through `toEnginePlan`, the market parameters through
+ * `boundary.ts#monteCarloMarketFrom`, the crypto holding through the boundary's
+ * own crossing (currency-checked, non-negative, exact to 2^53).
+ */
 export function toMonteCarloJob(request: MonteCarloRequest): MonteCarloJob {
   const plan = toEnginePlan(request.plan, request.assumptions);
   const code = planCurrency(request.plan);
-  const market = request.assumptions.file.capitalMarket;
-  const correlation = citedOf(request.assumptions.file.correlation);
-  let holding = 0;
-  if (request.cryptoHolding !== undefined && request.cryptoHolding !== null) {
-    try {
-      // The boundary's own Money → engine crossing (non-negative, currency-checked, exact to 2^53).
-      holding = toEngineTarget(request.cryptoHolding, code, 'real', 0, 0);
-    } catch (error) {
-      if (error instanceof ProjectionInputRefused) {
-        throw new ProjectionInputRefused(error.code, 'cryptoHolding', error.message);
-      }
-      throw error;
-    }
-  }
+  const market = monteCarloMarketFrom(request.assumptions);
   return {
     plan,
     engine: request.engine ?? 'bootstrap',
     series: request.series ?? null,
-    volatility: {
-      equity: rateOf(market.usEquity.volatility, 'usEquity.volatility'),
-      bond: rateOf(market.usAggregateBonds.volatility, 'usAggregateBonds.volatility'),
-      inflation: rateOf(market.inflation.volatility, 'inflation.volatility'),
-    },
-    correlation: {
-      assets: [...correlation.assets],
-      matrix: correlation.matrix.map((row, i) =>
-        row.map((cell, j) => toEngineRate(cell, `correlation[${String(i)}][${String(j)}]`)),
-      ),
-    },
-    crypto: {
-      holding,
-      expectedNominal: rateOf(market.crypto.expectedReturn, 'crypto.expectedReturn'),
-      volatility: rateOf(market.crypto.volatility, 'crypto.volatility'),
-      degreesOfFreedom: toEngineRate(
-        citedOf(market.crypto.degreesOfFreedom),
-        'crypto.degreesOfFreedom',
-      ),
-    },
+    volatility: market.volatility,
+    correlation: market.correlation,
+    crypto: { holding: toEngineCryptoHolding(request.cryptoHolding, code), ...market.crypto },
     // Canonical (unsigned) when it is a 64-bit pattern; anything else is left for the envelope to refuse.
     seed:
       request.seed >= -(2n ** 63n) && request.seed < 2n ** 64n
@@ -572,7 +527,7 @@ export function toMonteCarloSummary(
             result.withoutCrypto.bands[median * years + years - 1] ?? Number.NaN,
             'withoutCrypto.medianTerminal',
           ),
-          disclaimer: citedOf(request.assumptions.file.capitalMarket.crypto.disclaimer),
+          disclaimer: monteCarloMarketFrom(request.assumptions).cryptoDisclaimer,
         };
   return {
     monteCarloVersion: result.monteCarloVersion,

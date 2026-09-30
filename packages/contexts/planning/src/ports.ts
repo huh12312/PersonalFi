@@ -366,6 +366,16 @@ export function defaultTaxBucketFor(kind: AccountKind, subtype: string | null): 
  */
 export interface CashflowAccount extends PlanningAccount {
   readonly taxBucket: TaxBucket | null;
+  /**
+   * WP 5.5 (wp4.6 §11 item 4): `'crypto'` for an account whose holdings are
+   * crypto — Ledger's `crypto` account type, which `planningKindOf` maps to
+   * `investment` and `defaultTaxBucketFor` therefore to `TAXABLE`. The
+   * projection sums such an account out of its bucket and hands it to the
+   * Monte Carlo as its own sleeve (07 §6.4: never folded into equity).
+   * Optional so the composition root compiles before it binds it; absent means
+   * "not crypto", which is exactly the behaviour before WP 5.5.
+   */
+  readonly sleeve?: 'crypto' | null;
 }
 
 /**
@@ -522,6 +532,14 @@ export interface MonteCarloRequest {
   /** Unsigned 64-bit. The only source of randomness the run may use. */
   readonly seed: bigint;
   readonly paths: number;
+  /**
+   * WP 5.5: crypto held today, the plan's currency — WP 4.5's own sleeve
+   * (`runMonteCarloInWorker`'s `cryptoHolding`: Student-t, funds last, and the
+   * crypto-at-zero projection beside it). Absent when the holder has none. The
+   * adapter passes it straight through; a runner that drops it answers for a
+   * plan with crypto valued at zero, which the input digest does not describe.
+   */
+  readonly cryptoHolding?: Money;
 }
 
 /** One projected year's band: end-of-year wealth in today's dollars. */

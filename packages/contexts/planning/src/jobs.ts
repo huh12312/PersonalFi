@@ -35,7 +35,14 @@ import { defineJob, upsertSchedule, type JobHandlerRegistration } from '@core/pl
 import { isProjectionInputRefused } from './engine/boundary.ts';
 import type { AssumptionsRegistry } from './assumptions.ts';
 import type { MonteCarloRunner, RevealedPorts, SnapshotPorts } from './ports.ts';
-import { createProjectionInputsReader, refreshBaseline } from './projection-service.ts';
+import {
+  computeProjection,
+  createProjectionInputsReader,
+  prepareBaselineRefresh,
+  storeProjection,
+  type ProjectionServiceDependencies,
+  type RefreshOutcome,
+} from './projection-service.ts';
 import { isProjectionRefused } from './projection-store.ts';
 import { runSnapshot, type SnapshotContext } from './snapshot.ts';
 import { platformOf, type PlanningDatabase, type PlanningExecutor } from './store.ts';
@@ -192,13 +199,30 @@ export interface ProjectionRefreshJobDependencies {
   readonly timeZone: string;
   /** Monte Carlo path count for the nightly baseline. Default 10,000 (08 §7.2). */
   readonly paths?: number;
-  /** Assumption versions this build resolves. Default: the checked-in file. */
+  /** Assumption versions this build resolves. Default: the checked-in file and its retained predecessors. */
   readonly registry?: () => AssumptionsRegistry;
+  /** The deterministic engine. Injectable so a test can observe what is open while it runs. */
+  readonly deterministic?: ProjectionServiceDependencies['deterministic'];
 }
 
 /**
- * One baseline refresh per fan-out job, in one transaction: the run, its bands
- * and `planning.ProjectionCompleted` land together or not at all.
+ * One baseline refresh per fan-out job, in **three steps, and the engine in
+ * none of them holding a transaction** (WP 5.5; wp4.6 §11 item 6):
+ *
+ *   1. **read** — one transaction: the baseline, the holder's resolved
+ *      assumptions, the sealed day, the revealed behaviour, the life events,
+ *      the cache lookup (`prepareBaselineRefresh`). A cache hit or a stale
+ *      answer ends the job here.
+ *   2. **compute** — no transaction, no connection: `computeProjection` takes
+ *      no executor. A 10,000-path Monte Carlo is ~1 s; held inside a
+ *      transaction it pins a pooled connection for that second, and Phase 5
+ *      adds a weekly job that runs the engine per Brief item — a second
+ *      transaction held across compute is how Phase 3's pool-vs-lease deadlock
+ *      comes back.
+ *   3. **write** — one transaction: the run, its bands and
+ *      `planning.ProjectionCompleted` land together or not at all
+ *      (`storeProjection`). A concurrent identical run between 1 and 3 wins the
+ *      cache key and is served; nothing is announced twice.
  *
  * A **domain** refusal — no sealed day yet, no spending to plan against, the
  * holder's overrides against a retired assumptions version — is logged and the
@@ -212,49 +236,78 @@ export function projectionRefreshJobHandler(
   return defineJob(
     PROJECTION_REFRESH_JOB_KIND,
     async (_payload, context) => {
-      await dependencies.database.transaction(async (tx) => {
-        const executor = tx as unknown as PlanningExecutor;
-        const ports = dependencies.portsFor(executor, context.userId);
-        try {
-          const outcome = await refreshBaseline(
-            executor,
+      const service = (executor: PlanningExecutor): ProjectionServiceDependencies => ({
+        inputs: createProjectionInputsReader(
+          executor,
+          dependencies.portsFor(executor, context.userId),
+        ),
+        monteCarlo: dependencies.monteCarlo,
+        clock: context.clock,
+        timeZone: dependencies.timeZone,
+        ...(dependencies.registry === undefined ? {} : { registry: dependencies.registry() }),
+        ...(dependencies.deterministic === undefined
+          ? {}
+          : { deterministic: dependencies.deterministic }),
+      });
+      const request = {
+        userId: context.userId,
+        correlationId: context.correlationId,
+        ...(dependencies.paths === undefined ? {} : { paths: dependencies.paths }),
+      };
+      try {
+        // 1. read
+        const prepared = await dependencies.database.transaction((tx) => {
+          const executor = tx as unknown as PlanningExecutor;
+          return prepareBaselineRefresh(executor, service(executor), request);
+        });
+        let outcome: RefreshOutcome;
+        if (prepared.status !== 'ready') {
+          outcome = prepared;
+        } else {
+          // 2. compute — outside any transaction
+          const computed = await computeProjection(
             {
-              inputs: createProjectionInputsReader(executor, ports),
               monteCarlo: dependencies.monteCarlo,
               clock: context.clock,
-              timeZone: dependencies.timeZone,
-              ...(dependencies.registry === undefined ? {} : { registry: dependencies.registry() }),
+              ...(dependencies.deterministic === undefined
+                ? {}
+                : { deterministic: dependencies.deterministic }),
             },
-            {
-              userId: context.userId,
-              correlationId: context.correlationId,
-              ...(dependencies.paths === undefined ? {} : { paths: dependencies.paths }),
-            },
+            prepared,
           );
-          context.logger.info(
-            {
-              job: PROJECTION_REFRESH_JOB_KIND,
-              status: outcome.status,
-              ...('run' in outcome && outcome.run !== null
-                ? { runId: outcome.run.id, method: outcome.run.method }
-                : {}),
-              ...(outcome.status === 'stale' ? { staleness: outcome.staleness } : {}),
-            },
-            outcome.status === 'stale'
-              ? 'baseline not recomputed: its assumptions version no longer resolves'
-              : `baseline projection ${outcome.status}`,
-          );
-        } catch (error) {
-          const refused =
-            (isProjectionRefused(error) && error.family === 'domain') ||
-            isProjectionInputRefused(error);
-          if (!refused) throw error;
-          context.logger.warn(
-            { job: PROJECTION_REFRESH_JOB_KIND, code: (error as { code: string }).code },
-            `baseline projection refused: ${(error as Error).message}`,
+          // 3. write
+          outcome = await dependencies.database.transaction((tx) =>
+            storeProjection(
+              tx as unknown as PlanningExecutor,
+              { clock: context.clock },
+              prepared,
+              computed,
+            ),
           );
         }
-      });
+        context.logger.info(
+          {
+            job: PROJECTION_REFRESH_JOB_KIND,
+            status: outcome.status,
+            ...('run' in outcome && outcome.run !== null
+              ? { runId: outcome.run.id, method: outcome.run.method }
+              : {}),
+            ...(outcome.status === 'stale' ? { staleness: outcome.staleness } : {}),
+          },
+          outcome.status === 'stale'
+            ? 'baseline not recomputed: its assumptions version no longer resolves'
+            : `baseline projection ${outcome.status}`,
+        );
+      } catch (error) {
+        const refused =
+          (isProjectionRefused(error) && error.family === 'domain') ||
+          isProjectionInputRefused(error);
+        if (!refused) throw error;
+        context.logger.warn(
+          { job: PROJECTION_REFRESH_JOB_KIND, code: (error as { code: string }).code },
+          `baseline projection refused: ${(error as Error).message}`,
+        );
+      }
     },
     // One refresh in flight: a Monte Carlo run is the most expensive thing this
     // process does, and two for one holder would race for one cache key.

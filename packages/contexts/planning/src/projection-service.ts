@@ -49,6 +49,34 @@
  * So a projection dated to a sealed day reproduces after a re-sync moves
  * today, which is the dispatch's §5 risk row.
  *
+ * ## Read, compute, write — never a transaction held across an engine run (WP 5.5)
+ *
+ * A projection is three phases, exported separately: `prepareProjection`
+ * (every read — the scenario, the resolved assumptions, the sealed day, the
+ * life events, the cache lookup), `computeProjection` (the engine, and nothing
+ * else: no executor reaches it), and `storeProjection` (the run, its bands and
+ * `ProjectionCompleted`, as one fact). `runProjection` composes them over one
+ * executor for the routes; the nightly refresh job (`jobs.ts`) runs the first
+ * and last each in their own short transaction and the engine between them,
+ * holding no connection — a ~1 s Monte Carlo inside a transaction is a pooled
+ * connection pinned for nothing, and Phase 5 adds a weekly job that runs the
+ * engine per Brief item. A concurrent identical run between the read and the
+ * write is harmless: `insertRun`'s `ON CONFLICT` serves the winner's row and
+ * nothing is announced twice.
+ *
+ * ## Life events that leave, and crypto (WP 5.5)
+ *
+ * A stored **outflow** (a home purchase, college, a sabbatical) in the plan's
+ * range is now applied: a dated one-off on the plan (`oneOffs`), converted at
+ * the boundary and drawn through the withdrawal order in its year. It is listed
+ * under `lifeEvents.applied` and no longer under `unapplied`. A **crypto**
+ * account (the composition root marks it `sleeve: 'crypto'`) is summed out of
+ * its tax bucket into `cryptoHolding` and handed to the Monte Carlo as its own
+ * sleeve (07 §6.4: never folded into equity — and a `TAXABLE` glidepath is an
+ * equity/bond blend). The deterministic engine has no crypto sleeve, so its
+ * run is the plan **with crypto valued at zero** — 07 §6.4 treatment 2's
+ * conservative projection — and the input document says so.
+ *
  * ## Goal pace (07 R6), once per evaluation
  *
  * `planning.goal_pace@v1` consumes a **baseline** run's `ProjectionCompleted`,
@@ -75,7 +103,9 @@ import {
 } from '@core/platform';
 import {
   UnknownAssumptionsVersion,
+  computableVersions,
   currentRegistry,
+  isRetainedVersion,
   resolveForUser,
   type AssumptionsRegistry,
   type ResolvedAssumptions,
@@ -84,8 +114,10 @@ import { CADENCE_PERIODS_PER_YEAR, amountOn, type ContributionPlan } from './con
 import { listEarmarks } from './earmarks.ts';
 import {
   PROJECTION_BUCKETS,
+  ageOn,
   type AssumptionsLike,
   type BucketPlan,
+  type OneOffPlan,
   type ProjectionBucket,
   type ProjectionPlan,
   type ProjectionResult,
@@ -148,6 +180,12 @@ export interface DerivedInputs {
   readonly annualIncome: MoneyType | null;
   readonly nonSavingsSpending: MoneyType | null;
   readonly essentialSpending: MoneyType | null;
+  /**
+   * WP 5.5: the day's crypto, summed out of the tax buckets (07 §6.4). Absent
+   * or zero when the holder has none — or when the composition root does not
+   * mark crypto accounts, in which case they stay in `TAXABLE` as before.
+   */
+  readonly cryptoHolding?: MoneyType;
 }
 
 /** Where the service reads what is observed. The real one is `createProjectionInputsReader`. */
@@ -207,17 +245,24 @@ async function derivedFromDay(
   const code = day.baseCurrency;
   const accounts = await revealed.cashflow.accounts(userId, day.asOfDate);
   const bucketOf = new Map(accounts.map((account) => [account.accountId, account.taxBucket]));
+  const crypto = new Set(
+    accounts.filter((account) => account.sleeve === 'crypto').map((account) => account.accountId),
+  );
   const byBucket: Record<ProjectionBucket, MoneyType> = {
     TAXABLE: Money.zero(code),
     TAX_DEFERRED: Money.zero(code),
     ROTH: Money.zero(code),
     HSA: Money.zero(code),
   };
+  let cryptoHolding = Money.zero(code);
   for (const entry of day.breakdown) {
     const bucket = bucketOf.get(entry.accountId);
     if (bucket === undefined || bucket === null) continue;
     if (entry.side !== 'asset' || !entry.inNetWorth) continue;
-    byBucket[bucket] = Money.add(byBucket[bucket], Money.of(BigInt(entry.baseMinor), code));
+    const held = Money.of(BigInt(entry.baseMinor), code);
+    // The bucket split (wp4.6 §11 item 4): a crypto account is its own sleeve, never a bucket's.
+    if (crypto.has(entry.accountId)) cryptoHolding = Money.add(cryptoHolding, held);
+    else byBucket[bucket] = Money.add(byBucket[bucket], held);
   }
   for (const bucket of PROJECTION_BUCKETS) {
     // A bucket is a pot of assets; a negative sum is a data problem the engine
@@ -245,6 +290,8 @@ async function derivedFromDay(
     annualIncome: annualOf(behaviour.income.total),
     nonSavingsSpending: annualOf(behaviour.spending.nonSavings),
     essentialSpending: annualOf(behaviour.spending.essential),
+    // Same floor as a bucket: a negative crypto sum is a data problem, and zero is "none".
+    ...(Money.isPositive(cryptoHolding) ? { cryptoHolding } : {}),
   });
 }
 
@@ -353,6 +400,8 @@ export function assembleBaselinePlan(
 /** Everything a run is computed from, and the document its digest is over. */
 export interface AssembledInput {
   readonly plan: ProjectionPlan;
+  /** WP 5.5: crypto held, for the Monte Carlo's own sleeve; `null` when none. */
+  readonly cryptoHolding: MoneyType | null;
   readonly document: Readonly<Record<string, unknown>>;
   readonly digest: string;
 }
@@ -434,8 +483,16 @@ export function assembleInput(input: {
     plan = applied.plan;
     windfall = applied.windfall;
   }
-  const events = lifeEventsForPlan(input.lifeEvents, plan);
-  plan = { ...plan, otherIncome: [...plan.otherIncome, ...events.income] };
+  const events = outflowsApplied(input.lifeEvents, plan, lifeEventsForPlan(input.lifeEvents, plan));
+  plan = {
+    ...plan,
+    otherIncome: [...plan.otherIncome, ...events.income],
+    ...(events.oneOffs.length === 0 ? {} : { oneOffs: events.oneOffs }),
+  };
+  const cryptoHolding =
+    input.derived.cryptoHolding !== undefined && Money.isPositive(input.derived.cryptoHolding)
+      ? input.derived.cryptoHolding
+      : null;
 
   const document = documentOf({
     schema: INPUT_DOCUMENT_SCHEMA,
@@ -455,8 +512,63 @@ export function assembleInput(input: {
     plan,
     lifeEvents: { applied: events.applied, unapplied: events.unapplied },
     windfall,
+    // Absent (not null) when there is none, so a plan without crypto digests as it always did.
+    crypto:
+      cryptoHolding === null
+        ? undefined
+        : {
+            holding: cryptoHolding,
+            monteCarlo: 'own_sleeve',
+            deterministic: 'valued_at_zero',
+          },
   }) as Record<string, unknown>;
-  return Object.freeze({ plan, document, digest: inputDigestOf(document) });
+  return Object.freeze({ plan, cryptoHolding, document, digest: inputDigestOf(document) });
+}
+
+/**
+ * WP 5.5: the stored outflows `lifeEventsForPlan` sets aside as
+ * `outflow_not_modelled` become dated one-offs and move to `applied`.
+ *
+ * That reason is reached only after the currency, the plan's start and the
+ * plan's end have all been checked (`oneTimeInflow`'s order), so every event it
+ * names is a negative amount, in the plan's currency, inside the plan — exactly
+ * what `toEnginePlan` accepts. Inflows stay one-year income streams, as before,
+ * so no stored plan without an outflow changes by a byte.
+ */
+function outflowsApplied(
+  lifeEvents: readonly LifeEvent[],
+  plan: ProjectionPlan,
+  partition: ReturnType<typeof lifeEventsForPlan>,
+): ReturnType<typeof lifeEventsForPlan> & { readonly oneOffs: readonly OneOffPlan[] } {
+  const byId = new Map(lifeEvents.map((event) => [event.id, event]));
+  const oneOffs: OneOffPlan[] = [];
+  const applied = [...partition.applied];
+  const unapplied: (typeof partition.unapplied)[number][] = [];
+  for (const entry of partition.unapplied) {
+    const event = byId.get(entry.id);
+    if (entry.reason !== 'outflow_not_modelled' || event === undefined) {
+      unapplied.push(entry);
+      continue;
+    }
+    oneOffs.push({
+      name: `life_event:${event.id}`,
+      occursOn: event.occursOn,
+      amount: event.amount,
+    });
+    applied.push({ id: event.id, age: ageOn(plan.birthDate, event.occursOn) });
+  }
+  // Date order, as `lifeEventsForPlan` lists them: the digest must not depend on which kind came first.
+  const order = (id: string) => {
+    const event = byId.get(id);
+    return event === undefined ? '' : `${event.occursOn}|${event.id}`;
+  };
+  applied.sort((a, b) => (order(a.id) < order(b.id) ? -1 : order(a.id) > order(b.id) ? 1 : 0));
+  return Object.freeze({
+    income: partition.income,
+    applied: Object.freeze(applied),
+    unapplied: Object.freeze(unapplied),
+    oneOffs: Object.freeze(oneOffs),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -606,23 +718,100 @@ function elapsedMs(clock: Clock, started: Date): number {
 }
 
 /**
- * Serve or compute one scenario's projection.
- *
- * Pass a transaction: the run, its bands and `ProjectionCompleted` are one
- * fact. `appendEvent` is last, so the ordering lock it takes is held only for
- * the insert, never across an engine run.
+ * Everything a computation needs, read and assembled — and nothing that holds
+ * a connection. The output of `prepareProjection` when the answer is not
+ * already known; the input to `computeProjection` and `storeProjection`.
  */
-export async function runProjection(
+export interface PreparedProjection {
+  readonly status: 'ready';
+  readonly userId: string;
+  readonly scenario: Scenario;
+  readonly method: ProjectionMethod;
+  readonly resolved: ResolvedAssumptions;
+  readonly assumptionsOverrides: Readonly<Record<string, string>>;
+  readonly engineVersion: string;
+  readonly paths: number;
+  readonly seed: bigint;
+  readonly derived: DerivedInputs;
+  readonly assembled: AssembledInput;
+  readonly cacheKey: string;
+  readonly correlationId: string;
+  readonly causationId: string | null;
+}
+
+/** What the engine produced for one prepared projection. No Money here is stored yet. */
+export interface ComputedProjection {
+  readonly successProbability: string;
+  readonly percentiles: readonly StoredPercentile[];
+  readonly durationMs: number;
+}
+
+/**
+ * The label a run computed on `assumptionsVersion` reads back with when no new
+ * run may be computed on that version any more — it is not held at all, or it
+ * is held only as a frozen predecessor (WP 5.5) — naming the version; `null`
+ * when the version is one this build computes on. The one decision
+ * `readProjection` and `prepareProjection` both make.
+ */
+export function retiredStaleness(
+  assumptionsVersion: string,
+  registry: AssumptionsRegistry = currentRegistry(),
+): Staleness | null {
+  if (registry.has(assumptionsVersion) && !isRetainedVersion(registry, assumptionsVersion)) {
+    return null;
+  }
+  return {
+    reason: 'assumptions_version_retired',
+    assumptionsVersion,
+    known: computableVersions(registry),
+  };
+}
+
+function staleOutcome(
+  run: StoredRun | null,
+  percentiles: readonly StoredPercentile[],
+  assumptionsVersion: string,
+  registry: AssumptionsRegistry,
+): ProjectionOutcome {
+  return {
+    status: 'stale',
+    run,
+    percentiles,
+    staleness: retiredStaleness(assumptionsVersion, registry) ?? {
+      // Reached only for a version the registry computes on but the resolver refused — which
+      // `resolveOverrides` cannot do; kept total so the type needs no assertion.
+      reason: 'assumptions_version_retired',
+      assumptionsVersion,
+      known: computableVersions(registry),
+    },
+  };
+}
+
+/**
+ * Phase 1 — **read**. Resolve, assemble, digest and look the answer up. Returns
+ * a finished outcome when there is nothing to compute (a cache hit, or a stale
+ * answer), otherwise a `PreparedProjection`.
+ */
+export async function prepareProjection(
   executor: PlanningExecutor,
   dependencies: ProjectionServiceDependencies,
   request: ProjectionRequest,
-): Promise<ProjectionOutcome> {
+): Promise<ProjectionOutcome | PreparedProjection> {
   const registry = dependencies.registry ?? currentRegistry();
   const { scenario, baseline } = await scenarioAndBaseline(
     executor,
     request.userId,
     request.scenarioId,
   );
+  const staleRun = async (version: string) => {
+    const run = await latestRunForScenario(executor, request.userId, scenario.id, request.method);
+    return staleOutcome(
+      run,
+      run === null ? [] : await percentilesOf(executor, request.userId, run.id),
+      version,
+      registry,
+    );
+  };
 
   let resolved: ResolvedAssumptions;
   try {
@@ -635,18 +824,12 @@ export async function runProjection(
     if (!(error instanceof UnknownAssumptionsVersion)) throw error;
     // Never re-resolve against today's defaults: that would drop the holder's
     // overrides without a word and present the result under the scenario's name.
-    const run = await latestRunForScenario(executor, request.userId, scenario.id, request.method);
-    return {
-      status: 'stale',
-      run,
-      percentiles: run === null ? [] : await percentilesOf(executor, request.userId, run.id),
-      staleness: {
-        reason: 'assumptions_version_retired',
-        assumptionsVersion: error.requested,
-        known: error.known,
-      },
-    };
+    return staleRun(error.requested);
   }
+  // WP 5.5: the holder's overrides name a *retained* predecessor. They resolve — the assumptions
+  // screen shows them and a re-save carries them onto the current file — but no run is computed on
+  // a superseded file: the scenario's latest run is served stale, with that version named.
+  if (isRetainedVersion(registry, resolved.version)) return staleRun(resolved.version);
 
   const runner = request.method === 'monte_carlo' ? dependencies.monteCarlo : null;
   if (request.method === 'monte_carlo' && runner === null) {
@@ -691,33 +874,74 @@ export async function runProjection(
       percentiles: await percentilesOf(executor, request.userId, hit.id),
     };
   }
+  return Object.freeze({
+    status: 'ready',
+    userId: request.userId,
+    scenario,
+    method: request.method,
+    resolved,
+    assumptionsOverrides,
+    engineVersion,
+    paths,
+    seed,
+    derived,
+    assembled,
+    cacheKey,
+    correlationId: request.correlationId,
+    causationId: request.causationId ?? null,
+  });
+}
 
+/**
+ * Phase 2 — **compute**. The engine, and nothing else: this function takes no
+ * executor, so it cannot hold a transaction or a connection while it runs.
+ */
+export async function computeProjection(
+  dependencies: Pick<ProjectionServiceDependencies, 'monteCarlo' | 'clock' | 'deterministic'>,
+  prepared: PreparedProjection,
+): Promise<ComputedProjection> {
   const started = dependencies.clock.now();
-  let successProbability: string;
-  let percentiles: StoredPercentile[];
-  if (runner === null) {
+  const { assembled, resolved } = prepared;
+  if (prepared.method === 'deterministic') {
     const result = (dependencies.deterministic ?? projectDeterministic)(assembled.plan, resolved);
-    successProbability = result.success ? '1' : '0';
-    percentiles = result.years.map((year) => ({
-      index: year.index,
-      age: year.age,
-      calendarYear: year.calendarYear,
-      p5: null,
-      p10: null,
-      p25: null,
-      p50: year.endWealth,
-      p75: null,
-      p90: null,
-      p95: null,
-    }));
-  } else {
-    const outcome = checkedOutcome(
-      await runner.run({ plan: assembled.plan, assumptions: resolved, seed, paths }),
-      { engineVersion, seed, paths },
-      assembled.plan.currency,
+    return {
+      successProbability: result.success ? '1' : '0',
+      percentiles: result.years.map((year) => ({
+        index: year.index,
+        age: year.age,
+        calendarYear: year.calendarYear,
+        p5: null,
+        p10: null,
+        p25: null,
+        p50: year.endWealth,
+        p75: null,
+        p90: null,
+        p95: null,
+      })),
+      durationMs: elapsedMs(dependencies.clock, started),
+    };
+  }
+  const runner = dependencies.monteCarlo;
+  if (runner === null || runner.engineVersion !== prepared.engineVersion) {
+    throw new ProjectionRefused(
+      'planning.monte_carlo_unavailable',
+      'the Monte Carlo engine this projection was prepared for is not the one bound now',
     );
-    successProbability = outcome.successProbability;
-    percentiles = outcome.periods.map((period) => ({
+  }
+  const outcome = checkedOutcome(
+    await runner.run({
+      plan: assembled.plan,
+      assumptions: resolved,
+      seed: prepared.seed,
+      paths: prepared.paths,
+      ...(assembled.cryptoHolding === null ? {} : { cryptoHolding: assembled.cryptoHolding }),
+    }),
+    { engineVersion: prepared.engineVersion, seed: prepared.seed, paths: prepared.paths },
+    assembled.plan.currency,
+  );
+  return {
+    successProbability: outcome.successProbability,
+    percentiles: outcome.periods.map((period) => ({
       index: period.index,
       age: period.age,
       calendarYear: period.calendarYear,
@@ -728,30 +952,45 @@ export async function runProjection(
       p75: period.p75,
       p90: period.p90,
       p95: period.p95,
-    }));
-  }
-  const durationMs = elapsedMs(dependencies.clock, started);
+    })),
+    durationMs: elapsedMs(dependencies.clock, started),
+  };
+}
 
+/**
+ * Phase 3 — **write**. The run, its bands and `ProjectionCompleted` are one
+ * fact: pass a transaction. `appendEvent` is last, so the ordering lock it
+ * takes is held only for the insert. A concurrent identical run that landed
+ * between phase 1 and here wins the cache key; its row is served and nothing
+ * is announced.
+ */
+export async function storeProjection(
+  executor: PlanningExecutor,
+  dependencies: Pick<ProjectionServiceDependencies, 'clock'>,
+  prepared: PreparedProjection,
+  computed: ComputedProjection,
+): Promise<ProjectionOutcome> {
+  const { assembled, derived, scenario } = prepared;
   const stored = await insertRun(executor, {
     id: newId(),
-    userId: request.userId,
+    userId: prepared.userId,
     scenarioId: scenario.id,
     scenarioKind: scenario.kind,
-    method: request.method,
-    cacheKey,
-    seed,
-    engineVersion,
-    assumptionsVersion: resolved.version,
-    assumptionsOverrides,
+    method: prepared.method,
+    cacheKey: prepared.cacheKey,
+    seed: prepared.seed,
+    engineVersion: prepared.engineVersion,
+    assumptionsVersion: prepared.resolved.version,
+    assumptionsOverrides: prepared.assumptionsOverrides,
     inputDigest: assembled.digest,
     input: assembled.document,
-    paths,
+    paths: prepared.paths,
     asOfDate: derived.balances.asOfDate,
     balancesSealed: derived.balances.sealed,
     currency: assembled.plan.currency,
-    successProbability,
-    durationMs,
-    percentiles,
+    successProbability: computed.successProbability,
+    durationMs: computed.durationMs,
+    percentiles: [...computed.percentiles],
     createdAt: dependencies.clock.now(),
   });
   if (!stored.inserted) {
@@ -759,7 +998,7 @@ export async function runProjection(
     return {
       status: 'cached',
       run: stored.run,
-      percentiles: await percentilesOf(executor, request.userId, stored.run.id),
+      percentiles: await percentilesOf(executor, prepared.userId, stored.run.id),
     };
   }
 
@@ -781,10 +1020,10 @@ export async function runProjection(
         durationMs: run.durationMs,
       },
       {
-        userId: request.userId,
+        userId: prepared.userId,
         aggregateId: run.id,
-        correlationId: request.correlationId,
-        causationId: request.causationId ?? null,
+        correlationId: prepared.correlationId,
+        causationId: prepared.causationId,
       },
       dependencies.clock,
     ),
@@ -792,8 +1031,25 @@ export async function runProjection(
   return {
     status: 'computed',
     run,
-    percentiles: await percentilesOf(executor, request.userId, run.id),
+    percentiles: await percentilesOf(executor, prepared.userId, run.id),
   };
+}
+
+/**
+ * Serve or compute one scenario's projection: `prepareProjection`, then
+ * `computeProjection`, then `storeProjection`, over one executor — the routes'
+ * shape. A caller that must not hold a transaction across the engine (the
+ * nightly refresh, `jobs.ts`) runs the three phases itself.
+ */
+export async function runProjection(
+  executor: PlanningExecutor,
+  dependencies: ProjectionServiceDependencies,
+  request: ProjectionRequest,
+): Promise<ProjectionOutcome> {
+  const prepared = await prepareProjection(executor, dependencies, request);
+  if (prepared.status !== 'ready') return prepared;
+  const computed = await computeProjection(dependencies, prepared);
+  return storeProjection(executor, dependencies, prepared, computed);
 }
 
 /**
@@ -822,17 +1078,10 @@ export async function readProjection(
     throw new ProjectionRefused('planning.projection_not_found', `no projection ${input.runId}`);
   }
   const percentiles = await percentilesOf(executor, input.userId, run.id);
-  if (!registry.has(run.assumptionsVersion)) {
-    return {
-      run,
-      percentiles,
-      staleness: {
-        reason: 'assumptions_version_retired',
-        assumptionsVersion: run.assumptionsVersion,
-        known: [...registry.keys()],
-      },
-    };
-  }
+  // Not held at all, or held only as a frozen predecessor (WP 5.5): either way no run is computed
+  // on it any more, and this one reads back stale with its version named.
+  const retired = retiredStaleness(run.assumptionsVersion, registry);
+  if (retired !== null) return { run, percentiles, staleness: retired };
   let current: { readonly version: string; readonly overrides: Readonly<Record<string, string>> };
   try {
     const resolved = await resolveForUser(
@@ -949,6 +1198,32 @@ export async function compareScenarios(
 // ---------------------------------------------------------------------------
 
 export type RefreshOutcome = { readonly status: 'no_baseline' } | ProjectionOutcome;
+
+/**
+ * Phase 1 of the nightly refresh: find the baseline and prepare its run, the
+ * method chosen exactly as `refreshBaseline` chooses it. `jobs.ts` runs this in
+ * a read transaction, the engine outside any, and `storeProjection` in a write
+ * transaction.
+ */
+export async function prepareBaselineRefresh(
+  executor: PlanningExecutor,
+  dependencies: ProjectionServiceDependencies,
+  request: {
+    readonly userId: string;
+    readonly correlationId: string;
+    readonly paths?: number;
+  },
+): Promise<RefreshOutcome | PreparedProjection> {
+  const baseline = await getBaseline(executor, request.userId);
+  if (baseline === null) return { status: 'no_baseline' };
+  return prepareProjection(executor, dependencies, {
+    userId: request.userId,
+    scenarioId: baseline.id,
+    method: dependencies.monteCarlo === null ? 'deterministic' : 'monte_carlo',
+    ...(request.paths === undefined ? {} : { paths: request.paths }),
+    correlationId: request.correlationId,
+  });
+}
 
 /**
  * Recompute (or re-serve) the baseline, and nothing else — the dispatch's rule

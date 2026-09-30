@@ -212,8 +212,28 @@ export const ASSUMPTIONS_FILE = {
       'the bootstrap engine derives correlations empirically. ρ(crypto, US equity) = 0.40 per 07 §6.4.',
     asOf: MEMO,
     note:
-      'REIT has a correlation row but no expected return or volatility in 07 §5.5, so no REIT allocation ' +
-      'can be projected from this file until one is added.',
+      'REIT has a correlation row but no expected return or volatility in 07 §5.5. The engines have no ' +
+      'asset-class input, so a REIT holding is never refused and never given its own μ/σ: the net-worth ' +
+      "snapshot sums it into its account's tax bucket and it is projected at that bucket's glidepath " +
+      'equity/bond blend, like every other holding. The REIT row enters only the lognormal engine’s ' +
+      'Cholesky factorisation, as part of the positive-definiteness check, and never moves a draw ' +
+      '(decided and pinned by WP 5.5).',
+  },
+
+  // WP 5.5: 07 §5.6's `initial_wr`, moved here from the composition root's
+  // `GUARDRAIL_REFERENCE_RATE` literal. Overridable (07 marks it user-settable);
+  // adding it moved this file's version, and the previous version is retained,
+  // frozen, in `./assumptions-retained.ts` so overrides saved against it resolve.
+  withdrawalPolicy: {
+    guardrailReferenceRate: plainRate(
+      '0.045',
+      '07 §5.6 — initial_wr = 0.045 (user-settable): the initial withdrawal rate the Guyton-Klinger ' +
+        'guardrail band is drawn around (07 R7: the band is this rate times the guardrail multiples, ' +
+        "WP 4.4's GUYTON_KLINGER). Held until WP 5.5 as a literal in the composition root",
+      MEMO,
+      'A reference for reading this year’s withdrawal rate against, not an input to any projection: ' +
+        'the engine’s guardrails move spending from the plan’s own first-year rate.',
+    ),
   },
 
   socialSecurityStress: {

@@ -16,25 +16,37 @@ import { parseDateOnly } from '@core/kernel';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { ASSUMPTIONS_FILE } from '../data/assumptions.ts';
+import { RETAINED_ASSUMPTIONS_FILES } from '../data/assumptions-retained.ts';
 import {
   AssumptionOverrideRefused,
   AssumptionsYearUnavailable,
   CITED_KINDS,
   DECIMAL_PATTERN,
   OVERRIDABLE_PATHS,
+  UnknownAssumptionsVersion,
   applyOverrides,
   assumptionsVersion,
   canonicalDecimal,
   compareDecimal,
+  computableVersions,
+  currentRegistry,
   diffOverrides,
+  guardrailReferenceRate,
   hashAssumptionsFile,
   isAssumptionsRefusal,
+  isRetainedVersion,
   loadAssumptions,
   parseAssumptions,
+  resolveOverrides,
+  retainedAssumptions,
   taxYear,
   type Assumptions,
   type OverridablePath,
 } from '../src/assumptions.ts';
+import { toMonteCarloJob } from '../src/engine/worker-host.ts';
+import { runMonteCarlo, serialiseResult } from '../src/engine/montecarlo.ts';
+import { retiredStaleness } from '../src/projection-service.ts';
+import { BASE, usd } from './engine/support.ts';
 
 const PACKAGE_ROOT = resolve(import.meta.dirname, '..');
 const REPO_ROOT = resolve(PACKAGE_ROOT, '..', '..', '..');
@@ -467,6 +479,152 @@ describe('WP 4.2 — the file is well-formed beyond citation', () => {
     );
     expect(refused({ 'capitalMarket.usEquity.volatility': '-0.1' }).code).toBe(
       'planning.assumptions_value_invalid',
+    );
+  });
+});
+
+describe('WP 5.5 — the guardrail reference rate, the retained predecessor, REIT', () => {
+  const GUARDRAIL = 'withdrawalPolicy.guardrailReferenceRate';
+  const PREDECESSOR = 'sha256:d294715e0094c8862c84c278a457656bb6bb68915feb61087d3d7422442ed67f';
+
+  it('the guardrail reference rate is a cited, overridable assumption', () => {
+    const assumptions = loadAssumptions();
+    // Cited, in the file, where the walk finds it: a source naming 07 §5.6 and an as_of date.
+    const node = nodeByPath(ASSUMPTIONS_FILE, `$.${GUARDRAIL}`);
+    expect(node['kind']).toBe('rate');
+    expect(node['value']).toBe('0.045');
+    expect(String(node['source'])).toContain('07 §5.6');
+    expect(node['asOf']).toMatch(ISO_DATE);
+    expect(citationFindings(ASSUMPTIONS_FILE)).toEqual([]);
+    // The accessor the composition root reads instead of its literal.
+    expect(guardrailReferenceRate(assumptions)).toEqual(
+      assumptions.file.withdrawalPolicy?.guardrailReferenceRate,
+    );
+    expect(guardrailReferenceRate(assumptions).value).toBe('0.045');
+
+    // Overridable: a delta, applied with the holder as its source, the default kept beside it.
+    expect(OVERRIDABLE_PATHS as readonly string[]).toContain(GUARDRAIL);
+    const delta = diffOverrides(assumptions, { [GUARDRAIL]: '0.04' });
+    expect(delta).toEqual({ [GUARDRAIL]: '0.04' });
+    const resolved = applyOverrides(assumptions, delta, parseDateOnly('2026-09-30'));
+    const overridden = guardrailReferenceRate(resolved);
+    expect(overridden.value).toBe('0.04');
+    expect(overridden.source).toContain('Your override (the default is 0.045');
+    expect(resolved.overrides.map((override) => override.path)).toEqual([GUARDRAIL]);
+    // Restating the default stores nothing; an out-of-range rate is refused.
+    expect(diffOverrides(assumptions, { [GUARDRAIL]: '0.0450' })).toEqual({});
+    expect(() => diffOverrides(assumptions, { [GUARDRAIL]: '1.5' })).toThrow(
+      AssumptionOverrideRefused,
+    );
+    // And it moved the version: a file without it is not this file.
+    const without = structuredClone(ASSUMPTIONS_FILE) as Record<string, unknown>;
+    delete without['withdrawalPolicy'];
+    expect(hashAssumptionsFile(without)).not.toBe(assumptionsVersion());
+    expect(() => parseAssumptions(without)).toThrow(/withdrawalPolicy\.guardrailReferenceRate/);
+  });
+
+  it('an override stored against the previous file version still resolves and its runs read stale with that version named', () => {
+    const registry = currentRegistry();
+    const current = assumptionsVersion();
+    expect(current).not.toBe(PREDECESSOR);
+    // The predecessor is held, frozen, and still hashes to the version every pre-WP 5.5 override
+    // and run was saved against — the value WP 4.2's evidence §4 recorded.
+    expect(RETAINED_ASSUMPTIONS_FILES.map((entry) => entry.version)).toEqual([PREDECESSOR]);
+    expect(hashAssumptionsFile(RETAINED_ASSUMPTIONS_FILES[0]?.file)).toBe(PREDECESSOR);
+    expect(retainedAssumptions().map((entry) => entry.version)).toEqual([PREDECESSOR]);
+    expect(isRetainedVersion(registry, PREDECESSOR)).toBe(true);
+    expect(computableVersions(registry)).toEqual([current]);
+
+    // An override saved last week, against the predecessor, as `plan_assumptions` holds it.
+    const stored = {
+      assumptionsVersion: PREDECESSOR,
+      deltas: { 'capitalMarket.usEquity.expectedReturn': '0.06' },
+    };
+    const resolved = resolveOverrides(stored, parseDateOnly('2026-09-29'));
+    expect(resolved.version).toBe(PREDECESSOR);
+    expect(resolved.file.capitalMarket.usEquity.expectedReturn.value).toBe('0.06');
+    expect(resolved.overrides.map((override) => [override.path, override.value])).toEqual([
+      ['capitalMarket.usEquity.expectedReturn', '0.06'],
+    ]);
+    // The predecessor predates the guardrail node; its runs used the literal, recorded beside it.
+    expect(resolved.file.withdrawalPolicy).toBeUndefined();
+    expect(guardrailReferenceRate(resolved).value).toBe('0.045');
+    expect(guardrailReferenceRate(resolved).source).toContain('GUARDRAIL_REFERENCE_RATE');
+    // No override of a path the predecessor never had can be resolved against it.
+    expect(() =>
+      resolveOverrides(
+        { assumptionsVersion: PREDECESSOR, deltas: { [GUARDRAIL]: '0.04' } },
+        parseDateOnly('2026-09-29'),
+      ),
+    ).toThrow(AssumptionOverrideRefused);
+
+    // Its runs read stale, the predecessor named — the decision readProjection and
+    // prepareProjection both make — and a current-version run does not.
+    expect(retiredStaleness(PREDECESSOR, registry)).toEqual({
+      reason: 'assumptions_version_retired',
+      assumptionsVersion: PREDECESSOR,
+      known: [current],
+    });
+    expect(retiredStaleness(current, registry)).toBeNull();
+
+    // A version this build never held still refuses by name, exactly as before WP 5.5.
+    let refusal: unknown;
+    try {
+      resolveOverrides(
+        { assumptionsVersion: `sha256:${'0'.repeat(64)}`, deltas: {} },
+        parseDateOnly('2026-09-29'),
+      );
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(UnknownAssumptionsVersion);
+    expect((refusal as UnknownAssumptionsVersion).known).toEqual([current]);
+  });
+
+  it("REIT is never refused and never given its own draw: a holding is projected at its bucket's blend", () => {
+    // Decided (05 §2's REIT row): the engines take tax buckets with glidepaths, not asset classes,
+    // so a REIT position is summed into its account's bucket and projected at that bucket's
+    // equity/bond blend. The REIT correlation row enters only the lognormal Cholesky's
+    // positive-definiteness check. Pinned: moving every REIT correlation (keeping the matrix
+    // positive definite) changes not one byte of a lognormal run, crypto held.
+    const assumptions = loadAssumptions();
+    expect(Object.keys(assumptions.file.capitalMarket)).not.toContain('reit');
+    expect(assumptions.file.correlation.value.assets).toContain('REIT');
+    expect(assumptions.file.correlation.note).toContain('never moves a draw');
+
+    const plan = {
+      ...BASE,
+      buckets: [
+        {
+          bucket: 'TAXABLE' as const,
+          startingBalance: usd('400000'),
+          annualContribution: usd('12000'),
+        },
+      ],
+      contributionGrowth: 'flat' as const,
+      glidepath: { kind: 'static' as const, equityShare: '0.6' },
+      annualSpending: usd('50000'),
+    };
+    const bytesWith = (file: typeof assumptions.file) => {
+      const job = toMonteCarloJob({
+        plan,
+        assumptions: { version: assumptions.version, file },
+        seed: 20_260_930n,
+        paths: 400,
+        engine: 'lognormal',
+        cryptoHolding: usd('20000'),
+      });
+      return Buffer.from(serialiseResult(runMonteCarlo(job))).toString('base64');
+    };
+    const reit = assumptions.file.correlation.value.assets.indexOf('REIT');
+    const moved = structuredClone(assumptions.file) as {
+      correlation: { value: { matrix: string[][] } };
+    };
+    moved.correlation.value.matrix = moved.correlation.value.matrix.map((row, i) =>
+      row.map((cell, j) => (i === j ? cell : i === reit || j === reit ? '0.10' : cell)),
+    );
+    expect(bytesWith(moved as unknown as typeof assumptions.file)).toBe(
+      bytesWith(assumptions.file),
     );
   });
 });

@@ -55,6 +55,7 @@ import {
   type AssumptionsVersion,
 } from '../assumptions.ts';
 import type { EngineGlidepath } from './glidepath.ts';
+import type { EngineCorrelation, EngineCrypto } from './montecarlo.ts';
 import { GUYTON_KLINGER, decisionNames, guytonKlingerRules } from './guardrails.ts';
 import type { EnginePensionCola } from './pension.ts';
 import type { EngineSocialSecurity, SocialSecurityRules } from './social-security.ts';
@@ -64,6 +65,7 @@ import {
   ROTH,
   TAXABLE,
   TAX_DEFERRED,
+  type EngineOneOff,
   type EnginePlan,
   type PathResult,
   type PreparedPlan,
@@ -303,6 +305,19 @@ export interface IncomePlan {
   readonly annual: Money;
 }
 
+/**
+ * A dated one-off flow (WP 5.5): a stored life event that leaves — a home
+ * purchase, college, a sabbatical — or the solver's "a one-off this year".
+ * Signed, **today's dollars** (the projection's basis, like every life event):
+ * positive arrives, negative leaves. It lands in the year of the holder's age
+ * on `occursOn`; `toEnginePlan` converts both halves here, at the one crossing.
+ */
+export interface OneOffPlan {
+  readonly name: string;
+  readonly occursOn: DateOnly;
+  readonly amount: Money;
+}
+
 export type WithdrawalPolicyChoice =
   | { readonly kind: 'constant_real' }
   | {
@@ -337,6 +352,11 @@ export interface ProjectionPlan {
   readonly returnShift?: string;
   /** Where a solved additional contribution goes. Default TAXABLE. */
   readonly extraContributionBucket?: ProjectionBucket;
+  /**
+   * Dated one-off flows (WP 5.5). Absent and empty are the same plan; the
+   * projection service fills it with the holder's stored outflows.
+   */
+  readonly oneOffs?: readonly OneOffPlan[];
 }
 
 /** What the engine needs of WP 4.2: a file and its version (an `Assumptions` or a `ResolvedAssumptions`). */
@@ -604,6 +624,7 @@ export function toEnginePlan(plan: ProjectionPlan, assumptions: AssumptionsLike)
 
   const birthYear = DateOnly.year(plan.birthDate);
   const socialSecurity = socialSecurityOf(plan, code, birthYear);
+  const oneOffs = oneOffsOf(plan, code, startAge);
 
   return Object.freeze({
     startAge,
@@ -652,6 +673,36 @@ export function toEnginePlan(plan: ProjectionPlan, assumptions: AssumptionsLike)
       };
     }),
     extraBucket: SLOT[plan.extraContributionBucket ?? 'TAXABLE'],
+    ...(oneOffs.length === 0 ? {} : { oneOffs }),
+  });
+}
+
+/**
+ * The plan's dated one-offs in engine units: each date through `ageOn`, each
+ * amount through `toEngineAmount` — the one crossing, in both halves. A flow
+ * dated before the plan's start (its effect is already in the balances) or in
+ * or after its last year is refused, never clamped: the projection service has
+ * already set those aside by name, so one arriving here is a caller's bug.
+ */
+function oneOffsOf(plan: ProjectionPlan, code: CurrencyCode, startAge: number): EngineOneOff[] {
+  return (plan.oneOffs ?? []).map((flow, index) => {
+    const field = `oneOffs.${String(index)}`;
+    if (DateOnly.isBefore(flow.occursOn, plan.asOf)) {
+      throw new ProjectionInputRefused(
+        'planning.projection_ages_invalid',
+        `${field}.occursOn`,
+        `${flow.occursOn} is before the plan starts (${plan.asOf}); its effect is in the balances`,
+      );
+    }
+    const age = ageOn(plan.birthDate, flow.occursOn);
+    if (age < startAge || age >= plan.planEndAge) {
+      throw new ProjectionInputRefused(
+        'planning.projection_ages_invalid',
+        `${field}.occursOn`,
+        `lands at age ${String(age)}, outside the plan's ages ${String(startAge)}..${String(plan.planEndAge - 1)}`,
+      );
+    }
+    return Object.freeze({ age, real: toEngineAmount(flow.amount, code, `${field}.amount`) });
   });
 }
 
@@ -855,4 +906,100 @@ export function toEngineCeiling(maxMonthly: Money, code: CurrencyCode): number {
 /** Engine dollars → Money for the solver's diagnostics (the gap at the ceiling). */
 export function solverMoney(dollars: number, code: CurrencyCode, field: string): Money {
   return fromEngineAmount(dollars, code, field);
+}
+
+/** Money → whole minor units' worth of engine dollars, refused negative. The solver's action. */
+export function toEngineAction(action: Money, code: CurrencyCode, field: string): number {
+  return nonNegative(toEngineAmount(action, code, field), field);
+}
+
+/**
+ * Whole months of `perYear` that `funded` pays for — ⌊12 × funded ÷ perYear⌋ —
+ * computed in **exact bigint minor units from the two Money figures shown**, so
+ * anyone can check it from the numbers on the screen (the gate computes one by
+ * hand). `null` when there is no spending to divide by. Negative when `funded`
+ * is: a flow that costs retirement months says so.
+ */
+export function wholeMonthsFunded(funded: Money, perYear: Money): number | null {
+  if (funded.currency !== perYear.currency) {
+    throw new ProjectionInputRefused(
+      'planning.projection_currency_mismatch',
+      'monthsOfSpending',
+      new CurrencyMismatchError(perYear.currency, funded.currency).message,
+    );
+  }
+  if (perYear.minor <= 0n) return null;
+  const twelfths = funded.minor * 12n;
+  // Floor toward −∞, so a small loss is −1 month rather than 0.
+  let months = twelfths / perYear.minor;
+  if (twelfths % perYear.minor !== 0n && twelfths < 0n) months -= 1n;
+  return Number(months);
+}
+
+// ---------------------------------------------------------------------------
+// The Monte Carlo's market parameters (WP 5.5; wp4.5 §10 item 6)
+// ---------------------------------------------------------------------------
+
+/** What the Monte Carlo reads from the assumptions file, in engine units. */
+export interface MonteCarloMarket {
+  readonly volatility: {
+    readonly equity: number;
+    readonly bond: number;
+    readonly inflation: number;
+  };
+  readonly correlation: EngineCorrelation;
+  /** Crypto's distribution parameters; the holding is the request's, not the file's. */
+  readonly crypto: Omit<EngineCrypto, 'holding'>;
+  /** 07 §6.4 treatment 1's disclaimer, verbatim — shown wherever a crypto assumption is. */
+  readonly cryptoDisclaimer: string;
+}
+
+/**
+ * The Monte Carlo's volatilities, correlation matrix and crypto parameters,
+ * read once from the (resolved) assumptions file through `toEngineRate`.
+ *
+ * Here because this is the one file under `src/engine/` that may read a cited
+ * node's `value` — WP 4.4's interior grep bans the spelling everywhere else,
+ * and WP 4.5 had reached it from `worker-host.ts` through a `CITED = 'value'`
+ * string accessor (a declared evasion, wp4.5 §10 item 6). That accessor is
+ * gone; this is its proper home.
+ */
+export function monteCarloMarketFrom(assumptions: AssumptionsLike): MonteCarloMarket {
+  const market = assumptions.file.capitalMarket;
+  const correlation = assumptions.file.correlation.value;
+  return {
+    volatility: {
+      equity: toEngineRate(market.usEquity.volatility.value, 'usEquity.volatility'),
+      bond: toEngineRate(market.usAggregateBonds.volatility.value, 'usAggregateBonds.volatility'),
+      inflation: toEngineRate(market.inflation.volatility.value, 'inflation.volatility'),
+    },
+    correlation: {
+      assets: [...correlation.assets],
+      matrix: correlation.matrix.map((row, i) =>
+        row.map((cell, j) => toEngineRate(cell, `correlation[${String(i)}][${String(j)}]`)),
+      ),
+    },
+    crypto: {
+      expectedNominal: toEngineRate(market.crypto.expectedReturn.value, 'crypto.expectedReturn'),
+      volatility: toEngineRate(market.crypto.volatility.value, 'crypto.volatility'),
+      degreesOfFreedom: toEngineRate(
+        market.crypto.degreesOfFreedom.value,
+        'crypto.degreesOfFreedom',
+      ),
+    },
+    cryptoDisclaimer: market.crypto.disclaimer.value,
+  };
+}
+
+/**
+ * Crypto held today → engine dollars: currency-checked, exact to 2^53, refused
+ * negative. `null` or absent is no crypto. (WP 4.5 borrowed `toEngineTarget`
+ * for this; the crossing now says what it is.)
+ */
+export function toEngineCryptoHolding(
+  holding: Money | null | undefined,
+  code: CurrencyCode,
+): number {
+  if (holding === undefined || holding === null) return 0;
+  return nonNegative(toEngineAmount(holding, code, 'cryptoHolding'), 'cryptoHolding');
 }
