@@ -2,7 +2,7 @@
 
 _The one page to read for "where are we". Updated by the orchestrator at every phase boundary and every
 gate verdict; the dated detail stays in [`01-execution-log.md`](01-execution-log.md). Rung definitions
-are the master plan's §2.3, quoted verbatim in the first column. Last updated 2026-09-28 22:40 EDT._
+are the master plan's §2.3, quoted verbatim in the first column. Last updated 2026-09-30 02:40 EDT._
 
 ## The ladder
 
@@ -42,14 +42,14 @@ Every one of these is carried at every gate and cannot be closed by seeds or fix
 | 2     | 2026-09-16   | 2026-09-21   | GO-WITH-CONDITIONS → closed                       |                                                                                 |
 | 3     | 2026-09-21   | 2026-09-26   | GO-WITH-CONDITIONS → all 16 closed in Phase 4     | one weekly-limit pause (~32 h)                                                  |
 | 4     | 2026-09-26   | 2026-09-28   | GO-WITH-CONDITIONS (one HIGH) → 16 conditions open | 11 session-limit kills; roughly a third of wall-clock spent recovering from them; the gate took three finishers |
-| 5     | 2026-09-28   | —            | —                                                 | Wave A open: the shared-file batch and the HIGH's carry-over first, the two Opus security packages next |
+| 5     | 2026-09-28   | —            | —                                                 | Wave A landed 2026-09-30 (run control, the local-model sandbox measured on this host at 4.7 GiB and 4.5 tokens/s, every Phase 4 condition closed incl. the HIGH); Wave B in flight; two session-limit kills so far, both recovered by snapshot-and-relaunch |
 
 The single largest drag is the account's session limit, which takes every in-flight agent at once every few hours. The mitigations that hold are in the orchestration memory: report-before-verify, finish cheap tails in the orchestrator, snapshot-and-relaunch with a state brief, waves of two where a third agent would drain the window. Raising the limit is the one lever only Chris has.
 
 ## Next three moves
 
-1. Wave A lands: the shared-file batch (W-A0) and WP 5.13a (G4-1, G4-2, G4-23) now; then WP 5.1 run control and WP 5.2 local model + sandbox (two Opus agents by design); then 5.13b (C-3–C-6, C-13) in the third slot.
-2. Wave B (5.5 planning solver, 5.7 anomaly + fee hunter with contract 1.4.0 and migration 0029, 5.9 feedback loop) after the W-A wiring batch.
+1. Wave B lands (5.5 planning solver, 5.7 anomaly + fee hunter with contract 1.4.0 and migration 0029, 5.9 feedback loop), then the W-B wiring batch.
+2. Wave C: 5.3 the narrator (the riskiest package in the phase), 5.6 the Weekly Brief, 5.8 the health score; then Wave D with the red-team corpus and the REST surface.
 3. Between waves: the Caddy CVE snoozes expire 2026-10-10; if upstream is still unfixed, build Caddy from source with a current Go toolchain.
 
 Decisions that now gate work (all have stated defaults the work proceeds on): the merchant-pseudonym swap before WP 5.1 lands (Phase 5 plan §6 Q5, default yes); goal/questionnaire/fork screens vs Phase 9 (gate C-10); which local model and on which host (§6 Q1–Q2, default a 7–8B Apache-2.0 instruct model at 4-bit on this host); `sudo just harden-secrets` on this host (gate C-16).
