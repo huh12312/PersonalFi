@@ -3594,6 +3594,34 @@ const WALLET_DESCRIPTOR_SEAL_REF = {
   column: 'descriptor_sealed',
 } as const;
 
+/**
+ * WP 5.13b carry C-4 (G4-8, `docs/evidence/phase-4/gate-security-review.md`
+ * §2.5, §3.17): a `SecretBox`, or a way to get one once it exists.
+ *
+ * `createWalletRpcRuntime`'s own doc comment on its `secretBox` option
+ * already named the reason this exists: `app.ts` builds this runtime before
+ * a `SecretBox` exists at all (it is lazy behind `security.requireSecretBox()`,
+ * which throws until the application is unlocked), so a call site there
+ * cannot hand over a *value* — only a way to ask for one later, at the moment
+ * a descriptor is actually about to be written or read. A thunk is that: it
+ * costs nothing to hold unresolved, and every store operation below resolves
+ * it fresh rather than once at construction, so a store built before the
+ * application unlocks starts sealing the moment it does, with no restart and
+ * no second `createWalletRpcRuntime` call.
+ *
+ * `worker.ts` needs none of this — a `SecretBox` is already in scope by the
+ * time it builds this runtime — and passes a concrete value, which resolves
+ * to itself below.
+ */
+export type WalletDescriptorSecretBox = SecretBox | (() => SecretBox | undefined);
+
+function resolveWalletSecretBox(
+  value: WalletDescriptorSecretBox | undefined,
+): SecretBox | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === 'function' ? value() : value;
+}
+
 function sealWalletDescriptor(
   secretBox: SecretBox,
   rowId: string,
@@ -3646,7 +3674,7 @@ async function walletDescriptorOf(
 
 export function createWalletAddressStore(
   database: Database,
-  secretBox?: SecretBox,
+  secretBox?: WalletDescriptorSecretBox,
 ): DurableWalletAddressStore {
   /** Staged by `connect()`, drained by `persistPending`. Never a cache: `get` does not read it. */
   const pending = new Map<string, WalletAddressRecord>();
@@ -3689,10 +3717,14 @@ export function createWalletAddressStore(
     // `createWalletRpcRuntime`'s `secretBox` option for why that is common
     // today. Never both columns for the same write: a plaintext `descriptor`
     // sitting beside its own sealed copy would be "sealed" in name only.
+    // Resolved fresh on every write (`resolveWalletSecretBox`), not once at
+    // construction: a `WalletDescriptorSecretBox` thunk lets a caller built
+    // before the application unlocks start sealing the moment it does.
+    const resolvedSecretBox = resolveWalletSecretBox(secretBox);
     const sealed =
-      secretBox === undefined
+      resolvedSecretBox === undefined
         ? null
-        : Buffer.from(await sealWalletDescriptor(secretBox, id, record.descriptor));
+        : Buffer.from(await sealWalletDescriptor(resolvedSecretBox, id, record.descriptor));
     const descriptorColumn = sealed === null ? record.descriptor : null;
 
     if (existing.rows[0] !== undefined) {
@@ -3752,7 +3784,7 @@ export function createWalletAddressStore(
       return {
         providerConnectionId,
         chain: row.chain,
-        descriptor: await walletDescriptorOf(row, secretBox),
+        descriptor: await walletDescriptorOf(row, resolveWalletSecretBox(secretBox)),
         derivationScheme: row.derivation_scheme,
         label: row.label,
         scanState: {
@@ -3807,6 +3839,55 @@ export function createWalletAddressStore(
       `);
     },
   };
+}
+
+/**
+ * WP 5.13b carry C-4 (G4-8): re-seal every `wallet_addresses` row a
+ * pre-migration-0027 install (or an install that linked before this WP's
+ * `worker.ts`/`createWalletRpcRuntime` wiring landed) still carries in the
+ * clear.
+ *
+ * Idempotent by construction — `WHERE descriptor IS NOT NULL` is exactly the
+ * set this function shrinks to zero, so a second call touches nothing — and
+ * safe to run against a live table: each row is sealed and cleared one at a
+ * time rather than in one large transaction, so a long-running pass never
+ * holds a lock across every row, and a crash partway through leaves the
+ * remaining plaintext rows exactly as findable (by the same `WHERE`) as
+ * before it started.
+ *
+ * **Built, and deliberately not wired to run anywhere.** The two honest
+ * places to call this — once at boot (`app.ts`/`worker.ts`, before either
+ * process serves a request or claims a job) or from a documented one-shot
+ * operator command (`RUNBOOK.md`, the same shape WP 5.13a's "Monte Carlo
+ * return series" section uses) — are both outside every file this work
+ * package may touch (`app.ts` and `RUNBOOK.md` are explicitly withheld;
+ * `worker.ts` is granted for exactly one line, the `secretBox` this WP
+ * already added to its `createWalletRpcRuntime` call, and "nothing else").
+ * No migration re-seals data (0027's own header: sealing is data, not
+ * schema, and 0034 is the last number this phase has spent) — this function
+ * *is* the mechanism a migration would otherwise have had to duplicate in
+ * SQL. See `docs/evidence/phase-5/wp5.13-carry-overs.md` §4.2 "Needs the
+ * orchestrator" for the exact call site this still needs.
+ */
+export async function resealPlaintextWalletDescriptors(
+  database: Database,
+  secretBox: SecretBox,
+): Promise<number> {
+  const rows = await database.execute<{ id: string; descriptor: string }>(sql`
+    SELECT id, descriptor FROM wallet_addresses
+     WHERE descriptor IS NOT NULL AND descriptor_sealed IS NULL
+  `);
+  let resealed = 0;
+  for (const row of rows.rows) {
+    const sealed = Buffer.from(await sealWalletDescriptor(secretBox, row.id, row.descriptor));
+    await database.execute(sql`
+      UPDATE wallet_addresses
+         SET descriptor_sealed = ${sealed}, descriptor = NULL, updated_at = now()
+       WHERE id = ${row.id}::uuid AND descriptor IS NOT NULL AND descriptor_sealed IS NULL
+    `);
+    resealed += 1;
+  }
+  return resealed;
 }
 
 /**
@@ -3898,25 +3979,34 @@ export function createWalletRpcRuntime(options: {
   /** `config.secrets.etherscan_api_key`. Absent is an ordinary install (BTC-only). */
   readonly etherscanApiKey?: Redacted<string> | undefined;
   /**
-   * WP 4.12c, C-13. When supplied, every `descriptor` this store writes from
-   * now on is sealed (`WALLET_DESCRIPTOR_SEAL_REF`, migration 0027) rather
-   * than written in the clear, and a row already sealed by a previous write
-   * is read back through it.
+   * WP 4.12c, C-13, wired by WP 5.13b (C-4, G4-8). When supplied, every
+   * `descriptor` this store writes from now on is sealed
+   * (`WALLET_DESCRIPTOR_SEAL_REF`, migration 0027) rather than written in the
+   * clear, and a row already sealed by a previous write is read back through
+   * it. Absent, this store's behaviour is unchanged from before 0027:
+   * plaintext `descriptor`, `descriptor_sealed` always NULL.
    *
-   * **Optional, and neither call site passes it today.** `app.ts` builds
-   * this runtime before a `SecretBox` exists at all (it is lazy behind
-   * `security.requireSecretBox()`, later, inside `deps.connections()`), and
-   * `worker.ts` builds it inside `resolveModules` where a `SecretBox` *is*
-   * already in scope — wiring the latter is one line, wiring the former
-   * needs the store's own seal calls to stay lazy the way `get`/`put`
-   * already are, which is why this option takes a value and not (yet) a
-   * thunk. Both are one-line, precisely specified edits outside this work
-   * package's granted files; see `docs/evidence/phase-4/
-   * wp4.12c-gate-conditions.md` §1 "For the orchestrator". Absent, this
-   * store's behaviour is unchanged from before 0027: plaintext `descriptor`,
-   * `descriptor_sealed` always NULL.
+   * Takes a `WalletDescriptorSecretBox` — a concrete `SecretBox` **or a
+   * thunk** — resolved fresh on every read and every write
+   * (`resolveWalletSecretBox`), precisely so a caller that has no
+   * `SecretBox` yet at the moment it builds this runtime can still hand one
+   * over. `worker.ts` passes a concrete value (a `SecretBox` is already in
+   * scope where it builds this runtime, inside `resolveModules`).
+   *
+   * `app.ts` still does not pass one: it builds this runtime before the
+   * application is unlocked (`security.requireSecretBox()` throws until
+   * then), and the *composition-root* line that would pass a thunk —
+   * `secretBox: () => { try { return security.requireSecretBox(); } catch {
+   * return undefined; } }` at the `createWalletRpcRuntime` call in `app.ts`
+   * — is outside every file this work package may touch (`app.ts` is
+   * explicitly withheld; see `docs/evidence/phase-5/wp5.13-carry-overs.md`
+   * §4.2 "Needs the orchestrator"). `BuildAppOptions.walletRpc` already lets
+   * a caller inject a fully-sealed runtime built this way without touching
+   * `app.ts` at all — see that file's own doc comment and this WP's own
+   * `apps/api/test/db/carry-c4-wallet-seal.test.ts`, which proves the seal
+   * path end to end over real HTTP through exactly that seam.
    */
-  readonly secretBox?: SecretBox;
+  readonly secretBox?: WalletDescriptorSecretBox;
 }): WalletRpcRuntime {
   const transport = createNodeTransport();
   const esploraPolicy = cryptoPolicyFor(ESPLORA_HOST, options.allowedHosts);

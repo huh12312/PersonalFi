@@ -505,6 +505,44 @@ describe.skipIf(NO_DATABASE)('the WP 4.8 plan surface, over a real database', ()
       expect(current).not.toBeNull();
       expect(current?.compositeScore).not.toBe(18); // Bob's own consistent answering, not Alice's
     });
+
+    it("order-independent: Alice answers again, after Bob, so the newest row overall is hers — Bob's GET must still show only Bob's own", async () => {
+      // WP 5.13b carry C-3 (gate-security-review.md §2.2, G4-4): the test
+      // above alone is order-dependent. Alice answered first in this file's
+      // fixed sequence, so "Bob's own answer is the newest row of anyone" was
+      // already true before this test ran, and an unscoped `currentRiskProfile`
+      // read (`ORDER BY answered_at DESC, id DESC LIMIT 1`, no `user_id`
+      // predicate — `goals-store.ts`'s `latestRiskProfile`) would have passed
+      // that test for the wrong reason. This test reverses the direction: it
+      // makes Alice's row the newest **after** Bob's own answer, so an
+      // unscoped read would now surface Alice's score under Bob's GET.
+      const aliceAgain = await h.request({
+        method: 'PUT',
+        url: '/risk-profile',
+        session: h.stale,
+        body: {
+          answers: {
+            'drawdown.stated': 'sell_some',
+            'drawdown.revealed': 'held',
+            'volatility.stated': 'range_narrow',
+            'volatility.revealed': 'stocks_under_20',
+            'risk_identity.stated': 'cautious',
+            'risk_identity.revealed': 'mostly_safe',
+          },
+          horizonYears: 5,
+          liquidityNeed: 'high',
+        },
+      });
+      expectStatus(aliceAgain, 200);
+      const aliceScore = (aliceAgain.json() as { profile: { compositeScore: number } }).profile
+        .compositeScore;
+
+      const bobsView = await h.request({ method: 'GET', url: '/risk-profile', session: bob });
+      expectStatus(bobsView, 200);
+      const current = (bobsView.json() as { current: { compositeScore: number } | null }).current;
+      expect(current).not.toBeNull();
+      expect(current?.compositeScore).not.toBe(aliceScore);
+    });
   });
 
   // -------------------------------------------------------------------

@@ -476,6 +476,16 @@ async function main(): Promise<void> {
                     database,
                     allowedHosts: config.crypto.allowedHosts,
                     etherscanApiKey: config.secrets.etherscan_api_key,
+                    // WP 5.13b carry C-4/G4-8: a `SecretBox` is already in
+                    // scope here (this branch is only reached when
+                    // `secretBox !== null`, line ~439) — every
+                    // `wallet_addresses.descriptor` this store writes from now
+                    // on is sealed (migration 0027, `domain.ts`'s
+                    // `sealWalletDescriptor`) rather than written in the
+                    // clear. See `createWalletRpcRuntime`'s own `secretBox`
+                    // doc comment, which named this exact line as the one it
+                    // was waiting on.
+                    secretBox,
                   }),
                   // WP 3.5, and the N-5 reasoning above applies unchanged: the
                   // worker is the only process that runs a scheduled sync, so

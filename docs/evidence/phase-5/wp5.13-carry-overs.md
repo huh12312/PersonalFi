@@ -388,19 +388,154 @@ migration's committed text.
 
 ---
 
-## 4. C-3–C-6, C-13 (not this session's scope)
+## 4. C-3, C-4, C-5, C-6, C-13 — WP 5.13b
 
-- **C-3** — tests for `balancesDay`/`getBaseline` `user_id` predicates dropped; a contribution
-  cross-user test naming both Alice's goal and contribution; the risk-profile route test made
-  order-independent. **Not started.**
-- **C-4** — C-13 wired (worker's `SecretBox` passed to `createWalletRpcRuntime`; api-path lazy
-  seal; a raw-column custody test; existing plaintext rows re-sealed). **Not started.**
-- **C-5** — route-level tests for C-8/C-9 (`unresolved`, `lastSnapshotFailure`,
-  `POST /net-worth/fx-rates` step-up). **Not started.**
-- **C-6** — the employer-stock-tag-never-inferred test moved to the composition root. **Not
-  started.**
-- **C-13** — a non-retryable leg failure sets the connection's error state; the add-wallet form
-  states the Etherscan requirement. **Not started.**
+**Tree:** same as §0–§3 above, this WP (WP 5.13b) picking up where WP 5.13a's HEAD left off
+(`3432941`). WP 5.1 works in the same tree at the same time in
+`packages/contexts/insights/**`, migration 0028, `apps/api/src/routes/insights.ts`,
+`apps/api/src/reports/export/registry.ts`, `apps/api/test/db/insights-routes.test.ts`,
+`packages/db/test/migrate.test.ts` and RUNBOOK's "Advisor kill switches" section — this WP never
+touches those; confirmed at the start of this session (`git status`) that those files already
+carried WP 5.1's uncommitted changes, none of them touched below. Written incrementally, section
+by section, from 2026-09-29T22:57Z.
+
+No secret value appears anywhere in this section. `docker compose exec … psql` and
+`docker compose logs` are not used from this agent — none of C-3–C-6/C-13's work needs the
+compose stack; every DB-backed test below runs against the dev Postgres at `127.0.0.1:5433`
+through vitest's `*-db` projects, each creating its own scratch database, per `docs/TESTING.md`.
+
+### 4.1 C-3 — cross-user isolation: `balancesDay`, `getBaseline`, the contribution route, risk-profile ordering
+
+**Condition, quoted (gate §6, row C-3; from G4-4, `gate-security-review.md` §2.2):** "Tests that
+fail when `balancesDay`'s (both branches) and `getBaseline`'s `user_id` predicates are dropped;
+a contribution cross-user test that names Alice's goal **and** Alice's contribution; the
+risk-profile route test made order-independent." §2.2's own finding: "`balancesDay` is the
+first — and only — read of `net_worth_daily` on the projection path, and `getBaseline` is the
+first read of the baseline… With either predicate gone, one holder's projection is computed from
+another holder's net-worth breakdown or plan, and **every suite in the tree stays green**." And
+from §2.2's "together" paragraph: "the contribution cross-user tests stayed green, because none
+of them attempts the real attack (Bob naming Alice's goal *and* Alice's contribution)… the
+risk-profile cross-user test is order-dependent (Bob answers after Alice, so 'the newest row of
+anyone' is Bob's own and XU7 cannot go red there)."
+
+**File (new):** `packages/contexts/planning/test/db/carry-c3-cross-user.test.ts` —
+`balancesDay`'s two branches (`asOf === null`: newest sealed day; `asOf` given: that date's
+current revision) and `getBaseline`, each proven with the *other* holder's row planted first
+(Bob's, with a later date / higher revision / earlier insert) so an unscoped read would return
+the wrong holder's data rather than merely "whichever happened to be newest chronologically" —
+the same trap the gate's own risk-profile finding names. Three tests:
+
+- `"getBaseline returns the caller's own baseline, never the other holder's, even though Bob's
+  row was written first"`
+- `"balancesDay(userId, null) returns the caller's own newest sealed day, never a more recent
+  day sealed for another holder"`
+- `"balancesDay(userId, asOf) returns the caller's own revision for that date, never another
+  holder's higher revision of the same date"`
+
+Run alone (`--project planning-db`, dev Postgres): **3 passed (3)**.
+
+**Sabotage, each predicate removed in turn, `packages/contexts/planning/src/projection-store.ts`
+and `packages/contexts/planning/src/scenarios.ts`:**
+
+1. `balancesDay`'s null-`asOf` branch: `WHERE user_id = ${userId}::uuid AND sealed_at IS NOT
+   NULL` → `WHERE sealed_at IS NOT NULL`.
+   ```
+   AssertionError: expected 'EUR' to be 'USD'
+    ❯ test/db/carry-c3-cross-user.test.ts:148:36
+   ```
+   Red (Alice's read returned Bob's more recent, EUR-denominated day). Restored.
+
+2. `balancesDay`'s dated branch: `WHERE user_id = ${userId}::uuid AND as_of_date = ${asOf}::date`
+   → `WHERE as_of_date = ${asOf}::date`.
+   ```
+   AssertionError: expected 'EUR' to be 'USD'
+    ❯ test/db/carry-c3-cross-user.test.ts:158:36
+   ```
+   Red (Alice's read of 2026-09-15 returned Bob's higher-revision row for the same date).
+   Restored.
+
+3. `getBaseline`: `WHERE user_id = ${userId}::uuid AND kind = 'baseline'` → `WHERE kind =
+   'baseline'`.
+   ```
+   AssertionError: expected 'Bob baseline' to be 'Alice baseline'
+    ❯ test/db/carry-c3-cross-user.test.ts:140:33
+   ```
+   Red (Alice's read returned Bob's baseline, planted first). Restored.
+
+All three red on the first try. `git diff --stat packages/contexts/planning/src/scenarios.ts
+packages/contexts/planning/src/projection-store.ts` after every restore: empty. Re-run after the
+third restore: **3 passed (3)**.
+
+**The contribution cross-user test — the real attack, not "predicate 1 with Bob's own
+contribution id".** `apps/api/test/db/plan-routes.test.ts`'s existing "predicate 1"/"predicate 2"
+tests never drive the combination the gate names: Bob's session, Alice's goal id, **and Alice's
+own contribution id**, together. **File (new):**
+`apps/api/test/db/carry-c3-cross-user.test.ts`, one test:
+`"refuses Bob naming Alice's goal AND Alice's own contribution id, together — the real attack,
+not the own-contribution decoy"`. Run alone (`--project api-db`): **1 passed (1)**.
+
+This combination turns out to be defended in *three* independent layers
+(`packages/contexts/planning/src/goals-store.ts`): `findGoal`'s own `user_id` predicate (the
+route's `getGoal` pre-read), `listContributionRows`'s `goal_id … AND user_id` predicate (the
+route's own "owned" membership check, reading through `listContributions`), and
+`deleteContributionRow`'s `id … AND user_id` predicate (the final delete). Dropping any *one*
+of the three alone left the test green — each of the other two still caught the attack — so the
+sabotage record below drops all three together, which is what the gate's own "together" note
+describes ("`getGoal`+`listContributions`+`removeContribution` together → red, **but only
+through the goal tests** — the contribution cross-user tests stayed green"): this new test is
+exactly the one that was missing from that sentence.
+
+**Sabotage, all three predicates dropped together, `goals-store.ts`:**
+
+```
+findGoal:              WHERE id = ${goalId}::uuid AND user_id = ${userId}::uuid
+                     -> WHERE id = ${goalId}::uuid
+listContributionRows:  WHERE goal_id = ${goalId}::uuid AND user_id = ${userId}::uuid
+                     -> WHERE goal_id = ${goalId}::uuid
+deleteContributionRow:  WHERE id = ${contributionId}::uuid AND user_id = ${userId}::uuid
+                     -> WHERE id = ${contributionId}::uuid
+```
+
+```
+AssertionError: expected 200 to be 404
+ ❯ test/db/carry-c3-cross-user.test.ts:91:33
+```
+
+Red (Bob's DELETE against Alice's goal and Alice's own contribution succeeded, 200, instead of
+being refused). All three predicates restored; `git diff --stat
+packages/contexts/planning/src/goals-store.ts` afterward: empty; re-run: **1 passed (1)**.
+
+**The risk-profile route test's order-dependence.** The gate's own words: "`plan-routes.test.ts`'s
+risk-profile cross-user test is order-dependent (Bob answers after Alice, so 'the newest row of
+anyone' is Bob's own and XU7 cannot go red there; the store test catches it)." **File (edited):**
+`apps/api/test/db/plan-routes.test.ts`, a new test appended to the existing `/risk-profile`
+`describe` block — the old `"Bob's GET never shows Alice's profile"` test is left as-is (it still
+asserts real, correct behaviour), and a second test is added that reverses the direction: Alice
+answers a *third* time, **after** Bob's own answer, so the newest row over both holders is now
+Alice's — then asserts Bob's `GET /risk-profile` still shows Bob's own score, not Alice's newer
+one. New test: `"order-independent: Alice answers again, after Bob, so the newest row overall is
+hers — Bob's GET must still show only Bob's own"`. Full suite run alone (`--project api-db`):
+**35 passed (35)** (34 before this WP, +1).
+
+**Sabotage:** `packages/contexts/planning/src/goals-store.ts`'s `latestRiskProfile` (the function
+`currentRiskProfile` delegates to, called by the route's `GET /risk-profile`): `WHERE user_id =
+${userId}::uuid ORDER BY answered_at DESC, id DESC LIMIT 1` → `ORDER BY answered_at DESC, id
+DESC LIMIT 1` (predicate dropped).
+
+```
+AssertionError: expected 10 not to be 10
+ ❯ test/db/plan-routes.test.ts:544:43
+```
+
+Red (Bob's GET returned Alice's newer score, `compositeScore: 10`, instead of his own — the
+gate's own finding reproduced on demand, with the direction reversed from the file's existing
+fixed order). Restored; `git diff --stat packages/contexts/planning/src/goals-store.ts`
+afterward: empty; full suite re-run: **35 passed (35)**.
+
+**C-3 closed.** Every predicate G4-4 named now has a test that goes red when it is dropped, and
+the two coverage gaps §2.2's "together" paragraph named by name (the real contribution attack,
+the order-dependent risk-profile test) are each closed with the specific test that gap
+described.
 
 ---
 
