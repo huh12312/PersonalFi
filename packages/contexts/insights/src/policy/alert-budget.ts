@@ -103,12 +103,68 @@ export function belowFloor(insight: RankableInsight, currencyCode: string): bool
 }
 
 /**
+ * 02 §6 Q3's P0-safety class: overdraft ahead, a charge that may have landed
+ * twice, and a missed debt payment — findings where the harm is dollars
+ * leaving the account, not a probability drifting. None of the three claims
+ * an impact figure (the amount is unknown, banded, or the mismatch is the
+ * point), so under `rank()`'s magnitude term every one of them ties with
+ * every other `urgent` finding that claims none. wp4.9 §12 item 1 found what
+ * a bare `key` tie-break does next: `S6` (`spending.duplicate_charge`) lost
+ * its dashboard slot to `R2`/`R7` every time, because `'spending.'` sorts
+ * after `'retirement.'` — an artefact of the alphabet, not a decision about
+ * which finding matters more.
+ *
+ * Matched by `key` rather than by a `type` field the projection does not
+ * carry: `RankableInsight` is a read-time projection over `insights`, and
+ * every rule in this class emits a key that begins with its own type string
+ * (`insightOf`'s convention, unenforced but universal in this catalogue) — so
+ * the key already carries what is needed and the term below adds no new
+ * field to reach it.
+ */
+const P0_SAFETY_KEY_PREFIXES: readonly string[] = Object.freeze([
+  // C3 — a projected shortfall against cash on hand.
+  'cash.projected_shortfall',
+  // S6 — a charge that may have landed twice.
+  'spending.duplicate_charge.',
+  // D6 — a missed debt payment.
+  'debt.missed_payment.',
+]);
+
+/**
+ * `true` for an `urgent` finding in the P0-safety class.
+ *
+ * Gated on severity because the class is defined by what it warns about, not
+ * by a key prefix alone — a rule that reused one of these prefixes for a
+ * lower-severity finding (none does today) would not be this.
+ */
+export function isP0Safety(insight: RankableInsight): boolean {
+  if (insight.severity !== 'urgent') return false;
+  return P0_SAFETY_KEY_PREFIXES.some(
+    (prefix) => insight.key === prefix || insight.key.startsWith(prefix),
+  );
+}
+
+/**
+ * The P0-safety term's size, in `rank()`'s own units.
+ *
+ * Smaller than one full severity tier (10) and smaller than any dollar figure
+ * a claiming `urgent` finding would add — this only ever breaks a tie among
+ * findings that already tied on severity and claimed impact, exactly the
+ * `magnitude === 0` case wp4.9 found. It is not a claim that a safety finding
+ * outranks every dollar figure a rule might report.
+ */
+const P0_SAFETY_TERM = 0.5;
+
+/**
  * A score, higher is shown sooner.
  *
  * Deliberately a plain number: this is presentation ordering, not money, and
  * nothing here flows into a `*_minor` column. The severity term is additive and
  * dominant so that an urgent finding with no dollar figure outranks a large but
- * merely notable saving — the app's job is to lead with what will hurt.
+ * merely notable saving — the app's job is to lead with what will hurt. The
+ * P0-safety term is the next tie-break, before `key`: among findings already
+ * equal on severity and magnitude, a safety finding is shown for what it is,
+ * not for what its key happens to start with.
  */
 export function rank(insight: RankableInsight): number {
   const impact = effectiveImpactMinor(insight) ?? 0n;
@@ -116,7 +172,8 @@ export function rank(insight: RankableInsight): number {
   // beyond a point is all "a lot" to a reader deciding what to click.
   const magnitude = Math.log10(1 + Number(impact < 0n ? -impact : impact));
   const confidence = Math.min(1, Math.max(0, insight.confidence));
-  return severityRank(insight.severity) * 10 + magnitude * confidence;
+  const safetyTerm = isP0Safety(insight) ? P0_SAFETY_TERM : 0;
+  return severityRank(insight.severity) * 10 + magnitude * confidence + safetyTerm;
 }
 
 export interface BudgetedFeed<T> {

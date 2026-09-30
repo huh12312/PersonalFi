@@ -111,6 +111,38 @@ describe('the alert budget', () => {
     const urgent = insight({ key: 'z', severity: 'urgent', annualizedImpact: usd(6000n) });
     expect(rank(urgent)).toBeGreaterThan(rank(big));
   });
+
+  /**
+   * wp4.9 §12 item 1, reproduced: six `urgent` findings that claim no
+   * impact tie on `rank()`'s severity and magnitude terms, and a bare `key`
+   * tie-break sends `spending.duplicate_charge` (S6, the P0-safety class) to
+   * the list every time — `'spending.'` sorts after `'retirement.'`,
+   * `'investing.'` and `'crypto.'`. Six candidates for five dashboard slots
+   * still displaces exactly one; the fix is that it is no longer decided by
+   * the alphabet.
+   */
+  it('an urgent finding with no impact is never dropped from the dashboard by key order', () => {
+    const zeroImpactUrgent = (key: string) =>
+      insight({ key, severity: 'urgent', annualizedImpact: null, oneTimeImpact: null });
+    const nonSafety = [
+      'crypto.net_worth_share',
+      'investing.concentration.AAPL',
+      'investing.employer_stock.MSFT',
+      'retirement.success_probability.baseline',
+      'retirement.withdrawal_guardrail.above',
+    ].map(zeroImpactUrgent);
+    const safety = zeroImpactUrgent('spending.duplicate_charge.txn-a.txn-b');
+
+    const feed = applyAlertBudget([...nonSafety, safety], (row) => row, 'USD');
+    const dashboardKeys = feed.dashboard.map((row) => row.key);
+
+    expect(feed.dashboard).toHaveLength(5);
+    expect(dashboardKeys).toContain(safety.key);
+    // The non-safety candidate that sorts last is the one the alphabet still
+    // decides between — that is a tie-break among equals, not a P0-safety
+    // finding losing to one.
+    expect(dashboardKeys).not.toContain('retirement.withdrawal_guardrail.above');
+  });
 });
 
 describe('the cooldown ladder', () => {

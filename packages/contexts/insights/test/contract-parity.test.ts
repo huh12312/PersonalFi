@@ -68,26 +68,49 @@ describe('contract parity', () => {
    * same: the files on disk are exactly what the zod definitions emit *at this
    * version*, and the version-bearing artefacts all say the same version.
    */
-  it('the published schemas match the source at 1.3.0', () => {
-    expect(ADVISOR_ARTEFACT_VERSION).toBe('1.3.0');
-    for (const document of advisorSchemaDocuments()) {
-      const onDisk = JSON.parse(readContract('v1', document.file)) as Record<string, unknown>;
-      expect(onDisk['artefactVersion'], document.file).toBe('1.3.0');
-      expect(serialiseSchema(document.document), document.file).toBe(serialiseSchema(onDisk));
-    }
-    const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
-    expect(index['artefactVersion']).toBe('1.3.0');
-
-    // The additions 1.3.0 is for, present in the published request schema:
-    // the scope in the wire enum, its block, and R6's pace on a goal row.
+  it('the published schemas match the source at 1.3.0 (historical)', () => {
+    // Superseded by 1.4.0 below; kept as the record of what 1.3.0 added,
+    // checked against fields that are still present and unmoved.
     const request = readContract('v1', 'request.schema.json');
     expect(request).toContain('"plan.projection"');
     expect(request).toContain('"plan_projection"');
     expect(request).toContain('"success_probability"');
     expect(request).toContain('"required_monthly"');
-    // Strictly additive: the scope is the enum's *last* member, so every
-    // position a 1.2.0 reader relied on is where it was.
-    expect(ADVISOR_SCOPES[ADVISOR_SCOPES.length - 1]).toBe('plan.projection');
+  });
+
+  /**
+   * WP 5.7's bump. `transactions.anomalies` and `fees.summary` — S1, S5 and
+   * the fee hunter's scopes — land in the same commit as migration 0029,
+   * which widens `snapshot_grants_scope_check` to match (05 §4's
+   * non-negotiable pairing). Strictly additive over 1.3.0: both scopes are
+   * appended after `plan.projection`, so every position a 1.3.0 reader relied
+   * on is where it was.
+   */
+  it('the published schemas match the source at 1.4.0', () => {
+    expect(ADVISOR_ARTEFACT_VERSION).toBe('1.4.0');
+    for (const document of advisorSchemaDocuments()) {
+      const onDisk = JSON.parse(readContract('v1', document.file)) as Record<string, unknown>;
+      expect(onDisk['artefactVersion'], document.file).toBe('1.4.0');
+      expect(serialiseSchema(document.document), document.file).toBe(serialiseSchema(onDisk));
+    }
+    const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
+    expect(index['artefactVersion']).toBe('1.4.0');
+
+    // The additions 1.4.0 is for, present in the published request schema:
+    // the two scopes in the wire enum and their blocks.
+    const request = readContract('v1', 'request.schema.json');
+    expect(request).toContain('"transactions.anomalies"');
+    expect(request).toContain('"transactions_anomalies"');
+    expect(request).toContain('"deviation_multiple"');
+    expect(request).toContain('"first_seen_merchant"');
+    expect(request).toContain('"fees.summary"');
+    expect(request).toContain('"fees_summary"');
+    expect(request).toContain('"expense_ratio_drag"');
+    // Strictly additive: the two scopes are the enum's last two members, in
+    // the order they were appended, so every position a 1.3.0 reader relied
+    // on is where it was.
+    expect(ADVISOR_SCOPES[ADVISOR_SCOPES.length - 2]).toBe('transactions.anomalies');
+    expect(ADVISOR_SCOPES[ADVISOR_SCOPES.length - 1]).toBe('fees.summary');
   });
 
   it('the bundle index names the three documents and the wire major', () => {

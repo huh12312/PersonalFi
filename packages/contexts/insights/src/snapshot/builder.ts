@@ -71,7 +71,16 @@
  * one division later. The same reasoning applies to anything else that crosses
  * block boundaries, and this is the only place in the file that does.
  */
-import { DateOnly, Money, minorUnitScale, type DateOnly as DateOnlyType } from '@core/kernel';
+import {
+  DateOnly,
+  Money,
+  USD,
+  isCurrencyCode,
+  madMinor,
+  medianMinor,
+  minorUnitScale,
+  type DateOnly as DateOnlyType,
+} from '@core/kernel';
 import { configHash } from '@core/platform';
 import {
   scopeDefinition,
@@ -86,7 +95,12 @@ import {
   type AmountBucket,
   type MoneyJson,
 } from '../contract/snapshot.ts';
-import { PERCENT_PER_ANNUM, type InsightsHoldings, type SnapshotPorts } from './ports.ts';
+import {
+  PERCENT_PER_ANNUM,
+  type InsightsHoldings,
+  type InsightsTransaction,
+  type SnapshotPorts,
+} from './ports.ts';
 import { createTokeniser, inputDigest, type Tokeniser } from './tokens.ts';
 
 /** How much history each block asks for. Every one is a cap, never a target. */
@@ -107,6 +121,19 @@ export const SNAPSHOT_WINDOWS = Object.freeze({
   marketRates: 16,
   /** `GoalsListSchema.goals`' own ceiling. */
   goals: 64,
+  /**
+   * WP 5.7. `transactions.anomalies` and `fees.summary` share one trailing
+   * window over `LedgerPort.listTransactions` — 07 S1/S5's "twelve-month
+   * norm" and "the last 12 months" of fees. The row cap is sized off
+   * `rawTransactionRows`' own ratio (2000 over 90 days) scaled to a year, with
+   * headroom: 500/month is generous for a household's transaction volume.
+   */
+  anomalyWindowMonths: 12,
+  anomalyWindowRows: 8000,
+  /** A category baseline needs at least this many outflows to mean anything. */
+  anomalyMinCategorySample: 5,
+  /** `TransactionsAnomaliesSchema.rows`' own ceiling. */
+  anomalyMaxRows: 500,
 });
 
 /**
@@ -200,6 +227,33 @@ export function monthOf(date: DateOnlyType): string {
   return date.slice(0, 7);
 }
 
+// ---------------------------------------------------------------------------
+// WP 5.7 — transactions.anomalies, fees.summary
+// ---------------------------------------------------------------------------
+
+/** 07 S1: ">3 robust deviations". */
+const ANOMALY_DEVIATION_THRESHOLD = 3;
+/** 09 Q17, 07 S1's ADV-5 reading: a $25 materiality floor, not 07's original $100. */
+const ANOMALY_MATERIALITY_FLOOR_MAJOR = 25;
+/** 07 S5: "> $250". */
+const ANOMALY_NEW_MERCHANT_FLOOR_MAJOR = 250;
+/** Mirrors S6's `DUPLICATE_WINDOW_DAYS` (`rules-spending.ts`) for the within-block fold. */
+const ANOMALY_DUPLICATE_WINDOW_DAYS = 3;
+
+/** 07's fee taxonomy, the category slugs `@ctx/categorization` actually seeds. */
+const FEE_CATEGORY_SLUGS: ReadonlySet<string> = new Set([
+  'fees_and_services.atm_fees',
+  'fees_and_services.bank_fees',
+  'fees_and_services.foreign_fees',
+  'fees_and_services.interest_charges',
+  'fees_and_services.other_fees',
+]);
+
+/** 07: "interest charges are the D family's" — the one non-avoidable type. */
+const NON_AVOIDABLE_FEE_SLUGS: ReadonlySet<string> = new Set([
+  'fees_and_services.interest_charges',
+]);
+
 /** A ratio clamped into `[0,1]`, because the schema's `unitInterval` is. */
 function ratio(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -247,6 +301,13 @@ export function percentStringToRatio(text: string): number | null {
  */
 interface BuildMemo {
   holdings?: Promise<InsightsHoldings | null>;
+  /**
+   * `transactions.anomalies` and `fees.summary` are two grants over one
+   * `listTransactions` window — the same reasoning `#holdingsOnce` states for
+   * the two holdings blocks, over the same port method `transactions.raw`
+   * already calls with a different window.
+   */
+  transactionsWindow?: Promise<readonly InsightsTransaction[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +413,10 @@ export class SnapshotBuilder {
         return this.#riskProfile(input);
       case 'plan.projection':
         return this.#planProjection(input);
+      case 'transactions.anomalies':
+        return this.#transactionsAnomalies(input, tokeniser, memo);
+      case 'fees.summary':
+        return this.#feesSummary(input, tokeniser, granted, memo);
       default:
         // Every remaining scope has `sourcedInPhase2: false` and is filtered
         // out before this is reached. The `null` is the second line of defence
@@ -655,6 +720,296 @@ export class SnapshotBuilder {
         amount_bucket: bucketOf(row.amount),
         direction: row.amount.minor < 0n ? 'outflow' : 'inflow',
       })),
+    };
+  }
+
+  /**
+   * The trailing window `transactions.anomalies` and `fees.summary` share.
+   *
+   * One promise, awaited twice — `#holdingsOnce`'s pattern, for the same
+   * reason: a refresh landing between the two grants' reads would otherwise
+   * let a snapshot disagree with itself about what "the last twelve months"
+   * contained.
+   */
+  #transactionsWindow(
+    input: BuildSnapshotInput,
+    memo: BuildMemo,
+  ): Promise<readonly InsightsTransaction[]> {
+    memo.transactionsWindow ??= this.#ports.ledger.listTransactions({
+      userId: input.userId,
+      from: DateOnly.addMonths(input.today, -SNAPSHOT_WINDOWS.anomalyWindowMonths),
+      to: input.today,
+      limit: SNAPSHOT_WINDOWS.anomalyWindowRows,
+    });
+    return memo.transactionsWindow;
+  }
+
+  /**
+   * `transactions.anomalies` — 07 S1 and S5, WP 5.7.
+   *
+   * The threshold is applied **here**, in-process, the `idle_cash` precedent
+   * (`snapshot.ts:382`): a candidate's category median and MAD are computed
+   * over the whole trailing population, but only a row that already clears
+   * `>3 robust deviations and the $25 floor` (S1) or `a first-time charge over
+   * $250` (S5) is ever placed in `rows` — the unflagged population that
+   * produced the baseline never crosses.
+   *
+   * Every amount below is an outflow's *magnitude* — `-row.amount.minor` —
+   * because a robust baseline is about how large a charge is, and the sign is
+   * already implied by the scope (this block carries no `direction`, unlike
+   * `transactions.raw`).
+   */
+  async #transactionsAnomalies(
+    input: BuildSnapshotInput,
+    tokeniser: Tokeniser,
+    memo: BuildMemo,
+  ): Promise<unknown> {
+    const rows = await this.#transactionsWindow(input, memo);
+    const outflows = rows
+      .map((row, index) => ({ row, index }))
+      .filter((entry) => entry.row.amount.minor < 0n);
+    if (outflows.length === 0) return null;
+
+    // The same fallback `belowFloor` (`policy/alert-budget.ts`) uses: every
+    // real currency this app supports has a known minor-unit scale, and this
+    // runs over data already stored under `input.baseCurrency`, so the
+    // fallback changes the answer only for a code that should never have
+    // reached here.
+    const code = isCurrencyCode(input.baseCurrency) ? input.baseCurrency : USD;
+    const scale = 10n ** BigInt(minorUnitScale(code));
+    const materialityFloorMinor = BigInt(ANOMALY_MATERIALITY_FLOOR_MAJOR) * scale;
+    const newMerchantFloorMinor = BigInt(ANOMALY_NEW_MERCHANT_FLOOR_MAJOR) * scale;
+
+    // One category baseline per slug with enough of a population to mean
+    // anything. `@core/kernel`'s exact bigint median and MAD — never a float
+    // until the display-only multiple below, which is a ratio like `weight`
+    // or `confidence` and never re-enters a `*_minor` figure.
+    const magnitudesByCategory = new Map<string, bigint[]>();
+    for (const { row } of outflows) {
+      if (row.categorySlug === null) continue;
+      const magnitudes = magnitudesByCategory.get(row.categorySlug) ?? [];
+      magnitudes.push(-row.amount.minor);
+      magnitudesByCategory.set(row.categorySlug, magnitudes);
+    }
+    const baselines = new Map<string, { readonly median: bigint; readonly mad: bigint }>();
+    for (const [slug, magnitudes] of magnitudesByCategory) {
+      if (magnitudes.length < SNAPSHOT_WINDOWS.anomalyMinCategorySample) continue;
+      baselines.set(slug, { median: medianMinor(magnitudes), mad: madMinor(magnitudes) });
+    }
+
+    // The earliest-dated outflow per merchant in the window — S5's "never
+    // seen" reads as "not seen in what this window can see" (09 §6 Q17's
+    // honest limitation, stated once here rather than per row).
+    const earliestByMerchant = new Map<string, { readonly index: number; readonly date: string }>();
+    for (const entry of outflows) {
+      const merchantId = entry.row.merchantId;
+      if (merchantId === null) continue;
+      const existing = earliestByMerchant.get(merchantId);
+      if (existing === undefined || entry.row.date < existing.date) {
+        earliestByMerchant.set(merchantId, { index: entry.index, date: entry.row.date });
+      }
+    }
+
+    interface Candidate {
+      readonly row: InsightsTransaction;
+      readonly baselineMedian: bigint | null;
+      readonly baselineMad: bigint | null;
+      readonly deviationMultiple: number | null;
+      readonly firstSeenMerchant: boolean;
+      readonly s1Flag: boolean;
+      readonly s5Flag: boolean;
+    }
+
+    const candidates: Candidate[] = [];
+    for (const entry of outflows) {
+      const { row } = entry;
+      const magnitude = -row.amount.minor;
+      const baseline = row.categorySlug === null ? undefined : baselines.get(row.categorySlug);
+
+      let baselineMedian: bigint | null = null;
+      let baselineMad: bigint | null = null;
+      let deviationMultiple: number | null = null;
+      let s1Flag = false;
+      if (baseline !== undefined) {
+        baselineMedian = baseline.median;
+        baselineMad = baseline.mad;
+        const deviation =
+          magnitude < baseline.median ? baseline.median - magnitude : magnitude - baseline.median;
+        // Cross-multiplied against the threshold rather than divided, so the
+        // comparison stays exact bigint arithmetic (`windows.ts`'s own
+        // technique): `deviation > 3 × mad`, never `deviation / mad > 3`.
+        s1Flag =
+          deviation > BigInt(ANOMALY_DEVIATION_THRESHOLD) * baseline.mad &&
+          deviation > materialityFloorMinor;
+        // The multiple is presentation only, computed once at this boundary.
+        // Undefined when the category's MAD is exactly zero (every peer
+        // identical); `s1Flag` above never divided by it, so the flag itself
+        // is exact regardless.
+        deviationMultiple = baseline.mad === 0n ? null : Number(deviation) / Number(baseline.mad);
+      }
+
+      const firstSeenMerchant =
+        row.merchantId !== null && earliestByMerchant.get(row.merchantId)?.index === entry.index;
+      const s5Flag = firstSeenMerchant && magnitude > newMerchantFloorMinor;
+
+      candidates.push({
+        row,
+        baselineMedian,
+        baselineMad,
+        deviationMultiple,
+        firstSeenMerchant,
+        s1Flag,
+        s5Flag,
+      });
+    }
+
+    const flagged = candidates.filter((candidate) => candidate.s1Flag || candidate.s5Flag);
+    if (flagged.length === 0) return null;
+
+    // Stable order: date, then id — never the map's insertion order, so two
+    // builds of the same data produce the same digest.
+    const sorted = [...flagged].sort((a, b) =>
+      a.row.date === b.row.date
+        ? a.row.id.localeCompare(b.row.id)
+        : a.row.date < b.row.date
+          ? -1
+          : 1,
+    );
+    const refs = sorted.map((candidate) => tokeniser.ref('transaction', candidate.row.id));
+
+    // 09 NOT-5's *other* case: not the same id posting (D10 already keeps
+    // that to one row, and one insight key), but two flagged rows that look
+    // like the same charge seen twice — same merchant, same exact amount,
+    // days apart. The later one is folded rather than counted as a second,
+    // independent anomaly.
+    const duplicateOf: (string | null)[] = sorted.map(() => null);
+    for (let i = 0; i < sorted.length; i += 1) {
+      const current = sorted[i];
+      if (current === undefined) continue;
+      for (let j = 0; j < i; j += 1) {
+        const earlier = sorted[j];
+        if (earlier === undefined) continue;
+        if (current.row.merchantId === null || current.row.merchantId !== earlier.row.merchantId) {
+          continue;
+        }
+        if (current.row.amount.minor !== earlier.row.amount.minor) continue;
+        const gap = Math.abs(DateOnly.differenceInDays(current.row.date, earlier.row.date));
+        if (gap > ANOMALY_DUPLICATE_WINDOW_DAYS) continue;
+        duplicateOf[i] = refs[j] ?? null;
+        break;
+      }
+    }
+
+    return {
+      as_of: input.today,
+      currency: code,
+      window_months: SNAPSHOT_WINDOWS.anomalyWindowMonths,
+      materiality_floor: moneyJson(Money.of(materialityFloorMinor, code)),
+      deviation_threshold: ANOMALY_DEVIATION_THRESHOLD,
+      new_merchant_floor: moneyJson(Money.of(newMerchantFloorMinor, code)),
+      rows: sorted.slice(0, SNAPSHOT_WINDOWS.anomalyMaxRows).map((candidate, index) => ({
+        transaction_ref: refs[index] as string,
+        date: candidate.row.date,
+        category_slug: candidate.row.categorySlug,
+        merchant_ref:
+          candidate.row.merchantId === null ? null : tokeniser.merchant(candidate.row.merchantId),
+        amount: moneyJson(candidate.row.amount),
+        baseline_median:
+          candidate.baselineMedian === null
+            ? null
+            : moneyJson(Money.of(candidate.baselineMedian, code)),
+        baseline_mad:
+          candidate.baselineMad === null ? null : moneyJson(Money.of(candidate.baselineMad, code)),
+        deviation_multiple: candidate.deviationMultiple,
+        first_seen_merchant: candidate.firstSeenMerchant,
+        duplicate_of: duplicateOf[index] ?? null,
+        fee_type:
+          candidate.row.categorySlug !== null && FEE_CATEGORY_SLUGS.has(candidate.row.categorySlug)
+            ? candidate.row.categorySlug
+            : null,
+      })),
+    };
+  }
+
+  /**
+   * `fees.summary` — S7's fuller successor, WP 5.7.
+   *
+   * By type and by account over the same trailing window `transactions.anomalies`
+   * reads, classified once here so `builtin.spending.fee_hunter` only sums and
+   * picks. `expense_ratio_drag` obeys the cross-scope rule
+   * `cash.summary.emergency_fund_months` states first: present only when
+   * `holdings.detail` was *also* granted, and carried from that block's own
+   * `annual_fee_cost` rather than recomputed.
+   */
+  async #feesSummary(
+    input: BuildSnapshotInput,
+    tokeniser: Tokeniser,
+    granted: readonly AdvisorScope[],
+    memo: BuildMemo,
+  ): Promise<unknown> {
+    const rows = await this.#transactionsWindow(input, memo);
+    const feeRows = rows.filter(
+      (row) =>
+        row.categorySlug !== null &&
+        FEE_CATEGORY_SLUGS.has(row.categorySlug) &&
+        row.amount.minor < 0n,
+    );
+
+    let expenseRatioDrag: MoneyJson | null = null;
+    if (granted.includes('holdings.detail')) {
+      const holdings = await this.#holdingsOnce(input, memo);
+      if (holdings !== null && holdings.currency === input.baseCurrency) {
+        let total: Money | null = null;
+        for (const position of holdings.positions) {
+          if (position.annualFeeCost === null) continue;
+          total =
+            total === null ? position.annualFeeCost : Money.add(total, position.annualFeeCost);
+        }
+        expenseRatioDrag = total === null ? null : moneyJson(total);
+      }
+    }
+
+    if (feeRows.length === 0 && expenseRatioDrag === null) return null;
+
+    const byType = new Map<string, { count: number; total: Money }>();
+    for (const row of feeRows) {
+      const slug = row.categorySlug as string;
+      const bucket = byType.get(slug) ?? { count: 0, total: Money.zero(input.baseCurrency) };
+      bucket.count += 1;
+      bucket.total = Money.add(bucket.total, Money.absolute(row.amount));
+      byType.set(slug, bucket);
+    }
+
+    const byAccount = new Map<string, { count: number; total: Money }>();
+    for (const row of feeRows) {
+      if (row.accountId === undefined) continue;
+      const ref = tokeniser.ref('account', row.accountId);
+      const bucket = byAccount.get(ref) ?? { count: 0, total: Money.zero(input.baseCurrency) };
+      bucket.count += 1;
+      bucket.total = Money.add(bucket.total, Money.absolute(row.amount));
+      byAccount.set(ref, bucket);
+    }
+
+    return {
+      as_of: input.today,
+      currency: input.baseCurrency,
+      window_months: SNAPSHOT_WINDOWS.anomalyWindowMonths,
+      by_type: [...byType.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([type, bucket]) => ({
+          type,
+          avoidable: !NON_AVOIDABLE_FEE_SLUGS.has(type),
+          count: bucket.count,
+          total: moneyJson(bucket.total),
+        })),
+      by_account: [...byAccount.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([account_ref, bucket]) => ({
+          account_ref,
+          count: bucket.count,
+          total: moneyJson(bucket.total),
+        })),
+      expense_ratio_drag: expenseRatioDrag,
     };
   }
 

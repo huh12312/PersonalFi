@@ -579,3 +579,12 @@ export {
 } from './policy/outcomes.ts';
 
 export { ruleHealth, type RuleHealthView, type WrongAmountFlag } from './policy/rule-health.ts';
+
+// WP 5.7 — Anomaly and fee hunter (advisor contract 1.4.0, migration 0029).
+// Appended rather than folded into the existing `contract/snapshot.ts` and
+// `policy/alert-budget.ts` blocks above: this file is shared with WP 5.9 this
+// wave, and each work package appends its own labelled block at the end
+// rather than editing another's, so two agents in the same file never
+// collide on the same lines.
+export { TransactionsAnomaliesSchema, FeesSummarySchema } from './contract/snapshot.ts';
+export { isP0Safety } from './policy/alert-budget.ts';

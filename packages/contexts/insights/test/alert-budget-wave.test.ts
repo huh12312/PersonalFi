@@ -169,12 +169,23 @@ describe('the alert budget after the retirement wave (WP 4.9)', () => {
     expect(after.dashboard.length).toBe(ALERT_BUDGET.dashboard);
     expect(after.list.length).toBe(ALERT_BUDGET.list);
 
-    // R2 and R7 — the wave's two urgents — reach the dashboard by competing
-    // for it, and something that was there before the release is displaced to
-    // the list rather than the dashboard gaining a sixth slot.
+    // R2 and R7 — the wave's two urgents — compete for the dashboard along
+    // with `existing`'s own urgent, zero-impact rows, and something is
+    // displaced to the list rather than the dashboard gaining a sixth slot.
+    //
+    // WP 5.7's P0-safety term (`rank()`, `policy/alert-budget.ts`) is why R7
+    // is the one displaced here rather than S6: this file's own header used
+    // to describe wp4.9 §12 item 1 — S6, a P0-safety finding, losing its
+    // dashboard slot to `retirement.` sorting before `spending.` — as a
+    // latent defect. `releasedFeed(BUILTIN_CATALOGUE.filter(w => w !==
+    // 'retirement'))` evaluates S6 regardless of `defaultEnabled`, so once
+    // the fix landed and the retirement wave adds R7 as a sixth zero-impact
+    // urgent contender, S6 rightfully keeps its seat and R7 — tied with X1,
+    // I4 and I5 on rank, and alphabetically last among the non-safety
+    // contenders — is the one the budget moves to the list.
     const dashboard = after.dashboard.map((row) => row.ruleId);
     expect(dashboard).toContain('R2');
-    expect(dashboard).toContain('R7');
+    expect(dashboard).toContain('S6');
     const displaced = before.dashboard.filter(
       (row) => !after.dashboard.some((kept) => kept.insight.key === row.insight.key),
     );

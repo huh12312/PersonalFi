@@ -393,6 +393,15 @@ describeWithDb('runMigrations', () => {
       //   the refusal CHECK gains kind_disabled and payload_not_approved;
       //   advisors gains enabled_source (default | user | feedback). WP 5.1;
       //   references only 0012-era objects or its own (05 §4).
+      // 0029_snapshot_grant_scopes_v1_4: no table. Re-declares
+      //   `snapshot_grants_scope_check` with advisor contract 1.4.0's two added
+      //   scopes (`transactions.anomalies` — S1/S5's exact-amount category
+      //   baseline, never bucketed like `transactions.raw` — and `fees.summary` —
+      //   the fee hunter's by-type/by-account breakdown). Ships in the same
+      //   commit as the contract bump (05 §4's non-negotiable pairing). Parity
+      //   with `ADVISOR_SCOPES` is asserted by apps/api's registration test,
+      //   which reads the latest CHECK across migrations — the 0019 lesson
+      //   mechanised, same as 0024's. WP 5.7.
       // 0030_insight_feedback_reasons: one @ctx/insights table —
       //   insight_outcomes (outcome verification and forward validation, 09
       //   ADV-4, 05 §1 cut line 2; one row per acceptance, composite FK to

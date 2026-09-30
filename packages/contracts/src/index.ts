@@ -38,7 +38,10 @@ export const OPENAPI_CONTRACT_VERSION = '0.1.0';
  */
 // 1.3.0 (WP 4.9): the `plan.projection` scope and `goals_list[].pace`, strictly
 // additive; migration 0024 widens `snapshot_grants_scope_check` to match.
-export const ADVISOR_CONTRACT_VERSION = '1.3.0';
+// 1.4.0 (WP 5.7): the `transactions.anomalies` and `fees.summary` scopes,
+// strictly additive; migration 0029 widens `snapshot_grants_scope_check` to
+// match, in the same commit — 05-phase-5-dispatch.md §4's non-negotiable rule.
+export const ADVISOR_CONTRACT_VERSION = '1.4.0';
 
 /**
  * The integer that crosses the wire, as distinct from the artefact version

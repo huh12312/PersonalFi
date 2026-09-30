@@ -179,30 +179,29 @@ describe('the built-in catalogue', () => {
   });
 
   /**
-   * WP 3.10a moved the line. It used to sit between wave one and everything
-   * else; it now sits between **spending** and everything else, because the
-   * only wave still off is the one held back for pacing rather than for a
-   * missing reader.
+   * WP 3.10a moved the line once, from wave one to spending; **WP 5.7 removes
+   * it**. `transactions.anomalies` and `fees.summary` land sourced from their
+   * first commit, so S1, S5 and the fee hunter have no unsourced-reader wait
+   * to stagger against, and 07 §7.4's original spending stagger was always an
+   * operator's first-run pacing choice rather than a statement about readers
+   * — the same ruling WP 3.10a made for debt/investing/crypto, applied here to
+   * the one wave that had not yet reached it. Every rule in the catalogue now
+   * ships enabled; a deployment that wants the original stagger switches a
+   * rule off through `advisors.enabled` (kill switch 2), which needs no
+   * deploy and which a restart never undoes.
    */
-  it('ships every wave with a reader enabled, leaving only spending off', () => {
+  it('ships every rule in the catalogue enabled', () => {
     for (const entry of BUILTIN_CATALOGUE) {
-      if (entry.wave === 'spending') {
-        expect(entry.defaultEnabled, entry.ruleId).toBe(false);
-        expect(entry.disabledReason, entry.ruleId).not.toBeNull();
-      } else {
-        expect(entry.defaultEnabled, entry.ruleId).toBe(true);
-        expect(entry.disabledReason, entry.ruleId).toBeNull();
-      }
+      expect(entry.defaultEnabled, entry.ruleId).toBe(true);
+      expect(entry.disabledReason, entry.ruleId).toBeNull();
     }
-    // Thirty-one enabled: Phase 2's eight cash-and-subscriptions rules, WP
-    // 3.10's seventeen (switched on by WP 3.10a once `holdings.aggregate`,
-    // `holdings.detail`, `liabilities.terms` and `market.rates` gained readers),
-    // and WP 4.9's six retirement rules, which ship on for the same reason —
-    // `goals.list` and `plan.projection` have readers from the first commit.
-    // Six off: WP 2.7's spending rules, held by 07 §7.4's wave two alone — every
-    // scope they read has been sourced since Phase 2.
-    expect(BUILTIN_CATALOGUE.filter((entry) => entry.defaultEnabled).length).toBe(31);
-    expect(BUILTIN_CATALOGUE.filter((entry) => !entry.defaultEnabled).length).toBe(6);
+    // Forty enabled: the thirty-one WP 4.9 left (Phase 2's eight
+    // cash-and-subscriptions rules, WP 3.10's seventeen, and WP 4.9's six
+    // retirement rules), the six 07 §7.4 spending rules WP 5.7 releases
+    // (S2, S3, S6, S7, S9, S10), and WP 5.7's own three (S1, S5, the fee
+    // hunter — carrying `ruleId: 'S7'` too, `advisorId` tells the two apart).
+    expect(BUILTIN_CATALOGUE.filter((entry) => entry.defaultEnabled).length).toBe(40);
+    expect(BUILTIN_CATALOGUE.filter((entry) => !entry.defaultEnabled).length).toBe(0);
   });
 
   it('claims impact only where the manifest says it does', async () => {

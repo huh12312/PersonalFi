@@ -137,6 +137,19 @@ export interface InsightsTransaction {
   readonly merchantId: string | null;
   readonly categorySlug: string | null;
   readonly amount: Money;
+  /**
+   * WP 5.7. `fees.summary`'s by-account breakdown needs to group a fee by the
+   * account it was charged to, which `transactions.raw`'s own two callers
+   * (S3, S6) never needed. Optional, not because an account is ever really
+   * absent — every real transaction has one — but because every fixture in
+   * this package that built an `InsightsTransaction` before this field
+   * existed does not supply it, and widening the field to required would be a
+   * compile break in files WP 5.7 does not own. A row with no `accountId`
+   * (only ever a stale fixture; `createInsightsLedgerPort`'s one select
+   * always supplies it) is simply excluded from `by_account` — never
+   * fabricated into one.
+   */
+  readonly accountId?: string;
 }
 
 export interface LedgerPort {

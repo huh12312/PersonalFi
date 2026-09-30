@@ -289,6 +289,101 @@ export const TransactionsRawSchema = z.strictObject({
 });
 
 // ---------------------------------------------------------------------------
+// transactions.anomalies, fees.summary — WP 5.7
+// ---------------------------------------------------------------------------
+
+/** How many trailing months a robust-statistics window covers. Reported, not implied. */
+const twelveMonthWindow = z.number().int().positive().max(24);
+
+/**
+ * `transactions.anomalies` — S1 and S5, only the rows that already qualified.
+ *
+ * `baseline_median` and `baseline_mad` are `null` together, exactly when the
+ * row's category had fewer than `SNAPSHOT_WINDOWS.anomalyMinSample`
+ * transactions in the window to found a baseline on — S5 can still flag such a
+ * row (its trigger needs no category baseline), S1 cannot. `deviation_multiple`
+ * is `null` under the same condition: the ratio it reports is `|amount −
+ * median| ÷ mad`, computed once at the boundary from the exact bigint
+ * deviation and MAD, and is a presentation ratio like `weight` or `confidence`
+ * — never fed back into a `*_minor` figure.
+ */
+export const TransactionsAnomaliesSchema = z.strictObject({
+  as_of: dateOnly,
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  window_months: twelveMonthWindow,
+  /** The $25 materiality floor (09 Q17, 07 S1), reported rather than implied. */
+  materiality_floor: MoneyJsonSchema,
+  /** The ">3 robust deviations" threshold, as the multiple it is. */
+  deviation_threshold: z.number().positive(),
+  /** 07 S5's "> $250", reported so the rule's copy can cite it rather than print it. */
+  new_merchant_floor: MoneyJsonSchema,
+  rows: z
+    .array(
+      z.strictObject({
+        transaction_ref: opaqueRef,
+        date: dateOnly,
+        category_slug: z.string().min(1).max(96).nullable(),
+        merchant_ref: opaqueRef.nullable(),
+        /** Exact. This scope does not bucket — a masked outlier is not an outlier. */
+        amount: MoneyJsonSchema,
+        baseline_median: MoneyJsonSchema.nullable(),
+        baseline_mad: MoneyJsonSchema.nullable(),
+        deviation_multiple: z.number().nonnegative().nullable(),
+        /** S5's trigger: this row is the merchant's earliest appearance in the window. */
+        first_seen_merchant: z.boolean(),
+        /**
+         * 09 NOT-5: a pending charge that later posts is the same `id` (D10),
+         * so it is the same `transaction_ref` and the same insight key — this
+         * field is for the separate case, a near-identical charge the builder
+         * folded rather than flagging twice. `null` on almost every row.
+         */
+        duplicate_of: opaqueRef.nullable(),
+        /** One of `fees.summary`'s type slugs when this row's category is one, else `null`. */
+        fee_type: z.string().min(1).max(64).nullable(),
+      }),
+    )
+    .max(500),
+});
+
+/**
+ * `fees.summary` — totals, never a row. `builtin.spending.fee_hunter` sums the
+ * avoidable subset and picks the worst offender itself, from these totals; the
+ * scope declares the classification (which type is avoidable) so the rule
+ * does not.
+ */
+export const FeesSummarySchema = z.strictObject({
+  as_of: dateOnly,
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  window_months: twelveMonthWindow,
+  by_type: z
+    .array(
+      z.strictObject({
+        type: z.string().min(1).max(64),
+        /** `false` only for interest charges — 07: "interest charges are the D family's". */
+        avoidable: z.boolean(),
+        count: z.number().int().nonnegative(),
+        total: MoneyJsonSchema,
+      }),
+    )
+    .max(16),
+  by_account: z
+    .array(
+      z.strictObject({
+        account_ref: opaqueRef,
+        count: z.number().int().nonnegative(),
+        total: MoneyJsonSchema,
+      }),
+    )
+    .max(64),
+  /**
+   * `holdings.detail.positions[].annual_fee_cost`, summed — never recomputed.
+   * `null` unless `holdings.detail` was *also* granted, the same cross-scope
+   * rule `cash.summary.emergency_fund_months` follows.
+   */
+  expense_ratio_drag: MoneyJsonSchema.nullable(),
+});
+
+// ---------------------------------------------------------------------------
 // holdings.aggregate, holdings.detail — WP 3.10
 // ---------------------------------------------------------------------------
 
@@ -822,6 +917,11 @@ export const AdvisorSnapshotSchema = z
     transactions_summary: TransactionsSummarySchema.optional(),
     transactions_raw: TransactionsRawSchema.optional(),
     institutions_names: InstitutionsNamesSchema.optional(),
+    // Contract 1.4.0 (WP 5.7). Appended, like 1.3.0's `plan_projection` before
+    // it: the two new blocks join at the end rather than being interleaved
+    // into scope-catalogue order, which keeps the contract diff additive.
+    transactions_anomalies: TransactionsAnomaliesSchema.optional(),
+    fees_summary: FeesSummarySchema.optional(),
   })
   .describe('The minimised, read-only view an advisor receives. One key per granted scope.');
 

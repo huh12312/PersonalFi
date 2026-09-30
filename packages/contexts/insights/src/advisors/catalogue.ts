@@ -38,6 +38,7 @@
 import type { AdvisorRequest } from '../contract/request.ts';
 import { ADVISOR_CONTRACT_MAJOR } from '../contract/version.ts';
 import { AdvisorRegistry, type Advisor } from '../registry.ts';
+import { ANOMALY_RULES } from './builtin/anomaly/index.ts';
 import { CRYPTO_RULES } from './builtin/crypto/index.ts';
 import { DEBT_RULES } from './builtin/debt/index.ts';
 import { INVESTING_RULES } from './builtin/investing/index.ts';
@@ -65,9 +66,25 @@ import { contextOf, type BuiltinRule } from './support.ts';
  * the *same* five dashboard slots and twenty list slots — R2 and R7 at
  * `urgent` compete with I4, I5 and X1 rather than arriving with five slots of
  * their own. `alert-budget-wave.test.ts` pins it on the released catalogue.
+ *
+ * **WP 5.7 adds `anomalies`** — S1, S5 and the fee hunter — and releases the
+ * whole `spending` wave alongside it in the same commit: S1 and S5 read
+ * `transactions.anomalies`, and 07 §7.4's original stagger for S2/S3/S6/S7/S9/S10
+ * was a first-run pacing decision, not a statement that the rules would return
+ * nothing (WP 3.10a's own ruling for debt/investing/crypto, applied here to the
+ * one wave it had not yet reached). Both waves default **on**, reaching an
+ * existing install through `advisors.enabled_source` (WP 5.1): a row still
+ * `default` follows the catalogue; a row a human or WP 5.9's feedback loop
+ * touched does not move.
  */
 export type RuleWave =
-  'cash_and_subscriptions' | 'spending' | 'debt' | 'investing' | 'crypto' | 'retirement';
+  | 'cash_and_subscriptions'
+  | 'spending'
+  | 'debt'
+  | 'investing'
+  | 'crypto'
+  | 'retirement'
+  | 'anomalies';
 
 /**
  * 07 §3.3's priority column, carried as data.
@@ -176,6 +193,7 @@ const [payoffOrder, rateAboveMarket, minimumOnly, promoEnding, principalAgainst,
 const [cryptoShare, cryptoCustody, idleStablecoins, cryptoLoss, cryptoBasis] = CRYPTO_RULES;
 const [savingsRate, successProbability, rmdWindow, claimingAge, goalPace, withdrawalGuardrail] =
   RETIREMENT_RULES;
+const [categoryAnomaly, newMerchantHighCharge, feeHunter] = ANOMALY_RULES;
 
 function required(rule: BuiltinRule | undefined, id: string): BuiltinRule {
   if (rule === undefined) throw new Error(`catalogue is missing the rule for ${id}`);
@@ -202,12 +220,19 @@ export const BUILTIN_CATALOGUE: readonly BuiltinCatalogueEntry[] = Object.freeze
   entry('C3', required(shortfall, 'C3'), 'cash_and_subscriptions', 'P0', true),
   entry('C4', required(emergencyFund, 'C4'), 'cash_and_subscriptions', 'P1', true),
   entry('C7', required(largeBill, 'C7'), 'cash_and_subscriptions', 'P1', true),
-  entry('S2', required(categoryCreep, 'S2'), 'spending', 'P2', false),
-  entry('S3', required(uncategorised, 'S3'), 'spending', 'P1', false),
-  entry('S6', required(duplicateCharge, 'S6'), 'spending', 'P0', false),
-  entry('S7', required(fees, 'S7'), 'spending', 'P1', false),
-  entry('S9', required(negativeMonth, 'S9'), 'spending', 'P1', false),
-  entry('S10', required(annualBills, 'S10'), 'spending', 'P1', false),
+  // --- WP 5.7. Wave two ships **on**: the load-bearing reason for holding it
+  //     off — 07 §7.4's first-run pacing — is an operator's stagger, not a
+  //     statement about readers, the same ruling WP 3.10a made for
+  //     debt/investing/crypto (`WAVE_THREE_REASON` above). A deployment that
+  //     wants the original stagger switches a rule off through
+  //     `advisors.enabled` (kill switch 2), which needs no deploy and which a
+  //     restart never undoes.
+  entry('S2', required(categoryCreep, 'S2'), 'spending', 'P2', true),
+  entry('S3', required(uncategorised, 'S3'), 'spending', 'P1', true),
+  entry('S6', required(duplicateCharge, 'S6'), 'spending', 'P0', true),
+  entry('S7', required(fees, 'S7'), 'spending', 'P1', true),
+  entry('S9', required(negativeMonth, 'S9'), 'spending', 'P1', true),
+  entry('S10', required(annualBills, 'S10'), 'spending', 'P1', true),
   // --- WP 3.10, debt. Enabled by WP 3.10a: `liabilities.terms` (all six) and
   //     `market.rates` (D2) now have readers; D5 also reads `cash.summary` and
   //     `cashflow.monthly`, sourced since Phase 2.
@@ -245,6 +270,16 @@ export const BUILTIN_CATALOGUE: readonly BuiltinCatalogueEntry[] = Object.freeze
   entry('R4', required(claimingAge, 'R4'), 'retirement', 'P1', true),
   entry('R6', required(goalPace, 'R6'), 'retirement', 'P1', true),
   entry('R7', required(withdrawalGuardrail, 'R7'), 'retirement', 'P0', true),
+  // --- WP 5.7, advisor contract 1.4.0. `transactions.anomalies` and
+  //     `fees.summary` land sourced in the same commit, so both ship enabled
+  //     from the start — there is no unsourced-reader wait to stagger against.
+  //     `feeHunter` carries `ruleId: 'S7'` too: it is 07's same rule, read
+  //     from the richer scope this work package built, not a new numbered one
+  //     — `advisorId` (`catalog.test.ts`'s own uniqueness check) still tells
+  //     the two `S7` entries apart.
+  entry('S1', required(categoryAnomaly, 'S1'), 'anomalies', 'P2', true),
+  entry('S5', required(newMerchantHighCharge, 'S5'), 'anomalies', 'P1', true),
+  entry('S7', required(feeHunter, 'S7'), 'anomalies', 'P1', true),
 ]);
 
 /**
@@ -390,20 +425,9 @@ export const CATALOGUE_GAPS: readonly CatalogueGap[] = Object.freeze([
       'terms nobody has given this app. 04-phase-4-dispatch.md §6 Q4’s default is not to build ' +
       'it; like I8–I10 it is recorded here rather than written over data that is not there.',
   },
-  {
-    ruleId: 'S1',
-    summary: 'A transaction far above the category’s usual size.',
-    reason:
-      'Needs an exact transaction amount and a per-category distribution. `transactions.raw` ' +
-      'carries a band (03 §8.3), so neither σ nor "${amt}" can be computed or printed.',
-  },
-  {
-    ruleId: 'S5',
-    summary: 'A first-time charge above $250 at a new merchant.',
-    reason:
-      'Needs an exact amount and a merchant-first-seen date. The amount is banded and no scope ' +
-      'says when a merchant was first seen.',
-  },
+  // S1 and S5 left this list at WP 5.7: `transactions.anomalies` carries the
+  // exact amount and the per-category baseline `transactions.raw`'s bucket
+  // could not, and the merchant-first-seen date the window itself now tracks.
 ]);
 
 /**

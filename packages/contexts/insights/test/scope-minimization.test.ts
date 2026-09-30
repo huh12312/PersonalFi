@@ -19,7 +19,7 @@ import { wp310Catalogue } from '../src/advisors/catalogue.ts';
 import { contextOf } from '../src/advisors/support.ts';
 import { SCOPE_CATALOGUE, scopeDefinition, type AdvisorScope } from '../src/contract/scopes.ts';
 import { SnapshotBuilder } from '../src/snapshot/builder.ts';
-import { emptyPorts, inMemoryPlanningPort } from '../src/snapshot/ports.ts';
+import { emptyPorts, inMemoryLedgerPort, inMemoryPlanningPort } from '../src/snapshot/ports.ts';
 import { deriveTokenKey } from '../src/snapshot/tokens.ts';
 import { DateOnly, Money } from '@core/kernel';
 import { requestFor, seedSnapshot } from './advisors/seed.ts';
@@ -370,5 +370,65 @@ describe('scope minimisation — the planning scopes (WP 4.9)', () => {
       expect(definition.sourcedInPhase2, scope).toBe(true);
     }
     expect(scopeDefinition('plan.projection').drops).toMatch(/no date finer than a/u);
+  });
+});
+
+describe('scope minimisation — the anomaly scopes (WP 5.7)', () => {
+  const USER_ID = '01930000-0000-7000-8000-0000000000f1';
+
+  async function buildAnomaliesFor(kind: 'builtin' | 'local_model' | 'external') {
+    const ledger = {
+      transactions: [
+        // Five identical $50.00 charges and one $80.00 outlier -- the same
+        // shape `test/anomaly.test.ts` hand-verifies fires S1.
+        ...['2026-04-01', '2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01'].map(
+          (day, index) => ({
+            id: `txn-sm-${String(index)}`,
+            date: DateOnly.parse(day),
+            merchantId: 'merchant-sm',
+            categorySlug: 'test.anomaly_minimisation',
+            amount: Money.of(-5_000n, 'USD'),
+          }),
+        ),
+        {
+          id: 'txn-sm-outlier',
+          date: DateOnly.parse('2026-09-01'),
+          merchantId: 'merchant-sm-outlier',
+          categorySlug: 'test.anomaly_minimisation',
+          amount: Money.of(-8_000n, 'USD'),
+        },
+      ],
+    };
+    const ports = { ...emptyPorts(), ledger: inMemoryLedgerPort(ledger) };
+    return new SnapshotBuilder(ports).build({
+      userId: USER_ID,
+      kind,
+      grantedScopes: ['transactions.anomalies'] as AdvisorScope[],
+      today: DateOnly.parse('2026-09-19'),
+      baseCurrency: 'USD',
+      tokenKey: deriveTokenKey('wp-5-7-scope-minimisation', USER_ID),
+    });
+  }
+
+  it('transactions.anomalies is never emitted to an external advisor and carries no unflagged row', async () => {
+    // 08 §4.2's row, read the same way `scopesPermittedForKind` reads
+    // `transactions.raw`'s: `externalAllowed: false` refuses it before the
+    // builder's loop is ever reached, not by a filter after.
+    expect(scopeDefinition('transactions.anomalies').externalAllowed).toBe(false);
+
+    const builtin = await buildAnomaliesFor('builtin');
+    expect(builtin.emittedScopes).toContain('transactions.anomalies');
+    expect(builtin.snapshot.transactions_anomalies).toBeDefined();
+
+    const external = await buildAnomaliesFor('external');
+    expect(external.emittedScopes).not.toContain('transactions.anomalies');
+    expect(external.snapshot.transactions_anomalies).toBeUndefined();
+
+    // And never an unflagged row: only the $80.00 outlier crosses, never any
+    // of the five identical $50.00 charges the median and MAD were computed
+    // over.
+    const rows = builtin.snapshot.transactions_anomalies?.rows ?? [];
+    expect(rows.length).toBe(1);
+    expect(rows[0]?.amount.minor).toBe('-8000');
   });
 });

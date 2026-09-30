@@ -60,6 +60,11 @@ export const ADVISOR_SCOPES = [
   // latest CHECK out of the migrations and fails the build on a scope the
   // database would refuse to store a grant for.
   'plan.projection',
+  // WP 5.7, advisor contract 1.4.0. The two new members S1 and S5 need and the
+  // fee hunter reads: migration 0029 widens `snapshot_grants_scope_check` in
+  // the same commit as this bump, the rule 05 §4 states as non-negotiable.
+  'transactions.anomalies',
+  'fees.summary',
 ] as const;
 
 export type AdvisorScope = (typeof ADVISOR_SCOPES)[number];
@@ -309,6 +314,28 @@ export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
     sourcedInPhase2: true,
   }),
   Object.freeze({
+    // WP 5.7, advisor contract 1.4.0. S7's fuller successor: a by-type and
+    // by-account breakdown over twelve months, the avoidable subset (07's fee
+    // taxonomy minus interest, which is the D family's), and the fund
+    // expense-ratio drag summed from `holdings.detail` rather than recomputed.
+    scope: 'fees.summary',
+    sensitivity: 5,
+    key: 'fees_summary',
+    yields:
+      'Fees over the trailing twelve months, totalled by type and by account: the count and sum ' +
+      'per type with whether that type is avoidable, the count and sum per account, and — only ' +
+      'when `holdings.detail` was also granted — the fund expense-ratio drag `holdings.detail` ' +
+      'already computed, carried rather than recomputed.',
+    drops:
+      'Every individual transaction behind a total: no date, no merchant, no descriptor. An ' +
+      'account crosses as the same opaque `account_ref` `cash.summary` mints, never a name.',
+    externalAllowed: true,
+    requiresPerRunConsent: false,
+    minimisation: minimisation({}),
+    // WP 5.7: `#feesSummary`, over `LedgerPort.listTransactions`.
+    sourcedInPhase2: true,
+  }),
+  Object.freeze({
     scope: 'market.watchlist',
     sensitivity: 4,
     key: 'market_watchlist',
@@ -404,6 +431,36 @@ export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
     externalAllowed: false,
     requiresPerRunConsent: true,
     minimisation: minimisation({ bucketAmounts: true }),
+    sourcedInPhase2: true,
+  }),
+  Object.freeze({
+    // WP 5.7, advisor contract 1.4.0. S1 (a charge far above its category's
+    // norm) and S5 (a first-time charge over $250 at a new merchant), 09 ADV-5
+    // and ADV-8. The threshold — three robust deviations over the category's
+    // twelve-month median, and a $25 materiality floor — is applied
+    // in-process in `SnapshotBuilder`, the `idle_cash` precedent
+    // (`snapshot.ts:382`, `wp3.10a-snapshot-readers.md`): only a row that
+    // already qualifies crosses, so the per-row distribution behind the
+    // threshold never does. `externalAllowed: false` for the same reason
+    // `transactions.raw` carries it — an individual, exact-amount row is a
+    // fingerprint, and this scope is one even more exact than that one:
+    // nothing here is bucketed, because a masked outlier is not an outlier.
+    scope: 'transactions.anomalies',
+    sensitivity: 8,
+    key: 'transactions_anomalies',
+    yields:
+      'Only the flagged rows over the trailing twelve months: reference, date, category slug, ' +
+      'tokenised merchant, the exact amount, the category baseline median and MAD, the ' +
+      'deviation expressed as a multiple of the MAD, whether this is the merchant’s first ' +
+      'appearance in the window, a link to an earlier row this one duplicates, and a fee type ' +
+      'when the category is one.',
+    drops:
+      'Every unflagged transaction — the population the median and MAD were computed over never ' +
+      'crosses, only the qualifying rows. No account id; a liability or provider is never named.',
+    externalAllowed: false,
+    requiresPerRunConsent: true,
+    minimisation: minimisation({}),
+    // WP 5.7: `#transactionsAnomalies`, over `LedgerPort.listTransactions`.
     sourcedInPhase2: true,
   }),
   Object.freeze({

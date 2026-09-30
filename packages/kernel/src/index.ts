@@ -47,3 +47,11 @@ export {
   type InsightId,
   type EventId,
 } from './ids.ts';
+export {
+  Stats,
+  medianMinor,
+  twiceMedianMinor,
+  madMinor,
+  medianNumber,
+  madNumber,
+} from './stats.ts';
