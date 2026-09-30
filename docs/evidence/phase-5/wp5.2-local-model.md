@@ -669,3 +669,58 @@ Every file this package created or changed: prettier-clean, eslint-clean, typech
 `advisor-local-model` 33/33 and `platform` (incl. `local-endpoint.test.ts` 10/10) all PASS inside the
 same full run; `bash scripts/compose-hardening-check.sh --self-test` and `bash
 scripts/compose-hardening-check.sh` PASS.
+
+## 12. Live checks — run by the orchestrator, 2026-09-29 23:35–2026-09-30 00:05 EDT
+
+Run on this host with the `local-llm` profile over a cold prod stack (real `secrets/` files plus
+seven empty placeholders for the optional provider keys, removed after; no `compose.override.yml`;
+`personalfi_pgdata`/`backups`/`caddy_*`/`returns_cache` volumes removed at teardown and
+`personalfi_ollama_models` kept). Nothing else was measuring on the host during item 7. §8's
+numbering, one line of transcript each; every expected value in §8 was observed.
+
+1. **Store ownership / read-only store.** The pull's first run stopped with `ollama-pull: set
+LOCAL_MODEL_NAME in .env` (exit 2) — the RUNBOOK step says to set it and the local `.env` had
+   not; set (gitignored, not a secret) and re-run: `success`. `stat` over the volume: `1777 0:0 /v`,
+   `755 10003:10003 /v/ollama`, `755 10003:10003 /v/ollama/models`. `docker compose --profile
+local-llm up -d --wait` → `personalfi-ollama-1 … (healthy)` on the `:ro` store; `logs ollama |
+grep -ciE 'read-only|permission denied|mkdir'` → `0`. **No fallback needed; the weights stay
+   read-only to the runtime.**
+2. **Model digest.** Pull output: `845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e
+/var/tmp/ollama/models/manifests/registry.ollama.ai/library/qwen2.5/7b-instruct-q4_K_M`. From the
+   worker over `llm`: `qwen2.5:7b-instruct-q4_K_M 845dbda0…697e` — equal to `.env.example`'s pin.
+3. **`db` from the model container.** `getent hosts db` → no output, `exit=2`; from a throwaway
+   container on `personalfi_llm`, `nc -zv -w 3 172.25.0.2 5432` → `Network unreachable` (03 P0-8).
+4. **No outbound path.** `getent hosts registry.ollama.ai` → `exit=2`; `ollama pull tinyllama` →
+   `Error: pull model manifest: … dial tcp: lookup registry.ollama.ai on 127.0.0.11:53: server
+misbehaving`, exit 1.
+5. **Nothing secret inside.** `env` names: `HOME HOSTNAME LD_LIBRARY_PATH NVIDIA_DRIVER_CAPABILITIES
+NVIDIA_VISIBLE_DEVICES OLLAMA_DEBUG OLLAMA_HOST OLLAMA_KEEP_ALIVE OLLAMA_MAX_LOADED_MODELS
+OLLAMA_MAX_QUEUE OLLAMA_MODELS OLLAMA_NOPRUNE OLLAMA_NUM_PARALLEL PATH TZ`; `grep -ciE
+'KEY|SECRET|TOKEN|PASSWORD|DATABASE'` → `0`; `/run/secrets` → `No such file or directory`.
+6. **`docker inspect`.** `true 10003:10003 [ALL] [no-new-privileges:true] {} 256 8589934592
+4000000000`; networks `[ 'personalfi_llm' ]`; `personalfi_llm` → `true personalfi-ollama-1
+personalfi-worker-1`.
+7. **RSS and tokens/s** (load 2.97 before the run; the 5.13b finisher's vitest was the only other
+   work on the host): `ollama run qwen2.5:7b-instruct-q4_K_M --verbose 'Say hello in five words.'`
+   → `Hello, nice to meet.`; `total duration 18.08 s`, `load duration 11.81 s`, `prompt eval rate
+7.41 tokens/s`, `eval rate 4.54 tokens/s`. `docker stats` during and after: **4.69 GiB / 8 GiB**
+   at 397 % CPU while generating, 4.68 GiB idle with the model kept loaded. 58 % of the limit — the
+   §6.4 assumption (~5 GiB) holds; no change to `mem_limit`.
+8. **Worker egress after joining `llm`.** `fetch("https://registry.npmjs.org/")` from the worker →
+   `200`; its networks `[ 'personalfi_backend', 'personalfi_llm' ]`.
+9. **Fail fast on stop.** `docker compose stop ollama`, then the worker's `fetch` to
+   `ollama:11434` → `ERR ENOTFOUND` in **785 ms**; every other service still `healthy`; `up -d
+--wait ollama` → `Healthy`.
+10. **Canary in logs** — `grep -c canary` over `ollama worker api` → `0`, but no narration is wired
+    yet (W-C), so this is the empty case; the gate re-runs it after a live narration.
+11. **trivy** on `ollama/ollama:0.34.2@sha256:da6e0dc5…8f865532`: `--severity HIGH,CRITICAL
+--ignore-unfixed` → **43 HIGH, 0 CRITICAL**, all Go-module CVEs inside the upstream binary with
+    fixes available upstream (e.g. `github.com/buger/jsonparser` CVE-2026-32285); `--scanners
+secret` → **0 secrets**. Not clean enough to gate CI on (05 §3): **the Phase 5 gate rules**,
+    the same posture as the Caddy snoozes in `.trivyignore` — an upstream Go binary the project does
+    not build. The image sits on an internal network with no route out and no secret, which is the
+    mitigation the sandbox was designed to be.
+
+Teardown: `docker compose --profile local-llm down`; the five stack volumes removed by name;
+`ollama_models` kept (the ~4.7 GB pull); the seven placeholder secret files removed (`secrets/`
+back to its ten files); `docker compose ps -a` empty.
