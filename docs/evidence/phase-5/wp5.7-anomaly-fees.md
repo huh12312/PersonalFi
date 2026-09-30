@@ -520,3 +520,11 @@ $ timeout 300 pnpm exec vitest run --project insights
 Whole `insights` vitest project green: 27/27 files, 270/270 tests — `advisor-golden.test.ts`'s 42
 (previously 39: 37 pre-existing rows + the two suite-level tests) included, no other file's count moved.
 `test/advisor-golden.test.ts` is no longer orphaned-and-red; it is WP 5.7's last item, closed.
+
+Run by the orchestrator on the landed tree (this package `50e14dc` + `bee9246`, with 5.5, 5.9 and the
+W-B wiring beside it), 2026-09-30 ~11:40 EDT: typecheck, lint and every static check green; **331 test
+files, 3173 tests passed, 10 skipped, 1 failed** — `advisor-local-model/test/caps.test.ts`, the
+sanitiser's cap table lagging **this package's** 1.4.0 schema (`fee_type: 64` new; the widest `type`
+site now 64 in `fees.summary`). WP 5.2's parity test doing its job: fixed by the orchestrator in the
+adapter's `caps.ts` and proven green against the committed schema (33/33). Every other project green,
+including `insights` 27 files / 270 tests with the golden coverage test.

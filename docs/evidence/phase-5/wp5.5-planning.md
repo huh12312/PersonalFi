@@ -505,3 +505,11 @@ not bumped, with the reason), sabotages S1–S10 all red first try (§1), the wi
 the rest for the orchestrator (§9). The `just check` result follows.
 
 ## 14. `just check`
+
+Run by the orchestrator on the landed tree (WP 5.5 `29f79af`, 5.7 `50e14dc`, W-B `0de84c4`, 5.9 `b2a6e40`
+and the golden-test finisher `bee9246`), 2026-09-30 ~11:40 EDT, in the background because the suite no
+longer fits the 10-minute foreground window: typecheck, lint and every static check green; **331 test
+files, 3173 tests passed, 10 skipped, 1 failed** — the one red `advisor-local-model/test/caps.test.ts`
+(the sanitiser's cap table lagging contract 1.4.0's `fee_type` and the widened `type`), WP 5.7's
+contract change, not this package's; fixed in its own commit and proven green against the committed
+schema. Nothing in `planning`, `planning-db` or `planning-perf` red.
