@@ -1193,7 +1193,9 @@
               "institutions.names",
               "liabilities.terms",
               "market.rates",
-              "plan.projection"
+              "plan.projection",
+              "transactions.anomalies",
+              "fees.summary"
             ]
           },
           "sensitivity": {
@@ -8637,7 +8639,9 @@
               "institutions.names",
               "liabilities.terms",
               "market.rates",
-              "plan.projection"
+              "plan.projection",
+              "transactions.anomalies",
+              "fees.summary"
             ]
           },
           "sensitivity": {
@@ -24151,7 +24155,7 @@
         "tags": [
           "insights"
         ],
-        "description": "A dismissal starts the 30/90/permanent cooldown ladder — the third dismissal of the same finding suppresses it permanently (`@ctx/insights`'s `policy/cooldown.ts`).",
+        "description": "A dismissal starts the 30/90/permanent cooldown ladder — the third dismissal of the same finding suppresses it permanently (`@ctx/insights`'s `policy/cooldown.ts`). An optional `reasonCode` (07 §8.3's seven-value taxonomy, WP 5.9) drives the feedback loop: NOT_TRUE counts toward the rule's quarantine rate, ALREADY_KNOW skips to the 90-day rung, DONT_CARE turns the rule off for this holder, INTENTIONAL suppresses the entity permanently. Omitted, the three legacy preset strings in `reason` are still matched by exact text.",
         "requestBody": {
           "required": true,
           "content": {
@@ -24172,6 +24176,25 @@
                     "type": [
                       "string",
                       "null"
+                    ]
+                  },
+                  "reasonCode": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "NOT_TRUE",
+                          "ALREADY_KNOW",
+                          "NOT_ACTIONABLE",
+                          "DONT_CARE",
+                          "WRONG_AMOUNT",
+                          "INTENTIONAL",
+                          "LATER"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   },
                   "snoozeUntil": {
@@ -32058,7 +32081,9 @@
                         "institutions.names",
                         "liabilities.terms",
                         "market.rates",
-                        "plan.projection"
+                        "plan.projection",
+                        "transactions.anomalies",
+                        "fees.summary"
                       ]
                     }
                   },
@@ -32114,7 +32139,9 @@
                           "institutions.names",
                           "liabilities.terms",
                           "market.rates",
-                          "plan.projection"
+                          "plan.projection",
+                          "transactions.anomalies",
+                          "fees.summary"
                         ]
                       }
                     },
@@ -32138,7 +32165,9 @@
                           "institutions.names",
                           "liabilities.terms",
                           "market.rates",
-                          "plan.projection"
+                          "plan.projection",
+                          "transactions.anomalies",
+                          "fees.summary"
                         ]
                       }
                     }
