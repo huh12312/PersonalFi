@@ -221,6 +221,45 @@ describe.skipIf(NO_DATABASE)('/advisors/{id}/scopes and /advisors/{id}/grants (W
     expect([...stored]).toEqual([]);
   });
 
+  // Phase 4 gate G4-22 (C-12's consent-surface half, WP 5.1 §14 item 3): a
+  // scope the catalogue marks `requiresPerRunConsent` is consented per run;
+  // the run path never emits it without a consent for that run, so a
+  // standing grant that the body does not acknowledge would be a row that
+  // reads "granted" and means nothing.
+  it('a per-run-consent scope cannot be granted standing unless the body acknowledges it', async () => {
+    const refused = await h.request({
+      method: 'PUT',
+      url: `/advisors/${CASH_ADVISOR_ID}/grants`,
+      session: h.fresh,
+      body: { scopes: ['transactions.raw'] },
+    });
+    expect(refused.statusCode).toBe(422);
+    expect(problemOf(refused)['code']).toBe('insights.per_run_consent_required');
+    expect(String(problemOf(refused)['detail'])).toContain('transactions.raw');
+    const before = await listGrants(h.database.db, h.userId, CASH_ADVISOR_ID);
+    expect([...before]).not.toContain('transactions.raw');
+
+    const acknowledged = await h.request({
+      method: 'PUT',
+      url: `/advisors/${CASH_ADVISOR_ID}/grants`,
+      session: h.fresh,
+      body: { scopes: [...before, 'transactions.raw'], perRunConsent: true },
+    });
+    expectStatus(acknowledged, 200);
+    expect((acknowledged.json() as GrantsResponse).granted).toEqual(['transactions.raw']);
+
+    // Put the standing set back the way the earlier cases left it: the tests
+    // in this describe share one advisor row and one user.
+    const restored = await h.request({
+      method: 'PUT',
+      url: `/advisors/${CASH_ADVISOR_ID}/grants`,
+      session: h.fresh,
+      body: { scopes: [...before] },
+    });
+    expectStatus(restored, 200);
+    expect((restored.json() as GrantsResponse).revoked).toEqual(['transactions.raw']);
+  });
+
   it('the external advisor’s scope list never offers a scope it could not be granted', async () => {
     const response = await h.request({
       method: 'GET',

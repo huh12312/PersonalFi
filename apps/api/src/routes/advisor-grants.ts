@@ -42,6 +42,7 @@ import {
   listGrants,
   revokeScopes,
   SCOPE_CATALOGUE,
+  scopeDefinition,
   scopesPermittedForKind,
   type AdvisorScope,
   type InsightsContext,
@@ -82,6 +83,23 @@ function scopeNotPermittedForKind(scope: AdvisorScope, kind: string): AppError {
     code: 'insights.scope_not_permitted_for_kind',
     title: 'Unprocessable Content',
     detail: `${scope} is not permitted for a '${kind}' advisor (08 §4.2's minimisation table)`,
+    family: 'domain',
+  });
+}
+
+/**
+ * G4-22: a per-run-consent scope asked for as a standing grant without the
+ * body acknowledging it. 422 like `scopeNotPermittedForKind`: the request is
+ * well-formed and the caller is who they say; the *content* is refused.
+ */
+function perRunConsentRequired(scope: AdvisorScope): AppError {
+  return new AppError({
+    status: 422,
+    code: 'insights.per_run_consent_required',
+    title: 'Unprocessable Content',
+    detail:
+      `${scope} requires consent on each run (08 §4.2); a standing grant needs ` +
+      '`perRunConsent: true` in the body, and the run still asks every time',
     family: 'domain',
   });
 }
@@ -191,6 +209,18 @@ export const advisorGrantRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         const permittedSet = new Set(permitted);
         for (const scope of request.body.scopes) {
           if (!permittedSet.has(scope)) throw scopeNotPermittedForKind(scope, advisor.kind);
+          // Phase 4 gate G4-22 (C-12), the consent surface's honesty: a
+          // `requiresPerRunConsent` scope (`transactions.raw`,
+          // `institutions.names`) is consented per run, never standing. The
+          // run path already never emits one without a consent for *that*
+          // run (WP 5.1 `preview.ts`, sabotage S6), so a standing grant here
+          // would record a consent the data path ignores — the row would say
+          // "granted" on the advisor screen and mean nothing. Refused, named,
+          // unless the body says the caller understands (`perRunConsent:
+          // true`, which the store records on the grant row).
+          if (scopeDefinition(scope).requiresPerRunConsent && request.body.perRunConsent !== true) {
+            throw perRunConsentRequired(scope);
+          }
         }
 
         const desired = new Set(request.body.scopes);
