@@ -401,7 +401,20 @@ export class SecretBox {
 
   async #initialiseKeyring(passphrase: string): Promise<void> {
     const salt = randomBytes(KEK_SALT_BYTES);
-    const version = (await maxVersion(this.#db, this.#userId, 'kek', KEK_SCOPE)) + 1;
+    // Generation 1, unconditionally. This used to be `maxVersion + 1`, read
+    // *after* `unlock()`'s "is there an active KEK row?" check — and CI's
+    // Postgres timing found the hole on 2026-09-30 (run 36713567024): the
+    // winner's INSERT landed between that check and this read, the loser
+    // computed generation 2, inserted it with no collision, and two live
+    // keyrings existed for one holder (`keyring-race.test.ts` read `kekVersion`
+    // 2 where it expects 1). "Initialise" means no keyring exists, so the
+    // generation cannot depend on a read that can observe the winner: it is 1,
+    // and the unique index is what turns a lost race into the recovery below.
+    // A holder whose only rows are retired generations (rotation abandoned
+    // between INSERT and retire) collides here too and is refused in the
+    // catch as the stranger state it is, rather than silently restarted at a
+    // higher generation.
+    const version = 1;
     const derived = await deriveKek(passphrase, salt, this.#kdfParams, () => this.#clock.nowMs());
     const id = newId();
     const verifier = this.#wrapUnder(derived.key, id, version, new Uint8Array(KEK_VERIFIER));

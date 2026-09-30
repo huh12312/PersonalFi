@@ -118,4 +118,45 @@ describeWithDb('the keyring-initialisation race (carry-c2)', () => {
       expect(stateC).toMatchObject({ state: 'unlocked', kekVersion: 1 });
     },
   );
+
+  it(
+    "a loser that passed the existence check before the winner's INSERT still joins generation 1, never starts generation 2",
+    { timeout: 60_000 },
+    async () => {
+      // CI's Postgres timing (run 36713567024, 2026-09-30) found the
+      // interleaving the first test does not pin: B's "is there an active KEK
+      // row?" read says none, A inserts generation 1, and only then does B
+      // continue. `#initialiseKeyring` used to read `max(version) + 1` at
+      // that point — 2 — and insert it with no collision: two live keyrings.
+      // Here B is held after its existence check until A has finished, so
+      // whatever B does next happens with the winner's row already stored.
+      const userId = await database.createUser();
+      const boxA = boxFor(userId);
+      let aFinished: Promise<unknown> = Promise.resolve();
+      let bChecked = false;
+      const boxB = boxFor(userId, {
+        async query(text: string, values?: readonly unknown[]) {
+          const touchesKeys = text.includes('encryption_keys');
+          if (touchesKeys && !bChecked) {
+            bChecked = true; // the existence check, answered before A inserts
+          } else if (touchesKeys) {
+            await aFinished; // everything after it sees A's row
+          }
+          return database.db.query(text, values);
+        },
+      });
+
+      const bUnlock = boxB.unlock(PASSPHRASE);
+      aFinished = boxA.unlock(PASSPHRASE);
+      const [stateA, stateB] = await Promise.all([aFinished as Promise<unknown>, bUnlock]);
+
+      expect(stateA).toMatchObject({ state: 'unlocked', kekVersion: 1 });
+      expect(stateB).toMatchObject({ state: 'unlocked', kekVersion: 1 });
+      const keys = await database.db.query(
+        `SELECT count(*)::int AS n FROM encryption_keys WHERE user_id = $1 AND kind = 'kek'`,
+        [userId],
+      );
+      expect(keys.rows[0]?.['n']).toBe(1);
+    },
+  );
 });

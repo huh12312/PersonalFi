@@ -1367,3 +1367,20 @@ unrelated `buildx` state volume remain.
   future WP should widen `defaultMethodFor`/`refreshBaseline` themselves to ask "is a series
   configured at all" rather than "is one bound right now" — is a product/architecture call this
   WP's ownership could not make.
+
+### 2.x C-2 post-landing: the interleaving CI found (orchestrator, 2026-09-30 13:30 EDT)
+
+CI's `migration test (postgres 18)` on `893a810` (run 36713567024) read `kekVersion` **2** where
+`keyring-race.test.ts` expects 1: a loser whose "is there an active KEK row?" check answered _none_, and
+whose `max(version) + 1` read then landed **after** the winner's INSERT, computed generation 2 and
+inserted it with no collision — two live keyrings for one holder, the very state C-2 exists to
+prevent, reachable on CI's Postgres timing and never once on this host. The 5.13a race test widened
+the race on the _existence_ read only, so it could not pin this interleaving. Fix
+(`secret-box.ts#initialiseKeyring`): generation **1, unconditionally** — "initialise" means no
+keyring exists, and the generation must not depend on a read that can observe the winner; the unique
+index then turns the lost race into the existing recovery path. A holder whose only rows are retired
+generations now collides too and is refused in the catch as the stranger state it is. New test
+`'a loser that passed the existence check before the winner's INSERT still joins generation 1, never
+starts generation 2'` gates every query of B's after its existence check on A's completion:
+**red** with the old `maxVersion + 1` restored (`expected { …kekVersion: 2 } to match { kekVersion: 1 }`),
+green with the fix; `secretbox` + `secretbox-db` 59/59.
