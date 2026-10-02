@@ -60,6 +60,19 @@ const HTML_ENTITY = /&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,31
 const IMAGE = /!\[/;
 /** `javascript:`, `data:`, `vbscript:` anywhere, in any casing. */
 const DANGEROUS_SCHEME = /(?:javascript|data|vbscript|file|blob)\s*:/i;
+
+/**
+ * Whether `target` opens with a scheme `markdownViolations` already refuses
+ * (`autolink_scheme`, above). The link-target check (F-3, `pipeline.ts`)
+ * skips such a target rather than also refusing it under `checkLink`'s own
+ * `scheme_not_https`: the two checks would otherwise report the identical
+ * refusal under two different names, and this module's is the one with the
+ * test coverage for it. A non-dangerous non-`https` scheme (`http:`, `ftp:`)
+ * is not skipped — `checkLink` is the only thing that refuses those.
+ */
+export function isDangerousScheme(target: string): boolean {
+  return DANGEROUS_SCHEME.test(target);
+}
 const HEADING = /^\s{0,3}#{1,6}\s/m;
 const BLOCKQUOTE = /^\s{0,3}>/m;
 const CODE_FENCE = /^\s{0,3}(?:```|~~~)/m;
@@ -166,6 +179,29 @@ export interface RenderableFields {
   readonly actionLabels: readonly string[];
   readonly actionRationales: readonly string[];
   readonly caveats: readonly string[];
+}
+
+/** A markdown link's `(target)`, captured alongside the caption `renderedText` keeps. */
+const MARKDOWN_LINK = /\[[^\]]{0,200}\]\(([^)\s]{0,2048})(?:\s+"[^"]{0,200}")?\)/g;
+const BARE_URL = /\bhttps?:\/\/\S+/giu;
+
+/**
+ * Every link *target* in `text` — what a click actually sends a browser to
+ * (F-3). `markdown.ts`'s subset permits "links whose target is checked
+ * elsewhere"; this is the other half of `renderedText`, which keeps a link's
+ * *caption* and discards its target. Two shapes: a markdown link's `(target)`,
+ * and a bare URL written with no markdown syntax at all (`"Details:
+ * https://…"` passes every markdown rule there is, because it never uses any).
+ */
+export function linkTargetsOf(text: string): readonly string[] {
+  const targets: string[] = [];
+  for (const match of text.matchAll(MARKDOWN_LINK)) {
+    const target = match[1];
+    if (target !== undefined) targets.push(target);
+  }
+  const withoutMarkdownTargets = text.replace(MARKDOWN_LINK, ' ');
+  for (const match of withoutMarkdownTargets.matchAll(BARE_URL)) targets.push(match[0]);
+  return targets;
 }
 
 export function renderableStrings(fields: RenderableFields): readonly string[] {

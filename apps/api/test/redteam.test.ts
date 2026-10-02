@@ -60,12 +60,16 @@ const INPUT = loadInputCorpus();
 const MERCHANT_SOURCES = new Set(['merchant.descriptor', 'transaction.memo']);
 
 /**
- * The findings whose leaks are open (the evidence file's §4). The verbatim
- * exit test below is `it.fails` **because the criterion does not hold today**;
- * the pinning test beside it asserts the leaks are exactly these and no
- * others, so `.fails` cannot hide a new one.
+ * The findings whose leaks are open (the evidence file's §4, WP 5.3b's §11).
+ * F-1, F-2 and F-4 — the only ones this set ever named — are closed: the
+ * narrow trace's candidates are the finding's rendered figures only (never an
+ * identifier, a key, a slug or a symbol quoted into its prose), every
+ * decimal-digit script folds to ASCII before matching, and a spelled-out
+ * figure with a scale or currency cue beside it is held to the same set.
+ * Empty, not deleted: a new leak reopening this set is what the pin below
+ * exists to catch.
  */
-const OPEN_FABRICATION_FINDINGS = new Set(['F-1', 'F-2', 'F-4']);
+const OPEN_FABRICATION_FINDINGS = new Set<string>([]);
 
 // ---------------------------------------------------------------------------
 // Observation helpers
@@ -468,16 +472,12 @@ describe('WP 5.4 — the red-team corpus through the real builder, prompt, narra
     expect([control?.validator, control?.adapter]).toEqual(['accepted', 'accepted']);
   });
 
-  it.fails(
-    "zero schema-valid insights carry a figure that is not the narrated finding's own",
-    () => {
-      // `.fails`: the second exit criterion does NOT hold at this commit — see
-      // OPEN_FABRICATION_FINDINGS and the pinning test below. Remove `.fails`
-      // when F-1, F-2 and F-4 are closed; it then turns red until you do.
-      const leaks = [...inputs.flatMap((o) => o.leaks), ...outputs.flatMap((o) => o.leaks)];
-      expect(leaks).toEqual([]);
-    },
-  );
+  it("zero schema-valid insights carry a figure that is not the narrated finding's own", () => {
+    // Plainly green as of WP 5.3b (§11 of the narrator evidence): F-1, F-2 and
+    // F-4 are closed, and OPEN_FABRICATION_FINDINGS (the pin below) is empty.
+    const leaks = [...inputs.flatMap((o) => o.leaks), ...outputs.flatMap((o) => o.leaks)];
+    expect(leaks).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------

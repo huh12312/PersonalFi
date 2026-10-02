@@ -88,17 +88,25 @@ import {
   evidenceValueAgrees,
   isSnapshotRef,
   narratedFindingFor,
+  narratedLabelAgrees,
   narratedValueAgrees,
   resolveNarratedRef,
   resolveSourceRef,
 } from './evidence.ts';
 import { checkLink, externalUrlOf } from './links.ts';
-import { markdownViolations, renderableStrings } from './markdown.ts';
+import {
+  hasForbiddenCharacter,
+  isDangerousScheme,
+  linkTargetsOf,
+  markdownViolations,
+  renderableStrings,
+} from './markdown.ts';
 import {
   findingTraceContext,
   traceContext,
   untraceableInFinding,
   untraceableNumerals,
+  untraceableWordFiguresInFinding,
 } from './numerals.ts';
 
 export const VALIDATION_STEPS = [
@@ -442,14 +450,39 @@ function resolveEvidence(
   }
 
   for (const [position, action] of insight.proposed_actions.entries()) {
-    if (action.url === null) continue;
-    const verdict = checkLink(action.url, manifest.egress_allowlist);
+    if (action.url !== null) {
+      const verdict = checkLink(action.url, manifest.egress_allowlist);
+      if (!verdict.ok) {
+        return {
+          ok: false,
+          reason: `link_${verdict.reason}`,
+          detail: `proposed_actions[${String(position)}] ${action.url}`,
+        };
+      }
+    }
+    // F-3: a link *target* written into the Markdown prose itself — a
+    // `[caption](target)` or a bare URL — is checked the same way the `url`
+    // field is. `markdown.ts`'s subset permits links "whose target is
+    // checked elsewhere"; this is that check, for every rendered field a
+    // link could sit in, not only evidence and `proposed_actions[].url`.
+    for (const target of linkTargetsOf(action.rationale_md)) {
+      if (isDangerousScheme(target)) continue; // markdownViolations (step 7) already refuses this
+      const verdict = checkLink(target, manifest.egress_allowlist);
+      if (!verdict.ok) {
+        return {
+          ok: false,
+          reason: `link_${verdict.reason}`,
+          detail: `proposed_actions[${String(position)}] rationale ${target}`,
+        };
+      }
+    }
+  }
+
+  for (const target of linkTargetsOf(insight.summary_md)) {
+    if (isDangerousScheme(target)) continue; // markdownViolations (step 7) already refuses this
+    const verdict = checkLink(target, manifest.egress_allowlist);
     if (!verdict.ok) {
-      return {
-        ok: false,
-        reason: `link_${verdict.reason}`,
-        detail: `proposed_actions[${String(position)}] ${action.url}`,
-      };
+      return { ok: false, reason: `link_${verdict.reason}`, detail: `summary_md ${target}` };
     }
   }
 
@@ -465,6 +498,7 @@ function resolveEvidence(
 function resolveNarratedEvidence(
   insight: Insight,
   finding: NarratedFinding,
+  manifest: AdvisorManifest,
 ):
   | { readonly ok: true; readonly rows: readonly ResolvedEvidenceRow[] }
   | { readonly ok: false; readonly reason: string; readonly detail: string } {
@@ -485,6 +519,24 @@ function resolveNarratedEvidence(
         detail: `${where} ${row.source_ref}`,
       };
     }
+    // F-8: a real figure under a label the finding never attached to that
+    // ref is a fabrication one layer down from the prose — the evidence
+    // panel, not `summary_md`. Checked before the value, so a relabelled row
+    // is reported as what it is even when the value also happens to agree.
+    //
+    // Deferred when the *claimed* label itself carries a digit: a label that
+    // is wrong because it is a different, plausible description (no figure
+    // in it) has nothing else that will ever catch it, which is the gap F-8
+    // closes. A label that is wrong because it smuggles a fabricated number
+    // is numerals' case to make (step 7, against the same finding), not a
+    // second name for the same defect reported one step early.
+    if (!/\p{Nd}/u.test(row.label) && !narratedLabelAgrees(row.label, resolution.label)) {
+      return {
+        ok: false,
+        reason: 'narration_label_disagrees',
+        detail: `${where} claimed ${row.label}`,
+      };
+    }
     if (!narratedValueAgrees(row.value, resolution.value)) {
       return {
         ok: false,
@@ -500,6 +552,16 @@ function resolveNarratedEvidence(
       href: null,
       resolvedDisplay: resolution.value,
     });
+  }
+  // F-3: the same link-target check as a builtin's, over the allow-list a
+  // narrator is registered with — `[]`, so any link a narration's `summary_md`
+  // writes is refused here, before step 7 ever sees it.
+  for (const target of linkTargetsOf(insight.summary_md)) {
+    if (isDangerousScheme(target)) continue; // markdownViolations (step 7) already refuses this
+    const verdict = checkLink(target, manifest.egress_allowlist);
+    if (!verdict.ok) {
+      return { ok: false, reason: `link_${verdict.reason}`, detail: `summary_md ${target}` };
+    }
   }
   return { ok: true, rows };
 }
@@ -576,6 +638,19 @@ function checkNumerals(
     money === null ? [] : [money.minor],
   );
 
+  // F-5: the bidi/control-character refusal reaches every field a human will
+  // read, not only `summary_md` and a proposed action's `rationale_md`
+  // (`markdownViolations`, above). A title or an evidence label can carry a
+  // right-to-left override as easily as a summary can — `markdown.ts`'s own
+  // header names the stakes: the bytes can quote the finding's own `$18.99`
+  // while the screen shows `99.81$`. Same field list the numeral check below
+  // uses, so "every rendered field" cannot quietly mean two different things.
+  for (const text of [...renderableStrings(fields), ...impactStrings]) {
+    if (hasForbiddenCharacter(text)) {
+      return { reason: 'markdown_control_character', detail: text.slice(0, 80) };
+    }
+  }
+
   if (finding !== null) {
     // The narrow trace. A narrator's candidates are its finding's rendered
     // figures, verbatim — never the snapshot, whatever the request carried.
@@ -584,6 +659,15 @@ function checkNumerals(
       const first = untraceableInFinding(text, narrow)[0];
       if (first !== undefined) {
         return { reason: 'numeral_not_in_finding', detail: `${first.raw} in ${text.slice(0, 80)}` };
+      }
+      // F-4: a figure need not be a digit to be a figure — "five thousand
+      // four hundred dollars" renders exactly as "$5,400.00" does.
+      const wordFirst = untraceableWordFiguresInFinding(text, narrow)[0];
+      if (wordFirst !== undefined) {
+        return {
+          reason: 'numeral_not_in_finding',
+          detail: `${wordFirst.raw} in ${text.slice(0, 80)}`,
+        };
       }
     }
     return null;
@@ -646,7 +730,7 @@ export function validateResponse(input: ValidationInput): ValidationOutcome {
     const evidence =
       capability.finding === null
         ? resolveEvidence(insight, snapshot, input.manifest)
-        : resolveNarratedEvidence(insight, capability.finding);
+        : resolveNarratedEvidence(insight, capability.finding, input.manifest);
     if (!evidence.ok) {
       rejected.push({
         step: 'evidence',

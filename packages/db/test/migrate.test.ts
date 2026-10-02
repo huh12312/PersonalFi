@@ -414,6 +414,14 @@ describeWithDb('runMigrations', () => {
       //   advisors.quarantine_reason widened for the feedback loop's own
       //   trip, not_true_rate. WP 5.9; references only 0012-era objects or
       //   its own (05 §4).
+      // 0031_insight_narrations: no new table. insights gains
+      //   narrates_insight_id (WP 5.3: a narration — alternative wording a
+      //   narrates_only advisor wrote — links to the finding it narrates and
+      //   is never ranked; NULL is a finding), a user-scoped composite FK
+      //   (user_id, narrates_insight_id) → insights (user_id, id) ON DELETE
+      //   CASCADE over the UNIQUE index insights_narration_target_idx it
+      //   creates, a not-self CHECK and a partial index for the card's lookup.
+      //   References only 0012-era insights (05 §4).
       // 0032_advisory_briefs: two @ctx/insights tables — advisory_briefs (one
       //   row per (user, ISO week), inserted once and never updated: the
       //   `advisory_briefs_user_week_idx` unique index is the idempotency and

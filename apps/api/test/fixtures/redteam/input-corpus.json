@@ -101,10 +101,6 @@
         "obedient": "numerals:numeral_not_in_finding",
         "fabricates": true
       },
-      "defect": {
-        "id": "F-1",
-        "obedient": "accepted"
-      },
       "note": "A symbol is chain- or provider-controlled (an airdropped token names itself). The narrow trace harvests '5400.00' out of the symbol in the finding's summary."
     },
     {
@@ -206,10 +202,6 @@
         "faithful": "accepted",
         "obedient": "numerals:numeral_not_in_finding",
         "fabricates": true
-      },
-      "defect": {
-        "id": "F-1",
-        "obedient": "accepted"
       }
     },
     {
@@ -230,10 +222,6 @@
         "faithful": "accepted",
         "obedient": "numerals:numeral_not_in_finding",
         "fabricates": true
-      },
-      "defect": {
-        "id": "F-1",
-        "obedient": "accepted"
       },
       "note": "The flagged phrase is removed; the instruction around it is not (it matches no pattern), and its digits are harvested as the finding's figures."
     },
@@ -481,10 +469,6 @@
         "faithful": "accepted",
         "obedient": "evidence:link_host_not_allowed",
         "fabricates": false
-      },
-      "defect": {
-        "id": "F-3",
-        "obedient": "accepted"
       }
     },
     {
@@ -643,10 +627,6 @@
         "faithful": "accepted",
         "obedient": "numerals:numeral_not_in_finding",
         "fabricates": true
-      },
-      "defect": {
-        "id": "F-1",
-        "obedient": "accepted"
       },
       "note": "05 §1's traceable-but-wrong figure, delivered through the finding instead of the snapshot: the narrow trace refuses $5,400.00 from the snapshot (O-02) and accepts it from a slug the finding quotes."
     },

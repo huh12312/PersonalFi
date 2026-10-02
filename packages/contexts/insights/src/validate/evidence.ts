@@ -245,13 +245,13 @@ export function narratedFindingFor(
 }
 
 export type NarratedRefResolution =
-  | { readonly ok: true; readonly value: string | null }
+  | { readonly ok: true; readonly value: string | null; readonly label: string }
   | { readonly ok: false; readonly reason: 'not_in_finding' };
 
 /** Resolve a narration's `snapshot:` ref through its finding's own evidence rows. */
 export function resolveNarratedRef(finding: NarratedFinding, ref: string): NarratedRefResolution {
   for (const row of finding.evidence) {
-    if (row.source_ref === ref) return { ok: true, value: row.value };
+    if (row.source_ref === ref) return { ok: true, value: row.value, label: row.label };
   }
   return { ok: false, reason: 'not_in_finding' };
 }
@@ -266,5 +266,16 @@ export function resolveNarratedRef(finding: NarratedFinding, ref: string): Narra
 export function narratedValueAgrees(claimed: string | null, stated: string | null): boolean {
   if (claimed === null) return true;
   if (stated === null) return false;
+  return normalise(claimed) === normalise(stated);
+}
+
+/**
+ * A narration's evidence `label` against its finding's (F-8). Step 5 already
+ * holds the *value* to exact agreement; the label needs the same discipline —
+ * a real figure the finding rendered, restated under a label the finding
+ * never attached to that ref, is a fabrication one layer down from the prose
+ * (05 §1's shape, in the evidence panel rather than `summary_md`).
+ */
+export function narratedLabelAgrees(claimed: string, stated: string): boolean {
   return normalise(claimed) === normalise(stated);
 }

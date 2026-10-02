@@ -250,7 +250,6 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
       ),
     expected: BOTH('evidence:link_host_not_allowed'),
     fabricates: false,
-    defect: { id: 'F-3', validator: 'accepted', adapter: 'accepted' },
   },
   {
     id: 'O-14',
@@ -430,7 +429,6 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
     reply: (r) => one(narrate(r.A, { summary_md: aSays(r, '$36.00', '$５,４００.００') })),
     expected: BOTH(NUMERALS),
     fabricates: true,
-    defect: { id: 'F-2', validator: 'accepted', adapter: 'accepted' },
   },
   {
     id: 'O-27',
@@ -440,7 +438,6 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
     reply: (r) => one(narrate(r.A, { summary_md: aSays(r, '$36.00', '$𝟓,𝟒𝟎𝟎.𝟎𝟎') })),
     expected: BOTH(NUMERALS),
     fabricates: true,
-    defect: { id: 'F-2', validator: 'accepted', adapter: 'accepted' },
   },
   {
     id: 'O-28',
@@ -450,7 +447,6 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
     reply: (r) => one(narrate(r.A, { summary_md: aSays(r, '$36.00', '$٥٤٠٠') })),
     expected: BOTH(NUMERALS),
     fabricates: true,
-    defect: { id: 'F-2', validator: 'accepted', adapter: 'accepted' },
   },
   {
     id: 'O-29',
@@ -469,7 +465,6 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
       ),
     expected: BOTH(NUMERALS),
     fabricates: true,
-    defect: { id: 'F-4', validator: 'accepted', adapter: 'accepted' },
   },
   {
     id: 'O-30',
@@ -486,7 +481,6 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
       ),
     expected: BOTH(NUMERALS),
     fabricates: true,
-    defect: { id: 'F-1', validator: 'accepted', adapter: 'accepted' },
   },
   {
     id: 'O-31',
@@ -547,7 +541,6 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
       one(narrate(r.A, { title: `A subscription now costs ${RLO}$18.99${PDF} a month` })),
     expected: BOTH('numerals:markdown_control_character'),
     fabricates: false,
-    defect: { id: 'F-5', validator: 'accepted', adapter: 'accepted' },
   },
   {
     id: 'O-35',
@@ -616,7 +609,6 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
       one(narrate(r.A, { summary_md: `${r.A.summary_md} Details: https://evil.example/claim` })),
     expected: BOTH('evidence:link_host_not_allowed'),
     fabricates: false,
-    defect: { id: 'F-3', validator: 'accepted', adapter: 'accepted' },
   },
   {
     id: 'O-41',
@@ -671,6 +663,5 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
       ),
     expected: BOTH('evidence:narration_label_disagrees'),
     fabricates: false,
-    defect: { id: 'F-8', validator: 'accepted', adapter: 'accepted' },
   },
 ];

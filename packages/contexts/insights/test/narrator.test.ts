@@ -313,3 +313,186 @@ describe('the narrator (WP 5.3)', () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// WP 5.3b — closing the red-team leaks (wp5.4-redteam.md §4, F-1..F-5, F-8)
+// ---------------------------------------------------------------------------
+//
+// One case per finding, named for it, against a hand-built `NarratedFinding`
+// rather than a real built-in: the point of each case is the *shape* of the
+// figure (an identifier's digits, a non-ASCII digit, a spelled-out number, a
+// bidi override outside `summary_md`, a relabelled ref), not which rule
+// produced it — `apps/api/test/redteam.test.ts` is where the real builders,
+// the real adapter and the corpus prove the fix against production text.
+
+function syntheticFinding(overrides: Partial<NarratedFinding> = {}): NarratedFinding {
+  return {
+    key: 'investing.concentration.C98', // gitleaks:allow — the synthetic C98 symbol (F-1), a finding key not a credential
+    period: '2026-09',
+    type: 'investing.concentration',
+    severity: 'urgent',
+    title: 'One position is a large share of the portfolio',
+    summary_md: 'C98 is 33.05% of investable assets — $2,500.00 of $3,734.00.',
+    evidence: [
+      {
+        label: 'What this position is worth',
+        value: '$2,500.00',
+        source_ref: 'snapshot:holdings_aggregate.top_positions[0].value',
+      },
+      {
+        label: 'Investable assets',
+        value: '$3,734.00',
+        source_ref: 'snapshot:holdings_aggregate.investable_total',
+      },
+    ],
+    derived: [],
+    impact: { annualized: null, one_time: null, basis: '' },
+    ...overrides,
+  };
+}
+
+describe('WP 5.3b — closing the red-team leaks', () => {
+  it('F-1: a digit run inside a quoted identifier (a key, a symbol, a slug) is never a licensed figure', async () => {
+    const snapshot = await seedSnapshot('drift');
+    const finding = syntheticFinding();
+
+    // The finding's title/summary quote the symbol `C98` and the category
+    // slug never appears at all — neither is a figure the finding rendered,
+    // so `98` stays untraceable however it is spelled into a narration.
+    const laundered = narrationOf(finding, [0, 1], {
+      summary_md:
+        'C98 is 33.05% of investable assets. A bad year could cost you $98 on this holding alone.',
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [laundered]))).toEqual([
+      'numerals:numeral_not_in_finding',
+    ]);
+
+    // The control: the finding's own evidence-backed figures, verbatim, pass.
+    const faithful = narrationOf(finding, [0, 1], {
+      summary_md: 'This position is worth $2,500.00 of $3,734.00 in investable assets.',
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [faithful]))).toEqual(['accepted']);
+  });
+
+  it('F-2: a fabricated figure in fullwidth or Arabic-Indic digits is refused after folding to ASCII', async () => {
+    const snapshot = await seedSnapshot('drift');
+    const finding = syntheticFinding();
+
+    // Fullwidth (NFKC-foldable): the finding never rendered $4,200.00 in any form.
+    const fullwidth = narrationOf(finding, [0], {
+      summary_md: 'About ＄４，２００．００ more this year.',
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [fullwidth]))).toEqual([
+      'numerals:numeral_not_in_finding',
+    ]);
+
+    // Arabic-Indic (NFKC leaves these alone; only the codepoint-block fold
+    // catches them) — the same fabricated value, ٤٢٠٠.
+    const arabicIndic = narrationOf(finding, [0], {
+      summary_md: 'About $٤٢٠٠ more this year.',
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [arabicIndic]))).toEqual([
+      'numerals:numeral_not_in_finding',
+    ]);
+
+    // The same digits, genuinely the finding's own figure ($2,500.00) in
+    // Arabic-Indic, still pass — folding is not a stricter check, only a
+    // digit-script-blind one.
+    const ownFigureFolded = narrationOf(finding, [0], {
+      summary_md: 'Worth about $٢٥٠٠.٠٠ today.',
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [ownFigureFolded]))).toEqual(['accepted']);
+  });
+
+  it('F-3: a markdown link or a bare URL in summary_md is refused against the allow-list (empty for a narrator)', async () => {
+    const snapshot = await seedSnapshot('drift');
+    const finding = syntheticFinding();
+
+    const markdownLink = narrationOf(finding, [0], {
+      summary_md: 'Worth $2,500.00. [Read more](https://evil.example/claim)',
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [markdownLink]))).toEqual([
+      'evidence:link_host_not_allowed',
+    ]);
+
+    const bareUrl = narrationOf(finding, [0], {
+      summary_md: 'Worth $2,500.00. Details: https://evil.example/claim',
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [bareUrl]))).toEqual([
+      'evidence:link_host_not_allowed',
+    ]);
+  });
+
+  it('F-4: a figure spelled out in words, with a currency or scale word beside it, is refused — a bare "three months" is not', async () => {
+    const snapshot = await seedSnapshot('drift');
+    const finding = syntheticFinding();
+
+    const spelled = narrationOf(finding, [0], {
+      summary_md: 'Worth about four thousand two hundred dollars today.',
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [spelled]))).toEqual([
+      'numerals:numeral_not_in_finding',
+    ]);
+
+    // The false-positive guard: a small number word with no currency or
+    // scale word beside it is never a figure claim — template prose like
+    // "worth checking again in three months" must still be quotable.
+    const noClaim = narrationOf(finding, [0], {
+      summary_md: 'Worth $2,500.00 today — worth checking again in three months.',
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [noClaim]))).toEqual(['accepted']);
+
+    // A spelled figure that renders to the finding's own value is allowed.
+    const spelledOwn = narrationOf(finding, [1], {
+      summary_md:
+        'Investable assets come to about three thousand seven hundred and thirty-four dollars.',
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [spelledOwn]))).toEqual(['accepted']);
+  });
+
+  it('F-5: a bidi override is refused in every free-text field, not only summary_md', async () => {
+    const snapshot = await seedSnapshot('drift');
+    const finding = syntheticFinding();
+    const rlo = String.fromCodePoint(0x202e);
+    const pdf = String.fromCodePoint(0x202c);
+
+    const inTitle = narrationOf(finding, [0], { title: `Worth ${rlo}$2,500.00${pdf} today` });
+    expect(verdictOf(narrate(snapshot, [finding], [inTitle]))).toEqual([
+      'numerals:markdown_control_character',
+    ]);
+
+    // The contrast: summary_md was already checked before F-5 (unaffected).
+    const inSummary = narrationOf(finding, [0], {
+      summary_md: `Worth ${rlo}$2,500.00${pdf} today`,
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [inSummary]))).toEqual([
+      'numerals:markdown_control_character',
+    ]);
+  });
+
+  it("F-8: a real figure under a label the finding's own ref does not carry is refused", async () => {
+    const snapshot = await seedSnapshot('drift');
+    const finding = syntheticFinding();
+
+    // The value ($2,500.00) is genuinely evidence[0]'s own value; the label
+    // is not evidence[0]'s own label ("What this position is worth").
+    const relabelled = narrationOf(finding, [], {
+      evidence: [
+        {
+          kind: 'metric',
+          label: 'Investable assets',
+          value: '$2,500.00',
+          source_ref: finding.evidence[0]?.source_ref ?? null,
+          url: null,
+        },
+      ],
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [relabelled]))).toEqual([
+      'evidence:narration_label_disagrees',
+    ]);
+
+    // The control: the finding's own label, verbatim, passes.
+    const ownLabel = narrationOf(finding, [0]);
+    expect(verdictOf(narrate(snapshot, [finding], [ownLabel]))).toEqual(['accepted']);
+  });
+});
