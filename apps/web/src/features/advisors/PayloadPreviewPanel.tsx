@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import {
   approveAdvisorPayloadMutation,
@@ -34,7 +35,9 @@ const CLOSE_TAG = '</untrusted_data>';
  * Returns `null` when the tags are not both present (the honest "nothing to
  * mark" case rather than a guessed split).
  */
-function splitUntrustedBlock(text: string): { before: string; marked: string; after: string } | null {
+function splitUntrustedBlock(
+  text: string,
+): { before: string; marked: string; after: string } | null {
   const openAt = text.indexOf(OPEN_TAG);
   if (openAt === -1) return null;
   const closeAt = text.indexOf(CLOSE_TAG, openAt + OPEN_TAG.length);
@@ -49,7 +52,11 @@ function splitUntrustedBlock(text: string): { before: string; marked: string; af
 function UntrustedMark({ text }: { text: string }) {
   const split = splitUntrustedBlock(text);
   if (split === null) {
-    return <pre className="overflow-x-auto whitespace-pre-wrap text-caption text-text-secondary">{text}</pre>;
+    return (
+      <pre className="overflow-x-auto whitespace-pre-wrap text-caption text-text-secondary">
+        {text}
+      </pre>
+    );
   }
   return (
     <div className="text-caption text-text-secondary">
@@ -109,14 +116,33 @@ export function PayloadPreviewPanel({ advisorId }: PayloadPreviewPanelProps) {
   const queryClient = useQueryClient();
   const stepUp = useStepUpRetry();
   const approveMutation = useMutation(approveAdvisorPayloadMutation());
+  const [approveError, setApproveError] = useState<string | null>(null);
 
   async function handleApprove(queryShape: string): Promise<void> {
-    await stepUp.run(() =>
-      approveMutation.mutateAsync({ path: { advisorId }, body: { queryShape } }),
-    );
-    await queryClient.invalidateQueries({
-      queryKey: previewAdvisorPayloadQueryKey({ path: { advisorId } }),
-    });
+    setApproveError(null);
+    try {
+      await stepUp.run(() =>
+        approveMutation.mutateAsync({ path: { advisorId }, body: { queryShape } }),
+      );
+      await queryClient.invalidateQueries({
+        queryKey: previewAdvisorPayloadQueryKey({ path: { advisorId } }),
+      });
+    } catch (cause) {
+      // A `local_model` advisor with no `PromptRenderer` bound on this
+      // process 503s here (`insights.prompt_renderer_unavailable` —
+      // `wp5.10-routes.md` §7 item 2) exactly as the preview route itself
+      // does below; `useStepUpRetry.run` only ever sets its own `.error` for
+      // the step-up ceremony failing, so the approval's *own* failure has to
+      // be caught and shown here or it is silently swallowed by the
+      // `void handleApprove(...)` call site — shown honestly rather than
+      // left blank, the same rule the preview's own error branch follows.
+      const problem = problemOf(cause);
+      setApproveError(
+        problem !== null
+          ? `${problem.title} (${problem.code})${problem.detail !== undefined ? ` — ${problem.detail}` : ''}`
+          : 'The payload could not be approved.',
+      );
+    }
   }
 
   if (previewQuery.isLoading) return <SkeletonText lines={5} />;
@@ -216,6 +242,7 @@ export function PayloadPreviewPanel({ advisorId }: PayloadPreviewPanelProps) {
           </Button>
         )}
       </div>
+      {approveError !== null && <p className="text-small text-status-critical">{approveError}</p>}
       {stepUp.error !== null && <p className="text-small text-status-critical">{stepUp.error}</p>}
     </div>
   );

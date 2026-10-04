@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 
 import { CryptoConnectScreen } from '../features/crypto/CryptoConnectScreen.tsx';
 import { MarketDataSettingsScreen } from '../features/market-data/MarketDataSettingsScreen.tsx';
@@ -23,6 +23,11 @@ export const Route = createFileRoute('/_app/settings')({
  * forms, but it is `features/connections/**`, which this work package may
  * not edit — see `features/crypto/CryptoConnectScreen.tsx`'s own header and
  * `docs/evidence/phase-3/wp3.12-networth-ui.md` §6).
+ *
+ * "Advisor management" (WP 5.12) is a separate route rather than a tab here:
+ * `routes/_app.settings_.advisors.tsx` escapes this file's layout (that
+ * file's own header says why), so it is reached by the one link line below,
+ * not an `Outlet`.
  */
 function SettingsRoute() {
   return (
@@ -48,6 +53,12 @@ function SettingsRoute() {
           <CryptoConnectScreen />
         </TabsPanel>
       </Tabs>
+      <p className="text-small">
+        <Link to="/settings/advisors" className="text-accent-text underline">
+          Advisor management
+        </Link>{' '}
+        — scope grants, the kill ladder, the run inspector and the payload preview.
+      </p>
       <p className="text-caption text-text-muted">
         Profile, security &amp; passkeys, connections, and appearance settings land in a later work
         package.

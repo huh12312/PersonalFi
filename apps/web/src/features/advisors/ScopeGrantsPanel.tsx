@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import {
   getAdvisorScopesOptions,
@@ -66,25 +66,27 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
   // defensive, not a correction.
   const orderedScopes = [...scopes].sort((a, b) => a.sensitivity - b.sensitivity);
 
-  useEffect(() => {
-    if (scopesQuery.data === undefined) return;
-    setSelected((prev) => {
-      const next: Record<string, boolean> = {};
-      for (const scope of scopesQuery.data.scopes) {
-        next[scope.scope] = scope.scope in prev ? prev[scope.scope]! : scope.granted;
-      }
-      return next;
-    });
-  }, [scopesQuery.data]);
+  // The checked state of a scope not yet explicitly toggled this session is
+  // its own `granted` value — computed at render time, not synchronised
+  // into `selected` by an effect (which only ever recomputed this exact
+  // fallback one render late, and set state from inside an effect for no
+  // external system to synchronise with — `react-hooks/set-state-in-effect`).
+  // `selected` holds only the scopes a click has touched; everything else
+  // reads straight from the fetched data.
+  function isChecked(scope: AdvisorScopeDefinition): boolean {
+    return scope.scope in selected ? selected[scope.scope]! : scope.granted;
+  }
 
   function invalidate(): void {
-    void queryClient.invalidateQueries({ queryKey: getAdvisorScopesQueryKey({ path: { advisorId } }) });
+    void queryClient.invalidateQueries({
+      queryKey: getAdvisorScopesQueryKey({ path: { advisorId } }),
+    });
     void queryClient.invalidateQueries({ queryKey: listAdvisorsQueryKey() });
   }
 
   async function handleSave(): Promise<void> {
     setSaveError(null);
-    const chosen = orderedScopes.filter((scope) => selected[scope.scope] === true);
+    const chosen = orderedScopes.filter((scope) => isChecked(scope));
     const needsPerRunConsent = chosen.some((scope) => scope.requiresPerRunConsent);
     try {
       const result = await stepUp.run(() =>
@@ -133,7 +135,7 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
                 <input
                   type="checkbox"
                   className="mt-1"
-                  checked={selected[scope.scope] ?? scope.granted}
+                  checked={isChecked(scope)}
                   onChange={(event) =>
                     setSelected((prev) => ({ ...prev, [scope.scope]: event.target.checked }))
                   }
@@ -172,16 +174,13 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
       {stepUp.error !== null && <p className="text-small text-status-critical">{stepUp.error}</p>}
       {lastResult !== null && (
         <p className="text-small text-text-secondary" role="status">
-          Granted: {lastResult.granted.length === 0 ? 'none' : lastResult.granted.join(', ')}. Revoked:{' '}
-          {lastResult.revoked.length === 0 ? 'none' : lastResult.revoked.join(', ')}.
+          Granted: {lastResult.granted.length === 0 ? 'none' : lastResult.granted.join(', ')}.
+          Revoked: {lastResult.revoked.length === 0 ? 'none' : lastResult.revoked.join(', ')}.
         </p>
       )}
 
       <div>
-        <Button
-          onClick={() => void handleSave()}
-          disabled={stepUp.busy || grantMutation.isPending}
-        >
+        <Button onClick={() => void handleSave()} disabled={stepUp.busy || grantMutation.isPending}>
           {stepUp.busy || grantMutation.isPending ? 'Saving…' : 'Save grants'}
         </Button>
       </div>
