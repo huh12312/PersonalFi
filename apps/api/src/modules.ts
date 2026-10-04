@@ -925,6 +925,10 @@ function insightsModule(
     timeZone: options.timezone,
     currencyCode: 'USD',
     clock,
+    // WP 5.8's fold (wp5.8-health.md §6): the same ports the advisor-run path
+    // builds its snapshot from, and the token secret `deriveTokenKey` needs.
+    snapshotPorts: dependencies.ports,
+    tokenSecret: options.advisorTokenSecret,
     // W-C's decision (wp5.6-brief.md §8 item 2): gate the narration enqueue
     // on the same flag the narrator's own registration above reads, rather
     // than leave a Brief queue `insights.run_local` for an advisor nobody

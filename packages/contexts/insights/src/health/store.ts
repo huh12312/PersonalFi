@@ -45,6 +45,7 @@
  * first week says so'` a database claim and not only a unit claim about
  * `directionOf`.
  */
+import type { AdvisorScope } from '../contract/scopes.ts';
 import { and, desc, eq } from 'drizzle-orm';
 import { newId, systemClock, type Clock } from '@core/kernel';
 import { healthScores } from '../../schema/index.ts';
@@ -157,6 +158,23 @@ export interface ComputedHealthScore extends StoredHealthScore {
  * a week already computed writes nothing and reports `alreadyComputed`,
  * the same short-circuit `publishWeeklyBrief` runs for the Brief.
  */
+/**
+ * The seven scopes `health/score.ts` reads (its own header names the blocks).
+ * The weekly-job fold builds a `kind: 'builtin'` snapshot over exactly these:
+ * the score is not an advisor and holds no `snapshot_grants` row of its own,
+ * and `scopesPermittedForKind('builtin')` permits every published scope
+ * (09 TRD-6: builtin-sourced blocks only, by construction).
+ */
+export const HEALTH_SNAPSHOT_SCOPES = [
+  'cash.summary',
+  'cashflow.monthly',
+  'plan.projection',
+  'liabilities.terms',
+  'recurring.list',
+  'holdings.aggregate',
+  'fees.summary',
+] as const satisfies readonly AdvisorScope[];
+
 export async function computeAndStoreHealthScore(
   database: InsightsDatabase,
   input: ComputeAndStoreHealthScoreInput,

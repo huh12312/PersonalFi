@@ -263,3 +263,16 @@ output as it was run in this session — nothing here is a paraphrase of a resul
 
 This report is posted before the final verification run, per the phase rule; §6 above **is** that final
 pass, run and appended after the rest of this document was written, with no edits made to §§0–5 afterward.
+
+## 6. W-E: the health-score fold (orchestrator, 2026-10-04 09:50 EDT)
+
+WP 5.8's `computeAndStoreHealthScore` folded into the weekly Brief job per wp5.8-health.md §6:
+`BriefJobDependencies` gains optional `snapshotPorts` and `tokenSecret`; `insightsModule` passes
+`dependencies.ports` and `options.advisorTokenSecret`; after the already-published check and
+independent of whether the week has anything material, the job builds a `kind: 'builtin'` snapshot
+over `HEALTH_SNAPSHOT_SCOPES` (the seven scopes `health/score.ts` reads, now exported from
+`health/store.ts`) and stores the score. A failure is logged and does not fail the Brief (the route
+then answers "not computed" for the week); a composition root that binds no ports logs "not
+computed" and stores nothing. `phase5-wiring.test.ts`'s weekly-Brief case asserts one
+`health_scores` row after the tick. **Sabotage** — `snapshotPorts` not passed from `modules.ts` →
+`expected +0 to be 1`, red; restored, green (8/8).

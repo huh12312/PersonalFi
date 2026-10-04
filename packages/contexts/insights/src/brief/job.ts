@@ -37,6 +37,10 @@ import { platformOf, type InsightsDatabase } from '../db.ts';
 import { RUN_LOCAL_JOB_KIND } from '../jobs.ts';
 import { BriefPublished } from '../events.ts';
 import { assembleBrief } from './assembly.ts';
+import { HEALTH_SNAPSHOT_SCOPES, computeAndStoreHealthScore } from '../health/store.ts';
+import { SnapshotBuilder } from '../snapshot/builder.ts';
+import type { SnapshotPorts } from '../snapshot/ports.ts';
+import { deriveTokenKey } from '../snapshot/tokens.ts';
 import { isoWeekOf } from './iso-week.ts';
 import type { RetirementImpactPort } from './ports.ts';
 import { retirementEffectOf } from './retirement.ts';
@@ -81,6 +85,16 @@ export interface BriefJobDependencies {
    * `runAdvisor` refusing what nothing has a handler for.
    */
   readonly narratorConfigured?: boolean;
+  /**
+   * WP 5.8 folded into the weekly job (05 §4 W-C: "the health score … folded
+   * into the weekly job"; wp5.8-health.md §6): the same `SnapshotPorts` the
+   * advisor-run path builds its snapshot from, and the token secret
+   * `deriveTokenKey` needs. Both or neither — a composition root that binds
+   * no ports gets a Brief and no score (logged, never a silent zero), which
+   * is what `GET /insights/health-score`'s 404 then says.
+   */
+  readonly snapshotPorts?: SnapshotPorts;
+  readonly tokenSecret?: string;
 }
 
 /**
@@ -106,6 +120,42 @@ export function createBriefJob(input: BriefJobDependencies): JobHandlerRegistrat
           'weekly Brief already published; nothing to do',
         );
         return;
+      }
+
+      // WP 5.8: the health score is computed with the Brief each week,
+      // independent of whether the week has anything material — a quiet week
+      // still has a score. It reads the seven builtin-sourced scopes over a
+      // `kind: 'builtin'` snapshot (the score is not an advisor and holds no
+      // grant row; 09 TRD-6). A failure here is logged and does not fail the
+      // Brief: the route answers "not computed" for the week rather than the
+      // holder losing the Brief too.
+      if (input.snapshotPorts !== undefined && input.tokenSecret !== undefined) {
+        try {
+          const built = await new SnapshotBuilder(input.snapshotPorts).build({
+            userId: context.userId,
+            kind: 'builtin',
+            grantedScopes: HEALTH_SNAPSHOT_SCOPES,
+            today: todayIn(clock, input.timeZone),
+            baseCurrency: input.currencyCode,
+            tokenKey: deriveTokenKey(input.tokenSecret, context.userId),
+          });
+          await computeAndStoreHealthScore(input.database, {
+            userId: context.userId,
+            isoWeek,
+            snapshot: built.snapshot,
+            clock,
+          });
+        } catch (error) {
+          context.logger.warn(
+            { job: BRIEF_JOB_KIND, isoWeek, err: error },
+            'health score not computed this week; the Brief proceeds',
+          );
+        }
+      } else {
+        context.logger.info(
+          { job: BRIEF_JOB_KIND, isoWeek },
+          'health score not computed: no snapshot ports bound to the Brief job',
+        );
       }
 
       const [candidates, advisorKinds, dismissRates, historyDays, carried] = await Promise.all([

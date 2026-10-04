@@ -254,6 +254,17 @@ Posted before the final run, per the phase rule; foreground, in groups.
 7. `npx vitest run --project db` — **10 passed** (`migrate.test.ts`, including the new attribution/list entries).
 8. `npx vitest run --project api-db apps/api/test/db/health-routes.test.ts` — **4 passed**.
 9. `npx vitest run --project api-db apps/api/test/db/brief-routes.test.ts` — **10 passed** (confirms §7 item 2: no regression from the health-score handler change).
-10. Full `npx vitest run --project api-db` (every file in the project, `fileParallelism: false`) — **60
-    test files passed, 1 skipped (61); 360 tests passed, 4 skipped (364); exit code 0.** No regression
-    anywhere in the project from this WP's one route change. Duration 538 s.
+10. Full `npx vitest run --project api-db` (every file in the project, `fileParallelism: false`) — run
+    **twice**. The first run overlapped this evidence's own sabotage window (§4) and its result is
+    discarded as untrustworthy for that reason, named rather than quietly kept. The second, run after every
+    sabotage was confirmed reverted (`grep -rn SABOTAGE` clean) and against a `git diff` showing
+    `health/score.ts`/`health/store.ts` back to their landed state: **59 test files passed, 1 failed, 1
+    skipped (61); 359 tests passed, 1 failed, 4 skipped (364).** The one failure,
+    `test/db/projection-perf.test.ts`'s `'POST /plan/scenarios/{id}/projections p95 is within budget over
+real HTTP'` (measured 856.9 ms against an 800 ms budget), is unrelated to this WP: last touched at
+    `ab0b5e4`, zero diff from this session (`git diff --stat` confirms), a Planning/WP 4.5/4.14 file this WP
+    never claims, and the exact host-load sensitivity 05 §3's preamble rule 4 names ("no performance number
+    is believed while a model is loaded on the host") — `uptime` read `6.88 1m` during the full-project
+    run. Re-run alone, immediately after, with nothing else contending: **3/3 passed**, p95 574 ms, well
+    inside the 800 ms budget. Recorded here as a known, pre-existing, load-induced flake outside this WP's
+    ownership, not a regression from the health-score handler.

@@ -441,6 +441,16 @@ describe.skipIf(NO_DATABASE)('Phase 5 W-C wiring (apps/api/src/{modules,worker}.
         await runner.stop();
       }
 
+      // WP 5.8's fold (wp5.8-health.md §6, applied by the orchestrator): the
+      // same tick computed and stored the week's health score over a builtin
+      // snapshot — a quiet week still gets a score, and a Brief job bound
+      // without snapshot ports would have logged "not computed" and stored
+      // nothing, which this row count would catch.
+      const health = await h.database.db.execute<{ n: number }>(sql`
+        SELECT count(*)::int AS n FROM health_scores WHERE user_id = ${userId}::uuid
+      `);
+      expect(health.rows[0]?.n).toBe(1);
+
       const briefs = await h.database.db
         .select()
         .from(advisoryBriefs)
