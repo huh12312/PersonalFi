@@ -5525,6 +5525,123 @@
           "items"
         ]
       },
+      "HealthScoreComponentInput": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string",
+            "enum": [
+              "emergency_fund_months",
+              "savings_rate",
+              "debt_to_income",
+              "subscription_load",
+              "diversification",
+              "fee_drag"
+            ]
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MoneyInput"
+              }
+            ]
+          },
+          "band": {
+            "type": "string",
+            "enum": [
+              "poor",
+              "fair",
+              "good",
+              "excellent"
+            ]
+          },
+          "weight": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "improved",
+              "worsened",
+              "unchanged",
+              "no_previous_data"
+            ]
+          }
+        },
+        "required": [
+          "component",
+          "value",
+          "band",
+          "weight",
+          "score",
+          "direction"
+        ]
+      },
+      "HealthScoreExcludedComponentInput": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string",
+            "enum": [
+              "emergency_fund_months",
+              "savings_rate",
+              "debt_to_income",
+              "subscription_load",
+              "diversification",
+              "fee_drag"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "component",
+          "reason"
+        ]
+      },
+      "HealthScoreInput": {
+        "type": "object",
+        "properties": {
+          "isoWeek": {
+            "type": "string"
+          },
+          "overall": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthScoreComponentInput"
+            }
+          },
+          "excluded": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthScoreExcludedComponentInput"
+            }
+          },
+          "computedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "isoWeek",
+          "overall",
+          "components",
+          "excluded",
+          "computedAt"
+        ]
+      },
       "BudgetLineInput": {
         "type": "object",
         "properties": {
@@ -17064,6 +17181,126 @@
           "inputDigest",
           "publishedAt",
           "items"
+        ],
+        "additionalProperties": false
+      },
+      "HealthScoreComponent": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string",
+            "enum": [
+              "emergency_fund_months",
+              "savings_rate",
+              "debt_to_income",
+              "subscription_load",
+              "diversification",
+              "fee_drag"
+            ]
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/Money"
+              }
+            ]
+          },
+          "band": {
+            "type": "string",
+            "enum": [
+              "poor",
+              "fair",
+              "good",
+              "excellent"
+            ]
+          },
+          "weight": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "improved",
+              "worsened",
+              "unchanged",
+              "no_previous_data"
+            ]
+          }
+        },
+        "required": [
+          "component",
+          "value",
+          "band",
+          "weight",
+          "score",
+          "direction"
+        ],
+        "additionalProperties": false
+      },
+      "HealthScoreExcludedComponent": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string",
+            "enum": [
+              "emergency_fund_months",
+              "savings_rate",
+              "debt_to_income",
+              "subscription_load",
+              "diversification",
+              "fee_drag"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "component",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "HealthScore": {
+        "type": "object",
+        "properties": {
+          "isoWeek": {
+            "type": "string"
+          },
+          "overall": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthScoreComponent"
+            }
+          },
+          "excluded": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthScoreExcludedComponent"
+            }
+          },
+          "computedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "isoWeek",
+          "overall",
+          "components",
+          "excluded",
+          "computedAt"
         ],
         "additionalProperties": false
       },
@@ -40533,8 +40770,27 @@
         "tags": [
           "insights"
         ],
-        "description": "WP 5.8 (05-phase-5-dispatch.md §3, Wave E) has not landed at this commit: no `health_scores` row can exist yet. This route answers 404 `insights.health_score_not_computed` naming that, so `apps/web`’s generated client has a stable shape to code against before it does.",
+        "description": "The most recently computed week (05 §3 WP 5.8), served exactly as stored — no recomputation on read, the same rule the Brief above follows. Six named components, each with value, band, weight, score and direction of travel against the previous stored week; a component with no data is named in `excluded`, never scored as zero (09 ADV-7). 404 `insights.health_score_not_computed` when no score has ever been computed for this holder.",
         "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "healthScore": {
+                      "$ref": "#/components/schemas/HealthScore"
+                    }
+                  },
+                  "required": [
+                    "healthScore"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "401": {
             "description": "Default Response",
             "content": {

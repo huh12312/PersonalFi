@@ -16,6 +16,7 @@ import { Route as RegisterRouteImport } from './routes/register'
 import { Route as UnlockRouteImport } from './routes/unlock'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
 import { Route as AppAccountsRouteImport } from './routes/_app.accounts'
+import { Route as AppBriefRouteImport } from './routes/_app.brief'
 import { Route as AppBudgetRouteImport } from './routes/_app.budget'
 import { Route as AppInboxRouteImport } from './routes/_app.inbox'
 import { Route as AppInsightsRouteImport } from './routes/_app.insights'
@@ -29,6 +30,7 @@ import { Route as DevKitchenSinkRouteImport } from './routes/dev.kitchen-sink'
 import { Route as AppAccountsIndexRouteImport } from './routes/_app.accounts.index'
 import { Route as AppAccountsAccountIdRouteImport } from './routes/_app.accounts.$accountId'
 import { Route as AppAccountsConnectionsRouteImport } from './routes/_app.accounts.connections'
+import { Route as AppSettingsAdvisorsRouteImport } from './routes/_app.settings_.advisors'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -62,6 +64,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppAccountsRoute = AppAccountsRouteImport.update({
   id: '/accounts',
   path: '/accounts',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBriefRoute = AppBriefRouteImport.update({
+  id: '/brief',
+  path: '/brief',
   getParentRoute: () => AppRoute,
 } as any)
 const AppBudgetRoute = AppBudgetRouteImport.update({
@@ -129,6 +136,11 @@ const AppAccountsConnectionsRoute = AppAccountsConnectionsRouteImport.update({
   path: '/connections',
   getParentRoute: () => AppAccountsRoute,
 } as any)
+const AppSettingsAdvisorsRoute = AppSettingsAdvisorsRouteImport.update({
+  id: '/settings_/advisors',
+  path: '/settings/advisors',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -137,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/unlock': typeof UnlockRoute
   '/accounts': typeof AppAccountsRouteWithChildren
+  '/brief': typeof AppBriefRoute
   '/budget': typeof AppBudgetRoute
   '/inbox': typeof AppInboxRoute
   '/insights': typeof AppInsightsRoute
@@ -149,6 +162,7 @@ export interface FileRoutesByFullPath {
   '/dev/kitchen-sink': typeof DevKitchenSinkRoute
   '/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/settings/advisors': typeof AppSettingsAdvisorsRoute
   '/accounts/': typeof AppAccountsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -156,6 +170,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/unlock': typeof UnlockRoute
+  '/brief': typeof AppBriefRoute
   '/budget': typeof AppBudgetRoute
   '/inbox': typeof AppInboxRoute
   '/insights': typeof AppInsightsRoute
@@ -169,6 +184,7 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/settings/advisors': typeof AppSettingsAdvisorsRoute
   '/accounts': typeof AppAccountsIndexRoute
 }
 export interface FileRoutesById {
@@ -179,6 +195,7 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/unlock': typeof UnlockRoute
   '/_app/accounts': typeof AppAccountsRouteWithChildren
+  '/_app/brief': typeof AppBriefRoute
   '/_app/budget': typeof AppBudgetRoute
   '/_app/inbox': typeof AppInboxRoute
   '/_app/insights': typeof AppInsightsRoute
@@ -192,6 +209,7 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_app/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/_app/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/_app/settings_/advisors': typeof AppSettingsAdvisorsRoute
   '/_app/accounts/': typeof AppAccountsIndexRoute
 }
 export interface FileRouteTypes {
@@ -203,6 +221,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/unlock'
     | '/accounts'
+    | '/brief'
     | '/budget'
     | '/inbox'
     | '/insights'
@@ -215,6 +234,7 @@ export interface FileRouteTypes {
     | '/dev/kitchen-sink'
     | '/accounts/$accountId'
     | '/accounts/connections'
+    | '/settings/advisors'
     | '/accounts/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -222,6 +242,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/unlock'
+    | '/brief'
     | '/budget'
     | '/inbox'
     | '/insights'
@@ -235,6 +256,7 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts/$accountId'
     | '/accounts/connections'
+    | '/settings/advisors'
     | '/accounts'
   id:
     | '__root__'
@@ -244,6 +266,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/unlock'
     | '/_app/accounts'
+    | '/_app/brief'
     | '/_app/budget'
     | '/_app/inbox'
     | '/_app/insights'
@@ -257,6 +280,7 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/accounts/$accountId'
     | '/_app/accounts/connections'
+    | '/_app/settings_/advisors'
     | '/_app/accounts/'
   fileRoutesById: FileRoutesById
 }
@@ -318,6 +342,13 @@ declare module '@tanstack/react-router' {
       path: '/accounts'
       fullPath: '/accounts'
       preLoaderRoute: typeof AppAccountsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/brief': {
+      id: '/_app/brief'
+      path: '/brief'
+      fullPath: '/brief'
+      preLoaderRoute: typeof AppBriefRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/budget': {
@@ -411,6 +442,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAccountsConnectionsRouteImport
       parentRoute: typeof AppAccountsRoute
     }
+    '/_app/settings_/advisors': {
+      id: '/_app/settings_/advisors'
+      path: '/settings/advisors'
+      fullPath: '/settings/advisors'
+      preLoaderRoute: typeof AppSettingsAdvisorsRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -432,6 +470,7 @@ const AppAccountsRouteWithChildren = AppAccountsRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAccountsRoute: typeof AppAccountsRouteWithChildren
+  AppBriefRoute: typeof AppBriefRoute
   AppBudgetRoute: typeof AppBudgetRoute
   AppInboxRoute: typeof AppInboxRoute
   AppInsightsRoute: typeof AppInsightsRoute
@@ -442,10 +481,12 @@ interface AppRouteChildren {
   AppSettingsRoute: typeof AppSettingsRoute
   AppTransactionsRoute: typeof AppTransactionsRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppSettingsAdvisorsRoute: typeof AppSettingsAdvisorsRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAccountsRoute: AppAccountsRouteWithChildren,
+  AppBriefRoute: AppBriefRoute,
   AppBudgetRoute: AppBudgetRoute,
   AppInboxRoute: AppInboxRoute,
   AppInsightsRoute: AppInsightsRoute,
@@ -456,6 +497,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSettingsRoute: AppSettingsRoute,
   AppTransactionsRoute: AppTransactionsRoute,
   AppIndexRoute: AppIndexRoute,
+  AppSettingsAdvisorsRoute: AppSettingsAdvisorsRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
