@@ -285,7 +285,10 @@ function diversification(snapshot: AdvisorSnapshot): ComputableFigure {
   if (holdings === undefined) {
     return excluded('holdings.aggregate was not granted, or had no source behind it');
   }
-  if (holdings.top_positions.length === 0 || Money.isZero(Money.fromJSON(holdings.investable_total))) {
+  if (
+    holdings.top_positions.length === 0 ||
+    Money.isZero(Money.fromJSON(holdings.investable_total))
+  ) {
     return excluded('holdings.aggregate had no investable holdings to assess concentration over');
   }
   const topWeight = holdings.top_positions.reduce(
@@ -376,22 +379,28 @@ function bandOf(componentId: HealthComponentId, figure: D.Decimal | MoneyType): 
       money.minor,
     );
   }
-  return classifyDecimal(componentId, (text) => D.parseDecimal(text), decimalCompare, figure as D.Decimal);
+  return classifyDecimal(
+    componentId,
+    (text) => D.parseDecimal(text),
+    decimalCompare,
+    figure as D.Decimal,
+  );
 }
 
 // ---------------------------------------------------------------------------
 // The whole score
 // ---------------------------------------------------------------------------
 
-const EXTRACTORS: Readonly<Record<HealthComponentId, (snapshot: AdvisorSnapshot) => ComputableFigure>> =
-  Object.freeze({
-    emergency_fund_months: emergencyFundMonths,
-    savings_rate: savingsRate,
-    debt_to_income: debtToIncome,
-    subscription_load: subscriptionLoad,
-    diversification: diversification,
-    fee_drag: feeDrag,
-  });
+const EXTRACTORS: Readonly<
+  Record<HealthComponentId, (snapshot: AdvisorSnapshot) => ComputableFigure>
+> = Object.freeze({
+  emergency_fund_months: emergencyFundMonths,
+  savings_rate: savingsRate,
+  debt_to_income: debtToIncome,
+  subscription_load: subscriptionLoad,
+  diversification: diversification,
+  fee_drag: feeDrag,
+});
 
 function directionOf(
   componentId: HealthComponentId,
@@ -417,7 +426,8 @@ export function computeHealthScore(
   snapshot: AdvisorSnapshot,
   previous: ReadonlyMap<HealthComponentId, PreviousComponentScore> | null,
 ): HealthScoreResult {
-  const computable: { readonly component: HealthComponentId; readonly figure: ComputableFigure }[] = [];
+  const computable: { readonly component: HealthComponentId; readonly figure: ComputableFigure }[] =
+    [];
   const excludedComponents: HealthExcludedComponent[] = [];
 
   for (const component of HEALTH_COMPONENT_IDS) {

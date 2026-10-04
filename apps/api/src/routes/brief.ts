@@ -55,16 +55,30 @@
  * LIMIT 1` is "the most recently published Brief" with no date arithmetic at
  * all, which is what "current" means to a holder opening the screen.
  *
- * ## `GET /insights/health-score` — WP 5.8 has not landed
+ * ## `GET /insights/health-score` — WP 5.8's read, folded in
  *
- * `health_scores` (migration 0033) does not exist yet (`ls
- * packages/db/migrations` at the time this file was written shows 0032 then
- * 0034, reserved for this WP). Per this WP's dispatch entry: the route exists
- * and answers 404 `insights.health_score_not_computed` with a problem detail
- * naming that no score has been computed yet, so `apps/web`'s generated
- * client has a stable shape to code against before WP 5.8 lands.
+ * `health_scores` (migration 0033) is a single table with no child and no
+ * foreign key toward the Brief's tables (`0033_health_scores.sql`'s own
+ * header). WP 5.8 exported `findLatestHealthScore` through `@ctx/insights`'s
+ * barrel (`src/index.ts`'s own WP 5.8 block) rather than repeating this
+ * file's "deep import is a compile error" workaround for the Brief above —
+ * the barrel export did not exist when WP 5.6/5.10 needed the equivalent
+ * Brief reads, and does now, so this handler imports `findLatestHealthScore`
+ * directly rather than querying `healthScores` by hand. "Current" is the
+ * latest computed week, the same `ORDER BY iso_week DESC LIMIT 1` meaning
+ * `loadBrief` gives it, and the row is served exactly as
+ * `computeAndStoreHealthScore` stored it — no recomputation here, the same
+ * rule the Brief above follows. No row for this holder yet (including every
+ * holder before WP 5.8 landed) is still 404 `insights.health_score_not_computed`,
+ * unchanged from the stub — only the 200 path is new.
  */
 import { and, desc, eq } from 'drizzle-orm';
+import {
+  findLatestHealthScore,
+  HEALTH_BANDS,
+  HEALTH_COMPONENT_IDS,
+  HEALTH_SCORE_DIRECTIONS,
+} from '@ctx/insights';
 import { advisoryBriefItems, advisoryBriefs } from '@ctx/insights/schema';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -208,6 +222,57 @@ const briefSchema = z
     items: z.array(briefItemSchema),
   })
   .meta({ id: 'AdvisoryBrief' });
+
+// ---------------------------------------------------------------------------
+// WP 5.8 — the health score, folded into this file per the dispatch's
+// ownership note (05 §3 WP 5.10/5.8). Mirrors `HealthScoreResult`
+// (`@ctx/insights/health/score.ts`) exactly: six named components, each
+// with value, band, weight, score and direction in words — never an opaque
+// single number (09 ADV-7) — plus an excluded list naming any component a
+// snapshot had no data for.
+// ---------------------------------------------------------------------------
+
+const healthComponentWireSchema = z
+  .object({
+    component: z.enum(HEALTH_COMPONENT_IDS),
+    /** A decimal string (months, a ratio) or `Money` — never a JSON number. */
+    value: z.union([z.string(), moneySchema]),
+    band: z.enum(HEALTH_BANDS),
+    /** A decimal string, renormalised over the computable components. */
+    weight: z.string(),
+    /** 0-100. */
+    score: z.number(),
+    direction: z.enum(HEALTH_SCORE_DIRECTIONS),
+  })
+  .meta({ id: 'HealthScoreComponent' });
+
+const healthExcludedWireSchema = z
+  .object({
+    component: z.enum(HEALTH_COMPONENT_IDS),
+    reason: z.string(),
+  })
+  .meta({ id: 'HealthScoreExcludedComponent' });
+
+const healthScoreSchema = z
+  .object({
+    isoWeek: z.string(),
+    /** 0-100, or `null` when every component was excluded that week. */
+    overall: z.number().nullable(),
+    components: z.array(healthComponentWireSchema),
+    excluded: z.array(healthExcludedWireSchema),
+    computedAt: isoInstant,
+  })
+  .meta({ id: 'HealthScore' });
+
+function healthScoreNotComputed(): AppError {
+  return new AppError({
+    status: 404,
+    code: 'insights.health_score_not_computed',
+    title: 'Not Found',
+    detail: 'No health score has been computed for this holder yet.',
+    family: 'user',
+  });
+}
 
 function briefNotFound(detail: string): AppError {
   return new AppError({
@@ -370,25 +435,34 @@ export const briefRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           operationId: 'getHealthScore',
           summary: 'The holder’s financial health score, with its six-component breakdown',
           description:
-            'WP 5.8 (05-phase-5-dispatch.md §3, Wave E) has not landed at this commit: no ' +
-            '`health_scores` row can exist yet. This route answers 404 ' +
-            '`insights.health_score_not_computed` naming that, so `apps/web`’s generated client ' +
-            'has a stable shape to code against before it does.',
+            'The most recently computed week (05 §3 WP 5.8), served exactly as stored — no ' +
+            'recomputation on read, the same rule the Brief above follows. Six named ' +
+            'components, each with value, band, weight, score and direction of travel against ' +
+            'the previous stored week; a component with no data is named in `excluded`, never ' +
+            'scored as zero (09 ADV-7). 404 `insights.health_score_not_computed` when no score ' +
+            'has ever been computed for this holder.',
           tags: ['insights'],
           response: {
+            200: z.object({ healthScore: healthScoreSchema }),
             ...problems(401, 404),
           },
         },
       },
       async (request) => {
-        await guards.requireSession(request);
-        throw new AppError({
-          status: 404,
-          code: 'insights.health_score_not_computed',
-          title: 'Not Found',
-          detail: 'No health score has been computed for this holder yet (WP 5.8 has not landed).',
-          family: 'user',
-        });
+        const session = await guards.requireSession(request);
+        const score = await findLatestHealthScore(deps.database, session.userId);
+        if (score === null) {
+          throw healthScoreNotComputed();
+        }
+        return {
+          healthScore: {
+            isoWeek: score.isoWeek,
+            overall: score.overall,
+            components: score.components.map((component) => ({ ...component })),
+            excluded: score.excluded.map((excluded) => ({ ...excluded })),
+            computedAt: score.computedAt.toISOString(),
+          },
+        };
       },
     );
   };

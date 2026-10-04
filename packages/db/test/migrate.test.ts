@@ -434,6 +434,20 @@ describeWithDb('runMigrations', () => {
       //   ON DELETE SET NULL, the click-through only, never the source of a
       //   displayed field). WP 5.6; references only 0012-era objects or its
       //   own (05 §4).
+      // 0033_health_scores: one @ctx/insights table — health_scores (one row
+      //   per (user, ISO week), inserted once and never updated:
+      //   health_scores_user_week_idx is the idempotency boundary
+      //   src/health/store.ts#computeAndStoreHealthScore's ON CONFLICT DO
+      //   NOTHING depends on, and what "direction of travel against the
+      //   previous stored week" reads backward through). components/excluded
+      //   are JSONB arrays mirroring HealthScoreResult exactly;
+      //   health_scores_six_components_named pins "every row names exactly
+      //   six components, computed or excluded" and
+      //   health_scores_overall_requires_components pins overall IS NULL iff
+      //   zero components were computable. No foreign key toward
+      //   advisory_briefs/advisory_brief_items (0032) — computed alongside
+      //   the Brief by the weekly job, not a child of it. WP 5.8; references
+      //   only 0012-era objects (users) or its own (05 §4).
       // 0034_securities_composite_fks: no new table. Phase 4 gate G4-23
       //   (C-14's clause, WP 5.13a): the five `REFERENCES securities (id)`
       //   that 0025/0026 left bare — security_identifiers, security_overlay,
@@ -479,6 +493,7 @@ describeWithDb('runMigrations', () => {
         'fx_rates',
         'goal_contributions',
         'goals',
+        'health_scores',
         'holdings',
         'holdings_snapshots',
         'insight_actions',

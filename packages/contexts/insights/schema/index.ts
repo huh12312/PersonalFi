@@ -101,3 +101,6 @@ export {
   type NewAdvisoryBriefItemRow,
   type NewAdvisoryBriefRow,
 } from './briefs.ts';
+
+// WP 5.8 — the health score with breakdown (migration 0033_health_scores.sql).
+export { healthScores, type HealthScoreRow, type NewHealthScoreRow } from './health.ts';

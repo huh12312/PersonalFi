@@ -314,6 +314,10 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'advisory_brief_items',
     "insights (WP 2.6); not named in this WP's export scope. Snapshots insights and insight_evidence, both already exempt here (WP 5.6).",
   ],
+  [
+    'health_scores',
+    "insights (WP 2.6); not named in this WP's export scope. A weekly score derived from the snapshot, not a view over data the holder entered (WP 5.8).",
+  ],
   ['notification_channels', "notifications (WP 2.4); not named in this WP's export scope."],
   ['notification_rules', "notifications (WP 2.4); not named in this WP's export scope."],
   ['notification_outbox', "notifications (WP 2.4); not named in this WP's export scope."],

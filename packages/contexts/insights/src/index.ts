@@ -661,3 +661,42 @@ export {
   type EvalRequestSpec,
   type NarrationVerdict,
 } from './advisors/local/eval.ts';
+
+// WP 5.8 — Health score with breakdown (05-phase-5-dispatch.md §3, migration
+// 0033_health_scores.sql). Appended as its own labelled block, the same
+// collision-avoidance rule WP 5.3/5.6 state above: each package appends
+// rather than edits another's lines. `computeAndStoreHealthScore` is this
+// package's export for the orchestrator's weekly-job fold — see
+// `src/health/store.ts`'s header and `docs/evidence/phase-5/wp5.8-health.md`
+// §6, "Wiring for the orchestrator".
+export {
+  BAND_SCORE,
+  HEALTH_BAND_THRESHOLDS,
+  HEALTH_BANDS,
+  HEALTH_COMPONENT_IDS,
+  classifyDecimal,
+  type CitedThreshold,
+  type ComponentBandDefinition,
+  type ComponentUnit,
+  type HealthBand,
+  type HealthComponentId,
+} from './health/thresholds.ts';
+export {
+  HEALTH_SCORE_DIRECTIONS,
+  computeHealthScore,
+  renormalizeWeights,
+  type HealthComponentResult,
+  type HealthExcludedComponent,
+  type HealthScoreDirection,
+  type HealthScoreResult,
+  type PreviousComponentScore,
+} from './health/score.ts';
+export {
+  computeAndStoreHealthScore,
+  findHealthScoreByWeek,
+  findLatestHealthScore,
+  previousComponentScoresFor,
+  type ComputeAndStoreHealthScoreInput,
+  type ComputedHealthScore,
+  type StoredHealthScore,
+} from './health/store.ts';

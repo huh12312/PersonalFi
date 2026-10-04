@@ -82,20 +82,20 @@ export const HEALTH_BAND_THRESHOLDS: Readonly<Record<HealthComponentId, Componen
       boundaries: [
         {
           value: '1',
-          source: 'memo: PersonalFi default — under one month is below any conventional guidance range.',
+          source:
+            'memo: PersonalFi default — under one month is below any conventional guidance range.',
         },
         {
           value: '3',
           source:
-            "Consumer Financial Protection Bureau, consumer education on emergency savings; Fidelity " +
+            'Consumer Financial Protection Bureau, consumer education on emergency savings; Fidelity ' +
             'Viewpoints, "How much should you have in an emergency fund?" — commonly cited lower bound ' +
             'of a 3-to-6-month range.',
           note: ssaEraNote,
         },
         {
           value: '6',
-          source:
-            'Same guidance, upper bound of the commonly cited 3-to-6-month range.',
+          source: 'Same guidance, upper bound of the commonly cited 3-to-6-month range.',
           note: ssaEraNote,
         },
       ],
@@ -129,7 +129,8 @@ export const HEALTH_BAND_THRESHOLDS: Readonly<Record<HealthComponentId, Componen
       boundaries: [
         {
           value: '0.20',
-          source: "memo: PersonalFi default — roughly half of the 43% ceiling below, named excellent.",
+          source:
+            'memo: PersonalFi default — roughly half of the 43% ceiling below, named excellent.',
         },
         {
           value: '0.36',
@@ -186,7 +187,8 @@ export const HEALTH_BAND_THRESHOLDS: Readonly<Record<HealthComponentId, Componen
         },
         {
           value: '0.25',
-          source: 'memo: PersonalFi default — two and a half times I5’s trigger, named poor above it.',
+          source:
+            'memo: PersonalFi default — two and a half times I5’s trigger, named poor above it.',
         },
       ],
     },
@@ -198,8 +200,8 @@ export const HEALTH_BAND_THRESHOLDS: Readonly<Record<HealthComponentId, Componen
         {
           value: '25.00',
           source:
-            "05-phase-5-dispatch.md §3 WP 5.7 / docs/evidence/phase-5/wp5.7-anomaly-fees.md §1: the " +
-            "$25 anomaly materiality floor (09 Q17, ADV-5) `SnapshotBuilder` already applies.",
+            '05-phase-5-dispatch.md §3 WP 5.7 / docs/evidence/phase-5/wp5.7-anomaly-fees.md §1: the ' +
+            '$25 anomaly materiality floor (09 Q17, ADV-5) `SnapshotBuilder` already applies.',
         },
         {
           value: '50.00',
@@ -209,7 +211,8 @@ export const HEALTH_BAND_THRESHOLDS: Readonly<Record<HealthComponentId, Componen
         },
         {
           value: '150.00',
-          source: 'memo: PersonalFi default — three times the Brief’s $50 floor, named poor above it.',
+          source:
+            'memo: PersonalFi default — three times the Brief’s $50 floor, named poor above it.',
         },
       ],
     },
