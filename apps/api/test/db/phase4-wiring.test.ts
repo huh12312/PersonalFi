@@ -693,6 +693,104 @@ describe.skipIf(NO_DATABASE)(
       10_000,
     );
 
+    it(
+      'the ninth concurrent Monte Carlo request waits and none is refused or lost ' +
+        '(WP 5.14: wp4.5 proved the semaphore per worker at maxConcurrent 2; this sabotages ' +
+        'the real default, MONTE_CARLO_MAX_CONCURRENT 8, at the cap itself)',
+      async () => {
+        // Same fixture shape as the test above, but at the production
+        // fallback cap (no `maxConcurrent` override) rather than a
+        // test-chosen 2, and with one request more than the cap rather than
+        // fewer — the gap 04 §5 item 1 and the Phase 4 gate's C-9 both name:
+        // WP 4.5 proved the semaphore holds *a* limit; nobody had proved it
+        // holds *this* limit, with a request genuinely waiting at it.
+        let concurrent = 0;
+        let maxConcurrentSeen = 0;
+        let spawnCount = 0;
+        const releases: (() => void)[] = [];
+        const spawn = (): unknown => {
+          concurrent += 1;
+          spawnCount += 1;
+          maxConcurrentSeen = Math.max(maxConcurrentSeen, concurrent);
+          const worker = new EventEmitter() as EventEmitter & { terminate: () => Promise<number> };
+          worker.terminate = () => Promise.resolve(0);
+          releases.push(() => {
+            concurrent -= 1;
+            worker.emit(
+              'error',
+              Object.assign(new Error('fixture: released'), { code: 'FIXTURE' }),
+            );
+          });
+          return worker;
+        };
+
+        const series = {
+          id: 'wp5.14-cap-fixture',
+          sha256: 'c'.repeat(64),
+          firstMonth: '2000-01',
+          equityReal: new Float64Array(24),
+          bondReal: new Float64Array(24),
+          inflation: new Float64Array(24),
+        };
+        // No `maxConcurrent`: the production fallback,
+        // `MAX_CONCURRENT_MONTE_CARLO_RUNS` (8), which
+        // `config.planning.monteCarloMaxConcurrent`'s default
+        // (`MONTE_CARLO_MAX_CONCURRENT`, `packages/config/src/schema.ts`)
+        // mirrors — the value both `worker.ts` and `app.ts` pass through
+        // `createMonteCarloRunnerFromCache` since the W-B wiring batch.
+        const runner = createMonteCarloRunner({ series, spawn: spawn as never });
+        const { plan } = assembleBaselinePlan(statedProfile(), zeroDerived('2026-09-20'));
+        const assumptions = fileAssumptions();
+
+        const sleep = (ms: number): Promise<void> =>
+          new Promise((resolve) => {
+            setTimeout(resolve, ms);
+          });
+
+        const CAP = 8;
+        const runs = Array.from({ length: CAP + 1 }, (_unused, i) =>
+          runner.run({ plan, assumptions, seed: BigInt(i + 1), paths: 50 }).then(
+            () => 'resolved',
+            () => 'rejected',
+          ),
+        );
+
+        // Every admitted call's synchronous-through-`acquire()` path has had
+        // time to reach `spawn`; the ninth is parked at `await
+        // semaphore.acquire()` and must not have called `spawn` at all yet —
+        // waiting, not refused outright and not simply absent.
+        await sleep(20);
+        expect(spawnCount, 'exactly the cap is admitted; the ninth is not spawned yet').toBe(CAP);
+        expect(concurrent).toBe(CAP);
+        expect(releases.length).toBe(CAP);
+
+        // Free exactly one slot. The ninth must now be admitted — proving it
+        // was queued, not lost — and the cap must never have been exceeded
+        // to make room for it.
+        releases.shift()?.();
+        await sleep(20);
+        expect(spawnCount, 'the ninth request is admitted once a slot frees, never dropped').toBe(
+          CAP + 1,
+        );
+
+        // Drain the rest and let every one of the nine settle.
+        while (releases.length > 0) {
+          releases.shift()?.();
+          await sleep(10);
+        }
+        const settled = await Promise.all(runs);
+
+        expect(maxConcurrentSeen, 'the cap is never exceeded, even by one, even once').toBe(CAP);
+        expect(settled.length, 'all nine settle — none hangs forever').toBe(CAP + 1);
+        // Every one of the nine was actually attempted (the fixture's forced
+        // 'error' resolves each to 'rejected'); none is refused pre-spawn
+        // (`MonteCarloRefused`, which this fixture never throws) and none is
+        // silently absent from the settled set.
+        expect(settled).toEqual(Array.from({ length: CAP + 1 }, () => 'rejected'));
+      },
+      10_000,
+    );
+
     it.skipIf(!REAL_SERIES_PRESENT)(
       "worker.ts's own boot path binds a non-null Monte Carlo runner when a return series is " +
         'present and null when it is not (WP 4.12b, the Wave C wiring handover §4.2/§4.4)',

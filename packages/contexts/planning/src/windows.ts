@@ -17,19 +17,20 @@
  * every threshold a decimal *string* parsed to an exact rational, and every
  * division rounds **once**, half-even, at the end.
  *
- * ## Why this does not reuse `@ctx/recurring`'s `medianMinor`
+ * ## `twiceMedian` now delegates to `@core/kernel` (WP 5.14)
  *
- * `packages/contexts/recurring/src/stats.ts` has a bigint median and MAD — the
- * kernel candidate the dispatch asked to check for. It cannot be imported:
- * `@ctx/recurring` is another context and `scripts/eslint-boundaries.js` gives
- * planning no arrow to it (08 §1.6 draws none), it is not on that package's
- * public surface, and its median rounds half-even to a whole minor unit, where
- * the one-off test below needs the *exact* median of an even count (it compares
- * against `2 × median`, never a rounded one). Lifting a shared robust-stats
- * module into `@core/kernel` is the right end state and is not this work
- * package's edit to make; it is recorded as a carry in the evidence.
+ * This file used to carry its own bigint median because `@ctx/recurring`'s
+ * `medianMinor` (`packages/contexts/recurring/src/stats.ts`) could not be
+ * imported — another context, no boundary arrow, and the wrong rounding mode:
+ * `recurring`'s rounds half-even to a whole minor unit, where the one-off test
+ * below needs the *exact* median of an even count (it compares against
+ * `2 × median`, never a rounded one). `packages/kernel/src/stats.ts` now
+ * carries `twiceMedianMinor` for exactly this shape, importable by every
+ * context including this one; `twiceMedian` below is a thin, behaviour-
+ * preserving wrapper over it, proven equal to the pre-WP-5.14 implementation
+ * by `test/stats-kernel-parity.test.ts`.
  */
-import { DateOnly } from '@core/kernel';
+import { DateOnly, twiceMedianMinor } from '@core/kernel';
 
 // ---------------------------------------------------------------------------
 // Windows
@@ -224,13 +225,14 @@ export function integerSqrt(n: bigint): bigint {
   return x;
 }
 
-/** Twice the median — exact for even counts, where the median itself is a half. */
+/**
+ * Twice the median — exact for even counts, where the median itself is a
+ * half. Delegates to `@core/kernel`'s `twiceMedianMinor` (WP 5.14); the
+ * `RangeError` on empty input is this module's own and preserved exactly.
+ */
 export function twiceMedian(values: readonly bigint[]): bigint {
   if (values.length === 0) throw new RangeError('twiceMedian: empty');
-  const sorted = [...values].sort((a, b) => (a === b ? 0 : a < b ? -1 : 1));
-  const middle = sorted.length >> 1;
-  if (sorted.length % 2 === 1) return 2n * (sorted[middle] as bigint);
-  return (sorted[middle - 1] as bigint) + (sorted[middle] as bigint);
+  return twiceMedianMinor(values);
 }
 
 // ---------------------------------------------------------------------------

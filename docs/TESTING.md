@@ -533,6 +533,27 @@ engine but outside the named boundary fails the check'` proves the resolution
 is not a blanket exemption for the file: a second, un-allow-listed file under
 `engine/` with the same alias shape still fails.
 
+**The imported-alias hole, closed (WP 5.14, C-11 / gate input 6).** WP 4.14's
+fix above resolved only a _local_ `type X = number` — its own header said so:
+"a syntactic pass has no module graph to resolve an imported alias." The
+Phase 4 gate proved the gap on both shapes a real crossing can take: `import
+type { EngineDollars } from './engine/boundary.ts'` (a relative import) read
+`GREEN` where a local `type GateDollars = number` read `FAIL`, and the same
+alias reached `apps/api` through `@ctx/planning`'s package barrel, also
+`GREEN`. `checkTree` now runs two passes: the first collects every
+**exported** `type X = <TypeNode>` across the whole scanned tree, by name
+(`collectExportedTypeAliases`); the second checks every file against its own
+local aliases merged with that tree-wide map. An `import … from <anywhere>`
+is never resolved by path — there still is no module graph — the alias is
+simply visible everywhere it is exported, which closes both shapes at once.
+`checkSources([...])` (new) runs the same two passes over an in-memory file
+list, for a test that proves cross-file resolution without touching disk.
+`check-numeric-boundaries.test.ts` → `'a float reaching a Brief amount
+outside a named boundary fails the check'` (a relative-import case and a
+package-barrel case, both caught) and `'an exported number alias is visible
+across files; a non-exported one is not'` (the boundary of the fix: a
+non-exported local alias of the same name in a second file borrows nothing).
+
 ## Investments perf budgets, over real HTTP
 
 `apps/api/test/db/investments-perf.test.ts` (WP 3.14) measures `GET /holdings`,
@@ -604,6 +625,22 @@ Two perf files read it:
   (a one-dollar-larger `annual_spending` lever each time) so the service's own
   cache — proven in `wp4.6-projection-service.md` §2 — never turns a sample
   into a no-op.
+
+**C-9 (WP 5.14): the whole-path budget is a re-measurement, not a one-time
+number.** `projection-perf.test.ts`'s two timing assertions skip by name —
+`it.skipIf(ON_SHARED_RUNNER, …)`, `ON_SHARED_RUNNER = process.env['CI'] !==
+undefined` — on GitHub's shared runner, which is not the target hardware; the
+row-count sanity test above them never skips, so a perf number over an empty
+table stays impossible everywhere. The Phase 4 gate's condition (C-9, Low)
+is that every later gate, and this quality pass, re-run both locally and
+print the number with the load average beside it rather than trust a
+committed figure to still be true; `docs/evidence/phase-5/wp5.14-quality.md`
+has this pass's re-measurement. `#planProjection`'s own three
+`projectDeterministic` calls per snapshot (`apps/api/src/domain.ts`'s
+`socialSecurityOf` × 2, `guardrailOf` × 1 — wp4.9 §12 item 6) and the Weekly
+Brief's added cost (`solveRetirementImpact`, ≤5 ranked items) are measured
+the same way, engine-only and in-process (no database), in the same
+evidence file.
 
 ## The reference fixtures and the shared invariants module (WP 4.14)
 
@@ -692,3 +729,51 @@ The control test sabotages the same equity-return constant
 ```bash
 pnpm exec vitest run --project planning test/reference.test.ts test/golden-drift.test.ts
 ```
+
+## WP 5.14 — the Phase 5 quality pass
+
+**One bigint-median module, not three.** `packages/kernel/src/stats.ts`
+(WP 5.7) is now the only place `medianMinor`/`madMinor`/`twiceMedianMinor` are
+implemented. `@ctx/recurring`'s `src/stats.ts` re-exports the kernel's
+`medianMinor`/`madMinor` under their original names — every existing
+`from './stats.ts'` import in that package is unchanged — and
+`@ctx/planning`'s `windows.ts#twiceMedian` is a thin wrapper that delegates
+to `twiceMedianMinor`, keeping only its own `RangeError` on empty input.
+Each package carries its own `test/stats-kernel-parity.test.ts` proving the
+move changed nothing observable, over the same fixed vectors (odd/even
+length, negative minor units, the exact-half case the one-off detector
+depends on never being rounded).
+
+**The seed-bound backtest** (05-phase-5-dispatch.md §1 cut line 2):
+`packages/contexts/insights/test/backtest-seed.test.ts` evaluates U2, S2 and
+C3 as-of weekly over a seed built for this file, through two readers — an
+"honest" one that truncates every row to what would have been known as of
+the chosen date, and a "leaking" one (the shape `inMemoryLedgerPort`/
+`inMemoryRecurringPort` already are, unmodified: neither `monthlyCashflow`
+nor `listStreams` takes an as-of bound). The file's own header has the full
+reasoning for why this is sound on a generated seed and nowhere else
+(`valid_time`/`knowledge_time` coincide there by construction).
+
+**The Monte Carlo concurrency cap, at the cap.** WP 4.5 proved the adapter's
+semaphore holds _a_ limit, with a test-chosen `maxConcurrent: 2`.
+`apps/api/test/db/phase4-wiring.test.ts` → `'the ninth concurrent Monte Carlo
+request waits and none is refused or lost'` proves the real default
+(`MAX_CONCURRENT_MONTE_CARLO_RUNS` / `MONTE_CARLO_MAX_CONCURRENT`, 8) with
+nine concurrent requests: exactly eight admitted, the ninth genuinely
+parked at `semaphore.acquire()` (not refused, not dropped), then admitted
+the moment a slot frees.
+
+**Playwright evidence screenshots, closed for the last two specs (C-14's
+G4-3).** `plan.spec.ts` and `plan-sliders.spec.ts` hardcoded their
+screenshot path straight at `docs/evidence/phase-4/screenshots/` — reproduced
+red first (a plain run with no `PLAYWRIGHT_EVIDENCE_DIR` rewrote eight
+committed PNGs). Both now take the `evidenceDir` test option
+`market-data.spec.ts` already used: gitignored by default
+(`e2e/support/screenshot-dir.ts`), the real evidence directory only when
+`PLAYWRIGHT_EVIDENCE_DIR` is set for a deliberate regeneration.
+
+**`e2e/support/drag.ts` (new).** `plan-sliders.spec.ts`'s own pointer-drag
+helper — scroll the handle into view, _then_ measure its box, or a drag
+below the fold silently drops with no error (wp4.11 §7 item 5) — is now the
+shared helper every drag in this repo should use, so that lesson is paid for
+once.

@@ -62,7 +62,16 @@ async function goToInsights(page: Page): Promise<void> {
     .getByRole('link', { name: 'Insights' })
     .click();
   await expect(page).toHaveURL(/\/insights$/);
-  await expect(page.getByRole('tablist', { name: 'Insights sections' })).toBeVisible();
+  // WP 5.14: this used to wait for a `tablist` named "Insights sections" —
+  // dead since WP 5.12 moved the advisor-settings tab out to its own
+  // `/settings/advisors` screen (`InsightsScreen.tsx`'s own header: "this
+  // screen no longer mounts it"), which is exactly what made the wait fail
+  // 100% of the time rather than flake: the element it waited for no longer
+  // exists, in any run, under any load. Every test that calls this helper
+  // installs mock data with at least one insight, so `RecurringScreen`'s own
+  // settled-mount signal (`goToRecurring`, above) has a direct analogue
+  // here: the feed's own `<ul aria-label="Insights">` list.
+  await expect(page.getByRole('list', { name: 'Insights' })).toBeVisible();
 }
 
 function candidatesList(page: Page) {
@@ -224,7 +233,14 @@ test('dismissing an insight captures a reason and shows the cooldown notice', as
   const dialog = page.getByRole('dialog');
   await injectAxe(page);
   await expectNoAxeViolations(page, 'insights (dismiss dialog)');
-  await dialog.getByRole('radio', { name: 'Not useful' }).click();
+  // WP 5.14: this used to click a preset literally named "Not useful" — WP
+  // 5.11 replaced the dialog's three free-text presets with 07 §8.3's seven
+  // `reasonCode`s (`DismissReasonDialog.tsx`) concurrently with this WP's own
+  // work, and no preset named "Not useful" survived the rewrite. This test
+  // never asserted which reason was chosen, only that dismissing captures
+  // one, so any valid option proves the same thing; "True, but I don't care
+  // about this" (`DONT_CARE`) is the closest match to the original intent.
+  await dialog.getByRole('radio', { name: "True, but I don't care about this" }).click();
   await dialog.getByRole('button', { name: 'Dismiss' }).click();
 
   const notice = page.getByTestId('cooldown-notice');

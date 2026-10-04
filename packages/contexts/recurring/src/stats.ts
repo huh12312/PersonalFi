@@ -13,30 +13,17 @@
  * Median and MAD rather than mean and standard deviation, because 04 §5.1 is
  * right: one double-posted month otherwise destroys the estimate, and a
  * double-posted month is a thing that happens.
+ *
+ * **`medianMinor` and `madMinor` now delegate to `@core/kernel`'s `stats.ts`
+ * (WP 5.14).** This module carried its own byte-identical copy until then —
+ * `@ctx/planning`'s `windows.ts` carried a second one, and `@ctx/insights`'s
+ * anomaly baseline (WP 5.7) was a third caller with the same need, which is
+ * what made `packages/kernel/src/stats.ts` the shared home. Re-exported under
+ * their original names so every existing `from './stats.ts'` import in this
+ * package is unchanged; the move is behaviour-preserving, proven by
+ * `test/stats-kernel-parity.test.ts`.
  */
-
-/** Median of a non-empty list of minor units. Even lengths round half-even. */
-export function medianMinor(values: readonly bigint[]): bigint {
-  if (values.length === 0) throw new Error('medianMinor: empty');
-  const sorted = [...values].sort((a, b) => (a === b ? 0 : a < b ? -1 : 1));
-  const mid = sorted.length >> 1;
-  if (sorted.length % 2 === 1) return sorted[mid] as bigint;
-  const low = sorted[mid - 1] as bigint;
-  const high = sorted[mid] as bigint;
-  const total = low + high;
-  // Half-even on the .5 case, so a median of 1 and 2 is 2 and of 3 and 4 is 4.
-  const quotient = total / 2n;
-  if (total % 2n === 0n) return quotient;
-  const away = total < 0n ? quotient - 1n : quotient + 1n;
-  return quotient % 2n === 0n ? quotient : away;
-}
-
-/** Median absolute deviation from the median, in minor units. */
-export function madMinor(values: readonly bigint[]): bigint {
-  if (values.length === 0) throw new Error('madMinor: empty');
-  const centre = medianMinor(values);
-  return medianMinor(values.map((value) => (value < centre ? centre - value : value - centre)));
-}
+export { medianMinor, madMinor } from '@core/kernel';
 
 /** Median of a list of plain numbers (day counts, residuals). */
 export function medianNumber(values: readonly number[]): number {

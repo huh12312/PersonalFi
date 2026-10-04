@@ -9,32 +9,44 @@
  * dollars** — the projection's basis (07 §5.2) — and belong to the holder's
  * plan, so every scenario sees them and every run's input digest includes them.
  *
- * ## What the engine can and cannot do with one — stated, never hidden
+ * ## What this file's own partition can and cannot do with one
  *
- * WP 4.4's `ProjectionPlan` has no one-time-flow input. It does have
- * `otherIncome`, a typed income stream over `[startAge, endAge)` whose
- * semantics are exactly a lump sum's when the range is one year: before
- * retirement it is saved into `TAXABLE` under the mid-year convention, and in
- * retirement it offsets that year's spending with any surplus deposited. So:
+ * WP 4.4's `ProjectionPlan` has no one-time-flow input of its own; this file
+ * only ever expresses a dated event through `otherIncome`, a typed income
+ * stream over `[startAge, endAge)` whose semantics are exactly a lump sum's
+ * when the range is one year: before retirement it is saved into `TAXABLE`
+ * under the mid-year convention, and in retirement it offsets that year's
+ * spending with any surplus deposited. So, at *this* layer:
  *
  *   * a **positive** event on or after the plan's start and before its end is
  *     applied as a one-year income stream at the holder's age on that date;
  *   * a **negative** event — a home purchase, college, a sabbatical — has no
- *     faithful expression in the engine's inputs (`otherIncome` is refused
- *     negative at the boundary, and bending it would push `TAXABLE` below zero
- *     instead of drawing down the withdrawal order). It is **not applied, and
- *     named**: every run records it under `lifeEvents.unapplied` with the
- *     reason `outflow_not_modelled`, and the digest includes that list so the
- *     day the engine gains the input, every such run misses the cache. WP 4.5
- *     owns `src/engine/**` now; the evidence's open items name the one field it
- *     needs.
+ *     faithful expression as `otherIncome` (refused negative at the boundary,
+ *     and bending it would push `TAXABLE` below zero instead of drawing down
+ *     the withdrawal order), so `lifeEventsForPlan` below still partitions it
+ *     into `unapplied` with the reason `outflow_not_modelled`;
  *   * an event dated before the plan's start (`before_as_of`) has already
  *     happened — its effect is in the sealed balances the run starts from — and
  *     one after the plan's last year (`after_plan_end`) is outside it.
  *
+ * **WP 5.5 gave the engine a second, separate input for exactly this case**
+ * (`oneOffs`, `src/engine/boundary.ts#toEnginePlan` → `deterministic.ts`'s
+ * signed `oneOffByYear`, the one boundary crossing) and
+ * `projection-service.ts#outflowsApplied` is the composition step that uses
+ * it: every event this file partitions as `outflow_not_modelled` is
+ * reclassified there into `applied` and carried as a dated one-off, so the
+ * run a holder actually gets **does** include a negative event — a house
+ * purchase is drawn down in its year, not silently dropped. What a direct
+ * caller of `lifeEventsForPlan` sees in its raw `unapplied` list (this file,
+ * alone) is therefore not the whole story; `outflowsApplied`'s own header has
+ * it. The client worker's ported kernel does **not** gain `oneOffs`
+ * (`docs/evidence/phase-5/wp5.5-planning.md` §6, deferred to Phase 9's shared
+ * `@core/projection-kernel`), so a slider preview of a plan with a dated
+ * outflow still diverges from the saved run — `GoalSliders.tsx` says so.
+ *
  * A projection that silently dropped a $400,000 house purchase would be wrong
- * by the house. One that says "this plan does not yet include: Home purchase,
- * −$400,000, 2029" is honest about exactly how.
+ * by the house. One that draws it down in its year, and says so in the run's
+ * own record either way, is honest about exactly how.
  */
 import {
   DateOnly,

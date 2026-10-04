@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
-import { fileURLToPath } from 'node:url';
-
-import { expect, test } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 import { expectNoAxeViolations, injectAxe } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installPlanMocks } from './support/mock-plan.ts';
+import { screenshotDir } from './support/screenshot-dir.ts';
 
 /**
  * WP 4.10's five named exit tests, verbatim from
@@ -14,14 +13,35 @@ import { installPlanMocks } from './support/mock-plan.ts';
  * themes and the evidence screenshots. Against `support/mock-plan.ts` (this
  * work package's own mock module — `mock-api.ts` and
  * `app-walkthrough.spec.ts` are off-limits per the dispatch).
+ *
+ * WP 5.14 / C-14's G4-3 (`docs/evidence/phase-4/gate-security-review.md`):
+ * this file hardcoded `SCREENSHOT_DIR` straight at the committed evidence
+ * directory, so an ordinary `just verify`/Playwright run rewrote eight
+ * committed `wp4.10-*.png` files in place — reproduced red first (a plain
+ * `pnpm exec playwright test e2e/plan.spec.ts --project chromium` with no
+ * `PLAYWRIGHT_EVIDENCE_DIR` left `git status` showing all eight modified).
+ * Same mechanism `market-data.spec.ts` already uses: the `evidenceDir` test
+ * option from `playwright.config.ts`, a gitignored output directory by
+ * default, `PLAYWRIGHT_EVIDENCE_DIR` for a deliberate regeneration.
  */
+interface EvidenceDirOptions {
+  readonly evidenceDir?: string;
+}
 
-const SCREENSHOT_DIR = fileURLToPath(
-  new URL('../../../docs/evidence/phase-4/screenshots/', import.meta.url),
-);
+const test = base.extend<EvidenceDirOptions>({
+  evidenceDir: [undefined, { option: true }],
+});
+
+let currentEvidenceDir: string | undefined;
+test.beforeEach(({ evidenceDir }) => {
+  currentEvidenceDir = evidenceDir;
+});
 
 async function shoot(page: Page, name: string): Promise<void> {
-  await page.screenshot({ path: `${SCREENSHOT_DIR}wp4.10-${name}.png`, fullPage: true });
+  await page.screenshot({
+    path: `${screenshotDir(currentEvidenceDir)}wp4.10-${name}.png`,
+    fullPage: true,
+  });
 }
 
 async function loginAndReachPlan(page: Page): Promise<void> {

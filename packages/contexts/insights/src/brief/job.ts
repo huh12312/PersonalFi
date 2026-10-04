@@ -241,7 +241,13 @@ export function createBriefJob(input: BriefJobDependencies): JobHandlerRegistrat
             trigger: 'event',
             triggerEventType: BriefPublished.type,
           },
-          dedupeKey: `${RUN_LOCAL_JOB_KIND}:${WEEKLY_BRIEF_NARRATOR_ADVISOR_ID}:${isoWeek}`,
+          // WP 5.14: carries `userId` (it did not before —
+          // `docs/evidence/phase-5/wave-c-wiring.md` §5 item 2, "harmless
+          // under D6's one holder, flagged for whoever next touches this
+          // file"). Without it, two holders' Monday Briefs landing in the
+          // same ISO week would collide on one dedupe row and only ever
+          // enqueue a narration for whichever holder wrote it first.
+          dedupeKey: `${RUN_LOCAL_JOB_KIND}:${WEEKLY_BRIEF_NARRATOR_ADVISOR_ID}:${context.userId}:${isoWeek}`,
           correlationId: context.correlationId,
         });
       }

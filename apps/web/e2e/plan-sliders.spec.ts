@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
-import { fileURLToPath } from 'node:url';
-
-import { expect, test } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 import { expectNoAxeViolations, injectAxe } from './support/axe.ts';
+import { dragFromTo } from './support/drag.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installPlanSlidersMocks } from './support/mock-plan-sliders.ts';
+import { screenshotDir } from './support/screenshot-dir.ts';
 
 /**
  * WP 4.11's three named exit tests, verbatim from
@@ -18,14 +18,29 @@ import { installPlanSlidersMocks } from './support/mock-plan-sliders.ts';
  * the orchestrator's (this WP's RULES say so explicitly) — so this file runs
  * by explicit path: `pnpm exec playwright test e2e/plan-sliders.spec.ts
  * --project chromium`.
+ *
+ * WP 5.14 / C-14's G4-3: same hole as `plan.spec.ts` (its header has the
+ * reproduced-red detail) and the same fix — `evidenceDir`, gitignored by
+ * default, `market-data.spec.ts`'s mechanism.
  */
+interface EvidenceDirOptions {
+  readonly evidenceDir?: string;
+}
 
-const SCREENSHOT_DIR = fileURLToPath(
-  new URL('../../../docs/evidence/phase-4/screenshots/', import.meta.url),
-);
+const test = base.extend<EvidenceDirOptions>({
+  evidenceDir: [undefined, { option: true }],
+});
+
+let currentEvidenceDir: string | undefined;
+test.beforeEach(({ evidenceDir }) => {
+  currentEvidenceDir = evidenceDir;
+});
 
 async function shoot(page: Page, name: string): Promise<void> {
-  await page.screenshot({ path: `${SCREENSHOT_DIR}wp4.11-${name}.png`, fullPage: true });
+  await page.screenshot({
+    path: `${screenshotDir(currentEvidenceDir)}wp4.11-${name}.png`,
+    fullPage: true,
+  });
 }
 
 async function loginAndReachPlan(page: Page): Promise<void> {
@@ -54,34 +69,22 @@ async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
 }
 
 /**
- * A real pointer drag on the "Monthly savings" thumb — `steps` intermediate
- * `pointermove`s so Base UI's own drag handling (and this component's
- * `onValueChange` while dragging vs `onValueCommitted` on release) fire the
- * way an actual user's drag would, not a single teleporting jump. Does not
- * call `mouse.up()` — the caller decides when to release, since test 1 and
- * test 2 assert different things about the moment in between.
+ * A real pointer drag on the "Monthly savings" thumb, 160px right of its
+ * start — not a single teleporting jump, so Base UI's own drag handling
+ * (`onValueChange` while dragging vs `onValueCommitted` on release) fires
+ * the way an actual user's drag would. Does not call `mouse.up()` — the
+ * caller decides when to release, since test 1 and test 2 assert different
+ * things about the moment in between.
+ *
+ * The panel sits below the fold at the default viewport size, which is
+ * exactly the shape `support/drag.ts`'s `dragFromTo` exists to get right —
+ * its header has the full "silently dropped, no error" story (05 §2's
+ * carry, wp4.11 §7 item 5).
  */
 async function beginDraggingMonthlySavings(page: Page): Promise<void> {
   const control = page.getByTestId('slider-monthly-savings-control');
   const thumb = page.getByTestId('slider-monthly-savings-thumb');
-  // The panel sits below the fold at the default viewport size — `elementFromPoint` (and so CDP's
-  // coordinate-based mouse dispatch) returns nothing for an off-screen point, silently dropping
-  // the whole gesture with no error. Confirmed empirically: without this, `page.mouse.down()` at
-  // the thumb's unscrolled `boundingBox()` coordinates fires a `pointerdown` that bubbles to
-  // `window` but never reaches the slider's own `onPointerDown` handler at all.
-  await thumb.scrollIntoViewIfNeeded();
-  const thumbBox = await thumb.boundingBox();
-  const controlBox = await control.boundingBox();
-  if (thumbBox === null || controlBox === null) {
-    throw new Error('the monthly-savings slider has no layout box to drag from');
-  }
-  const startX = thumbBox.x + thumbBox.width / 2;
-  const startY = thumbBox.y + thumbBox.height / 2;
-  const targetX = Math.min(controlBox.x + controlBox.width - 4, startX + 160);
-
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.mouse.move(targetX, startY, { steps: 12 });
+  await dragFromTo(page, thumb, control, { dx: 160 });
 }
 
 test.describe('plan sliders — the client projection worker (WP 4.11)', () => {

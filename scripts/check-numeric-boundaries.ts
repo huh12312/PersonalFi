@@ -334,15 +334,54 @@ function exemptionFor(file: string, identifier: string, isParameter = false): st
 
 /**
  * Every `type X = <TypeNode>` declared in this file, name → its right-hand
- * side. Local only — a syntactic pass has no module graph to resolve an
- * imported alias, which is why `boundary.ts`'s `EngineDollars` (declared and
- * used in the same file) is exactly the case this closes and an alias
- * re-exported from elsewhere is not: see the file header on the alias hole.
+ * side. Local only.
  */
 function collectTypeAliases(source: ts.SourceFile): ReadonlyMap<string, ts.TypeNode> {
   const aliases = new Map<string, ts.TypeNode>();
   function visit(node: ts.Node): void {
     if (ts.isTypeAliasDeclaration(node)) aliases.set(node.name.text, node.type);
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return aliases;
+}
+
+/**
+ * Every **exported** `type X = <TypeNode>` in this file — WP 5.14's close of
+ * gate input 6 / C-11 (`docs/evidence/phase-4/gate-security-review.md`,
+ * NB3/NB4): "a syntactic pass has no module graph to resolve an imported
+ * alias" was true of `collectTypeAliases` alone, and the gate proved the gap
+ * on both shapes a real crossing can take — `import type { EngineDollars }
+ * from './engine/boundary.ts'` (a relative import of the file that declares
+ * it) and `import type { EngineDollars } from '@ctx/planning'` (through the
+ * package barrel, `boundary.ts`'s alias is re-exported from `engine/index.ts`
+ * and from there from the package's own `src/index.ts`).
+ *
+ * The fix does not resolve either import path — this pass still has no
+ * module graph, and a path resolver is exactly the kind of thing a
+ * `tsconfig` change could defeat. Instead `checkTree` collects every
+ * **exported** type alias across the whole scanned tree once, by name, before
+ * checking any file (below), and every file is checked against that
+ * tree-wide map in addition to its own local one. An `import type { X } from
+ * <anywhere>` therefore need not be followed at all: if `X` is a number alias
+ * exported from *any* scanned file, a use of it anywhere else in the tree is
+ * visible, regardless of which path imported it or how many barrels it
+ * crossed on the way. This trades path-precision for soundness — a false
+ * positive here is two unrelated same-named exported aliases, one of which is
+ * `number`, which `ALLOW_LIST` exists to name if it ever happens; a false
+ * negative is what the gate found and is no longer possible for an exported
+ * alias.
+ */
+function collectExportedTypeAliases(source: ts.SourceFile): ReadonlyMap<string, ts.TypeNode> {
+  const aliases = new Map<string, ts.TypeNode>();
+  function visit(node: ts.Node): void {
+    if (
+      ts.isTypeAliasDeclaration(node) &&
+      ts.canHaveModifiers(node) &&
+      ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+    ) {
+      aliases.set(node.name.text, node.type);
+    }
     ts.forEachChild(node, visit);
   }
   visit(source);
@@ -413,14 +452,29 @@ function nameTextOf(name: ts.Node | undefined): string | null {
 /**
  * Every violation in one file's text. Exported so the vitest suite can drive it
  * over fixture *strings* as well as fixture files.
+ *
+ * `globalAliases` is the tree-wide exported-alias map `checkTree` builds
+ * before checking any file (see `collectExportedTypeAliases`'s header); it
+ * defaults to empty so every existing single-file call — every test in
+ * `check-numeric-boundaries.test.ts`, the `--self-test` fixtures — is
+ * unaffected. A local alias of the same name shadows a global one, matching
+ * ordinary TypeScript scoping: the merge below applies `globalAliases` first
+ * and `collectTypeAliases(source)` second, and `Map` spread keeps the later
+ * key.
  */
-export function checkSource(file: string, text: string): CheckResult {
+export function checkSource(
+  file: string,
+  text: string,
+  globalAliases: ReadonlyMap<string, ts.TypeNode> = new Map(),
+): CheckResult {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const violations: Violation[] = [];
   const exemptions: Exemption[] = [];
   // Collected once, up front, so a `type X = number` alias is seen through
-  // regardless of whether its declaration appears above or below its use.
-  const aliases = collectTypeAliases(source);
+  // regardless of whether its declaration appears above or below its use —
+  // and merged with every exported alias elsewhere in the scanned tree, so an
+  // imported alias resolves by name without this pass ever following a path.
+  const aliases = new Map([...globalAliases, ...collectTypeAliases(source)]);
 
   function lineOf(node: ts.Node): number {
     return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
@@ -567,22 +621,47 @@ export function collectFiles(root: string): string[] {
   return found;
 }
 
-export function checkTree(repoRoot: string, roots: readonly string[] = SCAN_ROOTS): CheckResult {
+/**
+ * `checkTree`'s two passes, over an in-memory file list rather than the
+ * filesystem — the shape a test uses to prove the tree-wide alias resolution
+ * (`collectExportedTypeAliases`) genuinely crosses files, without writing
+ * fixtures to disk. `checkTree` below is `collectFiles` + `readFileSync`
+ * feeding this.
+ */
+export function checkSources(files: readonly { file: string; text: string }[]): CheckResult {
   const violations: Violation[] = [];
   const exemptions: Exemption[] = [];
-  let filesScanned = 0;
 
+  // Pass 1: collect every *exported* type alias, tree-wide, before checking
+  // anything — `collectExportedTypeAliases`'s header explains why this is
+  // what closes the imported-alias hole (C-11) without ever resolving an
+  // import path.
+  const globalAliases = new Map<string, ts.TypeNode>();
+  for (const { file, text } of files) {
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    for (const [name, type] of collectExportedTypeAliases(source)) globalAliases.set(name, type);
+  }
+
+  // Pass 2: check every file against its own local aliases plus the
+  // tree-wide exported-alias map built above.
+  for (const { file, text } of files) {
+    const result = checkSource(file, text, globalAliases);
+    violations.push(...result.violations);
+    exemptions.push(...result.exemptions);
+  }
+
+  return { violations, exemptions, filesScanned: files.length };
+}
+
+export function checkTree(repoRoot: string, roots: readonly string[] = SCAN_ROOTS): CheckResult {
+  const files: { file: string; text: string }[] = [];
   for (const root of roots) {
     for (const absolute of collectFiles(join(repoRoot, root))) {
       const file = relative(repoRoot, absolute).split(sep).join('/');
-      const result = checkSource(file, readFileSync(absolute, 'utf8'));
-      violations.push(...result.violations);
-      exemptions.push(...result.exemptions);
-      filesScanned += 1;
+      files.push({ file, text: readFileSync(absolute, 'utf8') });
     }
   }
-
-  return { violations, exemptions, filesScanned };
+  return checkSources(files);
 }
 
 // ---------------------------------------------------------------------------

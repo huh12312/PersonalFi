@@ -683,9 +683,12 @@ export const planRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           operationId: 'getPlanProjection',
           summary: 'A stored run, exactly as stored, with its staleness named',
           description:
-            'Never recomputes. A run whose assumptions version this build no longer holds reads ' +
-            'back `assumptions_version_retired`; one whose version resolves but whose current ' +
-            'assumptions differ from the run’s reads back `assumptions_changed`.',
+            'Never recomputes. A run whose assumptions version this build does not hold as the ' +
+            'current file reads back `assumptions_version_retired` — whether the version is not ' +
+            'held at all, or (since the guardrail-rate move retained its predecessor) is held ' +
+            'only as a frozen, resolvable-but-superseded file. A run whose version is itself the ' +
+            'current file, but whose current assumptions differ from the run’s, reads back ' +
+            '`assumptions_changed`.',
           tags: ['planning'],
           params: z.object({ runId: z.uuid() }),
           response: { 200: projectionOutcomeSchema, ...problems(401, 404, 503) },

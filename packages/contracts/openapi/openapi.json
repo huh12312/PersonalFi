@@ -38854,7 +38854,7 @@
         "tags": [
           "planning"
         ],
-        "description": "Never recomputes. A run whose assumptions version this build no longer holds reads back `assumptions_version_retired`; one whose version resolves but whose current assumptions differ from the run’s reads back `assumptions_changed`.",
+        "description": "Never recomputes. A run whose assumptions version this build does not hold as the current file reads back `assumptions_version_retired` — whether the version is not held at all, or (since the guardrail-rate move retained its predecessor) is held only as a frozen, resolvable-but-superseded file. A run whose version is itself the current file, but whose current assumptions differ from the run’s, reads back `assumptions_changed`.",
         "parameters": [
           {
             "schema": {

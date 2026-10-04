@@ -23,6 +23,7 @@ import {
   GOOD_FIXTURE,
   MAGNITUDE_PATTERN,
   checkSource,
+  checkSources,
   checkTree,
   runSelfTest,
 } from './check-numeric-boundaries.ts';
@@ -92,6 +93,74 @@ describe('check-numeric-boundaries, against fixtures', () => {
 
   it('runs its own --self-test clean', () => {
     expect(runSelfTest(REPO_ROOT)).toEqual([]);
+  });
+
+  it('a float reaching a Brief amount outside a named boundary fails the check', () => {
+    // WP 5.14 / C-11 (gate input 6, NB3/NB4): the alias-aware extension
+    // closes the hole the Phase 4 gate found, which was not "a local alias is
+    // invisible" (WP 4.14 already fixed that) but "an *imported* alias is
+    // invisible" — `import type { EngineDollars } from './engine/boundary.ts'`
+    // read as `GREEN` where a local `type GateDollars = number` read `FAIL`.
+    // This is the same shape over the Brief's own money, proving the fix is
+    // general rather than a one-file patch for `boundary.ts`: one file
+    // exports a number alias, a second file imports it across a relative
+    // path, and a third imports it through a package-style specifier — all
+    // three must still be caught without `checkSources` ever resolving
+    // either import path (it resolves by the *exported name*, tree-wide).
+    const moneyFile = {
+      file: 'packages/contexts/insights/src/brief/money.ts',
+      text: 'export type BriefDollars = number;',
+    };
+    const relativeImporter = {
+      file: 'packages/contexts/insights/src/brief/assembly.ts',
+      text: [
+        "import type { BriefDollars } from './money.ts';",
+        'export interface BriefLine { readonly briefAmount: BriefDollars }',
+      ].join('\n'),
+    };
+    const barrelImporter = {
+      file: 'apps/api/src/routes/brief.ts',
+      text: [
+        "import type { BriefDollars } from '@ctx/insights';",
+        'export function headlineAmount(): BriefDollars { return 1_899; }',
+      ].join('\n'),
+    };
+
+    const result = checkSources([moneyFile, relativeImporter, barrelImporter]);
+    const byFile = new Map(
+      result.violations.map((violation) => [violation.file, violation.identifier]),
+    );
+    expect(byFile.get(relativeImporter.file)).toBe('briefAmount');
+    expect(byFile.get(barrelImporter.file)).toBe('headlineAmount');
+    // `money.ts` itself declares the alias but never hangs a magnitude
+    // identifier off it, so it contributes no violation of its own — the
+    // point is the two *importers*, not the declaration site.
+    expect(byFile.has(moneyFile.file)).toBe(false);
+  });
+
+  it('an exported number alias is visible across files; a non-exported one is not', () => {
+    // The other half of the same mechanism: `collectExportedTypeAliases`
+    // only ever collects `export type X = …`. A *local*, non-exported alias
+    // of the same name in a second file must not borrow the first file's
+    // export — the tree-wide map is genuinely name-keyed by what a module
+    // actually exports, not by every type alias anyone ever wrote.
+    const exported = {
+      file: 'packages/contexts/insights/src/brief/exported.ts',
+      text: 'export type BriefDollars2 = number;',
+    };
+    const unrelatedLocal = {
+      file: 'packages/contexts/insights/src/brief/unrelated.ts',
+      text: [
+        // Not exported, and not the same name — this file's own `value` is
+        // typed `string`, so it must never be flagged by the other file's
+        // unrelated export.
+        'type Scratch = string;',
+        'export interface Note { readonly value: Scratch }',
+      ].join('\n'),
+    };
+
+    const result = checkSources([exported, unrelatedLocal]);
+    expect(result.violations).toEqual([]);
   });
 
   it('a float assigned to a value inside the engine but outside the named boundary fails the check', () => {

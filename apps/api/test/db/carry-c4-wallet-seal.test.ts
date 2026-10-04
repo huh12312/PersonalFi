@@ -315,3 +315,93 @@ describe.skipIf(NO_DATABASE)('WP 5.13b carry C-4 — resealPlaintextWalletDescri
     expect(afterSecond.rows[0]?.descriptor_sealed).toEqual(afterFirst.rows[0]?.descriptor_sealed);
   });
 });
+
+/**
+ * The api half of C-4, closed by the orchestrator at the Phase 5 quality pass
+ * (wp5.14-quality.md §8 item 24): `app.ts` now hands `createWalletRpcRuntime`
+ * a `SecretBox` thunk over `security.requireSecretBox()`, so a wallet linked
+ * through the **production composition root** — no injected registry, no
+ * injected runtime — is sealed exactly as the suites above prove for an
+ * injected one. This is the case the suites above could not run while
+ * `app.ts` was outside WP 5.13b's ownership.
+ */
+describe.skipIf(NO_DATABASE)(
+  'C-4, the api half — app.ts builds its own wallet runtime over the unlocked SecretBox',
+  () => {
+    let database: TestDatabase;
+    let secrets: TempSecrets;
+    let app: Awaited<ReturnType<typeof buildApp>>['app'];
+    let session: TestSession;
+
+    beforeAll(async () => {
+      database = await createTestDatabase('personalfi_wp514_c4_app');
+      secrets = createTempSecrets();
+      const config = loadConfig({
+        env: {
+          NODE_ENV: 'test',
+          LOG_LEVEL: 'silent',
+          DATABASE_URL: database.url,
+          SECRETS_DIR: secrets.dir,
+          BASE_URL: TEST_ORIGIN,
+          AUTH_ALLOWED_ORIGINS: TEST_ORIGIN,
+          AUTH_RP_ID: '127.0.0.1',
+          KEK_ARGON2_MEMORY_KIB: '8192',
+          KEK_ARGON2_TIME_COST: '2',
+          KEK_ARGON2_PARALLELISM: '1',
+        },
+      });
+      // No `connectorRegistry`, no `walletRpc`: the real `app.ts` path.
+      const built = await buildApp({ config, pool: database.pool });
+      const state = await built.security.initialise();
+      if (state.state !== 'unlocked') {
+        throw new Error(`could not unlock the test application: ${JSON.stringify(state)}`);
+      }
+      await built.app.ready();
+      const issued = await built.security.requireIdentity().sessions.issue({
+        userId: database.userId,
+        authMethod: 'webauthn',
+        fresh: true,
+      });
+      app = built.app;
+      session = {
+        accessToken: issued.accessToken,
+        csrf: 'wp514-carry-c4-app-test-csrf-token-value-0000',
+        fresh: true,
+      };
+    }, 120_000);
+
+    afterAll(async () => {
+      await app?.close();
+      secrets?.dispose();
+      await database?.drop();
+    }, 30_000);
+
+    it('a watch-only wallet linked through the production composition root is sealed: the plaintext column is NULL', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/connections',
+        headers: {
+          'sec-fetch-site': 'same-origin',
+          origin: TEST_ORIGIN,
+          cookie: `__Host-pfi_session=${session.accessToken}; __Host-pfi_csrf=${session.csrf}`,
+          'x-csrf-token': session.csrf,
+        },
+        payload: {
+          provider: WALLETRPC_PROVIDER,
+          input: { chain: 'bitcoin', value: WATCH_ONLY_ZPUB, label: 'Sealed through app.ts' },
+        },
+      });
+      expectStatus(response, 201);
+      const rows = await database.db.execute<{
+        descriptor: string | null;
+        descriptor_sealed: Uint8Array | null;
+      }>(sql`
+        SELECT descriptor, descriptor_sealed FROM wallet_addresses
+         WHERE user_id = ${database.userId}::uuid
+      `);
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]?.descriptor).toBeNull();
+      expect(rows.rows[0]?.descriptor_sealed).not.toBeNull();
+    }, 60_000);
+  },
+);

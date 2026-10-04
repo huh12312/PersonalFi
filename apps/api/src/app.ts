@@ -452,6 +452,20 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       database,
       allowedHosts: config.crypto.allowedHosts,
       etherscanApiKey: config.secrets.etherscan_api_key,
+      // Phase 4 gate C-4 (G4-8), the api half: this runtime is built before
+      // the application is unlocked (`security.requireSecretBox()` throws
+      // until then), so the `SecretBox` is handed over as a thunk the store
+      // resolves fresh on every read and write (`resolveWalletSecretBox`).
+      // A wallet linked through the api is sealed exactly as one the worker
+      // syncs; before this line the api path still wrote the descriptor in
+      // the clear (wp5.13-carry-overs.md §4.2, wp5.14-quality.md §8 item 24).
+      secretBox: () => {
+        try {
+          return security.requireSecretBox();
+        } catch {
+          return undefined;
+        }
+      },
     });
   const registry =
     options.connectorRegistry ??

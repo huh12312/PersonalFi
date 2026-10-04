@@ -191,6 +191,10 @@ export function GoalSliders({ scenario }: GoalSlidersProps) {
       <p className="text-caption text-text-muted">
         A quick, local what-if preview — your saved plan above is unchanged until you act on it.
       </p>
+      <p className="text-caption text-text-muted" data-testid="slider-preview-divergence-note">
+        This preview does not include a dated one-time expense or income, or a crypto holding, if
+        your saved plan has one — the plan above does.
+      </p>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <SliderField
