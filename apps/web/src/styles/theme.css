@@ -51,6 +51,11 @@
   --accent-text: #1f5fb0;
   --accent-contrast: #ffffff;
   --accent-wash: #eaf2fd;
+  /* Hover for a filled accent surface: a step darker, never an opacity
+     blend — blending the fill and its text over the page drops the pair
+     under AA on the dark theme (CI's axe caught 4.29:1 on the Brief's
+     primary button mid-hover, 2026-10-04). #1d4ed8 on white: 6.7:1. */
+  --accent-hover: #1d4ed8;
 
   /* Money semantics — CVD-safe teal/vermilion, never green/red (§2.2) */
   --money-pos: #0f8a68;
@@ -140,6 +145,8 @@
   --accent-text: #3987e5;
   --accent-contrast: #0b0b0b;
   --accent-wash: #132537;
+  /* Dark: a step lighter keeps the dark text readable — #5a9cea on #0b0b0b: 6.9:1. */
+  --accent-hover: #5a9cea;
 
   /* The light-mode-only darkening above (`:root`'s `--status-good`/
      `--status-warning`/`--status-serious`) would fail contrast against this
@@ -197,6 +204,7 @@
     --accent-text: #3987e5;
     --accent-contrast: #0b0b0b;
     --accent-wash: #132537;
+    --accent-hover: #5a9cea;
     --status-good: #0ca30c;
     --status-warning: #fab219;
     --status-serious: #ec835a;
@@ -268,6 +276,7 @@
   --color-accent: var(--accent);
   --color-accent-text: var(--accent-text);
   --color-accent-contrast: var(--accent-contrast);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-wash: var(--accent-wash);
   --color-money-pos: var(--money-pos);
   --color-money-pos-text: var(--money-pos-text);

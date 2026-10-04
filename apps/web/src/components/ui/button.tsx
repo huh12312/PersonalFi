@@ -24,7 +24,10 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: 'bg-accent text-accent-contrast hover:opacity-90',
+        // A hover fill, never `opacity-90`: blending fill and text over the page
+        // took the dark theme's pair to 4.29:1 (axe, CI 2026-10-04); the tokens
+        // keep both themes above 6:1 hovered.
+        primary: 'bg-accent text-accent-contrast hover:bg-accent-hover',
         secondary: 'bg-bg-subtle text-text-primary border border-border-strong hover:bg-bg-inset',
         ghost: 'text-text-primary hover:bg-bg-subtle',
         destructive: 'bg-money-neg text-white hover:opacity-90',
