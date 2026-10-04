@@ -129,9 +129,12 @@ export function InsightCard({ insight, onReviewed }: InsightCardProps) {
         open={dismissing}
         onOpenChange={setDismissing}
         busy={review.isPending}
-        onDismiss={(reason) => {
+        onDismiss={({ reasonCode, note }) => {
           review.mutate(
-            { path: { insightId: insight.id }, body: { action: 'dismiss', reason } },
+            {
+              path: { insightId: insight.id },
+              body: { action: 'dismiss', reasonCode, reason: note },
+            },
             { onSuccess: () => setDismissing(false) },
           );
         }}

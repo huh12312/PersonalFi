@@ -198,10 +198,16 @@ describe('InsightsScreen', () => {
     await user.click(screen.getByRole('button', { name: 'Dismiss' }));
 
     const dialog = await screen.findByRole('dialog');
-    await user.click(within(dialog).getByRole('radio', { name: 'Not useful' }));
+    await user.click(within(dialog).getByRole('radio', { name: "True, but I can't act on it" }));
     await user.click(within(dialog).getByRole('button', { name: 'Dismiss' }));
 
-    await waitFor(() => expect(reviewedBody).toEqual({ action: 'dismiss', reason: 'Not useful' }));
+    await waitFor(() =>
+      expect(reviewedBody).toEqual({
+        action: 'dismiss',
+        reasonCode: 'NOT_ACTIONABLE',
+        reason: null,
+      }),
+    );
     expect(await screen.findByRole('status')).toHaveTextContent('Dismissed until');
   });
 

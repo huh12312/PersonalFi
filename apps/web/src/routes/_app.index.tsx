@@ -9,6 +9,7 @@ import { NetWorthDashboardSection } from '../features/networth/NetWorthChart.tsx
 import { netWorthSearchSchema } from '../features/networth/search.ts';
 import { latestValued } from '../features/networth/series.ts';
 import { TopInsightsWidget } from '../features/insights/TopInsightsWidget.tsx';
+import { BriefDashboardCard } from '../features/brief/BriefDashboardCard.tsx';
 
 /**
  * `/` — Dashboard. `validateSearch` adds `netWorthRange` (WP 3.12), the one
@@ -86,6 +87,7 @@ function DashboardRoute() {
         />
       </Card>
       <TopInsightsWidget />
+      <BriefDashboardCard />
     </div>
   );
 }

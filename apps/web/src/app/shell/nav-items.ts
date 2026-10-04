@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import {
+  CalendarClock,
   Inbox,
   Landmark,
   LayoutDashboard,
@@ -30,6 +31,7 @@ export type NavPath =
   | '/investments'
   | '/plan'
   | '/insights'
+  | '/brief'
   | '/settings';
 
 export interface NavItem {
@@ -50,6 +52,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard },
       { to: '/insights', label: 'Insights', icon: Lightbulb },
+      { to: '/brief', label: 'Brief', icon: CalendarClock },
     ],
   },
   {
@@ -90,5 +93,6 @@ export const MORE_NAV_ITEMS: NavItem[] = [
   { to: '/investments', label: 'Investments', icon: LineChart },
   { to: '/plan', label: 'Plan', icon: Target },
   { to: '/recurring', label: 'Recurring', icon: Repeat },
+  { to: '/brief', label: 'Brief', icon: CalendarClock },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
