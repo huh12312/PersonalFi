@@ -49,7 +49,7 @@
 # reverse-proxied "everything else" to the API, which answered 404 — the app
 # had no frontend in front of it at all.
 
-ARG CADDY_IMAGE=caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+ARG CADDY_IMAGE=caddy:2-alpine@sha256:d44355d3c2149dc580ce2cac735955d1c08d3d00882c30489c241aa51a5c10d9
 ARG NODE_IMAGE=node:26.8.2-alpine3.24@sha256:ef24c5053d50fdc3e4e56eb4e7ddb7861874ab0fdc797046ba897581deb8e868
 
 # ---------- web: build apps/web into a static bundle ----------

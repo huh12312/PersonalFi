@@ -5,7 +5,7 @@
 # Third-Party Notices
 
 PersonalFi is MIT-licensed. This file lists the runtime (production) dependency tree —
-`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:e96396a54d95d265.
+`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:353cf847eccf6648.
 devDependencies (build tooling, test frameworks) are not distributed and are not listed
 here; see `licenses.policy.yaml` for the policy that governs both.
 
@@ -244,7 +244,7 @@ pulls (`local-llm-pull`), not something this repository redistributes; the refer
 - `is-inside-container`@1.0.0 — https://github.com/sindresorhus/is-inside-container#readme
 - `is-wsl`@3.1.1 — https://github.com/sindresorhus/is-wsl#readme
 - `jiti`@2.7.0 — https://github.com/unjs/jiti#readme
-- `js-yaml`@4.2.0 — https://github.com/nodeca/js-yaml#readme
+- `js-yaml`@4.3.2 — https://github.com/nodeca/js-yaml#readme
 - `json-schema-ref-resolver`@3.0.0 — https://github.com/fastify/json-schema-ref-resolver#readme
 - `json-schema-resolver`@3.0.0 — https://github.com/Eomm/json-schema-resolver#readme
 - `json-schema-traverse`@1.0.0 — https://github.com/epoberezkin/json-schema-traverse#readme
