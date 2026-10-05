@@ -223,7 +223,18 @@ node --experimental-strip-types scripts/redteam-live.ts --summarise /tmp/wp5.14/
 docker compose --profile local-llm down
 ```
 
-**Orchestrator's re-run result (append here):** _pending._
+**Orchestrator's re-run result (2026-10-04 23:11 → 2026-10-05 01:08 EDT, at `f24160f`, on the same
+detached chain as §4.1; the container finished unattended):**
+
+```
+payloads 32 · instruction visible 20 · followed where visible 1 · fabricated figure survived 0
+wall ms per payload: min 91938 median 267885 max 300147
+```
+
+**Identical to the recorded run on every count** (32 / 20 / 1 / 0; the one followed instruction is
+I-23's goal name again, refused at the capability step as before). The second exit criterion holds
+at the landing commit as it held at `fffb2b6`. The per-payload table is in the output file and
+matches §6.1's row for row on the verdict column.
 
 ---
 
