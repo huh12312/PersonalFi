@@ -103,7 +103,7 @@
 
 ### 2a. Phase 5 gate conditions (filled by the orchestrator at the verdict)
 
-> *Placeholder.* The orchestrator copies the Phase 5 gate's §6 conditions here verbatim when the verdict exists, each with a proposed owner among §3's packages.
+> **Filled 2026-10-05 at the verdict (gate evidence commit b63a2a5): GO-WITH-CONDITIONS with three Highs (G5-2, G5-5, G5-7).** The rows below are the gate's §6 table, condition text verbatim, owners as the gate assigned them. **The HIGH rule fired: WP 9.3 is in Wave A and WP 9.2 opens Wave B** (§4 updated). The gate also re-tabled the Phase 4 conditions: C-1/C-2/C-7 closed live; C-8 → 9.7; C-10 → Chris then 9.7; C-12's feed half → 9.6 item 6; C-14's G4-14, O-10, O-11 → 9.3 and G4-19 → C5-8; C-15 and C-16 → Chris. The narrator stays at kill level 2 until C5-1, C5-2 and C5-4 are closed and walked on a cold install.
 >
 > **Rules:**
 > - **A HIGH promotes WP 9.3 into Wave A, and WP 9.2 slides to Wave B** (Chris's links do not need 9.2; his first real projection does).
@@ -114,7 +114,17 @@
 >
 > | # | Condition | Severity | Owner |
 > |---|---|---|---|
-> | — | *(not yet written)* | — | — |
+> | **C5-1** | **The narrator can be approved through the product.** The api binds the pure `PromptRenderer` and registers `local.narrator`'s manifest (never its executor) when a model is configured. **Exit:** on a cold install, preview → "Approve this payload" (step-up) → the worker's next narration is _not_ refused `payload_not_approved`. No SQL anywhere (from G5-2, R-4) | **High** | **WP 9.6** item 1 |
+> | **C5-2** | **A Brief's narration completes inside its deadline on this host, and narrates the Brief.** One finding per request (or numbered references); the Brief's enqueue passes its own items' ids (`narrateInsightIds`); no job-level retry of a `model_timeout` (the breaker already counts it); the deadline sized from a measured 5-item Brief. **Exit:** §5 item 6's observation — the scheduled Brief's narration _completing_ against a cold model on this host, timed against the deadline (from G5-7, G5-15) | **High** | **WP 9.5** (enqueue and lane), with 9.6 item 3 for display |
+> | **C5-3** | **S1 and S5 can fire on a real install.** Either `transactions.anomalies` drops `requiresPerRunConsent` for in-process kinds, with the reason written (it is already `externalAllowed: false`), or scheduled and on-demand runs gain a real per-run-consent path. **Exit:** this gate's walk data (a $940 charge against a $95–$129 baseline, a first-time $1,299 merchant) raises S1 and S5 through the nightly pass, with a test that fails when the consent gate drops the scope (from G5-5) | **High** | **WP 9.3** |
+> | **C5-4** | **Narrator v2, measured as shipped.** Option A: the app writes key and type, and the envelope carries the panel's displayed value. The worker passes `NARRATOR_REPLY_FORMAT`, or the eval builds its adapter through the composition root so the two cannot differ. A composition-root test asserts an accepted narration lands (§2.2 B5b). **Exit:** the ≥ 95 % re-measured on the pinned digest through the worker's own composition, steps 1–5 and 1–7 reported, per-class refusals listed (from G5-1, G5-6, R-1) | Medium | **WP 9.5** option A |
+> | C5-5 | **The inspector's digest covers what the model read.** `input_digest` over the whole canonical request (snapshot, findings, granted scopes) at run time; `inspectRunPayload` re-digests the same; tests tamper `findings`. **Exit:** the §3.6 tamper reproduced red, then green (from G5-16) | Medium | WP 9.3 |
+> | C5-6 | **Every scoping predicate tested alone.** A two-holder test that fails when `listGrants` loses `userId`; tests for the five shadowed predicates (Brief items `userId`; the cancel `UPDATE`'s `userId`; the retained payload's `userId` and `runId`; the run list's `advisorId`) (from G5-18, G5-17) | Medium | WP 9.3 |
+> | C5-7 | **The Brief's retirement figure is pinned to the engine at the port and on screen.** `brief-retirement-port.test.ts` on a funded plan with a non-null `yearsEarlier` and months; a web test asserting the rendered years and months equal the API's (from G5-19) | Medium | WP 9.3 (port); WP 9.6 (web half) |
+> | C5-8 | **The evidence panel prints money as money.** A minor-unit `resolvedDisplay` is formatted with its currency; S2 cites distinct recent and baseline rows and does not rank a single purchase as creep (G4-19's remainder, from Phase 4 C-14) (from G5-9, G5-10) | Medium | WP 9.6 (panel); WP 9.3 (S2) |
+> | C5-9 | **The Low bundle.** G5-3: the consent screen marks which scopes the advisor requests; the route refuses or flags the rest. G5-4: the S1/S5 gap rows are stale. G5-8: the cold-start note must agree with the items it heads. G5-11: a not-computable reason in words. G5-12: "subscription load" counts subscriptions, or is renamed. G5-13: RUNBOOK's "generation stops" is qualified. G5-14: a surface for level 1's user half (WP 9.6 item 2). RUNBOOK's "Advisor kill switches" still says "there is still no screen for any of this" (from G5-3, -4, -8, -11, -12, -13, -14) | Low | WP 9.6, 9.3, 9.12 |
+> | C5-10 | **The Ollama image re-ruled by 2026-11-05** (R-5) (from R-5) | Low | WP 9.11, with Chris |
+> | C5-11 | **Process.** No commit lands in the tree during a gate without the gate being told (P5-5); and every exit test asserts against the shipped composition, not a parallel construction (P5-1) — this gate's own §2 table is the checklist (from P5-1, P5-5) | process | the orchestrator; every Phase 9 brief |
 
 ### 2b. Code findings (read at `1417b36` while writing this file)
 
@@ -174,6 +184,8 @@ Phase 5's four rules are carried verbatim into every brief:
 6. **Every `docker compose` invocation by an agent names its own project with `-p`** — `pf-upgrade-<run>`, `pf-perf`, the gate's `personalfi` — and its own ports on `127.0.0.1`. **`down -v` only on a project the agent created this session.** **`docker volume prune`, `image prune`, `system prune` and `builder prune --all` are forbidden outright**: a prune while prod is stopped deletes prod.
 7. **Images an agent builds carry its own tag** (`pf-upgrade/api:<sha>`, `pf-perf/api:<sha>`). Only the gate rebuilds `personalfi/*:dev`.
 8. **Long runs are detached and resumable** (`setsid nohup`, a state file per step, `--from <n>`). Phase 5's two counted model runs survived their sessions' deaths only because the container kept writing.
+
+**And the Phase 5 gate's process condition C5-11, in every brief:** every exit test asserts against the shipped composition (the real `modules.ts`/`worker.ts` wiring), never a parallel construction of it; and the orchestrator lands no commit in the tree while a gate runs without telling the gate.
 
 Two structural reminders from Phase 4/5, unchanged:
 - The `insights`, `api` and `planning` vitest projects collect `test/*.test.ts` **one level deep**.
@@ -305,7 +317,7 @@ The planning-port binding in `apps/api/src/domain.ts` is the W-A batch's.
 
 ### WP 9.3 — Phase 5 gate carry-overs and conditions
 
-**Scope.** §2a's rows, and nothing else, in the gate's priority order. Verify-first for every row, each reproduced red first. If a condition touches a file another Phase 9 package owns in the same wave, the orchestrator moves the condition or the package — never both into one file.
+**Scope.** §2a's rows assigned to 9.3 — C5-3 (High), C5-5, C5-6, C5-7's port half, C5-8's S2 half, its share of C5-9, plus the Phase 4 remainders the gate re-tabled to it (G4-14 goals evaluated on write, O-10, O-11) — and nothing else, in the gate's priority order. Verify-first for every row, each reproduced red first. If a condition touches a file another Phase 9 package owns in the same wave, the orchestrator moves the condition or the package — never both into one file.
 
 **Owns.** Named per condition when the verdict exists. **Events.** None expected.
 
@@ -727,8 +739,8 @@ Phase 9 has more long runs than any phase so far: image builds for seven waypoin
 
 | Wave | Agents | Packages |
 |---|---|---|
-| A | 3 (1 Opus) | 9.1 soak · 9.2 real-data readiness · **9.4 upgrade (Opus)** |
-| B | 3 (1 Opus) | 9.3 Phase 5 carry-overs · **9.5 narrator (Opus)** · 9.6 advisory surface |
+| A | 3 (1 Opus) | 9.1 soak · **9.3 Phase 5 carry-overs (promoted: the verdict carried three Highs)** · **9.4 upgrade (Opus)** |
+| B | 3 (1 Opus) | 9.2 real-data readiness (slid from A) · **9.5 narrator (Opus)** · 9.6 advisory surface |
 | C | 3 (1 Opus) | 9.7 plan screens · 9.9 performance · **9.10 security review (Opus)** |
 | D | 3 (1 Opus) | 9.8 WCAG (exclusive web) · **9.11 security fixes (Opus)** · 9.12 docs |
 | E | 1 | 9.13 stranger install (+ a docs finisher loop) |
@@ -787,9 +799,9 @@ The rule: **no Phase 9 migration references an object a higher-numbered one crea
 
 | Migration | Tables / changes | WP | Wave |
 |---|---|---|---|
-| **0035** `account_overrides` | `account_overrides` (tax treatment, role, valuation; user-scoped composite FK to `accounts`) | 9.2 | A (B if HIGH) |
+| **0035** `account_overrides` | `account_overrides` (tax treatment, role, valuation; user-scoped composite FK to `accounts`) | 9.2 | B (the verdict carried Highs) |
 | **0036** `ops_status` | `ops_backup_runs`, `ops_restore_drills` (install-wide) | 9.1 | A |
-| **0037** | reserved for 9.3 (Phase 5 gate conditions), used only if reported necessary | 9.3 | A or B |
+| **0037** | reserved for 9.3 (Phase 5 gate conditions), used only if reported necessary | 9.3 | A |
 | **0038** `brief_actions_grant_events` | `advisory_brief_items.primary_action` (nullable, CHECK); `snapshot_grant_events` | 9.6 | B |
 | **0039** | reserved for 9.11 (role separation and grants; anything 9.10 rates) | 9.11 | D |
 | **0040** | spare, used only if reported necessary | — | — |
