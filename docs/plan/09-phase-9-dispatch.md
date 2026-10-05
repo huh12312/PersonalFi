@@ -103,7 +103,7 @@
 
 ### 2a. Phase 5 gate conditions (filled by the orchestrator at the verdict)
 
-> **Filled 2026-10-05 at the verdict (gate evidence commit b63a2a5): GO-WITH-CONDITIONS with three Highs (G5-2, G5-5, G5-7).** The rows below are the gate's §6 table, condition text verbatim, owners as the gate assigned them. **The HIGH rule fired: WP 9.3 is in Wave A and WP 9.2 opens Wave B** (§4 updated). The gate also re-tabled the Phase 4 conditions: C-1/C-2/C-7 closed live; C-8 → 9.7; C-10 → Chris then 9.7; C-12's feed half → 9.6 item 6; C-14's G4-14, O-10, O-11 → 9.3 and G4-19 → C5-8; C-15 and C-16 → Chris. The narrator stays at kill level 2 until C5-1, C5-2 and C5-4 are closed and walked on a cold install.
+> **Filled 2026-10-05 at the verdict (gate evidence commit b63a2a5): GO-WITH-CONDITIONS with three Highs (G5-2, G5-5, G5-7).** The rows below are the gate's §6 table, condition text verbatim, owners as the gate assigned them. **The HIGH rule fired: WP 9.3 is in Wave A and WP 9.2 opens Wave B** (§4 updated). The gate also re-tabled the Phase 4 conditions: C-1/C-2/C-7 closed live; C-8 → 9.7; C-10 → Chris then 9.7; C-12's feed half → 9.6 item 6; C-14's G4-14 and O-10 → 9.3 (O-11, import re-validation, stays with 9.11 as §2 assigns it) and G4-19 → C5-8; C-15 and C-16 → Chris. The narrator stays at kill level 2 until C5-1, C5-2 and C5-4 are closed and walked on a cold install.
 >
 > **Rules:**
 > - **A HIGH promotes WP 9.3 into Wave A, and WP 9.2 slides to Wave B** (Chris's links do not need 9.2; his first real projection does).
@@ -317,7 +317,7 @@ The planning-port binding in `apps/api/src/domain.ts` is the W-A batch's.
 
 ### WP 9.3 — Phase 5 gate carry-overs and conditions
 
-**Scope.** §2a's rows assigned to 9.3 — C5-3 (High), C5-5, C5-6, C5-7's port half, C5-8's S2 half, its share of C5-9, plus the Phase 4 remainders the gate re-tabled to it (G4-14 goals evaluated on write, O-10, O-11) — and nothing else, in the gate's priority order. Verify-first for every row, each reproduced red first. If a condition touches a file another Phase 9 package owns in the same wave, the orchestrator moves the condition or the package — never both into one file.
+**Scope.** §2a's rows assigned to 9.3 — C5-3 (High), C5-5, C5-6, C5-7's port half, C5-8's S2 half, its share of C5-9, plus the Phase 4 remainders the gate re-tabled to it (G4-14 goals evaluated on write; O-10's `worker-host.ts` comment — O-11 stays with 9.11) — and nothing else, in the gate's priority order. Verify-first for every row, each reproduced red first. If a condition touches a file another Phase 9 package owns in the same wave, the orchestrator moves the condition or the package — never both into one file.
 
 **Owns.** Named per condition when the verdict exists. **Events.** None expected.
 
