@@ -180,7 +180,29 @@ docker compose run --rm --no-deps --entrypoint node \
 node --experimental-strip-types scripts/advisor-eval.ts --finalise /tmp/wp5.14/narrator-out/live.jsonl
 ```
 
-**Orchestrator's re-run result (append here):** _pending._
+**Orchestrator's re-run result (2026-10-04 20:12 → 23:11 EDT, at `f24160f`, detached from the
+session with `setsid nohup`; the container finished unattended):**
+
+```
+cases 56 · requests 84 · narrations 112 · extras 21
+passed steps 1–1 (transport): 112   1–2 (schema): 103   1–3 (envelope): 103
+passed steps 1–4 (capability): 86   1–5 (evidence): 78   1–6 (derivations): 78   1–7 (numerals): 74
+FIRST ATTEMPT  steps 1–5: 78/112 = 69.6%   steps 1–7: 74/112 = 66.1%
+  17 × no_narration (under another finding's key)   9 × schema   7 × evidence:value_disagrees
+   1 × evidence:label_disagrees (F-8, new)            4 × numerals:numeral_not_in_finding (new)
+wall ms per request: min 95459 median 144456 max 285528; no timeouts this run
+```
+
+**Compared with the recorded run (76/112 = 67.9 % through both step 5 and step 7):** steps 1–5
+moved +2 (78) and steps 1–7 moved −2 (74). The difference is WP 5.3b: the recorded run measured
+the validator as of `1f70d00`; this one carries the red team's closures, so four narrations that
+used to pass step 7 are now refused as `numeral_not_in_finding` (a figure the finding did not
+render — F-1/F-2's class) and one at step 5 as `narration_label_disagrees` (F-8). Those five are
+the validator doing what the red team asked, not the model getting worse; the model's own
+first-attempt rate is unchanged within noise (the same `no_narration` mode dominates, 17 vs 16). No
+request hit the 300 s cap this time (two-finding median 249 s). **The third exit criterion remains
+NOT met: 66.1 % through step 7 against ≥ 95 %**, same conclusion and the same two options for the
+gate as wp5.3-narrator.md §8.
 
 ### 4.2 The red-team live pass (WP 5.4, the second exit criterion)
 
