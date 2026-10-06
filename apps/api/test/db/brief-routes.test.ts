@@ -711,7 +711,7 @@ describe.skipIf(NO_DATABASE)(
           // `advisory_brief_items.insight_id` is on `id` alone, so this row is
           // representable — and the join must not follow it into Alice's data).
           await seedBriefOver(api.database.db, bob, '2026-W41', [
-            { insightId: narrated, key: 'wp96-bob-points-at-alices' },
+            { insightId: narrated, key: 'wp96-bob-points-at-alices' }, // gitleaks:allow — a synthetic narration key, not a credential
           ]);
           const bobSession = await api.issueSession({ userId: bob });
           const response = await api.request({
@@ -867,7 +867,7 @@ describe.skipIf(NO_DATABASE)('a published Brief records its action (WP 9.6 item 
     const modules = appModules({
       advisorsEnabled: true,
       localModelConfigured: false,
-      advisorTokenSecret: 'wp96-brief-secret',
+      advisorTokenSecret: 'wp96-brief-secret', // gitleaks:allow — synthetic advisor-token secret for a test
       database: db,
       userId,
       orchestrator: runtime.orchestrator,

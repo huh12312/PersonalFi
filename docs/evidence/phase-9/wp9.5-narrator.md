@@ -202,4 +202,10 @@ From the frozen tree, through `scripts/redteam-live.ts --live`: the production a
 
 ## Final check
 
-_Filled after the final report is posted._
+Run after the report was posted to `main`, 2026-10-06 18:05–18:35 EDT. WP 9.6 had landed (`6214f3e`, `47a9ab1`, `4fcd03e`).
+
+- `just typecheck`: clean.
+- `just lint`: PASS. Prettier, ESLint (0 errors; 1 pre-existing warning in `apps/web/src/features/transactions/TransactionsList.tsx`, not mine), schema-ownership ok, numeric boundaries PASS (895 files). One fix first: prettier on `narration-link.test.ts` after its edit.
+- `vitest --project insights --project insights-db --project advisor-local-model --project api`: **76 files, 527 passed, 1 skipped**. That includes `redteam.test.ts` 9/9.
+- `api-db` narrator-composition + phase5-wiring: **10/10**.
+- `just check`: **exit 1 on one test only.** It was `apps/api/test/db/phase2-reports-http-perf.test.ts` ("GET /reports/spending holds p95 < 200 ms"), observed p95 1 399 ms at load 7.99. Re-run alone at load ~4–5 it passed, p95 37.8 ms. That is host load during the full suite, in a reports test that is not this package's, not a regression. Everything else: 371 files passed, 1 skipped; 3 449 tests passed, 12 skipped.

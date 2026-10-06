@@ -48,3 +48,14 @@
 # that introduced it (123c767, the Phase 3 wiring snapshot). The line now
 # carries `gitleaks:allow`; this entry covers the historical commit.
 123c76708f9cacf5c6605a8111bf7cb4a1db0349:packages/config/src/load.test.ts:generic-api-key:870
+
+# False positives: synthetic test fixtures in the Wave B wip snapshot
+# (2026-10-06). The snapshot was committed with LEFTHOOK=0 after the session
+# limit killed three agents at once, so the pre-commit gitleaks never saw
+# these lines; the values are a made-up narration key and two made-up
+# advisor-token secrets for tests, and authenticate nothing. The lines now
+# carry `// gitleaks:allow` in the tree; these fingerprints cover the commit
+# that introduced them, which is already pushed and is not rewritten.
+d025adc820181a7e36d5ab353df1d270cdeebc44:apps/api/test/db/brief-routes.test.ts:generic-api-key:714
+d025adc820181a7e36d5ab353df1d270cdeebc44:apps/api/test/db/brief-routes.test.ts:generic-api-key:870
+d025adc820181a7e36d5ab353df1d270cdeebc44:apps/api/test/db/narrator-composition.test.ts:generic-api-key:86
