@@ -42,6 +42,7 @@
 import { newId, systemClock } from '@core/kernel';
 import { advisoryBriefItems, advisoryBriefs } from '@ctx/insights/schema';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { loadItems } from '../../src/routes/brief.ts';
 import {
   createApiHarness,
   expectStatus,
@@ -89,6 +90,7 @@ async function seedBrief(
   userId: string,
   isoWeek: string,
   keyPrefix: string,
+  attentionEffect: Record<string, unknown> = NOT_COMPUTABLE_EFFECT,
 ): Promise<string> {
   const briefId = newId();
   const now = systemClock.now();
@@ -162,7 +164,7 @@ async function seedBrief(
       evidence: [],
       score: null,
       scoreFactors: null,
-      retirementEffect: NOT_COMPUTABLE_EFFECT,
+      retirementEffect: attentionEffect,
       createdAt: now,
     },
   ]);
@@ -319,6 +321,46 @@ describe.skipIf(NO_DATABASE)('/insights/brief and /insights/health-score (WP 5.1
         session: otherSession,
       });
       expect(byWeek.statusCode).toBe(404);
+    });
+
+    it('a not-computable retirement effect is served in words, never as an engine code (G5-11)', async () => {
+      // The gate's walk: a fresh install, no sealed net-worth day yet.
+      await seedBrief(h, h.userId, '2026-W29', 'wp93-g511', {
+        kind: 'not_computable',
+        reason: 'planning.projection_no_balances',
+      });
+      const response = await h.request({
+        method: 'GET',
+        url: '/insights/brief/2026-W29',
+        session: h.stale,
+      });
+      expectStatus(response, 200);
+      const body = response.json() as { brief: BriefWire };
+      for (const item of body.brief.items) {
+        const effect = item.retirementEffect as { kind: string; reason?: string };
+        if (item.section === 'attention') {
+          expect(effect.kind).toBe('not_computable');
+          expect(effect.reason).toMatch(/net-worth day/);
+          expect(effect.reason).not.toMatch(/planning\./);
+        }
+      }
+    }, 30_000);
+
+    it("loadItems' own userId predicate (C5-6, G5-17 R2a): a foreign briefId yields nothing for another holder", async () => {
+      // Through HTTP this predicate is shadowed: `loadBrief` is user-scoped, so
+      // it only ever hands `loadItems` the caller's own Brief id, and the
+      // composite FK (user_id, brief_id) makes a mismatched item unrepresentable.
+      // So the shipped `loadItems` — the function both routes call — is called
+      // with a briefId that is not the caller's, and must see nothing.
+      const otherUserId = await h.database.createUser('Brief Fourth Holder');
+      const briefId = await seedBrief(h, h.userId, '2026-W30', 'wp93-c56');
+
+      expect(await loadItems(h.database.db, otherUserId, briefId)).toEqual([]);
+      const own = await loadItems(h.database.db, h.userId, briefId);
+      expect(own.map((item) => item.insightKey).sort()).toEqual([
+        'wp93-c56.attention',
+        'wp93-c56.ranked',
+      ]);
     });
 
     it('a week that belongs to nobody the caller is 404 for every caller (both predicates wrong together)', async () => {

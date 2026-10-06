@@ -4,9 +4,10 @@
  * and the Money-facing conversion on both sides of the thread.
  *
  * A `worker_thread` is in-process: an out-of-memory there takes the API or the
- * worker container with it, and those are capped at 512 / 640 MB (08 §7.4;
- * dispatch §5, "the Monte Carlo worker is an unbounded resource"). So, in this
- * order, and every one of them sabotage-tested in `worker-limits.test.ts`:
+ * worker container with it, and both are capped at 1536 MB in `compose.yml`
+ * (08 §7.4's original 512 / 640 MB were raised at the Phase 0 gate and again for
+ * the worker; dispatch §5, "the Monte Carlo worker is an unbounded resource").
+ * So, in this order, and every one of them sabotage-tested in `worker-limits.test.ts`:
  *
  * 1. **The envelope, before anything is spawned.** A path count, horizon,
  *    path × year product, seed, series length or ν outside `MONTE_CARLO_ENVELOPE`
@@ -120,7 +121,7 @@ export const WORKER_RESOURCE_LIMITS = Object.freeze({
    * 64 MB of old generation. The kernel's heap is small — the plan, a few
    * closures, the result's headers; every per-path and per-year number lives
    * in a typed array outside the heap — and the probe measures a few MB in use.
-   * 64 MB is several times that and a small fraction of the 512 MB container,
+   * 64 MB is several times that and a small fraction of the 1536 MB container,
    * so a runaway (a leak, a pathological input past the envelope) dies here
    * with `ERR_WORKER_OUT_OF_MEMORY` instead of taking the API down.
    */

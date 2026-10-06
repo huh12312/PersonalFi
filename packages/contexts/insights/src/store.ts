@@ -513,21 +513,39 @@ export async function requestRunCancel(
     const run = await findRun(tx, context.userId, runId);
     if (run === null) return 'not_found';
     await lockAdvisor(tx, context.userId, run.advisorId);
-    const updated = await tx
-      .update(advisorRuns)
-      .set({
-        cancelRequestedAt: sql`COALESCE(${advisorRuns.cancelRequestedAt}, ${context.clock.now()})`,
-      })
-      .where(
-        and(
-          eq(advisorRuns.userId, context.userId),
-          eq(advisorRuns.id, runId),
-          eq(advisorRuns.status, 'started'),
-        ),
-      )
-      .returning({ id: advisorRuns.id });
-    return updated.length === 0 ? 'not_running' : 'requested';
+    return (await markCancelRequested(tx, context.userId, runId, context.clock.now()))
+      ? 'requested'
+      : 'not_running';
   });
+}
+
+/**
+ * The cancel `UPDATE` on its own: stamps `cancel_requested_at` on a `started`
+ * run of this holder and reports whether a row was touched. Split out of
+ * `requestRunCancel` (C5-6, G5-17) so its own `userId` predicate can be
+ * tested directly: inside `requestRunCancel`, `findRun`'s `userId` guard
+ * refuses a foreign run first, which shadows this one (gate §2.5 R4a stayed
+ * green with it dropped). `requestRunCancel` calls exactly this function, so
+ * the test and the route exercise the same query.
+ */
+export async function markCancelRequested(
+  executor: InsightsExecutor,
+  userId: string,
+  runId: string,
+  now: Date,
+): Promise<boolean> {
+  const updated = await executor
+    .update(advisorRuns)
+    .set({ cancelRequestedAt: sql`COALESCE(${advisorRuns.cancelRequestedAt}, ${now})` })
+    .where(
+      and(
+        eq(advisorRuns.userId, userId),
+        eq(advisorRuns.id, runId),
+        eq(advisorRuns.status, 'started'),
+      ),
+    )
+    .returning({ id: advisorRuns.id });
+  return updated.length > 0;
 }
 
 /**

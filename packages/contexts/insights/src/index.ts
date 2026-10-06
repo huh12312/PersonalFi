@@ -608,6 +608,7 @@ export {
   type RetirementImpactPort,
   type RetirementImpactRequest,
 } from './brief/ports.ts';
+export { REASON_FALLBACK_WORDS, retirementReasonInWords } from './brief/reason-text.ts';
 
 export {
   BRIEF_JOB_KIND,

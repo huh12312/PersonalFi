@@ -34,9 +34,19 @@ import {
 
 export const COLD_START_THRESHOLD_DAYS = 30;
 
+/**
+ * What a young advisor history actually costs (G5-8). `historyDays` is the days
+ * since this holder's earliest advisor *run*, so it says nothing about how many
+ * months of transactions the install holds: a rule that compares months (spending
+ * creep) reads the months already in the accounts and may rank on day one. The
+ * note used to claim trend findings were "not yet assessable" and printed that
+ * above two spending-creep items. It now says only what is true of the Brief
+ * itself: few earlier weeks to compare it with.
+ */
 export const COLD_START_NOTE =
-  'Under 30 days of advisor history, so trend-based findings — spending creep, category ' +
-  'baselines, subscription drift — are not yet assessable; only what a single snapshot can show is included.';
+  'Under 30 days of advisor history, so there are few earlier weeks to compare this Brief with. ' +
+  'Findings that compare months of spending read the transactions already in your accounts, ' +
+  'not this history.';
 
 export type BriefItemSection = 'ranked' | 'attention';
 

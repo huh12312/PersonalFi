@@ -13,13 +13,10 @@
  * gate's point about "shadowed": a predicate that is never exercised on its
  * own is a predicate nobody would notice disappearing.
  *
- * `requestRunCancel`'s cancel `UPDATE` is different: its own `userId` guard
- * and `findRun`'s earlier `userId` guard live inside **one** function with no
- * way to call just the `UPDATE`, so it genuinely cannot be isolated without
- * also defeating `findRun` — exactly what the gate's R4a/R4b pair showed
- * (dropping the `UPDATE`'s guard alone stays green; dropping both goes red).
- * That test is written to show both outcomes rather than claim a false
- * "tested alone".
+ * The cancel `UPDATE`'s own `userId` guard sat behind `findRun`'s identical guard
+ * inside one function (the gate's R4a/R4b), so it was extracted as
+ * `markCancelRequested` — `requestRunCancel` calls it, so the test and the
+ * product run one query — and is tested by calling it directly.
  *
  * Every sabotage below is recorded in `docs/evidence/phase-9/
  * wp9.3-carry-overs.md` §2 as it happens, and restored immediately.
@@ -29,10 +26,12 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { advisoryBriefItems, advisoryBriefs } from '../../schema/index.ts';
 import { listBriefItems } from '../../src/brief/store.ts';
 import {
+  findRun,
   findRunPayload,
   grantScopes,
   latestRuns,
   listGrants,
+  markCancelRequested,
   requestRunCancel,
   retainRunPayload,
   startRun,
@@ -132,16 +131,10 @@ describe.skipIf(NO_DATABASE)('C5-6 — every scoping predicate tested alone', ()
     expect(aliceItems[0]?.insightKey).toBe('test.alice');
   }, 30_000);
 
-  it("findRunPayload: a second holder's retained payload never crosses", async () => {
+  it("findRunPayload: a second holder's retained payload never crosses (userId alone: the second holder retains nothing, so only `userId` can refuse)", async () => {
     const bobId = await database.createUser('Bob');
     const alice = contextFor(database.userId);
-    const bob = contextFor(bobId);
     const aliceRun = await startRun(database.db, alice, {
-      advisorId: ADVISOR_ID,
-      advisorVersion: '1.0.0',
-      trigger: 'manual',
-    });
-    const bobRun = await startRun(database.db, bob, {
       advisorId: ADVISOR_ID,
       advisorVersion: '1.0.0',
       trigger: 'manual',
@@ -153,16 +146,8 @@ describe.skipIf(NO_DATABASE)('C5-6 — every scoping predicate tested alone', ()
       payload: { marker: 'alice' },
       payloadBytes: 16,
     });
-    await retainRunPayload(database.db, bob, {
-      runId: bobRun.id,
-      advisorId: ADVISOR_ID,
-      queryShape: QUERY_SHAPE,
-      payload: { marker: 'bob' },
-      payloadBytes: 16,
-    });
 
     const now = alice.clock.now();
-    expect(await findRunPayload(database.db, database.userId, bobRun.id, now)).toBeNull();
     expect(await findRunPayload(database.db, bobId, aliceRun.id, now)).toBeNull();
     const aliceOwn = await findRunPayload(database.db, database.userId, aliceRun.id, now);
     expect(aliceOwn?.payload).toMatchObject({ marker: 'alice' });
@@ -224,24 +209,35 @@ describe.skipIf(NO_DATABASE)('C5-6 — every scoping predicate tested alone', ()
     expect(onlyB.map((run) => run.id)).toEqual([runB.id]);
   }, 30_000);
 
-  it(
-    "requestRunCancel: a second holder's run is never cancelled — findRun's own " +
-      "userId guard already refuses it before the cancel UPDATE's own guard is ever reached " +
-      "(the gate's R4a/R4b: the UPDATE's predicate alone is shadowed by design; §2 records " +
-      "both sabotages, the UPDATE's alone staying green and both together going red)",
-    async () => {
-      const bobId = await database.createUser('Bob');
-      const alice = contextFor(database.userId);
-      const bob = contextFor(bobId);
-      const bobRun = await startRun(database.db, bob, {
-        advisorId: ADVISOR_ID,
-        advisorVersion: '1.0.0',
-        trigger: 'manual',
-      });
+  it("markCancelRequested: the cancel UPDATE's own userId guard — a second holder's started run is never stamped", async () => {
+    const bobId = await database.createUser('Bob');
+    const bob = contextFor(bobId);
+    const bobRun = await startRun(database.db, bob, {
+      advisorId: ADVISOR_ID,
+      advisorVersion: '1.0.0',
+      trigger: 'manual',
+    });
+    const now = bob.clock.now();
 
-      const outcome = await requestRunCancel(database.db, alice, bobRun.id);
-      expect(outcome).toBe('not_found');
-    },
-    30_000,
-  );
+    // Called directly, so `findRun`'s earlier guard is not in front of it.
+    expect(await markCancelRequested(database.db, database.userId, bobRun.id, now)).toBe(false);
+    expect((await findRun(database.db, bobId, bobRun.id))?.cancelRequestedAt).toBeNull();
+    expect(await markCancelRequested(database.db, bobId, bobRun.id, now)).toBe(true);
+    expect((await findRun(database.db, bobId, bobRun.id))?.cancelRequestedAt).not.toBeNull();
+  }, 30_000);
+
+  it("requestRunCancel: a second holder's run is refused and left unstamped (both guards together)", async () => {
+    const bobId = await database.createUser('Bob');
+    const alice = contextFor(database.userId);
+    const bob = contextFor(bobId);
+    const bobRun = await startRun(database.db, bob, {
+      advisorId: ADVISOR_ID,
+      advisorVersion: '1.0.0',
+      trigger: 'manual',
+    });
+
+    expect(await requestRunCancel(database.db, alice, bobRun.id)).toBe('not_found');
+    expect((await findRun(database.db, bobId, bobRun.id))?.cancelRequestedAt).toBeNull();
+    expect(await requestRunCancel(database.db, bob, bobRun.id)).toBe('requested');
+  }, 30_000);
 });

@@ -243,6 +243,15 @@ function debtToIncome(snapshot: AdvisorSnapshot): ComputableFigure {
 // recurring.list over cashflow.monthly's take-home — subscription_load
 // ---------------------------------------------------------------------------
 
+/** Statuses (07 §2.8's dormancy ladder, `MIGRATED`) of a stream that no longer charges. */
+const NO_LONGER_CHARGING = new Set(['CANCELED', 'LIKELY_CANCELED', 'MIGRATED']);
+
+/**
+ * Σ annualised **subscription** streams that are still charging, over annual
+ * take-home — U7's own definition (G5-12). The gate's walk summed every
+ * `recurring.list` stream, so rent, power and groceries read as 57.3 % "Poor"
+ * on a holder whose subscriptions were about $87 a month.
+ */
 function subscriptionLoad(snapshot: AdvisorSnapshot): ComputableFigure {
   const recurring = snapshot.recurring_list;
   if (recurring === undefined) {
@@ -261,6 +270,7 @@ function subscriptionLoad(snapshot: AdvisorSnapshot): ComputableFigure {
   }
   let annualSubscriptions: D.Decimal = 0n;
   for (const stream of recurring.streams) {
+    if (stream.type !== 'SUBSCRIPTION' || NO_LONGER_CHARGING.has(stream.status)) continue;
     const typical = moneyToDecimal(Money.fromJSON(stream.typical_amount));
     const periods = D.fromNumber(stream.periods_per_year);
     if (typical === null || periods === null) continue;

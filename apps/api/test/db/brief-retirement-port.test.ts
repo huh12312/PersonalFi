@@ -24,7 +24,10 @@ import {
   upsertOpenDay,
   type BaselineProfile,
   type NetWorthSnapshot,
+  type RetirementImpact,
+  type RetirementImpactAction,
 } from '@ctx/planning';
+import type { RetirementImpactAnswer } from '@ctx/insights';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createInsightsRetirementImpactPort, planningRevealedPortsFor } from '../../src/domain.ts';
 import { createApiHarness, NO_DATABASE, type ApiHarness } from '../helpers/api-harness.ts';
@@ -81,6 +84,53 @@ function statedProfile(overrides: Partial<BaselineProfile> = {}): BaselineProfil
   };
 }
 
+/** A funded plan: 30 years old, $30k a year into a taxable pot, $24k of retirement spending. */
+function fundedProfile(): BaselineProfile {
+  return statedProfile({
+    birthDate: DateOnly.parse('1996-09-25'),
+    annualSpending: money(24_000_00n, USD),
+    contributions: { TAXABLE: money(30_000_00n, USD) },
+  });
+}
+const FUNDED_ACTION = { kind: 'extra_annual' as const, annual: money(12_000_00n, USD) };
+
+/** Field for field: the adapter's conversion changed nothing. */
+type ComputedAnswer = Extract<RetirementImpactAnswer, { readonly kind: 'computed' }>;
+
+function expectFigureEqual(answer: ComputedAnswer, direct: RetirementImpact): void {
+  expect(answer.engineVersion).toBe(direct.engineVersion);
+  expect(answer.assumptionsVersion).toBe(direct.assumptionsVersion);
+  expect(answer.plannedRetirementAge).toBe(direct.plannedRetirementAge);
+  expect(answer.yearsEarlier).toBe(direct.yearsEarlier);
+
+  expect(answer.baseline.kind).toBe(direct.baseline.kind);
+  if (answer.baseline.kind === 'earliest' && direct.baseline.kind === 'earliest') {
+    expect(answer.baseline.age).toBe(direct.baseline.age);
+  }
+  expect(answer.withAction.kind).toBe(direct.withAction.kind);
+  if (answer.withAction.kind === 'earliest' && direct.withAction.kind === 'earliest') {
+    expect(answer.withAction.age).toBe(direct.withAction.age);
+  }
+
+  expect(answer.monthsOfSpending.months).toBe(direct.monthsOfSpending.months);
+  if (answer.monthsOfSpending.months !== null && direct.monthsOfSpending.months !== null) {
+    expect(answer.monthsOfSpending.atAge).toBe(direct.monthsOfSpending.atAge);
+    expect(
+      Money.equals(
+        answer.monthsOfSpending.wealthDifference,
+        direct.monthsOfSpending.wealthDifference,
+      ),
+    ).toBe(true);
+    expect(
+      Money.equals(
+        answer.monthsOfSpending.firstYearSpending,
+        direct.monthsOfSpending.firstYearSpending,
+      ),
+    ).toBe(true);
+    expect(answer.monthsOfSpending.derivation).toBe(direct.monthsOfSpending.derivation);
+  }
+}
+
 describe.skipIf(NO_DATABASE)("WP 5.6's RetirementImpactPort reproduces a direct engine run", () => {
   let h: ApiHarness;
 
@@ -92,30 +142,30 @@ describe.skipIf(NO_DATABASE)("WP 5.6's RetirementImpactPort reproduces a direct 
     await h.close();
   }, 60_000);
 
-  it('the bound port reproduces a direct engine run for the same plan exactly', async () => {
-    const userId = await h.database.createUser('WP 5.6 retirement-port holder');
+  /**
+   * Seals a day, saves `profile` as the baseline and returns the bound port's
+   * answer for `action` and the direct engine run over the same assembly.
+   */
+  async function portAndDirect(
+    name: string,
+    profile: BaselineProfile,
+    action: RetirementImpactAction,
+  ): Promise<{ answer: ComputedAnswer; direct: RetirementImpact }> {
+    const userId = await h.database.createUser(name);
     const asOfDate = '2026-09-25';
     await sealMinimalDay(h.database.db, userId, asOfDate);
-    await saveBaseline(h.database.db, {
-      userId,
-      name: 'WP 5.6 retirement-port baseline',
-      profile: statedProfile(),
-      clock: systemClock,
-    });
-
-    const action = { kind: 'extra_annual' as const, annual: money(6_000_00n, USD) };
+    await saveBaseline(h.database.db, { userId, name, profile, clock: systemClock });
 
     // The bound port, exactly as `apps/api/src/domain.ts` constructs it.
     const port = createInsightsRetirementImpactPort(h.database.db, { timeZone: ZONE });
     const answer = await port.effectOf({ userId, action });
     expect(answer.kind, answer.kind === 'not_computable' ? answer.reason : '').toBe('computed');
-    if (answer.kind !== 'computed') return;
+    if (answer.kind !== 'computed') throw new Error('unreachable');
 
     // The direct engine run: the same assembly the adapter performs,
     // called here without going through the port at all.
     const baseline = await getBaseline(h.database.db, userId);
-    expect(baseline).not.toBeNull();
-    if (baseline === null) return;
+    if (baseline === null) throw new Error('baseline was just saved');
     const resolved = await resolveForUser(h.database.db, { userId, timeZone: ZONE });
     const derived = await createProjectionInputsReader(
       h.database.db,
@@ -130,39 +180,32 @@ describe.skipIf(NO_DATABASE)("WP 5.6's RetirementImpactPort reproduces a direct 
       method: 'deterministic',
       paths: 1,
     });
-    const direct = solveRetirementImpact(assembled.plan, resolved, action);
+    return { answer, direct: solveRetirementImpact(assembled.plan, resolved, action) };
+  }
 
-    // Field for field: the adapter's conversion changed nothing.
-    expect(answer.engineVersion).toBe(direct.engineVersion);
-    expect(answer.assumptionsVersion).toBe(direct.assumptionsVersion);
-    expect(answer.plannedRetirementAge).toBe(direct.plannedRetirementAge);
+  it('the bound port reproduces a direct engine run for the same plan exactly (the original WP 5.6 plan, an empty sealed day — its yearsEarlier is null, so it cannot pin that field; see the funded test below)', async () => {
+    const { answer, direct } = await portAndDirect(
+      'WP 5.6 retirement-port holder',
+      statedProfile(),
+      { kind: 'extra_annual', annual: money(6_000_00n, USD) },
+    );
+    expectFigureEqual(answer, direct);
+  });
+
+  it("C5-7 (G5-19): on a FUNDED plan the Brief figure — a non-null yearsEarlier and months of spending — is the engine's, exactly", async () => {
+    const { answer, direct } = await portAndDirect(
+      'WP 9.3 funded retirement-port holder',
+      fundedProfile(),
+      FUNDED_ACTION,
+    );
+
+    // The precondition the old test lacked: this comparison is not null = null.
+    expect(direct.baseline.kind).toBe('earliest');
+    expect(direct.withAction.kind).toBe('earliest');
+    expect(direct.yearsEarlier).not.toBeNull();
+    expect(direct.monthsOfSpending.months).not.toBeNull();
     expect(answer.yearsEarlier).toBe(direct.yearsEarlier);
-
-    expect(answer.baseline.kind).toBe(direct.baseline.kind);
-    if (answer.baseline.kind === 'earliest' && direct.baseline.kind === 'earliest') {
-      expect(answer.baseline.age).toBe(direct.baseline.age);
-    }
-    expect(answer.withAction.kind).toBe(direct.withAction.kind);
-    if (answer.withAction.kind === 'earliest' && direct.withAction.kind === 'earliest') {
-      expect(answer.withAction.age).toBe(direct.withAction.age);
-    }
-
     expect(answer.monthsOfSpending.months).toBe(direct.monthsOfSpending.months);
-    if (answer.monthsOfSpending.months !== null && direct.monthsOfSpending.months !== null) {
-      expect(answer.monthsOfSpending.atAge).toBe(direct.monthsOfSpending.atAge);
-      expect(
-        Money.equals(
-          answer.monthsOfSpending.wealthDifference,
-          direct.monthsOfSpending.wealthDifference,
-        ),
-      ).toBe(true);
-      expect(
-        Money.equals(
-          answer.monthsOfSpending.firstYearSpending,
-          direct.monthsOfSpending.firstYearSpending,
-        ),
-      ).toBe(true);
-      expect(answer.monthsOfSpending.derivation).toBe(direct.monthsOfSpending.derivation);
-    }
+    expectFigureEqual(answer, direct);
   });
 });

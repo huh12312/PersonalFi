@@ -46,6 +46,7 @@ import {
 } from './contributions.ts';
 import { PlanningError } from './errors.ts';
 import { GoalCreated } from './events.ts';
+import { evaluateGoalOnWrite } from './goal-write-evaluation.ts';
 import {
   deleteContributionRow,
   deleteGoalRow,
@@ -257,6 +258,8 @@ export async function createGoal(
       context.clock,
     ),
   );
+  // G4-14: judged now, not at the next fresh run.
+  await evaluateGoalOnWrite(executor, context, goal.id);
   return goal;
 }
 
@@ -349,7 +352,21 @@ export async function updateGoal(
     now: context.clock.now(),
   });
   if (updated === null) throw new PlanningError('planning.goal_not_found', `no goal ${goalId}`);
+  // G4-14: a pace input moved (target, date, funding, or the goal became active),
+  // so judge it now. A rename or a priority change moves no input and says nothing.
+  if (movesPace(current, updated)) await evaluateGoalOnWrite(executor, context, updated.id);
   return updated;
+}
+
+/** Whether an edit changed anything `evaluateGoalPace` reads from the goal row. */
+function movesPace(before: Goal, after: Goal): boolean {
+  return (
+    !Money.equals(before.target, after.target) ||
+    before.targetDate !== after.targetDate ||
+    before.status !== after.status ||
+    before.fundedFromAccountIds.length !== after.fundedFromAccountIds.length ||
+    before.fundedFromAccountIds.some((id, index) => id !== after.fundedFromAccountIds[index])
+  );
 }
 
 /** Deletes the goal and, by cascade, its contribution plans and earmarks. */

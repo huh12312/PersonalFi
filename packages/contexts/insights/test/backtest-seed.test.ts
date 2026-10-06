@@ -338,9 +338,18 @@ function u2GroundTruth(asOf: string): boolean {
   return days >= 0 && days <= 180;
 }
 
-/** S2: never before the first elevated month (2026-02) is itself complete — i.e. `asOf` reaches March. */
+/**
+ * S2: never before the *second* elevated month (2026-03) is itself complete —
+ * i.e. `asOf` reaches April. C5-8 (G5-10): a creep is a run, not a purchase, so
+ * one elevated month in three is not yet supportable; it was, before, which is
+ * exactly the one-purchase "creep" the Phase 5 gate printed. This moved the
+ * ground truth by one month on purpose, not to make the test pass: it is
+ * derived from the dates above (the second month at the new level), not from
+ * the rule's thresholds.
+ */
+const SECOND_ELEVATED_MONTH = '2026-03';
 function s2GroundTruth(asOf: string): boolean {
-  return monthOf(asOf) > ELEVATED_FROM_MONTH;
+  return monthOf(asOf) > SECOND_ELEVATED_MONTH;
 }
 
 /**

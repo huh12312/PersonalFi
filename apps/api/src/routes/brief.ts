@@ -78,6 +78,7 @@ import {
   HEALTH_BANDS,
   HEALTH_COMPONENT_IDS,
   HEALTH_SCORE_DIRECTIONS,
+  retirementReasonInWords,
 } from '@ctx/insights';
 import { advisoryBriefItems, advisoryBriefs } from '@ctx/insights/schema';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
@@ -151,7 +152,8 @@ type RetirementEffectWire = z.infer<typeof retirementEffectSchema>;
  */
 function retirementEffectWire(raw: Record<string, unknown>): RetirementEffectWire {
   if (raw['kind'] === 'not_computable') {
-    return { kind: 'not_computable', reason: String(raw['reason']) };
+    // Words on the wire (G5-11); the stored row keeps the engine's code.
+    return { kind: 'not_computable', reason: retirementReasonInWords(String(raw['reason'])) };
   }
   const monthsRaw = raw['monthsOfSpending'] as Record<string, unknown>;
   const monthsOfSpending: z.infer<typeof monthsOfSpendingSchema> =
@@ -315,13 +317,20 @@ async function loadBrief(
  * item 8); both are needed together (`briefId` is a UUID but not by itself a
  * secret the route treats as authorization — `userId` is what an attacker
  * cannot supply).
+ *
+ * Exported (C5-6, G5-17) so `brief-routes.test.ts` can call it with a
+ * *foreign* `briefId`: behind the route, `loadBrief`'s user-scoped read always
+ * hands it the caller's own Brief, and the composite FK
+ * `(user_id, brief_id) → advisory_briefs (user_id, id)` makes a mismatched
+ * item row unrepresentable, so the `userId` predicate here could not otherwise
+ * be seen to matter. The route calls this same function — no parallel copy.
  */
-async function loadItems(
-  deps: RouteDeps,
+export async function loadItems(
+  database: RouteDeps['database'],
   userId: string,
   briefId: string,
 ): Promise<readonly (typeof advisoryBriefItems.$inferSelect)[]> {
-  return deps.database
+  return database
     .select()
     .from(advisoryBriefItems)
     .where(and(eq(advisoryBriefItems.userId, userId), eq(advisoryBriefItems.briefId, briefId)));
@@ -398,7 +407,7 @@ export const briefRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         if (brief === null) {
           throw briefNotFound('no Weekly Advisory Brief has been published for this holder yet');
         }
-        const items = await loadItems(deps, session.userId, brief.id);
+        const items = await loadItems(deps.database, session.userId, brief.id);
         return { brief: serialiseBrief(brief, items) };
       },
     );
@@ -423,7 +432,7 @@ export const briefRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         if (brief === null) {
           throw briefNotFound(`no Weekly Advisory Brief for ${request.params.isoWeek}`);
         }
-        const items = await loadItems(deps, session.userId, brief.id);
+        const items = await loadItems(deps.database, session.userId, brief.id);
         return { brief: serialiseBrief(brief, items) };
       },
     );

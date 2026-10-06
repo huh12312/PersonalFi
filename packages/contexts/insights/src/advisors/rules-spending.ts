@@ -75,7 +75,19 @@ function magnitude(value: bigint): bigint {
 // ---------------------------------------------------------------------------
 
 const CREEP_RECENT_MONTHS = 3;
-const CREEP_BASELINE_MONTHS = 12;
+/**
+ * The baseline is the six complete months **before** the three recent ones,
+ * not the trailing twelve (C5-8, G5-10). The trailing twelve contains the
+ * recent three, so one month's rows were cited both as "a recent month" and as
+ * "a month in the baseline", and the single month a purchase landed in dragged
+ * its own baseline up with it. Disjoint windows keep a row on one side only.
+ *
+ * Six and not nine because a derivation may only name the literals on
+ * `validate/derivations.ts`'s allow-list (`9` is not one; `6` is), and because
+ * the rule then still speaks at nine complete months of history, where the old
+ * one needed twelve — so a short real-world history does not silence S2.
+ */
+const CREEP_BASELINE_MONTHS = 6;
 /** 07 §3.3 S2's `× 1.25`, as an integer comparison: `recent × 4 > baseline × 5`. */
 const CREEP_RATIO_NUMERATOR = 4n;
 const CREEP_RATIO_DENOMINATOR = 5n;
@@ -86,7 +98,7 @@ export const spendingCategoryCreep: BuiltinRule = {
   manifest: builtinManifest({
     advisorId: 'builtin.spending.category_creep',
     displayName: 'A category that has crept up',
-    purpose: 'Compares the last three months of a category with the trailing year.',
+    purpose: 'Compares the last three months of a category with the six months before them.',
     scopes: ['cashflow.monthly'],
     maxSeverity: 'notable',
     producesImpact: true,
@@ -97,10 +109,15 @@ export const spendingCategoryCreep: BuiltinRule = {
     const { snapshot } = context;
     const allMonths = snapshot.cashflow_monthly?.months ?? [];
     const complete = completeMonths(allMonths, context.today);
-    if (complete.length < CREEP_BASELINE_MONTHS) return { insights: [], warnings: [] };
+    if (complete.length < CREEP_RECENT_MONTHS + CREEP_BASELINE_MONTHS) {
+      return { insights: [], warnings: [] };
+    }
 
-    const baseline = complete.slice(-CREEP_BASELINE_MONTHS);
     const recent = complete.slice(-CREEP_RECENT_MONTHS);
+    const baseline = complete.slice(
+      -(CREEP_RECENT_MONTHS + CREEP_BASELINE_MONTHS),
+      -CREEP_RECENT_MONTHS,
+    );
     const slugs = new Set(
       recent.flatMap((month) => month.by_category.map((row) => row.category_slug)),
     );
@@ -123,6 +140,17 @@ export const spendingCategoryCreep: BuiltinRule = {
       }
       if (recentAverage - baselineAverage < CREEP_DELTA_FLOOR_MINOR) continue;
 
+      // A creep is a run, not a purchase (C5-8, G5-10): the same two thresholds
+      // must hold with the single largest recent month set aside. One $1,299
+      // charge among three months moves the plain average past both and the
+      // trimmed one past neither. A trigger, never a rendered figure — nothing
+      // here reaches the user's eye or needs a derivation.
+      const trimmedAverage = trimmedRecentAverage(recentRefs.monthly);
+      if (trimmedAverage * CREEP_RATIO_NUMERATOR <= baselineAverage * CREEP_RATIO_DENOMINATOR) {
+        continue;
+      }
+      if (trimmedAverage - baselineAverage < CREEP_DELTA_FLOOR_MINOR) continue;
+
       const recentDerivation = averageOf(
         snapshot,
         'recent_average',
@@ -135,7 +163,7 @@ export const spendingCategoryCreep: BuiltinRule = {
         'baseline_average',
         baselineRefs.refs,
         CREEP_BASELINE_MONTHS,
-        'The trailing twelve complete months of this category, averaged.',
+        'The six complete months before those three, averaged.',
       );
       const annual = annualisedDelta(
         snapshot,
@@ -168,11 +196,12 @@ export const spendingCategoryCreep: BuiltinRule = {
           title: 'A category has been running higher than usual',
           summary:
             `${slug} has run about ${recentText} a month lately, against ${baselineText} ` +
-            `a month across the trailing year — about ${annualText} a year at the new pace.`,
+            `a month across the six months before — about ${annualText} a year at the new pace.`,
           confidence: 1,
           horizon: 'this_year',
           annualized: verdict.money,
-          basis: 'The gap between a three-month average and a twelve-month one, annualised.',
+          basis:
+            'The gap between a three-month average and the six-month average before it, annualised.',
           derivationId: annual.derivation.id,
           derivations: [
             recentDerivation.derivation,
@@ -188,10 +217,10 @@ export const spendingCategoryCreep: BuiltinRule = {
           actions: [
             suggest(
               'Look at this category',
-              'A three-month run can be a new habit or one large purchase.',
+              'Two or more of the last three months ran higher: a new habit, or a bill that moved.',
             ),
           ],
-          caveats: ['A single large month inside the window moves this average.'],
+          caveats: ['A single large month inside the window still moves this average.'],
         }),
       );
     }
@@ -203,6 +232,16 @@ export const spendingCategoryCreep: BuiltinRule = {
 interface CategoryRefs {
   readonly refs: readonly string[];
   readonly total: bigint;
+  /** Each window month's magnitude, in window order; a month without the category is `0n`. */
+  readonly monthly: readonly bigint[];
+}
+
+/** The mean of the recent months with the single largest set aside (integer minor units). */
+function trimmedRecentAverage(monthly: readonly bigint[]): bigint {
+  if (monthly.length < 2) return 0n;
+  const sorted = [...monthly].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+  const kept = sorted.slice(0, -1);
+  return kept.reduce((sum, value) => sum + value, 0n) / BigInt(kept.length);
 }
 
 function refsFor(
@@ -211,17 +250,21 @@ function refsFor(
   slug: string,
 ): CategoryRefs {
   const refs: string[] = [];
+  const monthly: bigint[] = [];
   let total = 0n;
   for (const month of window) {
     const monthIndex = allMonths.indexOf(month);
-    if (monthIndex < 0) continue;
     const categoryIndex = month.by_category.findIndex((row) => row.category_slug === slug);
     const row = month.by_category[categoryIndex];
-    if (categoryIndex < 0 || row === undefined) continue;
+    if (monthIndex < 0 || categoryIndex < 0 || row === undefined) {
+      monthly.push(0n);
+      continue;
+    }
     refs.push(monthRef(monthIndex, `by_category[${String(categoryIndex)}].amount.minor`));
     total += BigInt(row.amount.minor);
+    monthly.push(magnitude(BigInt(row.amount.minor)));
   }
-  return { refs, total };
+  return { refs, total, monthly };
 }
 
 // ---------------------------------------------------------------------------

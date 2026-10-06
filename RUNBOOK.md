@@ -961,10 +961,19 @@ Under all four sits `docker compose stop ollama`. It is not a level — nothing 
 the model container outright; a run waiting on it fails fast (WP 5.2) and the rest of the app is
 unaffected.
 
-Levels 2–4 each have a route now (WP 5.10); the database commands below use `psql` on the production
-stack (`docker compose exec db psql -U personalfi -d personalfi`) only where no route covers the case —
-level 3's breaker-driven quarantine is read-only from SQL, and there is still no screen for any of this
-(the advisor-management UI is WP 5.12's, not yet landed).
+**A kill stops the run at once; it does not always stop the model.** Levels 1–4 close the run within
+about a second and the write barrier guarantees nothing is written, but the model container may keep
+computing after our side of the connection is gone: Ollama finishes the prompt-evaluation batch it is
+in before it notices the socket closed. The Phase 5 gate measured `ollama` at about 390 % CPU for about
+38 s after a level-4 cancel (after levels 1–3 it dropped within 4 s). The cost is CPU and a queued next
+request, never a write. If you need the model idle now, `docker compose stop ollama` (below).
+
+Levels 2–4 each have a route (WP 5.10) and a control on the advisor-management screen (WP 5.12): the
+per-advisor switch (level 3), the local-model kind switch (level 2 — write-only, the screen cannot read
+it back) and "Cancel this run" in the run inspector (level 4). **Level 1's user half, the
+`module.insights` flag, still has no screen** (G5-14, WP 9.6); use the SQL below. The database commands
+below use `psql` on the production stack (`docker compose exec db psql -U personalfi -d personalfi`)
+only where no route covers the case — level 3's breaker-driven quarantine is read-only from SQL.
 
 **Level 1 — everything off.**
 
@@ -1189,14 +1198,14 @@ refuses to send a prompt unless the served model's digest is the one pinned belo
 
 ### What each kill looks like from here
 
-| Kill                                                                      | What the model container sees                           | What the run records                     |
-| ------------------------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------- |
-| Level 1–3 flipped mid-run (watcher, ≤ 1 s)                                | the chat connection closes mid-stream; generation stops | `cancelled`, `cancel_reason` = the level |
-| Level 4, `cancel_requested_at`                                            | the same                                                | `cancelled`, `run_cancelled`             |
-| Our deadline (`LOCAL_MODEL_TIMEOUT_MS` / the request's `limits.deadline`) | the connection closes                                   | `failed`, the adapter's `model_timeout`  |
-| `docker compose stop ollama`                                              | — (it is gone)                                          | `failed`, `model_unavailable`            |
-| A re-tagged or re-pulled model                                            | a `GET /api/tags`, **no** chat request                  | `failed`, `model_digest_mismatch`        |
-| A reply that will not stop                                                | the connection closes at 512 KiB of stream              | `failed`, `model_reply_too_large`        |
+| Kill                                                                      | What the model container sees                                                                      | What the run records                     |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Level 1–3 flipped mid-run (watcher, ≤ 1 s)                                | the chat connection closes mid-stream; generation usually stops within seconds, not always at once | `cancelled`, `cancel_reason` = the level |
+| Level 4, `cancel_requested_at`                                            | the same (measured: CPU stayed high for ~38 s once)                                                | `cancelled`, `run_cancelled`             |
+| Our deadline (`LOCAL_MODEL_TIMEOUT_MS` / the request's `limits.deadline`) | the connection closes                                                                              | `failed`, the adapter's `model_timeout`  |
+| `docker compose stop ollama`                                              | — (it is gone)                                                                                     | `failed`, `model_unavailable`            |
+| A re-tagged or re-pulled model                                            | a `GET /api/tags`, **no** chat request                                                             | `failed`, `model_digest_mismatch`        |
+| A reply that will not stop                                                | the connection closes at 512 KiB of stream                                                         | `failed`, `model_reply_too_large`        |
 
 The adapter's log lines (`event: local_model.run` / `local_model.failed` in `worker`'s log) carry
 sizes, the digest, token counts and durations, never prompt or reply text. `docker compose logs

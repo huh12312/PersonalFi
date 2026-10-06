@@ -166,10 +166,10 @@ const GOLDEN: readonly Golden[] = [
     seedCase: 'drift',
     keys: ['spending.category_creep.dining.restaurants'],
     summary:
-      'dining.restaurants has run about $450.00 a month lately, against $262.50 a month ' +
-      'across the trailing year — about $2,250.00 a year at the new pace.',
+      'dining.restaurants has run about $450.00 a month lately, against $200.00 a month ' +
+      'across the six months before — about $3,000.00 a year at the new pace.',
     severity: 'notable',
-    annualized: '225000',
+    annualized: '300000',
   },
   {
     ruleId: 'S3',
