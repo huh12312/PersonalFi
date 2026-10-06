@@ -429,6 +429,25 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       return route.fulfill(json(SESSION));
     }
 
+    // WP 9.1 (09 §4 batch 10): the dashboard's backup-status line. Unmocked it
+    // reads as a quiet "Backup status unknown"; mocked, a screenshot is
+    // deterministic.
+    if (path === '/api/ops/backup-status' && method === 'GET') {
+      return route.fulfill(
+        json({
+          lastAttemptStatus: 'ok',
+          lastAttemptAt: '2026-10-20T08:00:00.000Z',
+          lastSuccessfulBackupAt: '2026-10-20T08:00:00.000Z',
+          lastSuccessfulBackupAgeSeconds: 14_400,
+          backupOverdue: false,
+          lastDrillVerdict: 'pass',
+          lastDrillAt: '2026-10-13T10:00:00.000Z',
+          lastDrillAgeDays: 7,
+          drillOverdue: false,
+        }),
+      );
+    }
+
     if (path === '/api/auth/login/options' && method === 'POST') {
       return route.fulfill(json({ options: {} }));
     }

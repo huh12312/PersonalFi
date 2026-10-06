@@ -834,6 +834,17 @@ harden-secrets:
     ls -l
     echo "secrets hardened; 'just gen-*' after this needs sudo too (that is the trade)"
 
+# Weekly soak report (WP 9.1; 09 §4 batch 9). The orchestrator's alone (Phase 9
+# rule 5): it reads aggregates only, through scripts/soak/report.ts inside a
+# throwaway api container. Run from the production clone with
+# COMPOSE_PROJECT_NAME=personalfi-prod PERSONALFI_VERSION=<sha>
+# SOAK_EVIDENCE_DIR=<dev checkout>/docs/evidence/phase-9/soak (RUNBOOK
+# "Production install and the real-use soak").
+
+# Weekly soak report from the production clone (WP 9.1; orchestrator only)
+soak-report *args:
+    bash scripts/soak/run-report.sh {{args}}
+
 # Install git hooks (lefthook). Not run at install time: install scripts are off.
 hooks:
     pnpm exec lefthook install

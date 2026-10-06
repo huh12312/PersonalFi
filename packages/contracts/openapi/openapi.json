@@ -8735,6 +8735,98 @@
           "attempts"
         ]
       },
+      "OpsBackupStatusInput": {
+        "type": "object",
+        "properties": {
+          "lastAttemptStatus": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "fail"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastAttemptAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSuccessfulBackupAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSuccessfulBackupAgeSeconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "backupOverdue": {
+            "type": "boolean"
+          },
+          "lastDrillVerdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastDrillAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastDrillAgeDays": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "drillOverdue": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "lastAttemptStatus",
+          "lastAttemptAt",
+          "lastSuccessfulBackupAt",
+          "lastSuccessfulBackupAgeSeconds",
+          "backupOverdue",
+          "lastDrillVerdict",
+          "lastDrillAt",
+          "lastDrillAgeDays",
+          "drillOverdue"
+        ]
+      },
       "PlaidLinkTokenInput": {
         "type": "object",
         "properties": {
@@ -20445,6 +20537,99 @@
           "deadAt",
           "lastFailureCode",
           "attempts"
+        ],
+        "additionalProperties": false
+      },
+      "OpsBackupStatus": {
+        "type": "object",
+        "properties": {
+          "lastAttemptStatus": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "fail"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastAttemptAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSuccessfulBackupAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSuccessfulBackupAgeSeconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "backupOverdue": {
+            "type": "boolean"
+          },
+          "lastDrillVerdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastDrillAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastDrillAgeDays": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "drillOverdue": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "lastAttemptStatus",
+          "lastAttemptAt",
+          "lastSuccessfulBackupAt",
+          "lastSuccessfulBackupAgeSeconds",
+          "backupOverdue",
+          "lastDrillVerdict",
+          "lastDrillAt",
+          "lastDrillAgeDays",
+          "drillOverdue"
         ],
         "additionalProperties": false
       },
@@ -41349,6 +41534,38 @@
                     "advisors"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/backup-status": {
+      "get": {
+        "operationId": "getOpsBackupStatus",
+        "summary": "Backup and restore-drill status (D24, CF-17)",
+        "tags": [
+          "system"
+        ],
+        "description": "Install-wide, not account-holder data: the newest successful backup’s age and the newest restore drill’s verdict and age. `backupOverdue` turns true past the nightly cadence’s staleness window (or with no successful backup at all); `drillOverdue` turns true past 35 days since the last drill (or with no drill at all).",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsBackupStatus"
                 }
               }
             }
