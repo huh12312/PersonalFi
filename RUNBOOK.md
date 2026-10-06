@@ -607,6 +607,13 @@ production install), set it to the commit you pulled, in the same edit:
 `PERSONALFI_VERSION=<sha> just upgrade`. Build from the checkout you pulled —
 never point a checkout at images built from a different one.
 
+Upgrade **to a commit that has `just upgrade`** (this section). A commit from
+before it has no placeholder step, so stopping at one on the way — say v0.1 to
+a Phase 2 commit by that commit's own instructions — fails at `docker compose
+up` on the secrets it added (WP 9.4's finding F-94-2). If you ever must, run
+this checkout's `bash scripts/secrets-placeholders.sh --project-dir <that
+checkout>` first; it is the same step `just upgrade` runs.
+
 **What is automatic** — every step that used to be a hand step:
 
 1. **New secrets.** `scripts/secrets-placeholders.sh` creates every _optional_
@@ -617,7 +624,9 @@ never point a checkout at images built from a different one.
    writing anything — if a _required_ secret (`database_url`, `pg_password`,
    `master_key`, `age_recipient`) is missing or empty. A v0.1 install is
    missing eleven optional files; without this, `docker compose up` stops at
-   `secret … file not found`.
+   `secret file <project>_<name> does not exist`, then
+   `bind source path does not exist: …/secrets/<name>`
+   (older Compose: `secret … file not found`).
 2. **The build** of `api`/`worker`/`migrator`, `backup` and `proxy` from the
    checkout.
 3. **The pre-migration backup.** `docker compose up -d --wait` starts the

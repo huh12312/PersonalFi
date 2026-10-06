@@ -49,23 +49,27 @@ dc() {
   docker compose -p "$project" --project-directory "$dir" "$@"
 }
 
-# The tree a waypoint ships. HEAD is `git archive HEAD` plus this package's
-# owned files from the working tree (uncommitted until the orchestrator lands
-# them) — never another package's uncommitted edits.
+# The tree a waypoint ships. HEAD is `git archive $HEAD_SHA` (HEAD when the
+# run started, pinned in $RUN_DIR/head.sha so a commit landing mid-run or a
+# resume never splits one run across two commits) plus this package's
+# wholly-owned files from the working tree (uncommitted until the orchestrator
+# lands them) — never another package's uncommitted edits. The two files this
+# package owns only a block or a section of (compose.yml, RUNBOOK.md) come from
+# HEAD as committed: another package's in-flight edit to them must not ride
+# into the test (a working-tree difference is logged, not copied).
 WP94_OWNED_PATHS=(
   scripts/upgrade-test
   scripts/secrets-placeholders.sh
   packages/db/src/migrate.ts
   packages/db/test/migrate-newer.test.ts
-  compose.yml
   docker/backup/pre-migrate.sh
   docker/backup.Dockerfile
   docker/api.Dockerfile
   scripts/compose-hardening-check.sh
   scripts/fixtures/compose-hostile.yml
   .github/workflows/upgrade-test.yml
-  RUNBOOK.md
 )
+WP94_SHARED_PATHS=(compose.yml RUNBOOK.md)
 
 # prepare_tree <waypoint> <dest>
 prepare_tree() {
@@ -73,7 +77,7 @@ prepare_tree() {
   rm -rf "$dest"
   mkdir -p "$dest"
   if [ "$wp" = "HEAD" ] || [ "$wp" = "HEAD+1" ] || [ "$wp" = "HEAD-nocheck" ]; then
-    git -C "$REPO_ROOT" archive HEAD | tar -x -C "$dest"
+    git -C "$REPO_ROOT" archive "${HEAD_SHA:?HEAD_SHA unset}" | tar -x -C "$dest"
     local p
     for p in "${WP94_OWNED_PATHS[@]}"; do
       [ -e "$REPO_ROOT/$p" ] || continue
@@ -81,10 +85,17 @@ prepare_tree() {
       mkdir -p "$(dirname "$dest/$p")"
       cp -a "$REPO_ROOT/$p" "$dest/$p"
     done
-    # The `upgrade` recipe is the orchestrator's to add to the justfile (09 §4
-    # batch 9). Until it lands, the harness appends the proposed text verbatim
-    # from upgrade.just — and says so in its log.
-    if ! grep -q '^upgrade:' "$dest/justfile"; then
+    for p in "${WP94_SHARED_PATHS[@]}"; do
+      if ! git -C "$REPO_ROOT" diff --quiet "$HEAD_SHA" -- "$p" 2>/dev/null; then
+        log "note: the working tree's $p differs from ${HEAD_SHA:0:7} (a shared file); the test tree uses the commit's"
+      fi
+    done
+    # `just upgrade`: the justfile imports upgrade.just since d950bf2 (09 §4
+    # batch 9, wired by the orchestrator). Only a tree without the import and
+    # without a recipe of its own gets the text appended, and says so.
+    if grep -qE "^import +['\"]scripts/upgrade-test/upgrade\.just['\"]" "$dest/justfile"; then
+      :
+    elif ! grep -q '^upgrade:' "$dest/justfile"; then
       printf '\n' >>"$dest/justfile"
       cat "$REPO_ROOT/scripts/upgrade-test/upgrade.just" >>"$dest/justfile"
       log "WIRING PENDING: HEAD's justfile has no 'upgrade' recipe; appended scripts/upgrade-test/upgrade.just to the test tree"
@@ -105,6 +116,8 @@ prepare_tree() {
       fs.writeFileSync(p, src.replace(bad, good));
     ' "$dest/docker/backup/backup.sh"; then
       log "WIRING PENDING (F-94-1, backup.sh is WP 9.1's): the test tree's backup.sh carries the one-line pipefail fix"
+    else
+      log "F-94-1: HEAD's backup.sh no longer carries the \`printf | grep -qE\` schema_migrations check; no patch applied"
     fi
     if [ "$wp" = "HEAD+1" ]; then
       # A release one migration newer than HEAD: the database it leaves behind
@@ -135,10 +148,10 @@ SQL
 # The version tag a waypoint's images carry: pf-upgrade/<svc>:<tag>.
 version_tag() {
   case "$1" in
-    HEAD) echo "$(git -C "$REPO_ROOT" rev-parse --short=7 HEAD)-wp94" ;;
-    HEAD+1) echo "$(git -C "$REPO_ROOT" rev-parse --short=7 HEAD)-wp94-plus1" ;;
-    HEAD-nocheck) echo "$(git -C "$REPO_ROOT" rev-parse --short=7 HEAD)-wp94-nocheck" ;;
-    HEAD-pristine) git -C "$REPO_ROOT" rev-parse --short=7 HEAD ;;
+    HEAD) echo "${HEAD_SHA:0:7}-wp94" ;;
+    HEAD+1) echo "${HEAD_SHA:0:7}-wp94-plus1" ;;
+    HEAD-nocheck) echo "${HEAD_SHA:0:7}-wp94-nocheck" ;;
+    HEAD-pristine) echo "${HEAD_SHA:0:7}" ;;
     *) echo "${WAYPOINT_SHA[$1]}" ;;
   esac
 }

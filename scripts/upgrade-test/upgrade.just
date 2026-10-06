@@ -11,6 +11,8 @@
 #      (CF-2), then api/worker start;
 #   4. `/ready` must answer 200 and api/worker must not have restarted.
 # Rollback is "restore the pre-migration backup", never "pin the prior image".
+#
+# Upgrade this install in place, after `git pull` (automatic backup, migrations, checks)
 upgrade:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -24,7 +26,10 @@ upgrade:
       docker compose logs --no-log-prefix --tail 20 pre-migrate-backup migrator >&2 || true
       exit 1
     fi
-    if ! docker compose exec -T api node -e "fetch('http://127.0.0.1:8080/ready').then(async (r) => { console.log('upgrade: /ready ' + r.status + ' ' + (await r.text()).slice(0, 160)); process.exit(r.ok ? 0 : 1); }).catch((e) => { console.error('upgrade: /ready unreachable: ' + e.message); process.exit(1); })"; then
+    # 200 is ready to serve. A 200 whose status is not "ready" (a consumer
+    # dead-lettered, an outbox lagging) does not fail the upgrade, because it
+    # may predate it, but it is printed as a WARNING, never passed silently.
+    if ! docker compose exec -T api node -e "fetch('http://127.0.0.1:8080/ready').then(async (r) => { const t = await r.text(); console.log('upgrade: /ready ' + r.status + ' ' + t.slice(0, 160)); let j = {}; try { j = JSON.parse(t); } catch {} if (r.ok && j.status !== 'ready') console.error('upgrade: WARNING: /ready reports ' + j.status + (j.outbox && j.outbox.failedConsumers && j.outbox.failedConsumers.length ? '; consumer(s) stopped at an event they cannot handle: ' + j.outbox.failedConsumers.join(', ') : '') + ' — the upgrade completed, but read why before relying on it'); process.exit(r.ok ? 0 : 1); }).catch((e) => { console.error('upgrade: /ready unreachable: ' + e.message); process.exit(1); })"; then
       echo "upgrade: FAILED: /ready is not 200" >&2
       exit 1
     fi

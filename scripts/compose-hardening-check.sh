@@ -671,7 +671,7 @@ self_test() {
     echo "compose-hardening-check: SELF-TEST FAILED: these service:rule pairs did not fire: ${missing_pairs[*]}" >&2
     rc=1
   else
-    echo "  ollama sandbox: all ${#EXPECTED_SERVICE_RULES[@]} service:rule pairs fired" >&2
+    echo "  per-service cases (ollama sandbox, pre-migrate-backup, migrator): all ${#EXPECTED_SERVICE_RULES[@]} service:rule pairs fired" >&2
   fi
   if [ "$rc" -eq 0 ]; then
     echo "compose-hardening-check: SELF-TEST PASS (all ${#EXPECTED_RULES[@]} rules fire on a hostile file)" >&2

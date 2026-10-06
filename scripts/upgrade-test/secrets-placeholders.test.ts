@@ -64,7 +64,12 @@ describe('scripts/secrets-placeholders.sh (CF-4)', () => {
   it('REQUIRED is exactly the declared secrets the app cannot boot without; every other declared secret is optional in @core/config', () => {
     const required = requiredFromScript();
     const declared = declaredInCompose();
-    const specs = new Map(SECRET_SPECS.map((spec) => [spec.file, spec]));
+    // Keyed by plain string: the names come from `docker compose config`, so
+    // a declared name @core/config does not know must be a lookup miss (and a
+    // failed expectation below), not a type error.
+    const specs = new Map<string, (typeof SECRET_SPECS)[number]>(
+      SECRET_SPECS.map((spec) => [spec.file, spec]),
+    );
 
     // Every REQUIRED name is really declared (no stale entry hiding a rename).
     for (const name of required) expect(declared, name).toContain(name);

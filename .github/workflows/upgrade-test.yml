@@ -3,10 +3,20 @@
 # The unattended-upgrade test (WP 9.4; docs/plan/09-phase-9-dispatch.md §3,
 # v1.0's "unattended upgrade from v0.1 works"): v0.1 (d04669e) installed cold
 # and loaded through its own API, then the DIRECT JUMP to this commit by
-# `just upgrade` alone, with checks (i)–(vi), the cross-boundary restore and
-# the CF-2 rollback suite. The chain (W0 -> W1 -> … -> HEAD) runs locally at
-# each gate (`bash scripts/upgrade-test/run.sh --path chain`), not here: seven
-# image sets do not fit a runner's time budget.
+# `just upgrade` alone, with checks (i)–(vi) and the cross-boundary restore.
+#
+# Not here, and why:
+#   * the chain (W0 -> W1 -> … -> HEAD) runs locally at each gate
+#     (`bash scripts/upgrade-test/run.sh --path chain`): seven image sets do
+#     not fit a runner's time budget;
+#   * the stack-level CF-2 rollback suite (it builds HEAD+1, a sabotaged HEAD
+#     and W5) runs locally too: `--ci` skips it, so this job builds exactly
+#     two image sets, W0 and HEAD. CF-2 itself is covered on every push by
+#     `packages/db/test/migrate-newer.test.ts` (ci.yml's `db` project).
+#
+# Self-contained: nothing here reads a developer's /tmp state. `WORK` is the
+# runner's temp directory; the compose project is pf-upgrade-direct on
+# 127.0.0.1:8451/8452; images are tagged pf-upgrade/<svc>:<sha>.
 #
 # Triggers: by hand, weekly, and as a required predecessor of release.yml —
 # release.yml calls this workflow (`workflow_call`) and its build job
@@ -23,10 +33,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: upgrade-test-${{ github.ref }}
-  cancel-in-progress: false
-
 env:
   NPM_CONFIG_IGNORE_SCRIPTS: 'true'
 
@@ -35,6 +41,12 @@ jobs:
     name: v0.1 -> this commit, by `just upgrade` alone
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    # Job-level, not workflow-level: the same group whether this runs on its
+    # own triggers or inside release.yml through `workflow_call`. Two runs on
+    # one ref never share a runner's ports anyway; this only queues them.
+    concurrency:
+      group: upgrade-test-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,30 +58,39 @@ jobs:
           node-version-file: .node-version
       - run: npm install --global pnpm@12.4.1
       - run: pnpm install --frozen-lockfile
+        timeout-minutes: 10
       # The driver runs passkey ceremonies in the repo's own Playwright Chromium.
       - run: pnpm --filter @app/web exec playwright install --with-deps chromium
+        timeout-minutes: 10
       - name: install just
+        timeout-minutes: 5
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq just
-          just --version
+          # `import` (the justfile pulls in scripts/upgrade-test/upgrade.just)
+          # is stable from just 1.19; Ubuntu 24.04 ships 1.21.
+          v="$(just --version | awk '{print $2}')"
+          echo "just $v"
+          printf '1.19.0\n%s\n' "$v" | sort -C -V || { echo "just $v is older than 1.19.0"; exit 1; }
       - name: the placeholder script's self-test
+        timeout-minutes: 5
         run: bash scripts/secrets-placeholders.sh --self-test
-      - name: direct jump W0 -> HEAD (detached, polled)
+      - name: direct jump W0 -> HEAD
+        timeout-minutes: 60
+        shell: bash
         env:
           WORK: ${{ runner.temp }}/wp94
+        # Foreground under its own timeout. The full log is kept for the report
+        # step; only step boundaries, timings and the verdict are echoed here.
         run: |
           mkdir -p "$WORK"
-          setsid nohup bash scripts/upgrade-test/run.sh --path direct --keep \
-            > "$WORK/direct.log" 2>&1 < /dev/null &
-          pid=$!
-          while kill -0 "$pid" 2>/dev/null; do
-            sleep 30
-            grep -E 'step .*: (start|done)|FATAL|FAILED|RESULT' "$WORK/direct.log" | tail -3 || true
-          done
-          wait "$pid"
+          set -o pipefail
+          timeout 3500 bash scripts/upgrade-test/run.sh --path direct --ci --keep 2>&1 |
+            tee "$WORK/direct.log" |
+            grep --line-buffered -E 'step .*: (start|done)|timing|FATAL|FAILED|RESULT'
       - name: report
         if: always()
+        timeout-minutes: 2
         env:
           WORK: ${{ runner.temp }}/wp94
         run: |
@@ -77,6 +98,7 @@ jobs:
           tail -60 "$WORK/direct.log" || true
       - name: teardown
         if: always()
+        timeout-minutes: 5
         env:
           WORK: ${{ runner.temp }}/wp94
         run: bash scripts/upgrade-test/run.sh --path direct --teardown || true

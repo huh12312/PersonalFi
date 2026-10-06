@@ -32,6 +32,16 @@ import { request as httpRequest } from 'node:http';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 
+// The harness reads this script's stdout line by line (one JSON object or one
+// check line per command) and its stderr for the reason a step failed. Both are
+// written directly: a script's protocol, not a debug log (the repo's no-console).
+function say(line) {
+  process.stdout.write(`${line}\n`);
+}
+function warn(line) {
+  process.stderr.write(`${line}\n`);
+}
+
 const env = {
   repoRoot: must('REPO_ROOT'),
   authDir: must('AUTH_DIR'),
@@ -48,7 +58,7 @@ const env = {
 function must(name) {
   const value = process.env[name];
   if (value === undefined || value === '') {
-    console.error(`driver: ${name} is required`);
+    warn(`driver: ${name} is required`);
     process.exit(2);
   }
   return value;
@@ -258,7 +268,9 @@ const CEREMONY = async ({ prefix, kind, token, friendlyName }) => {
       .replaceAll('/', '_')
       .replace(/=+$/, '');
   const csrf = () =>
-    decodeURIComponent((document.cookie.match(/(?:^|; )__Host-pfi_csrf=([^;]*)/) ?? [])[1] ?? '');
+    decodeURIComponent(
+      (globalThis.document.cookie.match(/(?:^|; )__Host-pfi_csrf=([^;]*)/) ?? [])[1] ?? '',
+    );
   const post = async (path, body) => {
     const res = await fetch(`${prefix}${path}`, {
       method: 'POST',
@@ -550,7 +562,126 @@ const loads = {
       'POST /rules',
     );
     const ruleId = rule.id ?? rule.rule?.id;
-    const budget = await expectStatus(api('GET', '/budgets/current'), 200, 'GET /budgets/current');
+    // First, while W1's accounts are still open: recurring candidates come
+    // from the worker replaying W1's ledger events into the detection
+    // consumer. Poll, do not assume; a miss is recorded and W3 tries again.
+    const recurring = await confirmRecurring(240_000);
+    // W2's budget refuses (409 budgeting.balance_unreported) while any
+    // on-budget account has no balance observation; a CSV file states none,
+    // and W2 has no route that reports one for a non-manual account. W1's
+    // file-import connection cannot take another file at W2 either: W2 made
+    // staging durable and W1's was in memory only, so staging onto it answers
+    // 409 connector.auth_required, "upload the file again" (finding F-94-7).
+    // So the holder does what W2 says: the statements again, as OFX (which
+    // carries balances), on a new file-import connection; then the W1 CSV
+    // accounts, superseded, are closed (a closed account leaves the budget's
+    // identity; its transactions stay readable). Opening the budget before
+    // this would leave a budget that dead-letters the actuals consumer (F-94-5).
+    const ledger = [
+      {
+        id: 'wp94-ofx-checking',
+        kind: 'STMTRS',
+        from: 'BANKACCTFROM',
+        type: 'CHECKING',
+        bal: '2500.00',
+      },
+      {
+        id: 'wp94-ofx-savings',
+        kind: 'STMTRS',
+        from: 'BANKACCTFROM',
+        type: 'SAVINGS',
+        bal: '10000.00',
+      },
+      // A paid-off card: W2's first period opens every card line from
+      // carryover 0, so a card already owing at that moment fails identity II
+      // (409 budgeting.card_identity_violation, owed ≠ available + unfunded;
+      // chain attempt 4). Recorded as an observation, not exercised here.
+      { id: 'wp94-ofx-card', kind: 'CCSTMTRS', from: 'CCACCTFROM', type: null, bal: '0.00' },
+    ];
+    const asOf = new Date().toISOString().slice(0, 10).replaceAll('-', '');
+    const statements = ledger.map((a) => {
+      const msg = a.kind === 'STMTRS' ? 'BANKMSGSRSV1' : 'CREDITCARDMSGSRSV1';
+      const trn = a.kind === 'STMTRS' ? 'STMTTRNRS' : 'CCSTMTTRNRS';
+      const acct = [
+        `<${a.from}>`,
+        ...(a.type === null ? [] : ['<BANKID>021000021']),
+        `<ACCTID>${a.id}`,
+        ...(a.type === null ? [] : [`<ACCTTYPE>${a.type}`]),
+        `</${a.from}>`,
+      ];
+      return [
+        `<${msg}>`,
+        `<${trn}>`,
+        '<TRNUID>1',
+        '<STATUS><CODE>0<SEVERITY>INFO</STATUS>',
+        `<${a.kind}>`,
+        '<CURDEF>USD',
+        ...acct,
+        '<BANKTRANLIST>',
+        `<DTSTART>${asOf}`,
+        `<DTEND>${asOf}`,
+        '</BANKTRANLIST>',
+        '<LEDGERBAL>',
+        `<BALAMT>${a.bal}`,
+        `<DTASOF>${asOf}120000`,
+        '</LEDGERBAL>',
+        `</${a.kind}>`,
+        `</${trn}>`,
+        `</${msg}>`,
+      ].join('\n');
+    });
+    const ofx = [
+      'OFXHEADER:100',
+      'DATA:OFXSGML',
+      'VERSION:102',
+      'SECURITY:NONE',
+      'ENCODING:USASCII',
+      'CHARSET:1252',
+      'COMPRESSION:NONE',
+      'OLDFILEUID:NONE',
+      'NEWFILEUID:NONE',
+      '',
+      '<OFX>',
+      ...statements,
+      '</OFX>',
+      '',
+    ].join('\n');
+    const statement = await expectStatus(
+      api(
+        'POST',
+        '/imports/csv',
+        {
+          displayName: 'Statements (WP 9.4)',
+          files: [{ name: 'statements.ofx', format: 'ofx', content: ofx }],
+        },
+        { timeoutMs: 120_000 },
+      ),
+      200,
+      'POST /imports/csv (OFX statement balances)',
+    );
+    const all = await expectStatus(api('GET', '/accounts'), 200, 'GET /accounts');
+    const superseded = (all.accounts ?? []).filter(
+      (a) => a.connectionId === facts.W1?.connectionId && a.closedAt === null,
+    );
+    for (const a of superseded) {
+      await expectStatus(
+        api('PATCH', `/accounts/${a.id}`, { closed: true }),
+        200,
+        'PATCH /accounts/:id (closed)',
+      );
+    }
+    let budget;
+    const budgetDeadline = Date.now() + 120_000;
+    for (;;) {
+      const res = await api('GET', '/budgets/current');
+      if (res.status === 200) {
+        budget = res.json;
+        break;
+      }
+      if (Date.now() > budgetDeadline)
+        throw new Error(`GET /budgets/current: HTTP ${res.status} ${res.text.slice(0, 300)}`);
+      await new Promise((r) => setTimeout(r, 5_000));
+    }
     const line = await expectStatus(
       api('POST', '/budgets/lines', {
         periodId: budget.period.id,
@@ -567,25 +698,14 @@ const loads = {
       200,
       'PATCH /budgets/lines/:id',
     );
-    // Recurring candidates come from the worker replaying W1's ledger events
-    // into the detection consumer: poll, do not assume.
-    let candidates = [];
-    const deadline = Date.now() + 240_000;
-    while (Date.now() < deadline) {
-      const res = await api('GET', '/recurring/candidates');
-      candidates = res.json?.candidates ?? res.json?.items ?? [];
-      if (res.status === 200 && candidates.length > 0) break;
-      await new Promise((r) => setTimeout(r, 5_000));
-    }
-    if (candidates.length === 0)
-      throw new Error('no recurring candidates after 240 s (the worker never detected a series)');
-    const pick = candidates[0];
-    const confirmed = await expectStatus(
-      api('POST', `/recurring/candidates/${pick.id ?? pick.candidateId}/confirm`, { reason: null }),
-      [200, 201],
-      'POST /recurring/candidates/:id/confirm',
-    );
     facts.W2 = {
+      balances: {
+        via: 'OFX statements (LEDGERBAL) on a new file-import connection',
+        connectionId: statement.connectionId,
+        status: statement.status ?? null,
+        accounts: ledger.map((a) => `${a.id}=${a.bal}`),
+        closedW1Accounts: superseded.map((a) => a.id),
+      },
       category: { id: leaf.id, key: leaf.key },
       ruleId,
       budget: {
@@ -594,7 +714,7 @@ const loads = {
         lineId,
         assignedMinor: '50000',
       },
-      recurring: { seriesId: confirmed.seriesId, candidatesSeen: candidates.length },
+      recurring,
       dismissedInsight:
         'NOT LOADABLE at W2 through its API: no route writes snapshot_grants, and POST /advisors/run needs a non-empty advisor_token_secret (finding F-94-3); loaded at W5 instead',
     };
@@ -653,7 +773,11 @@ const loads = {
       201,
       'POST /connections (wallet_rpc)',
     );
+    // W2 could not confirm a series within its window (recorded there): the
+    // same holder action at W3, on the same W1 transactions.
+    const recurring = facts.W2?.recurring?.seriesId ? undefined : await confirmRecurring(240_000);
     facts.W3 = {
+      ...(recurring === undefined ? {} : { recurring }),
       investment: { connectionId: manual.connectionId, accountId, balanceMinor: '1500000' },
       wallet: { connectionId: wallet.connectionId, accountIds: wallet.accountIds },
       holdings:
@@ -711,14 +835,37 @@ const loads = {
       200,
       'PUT /assumptions/overrides',
     );
-    const projection = await expectStatus(
-      api('POST', `/plan/scenarios/${scenarioId}/projections`, {
+    // A projection starts from a net-worth day. With no `asOf`, W4 wants a
+    // SEALED day (409 planning.projection_no_balances until one exists), and
+    // an install loaded today has none. W4's own answer is `asOf` = today
+    // with `allowOpenDay: true` (the run records `balances_sealed = false`).
+    // Today's row is written by the snapshot job the harness moved to now,
+    // so poll — on the 409 or on `status: 'stale', run: null` — up to 300 s.
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: facts.W0?.displayTimezone ?? 'UTC',
+    }).format(new Date());
+    let projection;
+    let last;
+    const projDeadline = Date.now() + 300_000;
+    for (;;) {
+      const res = await api('POST', `/plan/scenarios/${scenarioId}/projections`, {
         method: 'deterministic',
         allowOpenDay: true,
-      }),
-      200,
-      'POST /plan/scenarios/:id/projections',
-    );
+        asOf: today,
+      });
+      if (res.status === 200 && res.json?.run) {
+        projection = res.json;
+        break;
+      }
+      if (res.status !== 200 && res.status !== 409)
+        throw new Error(
+          `POST /plan/scenarios/:id/projections: HTTP ${res.status} ${res.text.slice(0, 300)}`,
+        );
+      last = `HTTP ${res.status} ${res.text.slice(0, 240)}`;
+      if (Date.now() > projDeadline)
+        throw new Error(`no projection run for ${today} after 300 s: last ${last}`);
+      await new Promise((r) => setTimeout(r, 10_000));
+    }
     facts.W4 = {
       scenarioId,
       goalId,
@@ -727,6 +874,8 @@ const loads = {
         runId: projection.run.id,
         method: projection.run.method,
         status: projection.status,
+        asOf: today,
+        balancesSealed: projection.run.balancesSealed ?? null,
       },
     };
     saveFacts();
@@ -740,7 +889,10 @@ const loads = {
     let granted = 0;
     for (const advisor of advisors.advisors.filter((a) => a.kind === 'builtin')) {
       const scopes = await api('GET', `/advisors/${encodeURIComponent(advisor.advisorId)}/scopes`);
+      // A scope that needs consent per run is refused in a standing grant
+      // with perRunConsent false; W5 marks each one on its definition.
       const permitted = (scopes.json?.permitted ?? scopes.json?.scopes ?? [])
+        .filter((s) => typeof s === 'string' || s.requiresPerRunConsent !== true)
         .map((s) => (typeof s === 'string' ? s : s.scope))
         .filter((s) => s && s !== 'transactions.raw' && s !== 'institutions.names');
       if (permitted.length === 0) continue;
@@ -791,6 +943,38 @@ const loads = {
     return facts.W5;
   },
 };
+
+/**
+ * Confirm one recurring candidate, polling up to `limitMs` while the worker
+ * replays W1's ledger events into detection. Returns null (with the reason)
+ * rather than throwing: an era whose worker has not detected a series in the
+ * window is a fact to record, and the next era tries again.
+ */
+async function confirmRecurring(limitMs) {
+  let candidates = [];
+  let lastStatus = 0;
+  const deadline = Date.now() + limitMs;
+  while (Date.now() < deadline) {
+    const res = await api('GET', '/recurring/candidates');
+    lastStatus = res.status;
+    candidates = res.json?.candidates ?? res.json?.items ?? [];
+    if (res.status === 200 && candidates.length > 0) break;
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
+  if (candidates.length === 0) {
+    return {
+      seriesId: null,
+      notLoaded: `no recurring candidate within ${limitMs / 1000} s (last HTTP ${lastStatus})`,
+    };
+  }
+  const pick = candidates[0];
+  const confirmed = await expectStatus(
+    api('POST', `/recurring/candidates/${pick.id ?? pick.candidateId}/confirm`, { reason: null }),
+    [200, 201],
+    'POST /recurring/candidates/:id/confirm',
+  );
+  return { seriesId: confirmed.seriesId, candidatesSeen: candidates.length };
+}
 
 /** W5's Brief, after the harness shortened the schedule: wait for it, record it. */
 async function awaitBrief(limitMs) {
@@ -868,13 +1052,27 @@ async function verify() {
   });
   await check('iii.totp', async () => {
     const saved = { ...jar };
-    const code = await freshTotp();
-    const res = await call('POST', '/auth/totp/verify', { token: code, trustedDevice: false });
+    let code = await freshTotp();
+    let res = await call('POST', '/auth/totp/verify', { token: code, trustedDevice: false });
+    let waited = 0;
+    if (res.status === 429) {
+      // The limiter counts every verification, successful or not, and the
+      // chain verifies once per hop: wait out what it says, once, then retry.
+      const fromHeader = Number(res.headers?.['retry-after']);
+      const fromText = Number(/in (\d+) seconds?/.exec(res.text)?.[1]);
+      waited = Number.isFinite(fromHeader) && fromHeader > 0 ? fromHeader : fromText;
+      if (!Number.isFinite(waited) || waited > 330)
+        throw new Error(`TOTP rate-limited for ${waited} s: ${res.text.slice(0, 160)}`);
+      await new Promise((r) => setTimeout(r, (waited + 2) * 1000));
+      jar = { ...saved };
+      code = await freshTotp();
+      res = await call('POST', '/auth/totp/verify', { token: code, trustedDevice: false });
+    }
     jar = saved; // keep the passkey session for the reads below
     writeSecret(P.cookies, jar);
     if (res.status !== 200)
       throw new Error(`TOTP from W0's secret: HTTP ${res.status} ${res.text.slice(0, 160)}`);
-    return "a TOTP code from W0's secret verified (POST /auth/totp/verify 200)";
+    return `a TOTP code from W0's secret verified (POST /auth/totp/verify 200)${waited ? ` after waiting out a ${waited} s rate limit` : ''}`;
   });
 
   if (want('W0')) {
@@ -927,11 +1125,15 @@ async function verify() {
         throw new Error(`budget line ${f.budget.lineId} missing from the current period`);
       if (String(line.assigned?.minor) !== f.budget.assignedMinor)
         throw new Error(`assigned ${line.assigned?.minor}`);
-      const series = await expectStatus(api('GET', '/recurring/series'), 200, 'series');
-      const s = (series.series ?? []).find((x) => x.id === f.recurring.seriesId);
-      if (s === undefined || s.userConfirmed !== true)
-        throw new Error(`series ${f.recurring.seriesId} missing or unconfirmed`);
-      return 'rule, budget line (assigned 500.00), confirmed recurring series intact';
+      let seriesNote = `recurring not loaded at W2 (${f.recurring?.notLoaded ?? 'unknown'})`;
+      if (f.recurring?.seriesId) {
+        const series = await expectStatus(api('GET', '/recurring/series'), 200, 'series');
+        const s = (series.series ?? []).find((x) => x.id === f.recurring.seriesId);
+        if (s === undefined || s.userConfirmed !== true)
+          throw new Error(`series ${f.recurring.seriesId} missing or unconfirmed`);
+        seriesNote = 'confirmed recurring series';
+      }
+      return `rule, budget line (assigned 500.00), ${seriesNote} intact`;
     });
   }
   if (want('W3')) {
@@ -952,7 +1154,17 @@ async function verify() {
       const bal = inv.balance?.current?.minor ?? inv.balance?.minor ?? null;
       if (bal !== null && String(bal) !== f.investment.balanceMinor)
         throw new Error(`balance ${bal}`);
-      return `investment account (balance ${bal ?? 'n/a'}), wallet connection intact`;
+      let seriesNote = '';
+      if (f.recurring?.seriesId) {
+        const series = await expectStatus(api('GET', '/recurring/series'), 200, 'series');
+        const s = (series.series ?? []).find((x) => x.id === f.recurring.seriesId);
+        if (s === undefined || s.userConfirmed !== true)
+          throw new Error(
+            `series ${f.recurring.seriesId} (confirmed at W3) missing or unconfirmed`,
+          );
+        seriesNote = ', recurring series confirmed at W3';
+      }
+      return `investment account (balance ${bal ?? 'n/a'}), wallet connection${seriesNote} intact`;
     });
   }
   if (want('W4')) {
@@ -966,13 +1178,17 @@ async function verify() {
       const o = (a.overrides ?? []).find((x) => x.path === f.assumption.path);
       if (o === undefined || String(o.value) !== f.assumption.value)
         throw new Error(`override ${JSON.stringify(o)}`);
-      const run = await expectStatus(
+      // GET /plan/projections/:runId answers the projection outcome,
+      // `{ status, run, staleness }`, the same shape the POST returned.
+      const outcome = await expectStatus(
         api('GET', `/plan/projections/${f.projection.runId}`),
         200,
         'projection',
       );
-      if (run.method !== 'deterministic') throw new Error(`run method ${run.method}`);
-      return 'scenario, goal, assumption override, deterministic run intact';
+      const run = outcome.run;
+      if (run?.id !== f.projection.runId || run?.method !== 'deterministic')
+        throw new Error(`run ${run?.id} method ${run?.method} (outcome ${outcome.status})`);
+      return `scenario, goal, assumption override, deterministic run (${outcome.status}, asOf ${run.asOfDate ?? f.projection.asOf}) intact`;
     });
   }
   if (want('W5')) {
@@ -1011,7 +1227,7 @@ try {
   if (command === 'register') {
     const token = readFileSync(arg, 'utf8').trim();
     const out = await ceremony('register', { token, friendlyName: 'WP 9.4 virtual authenticator' });
-    console.log(
+    say(
       JSON.stringify({
         registered: true,
         credentialCount: out.credentialCount,
@@ -1020,23 +1236,23 @@ try {
     );
   } else if (command === 'enrol-factors') {
     await primeCsrf();
-    console.log(JSON.stringify(await loads.W0()));
+    say(JSON.stringify(await loads.W0()));
   } else if (command === 'load') {
     await primeCsrf();
     if (loads[arg] === undefined) throw new Error(`no load for ${arg}`);
     const out = await loads[arg]();
-    console.log(JSON.stringify(out));
+    say(JSON.stringify(out));
   } else if (command === 'await-brief') {
     await primeCsrf();
-    console.log(JSON.stringify(await awaitBrief(Number(arg ?? '420') * 1000)));
+    say(JSON.stringify(await awaitBrief(Number(arg ?? '420') * 1000)));
   } else if (command === 'verify') {
     await primeCsrf();
     const results = await verify();
-    for (const r of results) console.log(`${r.ok ? 'pass' : 'FAIL'} ${r.check}: ${r.detail}`);
+    for (const r of results) say(`${r.ok ? 'pass' : 'FAIL'} ${r.check}: ${r.detail}`);
     process.exit(results.every((r) => r.ok) ? 0 : 1);
   } else if (command === 'status') {
     const u = await call('GET', '/auth/unlock-state');
-    console.log(JSON.stringify({ unlockState: u.status, body: u.json }));
+    say(JSON.stringify({ unlockState: u.status, body: u.json }));
   } else if (command === 'recovery-code') {
     await primeCsrf();
     const r = readJson(P.recovery, null);
@@ -1046,15 +1262,15 @@ try {
       r.used.push(code);
       writeSecret(P.recovery, r);
     }
-    console.log(JSON.stringify({ status: res.status, remainingCodes: res.json?.remainingCodes }));
+    say(JSON.stringify({ status: res.status, remainingCodes: res.json?.remainingCodes }));
     process.exit(res.status === 200 ? 0 : 1);
   } else {
-    console.error(
+    warn(
       'usage: driver.mjs register|enrol-factors|load <wp>|await-brief [s]|verify|status|recovery-code',
     );
     process.exit(2);
   }
 } catch (error) {
-  console.error(`driver: ${error.message}`);
+  warn(`driver: ${error.message}`);
   process.exit(1);
 }

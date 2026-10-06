@@ -9,10 +9,15 @@
 #
 #   bash scripts/upgrade-test/run.sh --path direct            # W0 -> HEAD
 #   bash scripts/upgrade-test/run.sh --path chain             # W0 -> W1 -> ... -> HEAD
+#   bash scripts/upgrade-test/run.sh --path s1-no-placeholders # sabotage S1 (expect red)
 #   bash scripts/upgrade-test/run.sh --path s2-no-premigrate  # sabotage S2 (expect red)
+#   bash scripts/upgrade-test/run.sh --path s3-no-newer-check # sabotage S3 (expect red)
 #   ... --run NAME        project pf-upgrade-NAME (default: the path)
 #   ... --from STEP       re-run from STEP (state files after it are dropped)
 #   ... --keep            leave the stack and $WORK in place at the end
+#   ... --ci              direct path only: skip the CF-2 rollback suite (it
+#                         builds HEAD+1, a sabotaged HEAD and W5), so a runner
+#                         builds exactly two image sets, W0 and HEAD
 #   ... --teardown        down -v this run's projects and delete its $WORK, then exit
 #
 # Resumable: every step writes $RUN_DIR/state/<step>.done; a re-run skips
@@ -33,6 +38,7 @@ PATH_KIND="direct"
 RUN=""
 FROM=""
 KEEP=0
+CI_MODE=0
 TEARDOWN_ONLY=0
 WORK="${WORK:-/tmp/wp94/work}"
 while [ "$#" -gt 0 ]; do
@@ -42,8 +48,9 @@ while [ "$#" -gt 0 ]; do
     --from) shift; FROM="$1" ;;
     --work) shift; WORK="$1" ;;
     --keep) KEEP=1 ;;
+    --ci) CI_MODE=1 ;;
     --teardown) TEARDOWN_ONLY=1 ;;
-    -h | --help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
   shift
@@ -65,6 +72,15 @@ export REPO_ROOT AUTH_DIR FACTS_FILE PROXY_HTTPS_PORT PROXY_HTTP_PORT
 export PUBLIC_HOST_TEST
 
 report() { echo "$*" | tee -a "$REPORT"; }
+
+# The commit this run tests as HEAD: resolved once, kept for resumes.
+if [ -s "$RUN_DIR/head.sha" ]; then
+  HEAD_SHA="$(cat "$RUN_DIR/head.sha")"
+else
+  HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  echo "$HEAD_SHA" >"$RUN_DIR/head.sha"
+fi
+export HEAD_SHA
 
 # ------------------------------------------------------------- teardown
 
@@ -167,7 +183,7 @@ install_w0() {
   # W0's RUNBOOK "First install", step 2, as written for that version.
   in_install "$v" just gen-pg-secrets >/dev/null
   in_install "$v" just gen-master-key >/dev/null
-  in_install "$v" just build >"$RUN_DIR/w0-build.log" 2>&1 || die "W0 build failed (see $RUN_DIR/w0-build.log)"
+  in_install "$v" timeout 1800 just build >"$RUN_DIR/w0-build.log" 2>&1 || die "W0 build failed (see $RUN_DIR/w0-build.log)"
   docker run --rm --entrypoint age-keygen "${REGISTRY_TEST}/backup:${v}" >"$AUTH_DIR/age-identity.txt" 2>/dev/null
   chmod 0600 "$AUTH_DIR/age-identity.txt"
   grep '^# public key:' "$AUTH_DIR/age-identity.txt" | cut -d' ' -f4 >"$INSTALL/secrets/age_recipient"
@@ -179,7 +195,7 @@ install_w0() {
   # Step 4: `just build && just up`.
   local t0 t1
   t0="$(now)"
-  in_install "$v" just up >"$RUN_DIR/w0-up.log" 2>&1 || die "W0 up failed (see $RUN_DIR/w0-up.log)"
+  in_install "$v" timeout 600 just up >"$RUN_DIR/w0-up.log" 2>&1 || die "W0 up failed (see $RUN_DIR/w0-up.log)"
   wait_ready_http /ready 300 || die "W0 never became ready"
   t1="$(now)"
   record_timing "W0 cold install: just up -> /ready 200" "$(elapsed "$t0" "$t1")" "W0 $(version_tag W0)"
@@ -227,9 +243,12 @@ verify_at() {
   if [[ "$v_res" == "api=0 worker=0" ]]; then
     report "| ${wp} | (v) RestartCount | ${v_res} |"
   elif [[ "$wp" == W[0-5] ]]; then
-    # An era's own defect, not the upgrade's: W0–W2's worker exits while idle
-    # before an account holder exists (G3-1, fixed by the Phase 3 gate's C-1).
-    report "| ${wp} | (v) RestartCount | ${v_res} — historical, that era's own worker (see the evidence's §5); not counted |"
+    # An era's own defect, not the upgrade's, fixed in a later era and absent
+    # at HEAD: W0's worker exits while idle before an account holder exists
+    # (G3-1, fixed by the Phase 3 gate's C-1); W0's and W1's worker has
+    # `memory: 512M` against a 1 GiB Argon2id KEK, so once a holder exists it
+    # is OOM-killed at every boot (W2's compose raised it to 1536M).
+    report "| ${wp} | (v) RestartCount | ${v_res} — historical, that era's own worker (W0: G3-1, no holder yet; W0/W1 with a holder: 512 MiB limit < 1 GiB KEK, cgroup OOM — see the evidence's §5); not counted |"
   else
     report "| ${wp} | (v) RestartCount | **${v_res}** |"
     rc=1
@@ -271,29 +290,58 @@ max_applied() { psql_db "$PROJECT" "$INSTALL" "SELECT coalesce(max(version), '00
 # just backup; docker compose up -d --wait. A failure is recorded with its
 # exact error; the only remediation applied is HEAD's own fix for it, and it
 # is counted as an extra step.
+# Compose's words for a declared secret file that is not on disk: a warning
+# per secret at create time, then the daemon's refusal of the bind mount.
+SECRET_MISSING_RE='secret file [^ ]+ does not exist|bind source path does not exist: [^ ]*/secrets/|secret.*(not found|no such file)'
+
+# extra_step <hop> <finding> <exact error> <what was done>: an era hop that
+# needed more than its documented upgrade. A finding, never silent.
+extra_step() {
+  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"$RUN_DIR/extra-steps.tsv"
+  report "  - **extra step at the ${1} hop (${2})**: ${4}"
+}
+
+# Before a hop replaces them: the outgoing era's worker log and every
+# consumer's offset, kept under $RUN_DIR (the containers are recreated by the
+# hop, and with them the only copy of that era's log).
+save_era_state() {
+  local to="$1"
+  dc "$PROJECT" "$INSTALL" logs --no-log-prefix worker >"$RUN_DIR/before-${to}-worker.log" 2>&1 || true
+  psql_db "$PROJECT" "$INSTALL" "SELECT consumer_name || ' ' || status || ' last_seq=' || last_seq || coalesce(' failed_seq=' || failed_seq, '') FROM event_consumer_offsets ORDER BY 1" \
+    >"$RUN_DIR/before-${to}-consumers.txt" 2>&1 || true
+  psql_db "$PROJECT" "$INSTALL" "SELECT 'max_seq=' || coalesce(max(seq)::text, 'none') FROM domain_events" >>"$RUN_DIR/before-${to}-consumers.txt" 2>&1 || true
+  report "- state before the ${to} hop: consumers \`$(tr '\n' ';' <"$RUN_DIR/before-${to}-consumers.txt" | cut -c1-400)\` (worker log kept: before-${to}-worker.log)"
+}
+
 hop_era() {
   local wp="$1" v before t0 t1 extra=0
   v="$(version_tag "$wp")"
+  save_era_state "$wp"
   host_check
   before="$(max_applied)"
   prepare_tree "$wp" "$WORK/src/$v"
   replace_tree "$INSTALL" "$WORK/src/$v"
-  in_install "$v" just build >"$RUN_DIR/hop-$wp-build.log" 2>&1 || die "$wp: just build failed"
+  in_install "$v" timeout 1800 just build >"$RUN_DIR/hop-$wp-build.log" 2>&1 || die "$wp: just build failed"
   in_install "$v" just backup >"$RUN_DIR/hop-$wp-backup.log" 2>&1 || report "- ${wp}: \`just backup\` (on the old stack) failed: $(tail -1 "$RUN_DIR/hop-$wp-backup.log")"
   t0="$(now)"
-  if ! in_install "$v" docker compose up -d --wait >"$RUN_DIR/hop-$wp-up.log" 2>&1; then
-    local err
-    err="$(grep -iE 'secret|not found|no such file|error' "$RUN_DIR/hop-$wp-up.log" | head -3 | tr '\n' ' ')"
-    report "- **${wp} hop: the era's documented upgrade FAILED**: \`${err}\`"
+  if ! in_install "$v" docker compose up -d --wait --wait-timeout 900 >"$RUN_DIR/hop-$wp-up.log" 2>&1; then
+    local err missing
+    err="$(grep -m1 -E 'Error response from daemon|^Error|error' "$RUN_DIR/hop-$wp-up.log" || true)"
+    missing="$(grep -oE 'secret file [^ ]+ does not exist' "$RUN_DIR/hop-$wp-up.log" | awk '{print $3}' | sed "s/^${PROJECT}_//" | sort -u | paste -sd' ' || true)"
+    report "- **${wp} hop: the era's documented upgrade FAILED** (\`docker compose up -d --wait\`): \`${err}\`${missing:+ — Compose warned \`secret file ${PROJECT}_<name> does not exist\` for: ${missing}}"
     if grep -q 'container .*-backup-1 is unhealthy' "$RUN_DIR/hop-$wp-up.log" &&
       ! grep -v 'backup-1 is unhealthy' "$RUN_DIR/hop-$wp-up.log" | grep -qiE 'is unhealthy|exited \(|dependency failed|secret'; then
       report "  - historical: only \`backup\` reported unhealthy (that era's backup.sh carries F-94-1's pipefail race); every other service up — no extra step taken"
-    elif grep -qiE 'secret.*(not found|no such file)|no such file.*secret' "$RUN_DIR/hop-$wp-up.log"; then
-      report "  - extra step (HF): HEAD's \`scripts/secrets-placeholders.sh --project-dir <install>\` — the fix for CF-4 — then \`docker compose up -d --wait\` again"
-      bash "$REPO_ROOT/scripts/secrets-placeholders.sh" --project-dir "$INSTALL" | tee -a "$REPORT"
+    elif grep -qE "$SECRET_MISSING_RE" "$RUN_DIR/hop-$wp-up.log"; then
+      # F-94-2: CF-4 at an era boundary. The era declared file secrets the
+      # install never had, and its documented upgrade had no step to create
+      # them. The minimal remediation is HEAD's own CF-4 fix, run against the
+      # era's compose project; counted, logged, never silent.
+      extra_step "$wp" "F-94-2" "${err}" "HEAD's \`scripts/secrets-placeholders.sh --project-dir <install>\` (CF-4's fix, against ${wp}'s compose.yml), then \`docker compose up -d --wait\` again"
+      bash "$REPO_ROOT/scripts/secrets-placeholders.sh" --project-dir "$INSTALL" 2>&1 | sed 's/^/    /' | tee -a "$REPORT"
       extra=1
       t0="$(now)"
-      in_install "$v" docker compose up -d --wait >>"$RUN_DIR/hop-$wp-up.log" 2>&1 || die "$wp: up failed even after placeholders (see $RUN_DIR/hop-$wp-up.log)"
+      in_install "$v" docker compose up -d --wait --wait-timeout 900 >>"$RUN_DIR/hop-$wp-up.log" 2>&1 || die "$wp: up failed even after placeholders (see $RUN_DIR/hop-$wp-up.log)"
     else
       die "$wp: up failed (see $RUN_DIR/hop-$wp-up.log)"
     fi
@@ -309,6 +357,7 @@ hop_head() {
   local wp="${1:-HEAD}" v before t0 t1
   local logf="$RUN_DIR/hop-${wp}${SABOTAGE:+-$SABOTAGE}-upgrade.log"
   v="$(version_tag "$wp")"
+  save_era_state "$wp"
   host_check
   before="$(max_applied)"
   prepare_tree "$wp" "$WORK/src/$v" | tee -a "$REPORT"
@@ -325,17 +374,23 @@ hop_head() {
   (
     for _ in $(seq 1 3000); do grep -q '^upgrade: up -d --wait' "$logf" 2>/dev/null && break; sleep 0.2; done
     s="$(now)"
-    if [ -n "$old_api" ]; then
-      for _ in $(seq 1 3000); do [ "$(docker inspect -f '{{.State.Running}}' "$old_api" 2>/dev/null)" = "true" ] || break; sleep 0.2; done
-    fi
-    for _ in $(seq 1 1500); do
-      c="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 2 --resolve "${PUBLIC_HOST_TEST}:${PROXY_HTTPS_PORT}:127.0.0.1" "${ORIGIN}/api/ready" || true)"
-      [ "$c" = "200" ] && { echo "$(elapsed "$s" "$(now)") $(loadavg)" >"$poll_out"; exit 0; }
+    # Ready means: a NEW api container (not the one the hop started with)
+    # answers /api/ready through the proxy, 200, with the readiness JSON and
+    # `"migrations":"current"`. A bare 200 is not enough: an older era's
+    # Caddy answers unknown paths with the SPA's index.html, 200. ("degraded"
+    # is still ready to serve; the hop's own log says why.) Bounded by time.
+    local deadline=$(($(date +%s) + 600))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      cur="$(dc "$PROJECT" "$INSTALL" ps -q api 2>/dev/null | head -1)"
+      if [ -n "$cur" ] && [ "$cur" != "$old_api" ]; then
+        b="$(curl -sk --max-time 2 -w '\n%{http_code}' --resolve "${PUBLIC_HOST_TEST}:${PROXY_HTTPS_PORT}:127.0.0.1" "${ORIGIN}/api/ready" || true)"
+        case "$b" in *'"migrations":"current"'*$'\n'200) echo "$(elapsed "$s" "$(now)") $(loadavg)" >"$poll_out"; exit 0 ;; esac
+      fi
       sleep 0.2
     done
   ) &
   local poller=$!
-  if ! in_install "$v" just upgrade >"$logf" 2>&1; then
+  if ! in_install "$v" timeout 2400 just upgrade >"$logf" 2>&1; then
     kill "$poller" 2>/dev/null || true
     report "- **${wp}: \`just upgrade\` FAILED** (${logf##*/}): \`$(grep -E '^upgrade: FAILED|^secrets-placeholders: REFUSED|^pre-migrate: FAILED|database_newer|secret .* file|^Error|^error' "$logf" | head -4 | tr '\n' ' ')\`"
     return 1
@@ -347,9 +402,27 @@ hop_head() {
   record_timing "${wp}: up-to-ready inside \`just upgrade\` (up --wait; floored by the api healthcheck's 30 s interval)" "${utr:-?}" "09 §5.3 budget < 20 s"
   wait "$poller" 2>/dev/null || true
   if [ -s "$poll_out" ]; then
-    record_timing "${wp}: up -> new api's /api/ready 200, polled every 0.2 s (pre-migration backup + migrations + boot)" "$(cut -d' ' -f1 "$poll_out")" "load at ready $(cut -d' ' -f2- "$poll_out")"
+    record_timing "${wp}: up -> a new api's /api/ready {status: ready}, polled every 0.2 s (pre-migration backup + migrations + boot)" "$(cut -d' ' -f1 "$poll_out")" "load at ready $(cut -d' ' -f2- "$poll_out")"
   fi
-  grep -E '^upgrade: (pre-migrate|/ready|api |worker )|^secrets-placeholders' "$logf" | sed 's/^/    /' | tee -a "$REPORT" >/dev/null
+  # (vi) broken down: when each one-shot ran and when the new api started,
+  # from the containers' own clocks (seconds after the first of them started).
+  local pm mg ap
+  pm="$(dc "$PROJECT" "$INSTALL" ps -a -q pre-migrate-backup 2>/dev/null | head -1)"
+  mg="$(dc "$PROJECT" "$INSTALL" ps -a -q migrator 2>/dev/null | head -1)"
+  ap="$(dc "$PROJECT" "$INSTALL" ps -q api 2>/dev/null | head -1)"
+  if [ -n "$pm" ] && [ -n "$mg" ] && [ -n "$ap" ]; then
+    report "| timing | ${wp}: stages (s after pre-migrate-backup started) | $(node -e '
+      const [pmS, pmF, mgS, mgF, apS] = process.argv.slice(1).map((t) => Date.parse(t));
+      const r = (t) => ((t - pmS) / 1000).toFixed(1);
+      console.log(`pre-migrate-backup ${r(pmF)} → migrator ${r(mgS)}–${r(mgF)} → api started ${r(apS)}`);
+    ' "$(docker inspect -f '{{.State.StartedAt}}' "$pm")" "$(docker inspect -f '{{.State.FinishedAt}}' "$pm")" \
+      "$(docker inspect -f '{{.State.StartedAt}}' "$mg")" "$(docker inspect -f '{{.State.FinishedAt}}' "$mg")" \
+      "$(docker inspect -f '{{.State.StartedAt}}' "$ap")") | the api's own boot (KEK derivation) follows |"
+  fi
+  grep -E '^upgrade: (pre-migrate|/ready|api |worker |WARNING)|^secrets-placeholders' "$logf" | sed 's/^/    /' | tee -a "$REPORT" >/dev/null
+  if grep -q '^upgrade: WARNING' "$logf"; then
+    report "| ${wp} | readiness | **$(grep -m1 '^upgrade: WARNING' "$logf" | sed 's/^upgrade: //')** |"
+  fi
   check_premigrate_backup "$wp" "$before"
 }
 
@@ -358,8 +431,13 @@ apply_sabotage() {
   case "$what" in
     s1-no-placeholders)
       # S1: `just upgrade` without its placeholder step.
-      sed -i 's|^    bash scripts/secrets-placeholders.sh$|    true # SABOTAGE-WP94-S1|' "$tree/justfile"
-      grep -q 'SABOTAGE-WP94-S1' "$tree/justfile" || die "S1 anchor not found"
+      # The recipe lives in upgrade.just, which the justfile imports (or, in
+      # a tree from before that wiring, in the justfile itself).
+      local f
+      for f in "$tree/scripts/upgrade-test/upgrade.just" "$tree/justfile"; do
+        sed -i 's|^    bash scripts/secrets-placeholders.sh$|    true # SABOTAGE-WP94-S1|' "$f"
+      done
+      cat "$tree/justfile" "$tree/scripts/upgrade-test/upgrade.just" | grep -q 'SABOTAGE-WP94-S1' || die "S1 anchor not found"
       ;;
     s2-no-premigrate)
       # S2: the pre-migration backup disabled (the one-shot does nothing).
@@ -372,6 +450,19 @@ apply_sabotage() {
 }
 
 # ------------------------------------------------- (iv) the restore checks
+
+# A restore check that fails is a finding, not the end of the run: say why,
+# remove the fresh project, bring the main stack back, and let the caller flag.
+restore_abort() {
+  local label="$1" why="$2" rp="${PROJECT}-r" rdir="$RUN_DIR/install-r"
+  report "| iv-${label} | restore | **FAIL: ${why}**: \`$(grep -m2 -E '^pg_restore: error|ERROR:|^restore: (FAIL|refus)' "$RUN_DIR/restore-$label.log" | tr '\n' ' ' | cut -c1-400)\` |"
+  teardown_project "$rp" "$rdir"
+  rm -rf "$rdir"
+  dc "$PROJECT" "$INSTALL" start >/dev/null 2>&1 || true
+  in_install "$(version_tag HEAD)" docker compose up -d --wait --wait-timeout 600 >/dev/null 2>&1 || true
+  wait_ready_http /api/ready 300 || die "main stack did not come back after the failed restore check"
+  return 1
+}
 
 # restore_into_fresh <label> <backup file on ${PROJECT}_backups> <facts scope>
 # RUNBOOK "Restore", into a fresh project pf-upgrade-<run>-r on HEAD, then
@@ -405,13 +496,14 @@ restore_into_fresh() {
     -v "$idd/id:/run/age_identity:ro" -e AGE_IDENTITY_FILE=/run/age_identity -e FORCE_RESTORE=1 \
     backup /usr/local/bin/restore.sh "/backups/$file") >"$RUN_DIR/restore-$label.log" 2>&1; then
     rm -rf "$idd"
-    die "restore $label: restore.sh failed (see $RUN_DIR/restore-$label.log)"
+    restore_abort "$label" "restore.sh failed (see restore-$label.log)"
+    return 1
   fi
   rm -rf "$idd"
   (cd "$rdir" && COMPOSE_PROJECT_NAME="$rp" REGISTRY="$REGISTRY_TEST" PERSONALFI_VERSION="$v" \
     docker compose -p "$rp" up -d --wait --wait-timeout 900) >>"$RUN_DIR/restore-$label.log" 2>&1 ||
-    die "restore $label: up after restore failed (see $RUN_DIR/restore-$label.log)"
-  wait_ready_http /api/ready 300 || die "restore $label: never ready"
+    { restore_abort "$label" "up after restore failed (see restore-$label.log)"; return 1; }
+  wait_ready_http /api/ready 300 || { restore_abort "$label" "never ready after restore"; return 1; }
   t1="$(now)"
   record_timing "(iv) ${label}: restore.sh + up -d --wait -> /ready" "$(elapsed "$t0" "$t1")" "backup ${file}"
   local rc=0
@@ -475,7 +567,7 @@ rollback_suite() {
   report "- **SABOTAGE s3-no-newer-check**: HEAD's migrate.ts with refuseDatabaseNewer short-circuited, built as pf-upgrade/*:$(version_tag HEAD-nocheck) ($(date -u +%H:%MZ))"
   prepare_tree HEAD-nocheck "$WORK/src/$(version_tag HEAD-nocheck)" >/dev/null
   (cd "$WORK/src/$(version_tag HEAD-nocheck)" && REGISTRY="$REGISTRY_TEST" PERSONALFI_VERSION="$(version_tag HEAD-nocheck)" \
-    docker compose -p "$PROJECT" build) >"$RUN_DIR/build-nocheck.log" 2>&1 || die "nocheck build failed"
+    timeout 1200 docker compose -p "$PROJECT" build) >"$RUN_DIR/build-nocheck.log" 2>&1 || die "nocheck build failed"
   if in_install "$(version_tag HEAD-nocheck)" docker compose up -d --wait --wait-timeout 300 >"$RUN_DIR/rollback-nocheck.log" 2>&1; then
     report "| S3 (check removed) pinned rollback | **up succeeded; /api/ready $(curl -sk -o /dev/null -w '%{http_code}' --resolve "${PUBLIC_HOST_TEST}:${PROXY_HTTPS_PORT}:127.0.0.1" "${ORIGIN}/api/ready") — the older binary serves HEAD+1's schema (RED, as expected)** |"
   else
@@ -506,11 +598,74 @@ rollback_suite() {
   rm -rf "$idd"
   local t0 t1
   t0="$(now)"
-  in_install "$headv" just upgrade >"$RUN_DIR/rollback-upgrade.log" 2>&1 || die "just upgrade after the rollback restore failed"
+  in_install "$headv" timeout 2400 just upgrade >"$RUN_DIR/rollback-upgrade.log" 2>&1 || die "just upgrade after the rollback restore failed"
   t1="$(now)"
   record_timing "rollback: restore pre-migration backup, then just upgrade" "$(elapsed "$t0" "$t1")" "from ${premig}"
   report "| rollback (e) | schema after: $(psql_db "$PROJECT" "$INSTALL" "select count(*) || ' applied, max ' || max(version) || ', 0099 present: ' || bool_or(version='0099') from schema_migrations") |"
   verify_at "HEAD-after-rollback" || true
+}
+
+# ------------------------------------------- S3 through the harness, alone
+
+# Sabotage S3 as its own path. The spec's words are "the newer-DB check
+# removed -> W5's image serves HEAD's schema". W5's image predates CF-2 and has
+# no check to remove, so the claim the sabotage tests is the general one: the
+# previous release's binary, on the schema the next release left behind. With
+# CF-2 landed, HEAD plays "the previous release" and HEAD+1 "the next":
+#   control  HEAD's image pinned on HEAD+1's schema       -> refused (green)
+#   S3       the same with refuseDatabaseNewer removed    -> serves  (red)
+#   literal  W5's tree and image on HEAD+1's schema       -> serves  (CF-2 as found)
+s3_suite() {
+  local headv nocheck w5 code
+  headv="$(version_tag HEAD)"
+  nocheck="$(version_tag HEAD-nocheck)"
+  w5="$(version_tag W5)"
+  report "| S3 | schema before: $(psql_db "$PROJECT" "$INSTALL" "select count(*) || ' applied, 0099 present: ' || bool_or(version='0099') from schema_migrations") |"
+
+  if in_install "$headv" docker compose up -d --wait --wait-timeout 300 >"$RUN_DIR/s3-control.log" 2>&1; then
+    flag "S3 control: HEAD's image (check present) came up on HEAD+1's schema"
+  else
+    report "| S3 control: HEAD's image (check present) pinned on HEAD+1's schema | refused; migrator: \`$(dc "$PROJECT" "$INSTALL" logs --no-log-prefix migrator 2>&1 | grep -o 'migration.database_newer[^—]*' | head -1)\`; /api/ready $(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "${PUBLIC_HOST_TEST}:${PROXY_HTTPS_PORT}:127.0.0.1" "${ORIGIN}/api/ready") |"
+  fi
+
+  report "- **SABOTAGE s3-no-newer-check applied** ($(date -u +%H:%MZ)): the test tree's \`packages/db/src/migrate.ts\` gets \`return; // SABOTAGE-WP94-S3\` before \`if (unknown.length === 0) return;\` in \`refuseDatabaseNewer\`; built as pf-upgrade/*:${nocheck}"
+  prepare_tree HEAD-nocheck "$WORK/src/$nocheck" >/dev/null
+  report "| S3 | \`grep -c SABOTAGE-WP94-S3\`: test tree $(grep -c 'SABOTAGE-WP94-S3' "$WORK/src/$nocheck/packages/db/src/migrate.ts"), the real tree $(grep -c 'SABOTAGE-WP94-S3' "$REPO_ROOT/packages/db/src/migrate.ts" || true) |"
+  (cd "$WORK/src/$nocheck" && REGISTRY="$REGISTRY_TEST" PERSONALFI_VERSION="$nocheck" \
+    timeout 1200 docker compose -p "$PROJECT" build) >"$RUN_DIR/build-nocheck.log" 2>&1 || die "nocheck build failed (see $RUN_DIR/build-nocheck.log)"
+  if in_install "$nocheck" docker compose up -d --wait --wait-timeout 300 >"$RUN_DIR/s3-nocheck.log" 2>&1; then
+    code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "${PUBLIC_HOST_TEST}:${PROXY_HTTPS_PORT}:127.0.0.1" "${ORIGIN}/api/ready")"
+    report "| S3 sabotaged: the check removed, pinned on HEAD+1's schema | **up succeeded; /api/ready ${code} — the previous release's binary serves the next release's schema (RED, as the exit test expects)** |"
+    [ "$code" = "200" ] || flag "S3: up succeeded but /api/ready ${code}"
+  else
+    flag "S3: with the check removed the pinned rollback still failed — sabotage NOT observed red"
+  fi
+
+  prepare_tree W5 "$WORK/src/$w5" >/dev/null
+  replace_tree "$INSTALL" "$WORK/src/$w5"
+  if in_install "$w5" docker compose up -d --wait --wait-timeout 300 >"$RUN_DIR/s3-w5.log" 2>&1; then
+    report "| S3 literal: W5's tree and image on HEAD+1's schema | up succeeded; /api/ready $(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "${PUBLIC_HOST_TEST}:${PROXY_HTTPS_PORT}:127.0.0.1" "${ORIGIN}/api/ready") — W5 has no check (CF-2 as found); the protection starts with the release that carries CF-2 |"
+  else
+    report "| S3 literal: W5's tree and image on HEAD+1's schema | up --wait failed ($(grep -o 'container [^ ]* is unhealthy' "$RUN_DIR/s3-w5.log" | head -1)); /api/ready $(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "${PUBLIC_HOST_TEST}:${PROXY_HTTPS_PORT}:127.0.0.1" "${ORIGIN}/api/ready") |"
+  fi
+}
+
+# The chain's ledger of extra steps: every era hop that needed more than its
+# documented upgrade, and the HEAD hop, which never gets one.
+summarize_extra_steps() {
+  report ""
+  report "#### Extra steps by hop (any is a finding; the HEAD hop runs \`just upgrade\` alone and is never remediated)"
+  report "| hop | finding | exact error | extra step |"
+  report "| --- | --- | --- | --- |"
+  local n=0
+  if [ -s "$RUN_DIR/extra-steps.tsv" ]; then
+    while IFS=$'\t' read -r hop finding err what; do
+      report "| ${hop} | ${finding} | \`${err}\` | ${what} |"
+      n=$((n + 1))
+    done <"$RUN_DIR/extra-steps.tsv"
+  fi
+  report "| HEAD | — | — | none: \`just upgrade\` alone (step 21) |"
+  report "- era hops with an extra step: ${n}; HEAD hop: 0"
 }
 
 # --------------------------------------------------------- W4: CF-5 probe
@@ -541,11 +696,15 @@ sabotage_s1() {
     return 0
   fi
   local err code
-  err="$(grep -m1 -iE 'secret.*(not found|no such file)|no such file' "$RUN_DIR/hop-HEAD-s1-no-placeholders-upgrade.log" || true)"
+  err="$(grep -m1 -E 'Error response from daemon|bind source path does not exist|secret.*(not found|no such file)' "$RUN_DIR/hop-HEAD-s1-no-placeholders-upgrade.log" || true)"
+  local missing
+  missing="$(grep -oE 'secret file [^ ]+ does not exist' "$RUN_DIR/hop-HEAD-s1-no-placeholders-upgrade.log" | awk '{print $3}' | sed "s/^${PROJECT}_//" | sort -u | paste -sd' ' || true)"
+  report "| S1 | Compose: \`secret file ${PROJECT}_<name> does not exist\` for: ${missing:-<none>} |"
   report "| S1 | red as expected: \`${err:-<no secret error line; see hop-HEAD-upgrade.log>}\` |"
   code="$(curl -sk -o /dev/null -w '%{http_code}' --resolve "${PUBLIC_HOST_TEST}:${PROXY_HTTPS_PORT}:127.0.0.1" "${ORIGIN}/ready")"
   report "| S1 | after the failed upgrade the old W0 stack still answers /ready ${code}; restarts $(restart_counts "$PROJECT" "$INSTALL") |"
-  [ -n "$err" ] || flag "S1 failed, but not on a missing secret file"
+  grep -qE "$SECRET_MISSING_RE" "$RUN_DIR/hop-HEAD-s1-no-placeholders-upgrade.log" ||
+    flag "S1 failed, but not on a missing secret file"
   # The sabotaged tree is replaced by the next hop's prepare/replace.
 }
 
@@ -575,9 +734,22 @@ stop_forwarder() { docker rm -f "${PROJECT}-fwd" >/dev/null 2>&1 || true; }
 # `schedules.next_run_at`, never to data: the cron literals have no config key
 # (the Phase 5 gate did the same for the Brief).
 shorten_schedule() {
-  local name="$1"
-  psql_db "$PROJECT" "$INSTALL" "UPDATE schedules SET next_run_at = now() WHERE name = '${name}'" >/dev/null
-  report "- instrument: \`UPDATE schedules SET next_run_at = now() WHERE name = '${name}'\` at $(date -u +%H:%M:%SZ) (timing only; no data written)"
+  local name="$1" rows
+  # jitter_seconds too: the scheduler adds up to that many seconds to the job's
+  # run_after (600 s on the snapshot schedule: chain attempt 5 saw run_after
+  # 9 m 48 s after the claim). Both columns are timing metadata; no data.
+  rows="$(psql_db "$PROJECT" "$INSTALL" "UPDATE schedules SET next_run_at = now(), jitter_seconds = 0 WHERE name = '${name}' RETURNING name" | grep -c . || true)"
+  report "- instrument: \`UPDATE schedules SET next_run_at = now(), jitter_seconds = 0 WHERE name = '${name}'\` at $(date -u +%H:%M:%SZ) — ${rows} row(s) (timing only; no data written)"
+  [ "$rows" != "0" ] || report "  - **no schedule named ${name} exists yet** (registered at worker boot only when its module is on)"
+}
+
+# What the scheduler and the job queue say about one scheduled job kind: the
+# evidence for a "never happened", read by the harness (never by hand).
+schedule_diagnostics() {
+  local name="$1" kind="$2"
+  report "  - diagnostics: schedule \`$(psql_db "$PROJECT" "$INSTALL" "SELECT coalesce(string_agg(name || ' enabled=' || enabled || ' next=' || coalesce(to_char(next_run_at AT TIME ZONE 'UTC','HH24:MI:SS'),'-') || ' last=' || coalesce(to_char(last_run_at AT TIME ZONE 'UTC','HH24:MI:SS'),'-'), '; '), 'none') FROM schedules WHERE name = '${name}'" 2>&1 | tr '\n' ' ')\`"
+  report "  - diagnostics: jobs \`$(psql_db "$PROJECT" "$INSTALL" "SELECT coalesce(string_agg(status || ' attempts=' || attempts || ' run_after=' || to_char(run_after AT TIME ZONE 'UTC','HH24:MI:SS') || coalesce(' error=' || left(last_error::text, 200), ''), '; ' ORDER BY run_after), 'none') FROM jobs WHERE kind LIKE '${kind}'" 2>&1 | tr '\n' ' ')\`"
+  report "  - diagnostics: worker log \`$(dc "$PROJECT" "$INSTALL" logs --no-log-prefix worker 2>&1 | grep -iE "brief|schedul|snapshot|net_worth" | tail -4 | cut -c1-240 | tr '\n' ' ')\`"
 }
 
 load_era() {
@@ -590,7 +762,11 @@ load_era() {
       ;;
     W4)
       shorten_schedule planning.net_worth_snapshot
-      out="$(driver W4 load W4)" || { flag "load W4"; return 0; }
+      out="$(driver W4 load W4)" || {
+        schedule_diagnostics planning.net_worth_snapshot 'planning.%'
+        flag "load W4"
+        return 0
+      }
       ;;
     W5)
       # The holder opts into insights the way RUNBOOK "Create secrets" step 7
@@ -605,7 +781,14 @@ load_era() {
       report "- W5: holder opted into insights (advisor_token_secret written; \`docker compose restart api worker\`)"
       out="$(driver W5 load W5)" || { flag "load W5"; return 0; }
       shorten_schedule insights.weekly_brief
-      out="$out $(driver W5 await-brief 480)" || { flag "W5 Brief never published"; return 0; }
+      local brief
+      if ! brief="$(driver W5 await-brief 480)"; then
+        report "- W5 loaded through W5's API (before the Brief): \`$(echo "$out" | tr -d '\n' | cut -c1-600)\`"
+        schedule_diagnostics insights.weekly_brief insights.brief
+        flag "W5 Brief never published"
+        return 0
+      fi
+      out="$out $brief"
       ;;
     *) out="$(driver "$wp" load "$wp")" || { flag "load $wp"; return 0; } ;;
   esac
@@ -643,7 +826,11 @@ case "$PATH_KIND" in
     step 06-verify-HEAD verify_or_flag HEAD
     step 07-restore-W0-premigrate restore_w0_premigrate
     step 08-head-drill head_backup_drill
-    step 09-rollback rollback_suite
+    if [ "$CI_MODE" -eq 1 ]; then
+      log "--ci: step 09-rollback skipped (CF-2 is covered in CI by packages/db/test/migrate-newer.test.ts; the stack-level suite runs locally at each gate)"
+    else
+      step 09-rollback rollback_suite
+    fi
     step 10-recovery-code recovery_code
     ;;
   chain)
@@ -667,6 +854,13 @@ case "$PATH_KIND" in
     step 24-restore-W0-backup restore_w0_backup
     step 25-head-drill head_backup_drill
     step 26-recovery-code recovery_code
+    step 27-extra-steps summarize_extra_steps
+    ;;
+  s3-no-newer-check)
+    step 01-install-W0 install_w0
+    step 02-load-W0 load_w0
+    step 03-hop-HEAD+1 hop_head HEAD+1
+    step 04-s3 s3_suite
     ;;
   s2-no-premigrate)
     step 01-install-W0 install_w0
