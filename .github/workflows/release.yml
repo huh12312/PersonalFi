@@ -23,8 +23,19 @@ env:
   NPM_CONFIG_IGNORE_SCRIPTS: 'true'
 
 jobs:
+  # WP 9.4 (09 §4 batch 6): the unattended-upgrade test is a required
+  # predecessor of every release — a tag whose direct jump v0.1 -> this
+  # commit is red never publishes an image. upgrade-test.yml exposes
+  # `workflow_call` for exactly this.
+  upgrade-test:
+    name: unattended upgrade from v0.1
+    uses: ./.github/workflows/upgrade-test.yml
+    permissions:
+      contents: read
+
   build-sign-publish:
     name: build, sign, publish (${{ matrix.image }})
+    needs: upgrade-test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
