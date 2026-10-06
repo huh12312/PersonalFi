@@ -482,6 +482,17 @@ describeWithDb('runMigrations', () => {
       //   max migration, rto_seconds). No user_id: a backup is a fact about the
       //   deployment, not a holder; GET /ops/backup-status reads both (CF-17,
       //   D24, 09 §5.7). WP 9.1; references no other table (09 §4).
+      // 0038_brief_actions_grant_events: one nullable column and one @ctx/insights
+      //   table. advisory_brief_items.primary_action (CF-24: the item's first
+      //   proposed action as the Brief said it, jsonb with a shape CHECK to the
+      //   four non-acting kinds, written once at publish, NULL for every Brief
+      //   published before this migration and read as "no action recorded", never
+      //   as the live insight's action) and snapshot_grant_events (O-9: an
+      //   append-only history of every grant, revoke and re_granted of a scope to
+      //   an advisor, a trigger refusing UPDATE, step_up_session_id a plain UUID
+      //   with no foreign key because the session will not exist on the far side
+      //   of a restore). WP 9.6; expand-only; references only 0002/0012/0032
+      //   objects or its own (09 §4); 0035 and this file never reference each other.
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -580,6 +591,7 @@ describeWithDb('runMigrations', () => {
         'security_overlay',
         'security_tags',
         'sessions',
+        'snapshot_grant_events',
         'snapshot_grants',
         'subscription_metadata',
         'sync_runs',
