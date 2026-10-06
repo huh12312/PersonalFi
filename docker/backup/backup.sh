@@ -74,6 +74,42 @@ PLAIN="${WORK_DIR}/personalfi-${TIMESTAMP}.dump"
 # healthcheck reads. Written on every exit path, including the failure ones.
 status() {
   printf '%s %s %s\n' "$1" "$(date -u +%s)" "$2" >"${STATUS_FILE}"
+  record_backup_run "$1" "$2"
+}
+
+# WP 9.1 (CF-17, D24, migration 0036_ops_status.sql): one row per attempt in
+# `ops_backup_runs`, so `GET /ops/backup-status` can answer "when did the
+# last successful backup finish?" without shelling into this container. This
+# insert is **best-effort**, deliberately not gated behind `set -e`/`-o
+# pipefail`'s usual "fail loudly" posture, for a written reason: WP 9.4's
+# `pre-migrate-backup` one-shot runs this same script *before* the migrator
+# has applied anything on a fresh or older install, so `ops_backup_runs` may
+# simply not exist yet, and an older backup image can likewise run against a
+# schema newer migrations have since moved past. A verified, promoted backup
+# must never be reported as a failure just because this status table isn't
+# there (or isn't shaped the way this script expects) -- the dump itself, and
+# the STATUS_FILE the healthcheck reads, are unaffected either way.
+#
+# `gen_random_uuid()` rather than an app-side uuidv7 (`newId()`,
+# docs/CONVENTIONS.md's usual rule): this is a shell script with no uuidv7
+# generator to hand, and nothing orders `ops_backup_runs` by its own `id` --
+# every read goes through `finished_at`/`created_at` instead (`@core/platform`'s
+# `backupStatus`), so the ordering property uuidv7 exists for is not needed here.
+record_backup_run() {
+  run_status="$1"
+  run_reason="$2"
+  run_bytes_sql="NULL"
+  if [ -n "${DUMP_BYTES:-}" ]; then run_bytes_sql="${DUMP_BYTES}"; fi
+  run_toc_sql="NULL"
+  if [ -n "${TOC_ENTRIES:-}" ]; then run_toc_sql="${TOC_ENTRIES}"; fi
+  if ! run_insert_error="$(
+    psql -h "${PGHOST}" -U "${PGUSER}" -d "${PGDATABASE}" -v ON_ERROR_STOP=1 -q -tAc \
+      "INSERT INTO ops_backup_runs (id, status, finished_at, plaintext_bytes, toc_entries, reason)
+       VALUES (gen_random_uuid(), '${run_status}', now(), ${run_bytes_sql}, ${run_toc_sql},
+               \$backup_reason\$${run_reason}\$backup_reason\$)" 2>&1
+  )"; then
+    echo "backup: ops_backup_runs insert skipped (best-effort; see docker/backup/backup.sh): ${run_insert_error}" >&2
+  fi
 }
 
 cleanup() {

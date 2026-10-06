@@ -322,6 +322,22 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
   ['notification_rules', "notifications (WP 2.4); not named in this WP's export scope."],
   ['notification_outbox', "notifications (WP 2.4); not named in this WP's export scope."],
   ['delivery_attempts', "notifications (WP 2.4); not named in this WP's export scope."],
+  // WP 9.1 (migration 0036). Neither carries a user_id column, so
+  // `discoverUserScopedTables` would never flag either as missing — they are
+  // named here anyway, as the dispatch asks (09 §3 "WP 9.1"), because a
+  // reasoned deferral should not rest on an absence a future schema change
+  // could quietly turn into one. Both are install telemetry (a backup
+  // attempt, a restore-drill verdict), never the account holder's own data;
+  // restoring a bundle onto a different install should not inherit another
+  // deployment's backup or drill history.
+  [
+    'ops_backup_runs',
+    "install telemetry (WP 9.1, CF-17): one row per backup.sh attempt on this deployment, not the account holder's data.",
+  ],
+  [
+    'ops_restore_drills',
+    "install telemetry (WP 9.1, CF-17): one row per restore-drill run on this deployment, not the account holder's data.",
+  ],
 ]);
 
 /**

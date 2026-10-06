@@ -18,3 +18,9 @@ export { jobs, jobRuns, type JobRow, type JobRunRow } from './jobs.ts';
 export { schedules, type ScheduleRow } from './schedules.ts';
 export { configSnapshots, type ConfigSnapshotRow } from './config-snapshots.ts';
 export { featureFlags, type FeatureFlagRow } from './feature-flags.ts';
+export {
+  opsBackupRuns,
+  opsRestoreDrills,
+  type OpsBackupRunRow,
+  type OpsRestoreDrillRow,
+} from './ops.ts';

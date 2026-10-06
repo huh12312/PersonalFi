@@ -132,6 +132,12 @@ export {
 } from './metrics.ts';
 export { platformExecutor } from './database.ts';
 export {
+  backupStatus,
+  DEFAULT_BACKUP_MAX_AGE_SECONDS,
+  DRILL_MAX_AGE_DAYS,
+  type BackupStatus,
+} from './ops-status.ts';
+export {
   createLivenessWriter,
   type LivenessWriter,
   type LivenessWriterOptions,

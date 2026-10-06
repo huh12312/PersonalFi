@@ -450,6 +450,11 @@ restore-drill:
 
     printf '%s' "$PG_PASSWORD" > "$SCRATCH_SECRETS/pg_password"
     RESTORE_OK=1
+    # WP 9.1 (CF-17, D24, migration 0036_ops_status.sql): the clock for the
+    # measured half of the RTO 1 h budget (master plan §3.4) — "restore
+    # started" to "the restored database answered /ready" — started here,
+    # read back below once that answer (pass or fail) is known.
+    RESTORE_STARTED_AT="$(date -u +%s)"
     docker run --rm --network "$BACKEND_NETWORK" \
       -v "$BACKUPS_VOLUME:/backups:ro" \
       -v "$SCRATCH_SECRETS/age_identity:/run/age_identity:ro" \
@@ -529,6 +534,31 @@ restore-drill:
     fi
 
     if [ "${#FAILURES[@]}" -eq 0 ]; then VERDICT="PASS"; else VERDICT="FAIL"; fi
+
+    RTO_SECONDS=$(( $(date -u +%s) - RESTORE_STARTED_AT ))
+
+    # WP 9.1 (CF-17, D24, migration 0036_ops_status.sql): the verdict this
+    # recipe just computed, written into the *live* database — never the
+    # throwaway $DRILL_DB this recipe is about to tear down — so
+    # `GET /ops/backup-status` can answer "when did the drill last pass?"
+    # without reading this file's own evidence markdown. Best-effort, same
+    # written contract as `docker/backup/backup.sh`'s own insert: a drill run
+    # against a live db that predates migration 0036 (or against one whose
+    # `db` service was not up at all, `LIVE_DB_CONTAINER` empty) must not
+    # turn a real, already-computed verdict into a recipe failure.
+    if [ -n "$LIVE_DB_CONTAINER" ]; then
+      DRILL_VERDICT_SQL="$(printf '%s' "$VERDICT" | tr '[:upper:]' '[:lower:]')"
+      if ! DRILL_INSERT_ERROR="$(docker exec "$LIVE_DB_CONTAINER" psql -U personalfi -d personalfi \
+          -v ON_ERROR_STOP=1 -q -tAc \
+          "INSERT INTO ops_restore_drills
+             (id, verdict, ran_at, restored_table_count, live_table_count, max_migration, rto_seconds)
+           VALUES (gen_random_uuid(), '$DRILL_VERDICT_SQL', now(),
+                   ${RESTORED_TABLES:-0}, ${LIVE_TABLES:-0}, '$RESTORED_MIGRATIONS', $RTO_SECONDS)" 2>&1)"; then
+        echo "restore-drill: ops_restore_drills insert skipped (best-effort; see justfile's restore-drill recipe): $DRILL_INSERT_ERROR" >&2
+      fi
+    else
+      echo "restore-drill: no live db container found; ops_restore_drills not written" >&2
+    fi
 
     mkdir -p "$ROOT/docs/evidence/ops"
     {

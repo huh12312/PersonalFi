@@ -34,6 +34,12 @@ a comment: a table defined outside its owning package, or claimed twice, fails C
 - `schedules`
 - `config_snapshots`
 - `feature_flags`
+- `ops_backup_runs` — one row per `docker/backup/backup.sh` attempt (CF-17,
+  D24; migration `0036_ops_status.sql`, WP 9.1). Install-wide, never
+  user-scoped.
+- `ops_restore_drills` — one row per `just restore-drill` run (CF-17, D24;
+  migration `0036_ops_status.sql`, WP 9.1). Install-wide, never
+  user-scoped.
 
 `feature_flags` moved here from `@core/db` in WP 0.3. `packages/db/OWNERSHIP.md`
 anticipated the split: the flag _service_ lives next to the consumers and
