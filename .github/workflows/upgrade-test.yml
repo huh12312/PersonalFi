@@ -93,9 +93,19 @@ jobs:
         timeout-minutes: 2
         env:
           WORK: ${{ runner.temp }}/wp94
+        # Every per-step log, not only the driver's: a `FATAL: W0 build failed
+        # (see …/w0-build.log)` is unreadable on a runner otherwise (the first
+        # runner run, 2026-10-06). The logs hold build and compose output; the
+        # test-only secrets live under install/secrets and are never printed.
         run: |
           cat "$WORK/runs/direct/report.md" >> "$GITHUB_STEP_SUMMARY" || true
           tail -60 "$WORK/direct.log" || true
+          for f in "$WORK"/runs/direct/*.log; do
+            [ -f "$f" ] || continue
+            echo "::group::$(basename "$f") (last 120 lines)"
+            tail -120 "$f"
+            echo "::endgroup::"
+          done
       - name: teardown
         if: always()
         timeout-minutes: 5

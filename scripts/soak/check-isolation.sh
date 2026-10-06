@@ -125,12 +125,22 @@ self_test() {
   # script's own repository if the override was not set), so the assertion
   # is against the real directory an agent/gate actually works in, not a
   # synthetic stand-in.
-  local this_repo
+  # The self-test proves the MECHANISM: on a host that is not Chris's (CI, a
+  # stranger's machine) the hard-coded default names a directory that does
+  # not exist there, so this case pins DEV_CHECKOUT to the script's own
+  # repository for its one call and restores it after. The default itself is
+  # deliberately not derived from the script's location: on the production
+  # clone that would make the script refuse the very directory it protects.
+  local this_repo saved_dev
   this_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  saved_dev="${DEV_CHECKOUT}"
+  DEV_CHECKOUT="${this_repo}"
   if check_isolation "personalfi-prod" "${fake_sha}" "${this_repo}" >/dev/null 2>&1; then
+    DEV_CHECKOUT="${saved_dev}"
     echo "check-isolation: SELF-TEST FAILED: this checkout's directory (${this_repo}) was not refused" >&2
     failures=$((failures + 1))
   else
+    DEV_CHECKOUT="${saved_dev}"
     echo "check-isolation: self-test 3/4 ok -- this checkout's directory refused" >&2
   fi
 

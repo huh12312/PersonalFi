@@ -38,7 +38,10 @@ describe('scripts/soak/check-isolation.sh (WP 9.1 part 1)', () => {
   it('refuses each violation by name, all of them at once, and accepts only the isolated tuple', () => {
     const scratch = mkdtempSync(join(tmpdir(), 'wp91-isolation-'));
     try {
-      const dev = run(['personalfi', 'dev', REPO_ROOT]);
+      // The checkout refusal is pinned to THIS checkout by the override: the
+      // script's default is Chris's host path, which does not exist on a CI
+      // runner (the mechanism is what is under test, not the host's path).
+      const dev = run(['personalfi', 'dev', REPO_ROOT], { PERSONALFI_DEV_CHECKOUT: REPO_ROOT });
       expect(dev.status).toBe(1);
       expect(dev.out).toContain("the compose project is 'personalfi', not 'personalfi-prod'");
       expect(dev.out).toContain("PERSONALFI_VERSION is 'dev', not a 40-hex commit SHA");
@@ -57,7 +60,11 @@ describe('scripts/soak/check-isolation.sh (WP 9.1 part 1)', () => {
       expect(ok.status, ok.out).toBe(0);
       expect(ok.out).toContain('check-isolation: ok');
       expect(
-        run([], { COMPOSE_PROJECT_NAME: 'personalfi-prod', PERSONALFI_VERSION: SHA }).status,
+        run([], {
+          COMPOSE_PROJECT_NAME: 'personalfi-prod',
+          PERSONALFI_VERSION: SHA,
+          PERSONALFI_DEV_CHECKOUT: REPO_ROOT,
+        }).status,
       ).toBe(1); // cwd is not forced: spawnSync inherits ours, which is this checkout
     } finally {
       rmSync(scratch, { recursive: true, force: true });
