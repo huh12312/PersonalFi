@@ -928,6 +928,203 @@ at least `create`) to have run at least once, so the `backend` network and
 
 ---
 
+## Production install and the real-use soak
+
+The soak (`docs/plan/09-phase-9-dispatch.md` §3 "WP 9.1") is Chris using
+PersonalFi as his only finance tool for 90 days, on a **production install
+that no agent and no gate ever touches**. This section is that install's rules,
+its day-one checklist, the weekly report, who upgrades it and when, and the
+monthly restore drill. It is the place where "dev", "the gate" and "production"
+are told apart, because on this host they share a Docker daemon.
+
+### Isolation rules (CF-20, CF-21)
+
+Three facts found in the code at `1417b36` make a careless production install
+destroyable by a routine agent or gate command, and each rule below answers one:
+
+1. **Own directory, own project.** Production lives in its **own clone**
+   (default `~/personalfi-prod`) at a pinned commit, never in the checkout the
+   agents and the gate work in (`/home/chris/Projects/PersonalFi`).
+   `compose.yml` has no top-level `name:`, so a Compose project is named after
+   its directory by default; the gate's `down -v` targets a project by name.
+   Set the name explicitly in the production clone's `.env`:
+
+   ```bash
+   COMPOSE_PROJECT_NAME=personalfi-prod
+   ```
+
+   That gives production its own volumes (`personalfi-prod_pgdata`,
+   `personalfi-prod_backups`, …) by project name; the dev and gate stack's
+   (`personalfi_*`) are a different set.
+
+2. **A real commit, never `dev`.** Every image is tagged
+   `${REGISTRY:-personalfi}/<service>:${PERSONALFI_VERSION:-dev}`, and every
+   gate or agent `docker compose build` **overwrites `:dev`**. A production stack
+   on `:dev` comes back up on unreviewed code at its next `up`. In the production
+   `.env`:
+
+   ```bash
+   PERSONALFI_VERSION=<the 40-hex commit SHA you cloned at>
+   ```
+
+   `PERSONALFI_VERSION` is **required, and never `dev`, for production**. Build
+   from the checkout you pulled; never point a checkout at images built from a
+   different one.
+
+3. **Own secrets, own address.** The production clone has its **own `secrets/`**
+   (generated for it, never copied from the dev checkout), hardened per C-16
+   with `sudo just harden-secrets`, and its own bind address — the Tailscale or
+   LAN address on 443 (`BIND_ADDRESS=<tailscale ip>`, `PUBLIC_HOST=<tailnet
+   name>`, see "Enabling remote access"). The dev and gate stack stay on
+   `127.0.0.1`.
+
+**The guard.** `scripts/soak/check-isolation.sh` refuses unless the project is
+exactly `personalfi-prod`, the version is a 40-hex SHA, and the directory is not
+the agent/gate checkout. It names **every** violation, not just the first:
+
+```bash
+cd ~/personalfi-prod
+bash scripts/soak/check-isolation.sh          # reads COMPOSE_PROJECT_NAME and PERSONALFI_VERSION
+bash scripts/soak/check-isolation.sh --self-test   # proves it refuses project personalfi, version dev, and this checkout
+```
+
+Run it before anything that could touch the production project. The weekly report
+wrapper runs it for you.
+
+**For agents and the gate** (Phase 9 rules 5 and 6, carried verbatim): production
+is off-limits — its directory, project, volumes, images, secrets and database.
+Every `docker compose` invocation names its own project with `-p` and its own
+ports; `down -v` only on a project the invoker created; `docker volume prune`,
+`image prune`, `system prune` and `builder prune --all` are forbidden outright
+(a prune while production is stopped deletes production).
+
+### Day one
+
+Soak day one is targeted at **2026-10-12** (earliest v1.0 2027-01-10). The
+checklist is `docs/plan/06-path-to-v1.md` "What only Chris can close", items 1–8:
+
+1. Link **two real institutions** and let them sync on schedule.
+2. A month of real data with **zero internal transfers in spend totals**
+   (computed by the weekly report from the first complete month).
+3. The recurring gold set against your own confirmed subscription list.
+4. A real brokerage's holdings reconciling to its statement.
+5. A projection run against real balances with real tax treatment per account.
+6. A view-only Coinbase CDP key, so the live on-ramp and ETH-on-one-row checks run.
+7. The decisions with stated defaults the work is proceeding on (return-series
+   licence; merchant-pseudonym construction — decide **before the first real
+   link**; plan terms; the local model).
+8. The Phase 0 hand actions: production LUKS2, Tailscale HTTPS, real secrets,
+   B2 with object lock.
+
+Then install production from a CI-green commit (`First install`, steps 0–7, in
+the production clone, with the three rules above in its `.env`), run the
+return-series fetch (`Monte Carlo return series`), and **write day one** in
+`docs/evidence/phase-9/soak/clock.md` (on the dev checkout; commit and push it).
+
+### The clock
+
+`docs/evidence/phase-9/soak/clock.md` holds **your** dated attestations, one table
+row each: `| YYYY-MM-DD | event | one-line note |`. The events:
+
+| Event                       | Meaning                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `day_one`                   | The soak started: production installed, two institutions linked, other tools retired.                                     |
+| `attest`                    | "This week I used only PersonalFi, nothing went wrong that I have not written here." One per week keeps the week clean.   |
+| `fallback`                  | You used another tool or a spreadsheet for something. **Resets the clock** to this date (09 §8.2: zero in the final 90).  |
+| `data_loss`                 | Data lost beyond the 24 h RPO. **Resets the clock.**                                                                      |
+| `outage_start`/`outage_end` | Production was down. An outage **over 24 h** without loss **pauses** the clock for its length.                            |
+| `upgrade`                   | A record of `just upgrade` (the SHA). Bookkeeping: **never resets or pauses**, and does not count as an attestation.       |
+| `criterion`                 | A judged line for the criteria ledger: `3: met - gold set matched my list` (`met`, `failed` or `observing`, criteria 3–8, 10, 11). |
+
+The weekly report prints "day N of 90" from the latest reset, and **prints a
+week with no attestation as a GAP, never as clean** — a gap is the clock telling
+you it has no evidence for that week, not a pass. Day one is day 1.
+
+### The weekly soak report
+
+`scripts/soak/report.ts` reads **aggregates and whitelisted dimensions only** (ISO
+week, connection ordinal, provider kind, status, job kind, reason code): never an
+amount, a name, a memo, an institution, a merchant or a goal — enforced by a
+structural test, an output-column whitelist, and a canary test, because the file
+is committed and pushed. It runs in one READ ONLY transaction. It is **the
+orchestrator's alone** (rule 5); an agent never runs it against production.
+
+From the production clone (the wrapper runs the isolation guard first, mounts the
+one script and `clock.md` read-only into a throwaway `api` container — the image
+deletes `scripts/`, so this is how it gets in — and writes the file only if the
+report succeeded):
+
+```bash
+cd ~/personalfi-prod
+COMPOSE_PROJECT_NAME=personalfi-prod PERSONALFI_VERSION=<sha> \
+SOAK_EVIDENCE_DIR=/home/chris/Projects/PersonalFi/docs/evidence/phase-9/soak \
+  bash scripts/soak/run-report.sh                      # `just soak-report` once the orchestrator wires it
+# -> .../week-YYYY-Www.md ; commit it and push
+```
+
+`SOAK_EVIDENCE_DIR` is where `clock.md` is read and the week file written (the
+production clone is pinned and is not where evidence is committed). Optional
+flags: `--as-of 2026-11-09T12:00:00Z` (a backfill week), `--label TEXT`.
+
+Without a container — from a checkout with a database URL it can reach (a dev
+database, a restored copy):
+
+```bash
+DATABASE_URL=postgres://… node --experimental-strip-types scripts/soak/report.ts \
+  --clock docs/evidence/phase-9/soak/clock.md --out docs/evidence/phase-9/soak
+```
+
+Each file carries the sections (sync health per connection ordinal, ledger
+invariants as counts, categorisation, review burden, the Brief, notifications,
+jobs, auth, backups and drills, the assumptions file's age, upgrades applied),
+the clock, and the **criteria ledger**: 06 items 1–8, the Brief's first month,
+the narrator, "only finance tool". Criteria 1, 2 and 9 are computed; the rest are
+your `criterion` rows. The report does not need to exist first — it backfills.
+
+### Who upgrades production, and when
+
+**You do. Nothing an agent does touches production** (09 §6 Q6). After each wave
+lands and CI is green, the orchestrator posts "wave X at `<sha>`, CI green". Then,
+in the production clone:
+
+```bash
+git fetch && git checkout <sha>
+bash scripts/soak/check-isolation.sh            # with PERSONALFI_VERSION=<sha> in .env
+just upgrade                                     # see "Upgrade": automatic pre-migration backup
+```
+
+and add an `upgrade` row to `clock.md`. Each upgrade is a real-world observation
+for v1.0's second clause and is recorded by the report from
+`schema_migrations.applied_at`. **Every Phase 9 migration is expand-only**; upgrades
+never reset the clock.
+
+### The monthly restore drill
+
+D24: an untested backup is a rumour. Monthly at minimum — next due **2026-11-05**
+from the 2026-10-05 drill. The dashboard shows "Last backup 4 h ago · restore
+drill passed 2026-10-13" and turns that line into a warning past 26 h without a
+successful backup (`BACKUP_MAX_AGE_SECONDS`) or past 35 days without a drill.
+Both facts come from `ops_backup_runs` and `ops_restore_drills`, which
+`docker/backup/backup.sh` and `just restore-drill` write (best-effort: a database
+that predates migration 0036 simply has no rows).
+
+```bash
+cd ~/personalfi-prod
+export COMPOSE_PROJECT_NAME=personalfi-prod PERSONALFI_VERSION=<sha>
+export AGE_IDENTITY_FILE=/path/to/your/age-identity.txt
+just restore-drill
+```
+
+**On a host with more than one Compose project, `COMPOSE_PROJECT_NAME` is
+required**: the recipe looks up the `backups` volume, the `backend` network and
+the live `db` container by Compose label, and unset it **refuses** when the lookup
+is ambiguous rather than drilling — and writing its verdict into — the first
+project it finds. `DRILL_SECRETS_DIR` and `DRILL_EVIDENCE_DIR` redirect the two
+paths the recipe otherwise takes from the checkout (`./secrets`,
+`docs/evidence/ops`), so a scratch project can be drilled without touching either.
+
+---
+
 ## Master-key rotation
 
 Not yet implemented as a `just` target — this is a pointer, not a procedure,

@@ -153,7 +153,16 @@ fi
 # Proof this is a dump of *our* schema and not, say, an empty database someone
 # pointed PGDATABASE at by mistake: schema_migrations is created by the very
 # first migration and every subsequent one records itself there.
-if ! printf '%s\n' "${TOC}" | grep -qE 'TABLE[[:space:]]+public[[:space:]]+schema_migrations([[:space:]]|$)'; then
+#
+# F-94-1 (WP 9.4 found it, WP 9.1 fixed it): this was `grep -qE`. Under
+# `pipefail`, `grep -q` exits at its FIRST match, `printf` is then still writing
+# the rest of the TOC, dies of SIGPIPE once the TOC is larger than the 64 KiB
+# pipe buffer, and pipefail turns a match into "did not find the
+# schema_migrations table" -- 300 of 300 false refusals of a good backup in
+# isolation, and which runs fail depends on the dump's size. So: no `grep -q`
+# at the end of a pipe in this file. `>/dev/null` makes grep read all its input.
+# (`scripts/soak/backup-script-pipefail.test.ts` fails if the pattern returns.)
+if ! printf '%s\n' "${TOC}" | grep -E 'TABLE[[:space:]]+public[[:space:]]+schema_migrations([[:space:]]|$)' >/dev/null; then
   echo "backup: pg_restore --list did not find the schema_migrations table — refusing to promote it:" >&2
   echo "${TOC}" | sed 's/^/    /' >&2
   exit 1

@@ -376,14 +376,35 @@ restore-drill:
     : "${AGE_IDENTITY_FILE:?set AGE_IDENTITY_FILE to the age private key (RUNBOOK.md 'Restore')}"
     ROOT="{{justfile_directory()}}"
     DATE="$(date -u +%Y%m%dT%H%M%SZ)"
-    EVIDENCE="$ROOT/docs/evidence/ops/restore-drill-${DATE%%T*}.md"
+    EVIDENCE="${DRILL_EVIDENCE_DIR:-$ROOT/docs/evidence/ops}/restore-drill-${DATE%%T*}.md"
     PG_DIGEST="postgres:18.6-alpine3.24@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2"
     ALPINE_DIGEST="alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"
     DRILL_DB="restore-drill-db-$$"
     DRILL_API="restore-drill-api-$$"
 
-    BACKUPS_VOLUME="$(docker volume ls --filter label=com.docker.compose.volume=backups --format '{{{{.Name}}' | head -1)"
-    BACKEND_NETWORK="$(docker network ls --filter label=com.docker.compose.network=backend --format '{{{{.Name}}' | head -1)"
+    # WP 9.1: a host can carry several compose projects (production, the dev stack, scratch
+    # projects), and each has a `backups` volume, a `backend` network and a `db` service. The
+    # lookups below used to take `head -1` of whatever matched -- on such a host that could
+    # restore, compare against, and WRITE the verdict into the wrong project's database.
+    # Scope every lookup to ONE project (COMPOSE_PROJECT_NAME), and refuse when it is unset
+    # and the answer is ambiguous. DRILL_SECRETS_DIR / DRILL_EVIDENCE_DIR (defaults:
+    # ./secrets, docs/evidence/ops) let a scratch project be drilled without touching either.
+    SCOPE=()
+    if [ -n "${COMPOSE_PROJECT_NAME:-}" ]; then
+      SCOPE=(--filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME")
+    fi
+    SECRETS_HOST="${DRILL_SECRETS_DIR:-$ROOT/secrets}"
+    one_of() {
+      local what="$1" list="$2" n
+      n="$(printf '%s\n' "$list" | grep -c . || true)"
+      if [ "$n" -gt 1 ]; then
+        echo "restore-drill: $n candidate $what ($(printf '%s' "$list" | tr '\n' ' ')); set COMPOSE_PROJECT_NAME to the project being drilled" >&2
+        exit 1
+      fi
+      printf '%s' "$list"
+    }
+    BACKUPS_VOLUME="$(one_of volumes "$(docker volume ls "${SCOPE[@]}" --filter label=com.docker.compose.volume=backups --format '{{{{.Name}}')")"
+    BACKEND_NETWORK="$(one_of networks "$(docker network ls "${SCOPE[@]}" --filter label=com.docker.compose.network=backend --format '{{{{.Name}}')")"
     if [ -z "$BACKUPS_VOLUME" ] || [ -z "$BACKEND_NETWORK" ]; then
       echo "restore-drill: backend network or backups volume not found — run 'docker compose up' (or 'create') at least once first" >&2
       exit 1
@@ -401,7 +422,7 @@ restore-drill:
     # Read the password through a container running as root rather than with
     # `cat` on the host: after `just harden-secrets` the host file is 0440
     # owned by uid 70, which the operator deliberately cannot read.
-    PG_PASSWORD="$(docker run --rm --user 0:0 -v "$ROOT/secrets/pg_password:/s:ro" "$ALPINE_DIGEST" cat /s)"
+    PG_PASSWORD="$(docker run --rm --user 0:0 -v "$SECRETS_HOST/pg_password:/s:ro" "$ALPINE_DIGEST" cat /s)"
 
     # Same problem, same solution, for the age identity — and this one bit
     # during a real drill (gate-security-review-2.md, §2.7). The backup image
@@ -475,7 +496,7 @@ restore-drill:
     RESTORED_MIGRATIONS="$(q "$DRILL_DB" personalfi_restore_drill "select coalesce(max(version), '(none)') from schema_migrations" || echo '(schema_migrations not present)')"
     RESTORED_MIGRATIONS="${RESTORED_MIGRATIONS:-(schema_migrations not present)}"
 
-    LIVE_DB_CONTAINER="$(docker ps --filter label=com.docker.compose.service=db --format '{{{{.Names}}' | head -1)"
+    LIVE_DB_CONTAINER="$(one_of 'live db containers' "$(docker ps "${SCOPE[@]}" --filter label=com.docker.compose.service=db --format '{{{{.Names}}')")"
     if [ -n "$LIVE_DB_CONTAINER" ]; then
       LIVE_TABLES="$(q "$LIVE_DB_CONTAINER" personalfi "select count(*) from information_schema.tables where table_schema = 'public'" || echo 0)"
       LIVE_TABLES="${LIVE_TABLES:-0}"
@@ -521,7 +542,7 @@ restore-drill:
         -e AUTH_RP_ID="${PUBLIC_HOST:-personalfi.lan}" \
         -e AUTH_ALLOWED_ORIGINS="https://${PUBLIC_HOST:-personalfi.lan}" \
         -v "$SCRATCH_SECRETS/database_url:/run/secrets/database_url:ro" \
-        -v "$ROOT/secrets/master_key:/run/secrets/master_key:ro" \
+        -v "$SECRETS_HOST/master_key:/run/secrets/master_key:ro" \
         "${REGISTRY:-personalfi}/api:${PERSONALFI_VERSION:-dev}" >/dev/null
       API_READY="fail"
       for _ in $(seq 1 30); do
@@ -564,7 +585,7 @@ restore-drill:
       echo "restore-drill: no live db container found; ops_restore_drills not written" >&2
     fi
 
-    mkdir -p "$ROOT/docs/evidence/ops"
+    mkdir -p "$(dirname "$EVIDENCE")"
     {
       echo "# Restore drill — $DATE"
       echo
