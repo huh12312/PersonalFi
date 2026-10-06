@@ -12,6 +12,16 @@ export SECRETS_DIR := env_var_or_default("SECRETS_DIR", justfile_directory() / "
 # (RUNBOOK "Upgrade"). The recipe body is the package's own file.
 import 'scripts/upgrade-test/upgrade.just'
 
+# WP 9.4 (CF-4). Never overwrites; refuses a missing required secret; `just upgrade` runs it.
+# Create every optional secret compose.yml declares, empty, if it is missing
+secrets-placeholders *args:
+    bash scripts/secrets-placeholders.sh {{args}}
+
+# WP 9.4. path: direct | chain | s1-no-placeholders | s2-no-premigrate | s3-no-newer-check
+# The unattended-upgrade test: v0.1 installed cold, then this checkout by `just upgrade` alone
+upgrade-test path="direct" *args:
+    bash scripts/upgrade-test/run.sh --path {{path}} {{args}}
+
 _default:
     @just --list
 

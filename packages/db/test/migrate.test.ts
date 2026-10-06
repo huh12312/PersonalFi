@@ -473,6 +473,15 @@ describeWithDb('runMigrations', () => {
       //   max migration, rto_seconds). No user_id: a backup is a fact about the
       //   deployment, not a holder; GET /ops/backup-status reads both (CF-17,
       //   D24, 09 §5.7). WP 9.1; references no other table (09 §4).
+      // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
+      //   chain, the HEAD restore drill): 0022's
+      //   plan_scenario_levers_are_well_formed called
+      //   plan_amount_json_is_well_formed unqualified, and pg_restore runs
+      //   with an empty search_path, so no backup holding a plan_scenarios row
+      //   restored from 0022 to 0036. CREATE OR REPLACE with the inner calls
+      //   schema-qualified; expand-only. Regression:
+      //   test/restore-search-path.test.ts. The orchestrator's (0040 was the
+      //   plan's spare); 0037 (reserved for 9.3) went unused.
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',

@@ -299,7 +299,14 @@ services:
       test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://127.0.0.1:8080/health']
       interval: 30s
       timeout: 3s
-      start_period: 10s
+      # WP 9.4 (wp9.4-upgrade.md §9 item 4): the api boots in ~24 s at HEAD (the
+      # KEK derivation), past the old 10 s start period, after which Docker
+      # probed only every `interval` — so `up --wait` (and `just upgrade`)
+      # reported healthy 5–7 s after /ready first answered. Probing every
+      # second for the first minute reports readiness when it happens. A
+      # failure inside start_period does not count toward `retries`.
+      start_period: 60s
+      start_interval: 1s
       retries: 3
     deploy:
       resources: { limits: { cpus: '0.50', memory: 128M } }
