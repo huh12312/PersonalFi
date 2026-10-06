@@ -464,6 +464,15 @@ describeWithDb('runMigrations', () => {
       //   `securities_user_id_id_uniq (user_id, id)` so a row can never name
       //   another user's security; applied twice for idempotency, the
       //   cross-user merge sabotage red (wp5.13-carry-overs.md §3).
+      // 0035_account_overrides: one @ctx/ledger table — account_overrides (the
+      //   holder's overlay on an account: tax_treatment TAXABLE | TAX_DEFERRED |
+      //   ROTH | HSA, role spending | savings | taxable | tax_deferred | tax_free |
+      //   liability, valuation holdings | balance; one row per (user, account),
+      //   present exactly when at least one field is set —
+      //   account_overrides_not_empty). Composite FK (user_id, account_id) →
+      //   accounts (user_id, id), which needs the one additive UNIQUE
+      //   accounts_user_id_id_uniq it adds on accounts (0025/0026 convention, C-14).
+      //   CF-16, O-2. WP 9.2; expand-only; references only 0001/0004 objects (09 §4).
       // 0036_ops_status: two install-wide @core/platform tables — ops_backup_runs
       //   (one row per backup.sh attempt: status ok/fail, finished_at,
       //   plaintext_bytes, toc_entries, reason; best-effort insert because WP
@@ -484,6 +493,7 @@ describeWithDb('runMigrations', () => {
       //   plan's spare); 0037 (reserved for 9.3) went unused.
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
+        'account_overrides',
         'accounts',
         'advisor_payload_approvals',
         'advisor_run_payloads',

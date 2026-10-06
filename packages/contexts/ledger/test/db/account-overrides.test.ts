@@ -390,7 +390,9 @@ describe.skipIf(NO_DATABASE)(
        WHERE conrelid = 'account_overrides'::regclass AND contype = 'c'
     `);
       const valuesIn = (column: string): string[] => {
-        const def = result.rows.map((row) => row.def).find((text) => text.includes(`${column} = ANY`));
+        const def = result.rows
+          .map((row) => row.def)
+          .find((text) => text.includes(`${column} = ANY`));
         if (def === undefined) throw new Error(`no CHECK on ${column}`);
         return [...def.matchAll(/'([A-Za-z_]+)'::text/gu)].map((match) => match[1] as string);
       };

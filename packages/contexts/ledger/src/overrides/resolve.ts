@@ -93,9 +93,7 @@ export function resolveAccountOverlay(input: {
  * for "nothing set anywhere" so a holder who has never used overrides digests
  * exactly as before this feature existed.
  */
-export function overrideFingerprint(
-  overrides: readonly AccountOverride[],
-):
+export function overrideFingerprint(overrides: readonly AccountOverride[]):
   | readonly {
       accountId: string;
       taxTreatment: string | null;
