@@ -16,6 +16,12 @@
 upgrade:
     #!/usr/bin/env bash
     set -euo pipefail
+    # This recipe lives in an imported file. just < 1.3x runs an imported recipe
+    # from the IMPORTED file's directory (1.21, Ubuntu 24.04's package: the
+    # first runner run failed `bash: scripts/secrets-placeholders.sh: No such
+    # file`), newer versions from the root's. justfile_directory() is the root
+    # justfile's directory in both, so this line makes the two agree.
+    cd "{{justfile_directory()}}"
     echo "upgrade: $(git rev-parse --short HEAD 2>/dev/null || echo 'this checkout') as ${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}, images ${REGISTRY:-personalfi}/*:${PERSONALFI_VERSION:-dev}"
     bash scripts/secrets-placeholders.sh
     docker compose build
