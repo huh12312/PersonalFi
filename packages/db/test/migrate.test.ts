@@ -77,11 +77,19 @@ describe('migration files', () => {
     // configuration looked like at a given boot. Adding to this set should feel
     // like a decision — if a table holds anything Chris entered or a provider
     // returned, it carries `user_id`.
+    //
+    // WP 9.1 (0036) adds two more deployment facts: when the last backup ran
+    // and how the last restore drill went. Neither holds anything a holder
+    // entered or a provider returned (status, sizes, counts, a verdict, an
+    // RTO), and `GET /ops/backup-status` returns the same answer to every
+    // session on purpose (`@core/platform` OWNERSHIP.md).
     const exempt = new Set([
       'schema_migrations',
       'users',
       'event_consumer_offsets',
       'config_snapshots',
+      'ops_backup_runs',
+      'ops_restore_drills',
     ]);
     for (const file of readMigrationFiles()) {
       const statements = ddlOf(file.sql)
@@ -456,6 +464,15 @@ describeWithDb('runMigrations', () => {
       //   `securities_user_id_id_uniq (user_id, id)` so a row can never name
       //   another user's security; applied twice for idempotency, the
       //   cross-user merge sabotage red (wp5.13-carry-overs.md §3).
+      // 0036_ops_status: two install-wide @core/platform tables — ops_backup_runs
+      //   (one row per backup.sh attempt: status ok/fail, finished_at,
+      //   plaintext_bytes, toc_entries, reason; best-effort insert because WP
+      //   9.4's pre-migration backup runs against older schemas where the table
+      //   does not exist) and ops_restore_drills (one row per `just
+      //   restore-drill`: verdict pass/fail, restored and live table counts,
+      //   max migration, rto_seconds). No user_id: a backup is a fact about the
+      //   deployment, not a holder; GET /ops/backup-status reads both (CF-17,
+      //   D24, 09 §5.7). WP 9.1; references no other table (09 §4).
       expect(rows.map((row) => row.table_name)).toEqual([
         'account_balances',
         'accounts',
@@ -514,6 +531,8 @@ describeWithDb('runMigrations', () => {
         'notification_channels',
         'notification_outbox',
         'notification_rules',
+        'ops_backup_runs',
+        'ops_restore_drills',
         'plan_assumptions',
         'plan_life_events',
         'plan_scenarios',

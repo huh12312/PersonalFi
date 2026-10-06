@@ -8,6 +8,10 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 export DATABASE_URL := env_var_or_default("DATABASE_URL", "postgres://personalfi:personalfi@127.0.0.1:5433/personalfi_dev")
 export SECRETS_DIR := env_var_or_default("SECRETS_DIR", justfile_directory() / "secrets")
 
+# WP 9.4 (09 §4 batch 9): `just upgrade` — the one documented upgrade step
+# (RUNBOOK "Upgrade"). The recipe body is the package's own file.
+import 'scripts/upgrade-test/upgrade.just'
+
 _default:
     @just --list
 

@@ -56,6 +56,7 @@ import { investmentRoutes } from './routes/investments.ts';
 import { marketDataRoutes } from './routes/market-data.ts';
 import { netWorthRoutes } from './routes/net-worth.ts';
 import { notificationRoutes } from './routes/notifications.ts';
+import { opsRoutes } from './routes/ops.ts';
 import { plaidRoutes } from './routes/plaid.ts';
 import { planRoutes } from './routes/plan.ts';
 import { priceRoutes } from './routes/prices.ts';
@@ -587,6 +588,10 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   // process (`scripts/check-proxy-routes.ts`).
   await app.register(briefRoutes(deps));
   await app.register(advisorRunRoutes(deps));
+  // WP 9.1 (09 §4 batch 3, W-A): `GET /ops/backup-status` — install-wide
+  // backup and restore-drill status from `@core/platform`'s ops tables
+  // (0036). Session only; nothing in the answer is a holder's.
+  await app.register(opsRoutes(deps));
 
   /**
    * Idempotent repair pass for every user that already exists (condition D-6,
