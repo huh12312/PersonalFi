@@ -6,7 +6,12 @@
 # matching the server's major version), age (encryption), rclone (optional
 # remote push to Backblaze B2 or S3). No Node, no application code.
 
-ARG ALPINE_IMAGE=alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+# Base digest bumped 2026-10-06 to 3.24.2 (F-94-8): the 3.24.1 base's index no
+# longer served the pinned openssl build, and 3.5.7-r0 carries CVE-2026-14456
+# (HIGH). This base ships libssl3/libcrypto3 3.5.8-r0 already, so those two
+# pins below are satisfied by the installed packages and cannot expire while
+# this digest is pinned; `age` and `tzdata` are index-fetched and can.
+ARG ALPINE_IMAGE=alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 FROM ${ALPINE_IMAGE} AS runtime
 
@@ -19,9 +24,10 @@ FROM ${ALPINE_IMAGE} AS runtime
 # current version if a rebuild fails here after an index update.
 #
 # Bumped 2026-10-06 (WP 9.4 F-94-8): the first upgrade-test run on a clean
-# GitHub runner could not build this image — Alpine's index had moved past
-# age 1.3.1-r6 / tzdata 2026d / libssl3+libcrypto3 3.5.8-r0 and serves only the
-# versions below. CI's own image job had not noticed because its GHA layer
+# GitHub runner could not build this image — the 3.24.1 base's index had
+# moved past age 1.3.1-r6 / tzdata 2026d and did not serve openssl 3.5.8-r0
+# either (only 3.5.7-r0, which trivy flags): hence the base digest bump above
+# and the versions below. CI's own image job had not noticed because its GHA layer
 # cache still held the old `apk add` layer; a fresh host (a stranger's
 # install, a production clone's first `just upgrade`) would have failed the
 # same way. The pin policy itself is the Phase 9 security review's to re-rule
@@ -33,8 +39,8 @@ RUN apk add --no-cache \
       age=1.3.2-r0 \
       rclone=1.74.1-r2 \
       tzdata=2026e-r0 \
-      libssl3=3.5.7-r0 \
-      libcrypto3=3.5.7-r0 && \
+      libssl3=3.5.8-r0 \
+      libcrypto3=3.5.8-r0 && \
     addgroup -g 10002 -S backup && \
     adduser -u 10002 -S -G backup -H -D -s /sbin/nologin backup && \
     mkdir -p /backups && chown 10002:10002 /backups

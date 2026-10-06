@@ -19,7 +19,7 @@ secrets-placeholders *args:
 
 # WP 9.4. path: direct | chain | s1-no-placeholders | s2-no-premigrate | s3-no-newer-check
 # The unattended-upgrade test: v0.1 installed cold, then this checkout by `just upgrade` alone
-upgrade-test path="direct" *args:
+upgrade-test path="direct" *args="":
     bash scripts/upgrade-test/run.sh --path {{path}} {{args}}
 
 _default:
