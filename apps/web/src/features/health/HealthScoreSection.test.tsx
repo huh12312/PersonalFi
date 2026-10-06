@@ -10,7 +10,7 @@ import {
   type FetchRoute,
 } from '../../test-support/api-test-utils.ts';
 import { HealthScoreSection } from './HealthScoreSection.tsx';
-import type { HealthScoreResult } from './types.ts';
+import type { HealthScore as HealthScoreResult } from '../../api/generated/types.gen.ts';
 
 function renderSection() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

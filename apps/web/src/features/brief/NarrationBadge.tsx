@@ -36,7 +36,8 @@ export function NarratedSummary({ templateSummaryMd, narration }: NarratedSummar
       <div className="mt-1">
         <p className="text-small text-text-secondary">{text}</p>
         <div className="mt-1 flex items-center gap-2">
-          <Badge variant="accent" icon={<Bot size={12} aria-hidden="true" />}>
+          {/* `neutral`, not `accent`: the accent badge is 4.28:1 in the dark theme (axe, WCAG AA 4.5:1) — a shared Badge token, handed to 9.8. */}
+          <Badge variant="neutral" icon={<Bot size={12} aria-hidden="true" />}>
             AI-assisted wording
           </Badge>
           <button

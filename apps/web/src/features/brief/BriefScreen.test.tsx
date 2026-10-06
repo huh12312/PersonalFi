@@ -79,6 +79,8 @@ function buildItem(overrides: Partial<BriefItem> & Pick<BriefItem, 'id'>): Brief
     ],
     score: 50400,
     retirementEffect: COMPUTED_EFFECT,
+    primaryAction: null,
+    narration: { status: 'none', aiAssisted: false, textShown: false, summaryMd: null },
     ...overrides,
   };
 }
@@ -208,7 +210,7 @@ describe('BriefScreen', () => {
     const narrated = {
       ...buildItem({ id: '1' }),
       narration: {
-        status: 'narrated',
+        status: 'narrated' as const,
         aiAssisted: true,
         textShown: true,
         summaryMd: 'Fee hunter found $720 you could get back this year.',
@@ -236,7 +238,12 @@ describe('BriefScreen', () => {
   it('R-2: a narrated item whose text the deployment withholds shows the built-in wording and says so', async () => {
     const withheld = {
       ...buildItem({ id: '1' }),
-      narration: { status: 'narrated', aiAssisted: true, textShown: false, summaryMd: null },
+      narration: {
+        status: 'narrated' as const,
+        aiAssisted: true,
+        textShown: false,
+        summaryMd: null,
+      },
     };
     stubFetchRoutes([briefRoute(buildBrief({ items: [withheld] })), healthScoreNotComputedRoute()]);
 
@@ -255,7 +262,12 @@ describe('BriefScreen', () => {
   it('a narration that is expected but has not arrived says it may follow', async () => {
     const pending = {
       ...buildItem({ id: '1' }),
-      narration: { status: 'pending', aiAssisted: false, textShown: true, summaryMd: null },
+      narration: {
+        status: 'pending' as const,
+        aiAssisted: false,
+        textShown: true,
+        summaryMd: null,
+      },
     };
     stubFetchRoutes([briefRoute(buildBrief({ items: [pending] })), healthScoreNotComputedRoute()]);
 
@@ -269,7 +281,7 @@ describe('BriefScreen', () => {
     const recorded = {
       ...buildItem({ id: '1' }),
       primaryAction: {
-        kind: 'open_url',
+        kind: 'open_url' as const,
         label: 'Open the fee-free account page',
         rationaleMd: 'Moves the fees away.',
         url: 'https://example.com/accounts',

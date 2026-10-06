@@ -1174,20 +1174,28 @@ in before it notices the socket closed. The Phase 5 gate measured `ollama` at ab
 38 s after a level-4 cancel (after levels 1–3 it dropped within 4 s). The cost is CPU and a queued next
 request, never a write. If you need the model idle now, `docker compose stop ollama` (below).
 
-Levels 2–4 each have a route (WP 5.10) and a control on the advisor-management screen (WP 5.12): the
-per-advisor switch (level 3), the local-model kind switch (level 2 — write-only, the screen cannot read
-it back) and "Cancel this run" in the run inspector (level 4). **Level 1's user half, the
-`module.insights` flag, still has no screen** (G5-14, WP 9.6); use the SQL below. The database commands
-below use `psql` on the production stack (`docker compose exec db psql -U personalfi -d personalfi`)
-only where no route covers the case — level 3's breaker-driven quarantine is read-only from SQL.
+Every level has a route and a control on the advisor-management screen (`/settings/advisors`; WP 5.12,
+completed by WP 9.6): level 1's two halves and its holder switch at the top of the screen (G5-14), the
+local-model kind switch (level 2), the per-advisor switch (level 3) and "Cancel this run" in the run
+inspector (level 4). Levels 1 and 2 **read back their real state**, in words, from
+`GET /advisors/module/enabled` and `GET /advisors/kinds/local_model/enabled` — the screen no longer
+shows only the last write. The holder's switches (levels 1–4) need a fresh passkey assertion; level 1's
+operator half (`ADVISORS_ENABLED`) is shown on the screen but only a change to `.env` and a restart
+moves it. The database commands below use `psql` on the production stack
+(`docker compose exec db psql -U personalfi -d personalfi`) only as a fallback when the app itself is
+unreachable, or where no route covers the case — level 3's breaker-driven quarantine is read-only from
+SQL.
 
 **Level 1 — everything off.**
 
 - Operator, whole deployment: set `ADVISORS_ENABLED=false` in `.env`, then
   `docker compose up -d api worker`. The restart ends any in-flight run with its process; nothing runs
   again until it is `true`.
-- User, this account: turn the module flag off. Takes effect **within one second** on a run in flight —
-  flags are read uncached on the run path.
+- User, this account: the **Insights module** switch at the top of Settings → Advisor management
+  (passkey step-up), or `PUT /advisors/module/enabled` `{"enabled": false}`. Takes effect **within one
+  second** on a run in flight — flags are read uncached on the run path. `GET /advisors/module/enabled`
+  (and the screen) report both halves and whether advisors are effectively on. The SQL is only the
+  fallback for an unreachable app:
   ```sql
   INSERT INTO feature_flags (user_id, key, enabled)
   SELECT id, 'module.insights', false FROM users
@@ -1198,9 +1206,12 @@ only where no route covers the case — level 3's breaker-driven quarantine is r
 
 **Level 2 — every local model off** (the built-in rules keep running).
 
-- User: `PUT /advisors/kinds/local_model/enabled` `{"enabled": false}` (step-up). It ships `false`. The
-  route only accepts a kind with a declared flag — today that is `local_model` alone — and answers 404
-  `insights.kind_flag_not_found` for any other.
+- User: the local-model kind switch on the same screen, or `PUT /advisors/kinds/local_model/enabled`
+  `{"enabled": false}` (step-up). It ships `false`. The route only accepts a kind with a declared flag —
+  today that is `local_model` alone — and answers 404 `insights.kind_flag_not_found` for any other.
+  `GET /advisors/kinds/local_model/enabled` answers `{enabled, configured, effective}`: the flag, whether
+  this deployment has a model configured (`LOCAL_MODEL_PIN_NAME` and `LOCAL_MODEL_PIN_DIGEST` on the api,
+  which compose takes from `LOCAL_MODEL_NAME` and `LOCAL_MODEL_DIGEST`), and both together.
 - Operator: leave `LOCAL_MODEL_ENDPOINT` empty. With no endpoint no local advisor is registered, and the
   kind is off whatever its flag says.
 

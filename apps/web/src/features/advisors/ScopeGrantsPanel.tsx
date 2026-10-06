@@ -5,6 +5,7 @@ import { useState } from 'react';
 import {
   getAdvisorScopesOptions,
   getAdvisorScopesQueryKey,
+  listAdvisorGrantEventsQueryKey,
   listAdvisorsQueryKey,
   putAdvisorGrantsMutation,
 } from '../../api/generated/@tanstack/react-query.gen.ts';
@@ -13,6 +14,7 @@ import { Badge } from '../../components/ui/badge.tsx';
 import { Button } from '../../components/ui/button.tsx';
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { useStepUpRetry } from '../../lib/step-up.ts';
+import { GrantHistory } from './GrantHistory.tsx';
 
 export interface ScopeGrantsPanelProps {
   advisorId: string;
@@ -46,6 +48,19 @@ function problemDetail(error: unknown): string | null {
  * selecting it sets `perRunConsent: true` on the request, which is what the
  * route's 422 `insights.per_run_consent_required` demands before it will
  * store such a grant at all (wp5.1-run-control.md §8 G4-22).
+ *
+ * **What the advisor actually asks for (G5-3, WP 9.6).** Each scope says
+ * whether this advisor's manifest requests it. The gate found the narrator's
+ * panel offering 18 scopes for 13 asked, so "grant" was being said of data the
+ * advisor would never receive. For a local-model or external advisor a scope it
+ * does not request cannot be newly granted (the route refuses it, 422
+ * `insights.scope_not_requested`), so its box is disabled and says why; a
+ * scope already granted stays revocable. For a built-in the box stays usable,
+ * the row says "not requested", and a save that granted such a scope says so
+ * in the result line.
+ *
+ * **The history (O-9).** Below the list, every grant, revoke and re-grant this
+ * advisor has had, with the sign-in session that authorised it.
  */
 export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
   const scopesQuery = useQuery(getAdvisorScopesOptions({ path: { advisorId } }));
@@ -57,9 +72,17 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
   const [lastResult, setLastResult] = useState<{
     granted: readonly string[];
     revoked: readonly string[];
+    notRequested: readonly string[];
   } | null>(null);
 
   const scopes: readonly AdvisorScopeDefinition[] = scopesQuery.data?.scopes ?? [];
+  const advisorKind = scopesQuery.data?.kind;
+  const requestedCount = scopes.filter((scope) => scope.requested).length;
+
+  /** A local-model or external advisor is never newly granted a scope it does not request (the route's 422). */
+  function isLocked(scope: AdvisorScopeDefinition): boolean {
+    return advisorKind !== 'builtin' && !scope.requested && !scope.granted;
+  }
   // Sensitivity order, least sensitive first — the order the dispatch
   // names explicitly. The route already returns them in this order
   // (`getAdvisorScopesOptions`'s own doc comment); sorting again is
@@ -81,6 +104,9 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
     void queryClient.invalidateQueries({
       queryKey: getAdvisorScopesQueryKey({ path: { advisorId } }),
     });
+    void queryClient.invalidateQueries({
+      queryKey: listAdvisorGrantEventsQueryKey({ path: { advisorId } }),
+    });
     void queryClient.invalidateQueries({ queryKey: listAdvisorsQueryKey() });
   }
 
@@ -98,7 +124,11 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
           },
         }),
       );
-      setLastResult({ granted: result.granted, revoked: result.revoked });
+      setLastResult({
+        granted: result.granted,
+        revoked: result.revoked,
+        notRequested: result.notRequested,
+      });
       invalidate();
     } catch (cause) {
       const detail = problemDetail(cause);
@@ -123,6 +153,10 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
         from least to most sensitive. Checking a box only changes what is <em>stored as granted</em>
         ; the step-up prompt appears when you save.
       </p>
+      <p className="text-small text-text-muted" data-testid="requested-summary">
+        This advisor requests {String(requestedCount)} of the {String(scopes.length)} scopes listed.
+        A scope it does not request is never read, whatever is granted.
+      </p>
       <ul className="flex flex-col gap-2">
         {orderedScopes.map((scope) => (
           <li
@@ -139,6 +173,7 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
                   onChange={(event) =>
                     setSelected((prev) => ({ ...prev, [scope.scope]: event.target.checked }))
                   }
+                  disabled={isLocked(scope)}
                   aria-label={`Grant ${scope.scope}`}
                 />
                 <span>
@@ -152,6 +187,17 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
               </label>
               <Badge variant="neutral">Sensitivity {scope.sensitivity}</Badge>
             </div>
+            <p
+              className="mt-1 text-caption text-text-secondary"
+              data-testid="scope-requested"
+              data-requested={scope.requested ? 'true' : 'false'}
+            >
+              {scope.requested
+                ? 'Requested by this advisor.'
+                : isLocked(scope)
+                  ? 'Not requested by this advisor, so it cannot be granted: it would never receive this data.'
+                  : 'Not requested by this advisor: it never reads this scope, whatever is granted.'}
+            </p>
             <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-small">
               <dt className="text-text-muted">Yields</dt>
               <dd className="text-text-secondary">{scope.yields}</dd>
@@ -176,6 +222,15 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
         <p className="text-small text-text-secondary" role="status">
           Granted: {lastResult.granted.length === 0 ? 'none' : lastResult.granted.join(', ')}.
           Revoked: {lastResult.revoked.length === 0 ? 'none' : lastResult.revoked.join(', ')}.
+          {lastResult.notRequested.length > 0 && (
+            <>
+              {' '}
+              <span data-testid="not-requested-flag">
+                Granted, but this advisor does not request {lastResult.notRequested.join(', ')}, so
+                it will never read {lastResult.notRequested.length === 1 ? 'it' : 'them'}.
+              </span>
+            </>
+          )}
         </p>
       )}
 
@@ -184,6 +239,8 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
           {stepUp.busy || grantMutation.isPending ? 'Saving…' : 'Save grants'}
         </Button>
       </div>
+
+      <GrantHistory advisorId={advisorId} />
     </div>
   );
 }

@@ -126,6 +126,30 @@ interface Store {
   approved: boolean;
   liveStatus: string;
   liveCancelReason: string | null;
+  /** Level 1: the operator's `ADVISORS_ENABLED` (read-only here) and the holder's `module.insights`. */
+  advisorsEnabled: boolean;
+  moduleEnabled: boolean;
+  /** Level 2: the `advisors.kind.local_model` flag, and whether the deployment has a model configured. */
+  kindEnabled: boolean;
+  modelConfigured: boolean;
+  grantEvents: Record<string, unknown>[];
+}
+
+function moduleState(store: Store) {
+  return {
+    operator: { advisorsEnabled: store.advisorsEnabled },
+    user: { enabled: store.moduleEnabled },
+    effective: store.advisorsEnabled && store.moduleEnabled,
+  };
+}
+
+function kindState(store: Store) {
+  return {
+    kind: 'local_model',
+    enabled: store.kindEnabled,
+    configured: store.modelConfigured,
+    effective: store.kindEnabled && store.modelConfigured,
+  };
 }
 
 function scopesFor(store: Store) {
@@ -140,6 +164,7 @@ function scopesFor(store: Store) {
       requiresPerRunConsent: false,
       sourcedInPhase2: true,
       granted: store.grantedScopes.has('cash.summary'),
+      requested: true,
     },
     {
       scope: 'transactions.raw',
@@ -151,6 +176,20 @@ function scopesFor(store: Store) {
       requiresPerRunConsent: true,
       sourcedInPhase2: false,
       granted: store.grantedScopes.has('transactions.raw'),
+      requested: true,
+    },
+    {
+      scope: 'risk.profile',
+      sensitivity: 5,
+      key: 'risk.profile',
+      yields: 'The holder’s own risk-tolerance answers.',
+      drops: 'No account or transaction data.',
+      externalAllowed: false,
+      requiresPerRunConsent: false,
+      sourcedInPhase2: true,
+      granted: store.grantedScopes.has('risk.profile'),
+      // G5-3: the narrator never asks for this scope, so it cannot be granted.
+      requested: false,
     },
   ] as const;
 }
@@ -235,6 +274,11 @@ async function installAdvisorMocks(page: Page, state: { steppedUp: boolean }): P
     approved: false,
     liveStatus: 'started',
     liveCancelReason: null,
+    advisorsEnabled: true,
+    moduleEnabled: false,
+    kindEnabled: true,
+    modelConfigured: false,
+    grantEvents: [],
   };
 
   await page.route('**/*', async (route: Route) => {
@@ -288,7 +332,11 @@ async function installAdvisorMocks(page: Page, state: { steppedUp: boolean }): P
       store.grantedScopes = new Set(body.scopes);
       const granted = body.scopes.filter((s) => !before.has(s));
       const revoked = [...before].filter((s) => !store.grantedScopes.has(s));
-      return json({ advisorId: ADVISOR_ID, granted, revoked });
+      return json({ advisorId: ADVISOR_ID, granted, revoked, notRequested: [] });
+    }
+
+    if (path === `/api/advisors/${ADVISOR_ID}/grant-events` && method === 'GET') {
+      return json({ advisorId: ADVISOR_ID, events: store.grantEvents });
     }
 
     if (path === `/api/advisors/${ADVISOR_ID}/payload-preview` && method === 'GET') {
@@ -355,10 +403,26 @@ async function installAdvisorMocks(page: Page, state: { steppedUp: boolean }): P
       return json({ runId: 'run_live', outcome: 'requested' });
     }
 
+    if (path === '/api/advisors/kinds/local_model/enabled' && method === 'GET') {
+      return json(kindState(store));
+    }
+
     if (path === '/api/advisors/kinds/local_model/enabled' && method === 'PUT') {
       if (!state.steppedUp) return stepUpRequired();
       const body = request.postDataJSON() as { enabled: boolean };
+      store.kindEnabled = body.enabled;
       return json({ kind: 'local_model', enabled: body.enabled });
+    }
+
+    if (path === '/api/advisors/module/enabled' && method === 'GET') {
+      return json(moduleState(store));
+    }
+
+    if (path === '/api/advisors/module/enabled' && method === 'PUT') {
+      if (!state.steppedUp) return stepUpRequired();
+      const body = request.postDataJSON() as { enabled: boolean };
+      store.moduleEnabled = body.enabled;
+      return json(moduleState(store));
     }
 
     return route.fallback();
@@ -384,7 +448,7 @@ test('granting a scope shows what it yields and what it drops before the step-up
   await openAdvisorDetail(page);
 
   const scopeRows = page.getByTestId('scope-row');
-  await expect(scopeRows).toHaveCount(2);
+  await expect(scopeRows).toHaveCount(3);
 
   // Rendered on mount, before any grant action — no checkbox has been
   // clicked and no step-up has happened yet (the sabotage this proves
@@ -458,6 +522,73 @@ test('an in-flight local-model run can be cancelled from the inspector', async (
   await expect(page.getByTestId('run-detail')).toContainText('cancelled');
   await expect(page.getByTestId('cancellation-level')).toContainText('Level 4 (this run)');
   await expect(page.getByTestId('cancel-run-button')).toHaveCount(0);
+});
+
+test('levels 1 and 2 show their real state in words', async ({ page }) => {
+  await installFakeWebAuthnAssertion(page);
+  const state = await installApiMocks(page);
+  await installAdvisorMocks(page, state);
+
+  await login(page);
+  await openAdvisorManagement(page);
+
+  // Read from the api, not guessed: the holder's module flag is OFF and the
+  // kind flag is ON with no model configured — neither is "the last write".
+  const moduleWords = page.getByTestId('module-state-words');
+  await expect(moduleWords).toContainText(
+    'Level 1 is off, so no advisor runs: you have switched the insights module off',
+  );
+  await expect(moduleWords).not.toContainText('ADVISORS_ENABLED is false');
+  const moduleSwitch = page.getByRole('switch', { name: /Insights module/ });
+  await expect(moduleSwitch).not.toBeChecked();
+
+  const kindWords = page.getByTestId('kind-state-words');
+  await expect(kindWords).toContainText('Level 2 is on but nothing can run');
+  await expect(kindWords).toContainText('no model configured');
+
+  // The holder's half of level 1 turns on from the screen (a step-up), and
+  // the words are re-read from the api afterwards.
+  await moduleSwitch.click();
+  await expect(moduleWords).toContainText('Level 1 is on: the operator allows advisors');
+  await expect(moduleSwitch).toBeChecked();
+
+  await page.getByRole('button', { name: 'Disable local_model' }).click();
+  await expect(kindWords).toContainText('Level 2 is off: the local_model flag is off');
+});
+
+test('the consent screen marks which scopes the advisor requests, and shows the history', async ({
+  page,
+}) => {
+  await installFakeWebAuthnAssertion(page);
+  const state = await installApiMocks(page);
+  const store = await installAdvisorMocks(page, state);
+  store.grantEvents = [
+    {
+      id: '00000000-0000-4000-8000-000000000001',
+      advisorId: ADVISOR_ID,
+      scope: 'cash.summary',
+      event: 'granted',
+      perRunConsent: false,
+      stepUpSessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      occurredAt: '2026-06-01T06:00:00.000Z',
+    },
+  ];
+
+  await login(page);
+  await openAdvisorManagement(page);
+  await openAdvisorDetail(page);
+
+  await expect(page.getByTestId('requested-summary')).toContainText(
+    'requests 2 of the 3 scopes listed',
+  );
+  const unrequested = page.getByTestId('scope-row').filter({ hasText: 'risk.profile' });
+  await expect(unrequested.getByTestId('scope-requested')).toContainText(
+    'Not requested by this advisor',
+  );
+  await expect(unrequested.getByRole('checkbox')).toBeDisabled();
+
+  await expect(page.getByTestId('grant-event')).toContainText('Granted cash.summary — ');
+  await expect(page.getByTestId('grant-event')).toContainText('sign-in session aaaaaaaa');
 });
 
 test('the advisor management screen is axe clean in both themes', async ({ page }) => {

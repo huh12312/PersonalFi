@@ -112,6 +112,9 @@ function briefItem(overrides: Record<string, unknown> & { id: string }): Record<
     ],
     score: 50400,
     retirementEffect: COMPUTED_EFFECT,
+    // WP 9.6 items 3 and 4: the two fields the response now carries on every item.
+    primaryAction: null,
+    narration: { status: 'none', aiAssisted: false, textShown: false, summaryMd: null },
     ...overrides,
   };
 }
@@ -340,15 +343,22 @@ test.describe('Brief screen (WP 5.11)', () => {
     await shoot(page, evidenceDir, 'five-cards');
   });
 
-  test('a narrated item shows the AI-assisted badge and the template text is one click away', async ({
+  test('the AI-assisted badge appears from the real response shape', async ({
     page,
     evidenceDir,
   }) => {
     await installFakeWebAuthnAssertion(page);
-    const narrated = {
-      ...briefItem({ id: '1' }),
-      narration: { narratedSummaryMd: 'Fee hunter found $720 you could get back this year.' },
-    };
+    // The api's actual shape (WP 9.6 item 3): status, the badge flag, whether
+    // this deployment shows narration text, and the text itself.
+    const narrated = briefItem({
+      id: '1',
+      narration: {
+        status: 'narrated',
+        aiAssisted: true,
+        textShown: true,
+        summaryMd: 'Fee hunter found $720 you could get back this year.',
+      },
+    });
     await installBriefMocks(page, { brief: buildBrief({ items: [narrated] }) });
     await loginAndReachBrief(page);
 
@@ -366,6 +376,51 @@ test.describe('Brief screen (WP 5.11)', () => {
     );
 
     await shoot(page, evidenceDir, 'narration-badge');
+  });
+
+  test('while the deployment withholds narration text (R-2) the built-in wording stays and the page says so', async ({
+    page,
+  }) => {
+    await installFakeWebAuthnAssertion(page);
+    const withheld = briefItem({
+      id: '1',
+      narration: { status: 'narrated', aiAssisted: true, textShown: false, summaryMd: null },
+    });
+    await installBriefMocks(page, { brief: buildBrief({ items: [withheld] }) });
+    await loginAndReachBrief(page);
+
+    await expect(
+      page.getByText('You paid $720 in avoidable fees over the last twelve months.'),
+    ).toBeVisible();
+    await expect(page.getByTestId('narration-withheld')).toContainText(
+      'exists and is not shown yet',
+    );
+    await expect(page.getByRole('button', { name: 'See the template wording' })).toHaveCount(0);
+  });
+
+  test('a published item shows the action it was published with, and an older Brief says none was recorded (CF-24)', async ({
+    page,
+  }) => {
+    await installFakeWebAuthnAssertion(page);
+    const recorded = briefItem({
+      id: '1',
+      primaryAction: {
+        kind: 'open_url',
+        label: 'Open the fee-free account page',
+        rationaleMd: 'Moves the fees away.',
+        url: 'https://example.com/accounts',
+      },
+    });
+    const older = briefItem({ id: '2', position: 1, primaryAction: null });
+    await installBriefMocks(page, { brief: buildBrief({ items: [recorded, older] }) });
+    await loginAndReachBrief(page);
+
+    const actions = page.getByTestId('brief-item-action');
+    await expect(actions).toHaveCount(2);
+    await expect(actions.nth(0)).toContainText(
+      'Suggested next step: Open the fee-free account page',
+    );
+    await expect(actions.nth(1)).toContainText('No action recorded');
   });
 
   test('a week with nothing material says so plainly', async ({ page, evidenceDir }) => {
@@ -454,7 +509,32 @@ test.describe('Brief screen (WP 5.11)', () => {
     await installBriefMocks(page, {
       brief: buildBrief({
         items: [
-          briefItem({ id: '1' }),
+          // Every state WP 9.6 added to the card, so axe scans each of them in both themes.
+          briefItem({
+            id: '1',
+            narration: {
+              status: 'narrated',
+              aiAssisted: true,
+              textShown: true,
+              summaryMd: 'Fee hunter found $720 you could get back this year.',
+            },
+            primaryAction: {
+              kind: 'open_url',
+              label: 'Open the fee-free account page',
+              rationaleMd: 'Moves the fees away.',
+              url: 'https://example.com/accounts',
+            },
+          }),
+          briefItem({
+            id: 'withheld',
+            position: 1,
+            narration: { status: 'narrated', aiAssisted: true, textShown: false, summaryMd: null },
+          }),
+          briefItem({
+            id: 'pending',
+            position: 2,
+            narration: { status: 'pending', aiAssisted: false, textShown: false, summaryMd: null },
+          }),
           briefItem({
             id: 'attn',
             section: 'attention',

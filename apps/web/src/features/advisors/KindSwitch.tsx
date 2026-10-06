@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: MIT
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { setAdvisorKindEnabledMutation } from '../../api/generated/@tanstack/react-query.gen.ts';
+import {
+  getAdvisorKindEnabledOptions,
+  getAdvisorKindEnabledQueryKey,
+  setAdvisorKindEnabledMutation,
+} from '../../api/generated/@tanstack/react-query.gen.ts';
 import type { Problem } from '../../api/generated/types.gen.ts';
 import { Button } from '../../components/ui/button.tsx';
 import { useStepUpRetry } from '../../lib/step-up.ts';
+import { kindStateWords } from './kill-levels.ts';
 
 export interface KindSwitchProps {
   readonly kind: 'local_model';
@@ -28,28 +33,28 @@ function problemMessage(error: unknown, fallback: string): string {
  * 404s `insights.kind_flag_not_found`, so this component is not offered a
  * `kind` prop wider than that).
  *
- * Deliberately **not** a `Switch`: no route in this build reports this
- * flag's current value to the browser (`kill-levels.ts`'s own
- * `MODULE_LEVEL_WORDS`/`kindLevelWords` doc comment says the same of level
- * 1). A toggle rendered in an "on" or "off" position it never read would be
- * a lie this screen tells about its own state — exactly the kind of
- * never-exercised control the Phase 4 gate went looking for
- * (`docs/evidence/phase-4/gate-security-review.md`). Two explicit buttons
- * and the exact result of the last write instead.
+ * Since WP 9.6 (item 2) the screen shows the state the api reports
+ * (`GET /advisors/kinds/{kind}/enabled`: the flag, whether this deployment has
+ * a model configured, and both together), in words, instead of "the last
+ * write". The two buttons stay buttons, each naming exactly what it sends: a
+ * change is a passkey step-up, and the line above them is re-read from the api
+ * after every write, never assumed. If the read fails the screen says so and
+ * still offers the writes.
  */
 export function KindSwitch({ kind }: KindSwitchProps) {
   const stepUp = useStepUpRetry();
   const mutation = useMutation(setAdvisorKindEnabledMutation());
-  const [lastResult, setLastResult] = useState<{ enabled: boolean } | null>(null);
+  const query = useQuery(getAdvisorKindEnabledOptions({ path: { kind } }));
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
 
   async function set(enabled: boolean): Promise<void> {
     setError(null);
     try {
-      const result = await stepUp.run(() =>
-        mutation.mutateAsync({ path: { kind }, body: { enabled } }),
-      );
-      setLastResult({ enabled: result.enabled });
+      await stepUp.run(() => mutation.mutateAsync({ path: { kind }, body: { enabled } }));
+      await queryClient.invalidateQueries({
+        queryKey: getAdvisorKindEnabledQueryKey({ path: { kind } }),
+      });
     } catch (cause) {
       setError(problemMessage(cause, 'The kind switch could not be changed.'));
     }
@@ -61,11 +66,15 @@ export function KindSwitch({ kind }: KindSwitchProps) {
       data-testid="kind-switch"
     >
       <p className="text-small font-medium text-text-primary">Level 2 — kind: {kind}</p>
-      <p className="text-caption text-text-muted">
-        No route in this build reports this flag&apos;s current value, so this control is
-        write-only: each button names exactly what it will send, and the line below is exactly what
-        the route returned — never a guessed starting position.
-      </p>
+      {query.data !== undefined ? (
+        <p className="text-small text-text-secondary" role="status" data-testid="kind-state-words">
+          {kindStateWords(query.data)}
+        </p>
+      ) : query.isLoading ? null : (
+        <p className="text-small text-status-critical" data-testid="kind-state-error">
+          {problemMessage(query.error, 'This level’s state could not be read.')}
+        </p>
+      )}
       <div className="flex items-center gap-2">
         <Button
           variant="secondary"
@@ -82,11 +91,6 @@ export function KindSwitch({ kind }: KindSwitchProps) {
           Disable {kind}
         </Button>
       </div>
-      {lastResult !== null && (
-        <p className="text-small text-text-secondary" role="status">
-          Last write: {kind} is now {lastResult.enabled ? 'enabled' : 'disabled'}.
-        </p>
-      )}
       {error !== null && <p className="text-small text-status-critical">{error}</p>}
       {stepUp.error !== null && <p className="text-small text-status-critical">{stepUp.error}</p>}
     </div>

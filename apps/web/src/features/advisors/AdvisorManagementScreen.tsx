@@ -15,13 +15,9 @@ import { Switch } from '../../components/ui/switch.tsx';
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { useStepUpRetry } from '../../lib/step-up.ts';
 import { CATALOGUE_GAPS } from '../insights/catalogue-gaps.ts';
-import {
-  advisorLevelWords,
-  kindLevelWords,
-  MODULE_LEVEL_WORDS,
-  runLevelWords,
-} from './kill-levels.ts';
+import { advisorLevelWords, kindLevelWords, runLevelWords } from './kill-levels.ts';
 import { KindSwitch } from './KindSwitch.tsx';
+import { ModuleSwitch } from './ModuleSwitch.tsx';
 import { PayloadPreviewPanel } from './PayloadPreviewPanel.tsx';
 import { RunInspectorPanel } from './RunInspectorPanel.tsx';
 import { ScopeGrantsPanel } from './ScopeGrantsPanel.tsx';
@@ -38,16 +34,11 @@ import { ScopeGrantsPanel } from './ScopeGrantsPanel.tsx';
  * and the payload preview with its approval (level 4's screen and the
  * preview gate), and cancel on an in-flight run.
  *
- * **Needs the orchestrator.** Levels 1 (`ADVISORS_ENABLED` /
- * `module.insights`) and 2 (`advisors.kind.local_model`) have no `GET`
- * route that reports their current boolean value to this browser —
- * `kill-levels.ts`'s own doc comment names this, and every word this
- * screen prints about those two levels is a description of the mechanism,
- * never a read of a value nobody can fetch. `KindSwitch` is two write-only
- * buttons rather than a `Switch` for exactly that reason. The fix is a
- * route (`GET /advisors/kinds/{kind}/enabled` and a module-level
- * equivalent), not a UI change, and it is outside this work package's
- * `apps/web`-only ownership.
+ * Levels 1 and 2 read their real state from the api (WP 9.6 item 2, G5-14):
+ * `ModuleSwitch` shows the operator's `ADVISORS_ENABLED` and the holder's
+ * `module.insights` and flips the latter; `KindSwitch` shows the kind flag and
+ * whether a model is configured. Every word either prints is a read, never a
+ * description standing in for one.
  */
 export function AdvisorManagementScreen() {
   const advisorsQuery = useQuery(listAdvisorsOptions());
@@ -104,12 +95,7 @@ export function AdvisorManagementScreen() {
         </p>
       </div>
 
-      <section
-        className="rounded-md border border-border-hairline bg-bg-subtle p-3 text-caption text-text-secondary"
-        data-testid="module-level-note"
-      >
-        {MODULE_LEVEL_WORDS}
-      </section>
+      <ModuleSwitch />
 
       {hasLocalModelAdvisor && <KindSwitch kind="local_model" />}
 

@@ -22,7 +22,7 @@
  * preview renderer cannot disagree on the template hash by construction, and
  * this test is what would turn red if they did.
  */
-import { createLocalModelAdapter, type LocalModelAdapter } from '@advisor/local-model';
+import { type LocalModelAdapter } from '@advisor/local-model';
 import { startFakeOllama, type FakeOllama } from '@advisor/local-model/test';
 import { fixedClock, newId, systemClock } from '@core/kernel';
 import {
@@ -471,6 +471,55 @@ describe.skipIf(NO_DATABASE)('WP 9.6 item 2 — the kill levels report their rea
     } finally {
       await pinned.close();
       await unpinned.close();
+    }
+  }, 180_000);
+
+  it("each holder's kill-level state is their own, and level 1's key is not level 2's (predicates alone and together)", async () => {
+    const api = await startApiWithEnv('levelsown', {
+      LOCAL_MODEL_PIN_NAME: MODEL_NAME,
+      LOCAL_MODEL_PIN_DIGEST: PINNED_DIGEST,
+    });
+    try {
+      const bobId = await api.database.createUser('a second holder');
+      const bob = {
+        fresh: await api.issueSession({ fresh: true, userId: bobId }),
+        stale: await api.issueSession({ fresh: false, userId: bobId }),
+      };
+      const read = async (
+        url: string,
+        session: EnvApiSession,
+      ): Promise<Record<string, unknown>> => {
+        const response = await api.request({ method: 'GET', url, session });
+        expect(response.statusCode).toBe(200);
+        return response.json() as Record<string, unknown>;
+      };
+      const write = async (url: string, session: EnvApiSession, enabled: boolean) =>
+        (await api.request({ method: 'PUT', url, session, body: { enabled } })).statusCode;
+      const moduleOf = async (session: EnvApiSession) =>
+        (await read('/advisors/module/enabled', session))['user'] as { enabled: boolean };
+      const kindOf = async (session: EnvApiSession) =>
+        (await read('/advisors/kinds/local_model/enabled', session))['enabled'] as boolean;
+
+      // Alice (the harness's holder) turns the module off and the kind on.
+      expect(await write('/advisors/module/enabled', api.fresh, false)).toBe(200);
+      expect(await write('/advisors/kinds/local_model/enabled', api.fresh, true)).toBe(200);
+
+      // userId alone: Bob reads his own defaults, not hers.
+      expect(await moduleOf(bob.stale)).toEqual({ enabled: true });
+      expect(await kindOf(bob.stale)).toBe(false);
+      // key alone: her module flag and her kind flag are each their own.
+      expect(await moduleOf(api.stale)).toEqual({ enabled: false });
+      expect(await kindOf(api.stale)).toBe(true);
+
+      // Together, in the other direction: Bob's writes move only Bob's flags.
+      expect(await write('/advisors/module/enabled', bob.fresh, true)).toBe(200);
+      expect(await write('/advisors/kinds/local_model/enabled', bob.fresh, false)).toBe(200);
+      expect(await moduleOf(bob.stale)).toEqual({ enabled: true });
+      expect(await kindOf(bob.stale)).toBe(false);
+      expect(await moduleOf(api.stale)).toEqual({ enabled: false });
+      expect(await kindOf(api.stale)).toBe(true);
+    } finally {
+      await api.close();
     }
   }, 180_000);
 

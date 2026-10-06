@@ -3,11 +3,10 @@ import type { BriefItem } from '../../api/generated/types.gen.ts';
 
 /**
  * What `GET /insights/brief/*` carries on each item since WP 9.6 (items 3 and
- * 4), typed locally until `just openapi` and `pnpm run gen` bring the generated
- * `BriefItem` up to date; both fields are optional here so an item from the
- * not-yet-regenerated client (or a mock that predates them) still reads. After
- * the regeneration `BriefItem` carries them required and the intersection below
- * is a no-op.
+ * 4). The generated `BriefItem` has both fields (required, since the contract
+ * was regenerated); the intersection below makes them tolerant of a response or
+ * a mock that predates them, so an item without them reads as "no narration"
+ * and "no action recorded" rather than throwing.
  *
  * **Narration (Phase 5 gate R-2).** `status` and the badge are always on the
  * wire. The narrator's TEXT is on the wire only when the deployment sets

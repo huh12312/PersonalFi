@@ -83,6 +83,33 @@ function previewRoute(advisorId: string) {
   };
 }
 
+function moduleRoute(state = { advisorsEnabled: true, userEnabled: true }) {
+  return {
+    match: '/api/advisors/module/enabled',
+    method: 'GET',
+    handle: () =>
+      jsonResponse({
+        operator: { advisorsEnabled: state.advisorsEnabled },
+        user: { enabled: state.userEnabled },
+        effective: state.advisorsEnabled && state.userEnabled,
+      }),
+  };
+}
+
+function kindRoute(state = { enabled: false, configured: true }) {
+  return {
+    match: '/api/advisors/kinds/local_model/enabled',
+    method: 'GET',
+    handle: () =>
+      jsonResponse({
+        kind: 'local_model',
+        enabled: state.enabled,
+        configured: state.configured,
+        effective: state.enabled && state.configured,
+      }),
+  };
+}
+
 function runsRoute(advisorId: string) {
   return {
     match: `/api/advisors/${advisorId}/runs`,
@@ -108,6 +135,7 @@ describe('AdvisorManagementScreen', () => {
         method: 'GET',
         handle: () => jsonResponse({ advisors: [advisor()] }),
       },
+      moduleRoute(),
     ]);
 
     renderScreen();
@@ -129,6 +157,8 @@ describe('AdvisorManagementScreen', () => {
         method: 'GET',
         handle: () => jsonResponse({ advisors: [narrator] }),
       },
+      moduleRoute({ advisorsEnabled: true, userEnabled: false }),
+      kindRoute({ enabled: true, configured: false }),
       scopesRoute('local.narrator'),
       previewRoute('local.narrator'),
       runsRoute('local.narrator'),
@@ -139,7 +169,14 @@ describe('AdvisorManagementScreen', () => {
 
     await screen.findByText('Local narrator');
     expect(screen.getByTestId('kind-switch')).toBeInTheDocument();
-    expect(screen.getByTestId('module-level-note')).toHaveTextContent('Level 1');
+    expect(await screen.findByTestId('module-level-note')).toHaveTextContent('Level 1');
+    // G5-14: levels 1 and 2 say their real state in words, from the api's reads.
+    expect(await screen.findByTestId('module-state-words')).toHaveTextContent(
+      'Level 1 is off, so no advisor runs: you have switched the insights module off',
+    );
+    expect(await screen.findByTestId('kind-state-words')).toHaveTextContent(
+      'Level 2 is on but nothing can run',
+    );
 
     await user.click(screen.getByRole('button', { name: 'Show detail' }));
 
@@ -152,6 +189,7 @@ describe('AdvisorManagementScreen', () => {
   it('lists the catalogue gaps', async () => {
     stubFetchRoutes([
       { match: '/api/advisors', method: 'GET', handle: () => jsonResponse({ advisors: [] }) },
+      moduleRoute(),
     ]);
 
     renderScreen();

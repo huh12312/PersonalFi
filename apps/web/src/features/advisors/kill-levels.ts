@@ -1,21 +1,72 @@
 // SPDX-License-Identifier: MIT
-import type { AdvisorHealth, AdvisorRunSummary } from '../../api/generated/types.gen.ts';
+import type {
+  AdvisorHealth,
+  AdvisorKindState,
+  AdvisorModuleState,
+  AdvisorRunSummary,
+} from '../../api/generated/types.gen.ts';
 
 /**
  * Words for the four-level kill ladder (`docs/plan/05-phase-5-dispatch.md`
  * §3 WP 5.1, evidenced in `docs/evidence/phase-5/wp5.1-run-control.md` §3).
- * Pure, no network call and no guessed live value: levels 1 and 2 have no
- * `GET` route exposing their current boolean to the browser today (the
- * catalogue's own `advisors` row covers level 3, and a run covers level 4),
- * so this file only ever states what each level *is* and what it affects —
- * never a value nobody can read. See `AdvisorManagementScreen.tsx`'s "Needs
- * the orchestrator" note in the WP's evidence for the missing reads.
+ * Pure, no network call. Since WP 9.6 levels 1 and 2 have reads
+ * (`GET /advisors/module/enabled`, `GET /advisors/kinds/{kind}/enabled`) and
+ * `moduleStateWords` / `kindStateWords` say what those routes answered;
+ * `MODULE_LEVEL_WORDS` and `kindLevelWords` still say only what each level
+ * *is*. Nothing here prints a value that was not read.
  */
 
 export const MODULE_LEVEL_WORDS =
-  'Level 1 — Module: the operator’s ADVISORS_ENABLED setting and the module.insights flag. ' +
-  'Off stops every advisor of every kind, everywhere in this deployment. Default: on. ' +
-  'No route in this build reports its current value to the browser.';
+  'Level 1 — Module: the operator’s ADVISORS_ENABLED setting and your module.insights flag. ' +
+  'Off in either place stops every advisor of every kind, everywhere in this deployment. ' +
+  'Default: on.';
+
+/**
+ * Level 1 as it stands, in words: both halves, and which one is responsible
+ * when it is off (G5-14 — the holder's half used to be a line of SQL).
+ */
+export function moduleStateWords(state: AdvisorModuleState): string {
+  const { advisorsEnabled } = state.operator;
+  const userEnabled = state.user.enabled;
+  if (advisorsEnabled && userEnabled) {
+    return (
+      'Level 1 is on: the operator allows advisors (ADVISORS_ENABLED) and you have not ' +
+      'switched the insights module off.'
+    );
+  }
+  const reasons: string[] = [];
+  if (!advisorsEnabled) {
+    reasons.push(
+      'the operator has turned advisors off (ADVISORS_ENABLED is false — only a change to the ' +
+        'deployment’s settings and a restart can turn it back on; nothing on this screen can)',
+    );
+  }
+  if (!userEnabled) {
+    reasons.push('you have switched the insights module off (the switch below turns it back on)');
+  }
+  return `Level 1 is off, so no advisor runs: ${reasons.join(', and ')}.`;
+}
+
+/** Level 2 as it stands, in words: the flag, the model configuration, and both together. */
+export function kindStateWords(state: AdvisorKindState): string {
+  const name = state.kind;
+  if (state.effective) {
+    return `Level 2 is on: the ${name} flag is on and a model is configured, so ${name} advisors may run.`;
+  }
+  if (state.enabled && !state.configured) {
+    return (
+      `Level 2 is on but nothing can run: the ${name} flag is on, and this deployment has no ` +
+      'model configured for it (the operator sets that), so no advisor of this kind runs.'
+    );
+  }
+  if (!state.enabled && state.configured) {
+    return `Level 2 is off: the ${name} flag is off (its default), so no ${name} advisor runs, though a model is configured.`;
+  }
+  return (
+    `Level 2 is off: the ${name} flag is off (its default), and this deployment has no model ` +
+    'configured for it either.'
+  );
+}
 
 export function kindLevelWords(kind: string): string {
   if (kind === 'local_model') {
