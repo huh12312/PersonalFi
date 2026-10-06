@@ -91,6 +91,17 @@
 # handle, same reasoning as every `connector-*` project above — so it joins
 # `test`, not `migration-test`. Landed the day the project was created, same
 # rule WP 2.12 states above: 41 root projects at `088fe4d` become 42.
+#
+# Phase 9 (09-phase-9-dispatch.md §4 batches 1 and 6): no new vitest project
+# — every Phase 9 test lives in an existing one (`api-db` for the soak report
+# and the ops status route, `db` for the newer-database refusal, `scripts`
+# for the placeholder and pipefail checks, `insights`/`insights-db` and
+# `planning`/`planning-db` for the gate carry-overs). `check-ci-projects`
+# should still read 42/42 at the Phase 9 gate; a request for a new project
+# means a test is in the wrong directory. The unattended-upgrade test is its
+# own workflow (upgrade-test.yml: by hand, weekly, and as release.yml's
+# required predecessor), not a job here — it builds two image sets and does
+# not fit this workflow's budget.
 name: CI
 
 on:
