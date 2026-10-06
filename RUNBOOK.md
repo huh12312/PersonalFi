@@ -1382,7 +1382,7 @@ refuses to send a prompt unless the served model's digest is the one pinned belo
    LOCAL_MODEL_ENDPOINT=ollama:11434        # a single-label compose name; http is fine on `llm`
    LOCAL_MODEL_NAME=qwen2.5:7b-instruct-q4_K_M
    LOCAL_MODEL_DIGEST=sha256:845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e
-   LOCAL_MODEL_TIMEOUT_MS=180000            # our deadline; never above 300000
+   LOCAL_MODEL_TIMEOUT_MS=180000            # one narration's deadline; never above 300000
    LOCAL_MODEL_ALLOW_REMOTE=false
    ```
    `@core/config` refuses to boot with an endpoint but no name or digest. The adapter refuses to
@@ -1394,6 +1394,11 @@ refuses to send a prompt unless the served model's digest is the one pinned belo
    100.64/10 address is CGNAT, not private, and is refused).
 6. The kill ladder's level 2 ships **off**: turn `advisors.kind.local_model` on (and the advisor's own
    switch, level 3) as "Advisor kill switches" above describes, and approve its payload preview.
+   **After an upgrade past WP 9.5, approve it again.** The narrator now writes figure slots
+   (`{{e1}}`) and the app fills each one with the finding's own figure beside its label, so the
+   prompt template and reply format changed. That changes the template hash, so an approval given
+   before 9.5 covers a different query shape; until it is re-approved, a narration is refused
+   `payload_not_approved`.
 
 ### Start
 
@@ -1402,8 +1407,13 @@ refuses to send a prompt unless the served model's digest is the one pinned belo
    docker compose up -d worker            # picks up the LOCAL_MODEL_* values
    docker compose ps ollama               # healthy after the first `ollama list` succeeds
    ```
-   The first request after a start loads the model (tens of seconds on this CPU) inside the run's own
-   deadline.
+   The first request after a start finds the model cold. The adapter then loads it with one
+   data-free warm-up call (the constant system prompt and a constant line, one token), and only after
+   that sends the narration (WP 9.5). The warm-up spends the headroom the narrator's 300 s request
+   deadline leaves above `LOCAL_MODEL_TIMEOUT_MS`, so the narration still gets its full 180 s.
+   Measured on this host: about 60 s to load, then a 94 s narration. The worker log's
+   `local_model.run` line carries `model_before` (`cold`/`warm`), `warm_up` and `warm_up_ms`; a failed
+   warm-up logs `local_model.warm_up_failed` once and is not retried.
 
 ### Stop
 

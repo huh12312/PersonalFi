@@ -319,7 +319,14 @@ async function live(args: Args): Promise<void> {
       outcome === null || !outcome.ok
         ? []
         : outcome.response.insights.map((insight: Insight, position: number) => {
-            if (outcome.accepted.some((entry2) => entry2.insight === insight))
+            // By identity, not object: a placed narration (contract 1.6.0,
+            // WP 9.5) is accepted as the filled copy the holder is shown.
+            if (
+              outcome.accepted.some(
+                (entry2) =>
+                  entry2.insight.key === insight.key && entry2.insight.period === insight.period,
+              )
+            )
               return { key: insight.key, verdict: 'accepted' };
             const rejected = outcome.rejected.find((entry2) => entry2.index === position);
             return {

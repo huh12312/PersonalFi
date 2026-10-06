@@ -72,10 +72,16 @@ export const NARRATOR_MANIFEST: AdvisorManifest = Object.freeze({
     max_severity: 'urgent',
   },
   limits: {
-    // WP 5.1's lane and LOCAL_MODEL_TIMEOUT_MS's default: 180 s, never the
-    // platform's 300 s ceiling. The adapter takes the earlier of this and its
-    // own configured timeout.
-    timeout_ms: 180_000,
+    // WP 9.5 (Phase 5 gate C5-2): the request's deadline is the platform's
+    // 300 s ceiling, and the narration's own is still LOCAL_MODEL_TIMEOUT_MS
+    // (180 s by default): the adapter bounds its chat by the earlier of the
+    // two, and spends only the headroom above it — up to 120 s — warming a
+    // cold model before the chat starts (`@advisor/local-model`'s
+    // `warmUpIfCold`). Sized from the measured 5-item Brief: warm, one
+    // finding took 121–155 s; the first, against a cold model, ran past
+    // 180 s. A warm model never uses the headroom; the lane is concurrency 1
+    // and the built-in lane never waits on it.
+    timeout_ms: 300_000,
     max_insights: 5,
     max_response_bytes: 65_536,
   },

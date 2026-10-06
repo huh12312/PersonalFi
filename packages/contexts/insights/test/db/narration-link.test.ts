@@ -184,7 +184,7 @@ describe.skipIf(NO_DATABASE)('narrations are linked, never ranked', () => {
   it('a narration never takes a feed, dashboard or Brief slot of its own', async () => {
     const model = recordedModel(() => ({
       title: 'All your cash sits in one account',
-      summary_md: 'There is 1 cash account here.',
+      summary_md: 'There is {{e1}} cash account here.',
     }));
     const dependencies = await setUp(model);
     expect((await runBuiltin(dependencies)).accepted).toBe(1);
@@ -237,7 +237,7 @@ describe.skipIf(NO_DATABASE)('narrations are linked, never ranked', () => {
 
     // It is carried on its finding's card instead — the wording, never a figure of its own.
     const cards = await narrationsFor(database.db, database.userId, [finding.id]);
-    expect(cards.get(finding.id)?.summaryMd).toBe('There is 1 cash account here.');
+    expect(cards.get(finding.id)?.summaryMd).toBe('There is 1 (Cash accounts) cash account here.');
 
     // The run's record: the grant it was laundered against, the scopes that
     // actually reached the model, the pinned model and the prompt's hash.
@@ -255,9 +255,10 @@ describe.skipIf(NO_DATABASE)('narrations are linked, never ranked', () => {
     let fabricate = false;
     const model = recordedModel(() =>
       fabricate
-        ? // A figure the finding never rendered.
+        ? // A figure the finding never rendered — and, since WP 9.5 option B
+          // (contract 1.6.0), any digit at all where a slot belongs.
           { summary_md: 'There are 7 cash accounts here.' }
-        : { summary_md: 'There is 1 cash account here.' },
+        : { summary_md: 'There is {{e1}} cash account here.' },
     );
     const dependencies = await setUp(model);
     await runBuiltin(dependencies);
@@ -281,7 +282,7 @@ describe.skipIf(NO_DATABASE)('narrations are linked, never ranked', () => {
     expect(rejected.accepted).toBe(0);
     expect(rejected.rejected).toBe(1);
     expect(rejected.rejections.map((entry) => `${entry.step}:${entry.reason}`)).toEqual([
-      'numerals:numeral_not_in_finding',
+      'numerals:numeral_not_placed',
     ]);
     const [run] = await database.db
       .select()
@@ -290,7 +291,7 @@ describe.skipIf(NO_DATABASE)('narrations are linked, never ranked', () => {
     expect(run?.status).toBe('completed');
     expect(run?.rejectedCount).toBe(1);
     expect(run?.rejections).toEqual([
-      expect.objectContaining({ step: 'numerals', reason: 'numeral_not_in_finding' }),
+      expect.objectContaining({ step: 'numerals', reason: 'numeral_not_placed' }),
     ]);
     expect(run?.llmPromptHash).toMatch(/^sha256:[0-9a-f]{64}$/);
 
@@ -300,14 +301,16 @@ describe.skipIf(NO_DATABASE)('narrations are linked, never ranked', () => {
     expect(after?.title).toBe(before.title);
     expect(after?.summaryMd).toBe(before.summaryMd);
     const written = await narrationRows();
-    expect(written.map((row) => row.summaryMd)).toEqual(['There is 1 cash account here.']);
+    expect(written.map((row) => row.summaryMd)).toEqual([
+      'There is 1 (Cash accounts) cash account here.',
+    ]);
     // And the week-old wording no longer describes the re-proposed finding,
     // so the card offers none: the template text is what shows.
     expect((await narrationsFor(database.db, database.userId, [before.id])).size).toBe(0);
   });
 
   it("a narrator whose grant does not cover a finding's source scopes is never called", async () => {
-    const model = recordedModel(() => ({ summary_md: 'There is 1 cash account here.' }));
+    const model = recordedModel(() => ({ summary_md: 'There is {{e1}} cash account here.' }));
     // Granted recurring.list; the only finding was built from cash.summary.
     const dependencies = await setUp(model, ['recurring.list']);
     expect((await runBuiltin(dependencies)).accepted).toBe(1);

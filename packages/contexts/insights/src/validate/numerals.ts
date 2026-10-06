@@ -577,3 +577,74 @@ export function untraceableWordFiguresInFinding(
   const allowed = canonicalIntegerFigures(context.figures);
   return extractWordFigures(masked).filter((figure) => !allowed.has(figure.digits));
 }
+
+// ---------------------------------------------------------------------------
+// Placed figures (contract 1.6.0, WP 9.5 option B — the Phase 5 gate's R-2)
+// ---------------------------------------------------------------------------
+//
+// The narrow trace matches figures, not what they are figures of: "went from
+// $18.99 to $15.99" passes it, every figure the finding's own (wp5.4 O-31).
+// When a finding is sent `placed_figures: true` the narration writes **slots**
+// (`{{e1}}`) and no figure at all, and the app places each one: the row's
+// value **beside the row's own label**, `$15.99 (Previous price)`. A figure is
+// then never shown detached from what it is a figure of, and the slot names
+// exactly one row, so the app can require the narration to cite that row.
+//
+// What "the app placed" covers, exactly: a slot's fill; and text the model was
+// shown and copies verbatim — a clause of the finding's (slotted) prose, a
+// date or a pseudonym token in it, an evidence label. Never a free figure:
+// the figure set a placed narration may write is **empty**, digits and words
+// alike (F-4's refusal kept beside the slots, as R-2 requires).
+
+/** A slot as a narration writes it. One optional space inside the braces is tolerated. */
+export const SLOT_PATTERN = /\{\{ ?(e[1-9][0-9]?) ?\}\}/gu;
+
+/** The slot names in `text`, in order (repeats kept). */
+export function slotsIn(text: string): readonly string[] {
+  return [...text.matchAll(SLOT_PATTERN)].map((match) => match[1] ?? '');
+}
+
+/** `text` with every slot replaced by a space, so a digit beside one stands alone. */
+export function withoutSlots(text: string): string {
+  return text.replace(SLOT_PATTERN, ' ');
+}
+
+/** The narrow context for a placed finding: no figures, and only what the model was shown to quote. */
+export function placedTraceContext(finding: NarratedFinding): FindingTraceContext {
+  const prose = [finding.title, finding.summary_md, finding.impact.basis]
+    .map(withoutSlots)
+    .filter((text) => text.length >= 3);
+  const literals = new Set<string>();
+  for (const text of prose) {
+    for (const match of text.matchAll(DATE_TOKEN)) literals.add(match[0]);
+    for (const match of text.matchAll(PSEUDONYM_TOKEN)) literals.add(match[0]);
+  }
+  for (const row of finding.evidence) {
+    literals.add(row.label);
+    // A row the model was shown whole (no slot) may be quoted whole.
+    if (row.slot === undefined && row.value !== null) literals.add(row.value);
+  }
+  return {
+    figures: new Set<string>(),
+    literals: [...literals].sort((left, right) => right.length - left.length).slice(0, 512),
+    prose,
+  };
+}
+
+/** What the app writes for a slot: the row's value beside its own label. */
+export function placedFigure(row: { readonly label: string; readonly value: string }): string {
+  return `${row.value} (${row.label})`;
+}
+
+/**
+ * Fill every slot in `text` from `finding`'s rows. A slot the finding does not
+ * define is left as written — the caller has already refused it.
+ */
+export function fillSlots(text: string, finding: NarratedFinding): string {
+  return text.replace(SLOT_PATTERN, (whole, slot: string) => {
+    const row = finding.evidence.find((entry) => entry.slot === slot);
+    return row === undefined || row.value === null
+      ? whole
+      : placedFigure({ label: row.label, value: row.value });
+  });
+}

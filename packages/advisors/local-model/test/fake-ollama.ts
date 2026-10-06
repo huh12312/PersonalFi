@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 /**
- * A fake Ollama: a real `node:http` server speaking the two endpoints the
- * adapter uses, `GET /api/tags` and a streamed `POST /api/chat`.
+ * A fake Ollama: a real `node:http` server speaking the endpoints the adapter
+ * uses — `GET /api/tags`, a streamed `POST /api/chat`, and (WP 9.5, C5-2)
+ * `GET /api/ps` and the non-streamed warm-up `POST /api/chat`. The model
+ * starts **loaded** (`loaded: true`), so a test that does not ask about the
+ * warm-up never sees one; a warm-up loads it.
  *
  * **Where it lives, and why here.** The adapter's layer denies every node
  * builtin (`scripts/eslint-boundaries.js`, `advisor-local-model`,
@@ -48,6 +51,12 @@ export interface FakeOllama {
   readonly chats: { closed: boolean; linesWritten: number }[];
   models: FakeModel[];
   chat: ChatMode;
+  /** What `GET /api/ps` reports. A warm-up sets it. */
+  loaded: boolean;
+  /** Every warm-up (`stream: false`) chat's body, in order. Not in `chats`. */
+  readonly warmUps: unknown[];
+  /** The warm-up's answer status; anything but 200 leaves the model unloaded. */
+  warmUpStatus: number;
   close(): Promise<void>;
 }
 
@@ -71,8 +80,9 @@ export async function startFakeOllama(initial: {
 }): Promise<FakeOllama> {
   const requests: RecordedRequest[] = [];
   const chats: { closed: boolean; linesWritten: number }[] = [];
+  const warmUps: unknown[] = [];
 
-  const state = { models: initial.models, chat: initial.chat };
+  const state = { models: initial.models, chat: initial.chat, loaded: true, warmUpStatus: 200 };
 
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -93,6 +103,34 @@ export async function startFakeOllama(initial: {
       if (req.method === 'GET' && path === '/api/tags') {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ models: state.models.map(MODEL_ENTRY) }));
+        return;
+      }
+      if (req.method === 'GET' && path === '/api/ps') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ models: state.loaded ? state.models.map(MODEL_ENTRY) : [] }));
+        return;
+      }
+      if (
+        req.method === 'POST' &&
+        path === '/api/chat' &&
+        (body as { stream?: unknown } | null)?.stream === false
+      ) {
+        warmUps.push(body);
+        if (state.warmUpStatus !== 200) {
+          res.writeHead(state.warmUpStatus);
+          res.end('{"error":"warm-up refused"}');
+          return;
+        }
+        state.loaded = true;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            message: { role: 'assistant', content: '{' },
+            done: true,
+            done_reason: 'length',
+            eval_count: 1,
+          }),
+        );
         return;
       }
       if (req.method === 'POST' && path === '/api/chat') {
@@ -128,6 +166,19 @@ export async function startFakeOllama(initial: {
     set chat(value: ChatMode) {
       state.chat = value;
     },
+    get loaded() {
+      return state.loaded;
+    },
+    set loaded(value: boolean) {
+      state.loaded = value;
+    },
+    get warmUpStatus() {
+      return state.warmUpStatus;
+    },
+    set warmUpStatus(value: number) {
+      state.warmUpStatus = value;
+    },
+    warmUps,
     close: () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();

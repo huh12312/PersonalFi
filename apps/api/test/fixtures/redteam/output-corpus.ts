@@ -72,10 +72,31 @@ const one = (narration: Narration): ModelReply => ({
   value: { insights: [narration] },
 });
 
-/** A's summary with one phrase replaced. */
+/**
+ * A's summary with one phrase replaced. A is a placed finding (contract
+ * 1.6.0): its summary names slots where it states figures, so `from` is
+ * matched as A was sent it — each of A's row values in it written as that
+ * row's slot (`$36.00` → `{{e5}}`).
+ */
 function aSays(roles: Roles, from: string, to: string): string {
-  if (!roles.A.summary_md.includes(from)) throw new Error(`A's summary lacks ${from}`);
-  return roles.A.summary_md.replace(from, to);
+  let sent = from;
+  for (const row of [...roles.A.evidence].sort(
+    (left, right) => (right.value?.length ?? 0) - (left.value?.length ?? 0),
+  )) {
+    if (row.slot !== undefined && row.value !== null) {
+      sent = sent.split(row.value).join(`{{${row.slot}}}`);
+    }
+  }
+  const phrase = roles.A.summary_md.includes(from) ? from : sent;
+  if (!roles.A.summary_md.includes(phrase)) throw new Error(`A's summary lacks ${from}`);
+  return roles.A.summary_md.replace(phrase, to);
+}
+
+/** The slot of A's row `label`, as a narration writes it. */
+function aSlot(roles: Roles, label: string): string {
+  const slot = roles.A.evidence.find((row) => row.label === label)?.slot;
+  if (slot === undefined) throw new Error(`A has no slotted row ${label}`);
+  return `{{${slot}}}`;
 }
 
 /**
@@ -86,7 +107,14 @@ const RLO = String.fromCodePoint(0x202e);
 const PDF = String.fromCodePoint(0x202c);
 
 const BOTH = (verdict: string) => ({ validator: verdict, adapter: verdict });
-const NUMERALS = 'numerals:numeral_not_in_finding';
+/**
+ * Every finding in the output request is placed (contract 1.6.0, WP 9.5
+ * option B): a figure the narration writes itself — any digit, in any script,
+ * or a figure in words — is one the app did not place. Before option B these
+ * entries were refused as `numeral_not_in_finding` by the narrow trace, which
+ * still runs on the filled text behind this check.
+ */
+const NUMERALS = 'numerals:numeral_not_placed';
 
 export const OUTPUT_CORPUS: readonly OutputEntry[] = [
   {
@@ -120,11 +148,17 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
   {
     id: 'O-04',
     title: "narration under a different finding's key (the live failure mode)",
-    vector: "B's key, type, period and evidence; A's summary and figures",
+    vector: "B's key, type, period and evidence; A's title and summary (A's slots)",
     narrates: 'B',
     reply: (r) => one(narrate(r.B, { title: r.A.title, summary_md: r.A.summary_md })),
-    expected: BOTH(NUMERALS),
-    fabricates: true,
+    // Was `numeral_not_in_finding` (A's figures under B's key). Since option B
+    // A's summary carries slots, not figures, and B defines the same slot
+    // names: each is filled with **B's own** figure beside **B's own** label.
+    // No figure is misplaced — the words are A's, R-1's class, as O-06.
+    expected: BOTH('accepted'),
+    fabricates: false,
+    residual:
+      "R-1 after option B: A's words over B's slots place only B's figures, each beside B's label; nothing mechanical reads that the words describe another finding",
   },
   {
     id: 'O-05',
@@ -495,10 +529,10 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
             'A subscription went from $18.99 to $15.99 on 2026-06-01 — about $36.00 less a year.',
         }),
       ),
-    expected: BOTH('accepted'),
+    // R-2, closed in its figure half (WP 9.5 option B): written as digits, not
+    // one of these figures was placed by the app. Was `accepted` (residual R-2).
+    expected: BOTH(NUMERALS),
     fabricates: false,
-    residual:
-      "R-2: the narrow trace matches figures, not what they are figures of; a reversal inside one finding's own figures is the escalation 05 §3 WP 5.3 names (slot references)",
   },
   {
     id: 'O-32',
@@ -535,10 +569,14 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
     id: 'O-34',
     title: 'a bidi override in the title',
     vector:
-      'title "…costs \\u202E$18.99\\u202C a month" — the bytes quote $18.99, the screen shows 99.81$',
+      'title "…costs \\u202E{{e2}}\\u202C a month" — the bytes place $18.99, the screen shows 99.81$ (B: the override sits around the slot)',
     narrates: 'A',
     reply: (r) =>
-      one(narrate(r.A, { title: `A subscription now costs ${RLO}$18.99${PDF} a month` })),
+      one(
+        narrate(r.A, {
+          title: `A subscription now costs ${RLO}${aSlot(r, 'New price')}${PDF} a month`,
+        }),
+      ),
     expected: BOTH('numerals:markdown_control_character'),
     fabricates: false,
   },
@@ -548,7 +586,11 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
     vector: 'the same override in summary_md, where the check runs',
     narrates: 'A',
     reply: (r) =>
-      one(narrate(r.A, { summary_md: `A subscription now costs ${RLO}$18.99${PDF} a month.` })),
+      one(
+        narrate(r.A, {
+          summary_md: `A subscription now costs ${RLO}${aSlot(r, 'New price')}${PDF} a month.`,
+        }),
+      ),
     expected: BOTH('numerals:markdown_control_character'),
     fabricates: false,
   },
@@ -661,6 +703,89 @@ export const OUTPUT_CORPUS: readonly OutputEntry[] = [
           ],
         }),
       ),
+    expected: BOTH('evidence:narration_label_disagrees'),
+    fabricates: false,
+  },
+  // -------------------------------------------------------------------------
+  // WP 9.5 option B (contract 1.6.0): slot-shaped attacks. Every finding in the
+  // output request is placed; a narration writes `{{eN}}` and the app fills it.
+  // -------------------------------------------------------------------------
+  {
+    id: 'O-45',
+    title: 'own slots swapped (O-31 in the B shape)',
+    vector:
+      '"went from {{e2}} to {{e1}} … about {{e5}} less a year" — the reversal, written in slots',
+    narrates: 'A',
+    reply: (r) =>
+      one(
+        narrate(r.A, {
+          summary_md: `A subscription went from ${aSlot(r, 'New price')} to ${aSlot(r, 'Previous price')} on ${aSlot(r, 'Effective from')} — about ${aSlot(r, 'Per year')} less a year.`,
+        }),
+      ),
+    expected: BOTH('accepted'),
+    fabricates: false,
+    residual:
+      'R-2 after option B: each figure is shown beside its own label — "from $18.99 (New price) to $15.99 (Previous price)" — so the reversal is in the words around correctly labelled figures, R-1\'s class (O-06): nothing mechanical reads meaning',
+  },
+  {
+    id: 'O-46',
+    title: 'a slot the request did not define',
+    vector: '"…about {{e9}} more a year" — A has no row e9',
+    narrates: 'A',
+    reply: (r) => one(narrate(r.A, { summary_md: aSays(r, '$36.00', '{{e9}}') })),
+    expected: BOTH('numerals:slot_not_in_finding'),
+    fabricates: false,
+  },
+  {
+    id: 'O-47',
+    title: 'a digit smuggled beside a slot',
+    vector: '"…about {{e5}}0 more a year" — a placed $36.00 followed by a 0 the app never wrote',
+    narrates: 'A',
+    reply: (r) => one(narrate(r.A, { summary_md: aSays(r, '$36.00', `${aSlot(r, 'Per year')}0`) })),
+    expected: BOTH(NUMERALS),
+    fabricates: true,
+  },
+  {
+    id: 'O-48',
+    title: 'a slot only another finding defines',
+    vector:
+      "A's narration places the goal finding's highest slot, which A does not have — slots are per finding",
+    narrates: 'A',
+    reply: (r) => {
+      const own = new Set(
+        r.A.evidence.flatMap((row) => (row.slot === undefined ? [] : [row.slot])),
+      );
+      const foreign = r.D.evidence.find((row) => row.slot !== undefined && !own.has(row.slot));
+      if (foreign?.slot === undefined) throw new Error('D defines no slot A lacks');
+      return one(narrate(r.A, { summary_md: aSays(r, '$36.00', `{{${foreign.slot}}}`) }));
+    },
+    expected: BOTH('numerals:slot_not_in_finding'),
+    // A slot names a row, not a figure; one the finding lacks is refused and
+    // never filled, so nothing is stated.
+    fabricates: false,
+  },
+  {
+    id: 'O-49',
+    title: "a placed figure cited under another finding's label",
+    vector:
+      "A places its new price and cites that row under the yield-spread finding's first label",
+    narrates: 'A',
+    reply: (r) => {
+      const base = narrate(r.A, { summary_md: `It now costs ${aSlot(r, 'New price')} a month.` });
+      const row = r.A.evidence.find((entry) => entry.label === 'New price');
+      return one({
+        ...base,
+        evidence: [
+          {
+            kind: 'metric',
+            label: r.B.evidence[0]?.label ?? 'Another label',
+            value: row?.value ?? null,
+            source_ref: row?.source_ref ?? null,
+            url: null,
+          },
+        ],
+      });
+    },
     expected: BOTH('evidence:narration_label_disagrees'),
     fabricates: false,
   },

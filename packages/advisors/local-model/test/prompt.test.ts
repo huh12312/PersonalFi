@@ -294,3 +294,52 @@ describe('the sanitiser: each flagged pattern', () => {
     expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
   });
 });
+
+describe('a placed finding in the prompt (WP 9.5 option B, contract 1.6.0)', () => {
+  it('is shown by number, with slots and labels and its slotted prose, and no row figure, ref or key', () => {
+    const placed = {
+      key: 'subscription.price_increase.MERCHANT_6fbb93c8e9d3.2026-06-01',
+      period: '2026-06',
+      type: 'subscription.price_increase',
+      severity: 'notable',
+      title: 'A subscription costs more than it did',
+      summary_md: 'A subscription went from {{e1}} to {{e2}} — about {{e3}} more a year.',
+      evidence: [
+        { label: 'Previous price', value: '$15.99', source_ref: 'snapshot:a.b[0].c', slot: 'e1' },
+        { label: 'New price', value: '$18.99', source_ref: 'snapshot:a.b[0].d', slot: 'e2' },
+        { label: 'Per year', value: '$36.00', source_ref: null, slot: 'e3' },
+        { label: 'Status', value: 'active', source_ref: 'snapshot:a.b[0].e' },
+      ],
+      derived: ['3600'],
+      impact: { annualized: '$36.00', one_time: null, basis: 'A year of the difference.' },
+      placed_figures: true,
+    };
+    const rendered = renderPrompt(baseRequest({ snapshot: {}, findings: [placed] }));
+    const block = rendered.messages[1]?.content ?? '';
+    const shown = JSON.parse(block.slice(block.indexOf('{'), block.lastIndexOf('}') + 1)) as {
+      findings: Record<string, unknown>[];
+    };
+    expect(shown.findings).toEqual([
+      {
+        finding: 1,
+        severity: 'notable',
+        title: 'A subscription costs more than it did',
+        summary_md: 'A subscription went from {{e1}} to {{e2}} — about {{e3}} more a year.',
+        evidence: [
+          { label: 'Previous price', slot: '{{e1}}' },
+          { label: 'New price', slot: '{{e2}}' },
+          { label: 'Per year', slot: '{{e3}}' },
+          { label: 'Status', value: 'active' },
+        ],
+        impact: { basis: 'A year of the difference.' },
+      },
+    ]);
+    for (const figure of ['15.99', '18.99', '36.00', '3600', 'MERCHANT_', 'snapshot:']) {
+      expect(JSON.stringify(shown.findings), figure).not.toContain(figure);
+    }
+    // A 1.5.0 finding (no `placed_figures`) is shown as it was sent.
+    const quoted = { ...placed, placed_figures: undefined };
+    const plain = renderPrompt(baseRequest({ snapshot: {}, findings: [quoted] }));
+    expect(plain.messages[1]?.content).toContain('$15.99');
+  });
+});

@@ -32,9 +32,11 @@
  *
  * What the narrow shape adds over the generic one, each from the live
  * calibration (wp5.3 §8): `confidence` an enum (Ollama's grammar does not
- * enforce numeric bounds; the model wrote `100`), at most two evidence rows,
- * never `external`, no caveats; and (WP 9.5 option A(a)) no `key`, `type` or
- * `period` — the narrator writes the narration's identity from the request.
+ * enforce numeric bounds; the model wrote `100`), no caveats; (WP 9.5
+ * option A(a)) no `key`, `type` or `period` — the narrator writes the
+ * narration's identity from the request; and (WP 9.5 option B, contract
+ * 1.6.0) **no `evidence`** — a narration writes figure slots (`{{e1}}`) and
+ * the narrator writes each placed slot's citation from its finding's row.
  */
 const SEVERITIES = ['info', 'notable', 'warning', 'urgent'];
 const HORIZONS = ['immediate', 'this_period', 'next_quarter', 'this_year', 'long_term'];
@@ -53,6 +55,7 @@ export const NARRATION_FORMAT: Readonly<Record<string, unknown>> = Object.freeze
         type: 'object',
         additionalProperties: false,
         required: [
+          'finding',
           'severity',
           'title',
           'summary_md',
@@ -61,13 +64,16 @@ export const NARRATION_FORMAT: Readonly<Record<string, unknown>> = Object.freeze
           'horizon',
           'requires_review',
           'impact',
-          'evidence',
           'derivations',
           'proposed_actions',
           'caveats',
           'expires_at',
         ],
         properties: {
+          // The finding's number in the prompt (1-based); the narrator writes
+          // the identity from it (`withIdentityFromRequest`). An enum: the
+          // grammar does not enforce numeric bounds.
+          finding: { type: 'integer', enum: [1, 2, 3, 4, 5] },
           severity: { type: 'string', enum: SEVERITIES },
           title: text(120),
           summary_md: text(600),
@@ -84,23 +90,6 @@ export const NARRATION_FORMAT: Readonly<Record<string, unknown>> = Object.freeze
               one_time: { type: 'null' },
               basis: text(160),
               derivation_id: { type: 'null' },
-            },
-          },
-          evidence: {
-            type: 'array',
-            minItems: 1,
-            maxItems: 2,
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['kind', 'label', 'value', 'source_ref', 'url'],
-              properties: {
-                kind: { type: 'string', enum: ['metric', 'transaction', 'series', 'budget_line'] },
-                label: text(160),
-                value: { anyOf: [{ type: 'string', maxLength: 160 }, { type: 'null' }] },
-                source_ref: text(512),
-                url: { type: 'null' },
-              },
             },
           },
           derivations: { type: 'array', maxItems: 0 },

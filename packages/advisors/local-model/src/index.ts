@@ -29,6 +29,8 @@ export {
   type LocalModelAdapterDeps,
   type LocalModelLogger,
   type LocalModelResponse,
+  MIN_WARM_UP_MS,
+  type WarmUpOutcome,
 } from './adapter.ts';
 export {
   LocalModelError,
@@ -47,6 +49,7 @@ export {
   type LocalModelTransport,
   type OllamaClient,
   type PinnedModel,
+  type WarmUpRequest,
 } from './ollama-client.ts';
 export {
   escapeForBlock,
@@ -54,9 +57,12 @@ export {
   FENCE_OPEN,
   PROMPT_TEMPLATE_HASH,
   PROMPT_TEMPLATE_VERSION,
+  placedView,
   renderPrompt,
   SYSTEM_PROMPT,
   USER_TRAILER,
+  WARM_UP_MESSAGES,
+  WARM_UP_USER,
   type PromptMessage,
   type RenderedPrompt,
 } from './prompt.ts';

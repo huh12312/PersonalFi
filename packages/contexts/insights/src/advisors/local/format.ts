@@ -16,9 +16,14 @@
  *     grammar does not enforce numeric bounds, and the pinned model wrote
  *     `100` — a step-2 refusal the bounds were supposed to prevent. An enum is
  *     a grammar the sampler does enforce.
- *   * **At most two evidence rows, never `external`, no `url`.** The model
- *     restated every row of its finding, at ≈2.5 tokens a second; a narration
- *     cites a subset of its finding's refs (step 5), and two is plenty.
+ *   * **No `evidence` at all (WP 9.5 option B, contract 1.6.0).** Phase 5
+ *     capped it at two rows (the model restated every row of its finding, at
+ *     ≈2.5 tokens a second). Option A's live run then found 5 of its 8
+ *     refusals were rows the model wrote — its own figure under the wrong
+ *     label, or a label shortened. A narration now writes figure **slots**
+ *     (`{{e1}}`) in its prose, and the narrator writes the citation of each
+ *     placed slot from the finding's own row (`narrator.ts`,
+ *     `withPlacedCitations`) — under that row's label, by construction.
  *   * **No caveats, no actions, no derivations, an all-null impact.** Every one
  *     is refused for a narrator at step 4 (or would add figures step 7 must
  *     trace); a grammar that cannot express them costs no tokens on them.
@@ -59,6 +64,7 @@ export const NARRATOR_REPLY_FORMAT: Readonly<Record<string, unknown>> = Object.f
         type: 'object',
         additionalProperties: false,
         required: [
+          'finding',
           'severity',
           'title',
           'summary_md',
@@ -67,13 +73,16 @@ export const NARRATOR_REPLY_FORMAT: Readonly<Record<string, unknown>> = Object.f
           'horizon',
           'requires_review',
           'impact',
-          'evidence',
           'derivations',
           'proposed_actions',
           'caveats',
           'expires_at',
         ],
         properties: {
+          // The finding's number in the prompt (1-based); the narrator writes
+          // the identity from it (`withIdentityFromRequest`). An enum: the
+          // grammar does not enforce numeric bounds.
+          finding: { type: 'integer', enum: [1, 2, 3, 4, 5] },
           severity: { type: 'string', enum: SEVERITIES },
           title: text(120),
           summary_md: text(600),
@@ -90,23 +99,6 @@ export const NARRATOR_REPLY_FORMAT: Readonly<Record<string, unknown>> = Object.f
               one_time: { type: 'null' },
               basis: text(160),
               derivation_id: { type: 'null' },
-            },
-          },
-          evidence: {
-            type: 'array',
-            minItems: 1,
-            maxItems: 2,
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['kind', 'label', 'value', 'source_ref', 'url'],
-              properties: {
-                kind: { type: 'string', enum: ['metric', 'transaction', 'series', 'budget_line'] },
-                label: text(160),
-                value: { anyOf: [{ type: 'string', maxLength: 160 }, { type: 'null' }] },
-                source_ref: text(512),
-                url: { type: 'null' },
-              },
             },
           },
           derivations: { type: 'array', maxItems: 0 },

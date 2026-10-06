@@ -15,6 +15,11 @@
  *      rather than sent;
  *   4. `GET /api/tags`: the served digest must equal the pinned one, or
  *      `model_digest_mismatch` — **before any prompt is sent**;
+ *   4a. the warm-up (WP 9.5, Phase 5 gate C5-2): `GET /api/ps`, and if the
+ *      pinned model is not loaded, one data-free chat that loads it
+ *      (`WARM_UP_MESSAGES`, one token) — in the request's deadline's headroom
+ *      above `LOCAL_MODEL_TIMEOUT_MS`, never inside the narration's own
+ *      timeout, logged on its own and never retried (see `warmUpIfCold`);
  *   5. `POST /api/chat`, streamed, under the byte cap, the deadline (the
  *      earlier of `LOCAL_MODEL_TIMEOUT_MS` and the request's own
  *      `limits.deadline`) and the caller's signal;
@@ -50,7 +55,12 @@ import {
   type LocalModelTransport,
   type OllamaClient,
 } from './ollama-client.ts';
-import { PROMPT_TEMPLATE_HASH, renderPrompt, type RenderedPrompt } from './prompt.ts';
+import {
+  PROMPT_TEMPLATE_HASH,
+  renderPrompt,
+  WARM_UP_MESSAGES,
+  type RenderedPrompt,
+} from './prompt.ts';
 import type { LocalModelRequest } from './request.ts';
 import { countFlags, FLAG_ONLY_KINDS, type SanitiserFlag } from './sanitise.ts';
 
@@ -130,6 +140,20 @@ export interface LocalModelAdapter {
   readonly policy: LocalEndpointPolicy | null;
 }
 
+/**
+ * What the warm-up stage did (WP 9.5, C5-2), for the run's log line and the
+ * Brief measurement: whether the model was loaded before (`warm`, `cold`, or
+ * `unknown` when `GET /api/ps` could not say), and what was done about it.
+ */
+export interface WarmUpOutcome {
+  readonly before: 'warm' | 'cold' | 'unknown' | 'unchecked';
+  readonly outcome: 'not_needed' | 'loaded' | 'failed' | 'no_headroom';
+  readonly durationMs: number | null;
+}
+
+/** Below this much headroom a warm-up is not attempted: it could not load a model anyway. */
+export const MIN_WARM_UP_MS = 5_000;
+
 /** `AdvisorResponse.diagnostics.warnings`: at most 16, each at most 240 characters. */
 const MAX_WARNINGS = 16;
 const MAX_WARNING_CHARS = 240;
@@ -182,6 +206,63 @@ export function createLocalModelAdapter(
     await client.checkModelDigest(signal);
   }
 
+  /**
+   * C5-2 (WP 9.5): **a cold model is warmed before the narration, not during
+   * it.** Measured on this host (`docs/evidence/phase-9/wp9.5-narrator.md`):
+   * a single-finding narration takes 121–155 s warm, and the first one of a
+   * Brief, against a model nothing had loaded, ran past the 180 s deadline
+   * (`model_timeout` at 180 005 ms, load 6.5) — the load and the uncached
+   * system region spent the deadline the reply needed. So:
+   *
+   *   * the warm-up runs only in the headroom the **request's** deadline
+   *     leaves above `LOCAL_MODEL_TIMEOUT_MS` (the narrator's manifest sets
+   *     300 s, the platform ceiling, for exactly this: 120 s to load, then the
+   *     narration's own full 180 s), and is not attempted below
+   *     `MIN_WARM_UP_MS` of it — a caller whose deadline is the timeout gets
+   *     the pre-9.5 behaviour, unchanged;
+   *   * it sends two constants and no request data (`WARM_UP_MESSAGES`), after
+   *     the digest pin and only inside a run the service already admitted
+   *     (kill switches, consent, approval), so a stopped narrator warms nothing;
+   *   * a warm model costs one `GET /api/ps` and nothing else;
+   *   * a failed or timed-out warm-up is logged and **not retried**; the
+   *     narration still gets its own full timeout and fails, once, on its own
+   *     terms if the model is really gone. Only a cancellation stops the run.
+   */
+  async function warmUpIfCold(
+    request: LocalModelRequest,
+    signal: AbortSignal,
+  ): Promise<WarmUpOutcome> {
+    const deadlineMs = Date.parse(request.limits.deadline);
+    const remaining = Number.isFinite(deadlineMs) ? deadlineMs - clock.nowMs() : 0;
+    const budget = Math.min(config.timeoutMs, remaining - config.timeoutMs);
+    if (budget < MIN_WARM_UP_MS) {
+      return { before: 'unchecked', outcome: 'no_headroom', durationMs: null };
+    }
+    const loaded = await client.isLoaded(signal);
+    if (loaded === true) return { before: 'warm', outcome: 'not_needed', durationMs: null };
+    const before = loaded === false ? 'cold' : 'unknown';
+    const started = clock.nowMs();
+    try {
+      await client.warmUp({ messages: WARM_UP_MESSAGES, signal, timeoutMs: budget });
+      return { before, outcome: 'loaded', durationMs: clock.nowMs() - started };
+    } catch (error) {
+      if (signal.aborted) throw error;
+      const code = error instanceof LocalModelError ? error.code : 'model_unavailable';
+      logger.warn(
+        {
+          event: 'local_model.warm_up_failed',
+          request_id: request.request_id,
+          model: config.name,
+          digest,
+          code,
+          warm_up_ms: clock.nowMs() - started,
+        },
+        'local model warm-up failed; the narration runs on its own timeout',
+      );
+      return { before, outcome: 'failed', durationMs: clock.nowMs() - started };
+    }
+  }
+
   async function run(request: LocalModelRequest, signal: AbortSignal): Promise<unknown> {
     const started = clock.nowMs();
     let stage = 'render';
@@ -201,6 +282,9 @@ export function createLocalModelAdapter(
 
       stage = 'digest_check';
       const before = await client.checkModelDigest(signal);
+
+      stage = 'warm_up';
+      const warm = await warmUpIfCold(request, signal);
 
       stage = 'chat';
       const deadlineMs = Date.parse(request.limits.deadline);
@@ -271,6 +355,9 @@ export function createLocalModelAdapter(
           eval_count: reply.evalCount,
           done_reason: reply.doneReason,
           digest_check_ms: before.durationMs,
+          model_before: warm.before,
+          warm_up: warm.outcome,
+          warm_up_ms: warm.durationMs,
           chat_ms: reply.durationMs,
           runtime_ms: runtimeMs,
           shape: requestShape(request),

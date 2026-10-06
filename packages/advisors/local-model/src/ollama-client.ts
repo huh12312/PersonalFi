@@ -9,6 +9,8 @@
  *     `model_digest_mismatch` unless the served digest for `LOCAL_MODEL_NAME`
  *     equals `LOCAL_MODEL_DIGEST`. A tag that moved is a different model, and
  *     the ≥95% measured on one says nothing about another.
+ *   * `GET /api/ps` — which models the runtime has loaded (WP 9.5, C5-2): a
+ *     cold model is warmed before a narration (`warmUp`), never during one.
  *   * `POST /api/chat` — `stream: true`, a `format` schema, `temperature: 0`,
  *     a fixed `seed`, bounded `num_ctx` and `num_predict`. The stream is
  *     newline-delimited JSON; the transport bounds its bytes **as they
@@ -93,9 +95,29 @@ export interface DigestCheck {
   readonly durationMs: number;
 }
 
+export interface WarmUpRequest {
+  readonly messages: readonly PromptMessage[];
+  readonly signal: AbortSignal;
+  readonly timeoutMs: number;
+}
+
 export interface OllamaClient {
   checkModelDigest(signal: AbortSignal): Promise<DigestCheck>;
   chat(request: ChatRequest): Promise<ChatResult>;
+  /**
+   * `GET /api/ps`: is the pinned model's name loaded? `null` when the runtime
+   * cannot say (an error status, a body that is not the documented shape, an
+   * unreachable endpoint). Throws only when `signal` is aborted.
+   */
+  isLoaded(signal: AbortSignal): Promise<boolean | null>;
+  /**
+   * One non-streamed chat, one token (`num_predict: 1`), under the narration's
+   * own `num_ctx`, seed and temperature — so the runner it loads is the one
+   * the narration then uses, and the system region it evaluates is a cached
+   * prefix of the narration's prompt. Its messages are the caller's
+   * constants (`WARM_UP_MESSAGES`); its reply is read for nothing.
+   */
+  warmUp(request: WarmUpRequest): Promise<{ readonly durationMs: number }>;
 }
 
 export interface OllamaClientOptions {
@@ -262,7 +284,68 @@ export function createOllamaClient(options: OllamaClientOptions): OllamaClient {
     };
   }
 
-  return Object.freeze({ checkModelDigest, chat });
+  async function isLoaded(signal: AbortSignal): Promise<boolean | null> {
+    let response: LocalEndpointResponse;
+    try {
+      response = await send({
+        method: 'GET',
+        path: '/api/ps',
+        headers: JSON_HEADERS,
+        signal,
+        maxResponseBytes: generation.maxTagsBytes,
+      });
+    } catch (error) {
+      if (signal.aborted) throw error;
+      return null;
+    }
+    if (response.status < 200 || response.status >= 300) return null;
+    try {
+      const models = (JSON.parse(response.body) as { models?: unknown }).models;
+      if (!Array.isArray(models)) return null;
+      return models.some((candidate: unknown) => {
+        if (candidate === null || typeof candidate !== 'object') return false;
+        const { name, model: modelName } = candidate as { name?: unknown; model?: unknown };
+        return name === wanted || modelName === wanted;
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async function warmUp(request: WarmUpRequest): Promise<{ readonly durationMs: number }> {
+    const started = clock.nowMs();
+    const response = await send({
+      method: 'POST',
+      path: '/api/chat',
+      headers: { ...JSON_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: wanted,
+        messages: request.messages.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
+        stream: false,
+        options: {
+          temperature: 0,
+          seed: generation.seed,
+          num_ctx: generation.numCtx,
+          num_predict: 1,
+        },
+      }),
+      signal: request.signal,
+      timeoutMs: request.timeoutMs,
+      maxResponseBytes: 64 * 1024,
+    });
+    if (response.status < 200 || response.status >= 300) {
+      throw new LocalModelError(
+        response.status >= 500 ? 'model_unavailable' : 'model_protocol_error',
+        `the warm-up POST /api/chat answered ${String(response.status)}`,
+      );
+    }
+    return { durationMs: clock.nowMs() - started };
+  }
+
+  return Object.freeze({ checkModelDigest, chat, isLoaded, warmUp });
 }
 
 /** Transport refusals, as the adapter's closed vocabulary. The cause is kept for a debugger, not a log. */

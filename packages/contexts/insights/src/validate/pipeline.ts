@@ -20,7 +20,7 @@
  * | 4 | `capability` | `confidence_basis: 'deterministic'` from a non-`builtin` or an advisor that never claimed it; `impact` from one that declared `produces_impact: false`; a new finding from a `narrates_only` advisor. Severity above the ceiling is **clamped**, not refused |
  * | 5 | `evidence` | a `source_ref` that does not resolve into the snapshot we sent; a label that disagrees with what it resolved to; a link outside the advisor's own allow-list |
  * | 6 | `derivations` | arithmetic that does not produce the value it claims, a literal outside the allow-list, an `impact.derivation_id` naming a derivation that failed |
- * | 7 | `numerals` | a figure in any rendered field that is in neither the snapshot nor an accepted derivation; Markdown outside the permitted subset |
+ * | 7 | `numerals` | a figure in any rendered field that is in neither the snapshot nor an accepted derivation; Markdown outside the permitted subset; for a placed finding, any figure the app did not place |
  *
  * ## A narrator is held to its finding (WP 5.3)
  *
@@ -40,6 +40,21 @@
  *   * **Step 7** traces every numeral against the finding's own rendered
  *     figures, verbatim (`findingTraceContext`) — not every number in the
  *     snapshot under six renderings, which is 05 §1's hole.
+ *
+ * ## A placed finding: the app writes every figure (contract 1.6.0, WP 9.5)
+ *
+ * A finding sent `placed_figures: true` is narrated in slots (`{{e1}}`).
+ * Step 7 then runs `checkPlacedFigures` **first**, on the narration as the
+ * model wrote it: every slot must be one the finding defines
+ * (`slot_not_in_finding`); no figure may stand outside a slot — no digit, in
+ * any script, and no figure in words (`numeral_not_placed`), unless it is part
+ * of a verbatim quotation of what the model was shown; and every placed row
+ * that has a ref must be cited under its own label (`slot_not_cited`). Then
+ * the app fills each slot with the row's value beside its label
+ * (`$15.99 (Previous price)`), and the narrow trace above runs **again on the
+ * filled text**, against the finding with the same fill — so what the holder
+ * is shown has passed the 1.5.0 rule too, unchanged. The accepted insight is
+ * the filled one: no stored narration ever carries a slot.
  *
  * There is no retry. A narration refused here is refused; the built-in's text
  * stands (07 §7.5 rule 1) and the run records the step. Re-asking until the
@@ -102,11 +117,15 @@ import {
   renderableStrings,
 } from './markdown.ts';
 import {
+  fillSlots,
   findingTraceContext,
+  placedTraceContext,
+  slotsIn,
   traceContext,
   untraceableInFinding,
   untraceableNumerals,
   untraceableWordFiguresInFinding,
+  withoutSlots,
 } from './numerals.ts';
 
 export const VALIDATION_STEPS = [
@@ -687,6 +706,107 @@ function checkNumerals(
   return null;
 }
 
+/** `InsightSchema`'s caps on the three fields a slot may be filled into. */
+const PLACED_FIELD_CAPS = { title: 160, summary_md: 2000, basis: 240 } as const;
+
+/**
+ * Step 7, first half, for a placed finding (see the header). Pure and total.
+ * Returns the narration as the holder will be shown it, and the finding with
+ * the same fill (what the narrow trace then quotes against).
+ */
+function checkPlacedFigures(
+  insight: Insight,
+  finding: NarratedFinding,
+):
+  | { readonly ok: true; readonly insight: Insight; readonly finding: NarratedFinding }
+  | { readonly ok: false; readonly reason: string; readonly detail: string } {
+  const prose = [insight.title, insight.summary_md, insight.impact.basis];
+  // A slot is filled only in the three prose fields; one anywhere else stays
+  // as written, and its own digit is refused below like any other.
+  const everywhere = [
+    ...prose.map((text) => ({ text, free: withoutSlots(text) })),
+    ...[
+      ...insight.evidence.map((row) => row.label),
+      ...insight.proposed_actions.flatMap((action) => [action.label, action.rationale_md]),
+      ...insight.caveats,
+    ].map((text) => ({ text, free: text })),
+  ];
+  const context = placedTraceContext(finding);
+  const placed = new Set<string>();
+  for (const text of prose) {
+    for (const slot of slotsIn(text)) {
+      if (!finding.evidence.some((row) => row.slot === slot && row.value !== null)) {
+        return { ok: false, reason: 'slot_not_in_finding', detail: `{{${slot}}}` };
+      }
+      placed.add(slot);
+    }
+  }
+  for (const { text, free } of everywhere) {
+    if (/\{\{|\}\}/u.test(free)) {
+      return { ok: false, reason: 'slot_malformed', detail: free.slice(0, 80) };
+    }
+    const digit = untraceableInFinding(free, context)[0];
+    if (digit !== undefined) {
+      return {
+        ok: false,
+        reason: 'numeral_not_placed',
+        detail: `${digit.raw} in ${text.slice(0, 80)}`,
+      };
+    }
+    // F-4, kept beside the slots: a figure in words was not placed either.
+    const word = untraceableWordFiguresInFinding(free, context)[0];
+    if (word !== undefined) {
+      return {
+        ok: false,
+        reason: 'numeral_not_placed',
+        detail: `${word.raw} in ${text.slice(0, 80)}`,
+      };
+    }
+  }
+  // Each placed figure under its own label: the row the slot names, cited by
+  // its ref (step 5 has already held each cited row's label and value to the
+  // finding's). A row with no ref — an impact figure — has nothing to cite;
+  // its label is beside it in the text.
+  for (const slot of placed) {
+    const row = finding.evidence.find((entry) => entry.slot === slot);
+    if (row === undefined || row.source_ref === null) continue;
+    const cited = insight.evidence.some(
+      (entry) => entry.source_ref === row.source_ref && narratedLabelAgrees(entry.label, row.label),
+    );
+    if (!cited) return { ok: false, reason: 'slot_not_cited', detail: `{{${slot}}} ${row.label}` };
+  }
+  const filled = {
+    title: fillSlots(insight.title, finding),
+    summary_md: fillSlots(insight.summary_md, finding),
+    basis: fillSlots(insight.impact.basis, finding),
+  };
+  for (const [field, cap] of Object.entries(PLACED_FIELD_CAPS)) {
+    const text = filled[field as keyof typeof filled];
+    if (text.length > cap) {
+      return {
+        ok: false,
+        reason: 'placed_text_too_long',
+        detail: `${field} ${String(text.length)} > ${String(cap)}`,
+      };
+    }
+  }
+  return {
+    ok: true,
+    insight: {
+      ...insight,
+      title: filled.title,
+      summary_md: filled.summary_md,
+      impact: { ...insight.impact, basis: filled.basis },
+    },
+    finding: {
+      ...finding,
+      title: fillSlots(finding.title, finding),
+      summary_md: fillSlots(finding.summary_md, finding),
+      impact: { ...finding.impact, basis: fillSlots(finding.impact.basis, finding) },
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The pipeline
 // ---------------------------------------------------------------------------
@@ -755,8 +875,27 @@ export function validateResponse(input: ValidationInput): ValidationOutcome {
       continue;
     }
 
-    // Step 7 — numerals.
-    const numerals = checkNumerals(insight, snapshot, derivations.derived, capability.finding);
+    // Step 7 — numerals. A placed finding's narration is checked as written,
+    // then filled, and the filled text is what the narrow trace (and the
+    // holder) reads.
+    let shown = insight;
+    let traced = capability.finding;
+    if (capability.finding?.placed_figures === true) {
+      const placed = checkPlacedFigures(insight, capability.finding);
+      if (!placed.ok) {
+        rejected.push({
+          step: 'numerals',
+          index,
+          key: insight.key,
+          reason: placed.reason,
+          detail: placed.detail,
+        });
+        continue;
+      }
+      shown = placed.insight;
+      traced = placed.finding;
+    }
+    const numerals = checkNumerals(shown, snapshot, derivations.derived, traced);
     if (numerals !== null) {
       rejected.push({ step: 'numerals', index, key: insight.key, ...numerals });
       continue;
@@ -769,7 +908,7 @@ export function validateResponse(input: ValidationInput): ValidationOutcome {
 
     accepted.push({
       status: 'pending_review',
-      insight,
+      insight: shown,
       severity: capability.severity,
       severityClamped: capability.clamped,
       evidence: evidence.rows,

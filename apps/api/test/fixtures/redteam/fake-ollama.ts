@@ -64,6 +64,13 @@ export async function startFakeOllama(respond: Responder, host = '127.0.0.1'): P
         );
         return;
       }
+      // WP 9.5 (C5-2): the model is always loaded here, so the adapter's
+      // warm-up never fires and every chat this server sees is a narration.
+      if (req.method === 'GET' && path === '/api/ps') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ models: [{ name: FAKE_MODEL_NAME, model: FAKE_MODEL_NAME }] }));
+        return;
+      }
       if (req.method === 'POST' && path === '/api/chat') {
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
           messages: WireMessage[];

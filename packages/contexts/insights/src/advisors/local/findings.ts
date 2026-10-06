@@ -236,12 +236,27 @@ export function envelopeValueOf(
   return plain;
 }
 
-/** The wire form. Pure. */
-export function narratedFindingOf(source: FindingSource): NarratedFinding {
+/**
+ * Which envelope a finding is sent in.
+ *
+ *   * `'placed'` — **contract 1.6.0, option B; what production sends**
+ *     (`assembleFindings`, the eval, the red team): the narration writes slots
+ *     and the app places every figure (`placeFiguresIn`, below).
+ *   * `'quoted'` — the 1.5.0 envelope: figures stated, and a narration that
+ *     restates one is held to the narrow trace alone. Kept for the tests that
+ *     pin the narrow trace on its own; no production path builds it.
+ */
+export type EnvelopeMode = 'placed' | 'quoted';
+
+/** The wire form. Pure. Placed (option B) unless a caller asks for the 1.5.0 form. */
+export function narratedFindingOf(
+  source: FindingSource,
+  mode: EnvelopeMode = 'placed',
+): NarratedFinding {
   const display = (money: MoneyJson | null): string | null =>
     money === null ? null : formatMoneyJson(money);
   const prose = [source.title, source.summaryMd, source.impact.basis];
-  return {
+  const quoted: NarratedFinding = {
     key: source.key,
     period: source.period,
     type: source.type,
@@ -260,6 +275,114 @@ export function narratedFindingOf(source: FindingSource): NarratedFinding {
       basis: source.impact.basis,
     },
   };
+  return mode === 'quoted' ? quoted : placeFiguresIn(quoted);
+}
+
+/**
+ * The labels of the figure rows a placed envelope adds for its finding's
+ * impact, when no evidence row already states the same display (the impact
+ * is a figure the holder is shown, and the slot needs a label to sit beside).
+ * No `source_ref`: there is no snapshot path to cite, so a narration places
+ * the figure with this label and cites nothing for it.
+ */
+export const IMPACT_FIGURE_LABELS = Object.freeze({
+  annualized: 'Per year',
+  one_time: 'One time',
+} as const);
+
+/** The envelope's evidence cap (`NarratedFindingSchema`), and the slot grammar's (`e1`…`e99`). */
+const MAX_ENVELOPE_ROWS = 32;
+const MAX_SLOTS = 99;
+
+/**
+ * Option B (contract 1.6.0; the Phase 5 gate's R-2): **the app places every
+ * figure.** Pure.
+ *
+ *   * every evidence row whose value carries a digit gets a slot, `e1`…, in row
+ *     order — figures, dates and identifiers alike, so the model is shown no
+ *     row's digits at all (`@advisor/local-model`'s `renderPrompt` sends a
+ *     slotted row as its label and slot, never its value);
+ *   * the finding's impact displays become figure rows of their own
+ *     (`IMPACT_FIGURE_LABELS`) unless a row already states them;
+ *   * the finding's `title`, `summary_md` and `impact.basis` are sent with
+ *     each slotted value replaced by `{{slot}}` — whole figures only, longest
+ *     value first, the earlier row winning a tie (so `$18.99` stated by both
+ *     "New price" and "The charge this belongs to" is "New price"'s), in one
+ *     pass so a slot's own `1` is never mistaken for a figure.
+ *
+ * What remains in the prose is what no row states — a derived rendering
+ * (`7.0pp`), a symbol (`SCL188`). A narration may copy such text only as a
+ * verbatim quotation of the prose it was shown; as a free figure it is
+ * refused (`validate/numerals.ts`, `placedTraceContext`).
+ */
+export function placeFiguresIn(finding: NarratedFinding): NarratedFinding {
+  const rows: { label: string; value: string | null; source_ref: string | null }[] =
+    finding.evidence.map((row) => ({
+      label: row.label,
+      value: row.value,
+      source_ref: row.source_ref,
+    }));
+  for (const field of ['annualized', 'one_time'] as const) {
+    const value = finding.impact[field];
+    if (value === null || rows.some((row) => row.value === value)) continue;
+    if (rows.length >= MAX_ENVELOPE_ROWS) break;
+    rows.push({ label: IMPACT_FIGURE_LABELS[field], value, source_ref: null });
+  }
+  let slots = 0;
+  const evidence = rows.map((row) => {
+    if (row.value === null || !/\p{Nd}/u.test(row.value) || slots >= MAX_SLOTS) return row;
+    slots += 1;
+    return { ...row, slot: `e${String(slots)}` };
+  });
+  const replacements = evidence
+    .flatMap((row, order) =>
+      row.value !== null && 'slot' in row ? [{ value: row.value, slot: row.slot, order }] : [],
+    )
+    .sort((left, right) => right.value.length - left.value.length || left.order - right.order);
+  const slotted = (text: string): string => replaceFigures(text, replacements);
+  return {
+    ...finding,
+    title: slotted(finding.title),
+    summary_md: slotted(finding.summary_md),
+    evidence,
+    impact: { ...finding.impact, basis: slotted(finding.impact.basis) },
+    placed_figures: true,
+  };
+}
+
+/** Is the match at `[at, at + length)` a whole figure — not inside a longer number or a date? */
+function isWholeFigure(text: string, at: number, length: number): boolean {
+  const before = at === 0 ? '' : (text[at - 1] ?? '');
+  const after = text.slice(at + length, at + length + 2);
+  return !/[\d.,-]/u.test(before) && !/^\d|^[.,]\d/u.test(after);
+}
+
+/** Every whole-figure occurrence of each value, by priority, non-overlapping, replaced in one pass. */
+function replaceFigures(
+  text: string,
+  replacements: readonly { readonly value: string; readonly slot: string }[],
+): string {
+  const spans: { start: number; end: number; slot: string }[] = [];
+  for (const { value, slot } of replacements) {
+    let from = 0;
+    for (;;) {
+      const at = text.indexOf(value, from);
+      if (at === -1) break;
+      from = at + 1;
+      const end = at + value.length;
+      if (!isWholeFigure(text, at, value.length)) continue;
+      if (spans.some((span) => at < span.end && end > span.start)) continue;
+      spans.push({ start: at, end, slot });
+    }
+  }
+  spans.sort((left, right) => left.start - right.start);
+  let out = '';
+  let cursor = 0;
+  for (const span of spans) {
+    out += `${text.slice(cursor, span.start)}{{${span.slot}}}`;
+    cursor = span.end;
+  }
+  return out + text.slice(cursor);
 }
 
 /** A validated built-in insight as a finding source — the pure path tests and the eval use. */

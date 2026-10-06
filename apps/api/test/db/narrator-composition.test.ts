@@ -15,8 +15,13 @@
  *
  *   * a built-in finding the Brief chooses is narrated, the narration is
  *     accepted and linked to it — the model wrote no key, no type and no
- *     period (WP 9.5 option A), and quoted a percent the built-in left `null`
- *     in its own row (option A(b), read back from `insight_evidence`);
+ *     period (WP 9.5 option A), and no figure and no citation (option B): it
+ *     placed slots, and the app filled each with the row's value beside its
+ *     label, one of them a percent the built-in left `null` in its own row
+ *     (option A(b), read back from `insight_evidence`);
+ *   * the Brief's first narration, against a model nothing has loaded, is
+ *     preceded by exactly one data-free warm-up inside the request's own
+ *     deadline, and a warm model gets none (C5-2's cold-model design);
  *   * the Brief enqueues **one job per item**, carrying that item's id, never
  *     re-run by the queue (C5-2);
  *   * the reply format the worker's adapter sends is the narrator's;
@@ -28,7 +33,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
-import { NARRATION_FORMAT } from '@advisor/local-model';
+import { NARRATION_FORMAT, WARM_UP_MESSAGES } from '@advisor/local-model';
 import { startFakeOllama, type FakeOllama } from '@advisor/local-model/test';
 import { money, newId, systemClock } from '@core/kernel';
 import {
@@ -269,28 +274,26 @@ async function narratorReady(
   return { findingId };
 }
 
-/** The reply in the shape the model is now asked for: no key, no type, no period. */
+/**
+ * The reply in the shape the model is now asked for (contract 1.6.0): its
+ * finding's number, prose with **slots** where figures go, and no key, type,
+ * period or evidence. The yield finding's rows, in order: `The balance`
+ * ($21,235.00) e1, `What it earns` (0%) e2, `The better rate you hold`
+ * (4.5%) e3.
+ */
 function narrationReply(): string {
   return JSON.stringify({
     insights: [
       {
+        finding: 1,
         severity: 'notable',
         title: 'One account earns far less than another',
-        summary_md: 'One account holds $21,235.00 at 0%, while another of your own earns 4.5%.',
+        summary_md: 'One account holds {{e1}} at {{e2}}, while another of your own earns {{e3}}.',
         confidence: 0.7,
         confidence_basis: 'model',
         horizon: 'this_year',
         requires_review: true,
         impact: { annualized: null, one_time: null, basis: '', derivation_id: null },
-        evidence: [
-          {
-            kind: 'metric',
-            label: 'The balance',
-            value: '$21,235.00',
-            source_ref: 'snapshot:cash_summary.accounts[1].balance',
-            url: null,
-          },
-        ],
         derivations: [],
         proposed_actions: [],
         caveats: [],
@@ -298,6 +301,15 @@ function narrationReply(): string {
       },
     ],
   });
+}
+
+/** The narrations the fake was sent — streamed chats, not the warm-up's. */
+function narrationChats(fake: FakeOllama): FakeOllama['requests'] {
+  return fake.requests.filter(
+    (request) =>
+      request.path === '/api/chat' &&
+      (request.body as { stream?: unknown } | null)?.stream !== false,
+  );
 }
 
 describe.skipIf(NO_DATABASE)('WP 9.5 — the narrator through the worker composition', () => {
@@ -328,7 +340,11 @@ describe.skipIf(NO_DATABASE)('WP 9.5 — the narrator through the worker composi
     if (insightsModule === undefined) throw new Error('module.insights did not resolve');
     const { findingId } = await narratorReady(h, userId, wiring, insightsModule);
     fake.chat = { kind: 'reply', reply: narrationReply() };
-    const chatsBefore = fake.requests.filter((request) => request.path === '/api/chat').length;
+    const chatsBefore = narrationChats(fake).length;
+    // C5-2: the scheduled Brief meets a cold model — nothing loaded.
+    fake.loaded = false;
+    const warmUpsBefore = fake.warmUps.length;
+    const requestsBefore = fake.requests.length;
 
     const handlers = (insightsModule.jobs ?? []).filter(
       (job) => job.kind === 'insights.brief' || job.kind === 'insights.run_local',
@@ -404,9 +420,24 @@ describe.skipIf(NO_DATABASE)('WP 9.5 — the narrator through the worker composi
     expect(narration?.key).toBe(finding?.key);
     expect(narration?.type).toBe(finding?.type);
     expect(narration?.period).toBe(finding?.period);
+    // Option B: the model wrote slots; the app placed each figure beside its
+    // own label and cited each placed row under that label.
+    expect(narration?.summaryMd).toBe(
+      'One account holds $21,235.00 (The balance) at 0% (What it earns), while another of ' +
+        'your own earns 4.5% (The better rate you hold).',
+    );
+    const cited = await h.database.db.execute<{ label: string; value: string | null }>(sql`
+      SELECT label, value FROM insight_evidence
+       WHERE insight_id = ${narration?.id ?? ''}::uuid ORDER BY position
+    `);
+    expect(cited.rows).toEqual([
+      { label: 'The balance', value: '$21,235.00' },
+      { label: 'What it earns', value: '0%' },
+      { label: 'The better rate you hold', value: '4.5%' },
+    ]);
     // Option A(b): `4.5%` is the built-in's own prose for a row it stored as
     // `null` (`resolved_display` 0.045) — the envelope read it back from
-    // `insight_evidence` as the panel shows it, so the step-7 trace held.
+    // `insight_evidence` as the panel shows it, and the slot placed it.
     expect(narration?.summaryMd).toContain('4.5%');
     const rateRow = await h.database.db.execute<{
       value: string | null;
@@ -417,9 +448,41 @@ describe.skipIf(NO_DATABASE)('WP 9.5 — the narrator through the worker composi
     `);
     expect(rateRow.rows[0]).toEqual({ value: null, resolved: '0.045' });
 
+    // C5-2's cold-model design: exactly one warm-up, before the first
+    // narration, carrying the two constants and nothing of the holder's — and
+    // under the narration's own runner settings, so it loads the runner the
+    // narration then uses. The model was warm for every later item.
+    const run = fake.requests.slice(requestsBefore);
+    const warmAt = run.findIndex(
+      (request) =>
+        request.path === '/api/chat' &&
+        (request.body as { stream?: unknown } | null)?.stream === false,
+    );
+    const firstNarrationAt = run.findIndex(
+      (request) =>
+        request.path === '/api/chat' &&
+        (request.body as { stream?: unknown } | null)?.stream !== false,
+    );
+    expect(fake.warmUps.length - warmUpsBefore).toBe(1);
+    expect(warmAt).toBeGreaterThanOrEqual(0);
+    expect(warmAt).toBeLessThan(firstNarrationAt);
+    expect(run.slice(0, warmAt).some((request) => request.path === '/api/ps')).toBe(true);
+    const warmUp = fake.warmUps.at(-1) as {
+      messages: unknown;
+      options: { num_predict: number; num_ctx: number };
+    };
+    expect(warmUp.messages).toEqual(WARM_UP_MESSAGES.map((m) => ({ ...m })));
+    expect(warmUp.options.num_predict).toBe(1);
+    const narrated = run[firstNarrationAt]?.body as { options: { num_ctx: number } };
+    expect(warmUp.options.num_ctx).toBe(narrated.options.num_ctx);
+    expect(JSON.stringify(warmUp)).not.toContain(finding?.title ?? '(no title)');
+    // The request's deadline is the platform ceiling; the chat's own timeout
+    // is still the adapter's (20 s here, LOCAL_MODEL_TIMEOUT_MS in production).
+    expect(NARRATOR_MANIFEST.limits.timeout_ms).toBe(300_000);
+
     // G5-6: the worker's adapter sent the narrator's reply format — the one
     // the evaluation measures — with no `format` passed anywhere.
-    const chats = fake.requests.filter((request) => request.path === '/api/chat');
+    const chats = narrationChats(fake);
     expect(chats.length).toBe(chatsBefore + jobs.rows.length);
     const sent = (chats.at(-1)?.body as { format?: unknown } | undefined)?.format;
     expect(isDeepStrictEqual(sent, NARRATOR_REPLY_FORMAT)).toBe(true);

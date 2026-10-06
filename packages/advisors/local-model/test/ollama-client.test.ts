@@ -16,8 +16,10 @@ import { createLocalEndpointPolicy, createLocalEndpointTransport } from '@core/p
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createLocalModelAdapter,
+  DEFAULT_GENERATION_OPTIONS,
   isLocalModelError,
   PROMPT_TEMPLATE_HASH,
+  WARM_UP_MESSAGES,
   type LocalModelAdapterDeps,
   type LocalModelErrorCode,
   type LocalModelLogger,
@@ -203,6 +205,8 @@ describe('the Ollama client', () => {
       );
       expect(server.requests.map((r) => `${r.method} ${r.path}`)).toEqual([
         'GET /api/tags',
+        // WP 9.5 (C5-2): the warm-up's probe. The model is loaded: no warm-up.
+        'GET /api/ps',
         'POST /api/chat',
         'GET /api/tags',
       ]);
@@ -459,6 +463,95 @@ describe('the PromptRenderer binding (WP 5.1’s port)', () => {
       expect(narrower.promptTemplateHash).not.toBe(adapter.promptTemplateHash);
       // …and the template hash still moves with the prompt template itself.
       expect(adapter.promptTemplateHash).not.toBe(PROMPT_TEMPLATE_HASH);
+    },
+    T,
+  );
+});
+
+describe('the warm-up (WP 9.5, Phase 5 gate C5-2)', () => {
+  const sequence = (server: FakeOllama) => server.requests.map((r) => `${r.method} ${r.path}`);
+  const runLines = (logs: Captured) =>
+    logs.lines.filter((line) => line.obj['event'] === 'local_model.run').map((line) => line.obj);
+
+  it(
+    'a cold model is warmed once, with constants only, before the narration; a warm one is not',
+    async () => {
+      const server = await fake({ kind: 'reply', reply: GOOD_REPLY });
+      server.loaded = false;
+      const logs = capture();
+      const adapter = adapterFor(server, { logger: logs.logger });
+      await adapter.run(baseRequest(), new AbortController().signal);
+      expect(sequence(server)).toEqual([
+        'GET /api/tags',
+        'GET /api/ps',
+        'POST /api/chat', // the warm-up
+        'POST /api/chat', // the narration
+        'GET /api/tags',
+      ]);
+      expect(server.warmUps).toHaveLength(1);
+      const warm = server.warmUps[0] as {
+        stream: unknown;
+        messages: unknown;
+        options: { num_predict: number; num_ctx: number };
+      };
+      expect(warm.stream).toBe(false);
+      expect(warm.messages).toEqual(WARM_UP_MESSAGES.map((message) => ({ ...message })));
+      expect(warm.options.num_predict).toBe(1);
+      expect(warm.options.num_ctx).toBe(DEFAULT_GENERATION_OPTIONS.numCtx);
+      expect(runLines(logs).at(-1)).toMatchObject({ model_before: 'cold', warm_up: 'loaded' });
+
+      await adapter.run(baseRequest(), new AbortController().signal);
+      expect(server.warmUps).toHaveLength(1);
+      expect(runLines(logs).at(-1)).toMatchObject({
+        model_before: 'warm',
+        warm_up: 'not_needed',
+        warm_up_ms: null,
+      });
+    },
+    T,
+  );
+
+  it(
+    "a request whose deadline leaves no headroom above the adapter's timeout is never warmed",
+    async () => {
+      const server = await fake({ kind: 'reply', reply: GOOD_REPLY });
+      server.loaded = false;
+      const logs = capture();
+      const adapter = adapterFor(server, { logger: logs.logger });
+      // The fixed clock reads 09:00:00; the adapter's timeout is 20 s.
+      const tight = baseRequest({
+        limits: {
+          max_insights: 5,
+          max_response_bytes: 131_072,
+          deadline: '2026-09-19T09:00:20.000Z',
+        },
+      });
+      await adapter.run(tight, new AbortController().signal);
+      expect(sequence(server)).toEqual(['GET /api/tags', 'POST /api/chat', 'GET /api/tags']);
+      expect(server.warmUps).toHaveLength(0);
+      expect(runLines(logs).at(-1)).toMatchObject({
+        model_before: 'unchecked',
+        warm_up: 'no_headroom',
+      });
+    },
+    T,
+  );
+
+  it(
+    'a warm-up that fails is logged once and not retried, and the narration still runs',
+    async () => {
+      const server = await fake({ kind: 'reply', reply: GOOD_REPLY });
+      server.loaded = false;
+      server.warmUpStatus = 500;
+      const logs = capture();
+      const adapter = adapterFor(server, { logger: logs.logger });
+      await adapter.run(baseRequest(), new AbortController().signal);
+      expect(server.warmUps).toHaveLength(1);
+      expect(chatRequests(server)).toHaveLength(2);
+      expect(
+        logs.lines.filter((line) => line.obj['event'] === 'local_model.warm_up_failed'),
+      ).toHaveLength(1);
+      expect(runLines(logs).at(-1)).toMatchObject({ model_before: 'cold', warm_up: 'failed' });
     },
     T,
   );

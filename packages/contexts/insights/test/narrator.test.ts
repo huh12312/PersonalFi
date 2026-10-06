@@ -48,7 +48,10 @@ async function builtinFinding(
   const validated = outcome.accepted[0];
   if (validated === undefined) throw new Error(`${advisorId} made no finding on this seed`);
   const source = findingSourceOf(validated);
-  return { source, finding: narratedFindingOf(source) };
+  // The 1.5.0 envelope (figures quoted, not placed): what the narrow trace
+  // judges on its own. Production places figures (option B) — see the last
+  // describe block, which builds the envelope the way `assembleFindings` does.
+  return { source, finding: narratedFindingOf(source, 'quoted') };
 }
 
 function narrate(
@@ -621,7 +624,7 @@ describe('WP 9.5 — Narrator v2', () => {
     expect(validated.insight.summary_md).toContain('23.99%');
 
     // The envelope now carries what the holder is shown for that row.
-    const finding = narratedFindingOf(findingSourceOf(validated));
+    const finding = narratedFindingOf(findingSourceOf(validated), 'quoted');
     expect(finding.evidence[position]?.value).toBe('23.99%');
 
     // So the finding's own percent, cited and stated, is accepted — the
@@ -654,5 +657,133 @@ describe('WP 9.5 — Narrator v2', () => {
     expect(verdictOf(narrate(snapshot, [finding], [otherRow]))).toEqual([
       'evidence:narration_value_disagrees',
     ]);
+  });
+
+  /**
+   * Option B — the Phase 5 gate's R-2, made a check the app can do. The
+   * production envelope (`narratedFindingOf`'s default, what
+   * `assembleFindings` sends) gives every digit-bearing row a slot and sends
+   * the finding's prose with each figure replaced by its slot; the model
+   * writes `{{e1}}` and never a digit; the validator refuses any figure the
+   * app did not place and fills each slot with the row's value **beside its
+   * own label**, and the narration cites that row under that label.
+   */
+  it('a narration contains no digit the app did not place, and each placed figure sits under its own evidence label', async () => {
+    const snapshot = await seedSnapshot('drift');
+    const { source } = await builtinFinding(PRICE_RISE, snapshot);
+    const finding = narratedFindingOf(source);
+    expect(finding.placed_figures).toBe(true);
+    const row = (label: string) => {
+      const found = finding.evidence.find((entry) => entry.label === label);
+      if (found?.slot === undefined) throw new Error(`no slotted row ${label}`);
+      return { ...found, slot: found.slot };
+    };
+    const previous = row('Previous price');
+    const next = row('New price');
+    const effective = row('Effective from');
+    expect([previous.value, next.value, effective.value]).toEqual([
+      '$15.99',
+      '$18.99',
+      '2026-06-01',
+    ]);
+    // The prose the model is sent names slots, never the figures.
+    const withoutSlots = (text: string) => text.replace(/\{\{e[1-9][0-9]?\}\}/gu, ' ');
+    for (const text of [finding.title, finding.summary_md, finding.impact.basis]) {
+      expect(withoutSlots(text)).not.toMatch(/\p{Nd}/u);
+    }
+    expect(finding.summary_md).toContain(`from {{${previous.slot}}} to {{${next.slot}}}`);
+
+    // What the B grammar lets a model write: prose and the constants — no
+    // key, no evidence. The narrator writes the identity and the citations.
+    const reply = (summary: string, extra: Record<string, unknown> = {}) => ({
+      severity: finding.severity,
+      title: 'A subscription now costs more',
+      summary_md: summary,
+      confidence: 0.8,
+      confidence_basis: 'model',
+      horizon: 'next_quarter',
+      requires_review: true,
+      impact: { annualized: null, one_time: null, basis: '', derivation_id: null },
+      derivations: [],
+      proposed_actions: [],
+      caveats: [],
+      expires_at: null,
+      ...extra,
+    });
+    const single = productionRequest([finding]);
+
+    const placed = await throughNarrator(single, [
+      reply(`It went from {{${previous.slot}}} to {{${next.slot}}} on {{${effective.slot}}}.`),
+    ]);
+    expect(verdictOf(placed)).toEqual(['accepted']);
+    const accepted = placed.ok ? placed.accepted[0] : undefined;
+    expect(accepted?.insight.summary_md).toBe(
+      'It went from $15.99 (Previous price) to $18.99 (New price) on 2026-06-01 (Effective from).',
+    );
+    // Every digit shown is inside a figure the app placed, beside its label …
+    let shown = accepted?.insight.summary_md ?? '';
+    for (const entry of [previous, next, effective]) {
+      shown = shown.replaceAll(`${String(entry.value)} (${entry.label})`, ' ');
+    }
+    expect(shown).not.toMatch(/\p{Nd}/u);
+    // … and each placed figure is cited under its own row's label, by the app.
+    expect(
+      accepted?.insight.evidence.map((entry) => [entry.label, entry.value, entry.source_ref]),
+    ).toEqual(
+      [previous, next, effective].map((entry) => [entry.label, entry.value, entry.source_ref]),
+    );
+
+    // R-2's own reply (wp5.4 O-31): the figures swapped. Each still carries
+    // its own label, so the reversal is shown for what it is.
+    const swapped = await throughNarrator(single, [
+      reply(`It went from {{${next.slot}}} to {{${previous.slot}}}.`),
+    ]);
+    expect(swapped.ok ? swapped.accepted[0]?.insight.summary_md : null).toBe(
+      'It went from $18.99 (New price) to $15.99 (Previous price).',
+    );
+
+    // Refused: a digit the app did not place — even the finding's own figure.
+    const verdict = async (summary: string, extra: Record<string, unknown> = {}) =>
+      verdictOf(await throughNarrator(single, [reply(summary, extra)]));
+    expect(await verdict(`It went from $15.99 to {{${next.slot}}}.`)).toEqual([
+      'numerals:numeral_not_placed',
+    ]);
+    // A digit smuggled beside a slot, in ASCII or in fullwidth (F-2's fold).
+    expect(await verdict(`It is now {{${next.slot}}}0.`)).toEqual(['numerals:numeral_not_placed']);
+    expect(await verdict(`It is now １{{${next.slot}}}.`)).toEqual(['numerals:numeral_not_placed']);
+    // A figure in words (F-4's refusal, kept beside the slots).
+    expect(await verdict('It costs about thirty-six dollars more a year.')).toEqual([
+      'numerals:numeral_not_placed',
+    ]);
+    // A slot the request did not define.
+    expect(await verdict('It went up to {{e9}}.')).toEqual(['numerals:slot_not_in_finding']);
+    // A placed figure cited under another row's label.
+    expect(
+      await verdict(`It went up to {{${next.slot}}}.`, {
+        evidence: [
+          {
+            kind: 'metric',
+            label: previous.label,
+            value: next.value,
+            source_ref: next.source_ref,
+            url: null,
+          },
+        ],
+      }),
+    ).toEqual(['evidence:narration_label_disagrees']);
+    // A placed figure whose row the narration does not cite at all.
+    expect(
+      await verdict(`It went up to {{${next.slot}}}.`, {
+        evidence: [
+          {
+            kind: 'metric',
+            label: previous.label,
+            value: previous.value,
+            source_ref: previous.source_ref,
+            url: null,
+          },
+        ],
+      }),
+    ).toEqual(['numerals:slot_not_cited']);
   });
 });

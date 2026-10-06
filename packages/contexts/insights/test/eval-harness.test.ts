@@ -38,7 +38,7 @@ import {
   type EvalRequestSpec,
   type NarrationVerdict,
 } from '../src/advisors/local/eval.ts';
-import type { NarratorModelPort } from '../src/advisors/local/narrator.ts';
+import { createNarratorAdvisor, type NarratorModelPort } from '../src/advisors/local/narrator.ts';
 import type { AdvisorRequest, NarratedFinding } from '../src/contract/request.ts';
 import { TODAY, seedSnapshot } from './advisors/seed.ts';
 
@@ -52,14 +52,18 @@ const RECORDED = join(
   'advisor-eval.recorded.json',
 );
 
-/** A narration of `finding` that quotes its first stated value, or `figure` instead. */
-function narration(finding: NarratedFinding, figure: string | null) {
-  const cited = finding.evidence.find((row) => row.source_ref !== null) ?? finding.evidence[0];
-  const quoted = figure ?? finding.evidence.find((row) => row.value !== null)?.value ?? null;
+/**
+ * A narration of `finding` in the B shape (contract 1.6.0): it places the
+ * finding's first citable figure by its slot — or writes `figure` as a digit
+ * instead — and names its finding by number. No key and no evidence: the
+ * narrator writes the identity and the citations, as it does in production.
+ */
+function narration(finding: NarratedFinding, number: number, figure: string | null) {
+  const slotted = finding.evidence.find((row) => row.slot !== undefined && row.source_ref !== null);
+  const placed = slotted?.slot === undefined ? null : `{{${slotted.slot}}}`;
+  const quoted = figure ?? placed;
   return {
-    key: finding.key,
-    period: finding.period,
-    type: finding.type,
+    finding: number,
     severity: finding.severity,
     title: 'In plain words',
     summary_md:
@@ -69,15 +73,6 @@ function narration(finding: NarratedFinding, figure: string | null) {
     horizon: 'this_period',
     requires_review: true,
     impact: { annualized: null, one_time: null, basis: '', derivation_id: null },
-    evidence: [
-      {
-        kind: 'metric',
-        label: cited?.label ?? 'Evidence',
-        value: null,
-        source_ref: cited?.source_ref ?? null,
-        url: null,
-      },
-    ],
     derivations: [],
     proposed_actions: [],
     caveats: [],
@@ -85,29 +80,39 @@ function narration(finding: NarratedFinding, figure: string | null) {
   };
 }
 
-/** Faithful nine times in ten, by narration count; the tenth invents `$9,999.99`. */
+/** A scripted model's reply envelope around `insights`. */
+function replyTo(request: AdvisorRequest, insights: unknown[]) {
+  return {
+    contract_version: 1,
+    request_id: request.request_id,
+    advisor_id: request.advisor_id,
+    advisor_version: request.advisor_version,
+    produced_at: request.generated_at,
+    diagnostics: { runtime_ms: 0, model: 'scripted', warnings: [] },
+    insights,
+  };
+}
+
+/**
+ * Faithful nine times in ten, by narration count; the tenth writes `$9,999.99`
+ * where its slot belongs. Wrapped by the real narrator, as the script wraps
+ * the adapter (`createNarratorAdvisor`).
+ */
 function oneInTenFabricator(): NarratorModelPort & { readonly calls: () => number } {
   let narrated = 0;
   let calls = 0;
-  return {
-    calls: () => calls,
+  const model: NarratorModelPort = {
     run(request: AdvisorRequest) {
       calls += 1;
-      const insights = (request.findings ?? []).map((finding) => {
+      const insights = (request.findings ?? []).map((finding, index) => {
         narrated += 1;
-        return narration(finding, narrated % 10 === 0 ? '$9,999.99' : null);
+        return narration(finding, index + 1, narrated % 10 === 0 ? '$9,999.99' : null);
       });
-      return Promise.resolve({
-        contract_version: 1,
-        request_id: request.request_id,
-        advisor_id: request.advisor_id,
-        advisor_version: request.advisor_version,
-        produced_at: request.generated_at,
-        diagnostics: { runtime_ms: 0, model: 'scripted', warnings: [] },
-        insights,
-      });
+      return Promise.resolve(replyTo(request, insights));
     },
   };
+  const narrator = createNarratorAdvisor({ model });
+  return { calls: () => calls, run: (request, signal) => narrator.run(request, signal) };
 }
 
 describe('the narrator evaluation harness', () => {
@@ -133,11 +138,12 @@ describe('the narrator evaluation harness', () => {
     expect(model.calls()).toBe(27);
     expect(report.narrations).toBe(40);
     expect(report.requests).toBe(27);
-    // Every narration clears steps 1–6; the four fabrications stop at 7.
+    // Every narration clears steps 1–6; the four fabrications stop at 7 —
+    // a digit where a slot belongs is a figure the app did not place.
     expect(report.passedThrough).toEqual([40, 40, 40, 40, 40, 40, 40, 36]);
     expect(report.firstAttempt.steps1to5).toEqual({ accepted: 40, total: 40, rate: 1 });
     expect(report.firstAttempt.steps1to7).toEqual({ accepted: 36, total: 40, rate: 0.9 });
-    expect(report.failures).toEqual({ 'numerals:numeral_not_in_finding': 4 });
+    expect(report.failures).toEqual({ 'numerals:numeral_not_placed': 4 });
     expect(report.extras).toBe(0);
   });
 
@@ -148,21 +154,19 @@ describe('the narrator evaluation harness', () => {
     );
     const [spec] = planRequests(cases, [3]) as [EvalRequestSpec];
     const request = evalRequest(spec, TODAY);
-    const reply = (insights: unknown[]) => ({
-      contract_version: 1,
-      request_id: request.request_id,
-      advisor_id: request.advisor_id,
-      advisor_version: request.advisor_version,
-      produced_at: request.generated_at,
-      diagnostics: { runtime_ms: 0, model: null, warnings: [] },
-      insights,
-    });
+    const reply = (insights: unknown[]) => replyTo(request, insights);
     const findings = spec.findings;
     // Two of three narrated; the third skipped: 2 accepted, 1 `no_narration` at 3.
+    // Through the real narrator, which writes identity and citations.
+    const narrator = createNarratorAdvisor({
+      model: {
+        run: () => Promise.resolve(reply([0, 1].map((n) => narration(findings[n]!, n + 1, null)))),
+      },
+    });
     const skipped = judgeReply(
       spec,
       request,
-      reply([findings[0], findings[1]].map((f) => narration(f!, null))),
+      await narrator.run(request, new AbortController().signal),
     );
     expect(skipped.verdicts.map((verdict) => verdict.passedThrough)).toEqual([7, 7, 3]);
     expect(skipped.verdicts[2]?.failure).toBe('no_narration');

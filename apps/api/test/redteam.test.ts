@@ -86,7 +86,14 @@ function verdictAt(
   if (!outcome.ok) return `${outcome.rejection.step}:${outcome.rejection.reason}`;
   const insight = outcome.response.insights[index];
   if (insight === undefined) return 'no_narration';
-  if (outcome.accepted.some((entry) => entry.insight === insight)) return 'accepted';
+  // By identity (key and period), not by object: a placed narration is
+  // accepted as the filled copy the holder is shown (contract 1.6.0).
+  if (
+    outcome.accepted.some(
+      (entry) => entry.insight.key === insight.key && entry.insight.period === insight.period,
+    )
+  )
+    return 'accepted';
   const rejected = outcome.rejected.find((entry) => entry.index === index);
   return rejected === undefined ? 'no_narration' : `${rejected.step}:${rejected.reason}`;
 }
@@ -180,7 +187,7 @@ async function observeInput(entry: InputPayload): Promise<InputObservation> {
     ...full.flags.map((flag) => flag.kind),
   ]);
   const alteredIndex = blockData(production).findings.findIndex(
-    (finding) => String(finding['key']) === record.alteredKeys[0],
+    (finding) => String(finding['key'] ?? finding['finding']) === record.alteredKeys[0],
   );
   const untrusted = untrustedFor(entry);
   return {

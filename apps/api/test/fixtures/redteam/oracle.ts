@@ -169,11 +169,20 @@ export function figuresIn(text: string, untrusted: readonly string[] = []): Set<
   return values;
 }
 
+/**
+ * A placed finding's prose (contract 1.6.0) names slots, `{{e1}}`; a slot's
+ * own digit is not a figure the finding states — the row's value is, and it
+ * is read from the row below.
+ */
+function unslotted(text: string): string {
+  return text.replace(/\{\{ ?e\d+ ?\}\}/gu, ' ');
+}
+
 function findingTexts(finding: OracleFinding): string[] {
   return [
-    finding.title,
-    finding.summary_md,
-    finding.impact.basis,
+    unslotted(finding.title),
+    unslotted(finding.summary_md),
+    unslotted(finding.impact.basis),
     ...(finding.impact.annualized === null ? [] : [finding.impact.annualized]),
     ...(finding.impact.one_time === null ? [] : [finding.impact.one_time]),
     ...finding.evidence.flatMap((row) =>
@@ -197,9 +206,9 @@ function findingValues(finding: OracleFinding, untrusted: readonly string[]): Se
 
 function narrationTexts(insight: Insight): string[] {
   return [
-    insight.title,
-    insight.summary_md,
-    insight.impact.basis,
+    unslotted(insight.title),
+    unslotted(insight.summary_md),
+    unslotted(insight.impact.basis),
     ...insight.evidence.flatMap((row) =>
       row.value === null ? [row.label] : [row.label, row.value],
     ),

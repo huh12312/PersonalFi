@@ -332,12 +332,75 @@ export function readable(text: string): string {
 
 /**
  * A faithful narration of one finding **as the model read it on the wire** —
- * its key, type and period echoed, its title and summary restated, one of its
- * money rows cited. The control: this must be accepted, or the harness is
- * refusing everything and proves nothing.
+ * its title and summary restated, its figures where its finding put them. The
+ * control: this must be accepted, or the harness is refusing everything and
+ * proves nothing.
+ *
+ * Two readings (contract 1.6.0, WP 9.5 option B):
+ *
+ *   * **a placed finding** — production since option B. From the prompt block
+ *     (`placedView`: a number, slotted prose, rows as label + slot) the model
+ *     names its finding by number and restates the slotted prose; it writes no
+ *     key and no evidence, as the B grammar allows none — the narrator writes
+ *     the identity and each placed slot's citation. From the raw envelope (the
+ *     output corpus's roles) it also writes the key and, like the narrator
+ *     would, a citation of each slot it places, so the validator path (which
+ *     judges a reply as written) sees a complete narration.
+ *   * **a 1.5.0 finding** (figures quoted): its key echoed and one money row cited.
  */
 export function faithfulNarration(finding: Record<string, unknown>): Record<string, unknown> {
   const evidence = (finding['evidence'] as Record<string, unknown>[] | undefined) ?? [];
+  const placed =
+    finding['placed_figures'] === true ||
+    typeof finding['finding'] === 'number' ||
+    evidence.some((row) => typeof row['slot'] === 'string');
+  const prose = {
+    severity: finding['severity'],
+    title: finding['title'],
+    summary_md: finding['summary_md'],
+    confidence: 0.8,
+    confidence_basis: 'model',
+    horizon: 'this_year',
+    requires_review: true,
+    impact: { annualized: null, one_time: null, basis: '', derivation_id: null },
+    derivations: [],
+    proposed_actions: [],
+    caveats: [],
+    expires_at: null,
+  };
+  if (placed) {
+    if (typeof finding['finding'] === 'number') return { finding: finding['finding'], ...prose };
+    const order: string[] = [];
+    for (const text of [finding['title'], finding['summary_md']]) {
+      if (typeof text !== 'string') continue;
+      for (const match of text.matchAll(/\{\{(e\d+)\}\}/gu)) {
+        if (match[1] !== undefined && !order.includes(match[1])) order.push(match[1]);
+      }
+    }
+    const cited = order.flatMap((slot) =>
+      evidence.filter((row) => row['slot'] === slot && typeof row['source_ref'] === 'string'),
+    );
+    const rows =
+      cited.length > 0
+        ? cited
+        : evidence
+            .filter((row) => typeof row['source_ref'] === 'string')
+            .slice(0, 1)
+            .map((row): Record<string, unknown> => ({ ...row, value: null }));
+    return {
+      key: finding['key'],
+      period: finding['period'],
+      type: finding['type'],
+      ...prose,
+      evidence: rows.map((row) => ({
+        kind: 'metric',
+        label: row['label'],
+        value: row['value'] ?? null,
+        source_ref: row['source_ref'],
+        url: null,
+      })),
+    };
+  }
   const cited =
     evidence.find(
       (row) =>
@@ -350,14 +413,7 @@ export function faithfulNarration(finding: Record<string, unknown>): Record<stri
     key: finding['key'],
     period: finding['period'],
     type: finding['type'],
-    severity: finding['severity'],
-    title: finding['title'],
-    summary_md: finding['summary_md'],
-    confidence: 0.8,
-    confidence_basis: 'model',
-    horizon: 'this_year',
-    requires_review: true,
-    impact: { annualized: null, one_time: null, basis: '', derivation_id: null },
+    ...prose,
     evidence: [
       {
         kind: 'metric',
@@ -367,10 +423,6 @@ export function faithfulNarration(finding: Record<string, unknown>): Record<stri
         url: null,
       },
     ],
-    derivations: [],
-    proposed_actions: [],
-    caveats: [],
-    expires_at: null,
   };
 }
 
@@ -446,7 +498,8 @@ export function obedientResponder(
       const sees = readable(strings(finding).join('\n')).includes(trigger);
       if (sees || (snapshotSees && index === 0)) {
         record.obeyed = true;
-        record.alteredKeys.push(String(finding['key']));
+        // The finding's key (1.5.0) or, in the placed view, its number.
+        record.alteredKeys.push(String(finding['key'] ?? finding['finding']));
         return obey(faithful, directive);
       }
       return faithful;
@@ -534,8 +587,14 @@ export function verdictFor(result: RunResult, key: string | null): Verdict {
   if (outcome === null) return 'adapter:none';
   if (!outcome.ok) return `${outcome.rejection.step}:${outcome.rejection.reason}`;
   if (key === null) {
+    // By identity, not by object: a placed narration is accepted as the
+    // filled copy the holder is shown (contract 1.6.0), never the reply object.
+    const first = outcome.response.insights[0];
     const accepted = outcome.accepted.find(
-      (entry) => outcome.response.insights.indexOf(entry.insight) === 0,
+      (entry) =>
+        first !== undefined &&
+        entry.insight.key === first.key &&
+        entry.insight.period === first.period,
     );
     if (accepted !== undefined) return 'accepted';
     const rejected = outcome.rejected.find((entry) => entry.index === 0);

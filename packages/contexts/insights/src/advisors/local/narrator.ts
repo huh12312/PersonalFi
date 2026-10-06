@@ -52,6 +52,7 @@
  */
 import type { AdvisorRequest, NarratedFinding } from '../../contract/request.ts';
 import type { Advisor } from '../../registry.ts';
+import { slotsIn } from '../../validate/numerals.ts';
 import { NARRATOR_MANIFEST } from './manifest.ts';
 
 /** WP 5.2's `LocalModelAdapter` satisfies this structurally; so does a recorded-reply fake. */
@@ -108,7 +109,12 @@ export function withIdentityFromRequest(
       const { finding: number, ...rest } = item as Record<string, unknown>;
       let finding: NarratedFinding | undefined = only;
       if (only === undefined) {
-        if (number === undefined) return rest; // the pre-9.5 shape: the 1:1 check decides
+        if (number === undefined) {
+          // The pre-9.5 shape: the 1:1 check decides the identity. The key it
+          // wrote still says which finding's slots it placed (option B).
+          const named = findings.find((candidate) => candidate.key === rest['key']);
+          return named === undefined ? rest : withPlacedCitations(rest, named);
+        }
         finding =
           typeof number === 'number' && Number.isInteger(number) && number >= 1
             ? findings[number - 1]
@@ -117,7 +123,56 @@ export function withIdentityFromRequest(
         // step 2 refuses it rather than this guessing.
         if (finding === undefined) return { ...rest, key: null, type: null, period: null };
       }
-      return { ...rest, key: finding?.key, type: finding?.type, period: finding?.period };
+      if (finding === undefined) return rest;
+      return withPlacedCitations(
+        { ...rest, key: finding.key, type: finding.type, period: finding.period },
+        finding,
+      );
     }),
+  };
+}
+
+/**
+ * Option B (contract 1.6.0), pure: a placed narration's **citations are the
+ * app's**, written from the slots it placed — each slot's row, in the order
+ * the narration first places it, under the row's own label, value and ref.
+ * The B reply format has no `evidence` for a model to write (26 of the gate's
+ * refusals were a model copying an identifier; 5 of option A's were a model
+ * writing a real figure under the wrong row). A narration that places no slot
+ * cites its finding's first row without restating it (`value: null`).
+ *
+ * Added only when the item carries no `evidence` of its own: a reply that does
+ * (a scripted one, or a model ignoring its grammar) is judged as written —
+ * step 5 holds each row's label and value to the finding's, and step 7 refuses
+ * a placed slot whose row it does not cite (`slot_not_cited`).
+ */
+export function withPlacedCitations(
+  item: Record<string, unknown>,
+  finding: NarratedFinding,
+): Record<string, unknown> {
+  if (finding.placed_figures !== true || 'evidence' in item) return item;
+  const impact = item['impact'];
+  const texts = [
+    item['title'],
+    item['summary_md'],
+    impact !== null && typeof impact === 'object'
+      ? (impact as Record<string, unknown>)['basis']
+      : null,
+  ].filter((text): text is string => typeof text === 'string');
+  const order: string[] = [];
+  for (const text of texts) {
+    for (const slot of slotsIn(text)) if (!order.includes(slot)) order.push(slot);
+  }
+  const citable = finding.evidence.filter((row) => row.source_ref !== null);
+  const rows = order.flatMap((slot) => citable.filter((row) => row.slot === slot));
+  const evidence =
+    rows.length > 0
+      ? rows.map((row) => ({ label: row.label, value: row.value, source_ref: row.source_ref }))
+      : citable
+          .slice(0, 1)
+          .map((row) => ({ label: row.label, value: null, source_ref: row.source_ref }));
+  return {
+    ...item,
+    evidence: evidence.map((row) => ({ kind: 'metric', ...row, url: null })),
   };
 }
