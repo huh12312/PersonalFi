@@ -92,6 +92,12 @@ export interface RunJobPayload {
   readonly advisorId: string;
   readonly trigger: 'schedule' | 'event' | 'manual' | 'backfill';
   readonly triggerEventType?: string | null;
+  /**
+   * WP 9.5 (C5-2, G5-15): for a narrator run, the built-in insights to
+   * narrate — the Brief enqueues one job per item it chose, each carrying that
+   * item's id. Absent ⇒ the feed's first finding (`advisors/local/findings.ts`).
+   */
+  readonly narrateInsightIds?: readonly string[];
 }
 
 export interface JobDependencies {
@@ -213,6 +219,13 @@ export function createRunLocalJob(input: JobDependencies): JobHandlerRegistratio
           trigger: payload.trigger,
           triggerEventType: payload.triggerEventType ?? null,
           lane: 'local',
+          ...(Array.isArray(payload.narrateInsightIds)
+            ? {
+                narrateInsightIds: payload.narrateInsightIds.filter(
+                  (id): id is string => typeof id === 'string',
+                ),
+              }
+            : {}),
         },
       );
 
@@ -233,11 +246,16 @@ export function createRunLocalJob(input: JobDependencies): JobHandlerRegistratio
         'local-model advisor run finished',
       );
 
-      // As `insights.run`: a failure fails the job so the queue retries it; a
-      // refusal or a cancellation is the ladder working, not a failure.
-      if (result.status === 'failed') {
-        throw new Error(`advisor ${result.advisorId} run failed`);
-      }
+      // WP 9.5 (Phase 5 gate C5-2, G5-7): **no job-level retry in this lane.**
+      // A failed local-model run — a `model_timeout`, an unreachable model, a
+      // reply the validator refused at steps 1–3 — has already written its
+      // `advisor_runs` row and advanced the breaker (`failRun`), which is the
+      // count that quarantines a failing model. Re-queueing it would spend
+      // another full deadline of all four cores on the same prompt (observed:
+      // a 180 s timeout retried, then a third trip of the breaker) and, for a
+      // refused reply, would be re-asking until the validator agrees. The job
+      // completes; the run's own row says it failed. A refusal or a
+      // cancellation is the ladder working, as before.
     },
     { concurrency: 1 },
   );

@@ -1644,3 +1644,94 @@ describe('Redacted', () => {
     expect(JSON.stringify(describeConfig(config))).not.toContain(MASTER_KEY);
   });
 });
+
+/**
+ * WP 9.6 (CF-1, C5-1, R-4): the api learns the model's NAME and DIGEST and
+ * never its endpoint. `localModelPin` is what the api process reads to bind
+ * the pure, preview-only `PromptRenderer`; the endpoint stays a worker-only
+ * input (`compose.yml` hands `LOCAL_MODEL_ENDPOINT` to `worker` alone).
+ */
+describe('the local model pin, the api-side half (WP 9.6, R-4)', () => {
+  const PIN_DIGEST = `sha256:${'b'.repeat(64)}`;
+
+  it('neither key set ⇒ no pin (the default)', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+    expect(config.localModelPin).toBeUndefined();
+  });
+
+  it('both keys set, no endpoint ⇒ a pin with a name and a digest and nothing else', () => {
+    const config = loadConfig({
+      env: env({ LOCAL_MODEL_PIN_NAME: 'qwen2.5:7b', LOCAL_MODEL_PIN_DIGEST: PIN_DIGEST }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.localModelPin).toEqual({ name: 'qwen2.5:7b', digest: PIN_DIGEST });
+    expect(config.localModel).toBeUndefined();
+  });
+
+  it('a name without a digest, or a digest without a name, is a boot problem naming the missing key', () => {
+    for (const [given, missing] of [
+      [{ LOCAL_MODEL_PIN_NAME: 'qwen2.5:7b' }, 'LOCAL_MODEL_PIN_DIGEST'],
+      [{ LOCAL_MODEL_PIN_DIGEST: PIN_DIGEST }, 'LOCAL_MODEL_PIN_NAME'],
+    ] as const) {
+      let caught: ConfigError | undefined;
+      try {
+        loadConfig({ env: env({ ...given }), readSecret: secretsFrom({}) });
+      } catch (error) {
+        caught = error as ConfigError;
+      }
+      expect(caught?.problems.map((p) => p.key)).toContain(missing);
+    }
+  });
+
+  it('a malformed digest is refused', () => {
+    expect(() =>
+      loadConfig({
+        env: env({ LOCAL_MODEL_PIN_NAME: 'qwen2.5:7b', LOCAL_MODEL_PIN_DIGEST: 'sha256:xyz' }),
+        readSecret: secretsFrom({}),
+      }),
+    ).toThrow(ConfigError);
+  });
+
+  it('a process that holds the full local model config pins from it, whatever the pin keys say', () => {
+    const config = loadConfig({
+      env: env({
+        LOCAL_MODEL_ENDPOINT: 'ollama:11434',
+        LOCAL_MODEL_NAME: 'qwen2.5:7b-instruct',
+        LOCAL_MODEL_DIGEST: `sha256:${'a'.repeat(64)}`,
+      }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.localModelPin).toEqual({
+      name: 'qwen2.5:7b-instruct',
+      digest: `sha256:${'a'.repeat(64)}`,
+    });
+  });
+
+  it('the pin carries no endpoint, even when one is configured', () => {
+    const config = loadConfig({
+      env: env({
+        LOCAL_MODEL_ENDPOINT: 'ollama:11434',
+        LOCAL_MODEL_NAME: 'qwen2.5:7b-instruct',
+        LOCAL_MODEL_DIGEST: `sha256:${'a'.repeat(64)}`,
+      }),
+      readSecret: secretsFrom({}),
+    });
+    expect(Object.keys(config.localModelPin ?? {}).sort()).toEqual(['digest', 'name']);
+  });
+});
+
+/** WP 9.6 R-2's gate: narration TEXT is shown to the holder only when this is set. */
+describe('NARRATION_TEXT_SHOWN (R-2, WP 9.6 item 3)', () => {
+  it('is false by default', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+    expect(config.env.NARRATION_TEXT_SHOWN).toBe(false);
+  });
+
+  it('is true when set', () => {
+    const config = loadConfig({
+      env: env({ NARRATION_TEXT_SHOWN: 'true' }),
+      readSecret: secretsFrom({}),
+    });
+    expect(config.env.NARRATION_TEXT_SHOWN).toBe(true);
+  });
+});

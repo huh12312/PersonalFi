@@ -13,6 +13,7 @@ import {
   stubFetchRoutes,
 } from '../../test-support/api-test-utils.ts';
 import type { Account, Transaction } from '../../api/generated/types.gen.ts';
+import { DEFAULT_OVERLAY } from '../accounts/fixtures.ts';
 
 const SESSION = {
   userId: 'user_1',
@@ -42,6 +43,7 @@ const ACCOUNT: Account = {
   closedAt: null,
   includeInNetWorth: true,
   balance: null,
+  overlay: DEFAULT_OVERLAY,
 };
 
 function transaction(overrides: Partial<Transaction> & Pick<Transaction, 'id'>): Transaction {

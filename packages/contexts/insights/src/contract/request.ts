@@ -23,6 +23,20 @@
  *   * **`limits.deadline`** is enforced by us with an `AbortSignal`, never by
  *     the advisor's own settings (08 §4.4, "Hard timeout, enforced by us").
  *
+ * ## Placed figures (contract 1.6.0, WP 9.5 option B — the Phase 5 gate's R-2)
+ *
+ * A finding marked `placed_figures: true` is narrated **without the model
+ * writing a figure**. Every evidence row whose value carries a digit has a
+ * `slot` (`e1`, `e2`, …); the finding's `title`, `summary_md` and
+ * `impact.basis` are sent with each such figure replaced by its slot in double
+ * braces (`went from {{e1}} to {{e2}}`); the model sees the slot and the
+ * row's label, never the digits (`@advisor/local-model`'s `renderPrompt`). A
+ * narration writes slots; the validator (step 7) refuses any digit or figure
+ * in words it did not place, fills each slot with the row's value **and its
+ * label** (`$15.99 (Previous price)`), and cites the row in the narration's
+ * evidence under that same label. Both fields are optional and app-written:
+ * a finding without them is narrated as in 1.5.0.
+ *
  * ## `findings` — the narration envelope (contract 1.5.0, WP 5.3)
  *
  * A `narrates_only` advisor cannot narrate a finding it never sees, and until
@@ -101,8 +115,14 @@ export const NarratedFindingSchema = z.strictObject({
     .array(
       z.strictObject({
         label: z.string().min(1).max(160),
+        /** What the holder is shown for this row (WP 9.5 option A(b)), or `null`. */
         value: z.string().max(160).nullable(),
         source_ref: SourceRefSchema.nullable(),
+        /** Contract 1.6.0: the slot a narration writes for this row's figure, `{{e1}}`. */
+        slot: z
+          .string()
+          .regex(/^e[1-9][0-9]?$/)
+          .optional(),
       }),
     )
     .min(1)
@@ -120,6 +140,11 @@ export const NarratedFindingSchema = z.strictObject({
     one_time: z.string().max(64).nullable(),
     basis: z.string().max(240),
   }),
+  /**
+   * Contract 1.6.0 (WP 9.5 option B): the narration places no figure of its
+   * own — see the header. App-written; never present unless `true`.
+   */
+  placed_figures: z.literal(true).optional(),
 });
 
 export type NarratedFinding = z.infer<typeof NarratedFindingSchema>;

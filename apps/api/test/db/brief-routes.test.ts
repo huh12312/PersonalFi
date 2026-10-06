@@ -39,10 +39,28 @@
  *   * **Together** — `'a week that belongs to nobody the caller is 404 for
  *     every caller'`.
  */
-import { newId, systemClock } from '@core/kernel';
-import { advisoryBriefItems, advisoryBriefs } from '@ctx/insights/schema';
+import { fixedClock, newId, systemClock } from '@core/kernel';
+import { createJobRunner, enqueueJob, platformExecutor, silentLogger } from '@core/platform';
+import { createEgressPolicy, createNtfyChannel, createSmtpChannel } from '@ctx/notifications';
+import { registerAdvisor, NARRATOR_MANIFEST } from '@ctx/insights';
+import {
+  advisoryBriefItems,
+  advisoryBriefs,
+  insightActions,
+  insightEvidence,
+  insights,
+} from '@ctx/insights/schema';
+import { and, eq, sql } from 'drizzle-orm';
+import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  createConnectorRegistry,
+  createDomainRuntime,
+  createInvestmentSyncPort,
+} from '../../src/domain.ts';
+import { appModules, registerBuiltinAdvisors } from '../../src/modules.ts';
 import { loadItems } from '../../src/routes/brief.ts';
+import { startApiWithEnv, type EnvApi } from '../helpers/api-with-env.ts';
 import {
   createApiHarness,
   expectStatus,
@@ -54,6 +72,18 @@ import {
 interface BriefItemWire {
   readonly section: string;
   readonly insightKey: string;
+  readonly primaryAction: {
+    readonly kind: string;
+    readonly label: string;
+    readonly rationaleMd: string;
+    readonly url: string | null;
+  } | null;
+  readonly narration: {
+    readonly status: 'narrated' | 'pending' | 'none';
+    readonly aiAssisted: boolean;
+    readonly textShown: boolean;
+    readonly summaryMd: string | null;
+  };
   readonly annualizedImpact: { readonly minor: string; readonly currency: string } | null;
   readonly retirementEffect: Record<string, unknown>;
 }
@@ -374,4 +404,602 @@ describe.skipIf(NO_DATABASE)('/insights/brief and /insights/health-score (WP 5.1
       expect(response.statusCode).toBe(404);
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+// WP 9.6 item 3 (a Brief item's narration, R-2's gate) and item 4 (CF-24)
+// ---------------------------------------------------------------------------
+
+type Db = ApiHarness['database']['db'];
+
+/**
+ * One live finding the way the nightly upsert leaves it: an `insights` row,
+ * one evidence row, one proposed action. Direct inserts against the public
+ * schema, matching what `upsertInsight` writes (the file header's reason).
+ */
+async function seedFinding(
+  db: Db,
+  userId: string,
+  input: {
+    readonly advisorId: string;
+    readonly key: string;
+    readonly title: string;
+    readonly action: { kind: string; label: string; rationaleMd: string; url: string | null };
+    readonly lastProposedAt?: Date;
+  },
+): Promise<string> {
+  const id = newId();
+  const proposed = input.lastProposedAt ?? new Date('2026-10-05T12:00:00.000Z');
+  await db.insert(insights).values({
+    id,
+    userId,
+    advisorId: input.advisorId,
+    advisorVersion: '1.0.0',
+    runId: null,
+    key: input.key,
+    period: 'all_time',
+    type: 'cash.emergency_fund_short',
+    severity: 'notable',
+    severityClamped: false,
+    title: input.title,
+    summaryMd: `The template wording for ${input.title}.`,
+    confidence: '0.900000',
+    confidenceBasis: 'deterministic',
+    horizon: 'this_period',
+    status: 'pending_review',
+    impactAnnualizedMinor: 50_000n,
+    impactOneTimeMinor: null,
+    impactCurrency: 'USD',
+    impactBasis: 'A stated basis.',
+    impactDerivationId: null,
+    derivations: [],
+    caveats: [],
+    narratesInsightId: null,
+    inputDigest: `sha256:${'b'.repeat(64)}`,
+    firstProposedAt: proposed,
+    lastProposedAt: proposed,
+    reviewedAt: null,
+    expiresAt: null,
+  });
+  await db.insert(insightEvidence).values({
+    id: newId(),
+    userId,
+    insightId: id,
+    position: 0,
+    kind: 'metric',
+    label: 'Balance',
+    value: '500.00',
+    sourceRef: 'snapshot:cash_summary.balance',
+    resolvedDisplay: '$500.00',
+    href: null,
+  });
+  await db.insert(insightActions).values({
+    id: newId(),
+    userId,
+    insightId: id,
+    position: 0,
+    kind: input.action.kind as 'suggest_only',
+    label: input.action.label,
+    rationaleMd: input.action.rationaleMd,
+    url: input.action.url,
+  });
+  return id;
+}
+
+/** The narrator's alternative wording of `findingId` (`narrates_insight_id`), newer than the finding. */
+async function seedNarration(
+  db: Db,
+  userId: string,
+  findingId: string,
+  text: string,
+): Promise<void> {
+  const proposed = new Date('2026-10-05T18:00:00.000Z');
+  await db.insert(insights).values({
+    id: newId(),
+    userId,
+    advisorId: 'local.narrator',
+    advisorVersion: '1.0.0',
+    runId: null,
+    key: `narration.${findingId}`,
+    period: 'all_time',
+    type: 'cash.emergency_fund_short',
+    severity: 'notable',
+    severityClamped: false,
+    title: 'A narrated title',
+    summaryMd: text,
+    confidence: '0.700000',
+    confidenceBasis: 'model',
+    horizon: 'this_period',
+    status: 'pending_review',
+    impactAnnualizedMinor: null,
+    impactOneTimeMinor: null,
+    impactCurrency: null,
+    impactBasis: '',
+    impactDerivationId: null,
+    derivations: [],
+    caveats: [],
+    narratesInsightId: findingId,
+    inputDigest: `sha256:${'c'.repeat(64)}`,
+    firstProposedAt: proposed,
+    lastProposedAt: proposed,
+    reviewedAt: null,
+    expiresAt: null,
+  });
+}
+
+/** A published Brief whose items point at live findings (`insight_id`), for the narration join. */
+async function seedBriefOver(
+  db: Db,
+  userId: string,
+  isoWeek: string,
+  findings: readonly { readonly insightId: string | null; readonly key: string }[],
+  publishedAt = new Date('2026-10-05T12:30:00.000Z'),
+): Promise<void> {
+  const briefId = newId();
+  await db.insert(advisoryBriefs).values({
+    id: briefId,
+    userId,
+    isoWeek,
+    currency: 'USD',
+    nothingMaterial: false,
+    coldStart: false,
+    coldStartNote: null,
+    inputDigest: `sha256:${'a'.repeat(64)}`,
+    publishedAt,
+    createdAt: publishedAt,
+  });
+  let position = 0;
+  for (const finding of findings) {
+    await db.insert(advisoryBriefItems).values({
+      id: newId(),
+      userId,
+      briefId,
+      section: 'ranked',
+      position: position++,
+      insightId: finding.insightId,
+      advisorId: 'builtin.cash.emergency_fund_short',
+      insightKey: finding.key,
+      insightType: 'cash.emergency_fund_short',
+      severity: 'notable',
+      title: `Item ${finding.key}`,
+      summaryMd: `The template wording of ${finding.key}.`,
+      confidence: '0.900000',
+      horizon: 'this_period',
+      carried: false,
+      impactAnnualizedMinor: 50_000n,
+      impactOneTimeMinor: null,
+      impactCurrency: 'USD',
+      evidence: [],
+      score: '0.500000',
+      scoreFactors: { impact: 0.8 },
+      retirementEffect: NOT_COMPUTABLE_EFFECT,
+      createdAt: publishedAt,
+    });
+  }
+}
+
+describe.skipIf(NO_DATABASE)(
+  'a Brief item carries its narration, gated by R-2 (WP 9.6 item 3)',
+  () => {
+    const TEXT = 'A friendlier way to say the same thing, written by the narrator.';
+
+    /** Seeds, for one holder: item A has a narration, item B has none. Returns the week. */
+    async function seedNarratedWeek(
+      db: Db,
+      userId: string,
+      week: string,
+    ): Promise<{ narrated: string; plain: string }> {
+      await registerBuiltinAdvisors(db, { userId, clock: systemClock, correlationId: newId() });
+      const action = {
+        kind: 'suggest_only',
+        label: 'Review it',
+        rationaleMd: 'Worth a look.',
+        url: null,
+      };
+      const narrated = await seedFinding(db, userId, {
+        advisorId: 'builtin.cash.emergency_fund_short',
+        key: `wp96-narrated-${week}`,
+        title: 'Narrated finding',
+        action,
+      });
+      const plain = await seedFinding(db, userId, {
+        advisorId: 'builtin.cash.emergency_fund_short',
+        key: `wp96-plain-${week}`,
+        title: 'Plain finding',
+        action,
+      });
+      await seedNarration(db, userId, narrated, TEXT);
+      await seedBriefOver(db, userId, week, [
+        { insightId: narrated, key: `wp96-narrated-${week}` },
+        { insightId: plain, key: `wp96-plain-${week}` },
+      ]);
+      return { narrated, plain };
+    }
+
+    async function itemsOf(api: EnvApi, week: string): Promise<BriefItemWire[]> {
+      const response = await api.request({
+        method: 'GET',
+        url: `/insights/brief/${week}`,
+        session: api.stale,
+      });
+      expectStatus(response as never, 200);
+      return (response.json() as { brief: BriefWire }).brief.items as BriefItemWire[];
+    }
+
+    it(
+      'a Brief item with a narration carries it, badged; one without carries none ' +
+        '(NARRATION_TEXT_SHOWN off: the badge and the status, never the text)',
+      async () => {
+        // The default config: the gate is closed.
+        const api = await startApiWithEnv('narroff');
+        try {
+          await seedNarratedWeek(api.database.db, api.database.userId, '2026-W41');
+          const items = await itemsOf(api, '2026-W41');
+          const narrated = items.find((item) => item.insightKey.startsWith('wp96-narrated'));
+          const plain = items.find((item) => item.insightKey.startsWith('wp96-plain'));
+          expect(narrated?.narration).toEqual({
+            status: 'narrated',
+            aiAssisted: true,
+            textShown: false,
+            summaryMd: null,
+          });
+          expect(plain?.narration).toEqual({
+            status: 'none',
+            aiAssisted: false,
+            textShown: false,
+            summaryMd: null,
+          });
+          // The text never reaches the wire while the gate is closed — not even
+          // somewhere a client could dig it out.
+          const raw = await api.request({
+            method: 'GET',
+            url: '/insights/brief/2026-W41',
+            session: api.stale,
+          });
+          expect(JSON.stringify(raw.json())).not.toContain(TEXT);
+        } finally {
+          await api.close();
+        }
+      },
+      120_000,
+    );
+
+    it(
+      'a Brief item with a narration carries it, badged; one without carries none ' +
+        '(NARRATION_TEXT_SHOWN on: the text, beside the built-in wording)',
+      async () => {
+        const api = await startApiWithEnv('narron', { NARRATION_TEXT_SHOWN: 'true' });
+        try {
+          await seedNarratedWeek(api.database.db, api.database.userId, '2026-W41');
+          const items = await itemsOf(api, '2026-W41');
+          const narrated = items.find((item) => item.insightKey.startsWith('wp96-narrated'));
+          const plain = items.find((item) => item.insightKey.startsWith('wp96-plain'));
+          expect(narrated?.narration).toEqual({
+            status: 'narrated',
+            aiAssisted: true,
+            textShown: true,
+            summaryMd: TEXT,
+          });
+          // The built-in's own summary is untouched: a narration is alternative
+          // wording, never a replacement of what the Brief stored.
+          expect((narrated as unknown as { summaryMd: string }).summaryMd).toMatch(
+            /^The template wording of/,
+          );
+          expect(plain?.narration).toEqual({
+            status: 'none',
+            aiAssisted: false,
+            textShown: true,
+            summaryMd: null,
+          });
+        } finally {
+          await api.close();
+        }
+      },
+      120_000,
+    );
+
+    it(
+      "another holder's narration is never joined onto this holder's item (userId alone), " +
+        'and a narration of a finding not on the Brief is not shown (finding id alone)',
+      async () => {
+        const api = await startApiWithEnv('narrx', { NARRATION_TEXT_SHOWN: 'true' });
+        try {
+          const bob = await api.database.createUser('Narration Second Holder');
+          const alice = api.database.userId;
+          const { narrated } = await seedNarratedWeek(api.database.db, alice, '2026-W41');
+          // Bob's Brief item names Alice's narrated finding as its source (the FK on
+          // `advisory_brief_items.insight_id` is on `id` alone, so this row is
+          // representable — and the join must not follow it into Alice's data).
+          await seedBriefOver(api.database.db, bob, '2026-W41', [
+            { insightId: narrated, key: 'wp96-bob-points-at-alices' },
+          ]);
+          const bobSession = await api.issueSession({ userId: bob });
+          const response = await api.request({
+            method: 'GET',
+            url: '/insights/brief/2026-W41',
+            session: bobSession,
+          });
+          const items = (response.json() as { brief: BriefWire }).brief.items;
+          expect(items).toHaveLength(1);
+          expect(items[0]?.narration.status).toBe('none');
+          expect(JSON.stringify(response.json())).not.toContain(TEXT);
+
+          // Alice's own plain item carries no narration although a narration
+          // exists for her OTHER finding: the join is per finding.
+          const aliceItems = await itemsOf(api, '2026-W41');
+          expect(aliceItems.filter((item) => item.narration.status === 'narrated')).toHaveLength(1);
+        } finally {
+          await api.close();
+        }
+      },
+      120_000,
+    );
+
+    it('a narration still expected is "pending"; with no model, or an old Brief, it is "none"', async () => {
+      const pin = {
+        LOCAL_MODEL_PIN_NAME: 'qwen2.5:7b-instruct-q4_K_M',
+        LOCAL_MODEL_PIN_DIGEST: `sha256:${'a'.repeat(64)}`,
+      };
+      const configured = await startApiWithEnv('narrpend', pin);
+      const bare = await startApiWithEnv('narrnone');
+      try {
+        for (const [api, expectPending] of [
+          [configured, true],
+          [bare, false],
+        ] as const) {
+          const userId = api.database.userId;
+          await registerBuiltinAdvisors(api.database.db, {
+            userId,
+            clock: systemClock,
+            correlationId: newId(),
+          });
+          const finding = await seedFinding(api.database.db, userId, {
+            advisorId: 'builtin.cash.emergency_fund_short',
+            key: 'wp96-pending',
+            title: 'Pending finding',
+            action: {
+              kind: 'suggest_only',
+              label: 'Review it',
+              rationaleMd: 'Worth a look.',
+              url: null,
+            },
+          });
+          // A Brief published just now, and one published three days ago.
+          await seedBriefOver(
+            api.database.db,
+            userId,
+            '2026-W41',
+            [{ insightId: finding, key: 'wp96-pending' }],
+            new Date(),
+          );
+          await seedBriefOver(
+            api.database.db,
+            userId,
+            '2026-W38',
+            [{ insightId: finding, key: 'wp96-pending-old' }],
+            new Date(Date.now() - 3 * 86_400_000),
+          );
+          if (expectPending) {
+            // The narrator is registered AND switched on, the kind is on, the
+            // module is on: a narration is expected to arrive.
+            await registerAdvisor(
+              api.database.db,
+              { userId, clock: systemClock, correlationId: newId() },
+              { manifest: NARRATOR_MANIFEST, enabled: true },
+            );
+            expect(
+              (
+                await api.request({
+                  method: 'PUT',
+                  url: '/advisors/kinds/local_model/enabled',
+                  session: api.fresh,
+                  body: { enabled: true },
+                })
+              ).statusCode,
+            ).toBe(200);
+          }
+          const recent = await itemsOf(api, '2026-W41');
+          expect(recent[0]?.narration.status).toBe(expectPending ? 'pending' : 'none');
+          // Never "pending" forever: a Brief past the window reads "none".
+          const old = await itemsOf(api, '2026-W38');
+          expect(old[0]?.narration.status).toBe('none');
+          expect(recent[0]?.narration.aiAssisted).toBe(false);
+        }
+      } finally {
+        await configured.close();
+        await bare.close();
+      }
+    }, 180_000);
+  },
+);
+
+describe.skipIf(NO_DATABASE)('a published Brief records its action (WP 9.6 item 4, CF-24)', () => {
+  let h: ApiHarness;
+  let userId: string;
+
+  beforeAll(async () => {
+    h = await createApiHarness({ suite: 'wp96-brief-action' });
+    userId = await h.database.createUser('Brief action holder');
+  }, 120_000);
+
+  afterAll(async () => {
+    await h.close();
+  });
+
+  it("a published Brief's action is the one shown at publication, after the insight's action changes", async () => {
+    const db = h.database.db;
+    await registerBuiltinAdvisors(db, { userId, clock: systemClock, correlationId: newId() });
+    const finding = await seedFinding(db, userId, {
+      advisorId: 'builtin.cash.emergency_fund_short',
+      key: 'wp96-action',
+      title: 'A finding with an action',
+      action: {
+        kind: 'suggest_only',
+        label: 'Move $500 into savings',
+        rationaleMd: 'It closes the gap to three months.',
+        url: null,
+      },
+    });
+
+    // A second, later action: the Brief records the FIRST by position.
+    await db.insert(insightActions).values({
+      id: newId(),
+      userId,
+      insightId: finding,
+      position: 1,
+      kind: 'open_url',
+      label: 'Read the savings guide',
+      rationaleMd: 'Background reading.',
+      url: 'https://example.com/guide',
+    });
+
+    // The real weekly job, through the real `appModules` composition, on a
+    // real job runner — the publish path, not a fixture.
+    const logger = pino({ level: 'silent' });
+    const denyAll = createEgressPolicy({ allowedHosts: [] });
+    const runtime = createDomainRuntime({
+      database: db,
+      clock: systemClock,
+      logger,
+      registry: createConnectorRegistry(),
+      secretBox: h.security.requireSecretBox(),
+    });
+    const modules = appModules({
+      advisorsEnabled: true,
+      localModelConfigured: false,
+      advisorTokenSecret: 'wp96-brief-secret',
+      database: db,
+      userId,
+      orchestrator: runtime.orchestrator,
+      timezone: 'America/Los_Angeles',
+      clock: fixedClock('2026-10-06T12:00:00.000Z'), // 2026-W41
+      notificationChannels: {
+        ntfy: createNtfyChannel({ policy: denyAll }),
+        smtp: createSmtpChannel({ policy: denyAll }),
+      },
+      secretBox: h.security.requireSecretBox(),
+      investmentSyncPort: createInvestmentSyncPort(db),
+    });
+    const briefJob = modules
+      .find((module) => module.flagKey === 'module.insights')
+      ?.jobs?.find((job) => job.kind === 'insights.brief');
+    if (briefJob === undefined) throw new Error('insights.brief did not register');
+    const runner = createJobRunner({
+      pool: h.database.pool,
+      db: platformExecutor(db),
+      handlers: [briefJob],
+      concurrency: 1,
+      pollIntervalMs: 25,
+      logger: silentLogger,
+    });
+    await runner.start();
+    try {
+      await enqueueJob(platformExecutor(db), {
+        kind: 'insights.brief',
+        userId,
+        payload: {},
+        correlationId: newId(),
+      });
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const rows = await db
+          .select()
+          .from(advisoryBriefs)
+          .where(eq(advisoryBriefs.userId, userId));
+        if (rows.length === 1) break;
+        if (Date.now() > deadline) throw new Error('the Brief did not publish');
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    } finally {
+      await runner.stop();
+    }
+
+    const session = await h.issueSession({ userId });
+    const read = async () => {
+      const response = await h.request({
+        method: 'GET',
+        url: '/insights/brief/2026-W41',
+        session,
+      });
+      expectStatus(response, 200);
+      return (response.json() as { brief: BriefWire }).brief.items;
+    };
+
+    const atPublication = await read();
+    const item = atPublication.find((entry) => entry.insightKey === 'wp96-action');
+    expect(item?.primaryAction).toEqual({
+      kind: 'suggest_only',
+      label: 'Move $500 into savings',
+      rationaleMd: 'It closes the gap to three months.',
+      url: null,
+    });
+
+    // The nightly upsert deletes and re-inserts a finding's actions (`store.ts`
+    // `upsertInsight`): the live insight now proposes something else.
+    await db
+      .delete(insightActions)
+      .where(and(eq(insightActions.userId, userId), eq(insightActions.insightId, finding)));
+    await db.insert(insightActions).values({
+      id: newId(),
+      userId,
+      insightId: finding,
+      position: 0,
+      kind: 'open_url',
+      label: 'Open the savings comparison',
+      rationaleMd: 'A different suggestion, this week.',
+      url: 'https://example.com/savings',
+    });
+    const live = await db
+      .select({ label: insightActions.label })
+      .from(insightActions)
+      .where(eq(insightActions.insightId, finding));
+    expect(live.map((row) => row.label)).toEqual(['Open the savings comparison']);
+
+    // The Brief still says what it said.
+    const later = await read();
+    expect(later.find((entry) => entry.insightKey === 'wp96-action')?.primaryAction).toEqual(
+      item?.primaryAction,
+    );
+  }, 120_000);
+
+  it('a Brief published before 0038 reads "no action recorded", never the live insight\'s action', async () => {
+    // `seedBrief` writes the rows as they were before the column existed.
+    await seedBrief(h, userId, '2026-W20', 'wp96-old');
+    const session = await h.issueSession({ userId });
+    const response = await h.request({
+      method: 'GET',
+      url: '/insights/brief/2026-W20',
+      session,
+    });
+    expectStatus(response, 200);
+    for (const item of (response.json() as { brief: BriefWire }).brief.items) {
+      expect(item.primaryAction).toBeNull();
+    }
+  }, 60_000);
+
+  it('the shape CHECK refuses an action that is not one of the four non-acting kinds', async () => {
+    const week = '2026-W21';
+    await seedBrief(h, userId, week, 'wp96-check');
+    for (const bad of [
+      { kind: 'transfer', label: 'Move money', rationaleMd: '', url: null },
+      { kind: 'open_url', label: 'Link', rationaleMd: '', url: 'http://not-https.example' },
+      { kind: 'suggest_only', label: 'x', rationaleMd: '', url: 'https://example.com' },
+      { kind: 'suggest_only', label: '   ', rationaleMd: '', url: null },
+      { kind: 'suggest_only', label: 'x', rationaleMd: '' },
+      { kind: 'suggest_only', label: 'x', rationaleMd: '', url: null, extra: 1 },
+    ]) {
+      await expect(
+        h.database.db.execute(sql`
+          UPDATE advisory_brief_items SET primary_action = ${JSON.stringify(bad)}::jsonb
+           WHERE user_id = ${userId}::uuid AND insight_key = 'wp96-check.ranked'
+        `),
+      ).rejects.toMatchObject({ cause: { code: '23514' } });
+    }
+    // And a well-formed one is accepted.
+    await h.database.db.execute(sql`
+      UPDATE advisory_brief_items
+         SET primary_action = ${JSON.stringify({ kind: 'open_url', label: 'Go', rationaleMd: 'r', url: 'https://example.com' })}::jsonb
+       WHERE user_id = ${userId}::uuid AND insight_key = 'wp96-check.ranked'
+    `);
+  }, 60_000);
 });

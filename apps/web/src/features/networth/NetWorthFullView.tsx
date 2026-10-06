@@ -11,6 +11,7 @@ import { Money } from '../../components/finance/Money.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
 import { formatDateOnly } from '../../lib/date.ts';
 import { useStepUpRetry } from '../../lib/step-up.ts';
+import { UnvaluedAccountsNotice } from '../accounts/UnvaluedAccountsNotice.tsx';
 import { useNetWorthSeriesQuery, useSetManualFxRateMutation } from './api.ts';
 import { groupByCurrency, interpolatedCount, missingCount, type RawSeriesPoint } from './series.ts';
 import {
@@ -60,6 +61,8 @@ export function NetWorthFullView({ range, onRangeChange }: NetWorthFullViewProps
         Planning net worth — holdings valued at market price. The Accounts screen’s figure is your
         ledger balances only; the two are not meant to match.
       </p>
+
+      <UnvaluedAccountsNotice />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div role="group" aria-label="Date range" className="flex gap-1">

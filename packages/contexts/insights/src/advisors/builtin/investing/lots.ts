@@ -41,6 +41,7 @@ import {
   type RuleOutput,
 } from '../../support.ts';
 import { detailRef, lotRef } from '../shared.ts';
+import { symbolKeyPart } from '../symbol-key.ts';
 
 /** 07 §3.3 I6: a loss over `max($500, 2% of position)`, in minor units. */
 const LOSS_FLOOR_MINOR = 50_000n;
@@ -96,7 +97,7 @@ export const investingLossLot: BuiltinRule = {
 
         insights.push(
           insightOf({
-            key: `investing.loss_lot.${position.symbol}.${String(lotIndex)}`,
+            key: `investing.loss_lot.${symbolKeyPart(position.symbol)}.${String(lotIndex)}`,
             period: context.period,
             type: 'investing.loss_lot',
             severity: 'notable',

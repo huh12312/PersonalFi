@@ -54,9 +54,11 @@ import { ADVISOR_CONTRACT_MAJOR, ADVISOR_SCHEMA_BASE } from './version.ts';
 // 1.1.0 WP 3.10 (two scopes); 1.2.0 WP 4.12b C-10 (`excluded_currencies`);
 // 1.3.0 WP 4.9 (`plan.projection`, `goals_list[].pace`); 1.4.0 WP 5.7
 // (`transactions.anomalies`, `fees.summary`); 1.5.0 WP 5.3 (`AdvisorRequest.findings`,
-// the narration envelope — an envelope field, not a scope, so no migration).
+// the narration envelope — an envelope field, not a scope, so no migration);
+// 1.6.0 WP 9.5 (`findings[].placed_figures`, `findings[].evidence[].slot`: the
+// figure slots of option B, both optional and app-written).
 // Each strictly additive.
-export const ADVISOR_ARTEFACT_VERSION = '1.5.0' as const;
+export const ADVISOR_ARTEFACT_VERSION = '1.6.0' as const;
 
 export interface SchemaDocument {
   /** File name under `packages/contracts/advisor/v1/`. */

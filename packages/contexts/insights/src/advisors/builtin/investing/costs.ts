@@ -43,6 +43,7 @@ import {
   type RuleOutput,
 } from '../../support.ts';
 import { aggregateRef, detailRef } from '../shared.ts';
+import { symbolKeyPart } from '../symbol-key.ts';
 
 /** 07 §3.3 I2: an expense ratio over half a point, on its own. */
 const HIGH_EXPENSE_RATIO = 0.005;
@@ -126,7 +127,7 @@ export const investingExpenseRatio: BuiltinRule = {
 
       insights.push(
         insightOf({
-          key: `investing.expense_ratio.${position.symbol}`,
+          key: `investing.expense_ratio.${symbolKeyPart(position.symbol)}`,
           period: context.period,
           type: 'investing.expense_ratio',
           severity:

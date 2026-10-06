@@ -44,6 +44,29 @@
  * `isIsoWeek` so the next reader of Brief data does not have to repeat this
  * note.
  *
+ * ## A Brief item's action is the one the Brief recorded (WP 9.6, CF-24)
+ *
+ * `primaryAction` is read from `advisory_brief_items.primary_action`
+ * (migration 0038), snapshotted at publish like the title and the summary — it
+ * is never looked up in the live `insight_actions`, which the nightly upsert
+ * rewrites. `null` for a Brief published before 0038: the screen says "no
+ * action recorded" rather than show this week's suggestion under last week's
+ * date.
+ *
+ * ## A Brief item's narration, and R-2's gate (WP 9.6 item 3)
+ *
+ * Each item carries `narration`: `narrated` (a narrator's wording is linked to
+ * the item's finding, through `insights.narrates_insight_id`), `pending` (none
+ * yet, but the narrator is on and the Brief is recent, so one is expected) or
+ * `none`. The AI-assisted badge (`aiAssisted`) and the status are always
+ * carried. The narration TEXT is delivered only when `NARRATION_TEXT_SHOWN` is
+ * set — the Phase 5 gate's R-2: until WP 9.5's figure slots have landed and
+ * been measured, or Chris accepts the residual in writing, the holder is not
+ * shown model-written prose. The gate is read from config here, at the one
+ * place the text leaves the server; the text is not on the wire at all while it
+ * is closed. The narration is alternative wording beside the Brief's own
+ * summary, never a replacement and never a source of a figure.
+ *
  * ## "Current" is the latest published week, not today's ISO week
  *
  * `isoWeekOf(today)` is exactly what's missing (above), and re-deriving ISO
@@ -73,16 +96,22 @@
  * unchanged from the stub — only the 200 path is new.
  */
 import { and, desc, eq } from 'drizzle-orm';
+import { PLATFORM_FLAGS, createFlagService, platformExecutor } from '@core/platform';
 import {
+  findAdvisor,
   findLatestHealthScore,
   HEALTH_BANDS,
   HEALTH_COMPONENT_IDS,
   HEALTH_SCORE_DIRECTIONS,
+  MODULE_FLAG_KEY,
+  narrationsFor,
   retirementReasonInWords,
+  type NarrationView,
 } from '@ctx/insights';
 import { advisoryBriefItems, advisoryBriefs } from '@ctx/insights/schema';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import { ADVISOR_KIND_FLAGS, MODULE_FLAGS } from '../platform.ts';
 import { AppError, problems } from '../problem.ts';
 import { isoInstant, moneySchema } from '../wire.ts';
 import type { RouteDeps } from './deps.ts';
@@ -188,6 +217,24 @@ function retirementEffectWire(raw: Record<string, unknown>): RetirementEffectWir
   };
 }
 
+const primaryActionSchema = z.object({
+  kind: z.enum(['suggest_only', 'open_url', 'create_goal_draft', 'create_rule_draft']),
+  label: z.string(),
+  rationaleMd: z.string(),
+  url: z.string().nullable(),
+});
+
+const narrationSchema = z.object({
+  /** `narrated`: wording is linked to this item's finding. `pending`: expected, not yet arrived. `none`: no narration, none expected. */
+  status: z.enum(['narrated', 'pending', 'none']),
+  /** The AI-assisted badge: true exactly when `status` is `narrated`. */
+  aiAssisted: z.boolean(),
+  /** Whether this deployment shows narration text (`NARRATION_TEXT_SHOWN`, Phase 5 gate R-2). */
+  textShown: z.boolean(),
+  /** The narrator's alternative wording; null unless `narrated` AND `textShown`. */
+  summaryMd: z.string().nullable(),
+});
+
 const briefItemSchema = z
   .object({
     id: z.uuid(),
@@ -208,6 +255,9 @@ const briefItemSchema = z
     evidence: z.array(evidenceSchema),
     score: z.number().nullable(),
     retirementEffect: retirementEffectSchema,
+    /** CF-24: the action as the Brief said it; null for a Brief published before 0038 ("no action recorded"). */
+    primaryAction: primaryActionSchema.nullable(),
+    narration: narrationSchema,
   })
   .meta({ id: 'BriefItem' });
 
@@ -336,9 +386,94 @@ export async function loadItems(
     .where(and(eq(advisoryBriefItems.userId, userId), eq(advisoryBriefItems.briefId, briefId)));
 }
 
+/** What `serialiseBrief` needs to say about narrations, read once per request. */
+interface NarrationContext {
+  readonly byFinding: ReadonlyMap<string, NarrationView>;
+  /** A narration is expected to arrive (narrator on, model configured, Brief recent). */
+  readonly expected: boolean;
+  /** `NARRATION_TEXT_SHOWN`. */
+  readonly textShown: boolean;
+}
+
+/**
+ * A narration not delivered within a day of the Brief's publication is not
+ * "pending" any more — the narrator failed, was refused or was quarantined, and
+ * the Brief's own text stands (07 §7.5 rule 1). A status that read "pending"
+ * for ever would be a promise nothing keeps.
+ */
+export const NARRATION_PENDING_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function narrationOfItem(
+  item: typeof advisoryBriefItems.$inferSelect,
+  context: NarrationContext,
+): z.infer<typeof narrationSchema> {
+  const found = item.insightId === null ? undefined : context.byFinding.get(item.insightId);
+  if (found !== undefined) {
+    return {
+      status: 'narrated',
+      aiAssisted: true,
+      textShown: context.textShown,
+      summaryMd: context.textShown ? found.summaryMd : null,
+    };
+  }
+  return {
+    status: context.expected ? 'pending' : 'none',
+    aiAssisted: false,
+    textShown: context.textShown,
+    summaryMd: null,
+  };
+}
+
+function flagServiceOf(deps: RouteDeps) {
+  return createFlagService({
+    db: platformExecutor(deps.database),
+    defaults: [...PLATFORM_FLAGS, ...MODULE_FLAGS, ...ADVISOR_KIND_FLAGS],
+    ttlMs: 0,
+  });
+}
+
+/**
+ * Is a narration expected for a Brief published at `publishedAt`? Only if every
+ * level of the ladder that stands between a Brief and its narration is open:
+ * a model is configured on this deployment, `ADVISORS_ENABLED`, the holder's
+ * `module.insights` and `advisors.kind.local_model`, and the narrator itself
+ * registered, enabled and not quarantined — and the Brief is recent.
+ */
+async function narrationExpected(
+  deps: RouteDeps,
+  userId: string,
+  publishedAt: Date,
+): Promise<boolean> {
+  if (deps.config.localModelPin === undefined) return false;
+  if (!deps.config.env.ADVISORS_ENABLED) return false;
+  if (deps.clock.now().getTime() - publishedAt.getTime() > NARRATION_PENDING_WINDOW_MS) {
+    return false;
+  }
+  const flags = flagServiceOf(deps);
+  if (!(await flags.isEnabled(userId, MODULE_FLAG_KEY))) return false;
+  if (!(await flags.isEnabled(userId, 'advisors.kind.local_model'))) return false;
+  const narrator = await findAdvisor(deps.database, userId, 'local.narrator');
+  return narrator !== null && narrator.enabled && narrator.quarantinedAt === null;
+}
+
+async function narrationContextFor(
+  deps: RouteDeps,
+  userId: string,
+  brief: typeof advisoryBriefs.$inferSelect,
+  items: readonly (typeof advisoryBriefItems.$inferSelect)[],
+): Promise<NarrationContext> {
+  const findingIds = items.flatMap((item) => (item.insightId === null ? [] : [item.insightId]));
+  const [byFinding, expected] = await Promise.all([
+    narrationsFor(deps.database, userId, findingIds),
+    narrationExpected(deps, userId, brief.publishedAt),
+  ]);
+  return { byFinding, expected, textShown: deps.config.env.NARRATION_TEXT_SHOWN };
+}
+
 function serialiseBrief(
   brief: typeof advisoryBriefs.$inferSelect,
   items: readonly (typeof advisoryBriefItems.$inferSelect)[],
+  narrations: NarrationContext,
 ): z.infer<typeof briefSchema> {
   const sorted = [...items].sort((a, b) =>
     a.section === b.section ? a.position - b.position : a.section.localeCompare(b.section),
@@ -377,6 +512,8 @@ function serialiseBrief(
       evidence: item.evidence as unknown as z.infer<typeof evidenceSchema>[],
       score: item.score === null ? null : Number.parseFloat(item.score),
       retirementEffect: retirementEffectWire(item.retirementEffect),
+      primaryAction: item.primaryAction,
+      narration: narrationOfItem(item, narrations),
     })),
   };
 }
@@ -408,7 +545,8 @@ export const briefRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           throw briefNotFound('no Weekly Advisory Brief has been published for this holder yet');
         }
         const items = await loadItems(deps.database, session.userId, brief.id);
-        return { brief: serialiseBrief(brief, items) };
+        const narrations = await narrationContextFor(deps, session.userId, brief, items);
+        return { brief: serialiseBrief(brief, items, narrations) };
       },
     );
 
@@ -433,7 +571,8 @@ export const briefRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           throw briefNotFound(`no Weekly Advisory Brief for ${request.params.isoWeek}`);
         }
         const items = await loadItems(deps.database, session.userId, brief.id);
-        return { brief: serialiseBrief(brief, items) };
+        const narrations = await narrationContextFor(deps, session.userId, brief, items);
+        return { brief: serialiseBrief(brief, items, narrations) };
       },
     );
 

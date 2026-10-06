@@ -18,7 +18,7 @@ import { headlineImpactOf } from '../insights/severity.ts';
 import { insightViewOf } from './evidence-adapter.ts';
 import { NarratedSummary } from './NarrationBadge.tsx';
 import { retirementEffectWording } from './retirement-effect.ts';
-import { narrationOf, type BriefItemWithNarration } from './types.ts';
+import { narrationOf, primaryActionOf, type BriefItemWithNarration } from './types.ts';
 
 export interface BriefItemCardProps {
   item: BriefItemWithNarration;
@@ -27,9 +27,9 @@ export interface BriefItemCardProps {
 /**
  * One of the Brief's at-most-five ranked cards (05-phase-5-dispatch.md §3
  * WP 5.11): headline, one dollar figure, the retirement effect in its three
- * wordings, one primary action (Accept — the only action verb
- * `POST /insights/{id}/review` defines; `BriefItem` carries no action data
- * of its own, so nothing here is invented), and the "Why am I seeing this?"
+ * wordings, the action the Brief recorded at publication (WP 9.6, CF-24 — a
+ * snapshot, or "No action recorded" for a Brief published before it existed),
+ * and Accept — the only action verb `POST /insights/{id}/review` defines, and the "Why am I seeing this?"
  * panel reusing `features/insights/EvidencePanel.tsx` unmodified over an
  * adapted view of this item's own snapshotted fields (never a live re-fetch
  * — `evidence-adapter.ts`'s header).
@@ -49,6 +49,7 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
   const impact = headlineImpactOf(item);
   const narration = narrationOf(item);
   const effect = retirementEffectWording(item.retirementEffect);
+  const action = primaryActionOf(item);
   const canReview = item.insightId !== null;
 
   return (
@@ -63,10 +64,7 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
             {item.carried && <Badge variant="neutral">Carried from last week</Badge>}
             <h3 className="text-body font-medium text-text-primary">{item.title}</h3>
           </div>
-          <NarratedSummary
-            templateSummaryMd={item.summaryMd}
-            narratedSummaryMd={narration?.narratedSummaryMd ?? null}
-          />
+          <NarratedSummary templateSummaryMd={item.summaryMd} narration={narration} />
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1" data-testid="brief-item-impact">
           {impact !== null ? (
@@ -91,6 +89,33 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
         {effect.text}
         {effect.assumption !== null && (
           <p className="mt-0.5 text-caption text-text-muted">{effect.assumption}</p>
+        )}
+      </div>
+
+      <div className="mt-2 text-small" data-testid="brief-item-action">
+        {action === null ? (
+          <p className="text-text-muted">No action recorded</p>
+        ) : (
+          <>
+            <p className="text-text-secondary">
+              <span className="text-text-muted">Suggested next step: </span>
+              {action.kind === 'open_url' && action.url !== null ? (
+                <a
+                  href={action.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-accent-text hover:underline"
+                >
+                  {action.label}
+                </a>
+              ) : (
+                <span className="font-medium text-text-primary">{action.label}</span>
+              )}
+            </p>
+            {action.rationaleMd !== '' && (
+              <p className="text-caption text-text-muted">{action.rationaleMd}</p>
+            )}
+          </>
         )}
       </div>
 

@@ -4,7 +4,7 @@
   "title": "PersonalFi AdvisorRequest v1",
   "description": "What crosses the boundary to an advisor: a minimised, read-only snapshot with one key per granted scope, the digest we stored, and the limits we enforce. One-way — there is no return channel, no token and no handle (08 §4.1).",
   "contractVersion": 1,
-  "artefactVersion": "1.5.0",
+  "artefactVersion": "1.6.0",
   "type": "object",
   "properties": {
     "contract_version": {
@@ -2771,6 +2771,10 @@
                       "type": "null"
                     }
                   ]
+                },
+                "slot": {
+                  "type": "string",
+                  "pattern": "^e[1-9][0-9]?$"
                 }
               },
               "required": ["label", "value", "source_ref"],
@@ -2817,6 +2821,10 @@
             },
             "required": ["annualized", "one_time", "basis"],
             "additionalProperties": false
+          },
+          "placed_figures": {
+            "type": "boolean",
+            "const": true
           }
         },
         "required": [

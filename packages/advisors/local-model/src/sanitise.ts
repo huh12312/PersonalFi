@@ -25,6 +25,18 @@
  * text) and into the log line as counts per kind. The removed text itself
  * goes nowhere.
  *
+ * 6. (WP 9.5, F-7) **Flag only, never remove:** a role marker or an
+ *    "ignore previous" spelled in look-alike letters (`ѕуѕtеm:` in Cyrillic
+ *    reads as `system:` to a model and to nothing above), found by folding a
+ *    small explicit confusables table (`CONFUSABLES`) to Latin and matching
+ *    the step-5 patterns on the fold; and a base64 run of the step-5 size
+ *    wrapped across lines (60-column wrapping hid one from the `base64_run`
+ *    pattern, wp5.4 I-20). These raise `confusable_marker` and
+ *    `wrapped_base64` and change no byte: the red team showed the flag list
+ *    is evadable with no effort, and F-7 asks only that a reader of the run
+ *    inspector seeing "no flags" is not misled. The control remains the
+ *    structure and the narrow trace.
+ *
  * None of this is the control. 03 §8.2 is explicit that structural
  * segregation "raises the bar; it does not solve the problem" and that
  * "structural defense beats filtering": the real containment is that the model
@@ -50,6 +62,9 @@ export const SANITISER_FLAG_KINDS = [
   'closing_tag',
   'base64_run',
   'key_collision',
+  // WP 9.5 (F-7): flag-only — see `FLAG_ONLY_KINDS`.
+  'confusable_marker',
+  'wrapped_base64',
 ] as const;
 export type SanitiserFlagKind = (typeof SANITISER_FLAG_KINDS)[number];
 
@@ -176,6 +191,140 @@ export const INJECTION_PATTERNS: readonly {
   },
 ]);
 
+/**
+ * The kinds that flag without removing anything (step 6). The adapter's
+ * diagnostics say "flagged" for these and "removed" for every other kind.
+ */
+export const FLAG_ONLY_KINDS: ReadonlySet<SanitiserFlagKind> = new Set([
+  'confusable_marker',
+  'wrapped_base64',
+]);
+
+/**
+ * Latin look-alikes NFKC leaves alone: Cyrillic and Greek letters that render
+ * as the Latin letter beside them. An explicit, reviewable table — the same
+ * stance as `CODE_POINT_CLASSES` — not a confusables package. Used only to
+ * *detect* (step 6); the text sent is never folded.
+ */
+export const CONFUSABLES: Readonly<Record<string, string>> = Object.freeze({
+  // Cyrillic, lower case
+  а: 'a',
+  в: 'b',
+  е: 'e',
+  ё: 'e',
+  һ: 'h',
+  і: 'i',
+  ї: 'i',
+  ј: 'j',
+  к: 'k',
+  ӏ: 'l',
+  м: 'm',
+  п: 'n',
+  о: 'o',
+  р: 'p',
+  ԛ: 'q',
+  г: 'r',
+  ѕ: 's',
+  т: 't',
+  и: 'u',
+  у: 'y',
+  ԝ: 'w',
+  х: 'x',
+  ԁ: 'd',
+  ɡ: 'g',
+  // Cyrillic, upper case
+  А: 'A',
+  В: 'B',
+  Е: 'E',
+  Н: 'H',
+  І: 'I',
+  Ј: 'J',
+  К: 'K',
+  М: 'M',
+  О: 'O',
+  Р: 'P',
+  С: 'C',
+  с: 'c',
+  Ѕ: 'S',
+  Т: 'T',
+  У: 'Y',
+  Х: 'X',
+  Ү: 'Y',
+  // Greek
+  α: 'a',
+  ε: 'e',
+  ι: 'i',
+  κ: 'k',
+  ν: 'v',
+  ο: 'o',
+  ρ: 'p',
+  τ: 't',
+  υ: 'u',
+  χ: 'x',
+  Α: 'A',
+  Β: 'B',
+  Ε: 'E',
+  Ζ: 'Z',
+  Η: 'H',
+  Ι: 'I',
+  Κ: 'K',
+  Μ: 'M',
+  Ν: 'N',
+  Ο: 'O',
+  Ρ: 'P',
+  Τ: 'T',
+  Υ: 'Y',
+  Χ: 'X',
+});
+
+/** `ѕуѕtеm` → `system`. Detection only. */
+export function confusableSkeleton(text: string): string {
+  let out = '';
+  for (const char of text) out += CONFUSABLES[char] ?? char;
+  return out;
+}
+
+const CONFUSABLE_TARGETS = INJECTION_PATTERNS.filter(
+  (entry) => entry.kind === 'role_marker' || entry.kind === 'ignore_previous',
+).map((entry) => entry.pattern);
+
+/** Step 6a: markers that only appear once the look-alikes are folded. */
+function confusableMarkers(value: string): number {
+  const skeleton = confusableSkeleton(value);
+  if (skeleton === value) return 0;
+  let found = 0;
+  for (const pattern of CONFUSABLE_TARGETS) {
+    const before = value.match(new RegExp(pattern.source, pattern.flags))?.length ?? 0;
+    const after = skeleton.match(new RegExp(pattern.source, pattern.flags))?.length ?? 0;
+    found += Math.max(0, after - before);
+  }
+  return found;
+}
+
+/** Step 6b: a base64 run of step 5's size, wrapped across lines. */
+// Segments of 16+ base64 characters joined by any whitespace (a newline in a
+// memo, a space where a slug or a name cannot hold one — I-20 wraps at 60
+// columns with a space), and a short tail.
+const WRAPPED_BASE64 = /(?:[A-Za-z0-9+/]{16,}={0,2}\s+)+[A-Za-z0-9+/]{4,}={0,2}/gu;
+
+function wrappedBase64Runs(value: string): number {
+  let found = 0;
+  for (const match of value.matchAll(WRAPPED_BASE64)) {
+    const joined = match[0].replace(/\s+/gu, '');
+    // Base64 of text mixes cases and carries digits or `+`/`/`; a run of long
+    // plain words does not. A false positive is a visible flag, nothing more.
+    if (
+      joined.length >= 65 &&
+      /[A-Z]/u.test(joined) &&
+      /[a-z]/u.test(joined) &&
+      /[0-9+/]/u.test(joined)
+    ) {
+      found += 1;
+    }
+  }
+  return found;
+}
+
 // ---------------------------------------------------------------------------
 // The string pipeline
 // ---------------------------------------------------------------------------
@@ -234,6 +383,12 @@ export function sanitiseString(input: string, path: string, cap: number): Saniti
     }
     if (!changed) break;
   }
+
+  // 6. flag only (F-7): nothing below changes `value`.
+  const confusable = confusableMarkers(value);
+  if (confusable > 0) bump('confusable_marker', confusable);
+  const wrapped = wrappedBase64Runs(value);
+  if (wrapped > 0) bump('wrapped_base64', wrapped);
 
   const flags = [...counts.entries()].map(([kind, count]) => ({ kind, path, count }));
   return { value, flags };

@@ -13,6 +13,7 @@
  */
 import type { Money } from '@core/kernel';
 import type { Severity } from '../contract/response.ts';
+import type { BriefPrimaryAction } from '../../schema/index.ts';
 
 export interface BriefCandidateEvidence {
   readonly position: number;
@@ -43,6 +44,12 @@ export interface BriefCandidate {
   readonly annualizedImpact: Money | null;
   readonly oneTimeImpact: Money | null;
   readonly actionKinds: readonly string[];
+  /**
+   * CF-24: the first proposed action (lowest `position`), as the Brief will
+   * say it — snapshotted onto the item at publish. Optional so a plain
+   * candidate built without one (unit fixtures) publishes `null`.
+   */
+  readonly primaryAction?: BriefPrimaryAction | null;
   readonly evidence: readonly BriefCandidateEvidence[];
   readonly inputDigest: string;
 }

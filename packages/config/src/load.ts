@@ -135,6 +135,18 @@ export interface LocalModelConfig {
 }
 
 /**
+ * What the api knows of the local model (WP 9.6, CF-1; Phase 5 gate R-4): its
+ * name and its digest, and no endpoint. Enough to bind the pure, preview-only
+ * `PromptRenderer` and to say whether a model is configured; nothing that can
+ * reach one. `undefined` when no pin is configured.
+ */
+export interface LocalModelPin {
+  readonly name: string;
+  /** `sha256:` + 64 lowercase hex characters. */
+  readonly digest: string;
+}
+
+/**
  * Coinbase, feature-detected — or absent.
  *
  * `AppConfig.coinbase` is `null` whenever `coinbase_key_name` or
@@ -173,6 +185,12 @@ export interface AppConfig {
   readonly planning: PlanningConfig;
   /** `undefined` when `LOCAL_MODEL_ENDPOINT` is empty or absent (§ `resolveLocalModel`). */
   readonly localModel: LocalModelConfig | undefined;
+  /**
+   * The model's name and digest without its endpoint (§ `resolveLocalModelPin`).
+   * From `LOCAL_MODEL_*` when this process holds the whole set, else from the
+   * two api-side `LOCAL_MODEL_PIN_*` keys; `undefined` when neither is set.
+   */
+  readonly localModelPin: LocalModelPin | undefined;
   readonly isProduction: boolean;
   readonly isTest: boolean;
 }
@@ -346,6 +364,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const plaid = resolvePlaid(secrets, env, problems);
   const coinbase = resolveCoinbase(secrets, problems);
   const localModel = resolveLocalModel(env, problems);
+  const localModelPin = resolveLocalModelPin(env, localModel, problems);
 
   if (problems.length > 0) throw new ConfigError(problems);
   if (databaseUrl === undefined) throw new ConfigError(problems); // unreachable; narrows the type
@@ -373,6 +392,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       monteCarloMaxConcurrent: env.MONTE_CARLO_MAX_CONCURRENT,
     }),
     localModel,
+    localModelPin,
     isProduction,
     isTest: env.NODE_ENV === 'test',
   });
@@ -890,6 +910,52 @@ function resolveLocalModel(
     timeoutMs: env.LOCAL_MODEL_TIMEOUT_MS,
     allowRemote: env.LOCAL_MODEL_ALLOW_REMOTE,
   };
+}
+
+/**
+ * The api-side half of the local model (WP 9.6, CF-1, R-4): a name and a
+ * digest, never an endpoint. A process holding the full `LOCAL_MODEL_*` set
+ * pins from it (the worker has no use for the pin keys, and two sources that
+ * could disagree would be a second configuration to drift). Otherwise the two
+ * `LOCAL_MODEL_PIN_*` keys are read together: both or neither, the digest
+ * checked for shape the way `resolveLocalModel` checks its own.
+ */
+function resolveLocalModelPin(
+  env: EnvironmentConfig,
+  localModel: LocalModelConfig | undefined,
+  problems: ConfigProblem[],
+): LocalModelPin | undefined {
+  if (localModel !== undefined) return { name: localModel.name, digest: localModel.digest };
+
+  const name = env.LOCAL_MODEL_PIN_NAME.trim();
+  const digest = env.LOCAL_MODEL_PIN_DIGEST.trim();
+  if (name.length === 0 && digest.length === 0) return undefined;
+
+  let valid = true;
+  if (name.length === 0) {
+    valid = false;
+    problems.push({
+      key: 'LOCAL_MODEL_PIN_NAME',
+      problem: 'is missing, but LOCAL_MODEL_PIN_DIGEST is set — the pin is a name and a digest',
+      hint: 'set LOCAL_MODEL_PIN_NAME to the same value the worker has as LOCAL_MODEL_NAME, or clear both pin keys',
+    });
+  }
+  if (digest.length === 0) {
+    valid = false;
+    problems.push({
+      key: 'LOCAL_MODEL_PIN_DIGEST',
+      problem: 'is missing, but LOCAL_MODEL_PIN_NAME is set — the pin is a name and a digest',
+      hint: 'set LOCAL_MODEL_PIN_DIGEST to the same value the worker has as LOCAL_MODEL_DIGEST, or clear both pin keys',
+    });
+  } else if (!SHA256_DIGEST_PATTERN.test(digest)) {
+    valid = false;
+    problems.push({
+      key: 'LOCAL_MODEL_PIN_DIGEST',
+      problem: `is "${digest}", which is not sha256: followed by 64 lowercase hex characters`,
+      hint: 'copy the digest verbatim from LOCAL_MODEL_DIGEST — no tag, no uppercase, no truncation',
+    });
+  }
+  return valid ? { name, digest } : undefined;
 }
 
 function kekFloorProblems(

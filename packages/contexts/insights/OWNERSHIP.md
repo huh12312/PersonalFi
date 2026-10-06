@@ -14,7 +14,8 @@ The first eight tables below exist as of migration `0012_insights.sql` (WP 2.6);
 of `0032_advisory_briefs.sql` (WP 5.6), each with a user-scoped composite FK into this
 context's own tables; the last as of `0033_health_scores.sql` (WP 5.8), computed alongside the Brief by
 the weekly job but carrying no foreign key toward either of its tables — 05 §4's rule that two
-migrations landing in one wave never reference each other's objects. None of
+migrations landing in one wave never reference each other's objects; and `snapshot_grant_events` as of
+`0038_brief_actions_grant_events.sql` (WP 9.6, O-9), the append-only history of `snapshot_grants`. None of
 them carries a foreign key into another context's schema: an insight's link back to
 the data is `insight_evidence.source_ref`, a path into the snapshot we sent, resolved
 by the API at render time. That is not squeamishness about joins — it is what makes
@@ -43,3 +44,4 @@ data the advisor never received would _resolve_.
 - `advisory_briefs`
 - `advisory_brief_items`
 - `health_scores`
+- `snapshot_grant_events`

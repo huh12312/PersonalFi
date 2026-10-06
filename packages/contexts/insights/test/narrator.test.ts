@@ -26,8 +26,9 @@ import {
   type FindingSource,
 } from '../src/advisors/local/findings.ts';
 import { NARRATOR_MANIFEST, NARRATOR_SCOPES } from '../src/advisors/local/manifest.ts';
+import { createNarratorAdvisor, type NarratorModelPort } from '../src/advisors/local/narrator.ts';
 import { resolveLimits } from '../src/contract/manifest.ts';
-import type { NarratedFinding } from '../src/contract/request.ts';
+import type { AdvisorRequest, NarratedFinding } from '../src/contract/request.ts';
 import type { Insight } from '../src/contract/response.ts';
 import type { AdvisorSnapshot } from '../src/contract/snapshot.ts';
 import { validateResponse, type ValidationOutcome } from '../src/validate/pipeline.ts';
@@ -494,5 +495,164 @@ describe('WP 5.3b — closing the red-team leaks', () => {
     // The control: the finding's own label, verbatim, passes.
     const ownLabel = narrationOf(finding, [0]);
     expect(verdictOf(narrate(snapshot, [finding], [ownLabel]))).toEqual(['accepted']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WP 9.5 — Narrator v2 (the Phase 5 gate's C5-4 / R-1 option A; R-2 option B)
+// ---------------------------------------------------------------------------
+
+/** A model port that answers every request with `items` as its reply's `insights`. */
+function scriptedModel(items: (request: AdvisorRequest) => readonly unknown[]): NarratorModelPort {
+  return {
+    run: (request) =>
+      Promise.resolve({
+        contract_version: request.contract_version,
+        request_id: request.request_id,
+        advisor_id: request.advisor_id,
+        advisor_version: request.advisor_version,
+        produced_at: request.generated_at,
+        diagnostics: { runtime_ms: 0, model: 'scripted', warnings: [] },
+        insights: items(request),
+      }),
+  };
+}
+
+/** The production request shape: the envelope and an empty snapshot. */
+function productionRequest(findings: readonly NarratedFinding[]): AdvisorRequest {
+  return { ...requestFor(NARRATOR_MANIFEST, {}), findings: [...findings] };
+}
+
+/** `validateResponse` exactly as `service.ts` calls it for a narrator run. */
+function asService(request: AdvisorRequest, body: unknown): ValidationOutcome {
+  return validateResponse({
+    request,
+    manifest: NARRATOR_MANIFEST,
+    limits: resolveLimits(NARRATOR_MANIFEST),
+    body,
+    knownFindingTypes: new Set(request.findings?.map((finding) => finding.type) ?? []),
+  });
+}
+
+async function throughNarrator(
+  request: AdvisorRequest,
+  items: readonly unknown[],
+): Promise<ValidationOutcome> {
+  const narrator = createNarratorAdvisor({ model: scriptedModel(() => items) });
+  return asService(request, await narrator.run(request, new AbortController().signal));
+}
+
+function acceptedIdentities(outcome: ValidationOutcome): readonly string[] {
+  return outcome.ok
+    ? outcome.accepted.map((entry) => `${entry.insight.key}|${entry.insight.type}`)
+    : [];
+}
+
+describe('WP 9.5 — Narrator v2', () => {
+  it("a narration's key and type are the request's: a reply naming another finding cannot attach to it", async () => {
+    const snapshot = await seedSnapshot('drift');
+    const { finding: rise } = await builtinFinding(PRICE_RISE, snapshot);
+    const { finding: debt } = await builtinFinding('builtin.debt.minimum_only', snapshot);
+    expect(debt.key).not.toBe(rise.key);
+    const named = (finding: NarratedFinding) => ({
+      key: finding.key,
+      type: finding.type,
+      period: finding.period,
+    });
+
+    // One finding per request (production since C5-2). The reply names the
+    // *other* finding — a real one, which the built-ins did make — and words
+    // the asked one faithfully. It is the asked finding's narration: the app
+    // wrote its identity, so there was nothing for the model to get wrong.
+    const single = productionRequest([rise]);
+    const wordsRise = narrationOf(rise, [0, 1], {
+      summary_md: 'This subscription went from $15.99 to $18.99 on 2026-06-01.',
+      ...named(debt),
+    });
+    const attached = await throughNarrator(single, [wordsRise]);
+    expect(verdictOf(attached)).toEqual(['accepted']);
+    expect(acceptedIdentities(attached)).toEqual([`${rise.key}|${rise.type}`]);
+
+    // The same reply naming the other finding and carrying *its* figure: it
+    // still cannot attach to that finding — it is judged as the asked one's
+    // narration, and the other finding's $145.00 is not the asked one's.
+    const debtFigure = debt.evidence.find((row) => row.value === '$145.00')?.value;
+    expect(debtFigure, 'the minimum-payment finding states $145.00').toBe('$145.00');
+    const wordsDebt = narrationOf(rise, [1], {
+      summary_md: 'The minimum payment is $145.00.',
+      ...named(debt),
+    });
+    const refused = await throughNarrator(single, [wordsDebt]);
+    expect(verdictOf(refused)).toEqual(['numerals:numeral_not_in_finding']);
+    expect(acceptedIdentities(refused)).toEqual([]);
+
+    // A request that numbers its findings: `finding: n` decides, never the
+    // key the model wrote; a number outside the envelope has no identity and
+    // is refused at step 2 rather than guessed at.
+    const pair = productionRequest([rise, debt]);
+    const byNumber = await throughNarrator(pair, [{ ...wordsRise, finding: 1 }]);
+    expect(acceptedIdentities(byNumber)).toEqual([`${rise.key}|${rise.type}`]);
+    const outOfRange = await throughNarrator(pair, [{ ...wordsRise, finding: 3 }]);
+    expect(verdictOf(outOfRange)).toEqual(['response:schema:schema_violation']);
+  });
+
+  it('an evidence row the panel shows as a percent reaches the envelope with that display value', async () => {
+    const snapshot = await seedSnapshot('drift');
+    const entry = BUILTIN_CATALOGUE.find((item) => item.advisorId === 'builtin.debt.minimum_only');
+    if (entry === undefined) throw new Error('no builtin.debt.minimum_only');
+    const request = requestFor(entry.advisor.manifest, snapshot);
+    const body = await entry.advisor.run(request, new AbortController().signal);
+    const outcome = validateResponse({
+      request,
+      manifest: entry.advisor.manifest,
+      limits: resolveLimits(entry.advisor.manifest),
+      body,
+    });
+    if (!outcome.ok) throw new Error(outcome.rejection.reason);
+    const validated = outcome.accepted[0];
+    if (validated === undefined) throw new Error('no minimum-only finding on the drift seed');
+
+    // The built-in states the rate in its prose and leaves the row's value
+    // null; the evidence panel shows the validator's resolved display.
+    const position = validated.insight.evidence.findIndex((row) => row.label === 'The rate');
+    expect(position).toBeGreaterThanOrEqual(0);
+    expect(validated.insight.evidence[position]?.value).toBeNull();
+    expect(validated.evidence[position]?.resolvedDisplay).toBe('0.2399');
+    expect(validated.insight.summary_md).toContain('23.99%');
+
+    // The envelope now carries what the holder is shown for that row.
+    const finding = narratedFindingOf(findingSourceOf(validated));
+    expect(finding.evidence[position]?.value).toBe('23.99%');
+
+    // So the finding's own percent, cited and stated, is accepted — the
+    // Phase 5 gate's eight step-5 and four step-7 refusals in one case …
+    const own = narrationOf(finding, [position], {
+      summary_md: 'This card is being paid at the minimum while it charges 23.99%.',
+    });
+    expect(own.evidence[0]?.value).toBe('23.99%');
+    expect(verdictOf(narrate(snapshot, [finding], [own]))).toEqual(['accepted']);
+
+    // … and nothing is widened: a different percent is still not a figure of
+    // this finding, in the prose or in the row.
+    const otherProse = narrationOf(finding, [position], {
+      summary_md: 'This card charges 24%.',
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [otherProse]))).toEqual([
+      'numerals:numeral_not_in_finding',
+    ]);
+    const otherRow = narrationOf(finding, [], {
+      evidence: [
+        {
+          kind: 'metric',
+          label: 'The rate',
+          value: '24%',
+          source_ref: finding.evidence[position]?.source_ref ?? null,
+          url: null,
+        },
+      ],
+    });
+    expect(verdictOf(narrate(snapshot, [finding], [otherRow]))).toEqual([
+      'evidence:narration_value_disagrees',
+    ]);
   });
 });

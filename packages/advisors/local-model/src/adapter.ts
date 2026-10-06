@@ -52,7 +52,7 @@ import {
 } from './ollama-client.ts';
 import { PROMPT_TEMPLATE_HASH, renderPrompt, type RenderedPrompt } from './prompt.ts';
 import type { LocalModelRequest } from './request.ts';
-import { countFlags, type SanitiserFlag } from './sanitise.ts';
+import { countFlags, FLAG_ONLY_KINDS, type SanitiserFlag } from './sanitise.ts';
 
 /** `@core/config`'s `LocalModelConfig`, structurally — this layer does not import `@core/config`. */
 export interface LocalModelAdapterConfig {
@@ -338,7 +338,8 @@ function requestShape(request: LocalModelRequest): Record<string, unknown> {
 
 function sanitiserWarnings(flags: readonly SanitiserFlag[]): string[] {
   return flags.map(
-    (flag) => `sanitiser removed ${flag.kind} x${String(flag.count)} at ${flag.path}`,
+    (flag) =>
+      `sanitiser ${FLAG_ONLY_KINDS.has(flag.kind) ? 'flagged' : 'removed'} ${flag.kind} x${String(flag.count)} at ${flag.path}`,
   );
 }
 

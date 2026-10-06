@@ -114,15 +114,9 @@ describe('contract parity', () => {
    * additive: `findings` is optional, so every 1.4.0 request is a 1.5.0
    * request.
    */
-  it('the published schemas match the source at 1.5.0', () => {
-    expect(ADVISOR_ARTEFACT_VERSION).toBe('1.5.0');
-    for (const document of advisorSchemaDocuments()) {
-      const onDisk = JSON.parse(readContract('v1', document.file)) as Record<string, unknown>;
-      expect(onDisk['artefactVersion'], document.file).toBe('1.5.0');
-      expect(serialiseSchema(document.document), document.file).toBe(serialiseSchema(onDisk));
-    }
-    const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
-    expect(index['artefactVersion']).toBe('1.5.0');
+  it('the published schemas match the source at 1.5.0 (historical)', () => {
+    // Superseded by 1.6.0 below; kept as the record of what 1.5.0 added,
+    // checked against fields that are still present and unmoved.
 
     // The envelope, as a sidecar author would read it off the published file:
     // optional (not in `required`), at most five, each finding a strict object
@@ -151,6 +145,46 @@ describe('contract parity', () => {
     // (`apps/api/test/phase3-registration.test.ts` tracks scopes only).
     expect(ADVISOR_SCOPES).toHaveLength(18);
     expect(ADVISOR_SCOPES[ADVISOR_SCOPES.length - 1]).toBe('fees.summary');
+  });
+
+  /**
+   * WP 9.5's bump (option B, the Phase 5 gate's R-2): the narration envelope's
+   * figure slots. `findings[].placed_figures` (the literal `true`) and
+   * `findings[].evidence[].slot` (`e1`…`e99`) are both optional and written by
+   * the app, never by an advisor, so every 1.5.0 request is a 1.6.0 request.
+   * An envelope change, not a scope: no migration, the scope enum unchanged.
+   */
+  it('the published schemas match the source at 1.6.0', () => {
+    expect(ADVISOR_ARTEFACT_VERSION).toBe('1.6.0');
+    for (const document of advisorSchemaDocuments()) {
+      const onDisk = JSON.parse(readContract('v1', document.file)) as Record<string, unknown>;
+      expect(onDisk['artefactVersion'], document.file).toBe('1.6.0');
+      expect(serialiseSchema(document.document), document.file).toBe(serialiseSchema(onDisk));
+    }
+    const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
+    expect(index['artefactVersion']).toBe('1.6.0');
+
+    const request = JSON.parse(readContract('v1', 'request.schema.json')) as {
+      properties: Record<string, Record<string, unknown>>;
+    };
+    const finding = (
+      request.properties['findings'] as {
+        items: {
+          required: readonly string[];
+          properties: Record<string, Record<string, unknown>>;
+        };
+      }
+    ).items;
+    expect(finding.properties['placed_figures']).toEqual({ type: 'boolean', const: true });
+    expect(finding.required).not.toContain('placed_figures');
+    const row = (
+      finding.properties['evidence'] as {
+        items: { required: readonly string[]; properties: Record<string, Record<string, unknown>> };
+      }
+    ).items;
+    expect(row.properties['slot']?.['pattern']).toBe('^e[1-9][0-9]?$');
+    expect(row.required).not.toContain('slot');
+    expect(ADVISOR_SCOPES).toHaveLength(18);
   });
 
   it('the bundle index names the three documents and the wire major', () => {

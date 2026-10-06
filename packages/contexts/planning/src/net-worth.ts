@@ -85,6 +85,14 @@ export interface BreakdownEntry {
   readonly stalePrice: boolean;
   /** For an interpolated investment position: the observations it sits between. */
   readonly between?: readonly string[];
+  /**
+   * WP 9.2 (O-2): present when the holder asked for this account to be valued by
+   * its balance and it has no priced holdings, so the number is the latest
+   * balance observation and not Σ quantity x price. Absent for every account
+   * valued the way its class says, so a day with no override stores exactly the
+   * bytes it always did.
+   */
+  readonly valuedBy?: 'balance_override';
 }
 
 /** An in-net-worth account that could not be valued, and the honest reason. */
@@ -176,6 +184,7 @@ export async function computeNetWorth(
       valuation: valued.valuation,
       stalePrice: valued.stalePrice,
       ...(valued.between === undefined ? {} : { between: valued.between }),
+      ...(valued.valuedBy === undefined ? {} : { valuedBy: valued.valuedBy }),
     });
   }
 
@@ -224,6 +233,7 @@ interface ValuedAccount {
   readonly valuation: ValuationMethod;
   readonly stalePrice: boolean;
   readonly between?: readonly string[];
+  readonly valuedBy?: 'balance_override';
 }
 
 /**
@@ -243,7 +253,12 @@ async function valueAccount(
   const method: InterpolationMethod = INTERPOLATION_POLICY[account.kind];
 
   if (method === 'quantity_times_price') {
-    return valueByQuantityTimesPrice(ports, account, input);
+    const byHoldings = await valueByQuantityTimesPrice(ports, account, input);
+    // WP 9.2 (O-2): holdings are tried first and win whenever they price. Only an
+    // account the holder said to value by balance, and which has nothing priced,
+    // falls back to its latest balance — and says so on the entry.
+    if (byHoldings !== null || account.valuation !== 'balance') return byHoldings;
+    return valueByBalanceOverride(ports, account, input);
   }
 
   const observation = await ports.balances.balanceOnOrBefore(
@@ -287,6 +302,32 @@ async function valueAccount(
     (userId, accountId, date) => ports.balances.transactionsTotalOn(userId, accountId, date),
   );
   return { nativeMinor, valuation: 'transaction_subtraction', stalePrice: false };
+}
+
+/**
+ * An investment or crypto account the holder asked to value by balance, with no
+ * priced holdings: its latest balance observation on or before the day, carried
+ * forward if the day itself was not observed. Never backfilled by transaction
+ * subtraction — that is a cash account's rule (04 §5.4), and an investment
+ * account's balance moves with the market, not with its transactions.
+ */
+async function valueByBalanceOverride(
+  ports: SnapshotPorts,
+  account: PlanningAccount,
+  input: ComputeInput,
+): Promise<ValuedAccount | null> {
+  const observation = await ports.balances.balanceOnOrBefore(
+    input.userId,
+    account.accountId,
+    input.asOfDate,
+  );
+  if (observation === null) return null;
+  return {
+    nativeMinor: observation.currentMinor,
+    valuation: observation.date === input.asOfDate ? 'observed' : 'carry_forward',
+    stalePrice: false,
+    valuedBy: 'balance_override',
+  };
 }
 
 /**
@@ -419,9 +460,60 @@ function isClosedBy(account: PlanningAccount, asOfDate: string): boolean {
 }
 
 function reasonFor(account: PlanningAccount): UnvaluedAccount['reason'] {
+  // An account the holder asked to value by balance that has none is missing a
+  // balance, not a priced holding.
+  if (account.valuation === 'balance') return 'no_balance';
   return INTERPOLATION_POLICY[account.kind] === 'quantity_times_price'
     ? 'no_priced_holding'
     : 'no_balance';
+}
+
+/** One account's line in `summariseValuation`. */
+export interface ValuationLine {
+  readonly accountId: string;
+  readonly name: string;
+}
+
+/**
+ * What the net-worth snapshot would leave out or count by the holder's say-so,
+ * for one day, by the same `valueAccount` the snapshot uses — no FX, no write.
+ *
+ * `unvalued` is every in-net-worth account that cannot be valued (never zero:
+ * `computeNetWorth` leaves it out of every total and counts it); `byBalance` is
+ * every account counted at its latest balance because the holder said to (O-2).
+ * The screens name both, so a number is never quietly missing an account or
+ * quietly resting on a typed figure.
+ */
+export async function summariseValuation(
+  ports: SnapshotPorts,
+  input: { readonly userId: string; readonly asOfDate: string },
+): Promise<{
+  readonly unvalued: readonly (ValuationLine & { readonly reason: UnvaluedAccount['reason'] })[];
+  readonly byBalance: readonly ValuationLine[];
+}> {
+  parseDateOnly(input.asOfDate);
+  const accounts = await ports.balances.accounts(input.userId, input.asOfDate);
+  const compute: ComputeInput = {
+    userId: input.userId,
+    asOfDate: input.asOfDate,
+    baseCurrency: 'USD',
+  };
+  const unvalued: (ValuationLine & { reason: UnvaluedAccount['reason'] })[] = [];
+  const byBalance: ValuationLine[] = [];
+  for (const account of accounts) {
+    if (isClosedBy(account, input.asOfDate) || !account.flags.inNetWorth) continue;
+    const valued = await valueAccount(ports, account, compute);
+    if (valued === null) {
+      unvalued.push({
+        accountId: account.accountId,
+        name: account.name,
+        reason: reasonFor(account),
+      });
+    } else if (valued.valuedBy === 'balance_override') {
+      byBalance.push({ accountId: account.accountId, name: account.name });
+    }
+  }
+  return { unvalued, byBalance };
 }
 
 /** Re-exported so a caller can talk about the flags without a second import. */

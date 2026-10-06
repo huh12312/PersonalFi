@@ -35,6 +35,7 @@ import {
   type WalletRpcRuntime,
 } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
+import { createPreviewModel } from './modules.ts';
 import { buildPlatform } from './platform.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
 import { accountRoutes } from './routes/accounts.ts';
@@ -587,7 +588,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   // `docker/Caddyfile` edit needed — both prefixes already route to this
   // process (`scripts/check-proxy-routes.ts`).
   await app.register(briefRoutes(deps));
-  await app.register(advisorRunRoutes(deps));
+  // WP 9.6 (CF-1, C5-1, Phase 5 gate R-4): when a model is configured the api
+  // binds the pure, preview-only `PromptRenderer` and registers
+  // `local.narrator`'s manifest (never its executor, never an endpoint — the
+  // api is given the model's name and digest, `LOCAL_MODEL_PIN_*`), so preview
+  // and "Approve this payload" work through the product and the worker's next
+  // narration is not refused `payload_not_approved`.
+  await app.register(advisorRunRoutes(deps, createPreviewModel(config.localModelPin)));
   // WP 9.1 (09 §4 batch 3, W-A): `GET /ops/backup-status` — install-wide
   // backup and restore-drill status from `@core/platform`'s ops tables
   // (0036). Session only; nothing in the answer is a holder's.

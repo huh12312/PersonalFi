@@ -48,7 +48,8 @@ import type { InsightsExecutor } from '../../db.ts';
 import { insightFeed } from '../../read.ts';
 import type { AdvisorRegistry } from '../../registry.ts';
 import type { ValidatedInsight } from '../../validate/pipeline.ts';
-import { formatMoneyJson } from '../support.ts';
+import * as decimal from '../../validate/decimal.ts';
+import { formatMinor, formatMoneyJson, formatPercent } from '../support.ts';
 
 /** What a finding is built from, whichever side (a validated insight or a stored row) supplies it. */
 export interface FindingSource {
@@ -62,6 +63,13 @@ export interface FindingSource {
     readonly label: string;
     readonly value: string | null;
     readonly sourceRef: string | null;
+    /**
+     * What the validator resolved the ref to when the built-in proposed it
+     * (`insight_evidence.resolved_display`, `ResolvedEvidenceRow.resolvedDisplay`)
+     * — what the evidence panel shows (`displayValueOf`) when `value` is
+     * `null`. WP 9.5 option A(b): the envelope carries the display from it.
+     */
+    readonly resolvedDisplay: string | null;
   }[];
   /** `derivations[].id` → value. Declared and re-computed agree, or step 6 refused it. */
   readonly derived: readonly { readonly id: string; readonly value: string }[];
@@ -133,10 +141,106 @@ export function redactFreeText(source: FindingSource, kind: AdvisorKind): Findin
   };
 }
 
+/**
+ * **One finding per narration request** (Phase 5 gate C5-2, G5-7; WP 9.5).
+ *
+ * A five-finding prompt is ~2,150 tokens: ~290 s of prompt evaluation alone
+ * on the reference host against a 180 s deadline, before a token is
+ * generated (gate §3.6). One finding is one bounded model call; the Brief
+ * enqueues one `insights.run_local` job per item it chose
+ * (`brief/job.ts`, `narrateInsightIds: [id]`), and a feed-driven run narrates
+ * the feed's first finding only. And with one finding there is nothing for a
+ * reply to name: the narrator writes the finding's identity from the request
+ * (`narrator.ts`, option A(a)).
+ */
+export const FINDINGS_PER_NARRATION_REQUEST = 1;
+
+/** Does `candidate` occur in `text` as a whole figure — not inside a longer number or a date? */
+function occursAsFigure(text: string, candidate: string): boolean {
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(candidate, from);
+    if (at === -1) return false;
+    const before = at === 0 ? '' : (text[at - 1] ?? '');
+    const after = text.slice(at + candidate.length, at + candidate.length + 2);
+    if (!/[\d.,-]/u.test(before) && !/^\d|^[.,]\d/u.test(after)) return true;
+    from = at + 1;
+  }
+}
+
+/**
+ * The value an envelope evidence row carries: **what the holder is shown for
+ * it** (WP 9.5 option A(b); the gate's CF-23 / G5-1 class of 12 refusals).
+ *
+ * A built-in leaves many rows `value: null` — rates, shares, counts, months
+ * in minor units — and the evidence panel shows the validator's
+ * `resolvedDisplay` instead (`displayValueOf`). The envelope used to copy
+ * `value` only, so a narration quoting the finding's own `23.99%` "disagreed"
+ * with `null` at step 5, or was untraceable at step 7. Now:
+ *
+ *   * a stated `value` is kept as it is;
+ *   * a resolved money object, or a minor-unit count under a `.minor` ref, is
+ *     printed as the app prints money (`formatMoneyJson`/`formatMinor`, C5-8's
+ *     "money as money");
+ *   * any other number is printed **the way the finding's own prose prints
+ *     it**, when it does (`0.2399` → `23.99%` because the summary says
+ *     `23.99%`): every candidate is a rendering of the resolved number, so the
+ *     prose chooses only the format, never the figure;
+ *   * otherwise the resolved display itself, exactly what the panel shows.
+ *
+ * Nothing here widens step 7. The narrow trace's figure set is the
+ * envelope's values (`findingFigureTexts`), and every value added is a
+ * rendering of a number the validator itself resolved from the snapshot the
+ * built-in was judged against.
+ */
+export function envelopeValueOf(
+  row: FindingSource['evidence'][number],
+  prose: readonly string[],
+): string | null {
+  if (row.value !== null) return row.value;
+  const resolved = row.resolvedDisplay;
+  if (resolved === null || resolved === 'null' || resolved.length === 0) return null;
+  if (resolved.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(resolved) as unknown;
+      if (
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        typeof (parsed as Record<string, unknown>)['minor'] === 'string' &&
+        typeof (parsed as Record<string, unknown>)['currency'] === 'string'
+      ) {
+        return formatMoneyJson(parsed as MoneyJson);
+      }
+    } catch {
+      // not JSON: shown as it is, below
+    }
+    return resolved.slice(0, 160);
+  }
+  if (!/^-?\d+(?:\.\d+)?$/u.test(resolved)) return resolved.slice(0, 160);
+  if (row.sourceRef !== null && row.sourceRef.endsWith('.minor')) {
+    const minor = decimal.parseDecimal(resolved);
+    return minor === null ? resolved : formatMinor(minor);
+  }
+  // `canonicalDecimal`, not `decimal.render`: a ratio can carry more places
+  // than the validator's scale (`0.6695232994108195`), and only the format is
+  // chosen here, never the figure.
+  const plain = canonicalDecimal(resolved);
+  const candidates = [formatPercent(Number(plain)), plain];
+  if (/^-?\d+$/u.test(plain) && plain.replace('-', '').length > 3) {
+    candidates.push(Number(plain).toLocaleString('en-US'));
+  }
+  for (const candidate of candidates) {
+    if (candidate === null) continue;
+    if (prose.some((text) => occursAsFigure(text, candidate))) return candidate;
+  }
+  return plain;
+}
+
 /** The wire form. Pure. */
 export function narratedFindingOf(source: FindingSource): NarratedFinding {
   const display = (money: MoneyJson | null): string | null =>
     money === null ? null : formatMoneyJson(money);
+  const prose = [source.title, source.summaryMd, source.impact.basis];
   return {
     key: source.key,
     period: source.period,
@@ -146,7 +250,7 @@ export function narratedFindingOf(source: FindingSource): NarratedFinding {
     summary_md: source.summaryMd,
     evidence: source.evidence.map((row) => ({
       label: row.label,
-      value: row.value,
+      value: envelopeValueOf(row, prose),
       source_ref: row.sourceRef,
     })),
     derived: source.derived.map((entry) => canonicalDecimal(entry.value)),
@@ -168,10 +272,11 @@ export function findingSourceOf(validated: ValidatedInsight): FindingSource {
     severity: validated.severity,
     title: insight.title,
     summaryMd: insight.summary_md,
-    evidence: insight.evidence.map((row) => ({
+    evidence: insight.evidence.map((row, position) => ({
       label: row.label,
       value: row.value,
       sourceRef: row.source_ref,
+      resolvedDisplay: validated.evidence[position]?.resolvedDisplay ?? null,
     })),
     derived: [...validated.derived.entries()].map(([id, value]) => ({ id, value })),
     impact: {
@@ -375,6 +480,7 @@ export async function assembleFindings(
           label: entry.label,
           value: entry.value,
           sourceRef: entry.sourceRef,
+          resolvedDisplay: entry.resolvedDisplay,
         })),
         derived: row.derivations.flatMap((derivation) => {
           const derivationId = derivation['id'];
@@ -393,7 +499,10 @@ export async function assembleFindings(
   }
 
   const verdict = launderFindings(candidates, input.grant);
-  const admitted = (verdict.admitted as typeof candidates).slice(0, MAX_NARRATED_FINDINGS);
+  const admitted = (verdict.admitted as typeof candidates).slice(
+    0,
+    Math.min(MAX_NARRATED_FINDINGS, FINDINGS_PER_NARRATION_REQUEST),
+  );
   return {
     findings: admitted.map((candidate) =>
       narratedFindingOf(redactFreeText(candidate.source, input.kind)),

@@ -32,7 +32,9 @@ export {
   advisorRunPayloads,
   advisorRuns,
   advisors,
+  snapshotGrantEvents,
   snapshotGrants,
+  GRANT_EVENT_KINDS,
   type AdvisorKindValue,
   type AdvisorPayloadApprovalRow,
   type AdvisorRow,
@@ -44,12 +46,15 @@ export {
   type NewAdvisorRunPayloadRow,
   type NewAdvisorRow,
   type NewAdvisorRunRow,
+  type GrantEventKind,
+  type NewSnapshotGrantEventRow,
   type NewSnapshotGrantRow,
   type QuarantineReasonValue,
   type RunRefusalValue,
   type RunStatus,
   type RunTrigger,
   type SeverityValue,
+  type SnapshotGrantEventRow,
   type SnapshotGrantRow,
 } from './advisors.ts';
 
@@ -98,6 +103,7 @@ export {
   type AdvisoryBriefItemRow,
   type AdvisoryBriefRow,
   type BriefItemSection,
+  type BriefPrimaryAction,
   type NewAdvisoryBriefItemRow,
   type NewAdvisoryBriefRow,
 } from './briefs.ts';

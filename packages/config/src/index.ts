@@ -16,6 +16,7 @@ export {
   type KekConfig,
   type LoadConfigOptions,
   type LocalModelConfig,
+  type LocalModelPin,
   type NotificationsConfig,
   type PlaidCallableEnvironment,
   type PlaidConfig,

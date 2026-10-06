@@ -60,6 +60,64 @@ describe('displayValueOf', () => {
   });
 });
 
+describe('displayValueOf — a minor-unit leaf is printed as money (G5-9, C5-8)', () => {
+  const MINOR = 'snapshot:category_creep.recent.amount.minor';
+
+  it("prints 129900 as $1,299.00 in the insight's currency, not as 129900", () => {
+    // The gate's walk: the row's value is null and the resolved display is the leaf.
+    const row = evidence({ sourceRef: MINOR, value: null, resolvedDisplay: '129900' });
+    expect(displayValueOf(row, { currency: 'USD' })).toBe('$1,299.00');
+  });
+
+  it("is exact for every magnitude and honours the currency's own minor-unit scale", () => {
+    const at = (minor: string, currency: string) =>
+      displayValueOf(evidence({ sourceRef: MINOR, value: null, resolvedDisplay: minor }), {
+        currency,
+      });
+    expect(at('5', 'USD')).toBe('$0.05');
+    expect(at('100', 'USD')).toBe('$1.00');
+    expect(at('123456789', 'USD')).toBe('$1,234,567.89');
+    expect(at('-4500', 'USD')).toBe('−$45.00');
+    expect(at('1299', 'JPY')).toBe('¥1,299');
+  });
+
+  it('with no currency to print it in, the raw figure says it is minor units — never bare dollars', () => {
+    const row = evidence({ sourceRef: MINOR, value: null, resolvedDisplay: '129900' });
+    expect(displayValueOf(row)).toBe('129900 minor units');
+    expect(displayValueOf(row, { currency: null })).toBe('129900 minor units');
+  });
+
+  it('leaves every other row alone: a count, a percent, a date, a ref that is not a leaf of minor units', () => {
+    const currency = { currency: 'USD' };
+    expect(
+      displayValueOf(
+        evidence({ sourceRef: 'snapshot:x.count', value: '3', resolvedDisplay: '3' }),
+        currency,
+      ),
+    ).toBe('3');
+    expect(
+      displayValueOf(
+        evidence({ sourceRef: 'snapshot:x.rate', value: null, resolvedDisplay: '4.5%' }),
+        currency,
+      ),
+    ).toBe('4.5%');
+    // `.minor` but not a whole number: not a minor-unit figure, shown as resolved.
+    expect(
+      displayValueOf(
+        evidence({ sourceRef: MINOR, value: null, resolvedDisplay: '$1,299.00' }),
+        currency,
+      ),
+    ).toBe('$1,299.00');
+    // A whole number on a ref that does not end in `.minor` is not money.
+    expect(
+      displayValueOf(
+        evidence({ sourceRef: 'snapshot:x.total', value: null, resolvedDisplay: '129900' }),
+        currency,
+      ),
+    ).toBe('129900');
+  });
+});
+
 describe('citedSourceRefs', () => {
   it('collects every non-null sourceRef', () => {
     const rows = [

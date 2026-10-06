@@ -8,6 +8,8 @@ import { EmptyState } from '../../components/patterns/EmptyState.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
 import { Label } from '../../components/ui/label.tsx';
 import type { BaselineScenario } from '../../api/generated/types.gen.ts';
+import { ProjectionOverridesNotice } from '../accounts/ProjectionOverridesNotice.tsx';
+import { UnvaluedAccountsNotice } from '../accounts/UnvaluedAccountsNotice.tsx';
 import {
   useAssumptionsQuery,
   useCompareQuery,
@@ -176,6 +178,9 @@ export function PlanScreen({ search, onSearchChange }: PlanScreenProps) {
           )}
         </p>
       </header>
+
+      <ProjectionOverridesNotice projection={projection} scenarioId={selectedScenarioId} />
+      <UnvaluedAccountsNotice />
 
       {scenarios.length > 1 && (
         <div className="flex items-end gap-2">

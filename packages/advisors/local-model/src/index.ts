@@ -63,7 +63,10 @@ export {
 export type { LocalModelRequest } from './request.ts';
 export {
   CODE_POINT_CLASSES,
+  CONFUSABLES,
+  confusableSkeleton,
   countFlags,
+  FLAG_ONLY_KINDS,
   INJECTION_PATTERNS,
   SANITISER_FLAG_KINDS,
   sanitiseString,

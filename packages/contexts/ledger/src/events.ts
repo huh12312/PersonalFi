@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { defineEvent, type EventDefinition } from '@core/platform';
 import { z } from 'zod';
+import { AccountOverrideChanged } from './overrides/events.ts';
 
 /**
  * Every fact the Ledger states.
@@ -124,4 +125,6 @@ export const LEDGER_EVENTS: readonly EventDefinition[] = Object.freeze([
   TransactionsUpserted,
   TransferPaired,
   TransactionSupersededByPosted,
+  // WP 9.2: the holder's overlay on an account (defined beside its store).
+  AccountOverrideChanged,
 ]);

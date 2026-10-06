@@ -33,10 +33,11 @@ import {
   advisoryBriefs,
   type AdvisorKindValue,
   type BriefItemSection,
+  type BriefPrimaryAction,
   type NewAdvisoryBriefItemRow,
 } from '../../schema/index.ts';
 import type { InsightsDatabase, InsightsExecutor } from '../db.ts';
-import { listInsights, type InsightView } from '../read.ts';
+import { listInsights, type ActionView, type InsightView } from '../read.ts';
 import type { Severity } from '../contract/response.ts';
 import { previousIsoWeek } from './iso-week.ts';
 import type { BriefCandidate } from './candidate.ts';
@@ -48,6 +49,22 @@ import {
   type RetirementAgeEffect,
   type RetirementImpactAnswer,
 } from './ports.ts';
+
+/**
+ * CF-24: the action the Brief will carry — the finding's first by `position`,
+ * in the four fields the Brief displays. `null` for a finding with none (the
+ * Brief's own eligibility rule keeps those out, so a published item has one).
+ */
+export function primaryActionOf(actions: readonly ActionView[]): BriefPrimaryAction | null {
+  const first = [...actions].sort((a, b) => a.position - b.position)[0];
+  if (first === undefined) return null;
+  return {
+    kind: first.kind as BriefPrimaryAction['kind'],
+    label: first.label,
+    rationaleMd: first.rationaleMd,
+    url: first.url,
+  };
+}
 
 /** `read.ts`'s `InsightView`, narrowed to what the Brief needs, as a `BriefCandidate`. */
 export function candidateOf(view: InsightView): BriefCandidate {
@@ -64,6 +81,7 @@ export function candidateOf(view: InsightView): BriefCandidate {
     annualizedImpact: view.annualizedImpact,
     oneTimeImpact: view.oneTimeImpact,
     actionKinds: view.actions.map((action) => action.kind),
+    primaryAction: primaryActionOf(view.actions),
     evidence: view.evidence.map((row) => ({
       position: row.position,
       kind: row.kind,
@@ -228,6 +246,8 @@ export interface StoredBriefItem {
   readonly score: number | null;
   readonly scoreFactors: Record<string, unknown> | null;
   readonly retirementEffect: RetirementImpactAnswer;
+  /** CF-24: what the Brief said the action was. `null` for a Brief published before 0038 ("no action recorded"). */
+  readonly primaryAction: BriefPrimaryAction | null;
 }
 
 function moneyOrNull(minor: bigint | null, currency: string | null): MoneyType | null {
@@ -270,6 +290,7 @@ export async function listBriefItems(
     score: scoreOf(row.score),
     scoreFactors: row.scoreFactors,
     retirementEffect: deserializeRetirementEffect(row.retirementEffect),
+    primaryAction: row.primaryAction,
   }));
 }
 
@@ -397,6 +418,9 @@ function itemRowOf(
     score: item.score === null ? null : item.score.toFixed(6),
     scoreFactors: item.scoreFactors as unknown as Record<string, unknown> | null,
     retirementEffect: serializeRetirementEffect(effect),
+    // CF-24: snapshotted here, with the title and the summary, and never read
+    // through to `insight_actions` afterwards.
+    primaryAction: item.candidate.primaryAction ?? null,
   };
 }
 

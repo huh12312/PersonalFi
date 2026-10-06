@@ -35,6 +35,15 @@ has not built yet.
 - `rejected_transfer_pairs`
 - `ledger_dedup_keys`
 
+### Built (migration 0035)
+
+The holder's overlay on an account (WP 9.2): a tax treatment, a role and a
+valuation basis that outrank what the provider's metadata implies. One row per
+`(user, account)`; a user-scoped composite foreign key to `accounts`. Provider
+facts on `accounts` are never mutated; `resolveAccountOverlay` decides.
+
+- `account_overrides`
+
 ### Claimed, not yet built
 
 - `institutions`

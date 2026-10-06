@@ -13,6 +13,7 @@ import { TransactionDetailSheet } from '../transactions/TransactionDetailSheet.t
 import { TransactionsList } from '../transactions/TransactionsList.tsx';
 import { DEFAULT_TRANSACTIONS_SEARCH, type TransactionsSearch } from '../transactions/filters.ts';
 import { ACCOUNT_TYPE_ICON } from './account-icons.tsx';
+import { AccountOverridesPanel } from './AccountOverridesPanel.tsx';
 import { AddManualTransactionDialog } from './AddManualTransactionDialog.tsx';
 import { RecordBalanceDialog } from './RecordBalanceDialog.tsx';
 import { useAccountsLookup } from './useAccountsLookup.ts';
@@ -133,6 +134,8 @@ export function AccountDetailScreen({ accountId }: AccountDetailScreenProps) {
           />
         </div>
       </div>
+
+      <AccountOverridesPanel account={account} />
 
       <TransactionsList
         search={search}

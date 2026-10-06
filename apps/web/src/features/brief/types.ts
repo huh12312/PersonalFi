@@ -2,37 +2,48 @@
 import type { BriefItem } from '../../api/generated/types.gen.ts';
 
 /**
- * A narration overlay for a Brief item — **not part of the generated
- * contract today**. WP 5.3 built the narrator and its storage
- * (`insights.narrates_insight_id`, migration 0031) and a server-side reader
- * for it (`narrationsFor(executor, userId, findingIds)`,
- * `packages/contexts/insights/src/advisors/local/link.ts` per
- * `docs/evidence/phase-5/wp5.3-narrator.md` §4), but no REST route anywhere
- * serves it: `listInsights` — the one function behind both the feed and
- * `GET /insights/{insightId}` — unconditionally excludes narration rows
- * (`isNull(insights.narratesInsightId)`,
- * `packages/contexts/insights/src/read.ts:172`), by design (a narration
- * "never takes a feed, dashboard or Brief slot of its own"). So a narration
- * cannot be fetched by any path that exists in this codebase today.
+ * What `GET /insights/brief/*` carries on each item since WP 9.6 (items 3 and
+ * 4), typed locally until `just openapi` and `pnpm run gen` bring the generated
+ * `BriefItem` up to date; both fields are optional here so an item from the
+ * not-yet-regenerated client (or a mock that predates them) still reads. After
+ * the regeneration `BriefItem` carries them required and the intersection below
+ * is a no-op.
  *
- * This type names the exact shape `GET /insights/brief/current` and
- * `GET /insights/brief/{isoWeek}` would need to add to `BriefItem` — a
- * `narration` field carrying the narrator's alternative wording — for
- * `NarratedSummary` (`./NarrationBadge.tsx`) to ever render for real against
- * a live backend. Until a route populates it, `narrationOf` below always
- * returns `null`, because the field is never present on the wire; nothing
- * in this package guesses at a URL to fetch one separately. See
- * `docs/evidence/phase-5/wp5.11-brief-ui.md` "Needs the orchestrator".
+ * **Narration (Phase 5 gate R-2).** `status` and the badge are always on the
+ * wire. The narrator's TEXT is on the wire only when the deployment sets
+ * `NARRATION_TEXT_SHOWN` (`textShown`); until WP 9.5's figure slots have landed
+ * and been measured, or Chris accepts the residual in writing, `summaryMd` is
+ * `null` and this screen shows the built-in wording alone, with a note.
  */
-export interface BriefNarration {
-  /** The narrator's alternative wording for this item's finding (07 §7.5 rule 1: shown only until/unless rejected). */
-  readonly narratedSummaryMd: string;
+export interface BriefItemNarration {
+  /** `narrated`: wording is linked to this item's finding. `pending`: one is expected. `none`. */
+  readonly status: 'narrated' | 'pending' | 'none';
+  /** The AI-assisted badge: true exactly when `status` is `narrated`. */
+  readonly aiAssisted: boolean;
+  /** Whether this deployment shows narration text at all. */
+  readonly textShown: boolean;
+  /** The narrator's alternative wording; `null` unless narrated and `textShown`. */
+  readonly summaryMd: string | null;
+}
+
+/** CF-24: the action as the Brief said it at publication. `null` on the item: published before 0038. */
+export interface BriefItemAction {
+  readonly kind: 'suggest_only' | 'open_url' | 'create_goal_draft' | 'create_rule_draft';
+  readonly label: string;
+  readonly rationaleMd: string;
+  readonly url: string | null;
 }
 
 export type BriefItemWithNarration = BriefItem & {
-  readonly narration?: BriefNarration | null;
+  readonly narration?: BriefItemNarration;
+  readonly primaryAction?: BriefItemAction | null;
 };
 
-export function narrationOf(item: BriefItemWithNarration): BriefNarration | null {
+export function narrationOf(item: BriefItemWithNarration): BriefItemNarration | null {
   return item.narration ?? null;
+}
+
+/** `undefined` (an item from a client that predates the field) reads as no action recorded. */
+export function primaryActionOf(item: BriefItemWithNarration): BriefItemAction | null {
+  return item.primaryAction ?? null;
 }

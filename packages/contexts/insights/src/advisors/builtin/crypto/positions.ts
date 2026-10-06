@@ -49,6 +49,7 @@ import {
   type RuleOutput,
 } from '../../support.ts';
 import { CRYPTO_WASH_SALE_WATCH, detailRef, lotRef, productOf, rateRef } from '../shared.ts';
+import { symbolKeyPart } from '../symbol-key.ts';
 
 /** 07 §3.3 X3: more than $5,000 of stablecoins, in minor units. */
 const STABLECOIN_FLOOR_MINOR = 500_000n;
@@ -128,7 +129,7 @@ export const cryptoIdleStablecoins: BuiltinRule = {
 
       insights.push(
         insightOf({
-          key: `crypto.idle_stablecoins.${position.symbol}`,
+          key: `crypto.idle_stablecoins.${symbolKeyPart(position.symbol)}`,
           period: context.period,
           type: 'crypto.idle_stablecoins',
           severity: 'notable',
@@ -220,7 +221,7 @@ export const cryptoLossLot: BuiltinRule = {
 
         insights.push(
           insightOf({
-            key: `crypto.loss_lot.${position.symbol}.${String(lotIndex)}`,
+            key: `crypto.loss_lot.${symbolKeyPart(position.symbol)}.${String(lotIndex)}`,
             period: context.period,
             type: 'crypto.loss_lot',
             severity: 'notable',
@@ -282,7 +283,7 @@ export const cryptoMissingBasis: BuiltinRule = {
 
       insights.push(
         insightOf({
-          key: `crypto.missing_basis.${position.symbol}`,
+          key: `crypto.missing_basis.${symbolKeyPart(position.symbol)}`,
           period: context.period,
           type: 'crypto.missing_basis',
           severity: 'notable',

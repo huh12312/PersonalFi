@@ -143,6 +143,44 @@ export const snapshotGrants = pgTable(
 export type SnapshotGrantRow = typeof snapshotGrants.$inferSelect;
 export type NewSnapshotGrantRow = typeof snapshotGrants.$inferInsert;
 
+export const GRANT_EVENT_KINDS = ['granted', 'revoked', 're_granted'] as const;
+export type GrantEventKind = (typeof GRANT_EVENT_KINDS)[number];
+
+/**
+ * O-9, migration `0038_brief_actions_grant_events.sql`: an append-only history
+ * of consent. `snapshot_grants` above is the *state* (one row per scope,
+ * updated on revoke and re-grant); this is the *record*: one row per grant,
+ * revoke and re-grant, written in the same transaction as the change, never
+ * updated (a trigger refuses it). `stepUpSessionId` names the session whose
+ * fresh assertion authorised the change; it has no foreign key on purpose — the
+ * record outlives the session.
+ */
+export const snapshotGrantEvents = pgTable(
+  'snapshot_grant_events',
+  {
+    id: idColumn(),
+    userId: userIdColumn(),
+    advisorId: text('advisor_id').notNull(),
+    scope: text('scope').notNull(),
+    event: text('event').$type<GrantEventKind>().notNull(),
+    perRunConsent: flagColumn('per_run_consent').notNull(),
+    stepUpSessionId: uuid('step_up_session_id'),
+    occurredAt: instantColumn('occurred_at').notNull(),
+    createdAt: createdAtColumn(),
+  },
+  (table) => [
+    index('snapshot_grant_events_advisor_idx').on(
+      table.userId,
+      table.advisorId,
+      table.occurredAt,
+      table.id,
+    ),
+  ],
+);
+
+export type SnapshotGrantEventRow = typeof snapshotGrantEvents.$inferSelect;
+export type NewSnapshotGrantEventRow = typeof snapshotGrantEvents.$inferInsert;
+
 export const RUN_TRIGGERS = ['schedule', 'event', 'manual', 'backfill'] as const;
 export type RunTrigger = (typeof RUN_TRIGGERS)[number];
 

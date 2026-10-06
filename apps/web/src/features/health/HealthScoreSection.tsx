@@ -12,7 +12,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 
 import { getHealthScoreOptions } from '../../api/generated/@tanstack/react-query.gen.ts';
-import type { Problem } from '../../api/generated/types.gen.ts';
+import type { HealthScoreComponent, Problem } from '../../api/generated/types.gen.ts';
 import { Card } from '../../components/ui/card.tsx';
 import { Money } from '../../components/finance/Money.tsx';
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
@@ -25,12 +25,10 @@ import {
   formatMonths,
   formatRatioPercent,
 } from './format.ts';
-import {
-  isMoneyValue,
-  type HealthBand,
-  type HealthComponentResult,
-  type HealthScoreWireResponse,
-} from './types.ts';
+import { isMoneyValue, type HealthBand } from './types.ts';
+
+/** The generated component type — the hand-mirrored `HealthComponentResult` is no longer needed here (CF-25). */
+type HealthComponentResult = HealthScoreComponent;
 
 const BAND_ICON: Record<HealthBand, LucideIcon> = {
   poor: AlertOctagon,
@@ -141,11 +139,11 @@ export function HealthScoreSection() {
     );
   }
 
-  // `GetHealthScoreResponses` has no 200 branch yet (see `./types.ts`'s
-  // header) — this is the one, documented cast from `unknown` to the real
-  // wire shape `apps/api/src/routes/brief.ts`'s route actually serves
-  // (`{ healthScore: {...} }`), not a guess at a new field.
-  const { healthScore: result } = query.data as HealthScoreWireResponse;
+  // The generated 200 type (`GetHealthScoreResponses`) carries the real wire
+  // shape; no cast (CF-25 — this used to be an `as HealthScoreWireResponse`
+  // from a hand-mirrored type written before the client was regenerated).
+  if (query.data === undefined) return <SkeletonText lines={5} />;
+  const { healthScore: result } = query.data;
 
   return (
     <Card padding="default" data-testid="health-score-section">

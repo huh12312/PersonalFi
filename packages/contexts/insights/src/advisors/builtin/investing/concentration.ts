@@ -45,6 +45,7 @@ import {
   type RuleOutput,
 } from '../../support.ts';
 import { aggregateRef, detailRef, positionRef } from '../shared.ts';
+import { symbolKeyPart } from '../symbol-key.ts';
 
 /** 07 §3.3 I4: `> 20% of investable assets`. */
 const CONCENTRATION_THRESHOLD = 0.2;
@@ -113,7 +114,7 @@ export const investingConcentration: BuiltinRule = {
 
       insights.push(
         insightOf({
-          key: `investing.concentration.${position.symbol}`,
+          key: `investing.concentration.${symbolKeyPart(position.symbol)}`,
           period: context.period,
           type: 'investing.concentration',
           severity: 'urgent',
@@ -194,7 +195,7 @@ export const investingEmployerStock: BuiltinRule = {
 
       insights.push(
         insightOf({
-          key: `investing.employer_stock.${position.symbol}`,
+          key: `investing.employer_stock.${symbolKeyPart(position.symbol)}`,
           period: context.period,
           type: 'investing.employer_stock',
           severity: 'urgent',

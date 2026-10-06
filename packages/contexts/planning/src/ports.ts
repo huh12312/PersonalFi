@@ -118,6 +118,13 @@ export interface PlanningAccount {
   readonly flags: AccountFlags;
   /** A closed account contributes nothing from the day it closed. */
   readonly closedAt: Date | null;
+  /**
+   * WP 9.2 (O-2): how the holder said to value an investment or crypto account.
+   * Absent or `'holdings'`: Σ quantity x price, an account with no priced
+   * holdings is unvalued, never zero. `'balance'`: the same, but an account with
+   * none falls back to its latest balance, labelled as such on the breakdown.
+   */
+  readonly valuation?: 'holdings' | 'balance';
 }
 
 /** A point-in-time balance observation, in the account's own currency. */
@@ -346,13 +353,42 @@ const NOT_A_RETIREMENT_BUCKET: ReadonlySet<string> = new Set([
  * which is what it is.
  */
 export function defaultTaxBucketFor(kind: AccountKind, subtype: string | null): TaxBucket | null {
-  if (kind !== 'investment') return null;
+  return defaultTaxBucketWithBasis(kind, subtype).bucket;
+}
+
+/**
+ * `defaultTaxBucketFor`, and *why*: `subtype` when the provider's own subtype
+ * named the bucket, `fallback` when nothing recognised it and `TAXABLE` is the
+ * conservative reading, `none` when the account has no bucket at all. WP 9.2's
+ * accounts screen says "from Plaid: 401k" for the first and "assumed taxable —
+ * no recognised subtype" for the second, and the difference is the whole point
+ * of CF-16: a mis-typed IRA that falls back to `TAXABLE` must not look like a
+ * fact the provider stated.
+ */
+export function defaultTaxBucketWithBasis(
+  kind: AccountKind,
+  subtype: string | null,
+): { readonly bucket: TaxBucket | null; readonly basis: 'subtype' | 'fallback' | 'none' } {
+  if (kind !== 'investment') return { bucket: null, basis: 'none' };
   const key = (subtype ?? '').trim().toLowerCase();
-  if (NOT_A_RETIREMENT_BUCKET.has(key)) return null;
-  if (ROTH_SUBTYPES.has(key)) return 'ROTH';
-  if (HSA_SUBTYPES.has(key)) return 'HSA';
-  if (TAX_DEFERRED_SUBTYPES.has(key)) return 'TAX_DEFERRED';
-  return 'TAXABLE';
+  if (NOT_A_RETIREMENT_BUCKET.has(key)) return { bucket: null, basis: 'none' };
+  if (ROTH_SUBTYPES.has(key)) return { bucket: 'ROTH', basis: 'subtype' };
+  if (HSA_SUBTYPES.has(key)) return { bucket: 'HSA', basis: 'subtype' };
+  if (TAX_DEFERRED_SUBTYPES.has(key)) return { bucket: 'TAX_DEFERRED', basis: 'subtype' };
+  return { bucket: 'TAXABLE', basis: 'fallback' };
+}
+
+/**
+ * What the holder has set on one account, as the projection needs to see it
+ * (WP 9.2). Raw fields, `null` where nothing is set: the effective tax bucket is
+ * already on `CashflowAccount.taxBucket`, and these exist so the input digest
+ * covers a change to *any* of the three — a role or a valuation change moves no
+ * bucket today and must still make a stored baseline read stale.
+ */
+export interface AccountOverlayFacts {
+  readonly taxTreatment: TaxBucket | null;
+  readonly role: string | null;
+  readonly valuation: 'holdings' | 'balance' | null;
 }
 
 /**
@@ -376,6 +412,12 @@ export interface CashflowAccount extends PlanningAccount {
    * "not crypto", which is exactly the behaviour before WP 5.5.
    */
   readonly sleeve?: 'crypto' | null;
+  /**
+   * WP 9.2: the holder's overlay on this account, `null` or absent when they have
+   * set none. `taxBucket` above is the *effective* bucket — the overlay's tax
+   * treatment where set, the provider-subtype default otherwise.
+   */
+  readonly overlay?: AccountOverlayFacts | null;
 }
 
 /**

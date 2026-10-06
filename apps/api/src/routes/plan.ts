@@ -89,7 +89,7 @@ import {
 import { DateOnly, Money, type Money as MoneyType } from '@core/kernel';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { planningRevealedPortsFor } from '../domain.ts';
+import { accountOverrideFingerprintFor, planningRevealedPortsFor } from '../domain.ts';
 import { mapDomainErrors } from './domain-errors.ts';
 import { problems } from '../problem.ts';
 import { booleanQuery, dateOnly, dateOnlyQuery, money, moneySchema } from '../wire.ts';
@@ -484,10 +484,40 @@ const stalenessSchema = z
       assumptionsVersion: z.string(),
       currentVersion: z.string(),
     }),
+    z.object({
+      reason: z.literal('account_overrides_changed'),
+      changes: z
+        .array(
+          z.object({
+            accountId: z.uuid(),
+            field: z.enum(['taxTreatment', 'role', 'valuation']),
+            from: z
+              .string()
+              .nullable()
+              .describe('What the run was computed with; null: nothing set.'),
+            to: z.string().nullable().describe('What the holder has set now; null: cleared.'),
+          }),
+        )
+        .describe(
+          'Each account field the holder changed after this run was computed (WP 9.2). The ' +
+            'projection is not recomputed behind their back: ask again with `acceptAccountChanges`.',
+        ),
+    }),
   ])
   .meta({ id: 'ProjectionStaleness' });
 
 function serialiseStaleness(staleness: Staleness): z.infer<typeof stalenessSchema> {
+  if (staleness.reason === 'account_overrides_changed') {
+    return {
+      reason: 'account_overrides_changed',
+      changes: staleness.changes.map((change) => ({
+        accountId: change.accountId,
+        field: change.field,
+        from: change.from,
+        to: change.to,
+      })),
+    };
+  }
   return staleness.reason === 'assumptions_version_retired'
     ? {
         reason: 'assumptions_version_retired',
@@ -646,6 +676,14 @@ export const planRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             paths: z.int().min(2).max(1_000_000).optional(),
             asOf: dateOnlyQuery.nullable().optional(),
             allowOpenDay: z.boolean().optional(),
+            acceptAccountChanges: z
+              .boolean()
+              .optional()
+              .describe(
+                'WP 9.2. After the holder changes an account’s tax treatment, role or valuation, ' +
+                  'the stored run comes back `stale` and nothing is computed. `true` says they know ' +
+                  'and asks for a new run from the current settings.',
+              ),
           }),
           response: {
             200: projectionOutcomeSchema,
@@ -668,6 +706,7 @@ export const planRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
                   ? null
                   : DateOnly.parse(request.body.asOf),
               allowOpenDay: request.body.allowOpenDay ?? false,
+              ...(request.body.acceptAccountChanges === true ? { acceptAccountChanges: true } : {}),
               correlationId: String(request.id),
             }),
           ),
@@ -697,12 +736,14 @@ export const planRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       async (request) => {
         const session = await guards.requireSession(request);
         const timeZone = await timezoneOf(deps);
+        const accountOverrides = await accountOverrideFingerprintFor(database, session.userId);
         const { run, percentiles, staleness } = await mapDomainErrors(() =>
           readProjection(database, {
             userId: session.userId,
             runId: request.params.runId,
             timeZone,
             registry: currentRegistry(),
+            accountOverrides,
           }),
         );
         return {

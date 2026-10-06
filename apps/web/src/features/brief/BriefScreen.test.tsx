@@ -204,9 +204,15 @@ describe('BriefScreen', () => {
   });
 
   it('a narrated item shows the AI-assisted badge and the template text is one click away', async () => {
+    // The real response shape (WP 9.6 item 3): status, badge, textShown, text.
     const narrated = {
       ...buildItem({ id: '1' }),
-      narration: { narratedSummaryMd: 'Fee hunter found $720 you could get back this year.' },
+      narration: {
+        status: 'narrated',
+        aiAssisted: true,
+        textShown: true,
+        summaryMd: 'Fee hunter found $720 you could get back this year.',
+      },
     };
     stubFetchRoutes([briefRoute(buildBrief({ items: [narrated] })), healthScoreNotComputedRoute()]);
 
@@ -225,6 +231,144 @@ describe('BriefScreen', () => {
     expect(await screen.findByTestId('narration-template-text')).toHaveTextContent(
       'You paid $720 in avoidable fees over the last twelve months.',
     );
+  });
+
+  it('R-2: a narrated item whose text the deployment withholds shows the built-in wording and says so', async () => {
+    const withheld = {
+      ...buildItem({ id: '1' }),
+      narration: { status: 'narrated', aiAssisted: true, textShown: false, summaryMd: null },
+    };
+    stubFetchRoutes([briefRoute(buildBrief({ items: [withheld] })), healthScoreNotComputedRoute()]);
+
+    renderScreen();
+
+    // The built-in's own wording is the text; the narration is not on screen.
+    expect(
+      await screen.findByText('You paid $720 in avoidable fees over the last twelve months.'),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('narration-withheld')).toHaveTextContent(
+      'An AI-assisted wording of this item exists and is not shown yet.',
+    );
+    expect(screen.queryByRole('button', { name: 'See the template wording' })).toBeNull();
+  });
+
+  it('a narration that is expected but has not arrived says it may follow', async () => {
+    const pending = {
+      ...buildItem({ id: '1' }),
+      narration: { status: 'pending', aiAssisted: false, textShown: true, summaryMd: null },
+    };
+    stubFetchRoutes([briefRoute(buildBrief({ items: [pending] })), healthScoreNotComputedRoute()]);
+
+    renderScreen();
+
+    expect(await screen.findByTestId('narration-pending')).toBeInTheDocument();
+    expect(screen.queryByText('AI-assisted wording')).not.toBeInTheDocument();
+  });
+
+  it("CF-24: the item shows the action the Brief recorded, and 'No action recorded' for an older Brief", async () => {
+    const recorded = {
+      ...buildItem({ id: '1' }),
+      primaryAction: {
+        kind: 'open_url',
+        label: 'Open the fee-free account page',
+        rationaleMd: 'Moves the fees away.',
+        url: 'https://example.com/accounts',
+      },
+    };
+    const older = { ...buildItem({ id: '2' }), position: 1, primaryAction: null };
+    stubFetchRoutes([
+      briefRoute(buildBrief({ items: [recorded, older] })),
+      healthScoreNotComputedRoute(),
+    ]);
+
+    renderScreen();
+
+    const cards = await screen.findAllByTestId('brief-item-action');
+    expect(cards[0]).toHaveTextContent('Suggested next step: Open the fee-free account page');
+    expect(
+      within(cards[0]!).getByRole('link', { name: 'Open the fee-free account page' }),
+    ).toHaveAttribute('href', 'https://example.com/accounts');
+    expect(cards[1]).toHaveTextContent('No action recorded');
+  });
+
+  // C5-7 (G5-19), the web half. The port side pins a funded plan at
+  // `yearsEarlier` 3 and 374 months (`brief-retirement-port.test.ts`); this
+  // side pins that the number a holder reads is the number the API sent —
+  // nothing between the response and the screen adds, rounds or re-derives a
+  // year or a month. Phase 5's gate found `Math.abs(yearsEarlier) + 1` in
+  // `retirement-effect.ts` passing every unit test and the e2e regex.
+  describe("C5-7: the rendered retirement figures equal the API's", () => {
+    function effectOf(yearsEarlier: number | null, months: string) {
+      return {
+        ...COMPUTED_EFFECT,
+        yearsEarlier,
+        monthsOfSpending: { ...COMPUTED_EFFECT.monthsOfSpending, months },
+      };
+    }
+
+    it('the funded plan the port test pins: 3 years earlier, 374 months', async () => {
+      stubFetchRoutes([
+        briefRoute(
+          buildBrief({
+            items: [
+              buildItem({ id: '1', retirementEffect: effectOf(3, '374') }),
+              buildItem({ id: '2', position: 1, retirementEffect: effectOf(0, '374') }),
+            ],
+          }),
+        ),
+        healthScoreNotComputedRoute(),
+      ]);
+      renderScreen();
+      const effects = await screen.findAllByTestId('retirement-effect');
+      // Years, exactly as sent.
+      expect(effects[0]).toHaveTextContent(/^Retire 3 years earlier/);
+      // Months, exactly as sent, when the year did not move.
+      expect(effects[1]).toHaveTextContent('funds about 374 months of retirement spending');
+    });
+
+    it.each([1, 2, 3, 7, 12, 40])('%i years earlier is rendered as %i', async (years) => {
+      stubFetchRoutes([
+        briefRoute(
+          buildBrief({ items: [buildItem({ id: '1', retirementEffect: effectOf(years, '9') })] }),
+        ),
+        healthScoreNotComputedRoute(),
+      ]);
+      renderScreen();
+      const effect = await screen.findByTestId('retirement-effect');
+      const expected =
+        years === 1 ? 'Retire 1 year earlier' : `Retire ${String(years)} years earlier`;
+      expect(effect.textContent?.startsWith(expected)).toBe(true);
+      // Not the neighbouring figures a +1 / -1 slip would print.
+      expect(effect.textContent).not.toMatch(new RegExp(`Retire ${String(years + 1)} year`));
+    });
+
+    it.each(['0', '1', '9', '374', '1200'])(
+      '%s months of spending is rendered as sent',
+      async (months) => {
+        stubFetchRoutes([
+          briefRoute(
+            buildBrief({ items: [buildItem({ id: '1', retirementEffect: effectOf(0, months) })] }),
+          ),
+          healthScoreNotComputedRoute(),
+        ]);
+        renderScreen();
+        const effect = await screen.findByTestId('retirement-effect');
+        expect(effect).toHaveTextContent(`funds about ${months} months of retirement spending`);
+      },
+    );
+
+    it("a later retirement is rendered with the API's magnitude", async () => {
+      stubFetchRoutes([
+        briefRoute(
+          buildBrief({ items: [buildItem({ id: '1', retirementEffect: effectOf(-4, '9') })] }),
+        ),
+        healthScoreNotComputedRoute(),
+      ]);
+      renderScreen();
+      expect(await screen.findByTestId('retirement-effect')).toHaveTextContent(
+        /^Retire 4 years later/,
+      );
+    });
   });
 
   it('an item with no narration shows only the template wording and no badge', async () => {

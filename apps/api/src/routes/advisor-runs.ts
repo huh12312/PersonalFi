@@ -36,26 +36,24 @@
  * advisor on this process (it is the only kind the api process may run
  * inline) but wrong for *previewing* one, which never runs anything at all.
  *
- * One thing does **not** carry over from the worker: the api process is
- * deliberately given no `PromptRenderer` binding (`routes/insights.ts`'s own
- * comment: *"No promptRenderer in the api — deliberate"*; the binding lives
- * in `worker.ts`, WP 5.1 §13, which this WP does not own). `previewRequest`
- * refuses `renderer_unavailable` for a `local_model` advisor without one —
- * mapped below to a named 503 — so **every advisor's preview shows its
- * request and scopes; only a `local_model` advisor's rendered prompt bytes
- * are unavailable on this process**, until it also binds a renderer.
+ * ## The renderer: bound when a model is configured (WP 9.6, CF-1, R-4)
  *
- * The same absence reaches **approval**, and more sharply:
- * `advisor_payload_approvals`'s own CHECK (`advisor_payload_approvals_local_has_template`,
- * migration 0028) requires a `local_model` row to carry a non-null prompt
- * template hash, which is always `null` here — `approvePayload` itself does
- * not pre-check this (it only refuses a *mismatched* shape), so an insert
- * would violate the CHECK and surface as a raw 500. The approval handler
- * below refuses first, named (503 `insights.prompt_renderer_unavailable`),
- * the same code the preview route uses for the same underlying reason. A
- * `local_model` advisor's payload **cannot be approved on this process at
- * all** until it binds a renderer — not just previewed incompletely.
- * Recorded under "Needs the orchestrator" in this WP's evidence.
+ * The api binds the pure, preview-only `PromptRenderer` and `local.narrator`'s
+ * manifest — never its executor, and never an endpoint — whenever
+ * `config.localModelPin` (`LOCAL_MODEL_PIN_NAME` and `LOCAL_MODEL_PIN_DIGEST`)
+ * is set; `app.ts` builds the `PreviewModel` (`modules.ts`'s
+ * `createPreviewModel`) and hands it here. Phase 5's "deliberately no
+ * renderer" (WP 5.1 §13) is overruled by the Phase 5 gate's R-4: without one
+ * no install can approve a payload, and the worker's run is refused
+ * `payload_not_approved` forever (G5-2). With no model configured nothing is
+ * bound, `previewRequest` still refuses `renderer_unavailable` for a
+ * `local_model` row some other process registered, and that refusal is named:
+ * 503 `insights.prompt_renderer_unavailable`, saying which setting is missing.
+ *
+ * The registry's `local.narrator` comes from the code's manifest, not from the
+ * possibly older row the worker stored: a payload approval is keyed to
+ * `{advisor_id, version, kind, scopes, template hash}`, and the version in that
+ * shape must be the one the worker will run.
  *
  * ## The preview sends nothing to any model
  *
@@ -71,6 +69,8 @@
 import {
   ADVISOR_KINDS,
   AdvisorRegistry,
+  MODULE_FLAG_KEY,
+  registerAdvisor,
   AdvisorRequestSchema,
   PreviewError,
   approvePayload,
@@ -103,6 +103,7 @@ import {
 import { ADVISOR_KIND_FLAGS, MODULE_FLAGS } from '../platform.ts';
 import { AppError, problems } from '../problem.ts';
 import { isoInstant } from '../wire.ts';
+import type { PreviewModel } from '../modules.ts';
 import type { RouteDeps } from './deps.ts';
 
 /** D6: one account holder — the same reading every other route file uses. */
@@ -131,6 +132,18 @@ function advisorNotFound(advisorId: string): AppError {
   });
 }
 
+function kindFlagNotFound(kind: AdvisorKind): AppError {
+  return new AppError({
+    status: 404,
+    code: 'insights.kind_flag_not_found',
+    title: 'Not Found',
+    detail:
+      `advisor kind '${kind}' has no kill switch of its own (only a kind with a ` +
+      'declared flag does — see ADVISOR_KIND_FLAGS)',
+    family: 'user',
+  });
+}
+
 function runNotFound(runId: string): AppError {
   return new AppError({
     status: 404,
@@ -147,9 +160,17 @@ function runNotFound(runId: string): AppError {
  * file's header. A row that fails re-validation is skipped, not thrown: one
  * legacy or corrupt manifest must not break preview for every other advisor.
  */
-async function previewRegistryFor(deps: RouteDeps, userId: string): Promise<AdvisorRegistry> {
+async function previewRegistryFor(
+  deps: RouteDeps,
+  userId: string,
+  preview: PreviewModel | undefined,
+): Promise<AdvisorRegistry> {
   const rows = await listAdvisors(deps.database, userId);
   const registry = new AdvisorRegistry();
+  // The code's `local.narrator` goes in first: a stored row for the same id is
+  // then a refused duplicate (`register` returns a verdict, it does not throw),
+  // so the shape is always the one this build's worker will run.
+  if (preview !== undefined) registry.register(preview.narrator);
   for (const row of rows) {
     const advisor: Advisor = {
       manifest: row.manifest as AdvisorManifest,
@@ -167,8 +188,8 @@ async function previewRegistryFor(deps: RouteDeps, userId: string): Promise<Advi
 
 /**
  * `previewRequest`/`approvePayload` need ports, a registry and settings —
- * never `switches` (preview and approval do not execute anything) and never
- * a `promptRenderer` (this process has none; see this file's header). No
+ * never `switches` (preview and approval do not execute anything), and a
+ * `promptRenderer` only when a model is configured (see this file's header). No
  * `advisor_token_secret` is required either: that secret keys merchant
  * pseudonyms for a `builtin` rule's *output copy*, not the snapshot the
  * preview reads, and `buildAdvisorRequest`'s `deriveTokenKey` call only needs
@@ -183,9 +204,11 @@ async function previewDependenciesOf(
   deps: RouteDeps,
   userId: string,
   timeZone: string,
+  preview: PreviewModel | undefined,
 ): Promise<InsightsDependencies> {
   return {
-    registry: await previewRegistryFor(deps, userId),
+    registry: await previewRegistryFor(deps, userId, preview),
+    ...(preview === undefined ? {} : { promptRenderer: preview.promptRenderer }),
     ports: {
       ledger: createInsightsLedgerPort(deps.database, deps.clock),
       budget: createInsightsBudgetPort(deps.database),
@@ -345,6 +368,29 @@ const ruleHealthSchema = z
   })
   .meta({ id: 'AdvisorRuleHealth' });
 
+const kindStateSchema = z
+  .object({
+    kind: z.enum(ADVISOR_KINDS),
+    /** Level 2's user half: the `advisors.kind.<kind>` flag as last written (or its default). */
+    enabled: z.boolean(),
+    /** Level 2's operator half: this deployment has a model configured for the kind. */
+    configured: z.boolean(),
+    /** Both. A kind runs only when the flag is on and a model is configured. */
+    effective: z.boolean(),
+  })
+  .meta({ id: 'AdvisorKindState' });
+
+const moduleStateSchema = z
+  .object({
+    /** Level 1's operator half: `ADVISORS_ENABLED`, static per process (a change is a restart). */
+    operator: z.object({ advisorsEnabled: z.boolean() }),
+    /** Level 1's user half: the `module.insights` flag as last written (or its default). */
+    user: z.object({ enabled: z.boolean() }),
+    /** Both. Advisors run only when the operator allows them and the holder has not switched them off. */
+    effective: z.boolean(),
+  })
+  .meta({ id: 'AdvisorModuleState' });
+
 /**
  * Maps a `PreviewError` (`@ctx/insights`'s `preview.ts`) to a named problem.
  * `advisor_not_registered` covers two distinct situations the library
@@ -382,7 +428,10 @@ function previewProblem(error: PreviewError): AppError {
   return advisorNotFound(error.message);
 }
 
-export const advisorRunRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
+export const advisorRunRoutes = (
+  deps: RouteDeps,
+  preview?: PreviewModel,
+): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
 
   return async (app) => {
@@ -521,7 +570,7 @@ export const advisorRunRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       async (request) => {
         const session = await guards.requireSession(request);
         const timeZone = await timezoneOf(deps);
-        const dependencies = await previewDependenciesOf(deps, session.userId, timeZone);
+        const dependencies = await previewDependenciesOf(deps, session.userId, timeZone, preview);
         try {
           const preview = await previewRequest(
             database,
@@ -570,15 +619,15 @@ export const advisorRunRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       async (request) => {
         const session = await guards.requireFreshSession(request);
         const timeZone = await timezoneOf(deps);
-        const dependencies = await previewDependenciesOf(deps, session.userId, timeZone);
+        const dependencies = await previewDependenciesOf(deps, session.userId, timeZone, preview);
         // `approvePayload` does not itself check this — it only refuses a
         // *mismatched* shape (`shape_changed`) — and `advisor_payload_approvals`'
         // own CHECK (`advisor_payload_approvals_local_has_template`, 0028)
-        // requires a `local_model` row to carry a prompt template hash. On
-        // this process that hash is always `null` (no `PromptRenderer`
-        // bound — this file's header), so an insert would violate the CHECK
-        // and surface as a raw 500. Refused here, named, the same way
-        // `previewRequest` already refuses its own renderer-dependent half.
+        // requires a `local_model` row to carry a prompt template hash. With no
+        // renderer bound (no model pin configured) that hash is always `null`,
+        // so an insert would violate the CHECK and surface as a raw 500.
+        // Refused here, named, the same way `previewRequest` already refuses
+        // its own renderer-dependent half.
         const registered = dependencies.registry.get(request.params.advisorId);
         if (
           registered?.manifest.kind === 'local_model' &&
@@ -589,10 +638,28 @@ export const advisorRunRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             code: 'insights.prompt_renderer_unavailable',
             title: 'Service Unavailable',
             detail:
-              `no PromptRenderer is bound on this process, so ${request.params.advisorId}'s ` +
-              'payload cannot be approved here (see this file’s header)',
+              `no model is configured on the api, so ${request.params.advisorId}'s payload ` +
+              'cannot be approved here: set LOCAL_MODEL_PIN_NAME and LOCAL_MODEL_PIN_DIGEST ' +
+              'on the api service (the model’s name and digest — never its endpoint)',
             family: 'internal',
           });
+        }
+        // The approval row is foreign-keyed to the advisor's own row
+        // (`advisor_payload_approvals_advisor_fk`), and that row is normally
+        // written by the worker at boot. If the api is being asked first, it
+        // registers `local.narrator` the way the worker does — off — rather than
+        // answer a raw FK violation. An approval is not a switch.
+        if (
+          preview !== undefined &&
+          request.params.advisorId === preview.narrator.manifest.advisor_id
+        ) {
+          const context = contextOf(deps, session.userId, request);
+          if ((await findAdvisor(database, session.userId, request.params.advisorId)) === null) {
+            await registerAdvisor(database, context, {
+              manifest: preview.narrator.manifest,
+              enabled: false,
+            });
+          }
         }
         try {
           const approved = await approvePayload(
@@ -606,6 +673,106 @@ export const advisorRunRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           if (error instanceof PreviewError) throw previewProblem(error);
           throw error;
         }
+      },
+    );
+
+    app.get(
+      '/advisors/kinds/:kind/enabled',
+      {
+        schema: {
+          operationId: 'getAdvisorKindEnabled',
+          summary:
+            'Kill switch 2, as it stands: the kind flag, the model configuration and both together',
+          description:
+            'What the settings screen shows instead of the last `PUT`: `enabled` is the flag the ' +
+            'holder controls, `configured` is whether this deployment has a model configured for ' +
+            'the kind (`LOCAL_MODEL_PIN_*` on the api, or the full `LOCAL_MODEL_*` set), and ' +
+            '`effective` is both. Only a kind with a declared flag has a state; 404 ' +
+            '`insights.kind_flag_not_found` otherwise, exactly as the `PUT`.',
+          tags: ['insights'],
+          params: z.object({ kind: z.enum(ADVISOR_KINDS) }),
+          response: {
+            200: kindStateSchema,
+            ...problems(401, 404),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const kind: AdvisorKind = request.params.kind;
+        const key = `advisors.kind.${kind}`;
+        if (!ADVISOR_KIND_FLAGS.some((definition) => definition.key === key)) {
+          throw kindFlagNotFound(kind);
+        }
+        const enabled = await flagServiceOf(deps).isEnabled(session.userId, key);
+        const configured = kind === 'local_model' && deps.config.localModelPin !== undefined;
+        return { kind, enabled, configured, effective: enabled && configured };
+      },
+    );
+
+    app.get(
+      '/advisors/module/enabled',
+      {
+        schema: {
+          operationId: 'getAdvisorModuleEnabled',
+          summary:
+            'Kill switch 1, as it stands: the operator setting, the holder’s flag and both together',
+          description:
+            '`operator.advisorsEnabled` is `ADVISORS_ENABLED` (static per process; the operator ' +
+            'changes it with a restart). `user.enabled` is `module.insights`, which the holder ' +
+            'flips with `PUT /advisors/module/enabled` (G5-14: until now it was a line of SQL).',
+          tags: ['insights'],
+          response: {
+            200: moduleStateSchema,
+            ...problems(401),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const advisorsEnabled = deps.config.env.ADVISORS_ENABLED;
+        const enabled = await flagServiceOf(deps).isEnabled(session.userId, MODULE_FLAG_KEY);
+        return {
+          operator: { advisorsEnabled },
+          user: { enabled },
+          effective: advisorsEnabled && enabled,
+        };
+      },
+    );
+
+    app.put(
+      '/advisors/module/enabled',
+      {
+        schema: {
+          operationId: 'setAdvisorModuleEnabled',
+          summary: 'Kill switch 1, the holder’s half: turn the insights module on or off',
+          description:
+            'Writes `module.insights`. Needs a fresh session — the same class of act as the kind ' +
+            'switch and `POST /advisors/{id}/enabled` (D21). Off stops every advisor of every kind ' +
+            'within about a second, a run in flight included (WP 5.1). Returns the state as it now ' +
+            'stands, the operator half included.',
+          tags: ['insights'],
+          body: z.object({ enabled: z.boolean() }),
+          response: {
+            200: moduleStateSchema,
+            ...problems(401, 403),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireFreshSession(request);
+        await flagServiceOf(deps).set(
+          platformExecutor(database),
+          session.userId,
+          MODULE_FLAG_KEY,
+          request.body.enabled,
+        );
+        const advisorsEnabled = deps.config.env.ADVISORS_ENABLED;
+        return {
+          operator: { advisorsEnabled },
+          user: { enabled: request.body.enabled },
+          effective: advisorsEnabled && request.body.enabled,
+        };
       },
     );
 
@@ -634,15 +801,7 @@ export const advisorRunRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         const key = `advisors.kind.${kind}`;
         const flags = flagServiceOf(deps);
         if (!ADVISOR_KIND_FLAGS.some((definition) => definition.key === key)) {
-          throw new AppError({
-            status: 404,
-            code: 'insights.kind_flag_not_found',
-            title: 'Not Found',
-            detail:
-              `advisor kind '${kind}' has no kill switch of its own (only a kind with a ` +
-              'declared flag does — see ADVISOR_KIND_FLAGS)',
-            family: 'user',
-          });
+          throw kindFlagNotFound(kind);
         }
         await flags.set(platformExecutor(database), session.userId, key, request.body.enabled);
         return { kind, enabled: request.body.enabled };

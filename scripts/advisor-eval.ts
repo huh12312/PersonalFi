@@ -25,9 +25,15 @@
  *       --endpoint http://ollama:11434 --model <name> --digest sha256:<64 hex> \
  *       --out <dir>/live.jsonl [--from <request index>] [--budget-ms 540000]
  *
- *   Live, against the pinned model through WP 5.2's real adapter (the
- *   local-endpoint egress policy, the digest pin before every request, the
- *   byte caps). Appends one JSON line per request to `--out` and stops before
+ *   Live, against the pinned model **through the worker's own composition**
+ *   (WP 9.5, Phase 5 gate C5-4/G5-6): the adapter is built by
+ *   `apps/api/src/narrator-wiring.ts`'s `createNarratorWiring` — the function
+ *   `worker.ts` calls, which takes no `format` — and wrapped by
+ *   `createNarratorAdvisor`, as `insightsModule` wraps it; each request is
+ *   sent with the production deadline (the narrator manifest's resolved
+ *   `timeoutMs`, and the adapter's `LOCAL_MODEL_TIMEOUT_MS` default, 180 s,
+ *   unless `--timeout-ms` names the value an install sets). One finding per
+ *   request, the production shape since C5-2. Appends one JSON line per request to `--out` and stops before
  *   `--budget-ms` elapses, so a run can be resumed with `--from` in chunks
  *   that each fit a foreground wait. Must run where the endpoint resolves —
  *   inside the compose `llm` network (see the evidence file for the exact
@@ -56,11 +62,27 @@ import {
   type EvalRequestSpec,
   type NarrationVerdict,
 } from '../packages/contexts/insights/src/advisors/local/eval.ts';
-import { NARRATOR_REPLY_FORMAT } from '../packages/contexts/insights/src/advisors/local/format.ts';
+import { createNarratorAdvisor } from '../packages/contexts/insights/src/advisors/local/narrator.ts';
+import { NARRATOR_MANIFEST } from '../packages/contexts/insights/src/advisors/local/manifest.ts';
+import { resolveLimits } from '../packages/contexts/insights/src/contract/manifest.ts';
+import type { AdvisorRequest } from '../packages/contexts/insights/src/contract/request.ts';
 import { evalCases } from './advisor-eval.fixtures.ts';
 
-/** Every finding alone, then in pairs: two different prompts per finding. */
-export const GROUP_SIZES = [1, 2] as const;
+/**
+ * One finding per request — the production shape since WP 9.5 (C5-2:
+ * `FINDINGS_PER_NARRATION_REQUEST`, one Brief item per job). Phase 5 measured
+ * every finding alone and in pairs; a pair is a request no install sends now.
+ */
+export const GROUP_SIZES = [1] as const;
+
+/** The Brief measurement's five findings (`--brief`): the case ids, in Brief order. */
+export const BRIEF_CASE_TYPES = [
+  'subscription.price_increase',
+  'cash.yield_spread',
+  'debt.minimum_only',
+  'spending.category_creep',
+  'investing.concentration',
+] as const;
 
 const RECORDED = join(import.meta.dirname, 'advisor-eval.recorded.json');
 
@@ -136,24 +158,37 @@ interface LiveLine {
   readonly promptEvalCount: number | null;
   readonly promptBytes: number | null;
   readonly chatMs: number | null;
+  /** `/proc/loadavg`'s first three fields when the request finished (WP 9.5). */
+  readonly load?: string;
+  readonly at?: string;
 }
 
-async function live(args: Args): Promise<void> {
+interface LiveRun {
+  readonly label: string;
+  readonly send: (
+    spec: EvalRequestSpec,
+    request: AdvisorRequest,
+  ) => Promise<{
+    readonly body: unknown;
+    readonly error: string | null;
+    readonly log: Record<string, unknown>;
+  }>;
+}
+
+/** Build the narrator exactly as the worker does, over `--endpoint`/`--model`/`--digest`. */
+async function shippedNarrator(args: Args): Promise<LiveRun> {
   const endpoint = args.values.get('endpoint');
   const model = args.values.get('model');
   const digest = args.values.get('digest');
-  const out = args.values.get('out');
-  if (endpoint === undefined || model === undefined || digest === undefined || out === undefined) {
-    throw new Error('--live needs --endpoint, --model, --digest and --out');
+  if (endpoint === undefined || model === undefined || digest === undefined) {
+    throw new Error('--live and --brief need --endpoint, --model and --digest');
   }
-  const from = Number(args.values.get('from') ?? '0');
-  const budgetMs = Number(args.values.get('budget-ms') ?? '540000');
-  const timeoutMs = Number(args.values.get('timeout-ms') ?? '300000');
+  const timeoutMs = Number(args.values.get('timeout-ms') ?? '180000');
   // Imported here, not at the top: replay mode (CI) must not need the adapter.
-  const { createLocalModelAdapter } = await import('../packages/advisors/local-model/src/index.ts');
+  const { createNarratorWiring } = await import('../apps/api/src/narrator-wiring.ts');
   // The adapter's own log line for the call just made: shape, sizes, token
   // counts and durations only (it never logs content). Read for timings.
-  let last: Record<string, unknown>;
+  let last: Record<string, unknown> = {};
   const logger = {
     info: (obj: Record<string, unknown>) => {
       last = obj;
@@ -162,18 +197,80 @@ async function live(args: Args): Promise<void> {
       last = obj;
     },
   };
-  const adapter = createLocalModelAdapter(
+  const wiring = createNarratorWiring(
     { endpoint, name: model, digest, timeoutMs, allowRemote: false },
-    // The narrator's own reply format — what the composition root passes too.
-    { logger, format: NARRATOR_REPLY_FORMAT },
+    { logger },
   );
-  console.log(`prompt template hash (template + format + sampling): ${adapter.promptTemplateHash}`);
+  if (wiring === undefined) throw new Error('no model configured');
+  const narrator = createNarratorAdvisor({ model: wiring.narratorModel });
+  const requestTimeoutMs = resolveLimits(NARRATOR_MANIFEST).timeoutMs;
+  const label =
+    `template hash ${wiring.localModel.promptTemplateHash} · adapter timeout ${String(timeoutMs)} ms · ` +
+    `request deadline +${String(requestTimeoutMs)} ms`;
+  return {
+    label,
+    async send(_spec, request) {
+      last = {};
+      // The production deadline, set at send time as `buildAdvisorRequest`
+      // sets it (`generated_at + timeoutMs`). Not part of the prompt.
+      const timed: AdvisorRequest = {
+        ...request,
+        limits: {
+          ...request.limits,
+          deadline: new Date(Date.now() + requestTimeoutMs).toISOString(),
+        },
+      };
+      try {
+        return {
+          body: await narrator.run(timed, new AbortController().signal),
+          error: null,
+          log: last,
+        };
+      } catch (caught) {
+        const code = (caught as { code?: unknown } | null)?.code;
+        return { body: null, error: typeof code === 'string' ? code : 'error', log: last };
+      }
+    },
+  };
+}
+
+/** What the runtime says about the model right now: loaded or not (`GET /api/ps`). */
+async function modelState(endpoint: string): Promise<string> {
+  try {
+    const base = endpoint.startsWith('http') ? endpoint : `http://${endpoint}`;
+    const response = await fetch(`${base}/api/ps`, { signal: AbortSignal.timeout(5_000) });
+    if (!response.ok) return `unknown (GET /api/ps answered ${String(response.status)})`;
+    const body = (await response.json()) as { models?: { name?: string; size?: number }[] };
+    const models = body.models ?? [];
+    return models.length === 0
+      ? 'cold (no model loaded)'
+      : `warm (${models.map((entry) => `${String(entry.name)} ${String(entry.size)} B`).join(', ')})`;
+  } catch {
+    return 'unknown';
+  }
+}
+
+function loadAverage(): string {
+  try {
+    return readFileSync('/proc/loadavg', 'utf8').split(' ').slice(0, 3).join(' ');
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function live(args: Args): Promise<void> {
+  const out = args.values.get('out');
+  if (out === undefined) throw new Error('--live needs --out');
+  const from = Number(args.values.get('from') ?? '0');
+  const budgetMs = Number(args.values.get('budget-ms') ?? '540000');
+  const run = await shippedNarrator(args);
+  console.log(`shipped composition: ${run.label}`);
 
   const { cases, today } = await evalCases();
   const specs = planRequests(cases, GROUP_SIZES);
   const started = Date.now();
   console.log(
-    `live: ${String(cases.length)} cases, ${String(specs.length)} requests; starting at ${String(from)}; budget ${String(budgetMs)} ms`,
+    `live: ${String(cases.length)} cases, ${String(specs.length)} requests; starting at ${String(from)}; budget ${String(budgetMs)} ms; load ${loadAverage()}`,
   );
   for (let index = from; index < specs.length; index += 1) {
     if (Date.now() - started > budgetMs) {
@@ -183,16 +280,9 @@ async function live(args: Args): Promise<void> {
     const spec = specs[index] as EvalRequestSpec;
     const request = evalRequest(spec, today);
     const t0 = Date.now();
-    let body: unknown = null;
-    let error: string | null = null;
-    last = {};
-    try {
-      body = await adapter.run(request, new AbortController().signal);
-    } catch (caught) {
-      const code = (caught as { code?: unknown } | null)?.code;
-      error = typeof code === 'string' ? code : 'error';
-    }
+    const sent = await run.send(spec, request);
     const wallMs = Date.now() - t0;
+    const { body, error, log: last } = sent;
     const judged =
       error === null
         ? judgeReply(spec, request, body)
@@ -221,12 +311,14 @@ async function live(args: Args): Promise<void> {
         typeof last['prompt_eval_count'] === 'number' ? last['prompt_eval_count'] : null,
       promptBytes: typeof last['prompt_bytes'] === 'number' ? last['prompt_bytes'] : null,
       chatMs: typeof last['chat_ms'] === 'number' ? last['chat_ms'] : null,
+      load: loadAverage(),
+      at: new Date().toISOString(),
     };
     appendFileSync(out, `${JSON.stringify(line)}\n`);
     // Shape only: which step each narration reached. Never the text.
     console.log(
       `[${String(index)}/${String(specs.length)}] findings ${String(spec.findings.length)} · ${String(wallMs)} ms · ` +
-        `prompt ${String(line.promptBytes ?? '?')} B / ${String(line.promptEvalCount ?? '?')} tok · eval ${String(line.evalCount ?? '?')} tok · ` +
+        `prompt ${String(line.promptBytes ?? '?')} B / ${String(line.promptEvalCount ?? '?')} tok · eval ${String(line.evalCount ?? '?')} tok · load ${line.load ?? '?'} · ` +
         judged.verdicts
           .map((verdict) =>
             verdict.failure === null ? 'ok' : `${verdict.failure}:${verdict.reason ?? ''}`,
@@ -235,6 +327,66 @@ async function live(args: Args): Promise<void> {
     );
   }
   console.log('live: all requests done');
+}
+
+/**
+ * `--brief`: a five-item Brief's narration on this host (Phase 5 gate C5-2's
+ * "deadline sized from a measured 5-item Brief"). Five findings, one request
+ * each — what the Brief now enqueues, one `insights.run_local` job per item,
+ * run back to back as the lane's concurrency 1 runs them — through the
+ * shipped composition and the production deadline. Records, per request, the
+ * wall time against the deadline, the model's state before it (cold/warm,
+ * from the runtime's own `GET /api/ps`) and the load average. Verdicts are
+ * recorded too, but this is a timing, not a count: the counted run is `--live`.
+ */
+async function brief(args: Args): Promise<void> {
+  const out = args.values.get('out');
+  const endpoint = args.values.get('endpoint') ?? '';
+  if (out === undefined) throw new Error('--brief needs --out');
+  const run = await shippedNarrator(args);
+  const { cases, today } = await evalCases();
+  const picked = BRIEF_CASE_TYPES.map((type) => {
+    const found = cases.find((entry) => entry.finding.type === type && entry.seed === 'drift');
+    if (found === undefined) throw new Error(`the drift seed has no ${type} finding`);
+    return found;
+  });
+  const specs = planRequests(picked, [1]);
+  const deadlineMs = resolveLimits(NARRATOR_MANIFEST).timeoutMs;
+  console.log(`brief: ${run.label}; load ${loadAverage()}`);
+  const started = Date.now();
+  for (const [index, spec] of specs.entries()) {
+    const state = await modelState(endpoint);
+    const loadBefore = loadAverage();
+    const request = evalRequest(spec, today);
+    const t0 = Date.now();
+    const sent = await run.send(spec, request);
+    const wallMs = Date.now() - t0;
+    const judged = sent.error === null ? judgeReply(spec, request, sent.body).verdicts : [];
+    const line = {
+      mode: 'brief',
+      index,
+      caseId: spec.caseIds[0],
+      modelStateBefore: state,
+      loadBefore,
+      loadAfter: loadAverage(),
+      wallMs,
+      deadlineMs,
+      insideDeadline: sent.error === null && wallMs < deadlineMs,
+      error: sent.error,
+      promptEvalCount: sent.log['prompt_eval_count'] ?? null,
+      evalCount: sent.log['eval_count'] ?? null,
+      chatMs: sent.log['chat_ms'] ?? null,
+      verdicts: judged.map((verdict) =>
+        verdict.failure === null ? 'ok' : `${verdict.failure}:${verdict.reason ?? ''}`,
+      ),
+      at: new Date().toISOString(),
+    };
+    appendFileSync(out, `${JSON.stringify(line)}\n`);
+    console.log(
+      `[brief ${String(index + 1)}/5] ${state} · ${String(wallMs)} ms of ${String(deadlineMs)} · load ${loadBefore} → ${line.loadAfter} · ${sent.error ?? line.verdicts.join(',')}`,
+    );
+  }
+  console.log(`brief: five items narrated in ${String(Date.now() - started)} ms`);
 }
 
 function readLines(file: string): readonly LiveLine[] {
@@ -360,5 +512,6 @@ async function replay(): Promise<void> {
 
 const args = parseArgs(process.argv.slice(2));
 if (args.flags.has('live')) await live(args);
+else if (args.flags.has('brief')) await brief(args);
 else if (args.values.has('finalise')) await finalise(args);
 else await replay();

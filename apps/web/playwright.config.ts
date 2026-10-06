@@ -88,7 +88,7 @@ export default defineConfig<ColdStartOptions & EvidenceDirOptions>({
     {
       name: 'chromium',
       testMatch:
-        /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan|plan-sliders|brief|advisors)\.spec\.ts/,
+        /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan|plan-sliders|brief|advisors|accounts-overrides)\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         baseURL: 'http://localhost:5183',

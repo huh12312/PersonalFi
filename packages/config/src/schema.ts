@@ -359,6 +359,31 @@ export const environmentSchema = z.object({
    */
   LOCAL_MODEL_ALLOW_REMOTE: z.stringbool().default(false),
 
+  /**
+   * WP 9.6 (CF-1 / C5-1, Phase 5 gate R-4): the two api-side keys. The api
+   * process never talks to the model — `worker` alone holds
+   * `LOCAL_MODEL_ENDPOINT` (compose.yml) — but preview and "Approve this
+   * payload" are api routes, and the approval is keyed to the template hash
+   * the model's pin goes into. So the api is told the model's NAME and DIGEST
+   * and is never told where it is: enough to bind the pure, preview-only
+   * `PromptRenderer`, and nothing a compromised api could dial. Both or
+   * neither; a half is a boot problem (`load.ts`'s `resolveLocalModelPin`).
+   * A process that has the full `LOCAL_MODEL_*` set (the worker) pins from
+   * that and ignores these.
+   */
+  LOCAL_MODEL_PIN_NAME: z.string().default(''),
+  LOCAL_MODEL_PIN_DIGEST: z.string().default(''),
+
+  /**
+   * WP 9.6 item 3, Phase 5 gate R-2: a Brief item carries its narration's
+   * status and the AI-assisted badge always, but the narration TEXT reaches
+   * the holder only when this is `true`. Default `false`: the gate ruled that
+   * no narration text may be shown until WP 9.5's figure slots (option B) have
+   * landed and been measured, or Chris accepts the residual in writing. The
+   * orchestrator flips it when either happens; nothing in the app flips it.
+   */
+  NARRATION_TEXT_SHOWN: z.stringbool().default(false),
+
   // -------------------------------------------------------------------- crypto
   //
   // The same shape and the same narrowing semantics, for the crypto connectors:

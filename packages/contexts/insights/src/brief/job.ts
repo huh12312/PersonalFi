@@ -34,6 +34,7 @@ import {
   type JobHandlerRegistration,
 } from '@core/platform';
 import { platformOf, type InsightsDatabase } from '../db.ts';
+import { MAX_NARRATED_FINDINGS } from '../contract/request.ts';
 import { RUN_LOCAL_JOB_KIND } from '../jobs.ts';
 import { BriefPublished } from '../events.ts';
 import { assembleBrief } from './assembly.ts';
@@ -233,23 +234,32 @@ export function createBriefJob(input: BriefJobDependencies): JobHandlerRegistrat
       // a job nothing claims — bounded, but a named failure every week on
       // every install with the local model off, which is the default.
       if (input.narratorConfigured ?? false) {
-        await enqueueJob(platformOf(input.database), {
-          kind: RUN_LOCAL_JOB_KIND,
-          userId: context.userId,
-          payload: {
-            advisorId: WEEKLY_BRIEF_NARRATOR_ADVISOR_ID,
-            trigger: 'event',
-            triggerEventType: BriefPublished.type,
-          },
-          // WP 5.14: carries `userId` (it did not before —
-          // `docs/evidence/phase-5/wave-c-wiring.md` §5 item 2, "harmless
-          // under D6's one holder, flagged for whoever next touches this
-          // file"). Without it, two holders' Monday Briefs landing in the
-          // same ISO week would collide on one dedupe row and only ever
-          // enqueue a narration for whichever holder wrote it first.
-          dedupeKey: `${RUN_LOCAL_JOB_KIND}:${WEEKLY_BRIEF_NARRATOR_ADVISOR_ID}:${context.userId}:${isoWeek}`,
-          correlationId: context.correlationId,
-        });
+        // WP 9.5 (Phase 5 gate C5-2; G5-7, G5-15): the Brief narrates **its own
+        // items**, one finding per job — `narrateInsightIds: [id]`, so the
+        // narrator is sent the finding this Brief chose and not the feed's top
+        // five, and each request is one bounded model call. `maxAttempts: 1`:
+        // a failed narration (a `model_timeout` included) is not re-run by the
+        // queue — the breaker already counts it, and re-asking a model whose
+        // reply the validator refused is retry-until-valid.
+        const items = [...assembled.ranked, ...assembled.attention].slice(0, MAX_NARRATED_FINDINGS);
+        for (const item of items) {
+          const insightId = item.candidate.insightId;
+          await enqueueJob(platformOf(input.database), {
+            kind: RUN_LOCAL_JOB_KIND,
+            userId: context.userId,
+            payload: {
+              advisorId: WEEKLY_BRIEF_NARRATOR_ADVISOR_ID,
+              trigger: 'event',
+              triggerEventType: BriefPublished.type,
+              narrateInsightIds: [insightId],
+            },
+            // WP 5.14 put `userId` in the key; WP 9.5 adds the item, so each
+            // of the week's narrations has its own row.
+            dedupeKey: `${RUN_LOCAL_JOB_KIND}:${WEEKLY_BRIEF_NARRATOR_ADVISOR_ID}:${context.userId}:${isoWeek}:${insightId}`,
+            correlationId: context.correlationId,
+            maxAttempts: 1,
+          });
+        }
       }
     },
     { concurrency: 1 },

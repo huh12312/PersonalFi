@@ -12,6 +12,7 @@ import {
   stubFetchRoutes,
 } from '../../test-support/api-test-utils.ts';
 import type { Account, NetWorth } from '../../api/generated/types.gen.ts';
+import { DEFAULT_OVERLAY } from './fixtures.ts';
 
 const SESSION = {
   userId: 'user_1',
@@ -39,6 +40,7 @@ function account(overrides: Partial<Account> & Pick<Account, 'id' | 'type' | 'na
     closedAt: null,
     includeInNetWorth: true,
     balance: null,
+    overlay: DEFAULT_OVERLAY,
     ...overrides,
   };
 }

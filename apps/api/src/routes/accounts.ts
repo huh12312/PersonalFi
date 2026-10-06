@@ -51,21 +51,32 @@
  */
 import { DateOnly, Money } from '@core/kernel';
 import {
+  ACCOUNT_ROLES,
+  TAX_TREATMENTS,
+  VALUATION_BASES,
   applyProviderTransactions,
+  clearAccountOverrides,
+  isOverrideNotApplicable,
+  listAccountOverrides,
   listAccounts,
   netWorthNow,
   recordBalance,
   setAccountClosed,
+  setAccountOverrides,
   setIncludeInNetWorth,
+  type AccountOverride,
   type AccountSummary,
   type NetWorthNow,
+  type ResolvedAccountOverlay,
 } from '@ctx/ledger';
+import { openDateIn, summariseValuation } from '@ctx/planning';
 import { MANUAL_PROVIDER, manualTransaction } from '@connector/manual';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { AppError, problems } from '../problem.ts';
 import {
   booleanQuery,
+  dateOnly,
   dateOnlyQuery,
   instantOrNull,
   isoInstant,
@@ -73,6 +84,7 @@ import {
   moneyOrNull,
   moneySchema,
 } from '../wire.ts';
+import { planningPortsFor, resolveAccountOverlayFor } from '../domain.ts';
 import { mapDomainErrors } from './domain-errors.ts';
 import type { RouteDeps } from './deps.ts';
 
@@ -85,6 +97,40 @@ const accountBalanceSchema = z
     source: z.enum(['provider', 'manual', 'derived']),
   })
   .meta({ id: 'AccountBalance' });
+
+const taxTreatmentSchema = z.enum(TAX_TREATMENTS);
+const accountRoleSchema = z.enum(ACCOUNT_ROLES);
+const valuationSchema = z.enum(VALUATION_BASES);
+
+/**
+ * What an account is, as the holder sees it — the effective value *and where it
+ * came from* (WP 9.2). The provider's metadata is never mutated; the holder's
+ * override outranks it, and `source` says which one is speaking, so the screen
+ * can say "from Plaid: 401k" or "set by you" and never present a guess as a fact.
+ */
+const accountOverlaySchema = z
+  .object({
+    taxTreatment: z.object({
+      effective: taxTreatmentSchema.nullable().describe('null: the account has no tax bucket.'),
+      source: z
+        .enum(['holder', 'provider_subtype', 'provider_fallback', 'none'])
+        .describe(
+          '`provider_subtype`: the provider’s own subtype named it. `provider_fallback`: ' +
+            'nothing recognised the subtype and TAXABLE is assumed — a guess, not a fact.',
+        ),
+      override: taxTreatmentSchema.nullable().describe('What the holder set, if anything.'),
+      providerDefault: taxTreatmentSchema.nullable(),
+    }),
+    role: z.object({
+      effective: accountRoleSchema.nullable(),
+      source: z.enum(['holder', 'none']),
+    }),
+    valuation: z.object({
+      effective: valuationSchema,
+      source: z.enum(['holder', 'default']),
+    }),
+  })
+  .meta({ id: 'AccountOverlay' });
 
 const accountSchema = z
   .object({
@@ -101,6 +147,7 @@ const accountSchema = z
     closedAt: isoInstant.nullable(),
     includeInNetWorth: z.boolean(),
     balance: accountBalanceSchema.nullable().describe('null until a balance has been observed.'),
+    overlay: accountOverlaySchema,
   })
   .meta({ id: 'Account' });
 
@@ -134,8 +181,25 @@ const netWorthSchema = z
       '`inputs` is the audit trail: every account, whether it counted, and why not.',
   });
 
-function serialiseAccount(account: AccountSummary): z.infer<typeof accountSchema> {
+function serialiseOverlay(overlay: ResolvedAccountOverlay): z.infer<typeof accountOverlaySchema> {
   return {
+    taxTreatment: {
+      effective: overlay.taxTreatment.value,
+      source: overlay.taxTreatment.source,
+      override: overlay.taxTreatment.override,
+      providerDefault: overlay.taxTreatment.providerDefault,
+    },
+    role: { effective: overlay.role.value, source: overlay.role.source },
+    valuation: { effective: overlay.valuation.value, source: overlay.valuation.source },
+  };
+}
+
+function serialiseAccount(
+  account: AccountSummary,
+  override: AccountOverride | null,
+): z.infer<typeof accountSchema> {
+  return {
+    overlay: serialiseOverlay(resolveAccountOverlayFor(account, override)),
     id: account.id,
     connectionId: account.connectionId,
     provider: account.provider,
@@ -182,6 +246,14 @@ function serialiseNetWorth(result: NetWorthNow): z.infer<typeof netWorthSchema> 
   };
 }
 
+/** D6: one holder, and their zone is what a local calendar day means. */
+async function timezoneOf(deps: RouteDeps): Promise<string> {
+  const rows = await deps.pool.query<{ display_timezone: string }>(
+    `SELECT display_timezone FROM users ORDER BY created_at, id LIMIT 1`,
+  );
+  return rows.rows[0]?.display_timezone ?? 'UTC';
+}
+
 export const accountRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
 
@@ -220,6 +292,34 @@ export const accountRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
     return account;
   }
 
+  /** The holder's overrides by account id — one predicate, the holder. */
+  async function overridesOf(userId: string): Promise<ReadonlyMap<string, AccountOverride>> {
+    const overrides = await listAccountOverrides(database, { userId });
+    return new Map(overrides.map((override) => [override.accountId, override] as const));
+  }
+
+  /** One account, re-read through the read model, or the same 404 a stranger's gets. */
+  async function accountWire(
+    userId: string,
+    accountId: string,
+  ): Promise<z.infer<typeof accountSchema>> {
+    const [accounts, overrides] = await Promise.all([
+      listAccounts(database, { userId, includeClosed: true }),
+      overridesOf(userId),
+    ]);
+    const account = accounts.find((candidate) => candidate.id === accountId);
+    if (account === undefined) {
+      throw new AppError({
+        status: 404,
+        code: 'ledger.account_not_found',
+        title: 'Not Found',
+        detail: `No account ${accountId}.`,
+        family: 'user',
+      });
+    }
+    return serialiseAccount(account, overrides.get(account.id) ?? null);
+  }
+
   return async (app) => {
     app.get(
       '/accounts',
@@ -246,7 +346,12 @@ export const accountRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             ? {}
             : { includeClosed: request.query.includeClosed }),
         });
-        return { accounts: accounts.map(serialiseAccount) };
+        const overrides = await overridesOf(session.userId);
+        return {
+          accounts: accounts.map((account) =>
+            serialiseAccount(account, overrides.get(account.id) ?? null),
+          ),
+        };
       },
     );
 
@@ -304,21 +409,168 @@ export const accountRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         // Re-read rather than patch a local copy: `setAccountClosed` also drops
         // the account out of net worth, and a response assembled by hand would
         // be the third place that rule is written down.
-        const accounts = await listAccounts(database, {
-          userId: session.userId,
-          includeClosed: true,
+        return { account: await accountWire(session.userId, accountId), changed };
+      },
+    );
+
+    // -------------------------------------------------------------------
+    // The holder's overlay on an account (WP 9.2)
+    // -------------------------------------------------------------------
+    //
+    // Session only, no step-up: no money moves. An override changes what a
+    // *projection* is computed from, and the stored projection says so rather
+    // than recomputing (`account_overrides_changed`); it cannot move a balance
+    // or reach a provider.
+
+    app.put(
+      '/accounts/:accountId/overrides',
+      {
+        schema: {
+          operationId: 'setAccountOverrides',
+          summary: 'Set what an account is: its tax treatment, role and valuation basis',
+          description:
+            'The holder’s overlay on the provider’s facts, which are never mutated. A **full ' +
+            'replacement**: an omitted or `null` field is cleared, and when none is left the ' +
+            'override is removed. `taxTreatment` outranks the provider-subtype default the ' +
+            'projection starts from (CF-16). `valuation: "balance"` counts an investment or ' +
+            'crypto account that has no priced holdings at its latest balance instead of leaving ' +
+            'it out — labelled as such wherever it appears (O-2). Changing any field makes a ' +
+            'stored projection read `stale`, naming the change; nothing is recomputed. Another ' +
+            'holder’s account is a 404, exactly as a missing one. Emits ' +
+            '`ledger.AccountOverrideChanged`. Session only: no money moves.',
+          tags: ['accounts'],
+          params: z.object({ accountId: z.uuid() }),
+          body: z.object({
+            taxTreatment: taxTreatmentSchema.nullable().optional(),
+            role: accountRoleSchema.nullable().optional(),
+            valuation: valuationSchema.nullable().optional(),
+          }),
+          response: {
+            200: z.object({ account: accountSchema, changed: z.boolean() }),
+            ...problems(400, 401, 404, 422, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const { accountId } = request.params;
+        const result = await mapDomainErrors(async () => {
+          try {
+            return await database.transaction((tx) =>
+              setAccountOverrides(
+                tx,
+                {
+                  userId: session.userId,
+                  accountId,
+                  taxTreatment: request.body.taxTreatment ?? null,
+                  role: request.body.role ?? null,
+                  valuation: request.body.valuation ?? null,
+                },
+                { clock, correlationId: String(request.id) },
+              ),
+            );
+          } catch (error) {
+            if (isOverrideNotApplicable(error)) {
+              throw new AppError({
+                status: 422,
+                code: error.code,
+                title: 'Unprocessable Content',
+                detail: error.message,
+                family: 'user',
+              });
+            }
+            throw error;
+          }
         });
-        const account = accounts.find((candidate) => candidate.id === accountId);
-        if (account === undefined) {
-          throw new AppError({
-            status: 404,
-            code: 'ledger.account_not_found',
-            title: 'Not Found',
-            detail: `No account ${accountId}.`,
-            family: 'user',
-          });
-        }
-        return { account: serialiseAccount(account), changed };
+        return { account: await accountWire(session.userId, accountId), changed: result.changed };
+      },
+    );
+
+    app.delete(
+      '/accounts/:accountId/overrides',
+      {
+        schema: {
+          operationId: 'clearAccountOverrides',
+          summary: 'Clear every override on an account, back to the provider’s defaults',
+          description:
+            'Idempotent: clearing an account with no override changes nothing. A stored ' +
+            'projection computed with the override reads `stale` afterwards, as for any change. ' +
+            'Another holder’s account is a 404. Session only: no money moves.',
+          tags: ['accounts'],
+          params: z.object({ accountId: z.uuid() }),
+          response: {
+            200: z.object({ account: accountSchema, changed: z.boolean() }),
+            ...problems(401, 404, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const { accountId } = request.params;
+        const result = await mapDomainErrors(() =>
+          database.transaction((tx) =>
+            clearAccountOverrides(
+              tx,
+              { userId: session.userId, accountId },
+              { clock, correlationId: String(request.id) },
+            ),
+          ),
+        );
+        return { account: await accountWire(session.userId, accountId), changed: result.changed };
+      },
+    );
+
+    app.get(
+      '/accounts/valuation',
+      {
+        schema: {
+          operationId: 'getAccountValuation',
+          summary:
+            'Which accounts net worth leaves out, and which it counts by the holder’s say-so',
+          description:
+            'Computed live by the same valuation the net-worth snapshot uses, without FX and ' +
+            'without writing. `unvalued` is every account in net worth that cannot be valued — ' +
+            'an investment account with no priced holdings, an account with no balance — and is ' +
+            'never counted as zero. `byBalance` is every account counted at its latest balance ' +
+            'because the holder set `valuation: "balance"`. The plan and net-worth screens name ' +
+            'both, so a figure is never quietly missing an account (O-2).',
+          tags: ['accounts'],
+          response: {
+            200: z.object({
+              asOfDate: dateOnly,
+              unvalued: z.array(
+                z.object({
+                  accountId: z.uuid(),
+                  name: z.string(),
+                  reason: z.enum(['no_balance', 'no_priced_holding', 'no_earlier_observation']),
+                }),
+              ),
+              byBalance: z.array(z.object({ accountId: z.uuid(), name: z.string() })),
+            }),
+            ...problems(401, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const timeZone = await timezoneOf(deps);
+        const asOfDate = openDateIn(clock, timeZone);
+        const summary = await summariseValuation(
+          planningPortsFor(database, { userId: session.userId, timeZone, clock }),
+          { userId: session.userId, asOfDate },
+        );
+        return {
+          asOfDate,
+          unvalued: summary.unvalued.map((entry) => ({
+            accountId: entry.accountId,
+            name: entry.name,
+            reason: entry.reason,
+          })),
+          byBalance: summary.byBalance.map((entry) => ({
+            accountId: entry.accountId,
+            name: entry.name,
+          })),
+        };
       },
     );
 
@@ -408,21 +660,7 @@ export const accountRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
 
         // Re-read: `recordBalance` only returns the new row's id, and `balance`
         // on the wire is always "the latest", which is a `listAccounts` rule.
-        const accounts = await listAccounts(database, {
-          userId: session.userId,
-          includeClosed: true,
-        });
-        const account = accounts.find((candidate) => candidate.id === accountId);
-        if (account === undefined) {
-          throw new AppError({
-            status: 404,
-            code: 'ledger.account_not_found',
-            title: 'Not Found',
-            detail: `No account ${accountId}.`,
-            family: 'user',
-          });
-        }
-        return { account: serialiseAccount(account), recorded: result.recorded };
+        return { account: await accountWire(session.userId, accountId), recorded: result.recorded };
       },
     );
 

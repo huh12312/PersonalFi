@@ -11,6 +11,7 @@ import {
   stubFetchRoutes,
 } from '../../test-support/api-test-utils.ts';
 import { RecordBalanceDialog } from './RecordBalanceDialog.tsx';
+import { DEFAULT_OVERLAY } from './fixtures.ts';
 
 vi.mock('@simplewebauthn/browser', () => ({
   startAuthentication: vi.fn(async () => ({})),
@@ -30,6 +31,7 @@ const ACCOUNT: Account = {
   closedAt: null,
   includeInNetWorth: true,
   balance: null,
+  overlay: DEFAULT_OVERLAY,
 };
 
 function renderDialog() {

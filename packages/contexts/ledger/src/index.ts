@@ -10,7 +10,7 @@
  * This file is the context's **only** public surface. Everything else under
  * `src/` is internal, and no other context may import from it — a consumer that
  * needs ledger data re-reads it through the read models below, or reacts to one
- * of the five events in `LEDGER_EVENTS`.
+ * of the events in `LEDGER_EVENTS`.
  *
  * ```text
  *  sync adapter ─▶ applyProviderTransactions ─┬─▶ transactions_provider (facts)
@@ -70,6 +70,34 @@ export {
   TransferPaired,
   TransactionSupersededByPosted,
 } from './events.ts';
+
+// --- the holder's overlay on an account (WP 9.2) ---------------------------
+export {
+  ACCOUNT_ROLES,
+  AccountOverrideChanged,
+  OVERRIDE_FIELDS,
+  OverrideNotApplicable,
+  TAX_TREATMENTS,
+  VALUATION_BASES,
+  clearAccountOverrides,
+  getAccountOverride,
+  isOverrideNotApplicable,
+  listAccountOverrides,
+  overrideFingerprint,
+  overrideRefusal,
+  resolveAccountOverlay,
+  setAccountOverrides,
+  type AccountOverride,
+  type AccountRole,
+  type OverrideField,
+  type OverrideWriteResult,
+  type ProviderTaxDefault,
+  type ResolvedAccountOverlay,
+  type SetAccountOverridesInput,
+  type TaxTreatment,
+  type TaxTreatmentSource,
+  type ValuationBasis,
+} from './overrides/index.ts';
 
 // --- write paths -----------------------------------------------------------
 export {

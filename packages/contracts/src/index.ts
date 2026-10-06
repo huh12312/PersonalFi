@@ -44,7 +44,10 @@ export const OPENAPI_CONTRACT_VERSION = '0.1.0';
 // 1.5.0 (WP 5.3): the optional `AdvisorRequest.findings` narration envelope,
 // present only for `narrates_only` advisors; strictly additive, and an envelope
 // field rather than a scope, so no `snapshot_grants` migration accompanies it.
-export const ADVISOR_CONTRACT_VERSION = '1.5.0';
+// 1.6.0 (WP 9.5): the narration envelope's figure slots — optional, app-written
+// `findings[].placed_figures` and `findings[].evidence[].slot` (option B, the
+// Phase 5 gate's R-2); strictly additive, no migration.
+export const ADVISOR_CONTRACT_VERSION = '1.6.0';
 
 /**
  * The integer that crosses the wire, as distinct from the artefact version

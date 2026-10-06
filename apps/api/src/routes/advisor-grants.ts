@@ -34,11 +34,32 @@
  * Only after both pass does anything reach `snapshot_grants`, whose own
  * `snapshot_grants_scope_check` is the backstop this route is never supposed
  * to need.
+ *
+ * ## WP 9.6: the history, and what the consent screen offers
+ *
+ * **O-9.** Every grant, revoke and re-grant is also a row in
+ * `snapshot_grant_events` (migration 0038), written by the store in the same
+ * transaction as the state change and carrying the step-up session that
+ * authorised it (`session.id` of the `requireFreshSession` caller).
+ * `GET /advisors/{id}/grant-events` reads them back, newest first. The state
+ * table is overwritten on a re-grant; the history never is.
+ *
+ * **G5-3.** The scope list marks which scopes the advisor's manifest actually
+ * requests (`requested`) — the Phase 5 gate found the narrator's panel offering
+ * all 18 scopes its kind may hold when it requests 13, so "grant" was being
+ * said of data the advisor would never receive. And the route no longer takes
+ * that at face value: a NEWLY granted scope the advisor never requests is
+ * refused 422 `insights.scope_not_requested` for a `local_model` or `external`
+ * advisor (data that would be offered across a boundary to something that never
+ * asked), and for a `builtin` — in-process, inert, and `effectiveRunScopes`
+ * intersects with `requires_scopes` anyway — it is allowed but FLAGGED:
+ * `notRequested` in the answer names it. Revoking is never refused.
  */
 import {
   ADVISOR_SCOPES,
   findAdvisor,
   grantScopes,
+  listGrantEvents,
   listGrants,
   revokeScopes,
   SCOPE_CATALOGUE,
@@ -49,7 +70,9 @@ import {
 } from '@ctx/insights';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import { GRANT_EVENT_KINDS } from '@ctx/insights/schema';
 import { AppError, problems } from '../problem.ts';
+import { isoInstant } from '../wire.ts';
 import type { RouteDeps } from './deps.ts';
 
 function contextOf(
@@ -115,8 +138,36 @@ const scopeDefinitionSchema = z
     requiresPerRunConsent: z.boolean(),
     sourcedInPhase2: z.boolean(),
     granted: z.boolean(),
+    /** G5-3: this advisor's manifest requests the scope. A scope it does not request is never read, whatever is granted. */
+    requested: z.boolean(),
   })
   .meta({ id: 'AdvisorScopeDefinition' });
+
+const grantEventSchema = z
+  .object({
+    id: z.uuid(),
+    advisorId: z.string(),
+    scope: z.enum(ADVISOR_SCOPES),
+    event: z.enum(GRANT_EVENT_KINDS),
+    perRunConsent: z.boolean(),
+    /** The session whose fresh step-up assertion authorised the change; null for a change made outside a request. */
+    stepUpSessionId: z.uuid().nullable(),
+    occurredAt: isoInstant,
+  })
+  .meta({ id: 'AdvisorGrantEvent' });
+
+/** G5-3: a newly granted scope the advisor never requests, for an advisor whose data crosses a boundary. */
+function scopeNotRequested(scope: AdvisorScope, advisorId: string, kind: string): AppError {
+  return new AppError({
+    status: 422,
+    code: 'insights.scope_not_requested',
+    title: 'Unprocessable Content',
+    detail:
+      `${advisorId} does not request ${scope}, so a '${kind}' advisor would never receive it: ` +
+      'consent is for what an advisor asks for (G5-3). Nothing was changed.',
+    family: 'domain',
+  });
+}
 
 export const advisorGrantRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
   const { guards, database } = deps;
@@ -150,6 +201,7 @@ export const advisorGrantRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         if (advisor === null) throw advisorNotFound(request.params.advisorId);
         const permitted = new Set(scopesPermittedForKind(advisor.kind));
         const granted = new Set(await listGrants(database, session.userId, advisor.advisorId));
+        const requested = new Set<string>(advisor.requiresScopes);
         return {
           advisorId: advisor.advisorId,
           kind: advisor.kind,
@@ -164,6 +216,7 @@ export const advisorGrantRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               requiresPerRunConsent: definition.requiresPerRunConsent,
               sourcedInPhase2: definition.sourcedInPhase2,
               granted: granted.has(definition.scope),
+              requested: requested.has(definition.scope),
             }),
           ),
         };
@@ -195,6 +248,8 @@ export const advisorGrantRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               advisorId: z.string(),
               granted: z.array(z.enum(ADVISOR_SCOPES)),
               revoked: z.array(z.enum(ADVISOR_SCOPES)),
+              /** G5-3: scopes granted by this call that the advisor does not request (a builtin only; other kinds are refused). */
+              notRequested: z.array(z.enum(ADVISOR_SCOPES)),
             }),
             ...problems(400, 401, 403, 404, 422, 503),
           },
@@ -228,7 +283,22 @@ export const advisorGrantRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         const toGrant = [...desired].filter((scope) => !current.has(scope));
         const toRevoke = [...current].filter((scope) => !desired.has(scope));
 
+        // G5-3: only a NEWLY granted scope is judged — a standing grant that
+        // predates this check can still be left alone or revoked. See this
+        // file's header for the builtin/other split.
+        const requested = new Set<string>(advisor.requiresScopes);
+        const notRequested = toGrant.filter((scope) => !requested.has(scope));
+        if (advisor.kind !== 'builtin') {
+          const refused = notRequested[0];
+          if (refused !== undefined) {
+            throw scopeNotRequested(refused, advisor.advisorId, advisor.kind);
+          }
+        }
+
         const context = contextOf(deps, session.userId, request);
+        // O-9: the events are written by the store inside this transaction and
+        // name the session whose step-up authorised the change.
+        const change = { stepUpSessionId: session.id };
         await database.transaction(async (tx) => {
           await grantScopes(
             tx,
@@ -236,11 +306,51 @@ export const advisorGrantRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             advisor.advisorId,
             toGrant,
             request.body.perRunConsent ?? false,
+            change,
           );
-          await revokeScopes(tx, context, advisor.advisorId, toRevoke);
+          await revokeScopes(tx, context, advisor.advisorId, toRevoke, change);
         });
 
-        return { advisorId: advisor.advisorId, granted: toGrant, revoked: toRevoke };
+        return { advisorId: advisor.advisorId, granted: toGrant, revoked: toRevoke, notRequested };
+      },
+    );
+
+    app.get(
+      '/advisors/:advisorId/grant-events',
+      {
+        schema: {
+          operationId: 'listAdvisorGrantEvents',
+          summary:
+            'The consent history for one advisor: every grant, revoke and re-grant, newest first',
+          description:
+            'O-9. Append-only: a re-grant is a new row beside the revoke it follows, never a ' +
+            'rewrite of either. Each row carries the step-up session that authorised it. ' +
+            'Bounded to the 200 most recent events.',
+          tags: ['insights'],
+          params: z.object({ advisorId: z.string() }),
+          response: {
+            200: z.object({ advisorId: z.string(), events: z.array(grantEventSchema) }),
+            ...problems(401, 404),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const advisor = await findAdvisor(database, session.userId, request.params.advisorId);
+        if (advisor === null) throw advisorNotFound(request.params.advisorId);
+        const events = await listGrantEvents(database, session.userId, advisor.advisorId);
+        return {
+          advisorId: advisor.advisorId,
+          events: events.map((event) => ({
+            id: event.id,
+            advisorId: event.advisorId,
+            scope: event.scope,
+            event: event.event,
+            perRunConsent: event.perRunConsent,
+            stepUpSessionId: event.stepUpSessionId,
+            occurredAt: event.occurredAt.toISOString(),
+          })),
+        };
       },
     );
   };

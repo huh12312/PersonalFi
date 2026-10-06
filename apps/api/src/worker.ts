@@ -56,8 +56,8 @@ import {
   resealPlaintextWalletDescriptors,
 } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
-import { createLocalModelAdapter } from '@advisor/local-model';
 import { appModules } from './modules.ts';
+import { createNarratorWiring } from './narrator-wiring.ts';
 import { MODULE_FLAGS, buildPlatform, resolveModules } from './platform.ts';
 
 /**
@@ -416,34 +416,36 @@ async function main(): Promise<void> {
     }
 
     // WP 5.2 (the W-A wiring batch): the local-model adapter, built once per
-    // process from `config.localModel` — which is `undefined` unless
+    // process from `config.localModel` (the Plaid feature-detection shape).
+    // WP 9.5 (C5-4, G5-6): built by `narrator-wiring.ts`, the one function the
+    // counted evaluation and the composition-root test also build it through,
+    // so what is measured is what runs. It passes no `format`: the adapter's
+    // default is the narrator's reply format. `undefined` unless
     // `LOCAL_MODEL_ENDPOINT`, `LOCAL_MODEL_NAME` and `LOCAL_MODEL_DIGEST` are
-    // all set (the Plaid feature-detection shape). A throw here (a malformed
-    // digest, a host the local-endpoint policy refuses) fails boot on purpose:
-    // an operator who configured a model and got a silently absent one would
-    // have no way to tell. The worker is the ONLY process that ever talks to
-    // the model (`insights.run_local`, concurrency 1); the api queues such a
-    // run and binds no adapter (`modules.ts`'s `ModuleWiringOptions`).
-    const localModel =
-      config.localModel === undefined
-        ? undefined
-        : createLocalModelAdapter(config.localModel, { logger, clock: systemClock });
+    // all set; a throw (a malformed digest, a host the local-endpoint policy
+    // refuses) fails boot on purpose — an operator who configured a model and
+    // got a silently absent one would have no way to tell. The worker is the
+    // ONLY process that ever talks to the model (`insights.run_local`,
+    // concurrency 1, one finding per job and no job-level retry since WP 9.5);
+    // the api binds no adapter that can run (`modules.ts`).
+    const narratorWiring = createNarratorWiring(config.localModel, {
+      logger,
+      clock: systemClock,
+    });
+    const localModel = narratorWiring?.localModel;
     if (localModel !== undefined) {
       logger.info(
-        { model: localModel.model.name, digest: localModel.model.digest },
+        {
+          model: localModel.model.name,
+          digest: localModel.model.digest,
+          promptTemplateHash: localModel.promptTemplateHash,
+        },
         'local model adapter bound (WP 5.2); runs go through insights.run_local',
       );
     }
-
-    // WP 5.3 / W-C: the narrator's model port, built from the same adapter
-    // instance `promptRenderer` above comes from — `LocalModelAdapter.run`
-    // already satisfies `NarratorModelPort` structurally (`packages/contexts/
-    // insights/src/advisors/local/narrator.ts`'s own header), so there is
-    // nothing to adapt: the object itself is what `insightsModule` binds.
-    // `undefined` with `localModel`, which is exactly when `insightsModule`
-    // must not register `local.narrator` either (`ModuleWiringOptions
-    // .narratorModel`'s own doc: the two are read together, never one alone).
-    const narratorModel = localModel;
+    // WP 5.3 / W-C: `undefined` with `localModel`, which is exactly when
+    // `insightsModule` must not register `local.narrator` either.
+    const narratorModel = narratorWiring?.narratorModel;
 
     // WP 3.4 (docs/evidence/phase-3/wp3.w-wiring.md). Built once per process,
     // in the worker only: the API runs no job runner and no scheduler, so a

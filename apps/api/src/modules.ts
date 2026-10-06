@@ -37,6 +37,9 @@
  * for which of the four `apps/api/test/db/phase2-wiring.test.ts` proved green
  * enough to flip, and why any that stayed off did.
  */
+import { type LocalModelTransport } from '@advisor/local-model';
+import type { LocalModelPin } from '@core/config';
+import { createNarratorWiring } from './narrator-wiring.ts';
 import {
   CATEGORIZATION_EVENTS,
   createCategorizationConsumer,
@@ -63,6 +66,7 @@ import {
   evaluateDueOutcomes,
   insightsJobs,
   registerWeeklyBriefSchedule,
+  type Advisor,
   type AdvisorKind,
   type NarratorModelPort,
   type PromptRenderer,
@@ -847,6 +851,72 @@ export function insightsRunSwitches(
     configuredKinds: new Set<AdvisorKind>(
       options.localModelConfigured ? ['builtin', 'local_model'] : ['builtin'],
     ),
+  });
+}
+
+/**
+ * What the api binds when a model is configured (WP 9.6, CF-1, R-4): the
+ * pure, preview-only `PromptRenderer` and `local.narrator`'s manifest — never
+ * its executor. Preview and "Approve this payload" are api routes; without
+ * these an install cannot approve the narrator's payload, so the worker's run
+ * is refused `payload_not_approved` forever (Phase 5 gate G5-2).
+ */
+export interface PreviewModel {
+  /** Pure by contract (`ports.ts`): renders prompt bytes, invokes nothing. */
+  readonly promptRenderer: PromptRenderer;
+  /**
+   * `local.narrator` as a manifest and a `run` that rejects. The registry the
+   * preview routes build is for showing and approving payload shapes; nothing
+   * on the api ever calls `run`, and there is no model behind it to call.
+   */
+  readonly narrator: Advisor;
+}
+
+/**
+ * The api holds no model endpoint — it is given a name and a digest
+ * (`LOCAL_MODEL_PIN_*`), which is enough to render and to approve and nothing
+ * that could be dialled. The adapter below is built over this transport, so
+ * even a code path that reached `run` would refuse rather than connect; the
+ * adapter is not retained, only its pure renderer is.
+ */
+const NO_ENDPOINT_TRANSPORT: LocalModelTransport = Object.freeze({
+  request: () =>
+    Promise.reject(
+      new Error('the api process holds no model endpoint: it renders and previews, it never calls'),
+    ),
+});
+
+/**
+ * `undefined` unless a model is configured (`config.localModelPin`). Built
+ * through `createNarratorWiring` — the same constructor the worker's adapter
+ * comes from — so the template hash in the shape an approval is keyed to is the
+ * hash the worker's run computes.
+ */
+export function createPreviewModel(pin: LocalModelPin | undefined): PreviewModel | undefined {
+  if (pin === undefined) return undefined;
+  // Through `createNarratorWiring` — the constructor the worker's own adapter
+  // comes from (WP 9.5) — so everything that goes into the template hash (the
+  // prompt, the reply format, the sampling options) is one definition and
+  // cannot differ between the process that approves a payload and the process
+  // that runs it. `endpoint` is never read: a transport is injected, so no
+  // endpoint policy is built and nothing resolves a name.
+  const wiring = createNarratorWiring(
+    { endpoint: '', name: pin.name, digest: pin.digest, timeoutMs: 1_000, allowRemote: false },
+    { transport: NO_ENDPOINT_TRANSPORT },
+  );
+  if (wiring === undefined) return undefined;
+  const adapter = wiring.localModel;
+  return Object.freeze({
+    promptRenderer: adapter.promptRenderer,
+    narrator: Object.freeze({
+      manifest: NARRATOR_MANIFEST,
+      run: () =>
+        Promise.reject(
+          new Error(
+            'the api process never executes an advisor: local.narrator is registered here as a manifest only',
+          ),
+        ),
+    }),
   });
 }
 

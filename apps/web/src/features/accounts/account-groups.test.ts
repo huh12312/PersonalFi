@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Account, AccountBalance } from '../../api/generated/types.gen.ts';
 import { ACCOUNT_TYPE_LABEL, groupAccounts, groupNetWorth } from './account-groups.ts';
+import { DEFAULT_OVERLAY } from './fixtures.ts';
 
 function balance(minor: string, currency = 'USD'): AccountBalance {
   return {
@@ -27,6 +28,7 @@ function account(overrides: Partial<Account> & Pick<Account, 'id' | 'type'>): Ac
     closedAt: null,
     includeInNetWorth: true,
     balance: null,
+    overlay: DEFAULT_OVERLAY,
     ...overrides,
   };
 }

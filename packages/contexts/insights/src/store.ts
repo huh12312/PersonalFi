@@ -39,7 +39,7 @@
  * sentence beside it — the worst kind of stale.
  */
 import { newId } from '@core/kernel';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { InsightsContext, InsightsDatabase, InsightsExecutor } from './db.ts';
 import type { AdvisorManifest } from './contract/manifest.ts';
 import type { AdvisorScope } from './contract/scopes.ts';
@@ -53,6 +53,7 @@ import {
   insightEvidence,
   insightFeedback,
   insights,
+  snapshotGrantEvents,
   snapshotGrants,
   type AdvisorRow,
   type AdvisorRunPayloadRow,
@@ -60,6 +61,7 @@ import {
   type CancelReasonValue,
   type EnabledSource,
   type FeedbackAction,
+  type GrantEventKind,
   type InsightDismissalRow,
   type InsightRow,
   type QuarantineReasonValue,
@@ -321,19 +323,60 @@ export async function listGrants(
   return rows.map((row) => row.scope as AdvisorScope);
 }
 
+/** Who authorised a consent change (O-9). Optional: a change made outside a request has no session. */
+export interface GrantChangeOptions {
+  /**
+   * The session whose fresh step-up assertion authorised the change (D21),
+   * recorded on the event. A reference, not a foreign key: the record outlives
+   * the session. The consent route always supplies it.
+   */
+  readonly stepUpSessionId?: string | null;
+}
+
+/**
+ * Grant scopes, and record each change that actually changed something in
+ * `snapshot_grant_events` (O-9) in the same executor — so, in the consent
+ * route's transaction, atomically with the state row.
+ *
+ * What an event says: `granted` — never granted before; `re_granted` — it had
+ * been revoked; nothing at all when the scope was already live (the state row
+ * is re-stamped as it always was, but no change of consent happened). The
+ * state row is still overwritten on a re-grant ("the grant in force is the one
+ * that started today"); the events are what is never overwritten.
+ */
 export async function grantScopes(
   executor: InsightsExecutor,
   context: InsightsContext,
   advisorId: string,
   scopes: readonly AdvisorScope[],
   perRunConsent = false,
+  options: GrantChangeOptions = {},
 ): Promise<void> {
-  if (scopes.length === 0) return;
+  const unique = [...new Set(scopes)];
+  if (unique.length === 0) return;
   const now = context.clock.now();
+
+  // What each scope was before this call. Row-locked, so a concurrent writer
+  // cannot make this call classify against a state that is about to change.
+  const prior = await executor
+    .select({ scope: snapshotGrants.scope, revokedAt: snapshotGrants.revokedAt })
+    .from(snapshotGrants)
+    .where(
+      and(
+        eq(snapshotGrants.userId, context.userId),
+        eq(snapshotGrants.advisorId, advisorId),
+        inArray(snapshotGrants.scope, unique),
+      ),
+    )
+    .for('update');
+  const before = new Map(
+    prior.map((row) => [row.scope, row.revokedAt === null ? 'live' : 'revoked'] as const),
+  );
+
   await executor
     .insert(snapshotGrants)
     .values(
-      scopes.map((scope) => ({
+      unique.map((scope) => ({
         id: newId(),
         userId: context.userId,
         advisorId,
@@ -352,17 +395,39 @@ export async function grantScopes(
       target: [snapshotGrants.userId, snapshotGrants.advisorId, snapshotGrants.scope],
       set: { revokedAt: null, grantedAt: now, perRunConsent, updatedAt: now },
     });
+
+  const changed = unique.filter((scope) => before.get(scope) !== 'live');
+  if (changed.length === 0) return;
+  await executor.insert(snapshotGrantEvents).values(
+    changed.map((scope) => ({
+      id: newId(),
+      userId: context.userId,
+      advisorId,
+      scope,
+      event: before.get(scope) === 'revoked' ? ('re_granted' as const) : ('granted' as const),
+      perRunConsent,
+      stepUpSessionId: options.stepUpSessionId ?? null,
+      occurredAt: now,
+      createdAt: now,
+    })),
+  );
 }
 
+/**
+ * Revoke scopes: a revocation, not a delete, and one `revoked` event per grant
+ * that was live. A scope that is not currently granted (never granted, or
+ * already revoked) changes nothing and records nothing.
+ */
 export async function revokeScopes(
   executor: InsightsExecutor,
   context: InsightsContext,
   advisorId: string,
   scopes: readonly AdvisorScope[],
+  options: GrantChangeOptions = {},
 ): Promise<void> {
   if (scopes.length === 0) return;
   const now = context.clock.now();
-  await executor
+  const revoked = await executor
     .update(snapshotGrants)
     .set({ revokedAt: now, updatedAt: now })
     .where(
@@ -370,8 +435,61 @@ export async function revokeScopes(
         eq(snapshotGrants.userId, context.userId),
         eq(snapshotGrants.advisorId, advisorId),
         inArray(snapshotGrants.scope, [...scopes]),
+        sql`${snapshotGrants.revokedAt} IS NULL`,
       ),
-    );
+    )
+    .returning({ scope: snapshotGrants.scope, perRunConsent: snapshotGrants.perRunConsent });
+  if (revoked.length === 0) return;
+  await executor.insert(snapshotGrantEvents).values(
+    revoked.map((row) => ({
+      id: newId(),
+      userId: context.userId,
+      advisorId,
+      scope: row.scope,
+      event: 'revoked' as const,
+      perRunConsent: row.perRunConsent,
+      stepUpSessionId: options.stepUpSessionId ?? null,
+      occurredAt: now,
+      createdAt: now,
+    })),
+  );
+}
+
+/** One row of a scope's consent history (O-9). */
+export interface GrantEventView {
+  readonly id: string;
+  readonly advisorId: string;
+  readonly scope: AdvisorScope;
+  readonly event: GrantEventKind;
+  readonly perRunConsent: boolean;
+  readonly stepUpSessionId: string | null;
+  readonly occurredAt: Date;
+}
+
+/** Newest first. Scoped to the holder AND the advisor: both predicates are tested alone (`grant-history.test.ts`). */
+export async function listGrantEvents(
+  executor: InsightsExecutor,
+  userId: string,
+  advisorId: string,
+  limit = 200,
+): Promise<readonly GrantEventView[]> {
+  const rows = await executor
+    .select()
+    .from(snapshotGrantEvents)
+    .where(
+      and(eq(snapshotGrantEvents.userId, userId), eq(snapshotGrantEvents.advisorId, advisorId)),
+    )
+    .orderBy(desc(snapshotGrantEvents.occurredAt), desc(snapshotGrantEvents.id))
+    .limit(limit);
+  return rows.map((row) => ({
+    id: row.id,
+    advisorId: row.advisorId,
+    scope: row.scope as AdvisorScope,
+    event: row.event,
+    perRunConsent: row.perRunConsent,
+    stepUpSessionId: row.stepUpSessionId,
+    occurredAt: row.occurredAt,
+  }));
 }
 
 // ---------------------------------------------------------------------------

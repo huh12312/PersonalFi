@@ -111,6 +111,13 @@ import {
   type ResolvedAssumptions,
 } from './assumptions.ts';
 import { CADENCE_PERIODS_PER_YEAR, amountOn, type ContributionPlan } from './contributions.ts';
+import {
+  diffOverrideFingerprints,
+  fingerprintOf,
+  storedFingerprintOf,
+  type OverrideChange,
+  type OverrideFingerprint,
+} from './override-staleness.ts';
 import { listEarmarks } from './earmarks.ts';
 import {
   PROJECTION_BUCKETS,
@@ -186,6 +193,12 @@ export interface DerivedInputs {
    * mark crypto accounts, in which case they stay in `TAXABLE` as before.
    */
   readonly cryptoHolding?: MoneyType;
+  /**
+   * WP 9.2: the holder's overlay on their accounts (tax treatment, role,
+   * valuation), as the fingerprint the input digest is over. Absent when they
+   * have set none, so a run without overrides digests as it always did.
+   */
+  readonly accountOverrides?: NonNullable<OverrideFingerprint>;
 }
 
 /** Where the service reads what is observed. The real one is `createProjectionInputsReader`. */
@@ -245,6 +258,7 @@ async function derivedFromDay(
   const code = day.baseCurrency;
   const accounts = await revealed.cashflow.accounts(userId, day.asOfDate);
   const bucketOf = new Map(accounts.map((account) => [account.accountId, account.taxBucket]));
+  const overrides = fingerprintOf(accounts);
   const crypto = new Set(
     accounts.filter((account) => account.sleeve === 'crypto').map((account) => account.accountId),
   );
@@ -292,6 +306,7 @@ async function derivedFromDay(
     essentialSpending: annualOf(behaviour.spending.essential),
     // Same floor as a bucket: a negative crypto sum is a data problem, and zero is "none".
     ...(Money.isPositive(cryptoHolding) ? { cryptoHolding } : {}),
+    ...(overrides === null ? {} : { accountOverrides: overrides }),
   });
 }
 
@@ -509,6 +524,9 @@ export function assembleInput(input: {
       sealed: input.derived.balances.sealed,
     },
     sources: base.sources,
+    // WP 9.2: the holder's overlay on their accounts. Absent (not null) when they
+    // have set none, so a run without overrides digests as it always did.
+    accountOverrides: input.derived.accountOverrides,
     plan,
     lifeEvents: { applied: events.applied, unapplied: events.unapplied },
     windfall,
@@ -597,6 +615,12 @@ export interface ProjectionRequest {
   /** The starting-balance day. Default: the newest sealed day. */
   readonly asOf?: DateOnlyType | null;
   readonly allowOpenDay?: boolean;
+  /**
+   * WP 9.2: the holder has seen that their account overrides changed since the
+   * stored run and asks for a new one. Without it, a changed overlay returns the
+   * stored run **stale** and computes nothing — never a silent recomputation.
+   */
+  readonly acceptAccountChanges?: boolean;
   readonly correlationId: string;
   readonly causationId?: string | null;
 }
@@ -613,6 +637,14 @@ export type Staleness =
       readonly reason: 'assumptions_changed';
       readonly assumptionsVersion: string;
       readonly currentVersion: string;
+    }
+  | {
+      /**
+       * WP 9.2: the holder changed an account's tax treatment, role or valuation
+       * after this run was computed. `changes` names each field that differs.
+       */
+      readonly reason: 'account_overrides_changed';
+      readonly changes: readonly OverrideChange[];
     };
 
 export type ProjectionOutcome =
@@ -874,6 +906,31 @@ export async function prepareProjection(
       percentiles: await percentilesOf(executor, request.userId, hit.id),
     };
   }
+  // WP 9.2: a cache miss because the holder's account overrides changed is not a
+  // reason to compute behind their back. Serve the stored run, stale, naming the
+  // fields — unless they have said they know (`acceptAccountChanges`).
+  if (request.acceptAccountChanges !== true) {
+    const latest = await latestRunForScenario(
+      executor,
+      request.userId,
+      scenario.id,
+      request.method,
+    );
+    if (latest !== null) {
+      const changes = diffOverrideFingerprints(
+        storedFingerprintOf(latest.input),
+        derived.accountOverrides ?? null,
+      );
+      if (changes.length > 0) {
+        return {
+          status: 'stale',
+          run: latest,
+          percentiles: await percentilesOf(executor, request.userId, latest.id),
+          staleness: { reason: 'account_overrides_changed', changes },
+        };
+      }
+    }
+  }
   return Object.freeze({
     status: 'ready',
     userId: request.userId,
@@ -1066,6 +1123,12 @@ export async function readProjection(
     readonly runId: string;
     readonly timeZone: string;
     readonly registry?: AssumptionsRegistry;
+    /**
+     * WP 9.2: the holder's account overlay *now* (`null`: none set), compared
+     * with the one the run recorded. Omitted, the overlay is not checked — the
+     * two callers in `apps/api` both pass it.
+     */
+    readonly accountOverrides?: OverrideFingerprint;
   },
 ): Promise<{
   readonly run: StoredRun;
@@ -1097,17 +1160,28 @@ export async function readProjection(
   const same =
     current.version === run.assumptionsVersion &&
     configHash({ ...current.overrides }) === configHash({ ...run.assumptionsOverrides });
-  return {
-    run,
-    percentiles,
-    staleness: same
-      ? null
-      : {
-          reason: 'assumptions_changed',
-          assumptionsVersion: run.assumptionsVersion,
-          currentVersion: current.version,
-        },
-  };
+  if (!same) {
+    return {
+      run,
+      percentiles,
+      staleness: {
+        reason: 'assumptions_changed',
+        assumptionsVersion: run.assumptionsVersion,
+        currentVersion: current.version,
+      },
+    };
+  }
+  // WP 9.2: the assumptions agree; does the overlay on the accounts?
+  if (input.accountOverrides !== undefined) {
+    const changes = diffOverrideFingerprints(
+      storedFingerprintOf(run.input),
+      input.accountOverrides,
+    );
+    if (changes.length > 0) {
+      return { run, percentiles, staleness: { reason: 'account_overrides_changed', changes } };
+    }
+  }
+  return { run, percentiles, staleness: null };
 }
 
 // ---------------------------------------------------------------------------

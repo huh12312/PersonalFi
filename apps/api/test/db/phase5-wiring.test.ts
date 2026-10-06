@@ -461,8 +461,13 @@ describe.skipIf(NO_DATABASE)('Phase 5 W-C wiring (apps/api/src/{modules,worker}.
         SELECT kind, payload->>'advisorId' AS advisor_id FROM jobs
          WHERE user_id = ${userId}::uuid AND kind = 'insights.run_local'
       `);
-      expect(queued.rows).toHaveLength(1);
-      expect(queued.rows[0]?.advisor_id).toBe('local.narrator');
+      // WP 9.5 (Phase 5 gate C5-2, G5-15): the Brief enqueues one narration
+      // job per item it chose, carrying that item's id — never a feed-wide
+      // narration. This holder has no findings, so its Brief has no items and
+      // nothing is enqueued; the positive case (a real item narrated and
+      // linked through the worker's wiring) is
+      // `narrator-composition.test.ts`.
+      expect(queued.rows).toHaveLength(0);
     },
     60_000,
   );

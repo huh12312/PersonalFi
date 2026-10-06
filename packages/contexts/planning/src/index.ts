@@ -105,6 +105,7 @@ export {
 // --- the aggregate ---------------------------------------------------------
 export {
   computeNetWorth,
+  summariseValuation,
   type BreakdownEntry,
   type ComputeInput,
   type NetWorthSnapshot,
@@ -287,6 +288,8 @@ export {
 export {
   TAX_BUCKETS,
   defaultTaxBucketFor,
+  defaultTaxBucketWithBasis,
+  type AccountOverlayFacts,
   type CashflowAccount,
   type CashflowInflow,
   type CashflowReader,
@@ -404,6 +407,17 @@ export {
   type ScenarioComparison,
   type Staleness,
 } from './projection-service.ts';
+// --- WP 9.2: a changed account overlay makes a stored run read stale ---------
+export { overlayFactsOf, resolveOverlayFor, withOverlay } from './account-overlay.ts';
+export {
+  diffOverrideFingerprints,
+  fingerprintOf,
+  storedFingerprintOf,
+  type OverrideChange,
+  type OverrideFieldName,
+  type OverrideFingerprint,
+  type OverrideFingerprintEntry,
+} from './override-staleness.ts';
 export {
   LEVER_KEYS,
   SCENARIO_NAME_MAX_LENGTH,

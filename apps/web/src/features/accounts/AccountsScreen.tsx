@@ -10,6 +10,7 @@ import { Skeleton, SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { Button } from '../../components/ui/button.tsx';
 import { groupAccounts } from './account-groups.ts';
 import { AccountGroupSection } from './AccountGroupSection.tsx';
+import { UnvaluedAccountsNotice } from './UnvaluedAccountsNotice.tsx';
 import { useAccountsQuery, useNetWorthQuery } from './useAccounts.ts';
 
 function AccountsSkeleton() {
@@ -96,6 +97,8 @@ export function AccountsScreen() {
           Manage connections
         </Button>
       </div>
+
+      <UnvaluedAccountsNotice />
 
       {groups.map((group) => (
         <AccountGroupSection key={group.type} group={group} />

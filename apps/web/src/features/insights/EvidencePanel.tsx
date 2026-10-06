@@ -26,6 +26,9 @@ export interface EvidencePanelProps {
  * rationale.
  */
 export function EvidencePanel({ insight }: EvidencePanelProps) {
+  // G5-9: a minor-unit leaf is money, and is printed as money in this
+  // insight's own currency (`evidence-resolver.ts#displayValueOf`).
+  const currency = insight.annualizedImpact?.currency ?? insight.oneTimeImpact?.currency ?? null;
   return (
     <div className="rounded-md bg-bg-subtle p-3" data-testid="evidence-panel">
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-caption text-text-muted">
@@ -60,7 +63,7 @@ export function EvidencePanel({ insight }: EvidencePanelProps) {
           // to the insight it is rendered for.
           const resolved =
             row.sourceRef === null ? row : resolveEvidenceRef(insight.evidence, row.sourceRef);
-          const display = displayValueOf(resolved);
+          const display = displayValueOf(resolved, { currency });
           return (
             <li
               key={row.position}

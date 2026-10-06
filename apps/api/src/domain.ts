@@ -157,14 +157,18 @@ import {
 import {
   applyProviderTransactions,
   listAccounts,
+  listAccountOverrides,
   listForCategorization,
   listTransactions,
   netWorthNow,
+  overrideFingerprint,
   recordBalance,
   setRuleCategory,
   upsertAccount,
+  type AccountOverride,
   type AccountSummary,
   type LedgerDatabase,
+  type ResolvedAccountOverlay,
 } from '@ctx/ledger';
 import {
   COINBASE_MANIFEST,
@@ -198,7 +202,6 @@ import {
   createProjectionInputsReader,
   currentRiskProfile,
   defaultFlagsFor,
-  defaultTaxBucketFor,
   evaluateGoalPace,
   assembleInput,
   getBaseline,
@@ -212,9 +215,11 @@ import {
   projectDeterministic,
   readProjection,
   resolveForUser,
+  resolveOverlayFor,
   runMonteCarloInWorker,
   solveRetirementImpact,
   taxYear,
+  withOverlay,
   type BaselineProfile,
   type DerivedInputs,
   type MonthsOfSpending,
@@ -232,6 +237,7 @@ import {
   type HoldingsReader as PlanningHoldingsReader,
   type MonteCarloHostOptions,
   type MonteCarloRunner,
+  type OverrideFingerprint as PlanningOverrideFingerprint,
   type PlanningAccount,
   type PlanningExecutor,
   type ReturnSeries,
@@ -1876,8 +1882,14 @@ export function createInsightsPlanningPort(
       if (baseline === null) return null;
       const runId = await newestBaselineRunId(database, input.userId, baseline.id);
       if (runId === null) return null;
+      const accountOverrides = await accountOverrideFingerprintFor(database, input.userId);
       const read = await orNull(() =>
-        readProjection(database, { userId: input.userId, runId, timeZone: options.timeZone }),
+        readProjection(database, {
+          userId: input.userId,
+          runId,
+          timeZone: options.timeZone,
+          accountOverrides,
+        }),
       );
       if (read === null) return null;
       const { run, percentiles, staleness } = read;
@@ -3047,14 +3059,21 @@ function createPlanningBalancesReader(
   const zone = options.timeZone;
   return {
     async accounts(userId: string, _asOf: string): Promise<readonly PlanningAccount[]> {
-      const [rows, offBudget] = await Promise.all([
+      const [rows, offBudget, overrides] = await Promise.all([
         listAccounts(executor, { userId, includeClosed: true }),
         offBudgetAccountIds(executor, userId),
+        listAccountOverrides(executor, { userId }),
       ]);
+      const overrideOf = new Map(overrides.map((override) => [override.accountId, override]));
       return rows.map((account) => {
         const kind = planningKindOf(account);
         const flags = defaultFlagsFor(kind, account.includeInNetWorth);
+        // WP 9.2 (O-2): the holder's valuation basis, from the same resolver every
+        // other reader of the overlay uses. Omitted when it is the default, so a
+        // holder with no overrides is served exactly the objects they always were.
+        const valuation = resolvedOverlayOf(account, overrideOf.get(account.id) ?? null).valuation;
         return {
+          ...(valuation.source === 'holder' ? { valuation: valuation.value } : {}),
           accountId: account.id,
           name: account.name,
           kind,
@@ -3286,6 +3305,34 @@ function uuidArrayParameter(ids: readonly string[]): string {
 }
 
 /**
+ * The overlay on one account, resolved — the holder's override over the
+ * provider-derived default, by `@ctx/planning`'s `resolveOverlayFor` (which
+ * calls `@ctx/ledger`'s one pure resolver over planning's subtype map).
+ * Exported for `routes/accounts.ts`: the accounts screen's "from Plaid: 401k" /
+ * "set by you" and the projection's tax bucket come from one call, not from two
+ * derivations that agree today.
+ */
+function resolvedOverlayOf(
+  account: AccountSummary,
+  override: AccountOverride | null,
+): ResolvedAccountOverlay {
+  return resolveOverlayFor(planningKindOf(account), account.subtype, override);
+}
+
+export { resolvedOverlayOf as resolveAccountOverlayFor };
+
+/**
+ * The holder's account overlay *now*, as the fingerprint a stored run is
+ * compared against (`readProjection`'s `accountOverrides`). `null`: nothing set.
+ */
+export async function accountOverrideFingerprintFor(
+  executor: PlanningExecutor,
+  userId: string,
+): Promise<PlanningOverrideFingerprint> {
+  return overrideFingerprint(await listAccountOverrides(executor, { userId }));
+}
+
+/**
  * `@ctx/planning`'s `CashflowReader`, over `@ctx/ledger`.
  *
  * The roster **is** WP 3.8's `BalancesReader.accounts()` — the same
@@ -3307,20 +3354,30 @@ export function planningCashflowReaderFor(
   const roster = planningPortsFor(executor, options).balances;
   return {
     async accounts(userId: string, asOf: string): Promise<readonly PlanningCashflowAccount[]> {
-      const [accounts, rows] = await Promise.all([
+      const [accounts, rows, overrides] = await Promise.all([
         roster.accounts(userId, asOf),
         listAccounts(executor, { userId, includeClosed: true }),
+        listAccountOverrides(executor, { userId }),
       ]);
       const subtypeOf = new Map(rows.map((row) => [row.id, row.subtype] as const));
       const typeOf = new Map(rows.map((row) => [row.id, row.type] as const));
-      return accounts.map((account) => ({
-        ...account,
-        taxBucket: defaultTaxBucketFor(account.kind, subtypeOf.get(account.accountId) ?? null),
-        // WP 5.5 (W-B wiring): Ledger's `crypto` accounts reach the Monte Carlo
-        // as their own sleeve (07 §6.4, never folded into equity). Before this
-        // line crypto stayed in TAXABLE exactly as WP 4.6 left it.
-        sleeve: typeOf.get(account.accountId) === 'crypto' ? ('crypto' as const) : null,
-      }));
+      const overrideOf = new Map(overrides.map((override) => [override.accountId, override]));
+      return accounts.map((account) =>
+        // WP 9.2 (CF-16): the holder's tax treatment wins over the provider
+        // subtype's default, through the one resolver. `withOverlay` assigns the
+        // ledger's four-word `TaxTreatment` to planning's `TaxBucket` — the
+        // build-time check the two lists still agree.
+        ({
+          ...withOverlay(account, {
+            subtype: subtypeOf.get(account.accountId) ?? null,
+            override: overrideOf.get(account.accountId) ?? null,
+          }),
+          // WP 5.5 (W-B wiring): Ledger's `crypto` accounts reach the Monte Carlo
+          // as their own sleeve (07 §6.4, never folded into equity). Before this
+          // line crypto stayed in TAXABLE exactly as WP 4.6 left it.
+          sleeve: typeOf.get(account.accountId) === 'crypto' ? ('crypto' as const) : null,
+        }),
+      );
     },
 
     async historyStarts(userId, accountIds) {

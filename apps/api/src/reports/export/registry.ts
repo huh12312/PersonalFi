@@ -130,6 +130,11 @@ export const TABLE_ORDER: readonly string[] = [
   // ledger
   'accounts',
   'account_balances',
+  // WP 9.2 (0035): the holder's overlay on an account — holder data (a tax
+  // treatment they set is a fact about their own accounts the provider cannot
+  // restore), so it is EXPORTED, after `accounts` by its composite
+  // (user_id, account_id) FK.
+  'account_overrides',
   'merchants',
   'transactions_provider',
   'transactions',
@@ -201,6 +206,17 @@ export const TABLE_ORDER: readonly string[] = [
   'plan_life_events',
   'projection_runs',
   'projection_percentiles',
+  // insights (WP 9.6, O-9; migration 0038): the append-only history of the
+  // holder's consent — every grant, revoke and re-grant of a scope to an
+  // advisor. EXPORTED, unlike `snapshot_grants` (the state, re-given not
+  // restored — see EXEMPT_TABLES): "what did I consent to, and when did I
+  // change my mind" is the holder's own record, and a bundle that dropped it
+  // would take with it the only proof of how a restored install's consent got
+  // to be what it is. References only `users`, so any position is valid.
+  // `step_up_session_id` names a session that will not exist on the other
+  // side; it is a plain UUID with no foreign key, and says only "a sign-in did
+  // this".
+  'snapshot_grant_events',
 ];
 
 /**

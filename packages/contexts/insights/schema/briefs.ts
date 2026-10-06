@@ -31,6 +31,18 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
+/**
+ * A Brief item's snapshotted action: the four fields `insight_actions` carries
+ * and the Brief ever displays. `kind` is one of the four non-acting members
+ * (08 §4.3); `url` is set only for `open_url`, `https://` only (0038's CHECK).
+ */
+export interface BriefPrimaryAction {
+  readonly kind: 'suggest_only' | 'open_url' | 'create_goal_draft' | 'create_rule_draft';
+  readonly label: string;
+  readonly rationaleMd: string;
+  readonly url: string | null;
+}
+
 export const BRIEF_ITEM_SECTIONS = ['ranked', 'attention'] as const;
 export type BriefItemSection = (typeof BRIEF_ITEM_SECTIONS)[number];
 
@@ -100,6 +112,14 @@ export const advisoryBriefItems = pgTable(
     scoreFactors: jsonb('score_factors').$type<Record<string, unknown> | null>(),
     /** `RetirementImpactAnswer`, whole. Never recomputed on read. */
     retirementEffect: jsonb('retirement_effect').$type<Record<string, unknown>>().notNull(),
+    /**
+     * CF-24, migration `0038_brief_actions_grant_events.sql`: the item's first
+     * proposed action as the Brief said it, snapshotted at publish and never
+     * updated. `null` for a Brief published before 0038 ("no action recorded"):
+     * never a read of the live `insight_actions`, which the nightly upsert
+     * rewrites.
+     */
+    primaryAction: jsonb('primary_action').$type<BriefPrimaryAction | null>(),
     createdAt: createdAtColumn(),
   },
   (table) => [
