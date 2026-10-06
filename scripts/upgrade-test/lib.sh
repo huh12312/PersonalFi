@@ -142,6 +142,40 @@ SQL
     local s="${WAYPOINT_SHA[$wp]:-}"
     [ -n "$s" ] || die "unknown waypoint $wp"
     git -C "$REPO_ROOT" archive "$s" | tar -x -C "$dest"
+    # F-94-8 (found by the first run on a clean GitHub runner, 2026-10-06):
+    # every era's Dockerfiles pin apk packages to exact builds, and Alpine's
+    # index keeps only the current build of each — so v0.1's images cannot be
+    # built from source on a host without the cached layer (`ERROR: unable to
+    # select packages: age-1.3.2-r0 breaks world[age=1.3.1-r6]`). A historical
+    # tree cannot be fixed in history; the test tree drops the `=version`
+    # pins inside `apk add` (the base-image digest pin stays, so the image is
+    # still that era's base with current packages). HEAD is never patched:
+    # it must build as shipped, and a red there is a real finding (the pin
+    # bump procedure is the Dockerfile's own comment). Recorded in the
+    # report as a build-reproducibility finding, not as an upgrade step.
+    local relaxed=0 df
+    for df in "$dest"/docker/*.Dockerfile; do
+      [ -f "$df" ] || continue
+      if node -e '
+        const fs = require("node:fs");
+        const p = process.argv[1];
+        const lines = fs.readFileSync(p, "utf8").split("\n");
+        let inBlock = false, changed = false;
+        for (let i = 0; i < lines.length; i++) {
+          if (/\bapk add\b/.test(lines[i])) inBlock = true;
+          if (inBlock) {
+            const out = lines[i].replace(/\b([a-z][a-z0-9-]*)=\d[^\s\\]*/g, "$1");
+            if (out !== lines[i]) { lines[i] = out; changed = true; }
+            if (!/\\\s*$/.test(lines[i])) inBlock = false;
+          }
+        }
+        if (!changed) process.exit(1);
+        fs.writeFileSync(p, lines.join("\n"));
+      ' "$df"; then relaxed=$((relaxed + 1)); fi
+    done
+    if [ "$relaxed" -gt 0 ]; then
+      log "F-94-8: $wp test tree — apk version pins dropped in $relaxed Dockerfile(s) (Alpine's index no longer serves the era's pinned builds; base-image digest pins kept; HEAD never patched)"
+    fi
   fi
 }
 

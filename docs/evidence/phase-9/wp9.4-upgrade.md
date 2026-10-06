@@ -814,6 +814,34 @@ CLI reaches them), documented in the RUNBOOK beside `/ready`'s `degraded`.
 **8. Nothing for** `vitest.config.ts` (the tests live in the existing `db` and `scripts` projects),
 `eslint-boundaries.js`, `package.json`, the lockfile, `ci.yml`, or the export registry.
 
+### F-94-8 — v0.1's images cannot be built from source on a clean host (observed by the orchestrator, 2026-10-06)
+
+Found by the first `upgrade-test.yml` run on a GitHub runner (run 37463986162, then 37466231586 with the
+per-step logs printed): `FATAL: W0 build failed` in 7 s, `w0-build.log`: `ERROR: unable to select
+packages: age-1.3.2-r0: breaks: world[age=1.3.1-r6] … libcrypto3-3.5.7-r0: breaks:
+world[libcrypto3=3.5.8-r0]`. Every era's `docker/backup.Dockerfile` (and `api.Dockerfile` from Phase 3)
+pins apk packages to exact builds, and Alpine's index keeps only the current build of each, so the pinned
+builds expire. On this host the cached `apk add` layer hid it for every waypoint; CI's own image job hid it
+at HEAD the same way (GHA layer cache). HEAD was affected too: the same `age=1.3.1-r6`, `tzdata=2026d-r0`,
+`libssl3=3.5.8-r0`, `libcrypto3=3.5.8-r0` pins, which the pinned base `alpine:3.24@sha256:28bd5fe8…`'s
+index no longer serves (`apk policy` in the base image: age 1.3.2-r0, tzdata 2026e-r0, libssl3 and
+libcrypto3 3.5.7-r0).
+
+- **HEAD, fixed by the Dockerfiles' own documented procedure:** the pins bumped to the index's current
+  builds in `docker/backup.Dockerfile` and `docker/api.Dockerfile`; `docker build --no-cache -f
+docker/backup.Dockerfile docker` green on this host.
+- **Eras, in the harness:** `prepare_tree` drops the `=version` pins inside `apk add` for W0–W5 test trees
+  only (the base-image digest pin stays); HEAD is never patched, so a red there stays a real finding. Logged
+  per tree as `F-94-8: <wp> test tree — apk version pins dropped …`; it is a build-reproducibility finding,
+  not an upgrade extra step (the documented upgrade is `git pull && just upgrade`, which builds from the
+  pulled tree — on a host with no cached layer the build itself is what fails).
+- **Handed on (WP 9.10/9.11, with 9.12's RUNBOOK bump procedure):** the pin policy. An exact-version apk
+  pin on Alpine is a build that expires; the choices are (a) pin the base digest and leave apk unpinned,
+  with the trivy image scan as the control, (b) keep exact pins and add a scheduled CI build with no cache
+  so an expiry is found the week it happens, not on a stranger's host, or (c) vendor the packages. Until it
+  is ruled, a production `just upgrade` on a host without the cached layer can fail at the build — the
+  soak install's first build on Chris's host has the layer cached and is not at risk.
+
 ## 10. Open items / handed to other packages
 
 1. **F-94-6 (HIGH) — the migration in §9 item 5**, the orchestrator's to number and land. Until it lands,
@@ -838,7 +866,8 @@ CLI reaches them), documented in the RUNBOOK beside `/ready`'s `degraded`.
 7. **History, recorded and closed:** F-94-2 (eras declaring new secrets), F-94-3/-4 (era API gaps),
    F-94-7 (W1 file connections dead at W2), the W2 era's stalled consumers, G3-1 and the W0/W1 worker OOM.
    None is reachable from an install that upgrades to a commit carrying `just upgrade`.
-8. **v1.0 close (09 §4):** the direct jump and the chain re-run at the release commit —
+8. **F-94-8** (above): the apk pin policy — 9.10/9.11 to rule; the harness relaxes era pins, HEAD bumped.
+9. **v1.0 close (09 §4):** the direct jump and the chain re-run at the release commit —
    `bash scripts/upgrade-test/run.sh --path direct` and `--path chain`, each detached, ~15 and ~25 min
    on this host.
 

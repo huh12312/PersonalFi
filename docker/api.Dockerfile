@@ -121,7 +121,9 @@ FROM ${NODE_IMAGE} AS runtime
 # against Alpine 3.24's main index at implementation time (2026-09-27). No
 # Renovate coverage for apk packages (06 §5.6); see RUNBOOK.md for the manual
 # bump procedure.
-RUN apk add --no-cache tini age=1.3.1-r6 && \
+# age bumped 2026-10-06 with docker/backup.Dockerfile's (F-94-8: Alpine's
+# index no longer served 1.3.1-r6).
+RUN apk add --no-cache tini age=1.3.2-r0 && \
     apk upgrade --no-cache libssl3 libcrypto3 && \
     addgroup -g 10001 -S app && \
     adduser -u 10001 -S -G app -H -D -s /sbin/nologin app && \

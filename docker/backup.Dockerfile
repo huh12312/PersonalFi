@@ -17,14 +17,24 @@ FROM ${ALPINE_IMAGE} AS runtime
 # closed. Versions verified against Alpine 3.24's main/community index at
 # implementation time (2026-09-11); `apk add <pkg>` with no pin will show the
 # current version if a rebuild fails here after an index update.
+#
+# Bumped 2026-10-06 (WP 9.4 F-94-8): the first upgrade-test run on a clean
+# GitHub runner could not build this image — Alpine's index had moved past
+# age 1.3.1-r6 / tzdata 2026d / libssl3+libcrypto3 3.5.8-r0 and serves only the
+# versions below. CI's own image job had not noticed because its GHA layer
+# cache still held the old `apk add` layer; a fresh host (a stranger's
+# install, a production clone's first `just upgrade`) would have failed the
+# same way. The pin policy itself is the Phase 9 security review's to re-rule
+# (WP 9.10/9.11): Alpine keeps no old builds, so an exact-version pin is a
+# build that expires. Verified: `docker build --no-cache` from this file.
 RUN apk add --no-cache \
       tini=0.19.0-r3 \
       postgresql18-client=18.6-r0 \
-      age=1.3.1-r6 \
+      age=1.3.2-r0 \
       rclone=1.74.1-r2 \
-      tzdata=2026d-r0 \
-      libssl3=3.5.8-r0 \
-      libcrypto3=3.5.8-r0 && \
+      tzdata=2026e-r0 \
+      libssl3=3.5.7-r0 \
+      libcrypto3=3.5.7-r0 && \
     addgroup -g 10002 -S backup && \
     adduser -u 10002 -S -G backup -H -D -s /sbin/nologin backup && \
     mkdir -p /backups && chown 10002:10002 /backups
