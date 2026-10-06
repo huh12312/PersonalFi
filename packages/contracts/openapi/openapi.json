@@ -955,6 +955,144 @@
           "source"
         ]
       },
+      "AccountOverlayInput": {
+        "type": "object",
+        "properties": {
+          "taxTreatment": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "null: the account has no tax bucket."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "provider_subtype",
+                  "provider_fallback",
+                  "none"
+                ],
+                "description": "`provider_subtype`: the provider’s own subtype named it. `provider_fallback`: nothing recognised the subtype and TAXABLE is assumed — a guess, not a fact."
+              },
+              "override": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What the holder set, if anything."
+              },
+              "providerDefault": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source",
+              "override",
+              "providerDefault"
+            ]
+          },
+          "role": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "spending",
+                      "savings",
+                      "taxable",
+                      "tax_deferred",
+                      "tax_free",
+                      "liability"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ]
+          },
+          "valuation": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "type": "string",
+                "enum": [
+                  "holdings",
+                  "balance"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ]
+          }
+        },
+        "required": [
+          "taxTreatment",
+          "role",
+          "valuation"
+        ]
+      },
       "AccountInput": {
         "type": "object",
         "properties": {
@@ -1042,6 +1180,9 @@
               }
             ],
             "description": "null until a balance has been observed."
+          },
+          "overlay": {
+            "$ref": "#/components/schemas/AccountOverlayInput"
           }
         },
         "required": [
@@ -1057,7 +1198,8 @@
           "mask",
           "closedAt",
           "includeInNetWorth",
-          "balance"
+          "balance",
+          "overlay"
         ]
       },
       "NetWorthInput": {
@@ -1223,6 +1365,9 @@
           },
           "granted": {
             "type": "boolean"
+          },
+          "requested": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -1234,7 +1379,79 @@
           "externalAllowed",
           "requiresPerRunConsent",
           "sourcedInPhase2",
-          "granted"
+          "granted",
+          "requested"
+        ]
+      },
+      "AdvisorGrantEventInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "advisorId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "networth.summary",
+              "cash.summary",
+              "cashflow.monthly",
+              "budgets.status",
+              "recurring.list",
+              "goals.list",
+              "risk.profile",
+              "market.watchlist",
+              "holdings.aggregate",
+              "holdings.detail",
+              "transactions.summary",
+              "transactions.raw",
+              "institutions.names",
+              "liabilities.terms",
+              "market.rates",
+              "plan.projection",
+              "transactions.anomalies",
+              "fees.summary"
+            ]
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "granted",
+              "revoked",
+              "re_granted"
+            ]
+          },
+          "perRunConsent": {
+            "type": "boolean"
+          },
+          "stepUpSessionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurredAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "advisorId",
+          "scope",
+          "event",
+          "perRunConsent",
+          "stepUpSessionId",
+          "occurredAt"
         ]
       },
       "AdvisorRunSummaryInput": {
@@ -4626,6 +4843,10 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "slot": {
+                            "type": "string",
+                            "pattern": "^e[1-9][0-9]?$"
                           }
                         },
                         "required": [
@@ -4680,6 +4901,10 @@
                         "basis"
                       ],
                       "additionalProperties": false
+                    },
+                    "placed_figures": {
+                      "type": "boolean",
+                      "const": true
                     }
                   },
                   "required": [
@@ -4889,6 +5114,69 @@
           "quarantinedForNotTrue",
           "outcomes",
           "wrongAmountFlags"
+        ]
+      },
+      "AdvisorKindStateInput": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "builtin",
+              "local_model",
+              "external"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "effective": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "enabled",
+          "configured",
+          "effective"
+        ]
+      },
+      "AdvisorModuleStateInput": {
+        "type": "object",
+        "properties": {
+          "operator": {
+            "type": "object",
+            "properties": {
+              "advisorsEnabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "advisorsEnabled"
+            ]
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "effective": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operator",
+          "user",
+          "effective"
         ]
       },
       "AssumptionsFileInput": {
@@ -5449,6 +5737,76 @@
                 ]
               }
             ]
+          },
+          "primaryAction": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "suggest_only",
+                      "open_url",
+                      "create_goal_draft",
+                      "create_rule_draft"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "rationaleMd": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "label",
+                  "rationaleMd",
+                  "url"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "narration": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "narrated",
+                  "pending",
+                  "none"
+                ]
+              },
+              "aiAssisted": {
+                "type": "boolean"
+              },
+              "textShown": {
+                "type": "boolean"
+              },
+              "summaryMd": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "aiAssisted",
+              "textShown",
+              "summaryMd"
+            ]
           }
         },
         "required": [
@@ -5469,7 +5827,9 @@
           "oneTimeImpact",
           "evidence",
           "score",
-          "retirementEffect"
+          "retirementEffect",
+          "primaryAction",
+          "narration"
         ]
       },
       "AdvisoryBriefInput": {
@@ -9447,6 +9807,61 @@
               "assumptionsVersion",
               "currentVersion"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "const": "account_overrides_changed"
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "accountId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "field": {
+                      "type": "string",
+                      "enum": [
+                        "taxTreatment",
+                        "role",
+                        "valuation"
+                      ]
+                    },
+                    "from": {
+                      "description": "What the run was computed with; null: nothing set.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "to": {
+                      "description": "What the holder has set now; null: cleared.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "accountId",
+                    "field",
+                    "from",
+                    "to"
+                  ]
+                },
+                "description": "Each account field the holder changed after this run was computed (WP 9.2). The projection is not recomputed behind their back: ask again with `acceptAccountChanges`."
+              }
+            },
+            "required": [
+              "reason",
+              "changes"
+            ]
           }
         ]
       },
@@ -12676,6 +13091,148 @@
         ],
         "additionalProperties": false
       },
+      "AccountOverlay": {
+        "type": "object",
+        "properties": {
+          "taxTreatment": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "null: the account has no tax bucket."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "provider_subtype",
+                  "provider_fallback",
+                  "none"
+                ],
+                "description": "`provider_subtype`: the provider’s own subtype named it. `provider_fallback`: nothing recognised the subtype and TAXABLE is assumed — a guess, not a fact."
+              },
+              "override": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What the holder set, if anything."
+              },
+              "providerDefault": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source",
+              "override",
+              "providerDefault"
+            ],
+            "additionalProperties": false
+          },
+          "role": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "spending",
+                      "savings",
+                      "taxable",
+                      "tax_deferred",
+                      "tax_free",
+                      "liability"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "valuation": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "type": "string",
+                "enum": [
+                  "holdings",
+                  "balance"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "taxTreatment",
+          "role",
+          "valuation"
+        ],
+        "additionalProperties": false
+      },
       "Account": {
         "type": "object",
         "properties": {
@@ -12763,6 +13320,9 @@
               }
             ],
             "description": "null until a balance has been observed."
+          },
+          "overlay": {
+            "$ref": "#/components/schemas/AccountOverlay"
           }
         },
         "required": [
@@ -12778,7 +13338,8 @@
           "mask",
           "closedAt",
           "includeInNetWorth",
-          "balance"
+          "balance",
+          "overlay"
         ],
         "additionalProperties": false
       },
@@ -12948,6 +13509,9 @@
           },
           "granted": {
             "type": "boolean"
+          },
+          "requested": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -12959,7 +13523,80 @@
           "externalAllowed",
           "requiresPerRunConsent",
           "sourcedInPhase2",
-          "granted"
+          "granted",
+          "requested"
+        ],
+        "additionalProperties": false
+      },
+      "AdvisorGrantEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "advisorId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "networth.summary",
+              "cash.summary",
+              "cashflow.monthly",
+              "budgets.status",
+              "recurring.list",
+              "goals.list",
+              "risk.profile",
+              "market.watchlist",
+              "holdings.aggregate",
+              "holdings.detail",
+              "transactions.summary",
+              "transactions.raw",
+              "institutions.names",
+              "liabilities.terms",
+              "market.rates",
+              "plan.projection",
+              "transactions.anomalies",
+              "fees.summary"
+            ]
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "granted",
+              "revoked",
+              "re_granted"
+            ]
+          },
+          "perRunConsent": {
+            "type": "boolean"
+          },
+          "stepUpSessionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurredAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "advisorId",
+          "scope",
+          "event",
+          "perRunConsent",
+          "stepUpSessionId",
+          "occurredAt"
         ],
         "additionalProperties": false
       },
@@ -16355,6 +16992,10 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "slot": {
+                            "type": "string",
+                            "pattern": "^e[1-9][0-9]?$"
                           }
                         },
                         "required": [
@@ -16409,6 +17050,10 @@
                         "basis"
                       ],
                       "additionalProperties": false
+                    },
+                    "placed_figures": {
+                      "type": "boolean",
+                      "const": true
                     }
                   },
                   "required": [
@@ -16622,6 +17267,73 @@
           "quarantinedForNotTrue",
           "outcomes",
           "wrongAmountFlags"
+        ],
+        "additionalProperties": false
+      },
+      "AdvisorKindState": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "builtin",
+              "local_model",
+              "external"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "effective": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "enabled",
+          "configured",
+          "effective"
+        ],
+        "additionalProperties": false
+      },
+      "AdvisorModuleState": {
+        "type": "object",
+        "properties": {
+          "operator": {
+            "type": "object",
+            "properties": {
+              "advisorsEnabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "advisorsEnabled"
+            ],
+            "additionalProperties": false
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "enabled"
+            ],
+            "additionalProperties": false
+          },
+          "effective": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operator",
+          "user",
+          "effective"
         ],
         "additionalProperties": false
       },
@@ -17198,6 +17910,78 @@
                 "additionalProperties": false
               }
             ]
+          },
+          "primaryAction": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "suggest_only",
+                      "open_url",
+                      "create_goal_draft",
+                      "create_rule_draft"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "rationaleMd": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "label",
+                  "rationaleMd",
+                  "url"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "narration": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "narrated",
+                  "pending",
+                  "none"
+                ]
+              },
+              "aiAssisted": {
+                "type": "boolean"
+              },
+              "textShown": {
+                "type": "boolean"
+              },
+              "summaryMd": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "aiAssisted",
+              "textShown",
+              "summaryMd"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -17218,7 +18002,9 @@
           "oneTimeImpact",
           "evidence",
           "score",
-          "retirementEffect"
+          "retirementEffect",
+          "primaryAction",
+          "narration"
         ],
         "additionalProperties": false
       },
@@ -21279,6 +22065,63 @@
               "currentVersion"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "const": "account_overrides_changed"
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "accountId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "field": {
+                      "type": "string",
+                      "enum": [
+                        "taxTreatment",
+                        "role",
+                        "valuation"
+                      ]
+                    },
+                    "from": {
+                      "description": "What the run was computed with; null: nothing set.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "to": {
+                      "description": "What the holder has set now; null: cleared.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "accountId",
+                    "field",
+                    "from",
+                    "to"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Each account field the holder changed after this run was computed (WP 9.2). The projection is not recomputed behind their back: ask again with `acceptAccountChanges`."
+              }
+            },
+            "required": [
+              "reason",
+              "changes"
+            ],
+            "additionalProperties": false
           }
         ]
       },
@@ -24841,6 +25684,343 @@
             }
           },
           "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{accountId}/overrides": {
+      "put": {
+        "operationId": "setAccountOverrides",
+        "summary": "Set what an account is: its tax treatment, role and valuation basis",
+        "tags": [
+          "accounts"
+        ],
+        "description": "The holder’s overlay on the provider’s facts, which are never mutated. A **full replacement**: an omitted or `null` field is cleared, and when none is left the override is removed. `taxTreatment` outranks the provider-subtype default the projection starts from (CF-16). `valuation: \"balance\"` counts an investment or crypto account that has no priced holdings at its latest balance instead of leaving it out — labelled as such wherever it appears (O-2). Changing any field makes a stored projection read `stale`, naming the change; nothing is recomputed. Another holder’s account is a 404, exactly as a missing one. Emits `ledger.AccountOverrideChanged`. Session only: no money moves.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taxTreatment": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "TAXABLE",
+                          "TAX_DEFERRED",
+                          "ROTH",
+                          "HSA"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "role": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "spending",
+                          "savings",
+                          "taxable",
+                          "tax_deferred",
+                          "tax_free",
+                          "liability"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "valuation": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "holdings",
+                          "balance"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "$ref": "#/components/schemas/Account"
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "account",
+                    "changed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "clearAccountOverrides",
+        "summary": "Clear every override on an account, back to the provider’s defaults",
+        "tags": [
+          "accounts"
+        ],
+        "description": "Idempotent: clearing an account with no override changes nothing. A stored projection computed with the override reads `stale` afterwards, as for any change. Another holder’s account is a 404. Session only: no money moves.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "accountId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "$ref": "#/components/schemas/Account"
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "account",
+                    "changed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/valuation": {
+      "get": {
+        "operationId": "getAccountValuation",
+        "summary": "Which accounts net worth leaves out, and which it counts by the holder’s say-so",
+        "tags": [
+          "accounts"
+        ],
+        "description": "Computed live by the same valuation the net-worth snapshot uses, without FX and without writing. `unvalued` is every account in net worth that cannot be valued — an investment account with no priced holdings, an account with no balance — and is never counted as zero. `byBalance` is every account counted at its latest balance because the holder set `valuation: \"balance\"`. The plan and net-worth screens name both, so a figure is never quietly missing an account (O-2).",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "asOfDate": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "unvalued": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "accountId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "no_balance",
+                              "no_priced_holding",
+                              "no_earlier_observation"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "accountId",
+                          "name",
+                          "reason"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "byBalance": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "accountId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "accountId",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "asOfDate",
+                    "unvalued",
+                    "byBalance"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -38794,6 +39974,10 @@
                   },
                   "allowOpenDay": {
                     "type": "boolean"
+                  },
+                  "acceptAccountChanges": {
+                    "description": "WP 9.2. After the holder changes an account’s tax treatment, role or valuation, the stored run comes back `stale` and nothing is computed. `true` says they know and asks for a new run from the current settings.",
+                    "type": "boolean"
                   }
                 }
               }
@@ -40751,12 +41935,39 @@
                           "fees.summary"
                         ]
                       }
+                    },
+                    "notRequested": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "networth.summary",
+                          "cash.summary",
+                          "cashflow.monthly",
+                          "budgets.status",
+                          "recurring.list",
+                          "goals.list",
+                          "risk.profile",
+                          "market.watchlist",
+                          "holdings.aggregate",
+                          "holdings.detail",
+                          "transactions.summary",
+                          "transactions.raw",
+                          "institutions.names",
+                          "liabilities.terms",
+                          "market.rates",
+                          "plan.projection",
+                          "transactions.anomalies",
+                          "fees.summary"
+                        ]
+                      }
                     }
                   },
                   "required": [
                     "advisorId",
                     "granted",
-                    "revoked"
+                    "revoked",
+                    "notRequested"
                   ],
                   "additionalProperties": false
                 }
@@ -40814,6 +42025,74 @@
             }
           },
           "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/advisors/{advisorId}/grant-events": {
+      "get": {
+        "operationId": "listAdvisorGrantEvents",
+        "summary": "The consent history for one advisor: every grant, revoke and re-grant, newest first",
+        "tags": [
+          "insights"
+        ],
+        "description": "O-9. Append-only: a re-grant is a new row beside the revoke it follows, never a rewrite of either. Each row carries the step-up session that authorised it. Bounded to the 200 most recent events.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "advisorId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "advisorId": {
+                      "type": "string"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AdvisorGrantEvent"
+                      }
+                    }
+                  },
+                  "required": [
+                    "advisorId",
+                    "events"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -41406,6 +42685,61 @@
       }
     },
     "/advisors/kinds/{kind}/enabled": {
+      "get": {
+        "operationId": "getAdvisorKindEnabled",
+        "summary": "Kill switch 2, as it stands: the kind flag, the model configuration and both together",
+        "tags": [
+          "insights"
+        ],
+        "description": "What the settings screen shows instead of the last `PUT`: `enabled` is the flag the holder controls, `configured` is whether this deployment has a model configured for the kind (`LOCAL_MODEL_PIN_*` on the api, or the full `LOCAL_MODEL_*` set), and `effective` is both. Only a kind with a declared flag has a state; 404 `insights.kind_flag_not_found` otherwise, exactly as the `PUT`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "builtin",
+                "local_model",
+                "external"
+              ]
+            },
+            "in": "path",
+            "name": "kind",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvisorKindState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
       "put": {
         "operationId": "setAdvisorKindEnabled",
         "summary": "Kill switch 2: turn every advisor of one kind on or off",
@@ -41496,6 +42830,96 @@
             }
           },
           "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/advisors/module/enabled": {
+      "get": {
+        "operationId": "getAdvisorModuleEnabled",
+        "summary": "Kill switch 1, as it stands: the operator setting, the holder’s flag and both together",
+        "tags": [
+          "insights"
+        ],
+        "description": "`operator.advisorsEnabled` is `ADVISORS_ENABLED` (static per process; the operator changes it with a restart). `user.enabled` is `module.insights`, which the holder flips with `PUT /advisors/module/enabled` (G5-14: until now it was a line of SQL).",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvisorModuleState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setAdvisorModuleEnabled",
+        "summary": "Kill switch 1, the holder’s half: turn the insights module on or off",
+        "tags": [
+          "insights"
+        ],
+        "description": "Writes `module.insights`. Needs a fresh session — the same class of act as the kind switch and `POST /advisors/{id}/enabled` (D21). Off stops every advisor of every kind within about a second, a run in flight included (WP 5.1). Returns the state as it now stands, the operator half included.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvisorModuleState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
             "description": "Default Response",
             "content": {
               "application/json": {
