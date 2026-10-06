@@ -390,7 +390,11 @@ services:
       # is the Phase 5 gate's R-2 gate — narration text reaches the holder only
       # when it is true (default false until WP 9.5's figure slots measure ≥ 95 %
       # or Chris accepts the residual in writing).
-      LOCAL_MODEL_PIN_NAME: ${LOCAL_MODEL_PIN_NAME:-${LOCAL_MODEL_NAME:-}}
+      # Both-or-neither on the api (a half is a boot error): the name is taken
+      # from LOCAL_MODEL_NAME only when LOCAL_MODEL_DIGEST is set too, because
+      # LOCAL_MODEL_NAME alone is also what `ollama-pull` reads — an install
+      # that has pulled a model but not yet pinned its digest must still boot.
+      LOCAL_MODEL_PIN_NAME: ${LOCAL_MODEL_PIN_NAME:-${LOCAL_MODEL_DIGEST:+${LOCAL_MODEL_NAME:-}}}
       LOCAL_MODEL_PIN_DIGEST: ${LOCAL_MODEL_PIN_DIGEST:-${LOCAL_MODEL_DIGEST:-}}
       NARRATION_TEXT_SHOWN: ${NARRATION_TEXT_SHOWN:-false}
     secrets:
