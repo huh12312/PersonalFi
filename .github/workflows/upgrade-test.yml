@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: MIT
+#
+# The unattended-upgrade test (WP 9.4; docs/plan/09-phase-9-dispatch.md §3,
+# v1.0's "unattended upgrade from v0.1 works"): v0.1 (d04669e) installed cold
+# and loaded through its own API, then the DIRECT JUMP to this commit by
+# `just upgrade` alone, with checks (i)–(vi), the cross-boundary restore and
+# the CF-2 rollback suite. The chain (W0 -> W1 -> … -> HEAD) runs locally at
+# each gate (`bash scripts/upgrade-test/run.sh --path chain`), not here: seven
+# image sets do not fit a runner's time budget.
+#
+# Triggers: by hand, weekly, and as a required predecessor of release.yml —
+# release.yml calls this workflow (`workflow_call`) and its build job
+# `needs:` it, so a tag whose direct jump is red never publishes an image.
+name: Upgrade test
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays 06:17 UTC — off the hour, after the weekend's dependency PRs.
+    - cron: '17 6 * * 1'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upgrade-test-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  direct-jump:
+    name: v0.1 -> this commit, by `just upgrade` alone
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # `git archive d04669e` needs the history, not a shallow clone.
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: npm install --global pnpm@12.4.1
+      - run: pnpm install --frozen-lockfile
+      # The driver runs passkey ceremonies in the repo's own Playwright Chromium.
+      - run: pnpm --filter @app/web exec playwright install --with-deps chromium
+      - name: install just
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq just
+          just --version
+      - name: the placeholder script's self-test
+        run: bash scripts/secrets-placeholders.sh --self-test
+      - name: direct jump W0 -> HEAD (detached, polled)
+        env:
+          WORK: ${{ runner.temp }}/wp94
+        run: |
+          mkdir -p "$WORK"
+          setsid nohup bash scripts/upgrade-test/run.sh --path direct --keep \
+            > "$WORK/direct.log" 2>&1 < /dev/null &
+          pid=$!
+          while kill -0 "$pid" 2>/dev/null; do
+            sleep 30
+            grep -E 'step .*: (start|done)|FATAL|FAILED|RESULT' "$WORK/direct.log" | tail -3 || true
+          done
+          wait "$pid"
+      - name: report
+        if: always()
+        env:
+          WORK: ${{ runner.temp }}/wp94
+        run: |
+          cat "$WORK/runs/direct/report.md" >> "$GITHUB_STEP_SUMMARY" || true
+          tail -60 "$WORK/direct.log" || true
+      - name: teardown
+        if: always()
+        env:
+          WORK: ${{ runner.temp }}/wp94
+        run: bash scripts/upgrade-test/run.sh --path direct --teardown || true

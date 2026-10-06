@@ -122,6 +122,30 @@ services:
     command: ['sleep', 'infinity']
     networks: [llm-pull]
 
+  # WP 9.4 (CF-3) — the pre-migration backup, broken every way the gate
+  # refuses: root, a writable rootfs, an added capability, no cap_drop, no
+  # no-new-privileges, and a writable mount of a volume it does not own.
+  pre-migrate-backup:
+    image: alpine:3.24
+    user: '0:0'
+    read_only: false
+    cap_add: [DAC_OVERRIDE]
+    command: ['true']
+    volumes:
+      - pgdata:/stolen-pgdata-too
+
+  # ... and a migrator that waits only for it to START, so a failed or
+  # half-written backup would be raced by the first migration.
+  migrator:
+    image: alpine:3.24
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    command: ['true']
+    depends_on:
+      pre-migrate-backup: { condition: service_started }
+
 networks:
   backend: {}
   # Not internal: the model's network would route off the host.

@@ -29,8 +29,11 @@ RUN apk add --no-cache \
     adduser -u 10002 -S -G backup -H -D -s /sbin/nologin backup && \
     mkdir -p /backups && chown 10002:10002 /backups
 
+# pre-migrate.sh (WP 9.4, CF-3) is the `pre-migrate-backup` one-shot's command:
+# one backup.sh run before the migrator, only when migrations are pending
+# against a non-empty schema. Same image, same tools, same user.
 COPY --chmod=755 backup/backup.sh backup/restore.sh backup/backup-loop.sh \
-     backup/healthcheck.sh /usr/local/bin/
+     backup/healthcheck.sh backup/pre-migrate.sh /usr/local/bin/
 
 USER 10002:10002
 WORKDIR /backups

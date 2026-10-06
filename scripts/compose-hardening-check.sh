@@ -105,6 +105,8 @@ EXPECTED_RULES=(
   llm-network-not-internal
   llm-network-member
   ollama-pull-network-shared
+  # WP 9.4 (CF-3): the pre-migration backup gate.
+  migrator-missing-pre-migrate-backup
 )
 
 # WP 5.2: rule ids alone could all fire on one service and still leave a
@@ -126,6 +128,16 @@ EXPECTED_SERVICE_RULES=(
   $'ollama-pull\tollama-pull-network-shared'
   $'ollama-pull\tollama-missing-profile'
   $'hostile-pull-peer\tollama-pull-network-shared'
+  # WP 9.4 (CF-3): a `pre-migrate-backup` running as root, writable, or with
+  # capabilities is refused; a migrator that merely waits for it to *start*
+  # is refused.
+  $'pre-migrate-backup\troot-user'
+  $'pre-migrate-backup\tmissing-read-only'
+  $'pre-migrate-backup\tcap-add'
+  $'pre-migrate-backup\tmissing-cap-drop-all'
+  $'pre-migrate-backup\tmissing-no-new-privileges'
+  $'pre-migrate-backup\twritable-volume-wrong-service'
+  $'migrator\tmigrator-missing-pre-migrate-backup'
 )
 
 EVALUATOR="$(mktemp -t compose-hardening-XXXXXX.mjs)"
@@ -175,6 +187,12 @@ const EXCEPTIONS = new Map([
 const WRITABLE_NAMED_VOLUMES = new Map([
   ['pgdata:db', 'postgres data directory'],
   ['backups:backup', 'encrypted nightly dumps'],
+  [
+    'backups:pre-migrate-backup',
+    'WP 9.4 (CF-3): the one-shot pre-migration backup writes the same age-encrypted ' +
+      'artifact into the same volume, before `migrator` may start; same image, same uid ' +
+      '10002, and it holds the age recipient only, so it cannot read what it wrote.',
+  ],
   ['caddy_data:proxy', "Caddy's internal-CA key material and issued certificates"],
   ['caddy_config:proxy', "Caddy's autosaved config snapshot"],
   [
@@ -411,6 +429,30 @@ for (const [service, spec] of Object.entries(services)) {
 
   if (spec.user === undefined || spec.user === null || isRootUser(spec.user)) {
     report(service, 'root-user', `user is ${spec.user === undefined ? 'unset (root)' : JSON.stringify(spec.user)}`);
+  }
+}
+
+// ---------- WP 9.4 (CF-3): no migration without the pre-migration backup ----------
+//
+// "Migrations never run without a backup taken first" (09 §5 item 4) is a
+// property of the dependency graph, so it is asserted on the graph: any file
+// that defines a `migrator` must also define `pre-migrate-backup`, and the
+// migrator must wait for it to COMPLETE SUCCESSFULLY — `service_started` or
+// `service_healthy` would let a failed or still-running backup be raced. The
+// service's own hardening (non-root, read-only, cap_drop ALL,
+// no-new-privileges) is held by the general rules above like every other
+// service; the hostile fixture breaks each of them on a `pre-migrate-backup`.
+if (services.migrator !== undefined) {
+  const dep = (services.migrator.depends_on ?? {})['pre-migrate-backup'];
+  if (services['pre-migrate-backup'] === undefined) {
+    report('migrator', 'migrator-missing-pre-migrate-backup', 'no `pre-migrate-backup` service is defined');
+  } else if (dep === undefined || dep.condition !== 'service_completed_successfully') {
+    report(
+      'migrator',
+      'migrator-missing-pre-migrate-backup',
+      `depends_on pre-migrate-backup is ${dep === undefined ? 'absent' : JSON.stringify(dep.condition)}; ` +
+        'it must be service_completed_successfully so a failed backup blocks every migration',
+    );
   }
 }
 

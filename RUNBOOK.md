@@ -595,19 +595,87 @@ you would for a first install, _then_ import.
 ## Upgrade
 
 ```bash
-git pull
-just build          # rebuild api/backup/proxy images against the new source
-just backup          # take a fresh backup before touching anything running
-docker compose up -d --wait   # migrator runs to completion before api/worker start
-docker compose ps
+git pull && just upgrade
 ```
 
-The `migrator` service is `restart: "no"`, gated into the dependency graph via
-`depends_on: {condition: service_completed_successfully}` on `api` and
-`worker` — neither starts against a mid-migration schema. If a migration
-fails, `api`/`worker` simply never start; `docker compose logs migrator` has
-the reason, and the previous image tag is still on disk to roll back to
-(`docker compose up -d` with `PERSONALFI_VERSION` pinned to the prior value).
+That is the whole upgrade, from any earlier release — including v0.1 — to this
+one, skipping as many releases as you like (WP 9.4 proves it on every release
+tag: `.github/workflows/upgrade-test.yml`, and the chain through every gate
+commit at each gate: `bash scripts/upgrade-test/run.sh --path chain`). If you
+pin images by version (`PERSONALFI_VERSION` in `.env`, required for the
+production install), set it to the commit you pulled, in the same edit:
+`PERSONALFI_VERSION=<sha> just upgrade`. Build from the checkout you pulled —
+never point a checkout at images built from a different one.
+
+**What is automatic** — every step that used to be a hand step:
+
+1. **New secrets.** `scripts/secrets-placeholders.sh` creates every _optional_
+   secret `compose.yml` declares that your install predates, **empty** (mode
+   0444). An empty file is the same as no file to the app: the feature stays
+   off until you write a real value (then `just harden-secrets`). It never
+   overwrites a file, keeps `secrets/` at 0700, and **refuses** — before
+   writing anything — if a _required_ secret (`database_url`, `pg_password`,
+   `master_key`, `age_recipient`) is missing or empty. A v0.1 install is
+   missing eleven optional files; without this, `docker compose up` stops at
+   `secret … file not found`.
+2. **The build** of `api`/`worker`/`migrator`, `backup` and `proxy` from the
+   checkout.
+3. **The pre-migration backup.** `docker compose up -d --wait` starts the
+   `pre-migrate-backup` one-shot before the migrator. When migrations are
+   pending against a database that has any, it takes one full backup — the
+   same verified, age-encrypted `personalfi-<UTC timestamp>.dump.age` the
+   nightly loop writes, into the same `backups` volume — plus a
+   `personalfi-<timestamp>.pre-migrate` note naming what was applied and what
+   was about to be. **If the backup fails, the migrator does not run, and
+   neither do the new `api`/`worker`** (`migrator` waits on it
+   `service_completed_successfully`). With nothing pending it exits at once. A
+   separate `just backup` is no longer needed.
+4. **Migrations.** The `migrator` one-shot applies whatever is pending and
+   exits; `api` and `worker` start only after it completes. It **refuses a
+   database that is newer than the code** — one holding a migration this
+   checkout does not have — with `migration.database_newer`, naming the
+   version, and `/ready` stays false on any `api` pointed at such a database.
+5. **The checks.** `/ready` must answer 200, and after a settle period `api`
+   and `worker` must still be running with a restart count of 0. The recipe
+   prints the up-to-ready time and the pre-migration backup's outcome, and
+   exits non-zero if any of this fails.
+
+**If it fails**, the recipe prints the last lines of `pre-migrate-backup` and
+`migrator`; `docker compose logs pre-migrate-backup migrator` has the rest.
+A failure at step 1 or 2 changes nothing: the old version keeps serving. A
+failure at step 3 or 4 changes nothing in the database either (a failed
+pre-migration backup means no migration ran; a refused or failed migration
+rolls itself back), but by then Compose has replaced the old `api` and `worker`
+containers, so the app stays **down** until you fix the cause and run `just
+upgrade` again — or roll back as below. It is never left serving a schema its
+code does not match. Step 5 fails after a successful migration: the new
+version is running; read why `api`/`worker` restarted, or why `backup` is
+unhealthy, before anything else.
+
+**Rollback is "restore the pre-migration backup"** — never "pin the prior
+image". Migrations are forward-only, and an older binary refuses the newer
+schema (step 4), so the old advice now fails safe instead of serving a schema
+the old code does not know. To go back to where you were before an upgrade:
+
+```bash
+git checkout <the commit you were on>      # the code that matches the backup
+docker compose stop api worker proxy backup
+docker compose run --rm --no-deps --entrypoint ls backup -1 /backups
+# pick personalfi-<timestamp>.dump.age next to the newest .pre-migrate note, then
+# restore it exactly as "Restore" below says (FORCE_RESTORE=1, your age identity):
+docker compose run --rm --no-deps \
+  -v /tmp/age-identity.txt:/run/age_identity:ro \
+  -e AGE_IDENTITY_FILE=/run/age_identity -e FORCE_RESTORE=1 \
+  backup /usr/local/bin/restore.sh /backups/personalfi-<timestamp>.dump.age
+just upgrade                                 # or `docker compose up -d --wait` on a
+                                             # checkout older than this section
+```
+
+Anything written between the backup and the rollback is lost — which is why the
+backup is taken immediately before the first migration, not the night before.
+(WP 9.4's evidence walks exactly this: an upgrade to a release one migration
+ahead, the old image refused, the pre-migration backup restored, `just
+upgrade` back to current, every fact intact.)
 
 A Postgres **major-version** upgrade (e.g. 18 -> 19) is a dump/restore
 project, not a `docker compose up` — take a backup, stand up the new major

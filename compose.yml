@@ -600,6 +600,53 @@ services:
       # crash loop; `regate-worker-boot.test.ts` now pins limit > KEK memory.
       resources: { limits: { cpus: '1.0', memory: 1536M } }
 
+  # CF-3 (WP 9.4; 09 §5.7 "automatic and mandatory"): the pre-migration
+  # backup. A one-shot on the backup image that runs `docker/backup/
+  # pre-migrate.sh` on every `up`, between `db` healthy and `migrator`: when
+  # migrations are pending against a non-empty schema it takes one full,
+  # verified, age-encrypted backup.sh run into the `backups` volume (plus a
+  # `.pre-migrate` marker naming what was applied and what is about to be);
+  # otherwise it exits 0 at once. `migrator` depends on it
+  # `service_completed_successfully`, so a failed backup means no migration —
+  # and so no new api/worker either. Rollback is "restore this backup"
+  # (RUNBOOK "Upgrade"), never "pin the prior image" (CF-2 refuses that).
+  #
+  # Hardened like `backup` (non-root 10002, read-only rootfs, cap_drop ALL,
+  # no-new-privileges); the second writer of `backups`
+  # (`compose-hardening-check.sh`'s WRITABLE_NAMED_VOLUMES names both). The
+  # checkout's migration list is bind-mounted read-only so "pending" is
+  # computed exactly as `migrate.ts` computes it (set membership); no B2
+  # secret and no RCLONE_REMOTE — local only. Does not need `ops_backup_runs`
+  # (WP 9.1): it runs against every older schema.
+  pre-migrate-backup:
+    <<: *common
+    image: ${REGISTRY:-personalfi}/backup:${PERSONALFI_VERSION:-dev}
+    restart: 'no'
+    networks: [backend]
+    user: '10002:10002'
+    command: ['/usr/local/bin/pre-migrate.sh']
+    environment:
+      TZ: UTC
+      PGHOST: db
+      PGUSER: personalfi
+      PGDATABASE: personalfi
+      PGPASSWORD_FILE: /run/secrets/pg_password
+      AGE_RECIPIENTS_FILE: /run/secrets/age_recipient
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      MIGRATIONS_DIR: /migrations
+    secrets: [pg_password, age_recipient]
+    volumes:
+      - backups:/backups
+      - ./packages/db/migrations:/migrations:ro
+    tmpfs: ['/tmp:size=256m,mode=1777,noexec,nosuid,nodev']
+    # A one-shot: the image's HEALTHCHECK asks whether the nightly loop is
+    # running, which this never is.
+    healthcheck: { disable: true }
+    depends_on:
+      db: { condition: service_healthy }
+    deploy:
+      resources: { limits: { cpus: '0.50', memory: 256M } }
+
   migrator:
     <<: *app-image
     restart: 'no'
@@ -630,6 +677,8 @@ services:
     user: '10001:10001'
     depends_on:
       db: { condition: service_healthy }
+      # CF-3 (WP 9.4): no migration without the pre-migration backup first.
+      pre-migrate-backup: { condition: service_completed_successfully }
 
   db:
     <<: *common

@@ -86,6 +86,39 @@ export function readMigrationFiles(dir: string = DEFAULT_MIGRATIONS_DIR): Migrat
   });
 }
 
+/**
+ * CF-2 (09-phase-9-dispatch.md §2b, WP 9.4): refuse a database that has applied a
+ * migration this binary does not carry. That database was migrated by a newer
+ * release, and an older binary serving it would read and write a schema it does
+ * not know — which is exactly what "pin the prior image" rollback used to do,
+ * silently, with `/ready` green.
+ *
+ * "Newer" is SET MEMBERSHIP: an applied version with no file on disk. Never a
+ * maximum-version comparison — Phase 9's migrations land on production in landing
+ * order, not number order (0036 before 0035), and a max comparison would both
+ * lock out a legitimately out-of-order install and miss a database holding a
+ * version this binary skipped while carrying a higher one
+ * (`packages/db/test/migrate-newer.test.ts`).
+ */
+function refuseDatabaseNewer(
+  applied: ReadonlyArray<{ version: string; name?: string | null }>,
+  files: readonly MigrationFile[],
+): void {
+  const onDisk = new Set(files.map((file) => file.version));
+  const unknown = applied
+    .filter((row) => !onDisk.has(row.version))
+    .map((row) => (row.name ? `${row.version}_${row.name}` : row.version))
+    .sort();
+  if (unknown.length === 0) return;
+  throw new MigrationError(
+    'migration.database_newer',
+    `migration.database_newer: the database has applied ${unknown.join(', ')}, which this ` +
+      'binary does not carry — it was migrated by a newer release. Refusing to migrate or ' +
+      'serve it: an older binary never runs against a newer schema. Run the release that ' +
+      'applied it, or roll back by restoring the pre-migration backup (RUNBOOK.md "Upgrade").',
+  );
+}
+
 const BOOTSTRAP_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version      TEXT        PRIMARY KEY,
@@ -133,6 +166,9 @@ export async function runMigrations(options: RunMigrationsOptions): Promise<RunM
       'SELECT version, name, checksum FROM schema_migrations ORDER BY version',
     );
     const alreadyApplied = new Map(rows.map((row) => [row.version, row]));
+    // Before anything else, including --dry-run: a refusal is the answer to
+    // "what would run" as much as to "run it".
+    refuseDatabaseNewer(rows, files);
 
     const pending: string[] = [];
     for (const file of files) {
@@ -202,22 +238,29 @@ export interface MigrationQueryable {
  * Migrations on disk that the database has not applied. `/ready` stays false
  * while this is non-empty, so a container never serves traffic against a schema
  * it does not match.
+ *
+ * CF-2: a database holding a version this binary lacks is not "nothing pending" —
+ * this rejects with `migration.database_newer`, naming the version, so `/ready`
+ * stays false for an older image pointed at a newer schema too.
  */
 export async function pendingMigrations(
   queryable: MigrationQueryable,
   migrationsDir: string = DEFAULT_MIGRATIONS_DIR,
 ): Promise<string[]> {
   const files = readMigrationFiles(migrationsDir);
-  let applied: Set<string>;
+  let rows: ReadonlyArray<{ version: string; name: string | null }>;
   try {
-    const result = (await queryable.query('SELECT version FROM schema_migrations')) as {
-      rows: ReadonlyArray<{ version: string }>;
+    const result = (await queryable.query('SELECT version, name FROM schema_migrations')) as {
+      rows: ReadonlyArray<{ version: string; name: string | null }>;
     };
-    applied = new Set(result.rows.map((row) => row.version));
+    rows = result.rows;
   } catch {
     // The bookkeeping table does not exist yet: everything is pending.
-    applied = new Set();
+    rows = [];
   }
+  // Outside the try: the refusal must never be read as "table missing".
+  refuseDatabaseNewer(rows, files);
+  const applied = new Set(rows.map((row) => row.version));
   return files
     .filter((file) => !applied.has(file.version))
     .map((file) => `${file.version}_${file.name}`);
