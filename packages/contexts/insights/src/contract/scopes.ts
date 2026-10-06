@@ -102,7 +102,26 @@ export interface ScopeDefinition {
   readonly drops: string;
   /** `false` ⇒ never emitted to an `external` advisor, however it was granted. */
   readonly externalAllowed: boolean;
-  /** `true` ⇒ needs a per-run consent record, not just a standing grant. */
+  /**
+   * `true` ⇒ a `local_model` or `external` advisor needs a per-run consent
+   * record for this scope, not just a standing grant — the data is about to
+   * leave the process (to a model or an API), and the holder re-affirms that
+   * for this run.
+   *
+   * **Never gates a `builtin` advisor.** A built-in is in-process: it reads
+   * this scope and writes insights back to the same database row its
+   * standing grant already authorised — nothing crosses a process boundary
+   * for a per-run consent to be *about*. Phase 5 shipped S1 and S5
+   * (`category_anomaly`, `new_merchant_high_charge`, both `builtin`)
+   * declaring `transactions.anomalies`, which carries this flag for the
+   * `local_model`/`external` case; no run path (the nightly fan-out,
+   * `POST /advisors/run`, the Brief) has ever supplied a built-in run with a
+   * per-run consent, so both rules produced zero proposals on every install,
+   * silently (Phase 5 gate G5-5, condition C5-3). `effectiveRunScopes`
+   * (`preview.ts`) is the one place this flag is read, and it reads it only
+   * for `manifest.kind !== 'builtin'` — the Phase 4 gate's G4-22 per-run
+   * consent for `local_model`/`external` stays exactly as strict as it was.
+   */
   readonly requiresPerRunConsent: boolean;
   readonly minimisation: ScopeMinimisation;
   /**
@@ -445,6 +464,12 @@ export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
     // `transactions.raw` carries it — an individual, exact-amount row is a
     // fingerprint, and this scope is one even more exact than that one:
     // nothing here is bucketed, because a masked outlier is not an outlier.
+    //
+    // `requiresPerRunConsent: true` stays, for the `local_model`/`external`
+    // case the flag exists for (see its doc above) — but as of WP 9.3
+    // (C5-3/G5-5) it no longer gates the `builtin` readers of this scope (S1,
+    // S5 above), which had no run path that could ever supply the per-run
+    // consent they were asking for, and so never fired on a real install.
     scope: 'transactions.anomalies',
     sensitivity: 8,
     key: 'transactions_anomalies',

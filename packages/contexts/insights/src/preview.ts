@@ -57,7 +57,18 @@ export function requiresPayloadApproval(kind: AdvisorKind): boolean {
  * The scopes a run will actually carry: what the holder granted, narrowed to
  * what the manifest asked for, to what the kind may hold, and — Phase 4 gate
  * G4-22 — never a `requiresPerRunConsent` scope without a consent for *this*
- * run. A standing grant of such a scope is not enough; the run path drops it.
+ * run, **for a `local_model` or `external` advisor**. A standing grant of such
+ * a scope is not enough for either of those; the run path drops it.
+ *
+ * Phase 5 gate C5-3/G5-5: a `builtin` advisor never leaves the process, so a
+ * per-run consent has nothing to be *about* — its standing grant already
+ * authorised exactly what it does with the scope (read it, write insights
+ * back). Gating a built-in on a per-run consent no run path ever supplies
+ * (not the nightly fan-out, not `POST /advisors/run`, not the Brief) is what
+ * made S1 and S5 — `transactions.anomalies` — silently produce zero
+ * proposals on every install. See `contract/scopes.ts`'s
+ * `requiresPerRunConsent` doc for the reasoning; this is the one place that
+ * reads it.
  *
  * Catalogue order, like `SnapshotBuilder.effectiveScopes`, which it calls.
  */
@@ -70,7 +81,9 @@ export function effectiveRunScopes(
   const requested = grants.filter(
     (scope) =>
       manifest.requires_scopes.includes(scope) &&
-      (!scopeDefinition(scope).requiresPerRunConsent || consented.has(scope)),
+      (!scopeDefinition(scope).requiresPerRunConsent ||
+        manifest.kind === 'builtin' ||
+        consented.has(scope)),
   );
   return SnapshotBuilder.effectiveScopes(manifest.kind, requested);
 }
@@ -386,13 +399,52 @@ export async function revokePayloadApprovals(
 // The run inspector's half: what was sent, verified rather than trusted
 // ---------------------------------------------------------------------------
 
+export interface CanonicalRunInput {
+  readonly snapshot: unknown;
+  /** Set only for a narrator's request (contract 1.5.0); absent otherwise. */
+  readonly findings?: unknown;
+  readonly granted_scopes: readonly string[];
+}
+
+/**
+ * The digest `advisor_runs.input_digest` records, and the one
+ * `inspectRunPayload` below re-derives from the retained bytes — the whole
+ * canonical request the advisor actually read this run: its snapshot, its
+ * findings envelope (set only for a narrator — `advisors/local/request.ts`'s
+ * header) and the scopes it was granted.
+ *
+ * Phase 5 gate G5-16: before this, `advisor_runs.input_digest` was
+ * `inputDigest(snapshot)` alone. A narrator's `snapshot` is always `{}` by
+ * design, so every narrator run carried the *same* digest regardless of what
+ * it was actually sent, and the inspector's "Verified" mark was observed
+ * live to survive a tampered `findings` envelope. One function, called from
+ * `service.ts` at run time and from `inspectRunPayload` over the retained
+ * bytes, is what stops the two ever computing it two different ways — the
+ * fix is never trusting the stored value, it is recomputing it the one way
+ * this is defined.
+ *
+ * Deliberately **not** the whole `AdvisorRequest`: `request_id`,
+ * `generated_at` and `limits.deadline` are fresh every run even when nothing
+ * about what was read changed, and folding them in would turn every
+ * `insights.input_digest` ("what this insight stood on") into a value that
+ * churns for no reason — exactly the kind of digest a reviewer stops
+ * trusting.
+ */
+export function canonicalRunDigest(input: CanonicalRunInput): string {
+  return inputDigest({
+    snapshot: input.snapshot,
+    findings: input.findings ?? null,
+    granted_scopes: [...input.granted_scopes],
+  });
+}
+
 export interface RetainedPayloadInspection {
   readonly runId: string;
   readonly advisorId: string;
   readonly queryShape: string;
   /** `advisor_runs.input_digest` — computed before the call; the authority. */
   readonly recordedDigest: string | null;
-  /** `inputDigest(payload.snapshot)`, recomputed now from the stored bytes. */
+  /** `canonicalRunDigest` over the stored bytes, recomputed now — never trusted. */
   readonly recomputedDigest: string;
   /** The two agree. A retained payload that does not verify is shown as such, never as evidence. */
   readonly verified: boolean;
@@ -402,8 +454,11 @@ export interface RetainedPayloadInspection {
 
 /**
  * Read a retained payload and re-digest it against the run's own
- * `input_digest`. `null` when the run retained nothing (a builtin) or the
- * payload has passed its 30-day bound.
+ * `input_digest`, over the **whole** canonical request — `snapshot`,
+ * `findings` and `granted_scopes` — via `canonicalRunDigest`, never over
+ * `snapshot` alone (G5-16: that left a narrator's digest meaningless, since
+ * its `snapshot` is always `{}`). `null` when the run retained nothing (a
+ * builtin) or the payload has passed its 30-day bound.
  */
 export async function inspectRunPayload(
   executor: InsightsExecutor,
@@ -414,7 +469,16 @@ export async function inspectRunPayload(
   const stored = await findRunPayload(executor, userId, runId, now);
   if (stored === null) return null;
   const run = await findRun(executor, userId, runId);
-  const recomputed = inputDigest((stored.payload as { snapshot?: unknown }).snapshot ?? null);
+  const payload = stored.payload as {
+    readonly snapshot?: unknown;
+    readonly findings?: unknown;
+    readonly granted_scopes?: readonly string[];
+  };
+  const recomputed = canonicalRunDigest({
+    snapshot: payload.snapshot ?? null,
+    findings: payload.findings,
+    granted_scopes: payload.granted_scopes ?? [],
+  });
   const recorded = run?.inputDigest ?? null;
   return {
     runId,

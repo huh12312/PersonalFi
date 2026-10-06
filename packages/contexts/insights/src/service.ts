@@ -96,6 +96,7 @@ import { isSuppressed } from './policy/cooldown.ts';
 import type { PromptRenderer } from './ports.ts';
 import {
   buildAdvisorRequest,
+  canonicalRunDigest,
   effectiveRunScopes,
   hasLiveApproval,
   requiresPayloadApproval,
@@ -464,15 +465,30 @@ export async function runAdvisor(
       : null;
     const prepared =
       narration ?? (await buildAdvisorRequest(dependencies, context, registered, opened.scopes));
-    built = prepared.built;
     const { request } = prepared;
+    // Phase 5 gate C5-5/G5-16: the digest this run records — the inspector's
+    // authority, and what every insight proposed this run "stood on" — must
+    // cover everything this request actually carried: its snapshot, its
+    // findings envelope (set only for a narrator) and the scopes it was
+    // granted. `prepared.built.inputDigest` alone is `inputDigest(snapshot)`,
+    // and a narrator's snapshot is always `{}` by design (`advisors/local/
+    // request.ts`), so every narrator run carried the *same* digest and a
+    // tampered findings envelope still re-digested clean. `canonicalRunDigest`
+    // is the one function that computes this, used here and by
+    // `inspectRunPayload` below — never two implementations of the same
+    // check.
+    const corrected: BuiltSnapshot = {
+      ...prepared.built,
+      inputDigest: canonicalRunDigest(request),
+    };
+    built = corrected;
     if (narration !== null && narration.findingCount === 0) {
       // Nothing the narrator may see: no prompt, no model call, no payload.
       return await closeNothingToNarrate(database, context, {
         runId: opened.runId,
         advisorId: manifest.advisor_id,
         durationMs: clock.now().getTime() - startedAt,
-        built: prepared.built,
+        built: corrected,
       });
     }
 
@@ -549,14 +565,14 @@ export async function runAdvisor(
         kind: manifest.kind,
         errorCode: `${outcome.rejection.step}:${outcome.rejection.reason}`,
         durationMs: clock.now().getTime() - startedAt,
-        inputDigest: prepared.built.inputDigest,
-        grantedScopes: prepared.built.grantedScopes,
-        emittedScopes: prepared.built.emittedScopes,
+        inputDigest: corrected.inputDigest,
+        grantedScopes: corrected.grantedScopes,
+        emittedScopes: corrected.emittedScopes,
       });
     }
 
     // --- transaction 2: the write barrier, suppression, the writes, the close
-    const snapshot = prepared.built;
+    const snapshot = corrected;
     return await database.transaction(async (tx): Promise<RunAdvisorResult> => {
       // The write barrier. Every switch, re-read under the `advisors` row lock
       // every level-3/4 writer also takes, before anything is written. A kill

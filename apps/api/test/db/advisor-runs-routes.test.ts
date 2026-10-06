@@ -19,11 +19,11 @@
  */
 import { newId, systemClock } from '@core/kernel';
 import {
+  canonicalRunDigest,
   createBuiltinRegistry,
   effectiveRunScopes,
   findRun,
   grantScopes,
-  inputDigest,
   registerAdvisor,
   retainRunPayload,
   shapeFor,
@@ -248,11 +248,17 @@ describe.skipIf(NO_DATABASE)('/advisors/{id}/runs and the run inspector (WP 5.10
 
     beforeAll(async () => {
       const snapshot = { cash_summary: { totalMinor: '1000', currency: 'USD' } };
-      const digest = inputDigest(snapshot);
+      const grantedScopes = ['cash.summary'];
+      // C5-5 (G5-16): the digest covers the whole canonical request — here,
+      // `snapshot` and `granted_scopes`, the same two fields the retained
+      // payload below carries. Computed through the production
+      // `canonicalRunDigest` (never re-derived by this test) so this fixture
+      // cannot silently drift from what `inspectRunPayload` actually checks.
+      const digest = canonicalRunDigest({ snapshot, granted_scopes: grantedScopes });
       runId = await insertRun(h, h.userId, {
         status: 'completed',
         inputDigest: digest,
-        grantedScopes: ['cash.summary'],
+        grantedScopes,
         emittedScopes: ['cash.summary'],
         proposedCount: 1,
         acceptedCount: 0,
@@ -264,8 +270,8 @@ describe.skipIf(NO_DATABASE)('/advisors/{id}/runs and the run inspector (WP 5.10
         runId,
         advisorId: CASH_ADVISOR_ID,
         queryShape: 'sha256:' + 'b'.repeat(64),
-        payload: { snapshot },
-        payloadBytes: JSON.stringify({ snapshot }).length,
+        payload: { snapshot, granted_scopes: grantedScopes },
+        payloadBytes: JSON.stringify({ snapshot, granted_scopes: grantedScopes }).length,
       });
     });
 
