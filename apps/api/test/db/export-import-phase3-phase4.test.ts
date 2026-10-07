@@ -45,7 +45,7 @@
  * `plan_scenarios.baseline_id` were it a fork) inserts in the correct order
  * automatically, the same property `registry.ts`'s own header now documents.
  */
-import { newId } from '@core/kernel';
+import { DateOnly, Money, newId } from '@core/kernel';
 import { createTestDatabase, type TestDatabase } from '@core/testkit';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -53,7 +53,13 @@ import {
   parseAndVerifyBundle,
   serialiseBundle,
 } from '../../src/reports/export/bundle.ts';
-import { RISK_INSTRUMENT, RISK_INSTRUMENT_VERSION, deriveTolerance } from '@ctx/planning';
+import {
+  RISK_INSTRUMENT,
+  RISK_INSTRUMENT_VERSION,
+  deriveTolerance,
+  profileToJson,
+  type BaselineProfile,
+} from '@ctx/planning';
 import { importBundle } from '../../src/reports/export/import.ts';
 import { assertRegistryIsComplete } from '../../src/reports/export/registry.ts';
 import { createApiHarness, NO_DATABASE, type ApiHarness } from '../helpers/api-harness.ts';
@@ -248,10 +254,33 @@ describeWithDb('export/import — the Phase 3 + Phase 4 tables (Phase 3 gate C-7
         JSON.stringify({ 'capitalMarket.usEquity.expectedReturn': '0.055' }),
       ],
     );
+    // Stored exactly as the scenarios route stores it (`profileToJson` of a
+    // full profile): 9.11's O-11 re-validation parses the stored document
+    // through the route's own schema on import, and the old `{ birthDate }`
+    // stub was never a document that route could have written.
+    const baselineProfile: BaselineProfile = {
+      birthDate: DateOnly.parse('1985-06-15'),
+      retirementAge: 65,
+      planEndAge: 95,
+      currency: 'USD',
+      glidepath: { kind: 'age_based' },
+      contributionGrowth: 'wage',
+      annualSpending: Money.parseAmount('60000', 'USD'),
+      withdrawalPolicy: 'guardrails',
+      spendingFloor: 'essential_spend',
+      taxDeferredRate: '0.15',
+      socialSecurity: {
+        monthlyPia: Money.parseAmount('2800', 'USD'),
+        claimAge: { years: 67, months: 0 },
+        stressAfter2034: false,
+      },
+      pensions: [],
+      contributions: null,
+    };
     await pool.query(
       `INSERT INTO plan_scenarios (id, user_id, kind, name, profile, seed)
        VALUES ($1, $2, 'baseline', 'Baseline', $3, '123456789')`,
-      [scenarioId, h.userId, JSON.stringify({ birthDate: '1985-06-15' })],
+      [scenarioId, h.userId, JSON.stringify(profileToJson(baselineProfile))],
     );
     await pool.query(
       `INSERT INTO plan_life_events
