@@ -299,14 +299,7 @@ services:
       test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://127.0.0.1:8080/health']
       interval: 30s
       timeout: 3s
-      # WP 9.4 (wp9.4-upgrade.md §9 item 4): the api boots in ~24 s at HEAD (the
-      # KEK derivation), past the old 10 s start period, after which Docker
-      # probed only every `interval` — so `up --wait` (and `just upgrade`)
-      # reported healthy 5–7 s after /ready first answered. Probing every
-      # second for the first minute reports readiness when it happens. A
-      # failure inside start_period does not count toward `retries`.
-      start_period: 60s
-      start_interval: 1s
+      start_period: 10s
       retries: 3
     deploy:
       resources: { limits: { cpus: '0.50', memory: 128M } }
@@ -438,7 +431,17 @@ services:
         ]
       interval: 30s
       timeout: 3s
-      start_period: 20s
+      # WP 9.4 §9 item 4 / WP 9.9 P-3: the api's own /ready answers at ~19.5 s
+      # (Postgres 5 s, migrations 0.5 s, Node + buildApp 4 s, the Argon2 KEK
+      # derivation 6 s, first listen 1 s), i.e. just inside the old 20 s start
+      # period, after which Docker probed only every `interval` — so `up
+      # --wait` (and `just upgrade`) saw healthy 4.5–7 s after readiness.
+      # Probing every second for the first minute reports readiness when it
+      # happens. A failure inside start_period does not count toward `retries`.
+      # (The orchestrator first applied this to the proxy block by mistake;
+      # 9.9 caught it.)
+      start_period: 60s
+      start_interval: 1s
       retries: 3
     deploy:
       # 1.5G, not 768M: deriving the KEK is Argon2id at m = 1 GiB (P0-2's floor,

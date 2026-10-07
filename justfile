@@ -851,6 +851,10 @@ harden-secrets:
 # SOAK_EVIDENCE_DIR=<dev checkout>/docs/evidence/phase-9/soak (RUNBOOK
 # "Production install and the real-use soak").
 
+# Every skipIf in a perf test must name its reason (WP 9.9; CI prints the list)
+check-perf-skips:
+    node scripts/check-perf-skips.ts
+
 # Weekly soak report from the production clone (WP 9.1; orchestrator only)
 soak-report *args:
     bash scripts/soak/run-report.sh {{args}}
