@@ -27,11 +27,6 @@
 # available (trivy 0.74.0: 28 → 0 on the base image, 0 on the rebuilt proxy
 # image). docker/caddy.Dockerfile's pin was bumped; no xcaddy build was needed.
 # Renovate watches the digest from here.
-# source-map-js 1.2.1 (CVE-2026-93749, HIGH: DoS) — transitive devDependency
-# via postcss <- vite (apps/web build tooling); excluded from every image the
-# same way js-yaml was (api.Dockerfile installs --prod and removes apps/web).
-# The fix, 1.2.2, was published 2026-09-30T14:08Z and sits inside
-# pnpm-workspace.yaml's 7-day minimumReleaseAge until 2026-10-07T14:08Z; the
-# cooldown is the supply-chain control and is not bypassed for a dev-only DoS.
-# Snoozed 2026-10-06 (WP 9 Wave A landing); bump the lockfile when it matures.
-CVE-2026-93749 exp:2026-10-09  ## expires: 2026-10-09 — source-map-js 1.2.1 devDependency DoS; 1.2.2 matures 2026-10-07 under minimumReleaseAge
+# source-map-js 1.2.1 (CVE-2026-93749): snoozed 2026-10-06 while the fix sat
+# inside minimumReleaseAge; CLOSED 2026-10-07 by the lockfile bump to 1.2.2
+# (pnpm-workspace.yaml override). No suppression remains.
