@@ -100,7 +100,7 @@ describe('AssumptionsPanel', () => {
       screen.getByTestId('assumption-overridden-capitalMarket.usEquity.expectedReturn'),
     ).toHaveTextContent('overridden — default 0.065');
 
-    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    await user.click(screen.getByRole('button', { name: /^Edit/ }));
     const input = screen.getByLabelText(/Override Capital market/);
     await user.clear(input);
     await user.type(input, '0.08');
@@ -120,6 +120,45 @@ describe('AssumptionsPanel', () => {
         onOverride={vi.fn()}
       />,
     );
-    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Edit/ })).not.toBeInTheDocument();
+  });
+
+  it('offers edit only for a path the engine reads, and says so beside one it does not (O-5)', () => {
+    const cited = (value: string) => ({
+      value,
+      kind: 'nominal',
+      basis: null,
+      source: 'test',
+      asOf: '2026-01-01',
+      note: null,
+    });
+    const file = {
+      capitalMarket: {
+        usEquity: { expectedReturn: cited('0.065'), volatility: cited('0.17') },
+        tips: { expectedReturn: cited('0.02') },
+      },
+    } as unknown as ReturnType<typeof assumptionsFileFixture>;
+    render(
+      <AssumptionsPanel
+        file={file}
+        overrides={[]}
+        overridablePaths={[
+          'capitalMarket.usEquity.expectedReturn',
+          'capitalMarket.usEquity.volatility',
+          'capitalMarket.tips.expectedReturn',
+        ]}
+        version="assumptions-1"
+        onOverride={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByRole('button', { name: /^Edit/ })).toHaveLength(2);
+    expect(
+      screen.getByTestId('assumption-unused-capitalMarket.tips.expectedReturn'),
+    ).toHaveTextContent('Not used by the current engine');
+    // Read by Monte Carlo only: still editable, and says which engine reads it.
+    expect(screen.getByText('Monte Carlo only.')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('assumption-unused-capitalMarket.usEquity.expectedReturn'),
+    ).not.toBeInTheDocument();
   });
 });

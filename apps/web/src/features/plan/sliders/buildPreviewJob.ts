@@ -15,9 +15,9 @@
  * never be read as the saved plan's own number (D20 — the server, not this
  * panel, is authoritative). `startingBalance` itself has no server field to
  * read at all (a scenario's `profile` carries levers and policy, not current
- * balances — those live in net worth/investments, outside this WP's
- * ownership), so it is the panel's own slider, seeded from a placeholder
- * default when nothing better is known.
+ * balances), so it is the panel's own slider. WP 9.7 (G4-11) seeds it from the
+ * newest sealed net-worth day (`./sealedStart.ts`) and labels the placeholder
+ * default as one when there is no such day.
  */
 import type { BaselineScenario } from '../../../api/generated/types.gen.ts';
 import type { EngineGlidepath } from '../../../workers/kernel/glidepath.ts';
@@ -81,8 +81,38 @@ function toEngineGlidepath(
   return { kind: glidepath.kind };
 }
 
-/** Sensible defaults for every lever, seeded from `scenario.profile` where it says something. */
-export function defaultLevers(scenario: BaselineScenario | undefined): SliderLevers {
+/** Which levers the saved plan states, and which fall back to this panel's own placeholder (G4-11). */
+export interface LeverSources {
+  readonly annualSpending: 'plan' | 'placeholder';
+  readonly monthlySavings: 'plan' | 'placeholder';
+}
+
+export function leverSources(scenario: BaselineScenario | undefined): LeverSources {
+  const profile = scenario?.profile;
+  const contributions = profile?.contributions ?? null;
+  const savesAnything =
+    contributions !== null &&
+    (['TAXABLE', 'TAX_DEFERRED', 'ROTH', 'HSA'] as const).some(
+      (bucket) => contributions[bucket] !== undefined && Number(contributions[bucket].minor) > 0,
+    );
+  return {
+    annualSpending:
+      profile?.annualSpending !== null && profile?.annualSpending !== undefined
+        ? 'plan'
+        : 'placeholder',
+    monthlySavings: savesAnything ? 'plan' : 'placeholder',
+  };
+}
+
+/**
+ * Sensible defaults for every lever, seeded from `scenario.profile` where it says something.
+ * `startingBalance` is the newest sealed day's investable balance when the caller has one
+ * (`./sealedStart.ts`); otherwise it is the placeholder, and the panel says so.
+ */
+export function defaultLevers(
+  scenario: BaselineScenario | undefined,
+  sealedStartingBalance?: number,
+): SliderLevers {
   const profile = scenario?.profile;
   const annualSpending =
     profile?.annualSpending !== null && profile?.annualSpending !== undefined
@@ -105,7 +135,7 @@ export function defaultLevers(scenario: BaselineScenario | undefined): SliderLev
       monthlySavingsAnnual !== null && monthlySavingsAnnual > 0
         ? Math.round(monthlySavingsAnnual / 12)
         : DEFAULT_MONTHLY_SAVINGS,
-    startingBalance: DEFAULT_STARTING_BALANCE,
+    startingBalance: sealedStartingBalance ?? DEFAULT_STARTING_BALANCE,
   };
 }
 

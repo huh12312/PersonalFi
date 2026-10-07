@@ -37,9 +37,17 @@ import {
   type ProjectionClient,
 } from '../../../workers/projection-client.ts';
 import { useProjectionQuery } from '../api.ts';
-import { buildPreviewJob, defaultLevers, type SliderLevers } from './buildPreviewJob.ts';
+import { isProbabilistic, SINGLE_PATH_OUTCOME_WORDS, singlePathOutcome } from '../engine.ts';
+import {
+  buildPreviewJob,
+  defaultLevers,
+  leverSources,
+  type SliderLevers,
+} from './buildPreviewJob.ts';
 import { FALLBACK_DEBOUNCE_MS, PREVIEW_PATHS, REFINE_PATHS } from './defaults.ts';
+import { PLACEHOLDER_REASON_WORDS } from './sealedStart.ts';
 import { SliderField } from './SliderField.tsx';
+import { useSealedStart } from './useSealedStart.ts';
 
 export interface GoalSlidersProps {
   readonly scenario: BaselineScenario;
@@ -71,7 +79,13 @@ function randomSeed64(): bigint {
 
 export function GoalSliders({ scenario }: GoalSlidersProps) {
   const [client, setClient] = useState<ProjectionClient | null>(null);
-  const [levers, setLevers] = useState<SliderLevers>(() => defaultLevers(scenario));
+  // What the holder has changed by hand; everything else is the saved plan's own, or the sealed
+  // starting balance (G4-11), re-derived each render so it follows the series query when it settles.
+  const [edited, setEdited] = useState<Partial<SliderLevers>>({});
+  const sealedStart = useSealedStart();
+  const sealedAmount = sealedStart.source.kind === 'sealed' ? sealedStart.source.amount : undefined;
+  const levers: SliderLevers = { ...defaultLevers(scenario, sealedAmount), ...edited };
+  const sources = leverSources(scenario);
   const [bands, setBands] = useState<ProjectionBands | null>(null);
   const [phase, setPhase] = useState<Phase>('previewing');
   const [fallbackFetching, setFallbackFetching] = useState(false);
@@ -105,6 +119,10 @@ export function GoalSliders({ scenario }: GoalSlidersProps) {
   );
 
   const available = client?.available ?? false;
+  const startingBalanceMax = Math.max(
+    2_000_000,
+    Math.ceil((levers.startingBalance * 1.25) / 100_000) * 100_000,
+  );
 
   function runPreview(nextLevers: SliderLevers, paths: number, committed: boolean): void {
     if (client === null || !client.available) return;
@@ -133,7 +151,7 @@ export function GoalSliders({ scenario }: GoalSlidersProps) {
 
   function handleChange(patch: Partial<SliderLevers>): void {
     const next = { ...levers, ...patch };
-    setLevers(next);
+    setEdited((previous) => ({ ...previous, ...patch }));
     if (available) {
       runPreview(next, PREVIEW_PATHS, false);
     } else {
@@ -143,7 +161,7 @@ export function GoalSliders({ scenario }: GoalSlidersProps) {
 
   function handleCommit(patch: Partial<SliderLevers>): void {
     const next = { ...levers, ...patch };
-    setLevers(next);
+    setEdited((previous) => ({ ...previous, ...patch }));
     if (available) {
       runPreview(next, REFINE_PATHS, true);
     } else {
@@ -155,10 +173,11 @@ export function GoalSliders({ scenario }: GoalSlidersProps) {
   // before the first drag rather than an empty state — reacting to an external system (the
   // worker) becoming available, not a value derivable during render.
   useEffect(() => {
+    // Waits for the sealed-balance lookup to settle, so the first figure on screen is not one it replaces.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- `runPreview` calls `setPhase` synchronously before its async `client.run` resolves; see this effect's own comment.
-    if (available && bands === null) runPreview(levers, PREVIEW_PATHS, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per worker becoming available
-  }, [available]);
+    if (available && sealedStart.ready && bands === null) runPreview(levers, PREVIEW_PATHS, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per worker becoming available and the lookup settling
+  }, [available, sealedStart.ready]);
 
   const lastYearIndex = bands === null ? -1 : bands.years - 1;
   const lastAge = bands === null ? null : bands.startAge + lastYearIndex;
@@ -169,6 +188,11 @@ export function GoalSliders({ scenario }: GoalSlidersProps) {
       : (bands.bands[lastYearIndex + bands.years * p50Index] ?? null);
   const successProbability =
     bands === null || bands.paths === 0 ? null : bands.successCount / bands.paths;
+
+  // The starting balance is the preview's one money input the holder never typed: when it is the
+  // placeholder, every sentence it feeds is an illustration and says so.
+  const illustrationOnly =
+    sealedStart.source.kind === 'placeholder' && edited.startingBalance === undefined;
 
   const statusText = useMemo(() => {
     if (!available) {
@@ -234,13 +258,28 @@ export function GoalSliders({ scenario }: GoalSlidersProps) {
           label="Starting balance"
           value={levers.startingBalance}
           min={0}
-          max={2_000_000}
+          max={startingBalanceMax}
           step={10_000}
+          inputStep={1}
           format={formatUsd}
           onChange={(v) => handleChange({ startingBalance: v })}
           onCommit={(v) => handleCommit({ startingBalance: v })}
         />
       </div>
+
+      <StartSourceNote
+        start={sealedStart}
+        edited={edited.startingBalance !== undefined}
+        placeholders={[
+          ...(sources.annualSpending === 'placeholder' && edited.annualSpending === undefined
+            ? ['annual spending']
+            : []),
+          ...(sources.monthlySavings === 'placeholder' && edited.monthlySavings === undefined
+            ? ['monthly savings']
+            : []),
+        ]}
+        startingBalance={levers.startingBalance}
+      />
 
       <div
         className="flex flex-col gap-1 rounded-md bg-bg-inset p-3 transition-opacity duration-normal ease-standard"
@@ -255,6 +294,11 @@ export function GoalSliders({ scenario }: GoalSlidersProps) {
         >
           {statusText}
         </p>
+        {illustrationOnly && (
+          <p className="text-caption text-text-muted" data-testid="slider-placeholder-note">
+            Illustration only: the starting balance is a placeholder, not your data.
+          </p>
+        )}
         {available && bands !== null && lastP50 !== null && successProbability !== null && (
           <p className="text-body text-text-primary">
             Median at age {lastAge}:{' '}
@@ -266,15 +310,70 @@ export function GoalSliders({ scenario }: GoalSlidersProps) {
         )}
         {!available && projectionQuery.data?.run != null && (
           <p data-testid="slider-worker-fallback" className="text-body text-text-primary">
-            Your saved plan:{' '}
-            <Percent
-              value={Number(projectionQuery.data.run.successProbability)}
-              signDisplay="never"
-            />{' '}
-            of simulated paths succeed.
+            {isProbabilistic(projectionQuery.data.run) ? (
+              <>
+                Your saved plan:{' '}
+                <Percent
+                  value={Number(projectionQuery.data.run.successProbability)}
+                  signDisplay="never"
+                />{' '}
+                of simulated paths succeed.
+              </>
+            ) : (
+              <>
+                Your saved plan is a single deterministic path, and it{' '}
+                {SINGLE_PATH_OUTCOME_WORDS[singlePathOutcome(projectionQuery.data.run)]}.
+              </>
+            )}
           </p>
         )}
       </div>
     </section>
+  );
+}
+
+interface StartSourceNoteProps {
+  readonly start: ReturnType<typeof useSealedStart>;
+  readonly edited: boolean;
+  readonly placeholders: readonly string[];
+  readonly startingBalance: number;
+}
+
+/**
+ * Says where the starting balance came from (G4-11): the newest sealed net-worth day, or a
+ * placeholder that is not the holder's data. Spending and savings that fall back to this panel's
+ * own defaults are named the same way.
+ */
+function StartSourceNote({ start, edited, placeholders, startingBalance }: StartSourceNoteProps) {
+  const { source, ready } = start;
+  let text;
+  if (!ready) {
+    text = 'Looking up your newest sealed net-worth day…';
+  } else if (source.kind === 'sealed') {
+    text = edited
+      ? `Starting balance changed by you. Your investable balance on ${source.asOfDate}, the newest sealed net-worth day, is ${formatUsd(source.amount)}.`
+      : `Starting balance: your investable balance on ${source.asOfDate}, the newest sealed net-worth day. Change it to try another figure.`;
+  } else {
+    text = edited
+      ? `Starting balance changed by you. It is not your data: ${PLACEHOLDER_REASON_WORDS[source.reason]}.`
+      : `Starting balance: ${formatUsd(startingBalance)} is a placeholder, not your data — ${PLACEHOLDER_REASON_WORDS[source.reason]}.`;
+  }
+  return (
+    <div className="flex flex-col gap-1 text-caption text-text-muted">
+      <p
+        data-testid="slider-start-source"
+        data-start-source={ready ? source.kind : 'loading'}
+        data-start-edited={edited ? 'true' : 'false'}
+      >
+        {text}
+      </p>
+      {placeholders.length > 0 && (
+        <p data-testid="slider-lever-placeholders">
+          {placeholders.join(' and ')[0]?.toUpperCase()}
+          {placeholders.join(' and ').slice(1)} {placeholders.length === 1 ? 'is' : 'are'} also a
+          placeholder: your saved plan does not state {placeholders.length === 1 ? 'it' : 'them'}.
+        </p>
+      )}
+    </div>
   );
 }

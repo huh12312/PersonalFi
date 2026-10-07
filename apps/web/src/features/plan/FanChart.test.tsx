@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { formatMoney, parseWireMoney } from '../../lib/money.ts';
-import { ChartInner, FanChart } from './FanChart.tsx';
+import { ChartInner, FanChart, rowsHaveBands } from './FanChart.tsx';
 import { percentilesFixture } from './fixtures.ts';
 
 /**
@@ -113,5 +113,28 @@ describe('FanChart', () => {
       compact: true,
     });
     expect(screen.getByText(expected)).toBeInTheDocument();
+  });
+
+  it('draws one path, with no band swatches and no "median" it is not, for a deterministic run', () => {
+    const single = rows().map((r) => ({
+      ...r,
+      p5: null,
+      p10: null,
+      p25: null,
+      p75: null,
+      p90: null,
+      p95: null,
+    }));
+    expect(rowsHaveBands(single)).toBe(false);
+    expect(rowsHaveBands(rows())).toBe(true);
+    const { container } = render(
+      <ChartInner width={640} height={320} rows={single} currency="USD" />,
+    );
+    expect(screen.getByText('projected path')).toBeInTheDocument();
+    expect(screen.queryByText('median')).not.toBeInTheDocument();
+    expect(container.querySelector('svg')).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('single path'),
+    );
   });
 });

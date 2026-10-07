@@ -24,6 +24,8 @@ export interface SliderFieldProps {
   readonly min: number;
   readonly max: number;
   readonly step?: number;
+  /** The number input's own step, when it should be finer than the slider's. */
+  readonly inputStep?: number;
   readonly unit?: string;
   readonly format?: (value: number) => string;
   readonly onChange: (value: number) => void;
@@ -37,6 +39,7 @@ export function SliderField({
   min,
   max,
   step = 1,
+  inputStep,
   unit,
   format,
   onChange,
@@ -68,7 +71,7 @@ export function SliderField({
           inputMode="decimal"
           min={min}
           max={max}
-          step={step}
+          step={inputStep ?? step}
           value={value}
           onChange={(e) => handleNumberChange(e.target.value)}
           className="h-8 w-28 text-right text-small tabular-nums"

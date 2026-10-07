@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import {
   comparePlanScenariosOptions,
+  comparePlanScenariosQueryKey,
   createPlanLifeEventMutation,
   createPlanScenarioMutation,
   deletePlanLifeEventMutation,
@@ -31,6 +32,28 @@ function invalidatePlanScenarios(queryClient: ReturnType<typeof useQueryClient>)
 function invalidateLifeEvents(queryClient: ReturnType<typeof useQueryClient>): void {
   void queryClient.invalidateQueries({ queryKey: listPlanLifeEventsOptions().queryKey });
 }
+
+/**
+ * Every stored or computed projection the screen holds, and every compare of two
+ * of them (G4-16). An assumption override moves the cache key the server runs
+ * under, so a headline read before the PUT quotes a run the holder has just
+ * superseded; it used to keep doing so for the query's whole 15-second stale
+ * time, with no label. The predicate matches the projection query's own key
+ * (`_id: 'runPlanProjection'`, below) and the generated compare key.
+ */
+export function invalidateProjections(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({
+    predicate: (query) => {
+      const head = query.queryKey[0] as { _id?: unknown } | undefined;
+      return head?._id === 'runPlanProjection' || head?._id === COMPARE_KEY_ID;
+    },
+  });
+}
+
+/** The generated compare query's key id, read off the generated factory rather than spelled twice. */
+const COMPARE_KEY_ID = (
+  comparePlanScenariosQueryKey({ query: { a: '', b: '' } })[0] as { _id: string }
+)._id;
 
 /** `GET /plan/scenarios` — the baseline plus every fork the caller has saved. */
 export function useScenariosQuery() {
@@ -73,7 +96,15 @@ export function useProjectionQuery(
     },
     enabled: scenarioId !== undefined,
     staleTime: STALE_TIME_MS,
+    // A refusal (a 4xx problem) is the server's considered answer and will not change on a second
+    // ask; only a fault on its side or a dropped connection is worth one more try.
+    retry: (failureCount, error) => !isRefusal(error) && failureCount < 1,
   });
+}
+
+function isRefusal(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500;
 }
 
 /** `GET /plan/compare?a=&b=` — both scenarios' projections plus the deltas, in one response. */
@@ -103,7 +134,10 @@ export function useOverrideAssumptionMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     ...putAssumptionsOverridesMutation(),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: getAssumptionsQueryKey() }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: getAssumptionsQueryKey() });
+      invalidateProjections(queryClient);
+    },
   });
 }
 
@@ -140,7 +174,8 @@ export function useDeleteLifeEventMutation() {
 export interface RequiredSavingsState {
   readonly result: SolveRequiredSavingsResponse | null;
   readonly pending: boolean;
-  readonly error: string | null;
+  /** The refusal the solver answered with, as thrown — `ProjectionProblem` words it. */
+  readonly error: { readonly cause: unknown } | null;
   readonly solve: (body: SolveRequiredSavingsData['body']) => Promise<void>;
   readonly clear: () => void;
 }
@@ -157,7 +192,7 @@ export interface RequiredSavingsState {
 export function useRequiredSavings(): RequiredSavingsState {
   const [result, setResult] = useState<SolveRequiredSavingsResponse | null>(null);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ readonly cause: unknown } | null>(null);
 
   async function solve(body: SolveRequiredSavingsData['body']): Promise<void> {
     setPending(true);
@@ -169,7 +204,7 @@ export function useRequiredSavings(): RequiredSavingsState {
       });
       setResult(data);
     } catch (cause) {
-      setError(refusalMessageOf(cause));
+      setError({ cause });
       setResult(null);
     } finally {
       setPending(false);
@@ -182,16 +217,6 @@ export function useRequiredSavings(): RequiredSavingsState {
   }
 
   return { result, pending, error, solve, clear };
-}
-
-/** Same rule as `features/investments/api.ts`'s own copy: the server's refusal, verbatim, never re-worded here. */
-function refusalMessageOf(cause: unknown): string {
-  if (typeof cause === 'object' && cause !== null) {
-    const problem = cause as { detail?: unknown; title?: unknown };
-    if (typeof problem.detail === 'string' && problem.detail !== '') return problem.detail;
-    if (typeof problem.title === 'string' && problem.title !== '') return problem.title;
-  }
-  return 'The required-savings solver could not answer.';
 }
 
 export type { CreatePlanScenarioData, RunPlanProjectionResponse };

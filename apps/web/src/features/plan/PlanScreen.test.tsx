@@ -13,11 +13,13 @@ import {
   stubFetchRoutes,
   type FetchRoute,
 } from '../../test-support/api-test-utils.ts';
+import { RouterForTest } from '../goals/routerTest.tsx';
 import { PlanScreen } from './PlanScreen.tsx';
 import {
   assumptionsResponse,
   baselineScenario,
   compareResponse,
+  forkScenario,
   lifeEventFixture,
   projectionResponse,
   scenariosResponse,
@@ -50,6 +52,8 @@ vi.mock('@visx/responsive', async () => {
 interface RouteOverrides {
   readonly scenarios?: unknown;
   readonly projection?: unknown;
+  /** Answers the projection POST itself — a refusal, or a counter. Wins over `projection`. */
+  readonly onProjection?: () => Response;
   readonly requiredSavings?: (body: unknown) => Response;
   readonly onCreateScenario?: (body: unknown) => Response;
   readonly onPatchLifeEvent?: (body: unknown) => Response;
@@ -74,7 +78,15 @@ function routesFor(overrides: RouteOverrides = {}): FetchRoute[] {
     {
       match: /^\/api\/plan\/scenarios\/[^/]+\/projections$/,
       method: 'POST',
-      handle: () => jsonResponse(overrides.projection ?? projectionResponse()),
+      handle: () =>
+        overrides.onProjection === undefined
+          ? jsonResponse(overrides.projection ?? projectionResponse())
+          : overrides.onProjection(),
+    },
+    {
+      match: '/api/risk-profile',
+      method: 'GET',
+      handle: () => jsonResponse({ instrument: 'risk-v1', items: [], current: null }),
     },
     { match: '/api/assumptions', method: 'GET', handle: () => jsonResponse(assumptionsResponse()) },
     {
@@ -132,7 +144,9 @@ function renderScreen(search: PlanSearch = {}) {
   });
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <PlanScreen search={search} onSearchChange={onSearchChange} />
+      <RouterForTest>
+        <PlanScreen search={search} onSearchChange={onSearchChange} />
+      </RouterForTest>
     </QueryClientProvider>,
   );
   return { onSearchChange, view };
@@ -159,7 +173,9 @@ function renderControlledScreen(initialSearch: PlanSearch = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <ControlledPlanScreen initialSearch={initialSearch} />
+      <RouterForTest>
+        <ControlledPlanScreen initialSearch={initialSearch} />
+      </RouterForTest>
     </QueryClientProvider>,
   );
 }
@@ -314,5 +330,133 @@ describe('PlanScreen', () => {
 
     await waitFor(() => expect(patched).not.toBeNull());
     expect((patched as { occursOn: string }).occursOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('words a refused projection instead of saying "Projecting your plan…" forever (G4-10)', async () => {
+    stubFetchRoutes(
+      routesFor({
+        onProjection: () =>
+          jsonResponse(
+            {
+              type: 'about:blank',
+              title: 'Conflict',
+              status: 409,
+              code: 'planning.projection_no_balances',
+              detail: 'no sealed net-worth day exists yet',
+              correlationId: 'corr-1',
+            },
+            409,
+          ),
+      }),
+    );
+    renderScreen();
+
+    const problem = await screen.findByTestId('plan-problem');
+    expect(problem).toHaveAttribute('data-problem-words', 'table');
+    expect(problem).toHaveTextContent('no sealed net-worth day');
+    const headline = screen.getByTestId('plan-headline');
+    expect(headline).not.toHaveTextContent('Projecting your plan');
+    expect(headline).toHaveTextContent('could not be projected');
+  });
+
+  it('names the engine on the section and never phrases a deterministic run as a probability (G4-13)', async () => {
+    const base = projectionResponse();
+    stubFetchRoutes(
+      routesFor({
+        projection: {
+          ...base,
+          run: {
+            ...(base.run as NonNullable<typeof base.run>),
+            method: 'deterministic',
+            paths: 1,
+            successProbability: '1',
+          },
+        },
+      }),
+    );
+    renderScreen();
+
+    const section = await screen.findByTestId('plan-projection');
+    await screen.findByTestId('plan-headline-outcome');
+    expect(section).toHaveAttribute('data-engine', 'deterministic');
+    expect(
+      within(section).getByRole('heading', { name: 'Deterministic projection' }),
+    ).toBeVisible();
+    for (const text of [section.textContent, screen.getByTestId('plan-headline').textContent]) {
+      expect(text).not.toMatch(/%|percent|probab|chance|likel|of (simulated )?(plans|paths)/i);
+    }
+  });
+
+  it('says a stored run is out of date and names its version (G4-16)', async () => {
+    const base = projectionResponse();
+    stubFetchRoutes(
+      routesFor({
+        projection: {
+          ...base,
+          status: 'stale',
+          staleness: {
+            reason: 'assumptions_version_retired',
+            assumptionsVersion: 'assumptions-0',
+            known: ['assumptions-1'],
+          },
+        },
+      }),
+    );
+    renderScreen();
+    const notice = await screen.findByTestId('plan-run-stale');
+    expect(notice).toHaveTextContent('assumptions-0');
+    expect(screen.getByTestId('plan-headline').textContent).toMatch(/^Out of date/);
+  });
+
+  it('asks for the projection again after an assumption override is saved (G4-16)', async () => {
+    let projectionCalls = 0;
+    stubFetchRoutes(
+      routesFor({
+        onProjection: () => {
+          projectionCalls += 1;
+          return jsonResponse(projectionResponse());
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    renderScreen();
+
+    await screen.findByTestId('plan-headline-probability');
+    const before = projectionCalls;
+    await user.click(await screen.findByRole('button', { name: /^Edit/ }));
+    const input = screen.getByLabelText(/^Override /);
+    await user.clear(input);
+    await user.type(input, '0.05');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(projectionCalls).toBeGreaterThan(before));
+  });
+
+  it('puts a freshly forked scenario straight into the compare against the baseline (C-10)', async () => {
+    let posted: unknown = null;
+    stubFetchRoutes(
+      routesFor({
+        onCreateScenario: (body) => {
+          posted = body;
+          return jsonResponse(forkScenario(), 201);
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    renderControlledScreen();
+
+    await screen.findByTestId('plan-headline-probability');
+    const form = screen.getByRole('form', { name: 'Fork the baseline' });
+    await user.type(within(form).getByLabelText('Fork name'), 'Retire at 62');
+    await user.type(within(form).getByLabelText('Retirement age'), '62');
+    await user.click(within(form).getByRole('button', { name: 'Fork and compare' }));
+
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted).toMatchObject({ kind: 'fork', levers: { retireAge: 62 } });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Scenario A')).toHaveValue('scenario-baseline'),
+    );
+    expect(screen.getByLabelText('Scenario B')).toHaveValue('scenario-fork-retire-early');
+    expect(await screen.findByTestId('compare-delta')).toHaveTextContent('Δ success probability');
   });
 });

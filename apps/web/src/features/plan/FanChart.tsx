@@ -85,6 +85,29 @@ function toRows(percentiles: readonly PlanPercentile[]): Row[] {
   }));
 }
 
+const ALL_COLUMNS: readonly { readonly key: keyof Omit<Row, 'year'>; readonly label: string }[] = [
+  { key: 'p5', label: 'p5' },
+  { key: 'p10', label: 'p10' },
+  { key: 'p25', label: 'p25' },
+  { key: 'p50', label: 'p50 (median)' },
+  { key: 'p75', label: 'p75' },
+  { key: 'p90', label: 'p90' },
+  { key: 'p95', label: 'p95' },
+];
+
+/** A Monte Carlo run carries the outer bands; a deterministic run is one path and carries only the median. */
+export function rowsHaveBands(rows: readonly Row[]): boolean {
+  return rows.some(
+    (r) =>
+      r.p5 !== null ||
+      r.p10 !== null ||
+      r.p25 !== null ||
+      r.p75 !== null ||
+      r.p90 !== null ||
+      r.p95 !== null,
+  );
+}
+
 /** Linear interpolation of the year at which `series` crosses `target`, or `null` if it never does. */
 function crossingYear(rows: readonly Row[], target: number): number | null {
   for (let i = 1; i < rows.length; i += 1) {
@@ -193,7 +216,11 @@ export function ChartInner({
         width={width}
         height={height}
         role="img"
-        aria-label="Projected portfolio value over time, shown as overlapping confidence bands around a median path"
+        aria-label={
+          rowsHaveBands(rows)
+            ? 'Projected portfolio value over time, shown as overlapping confidence bands around a median path'
+            : 'Projected portfolio value over time, shown as a single path'
+        }
       >
         <Group left={margin.left} top={margin.top}>
           {bandDefs.map(([lowKey, highKey, opacity]) => (
@@ -246,7 +273,7 @@ export function ChartInner({
             fontWeight={600}
             fill="var(--accent)"
           >
-            median
+            {rowsHaveBands(rows) ? 'median' : 'projected path'}
           </text>
 
           {goal !== null && goal !== undefined && goalY !== null && (
@@ -338,7 +365,7 @@ export function ChartInner({
             }}
           >
             {tooltipData.p25 === null
-              ? `By ${String(Math.round(tooltipData.year))}, median projected value is ${moneyLabel({ minor: String(Math.round(tooltipData.p50)), currency })}.`
+              ? `By ${String(Math.round(tooltipData.year))}, the projected value on this path is ${moneyLabel({ minor: String(Math.round(tooltipData.p50)), currency })}.`
               : `By ${String(Math.round(tooltipData.year))} there's a 75% chance you have at least ${moneyLabel({ minor: String(Math.round(tooltipData.p25)), currency })}.`}
           </Tooltip>
         )}
@@ -388,6 +415,8 @@ export function FanChart({
 }: FanChartProps) {
   const rows = useMemo(() => toRows(percentiles), [percentiles]);
   const [showTable, setShowTable] = useState(false);
+  const hasBands = rowsHaveBands(rows);
+  const tableColumns = hasBands ? ALL_COLUMNS : [{ key: 'p50' as const, label: 'Projected path' }];
 
   return (
     <div className={className}>
@@ -409,29 +438,33 @@ export function FanChart({
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-caption text-text-muted">
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block h-0.5 w-4" style={{ backgroundColor: 'var(--accent)' }} />
-          median
+          {hasBands ? 'median' : 'projected path'}
         </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span
-            className="inline-block h-3 w-4"
-            style={{ backgroundColor: 'var(--accent)', opacity: BAND_FILL_OPACITY[2] }}
-          />
-          p25–p75
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span
-            className="inline-block h-3 w-4"
-            style={{ backgroundColor: 'var(--accent)', opacity: BAND_FILL_OPACITY[1] }}
-          />
-          p10–p90
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span
-            className="inline-block h-3 w-4"
-            style={{ backgroundColor: 'var(--accent)', opacity: BAND_FILL_OPACITY[0] }}
-          />
-          p5–p95
-        </span>
+        {hasBands && (
+          <>
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="inline-block h-3 w-4"
+                style={{ backgroundColor: 'var(--accent)', opacity: BAND_FILL_OPACITY[2] }}
+              />
+              p25–p75
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="inline-block h-3 w-4"
+                style={{ backgroundColor: 'var(--accent)', opacity: BAND_FILL_OPACITY[1] }}
+              />
+              p10–p90
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="inline-block h-3 w-4"
+                style={{ backgroundColor: 'var(--accent)', opacity: BAND_FILL_OPACITY[0] }}
+              />
+              p5–p95
+            </span>
+          </>
+        )}
         {goal !== null && (
           <span className="inline-flex items-center gap-1.5">
             <span
@@ -458,34 +491,20 @@ export function FanChart({
       {showTable && (
         <table className="mt-2 w-full text-caption">
           <caption className="sr-only">
-            Projected portfolio value by year, at every percentile band
+            {hasBands
+              ? 'Projected portfolio value by year, at every percentile band'
+              : 'Projected portfolio value by year, on a single path'}
           </caption>
           <thead>
             <tr>
               <th scope="col" className="text-left">
                 Year
               </th>
-              <th scope="col" className="text-right">
-                p5
-              </th>
-              <th scope="col" className="text-right">
-                p10
-              </th>
-              <th scope="col" className="text-right">
-                p25
-              </th>
-              <th scope="col" className="text-right">
-                p50 (median)
-              </th>
-              <th scope="col" className="text-right">
-                p75
-              </th>
-              <th scope="col" className="text-right">
-                p90
-              </th>
-              <th scope="col" className="text-right">
-                p95
-              </th>
+              {tableColumns.map((column) => (
+                <th key={column.key} scope="col" className="text-right">
+                  {column.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -494,11 +513,14 @@ export function FanChart({
                 <th scope="row" className="text-left font-normal">
                   {Math.round(row.year)}
                 </th>
-                {[row.p5, row.p10, row.p25, row.p50, row.p75, row.p90, row.p95].map((v, i) => (
-                  <td key={i} className="text-right tabular-nums">
-                    {v === null ? '—' : moneyLabel({ minor: String(Math.round(v)), currency })}
-                  </td>
-                ))}
+                {tableColumns.map((column) => {
+                  const v = row[column.key];
+                  return (
+                    <td key={column.key} className="text-right tabular-nums">
+                      {v === null ? '—' : moneyLabel({ minor: String(Math.round(v)), currency })}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>

@@ -67,4 +67,64 @@ describe('ScenarioCompare', () => {
     );
     expect(screen.getByText('Choose two different scenarios to compare.')).toBeInTheDocument();
   });
+
+  it('never states a deterministic run as a probability, in a card or in the delta', () => {
+    const base = compareResponse();
+    const one = (id: string, successProbability: string) => ({
+      ...base.a,
+      run: {
+        ...(base.a.run as NonNullable<typeof base.a.run>),
+        id,
+        method: 'deterministic' as const,
+        paths: 1,
+        successProbability,
+      },
+    });
+    render(
+      <ScenarioCompare
+        scenarios={[baselineScenario(), forkScenario()]}
+        a="scenario-baseline"
+        b="scenario-fork-retire-early"
+        onChangeA={vi.fn()}
+        onChangeB={vi.fn()}
+        compare={{
+          ...base,
+          a: one('run-a', '1'),
+          b: one('run-b', '0'),
+          successProbabilityDelta: '-1',
+        }}
+        isLoading={false}
+      />,
+    );
+    const panel = screen.getByTestId('scenario-compare');
+    expect(
+      within(screen.getByTestId('compare-a')).getByText(/lasts to the end/),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('compare-b')).getByText(/runs out of money/),
+    ).toBeInTheDocument();
+    expect(panel.textContent).not.toMatch(/%|percent|probab|chance|likel/i);
+    expect(screen.queryByText(/Δ success probability/)).not.toBeInTheDocument();
+    // The retirement-date delta is not a probability and stays.
+    expect(
+      within(screen.getByTestId('compare-delta')).getByText(/36 months earlier/),
+    ).toBeInTheDocument();
+  });
+
+  it('words a failed compare instead of staying silent', () => {
+    render(
+      <ScenarioCompare
+        scenarios={[baselineScenario(), forkScenario()]}
+        a="scenario-baseline"
+        b="scenario-fork-retire-early"
+        onChangeA={vi.fn()}
+        onChangeB={vi.fn()}
+        compare={undefined}
+        isLoading={false}
+        isError
+        error={{ code: 'planning.projection_no_balances', status: 409 }}
+      />,
+    );
+    expect(screen.getByRole('alert')).toHaveAttribute('data-problem-words', 'table');
+  });
 });

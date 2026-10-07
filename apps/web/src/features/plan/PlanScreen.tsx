@@ -3,11 +3,11 @@ import { Target } from 'lucide-react';
 import { useState } from 'react';
 
 import { Money } from '../../components/finance/Money.tsx';
-import { Percent } from '../../components/finance/Percent.tsx';
 import { EmptyState } from '../../components/patterns/EmptyState.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
 import { Label } from '../../components/ui/label.tsx';
 import type { BaselineScenario } from '../../api/generated/types.gen.ts';
+import { RiskProfileSummary } from '../goals/RiskProfileSummary.tsx';
 import { ProjectionOverridesNotice } from '../accounts/ProjectionOverridesNotice.tsx';
 import { UnvaluedAccountsNotice } from '../accounts/UnvaluedAccountsNotice.tsx';
 import {
@@ -29,7 +29,12 @@ import { FanChart } from './FanChart.tsx';
 import { GoalControls } from './GoalControls.tsx';
 import { LifeEventForm } from './LifeEventForm.tsx';
 import { LifeEventsTimeline } from './LifeEventsTimeline.tsx';
+import { describeEngine, describeRunSource } from './engine.ts';
+import { PlanHeadline } from './PlanHeadline.tsx';
+import { ProjectionProblem } from './ProjectionProblem.tsx';
 import { ScenarioCompare } from './ScenarioCompare.tsx';
+import { ScenarioForkForm } from './ScenarioForkForm.tsx';
+import { StaleRunNotice } from './StaleRunNotice.tsx';
 import { DEFAULT_GOAL_CURRENCY, type PlanSearch } from './search.ts';
 import { GoalSliders } from './sliders/GoalSliders.tsx';
 
@@ -137,7 +142,6 @@ export function PlanScreen({ search, onSearchChange }: PlanScreenProps) {
 
   const projection = projectionQuery.data;
   const percentiles = projection?.percentiles ?? [];
-  const lastRow = percentiles[percentiles.length - 1];
   const run = projection?.run ?? null;
 
   const goal =
@@ -160,27 +164,22 @@ export function PlanScreen({ search, onSearchChange }: PlanScreenProps) {
     <div className="flex flex-col gap-8">
       <header className="flex flex-col gap-1">
         <h1 className="text-h2 font-semibold text-text-primary">Plan</h1>
-        <p className="text-body text-text-secondary" data-testid="plan-headline">
-          {run !== null && lastRow !== undefined ? (
-            <>
-              You&apos;re on track for{' '}
-              <Money value={lastRow.p50} colorBySign={false} data-testid="plan-headline-amount" />{' '}
-              at age {lastRow.age} —{' '}
-              <Percent
-                value={Number(run.successProbability)}
-                signDisplay="never"
-                data-testid="plan-headline-probability"
-              />{' '}
-              of plans succeed.
-            </>
-          ) : (
-            'Projecting your plan…'
-          )}
-        </p>
+        <PlanHeadline
+          loading={projectionQuery.isLoading}
+          failed={projectionQuery.isError}
+          projection={projection}
+        />
       </header>
 
       <ProjectionOverridesNotice projection={projection} scenarioId={selectedScenarioId} />
       <UnvaluedAccountsNotice />
+      {projection !== undefined && (
+        <StaleRunNotice
+          status={projection.status}
+          staleness={projection.staleness}
+          run={projection.run}
+        />
+      )}
 
       {scenarios.length > 1 && (
         <div className="flex items-end gap-2">
@@ -202,10 +201,31 @@ export function PlanScreen({ search, onSearchChange }: PlanScreenProps) {
         </div>
       )}
 
-      <section aria-label="Monte Carlo fan chart" className="flex flex-col gap-4">
+      <section
+        aria-labelledby="plan-projection-heading"
+        data-testid="plan-projection"
+        data-engine={run?.method ?? 'none'}
+        className="flex flex-col gap-4"
+      >
+        <div className="flex flex-col gap-1">
+          <h2 id="plan-projection-heading" className="text-h3 font-semibold text-text-primary">
+            {describeEngine(run?.method).heading}
+          </h2>
+          {run !== null && (
+            <p className="text-caption text-text-muted" data-testid="plan-run-source">
+              {describeRunSource(run)}
+            </p>
+          )}
+        </div>
+        {projectionQuery.isError && (
+          <ProjectionProblem
+            error={projectionQuery.error}
+            onRetry={() => void projectionQuery.refetch()}
+          />
+        )}
         {projectionQuery.isLoading ? (
           <Skeleton variant="block" height={320} />
-        ) : (
+        ) : projectionQuery.isError && projection === undefined ? null : (
           <FanChart
             percentiles={percentiles}
             currency={run?.currency ?? DEFAULT_GOAL_CURRENCY}
@@ -230,9 +250,7 @@ export function PlanScreen({ search, onSearchChange }: PlanScreenProps) {
           </p>
         )}
         {requiredSavings.error !== null && (
-          <p className="text-small text-status-critical" role="alert">
-            {requiredSavings.error}
-          </p>
+          <ProjectionProblem error={requiredSavings.error.cause} />
         )}
         {requiredSavings.result !== null && (
           <div
@@ -260,6 +278,8 @@ export function PlanScreen({ search, onSearchChange }: PlanScreenProps) {
         )}
       </section>
 
+      <RiskProfileSummary />
+
       <GoalSliders scenario={baseline} />
 
       <section aria-label="Life events" className="flex flex-col gap-3">
@@ -284,6 +304,9 @@ export function PlanScreen({ search, onSearchChange }: PlanScreenProps) {
 
       <section aria-label="Scenario compare" className="flex flex-col gap-3">
         <h2 className="text-h3 font-semibold text-text-primary">Compare scenarios</h2>
+        <ScenarioForkForm
+          onCreated={(fork) => update({ compareA: baseline.id, compareB: fork.id })}
+        />
         <ScenarioCompare
           scenarios={scenarios}
           a={search.compareA}
@@ -292,6 +315,9 @@ export function PlanScreen({ search, onSearchChange }: PlanScreenProps) {
           onChangeB={(id) => update({ compareB: id })}
           compare={compareQuery.data}
           isLoading={compareQuery.isLoading}
+          isError={compareQuery.isError}
+          error={compareQuery.error}
+          onRetry={() => void compareQuery.refetch()}
         />
       </section>
 

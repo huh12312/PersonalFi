@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { groupByTopLevel, walkCitedAssumptions } from './assumptions.ts';
+import { engineReads } from './engine-read-paths.ts';
 import type { AssumptionsFile, AssumptionsAppliedOverride } from '../../api/generated/types.gen.ts';
 
 export interface AssumptionsPanelProps {
@@ -49,7 +50,8 @@ export function AssumptionsPanel({
     <div className="flex flex-col gap-4" data-testid="assumptions-panel">
       <p className="text-caption text-text-muted">
         Assumptions file version <code className="font-mono">{version}</code>. {cited.length} cited
-        figures.
+        figures. An edit control is offered only for the assumptions the projection engine reads;
+        the rest are shown, cited, and marked as not used.
       </p>
       <div className="max-h-[480px] overflow-y-auto divide-y divide-border-hairline rounded-md border border-border-hairline">
         {[...groups.entries()].map(([group, items]) => (
@@ -67,7 +69,9 @@ export function AssumptionsPanel({
             <dl className="flex flex-col gap-3">
               {items.map((item) => {
                 const override = overrideByPath.get(item.path);
-                const canOverride = overridable.has(item.path);
+                const isOverridable = overridable.has(item.path);
+                const reads = engineReads(item.path);
+                const canOverride = isOverridable && reads !== null;
                 const isEditing = editingPath === item.path;
                 return (
                   <div key={item.path} className="grid gap-0.5">
@@ -115,11 +119,24 @@ export function AssumptionsPanel({
                               overridden — default {item.value}
                             </span>
                           )}
+                          {isOverridable && reads === null && (
+                            <span
+                              className="text-caption text-text-muted"
+                              data-testid={`assumption-unused-${item.path}`}
+                            >
+                              Not used by the current engine — changing it would change no
+                              projection.
+                            </span>
+                          )}
+                          {canOverride && reads === 'monte_carlo' && (
+                            <span className="text-caption text-text-muted">Monte Carlo only.</span>
+                          )}
                           {canOverride && (
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
+                              aria-label={`Edit ${item.label}`}
                               onClick={() => {
                                 setDraft(override !== undefined ? override.value : item.value);
                                 setEditingPath(item.path);

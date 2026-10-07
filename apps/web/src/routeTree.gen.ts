@@ -18,6 +18,7 @@ import { Route as AppIndexRouteImport } from './routes/_app.index'
 import { Route as AppAccountsRouteImport } from './routes/_app.accounts'
 import { Route as AppBriefRouteImport } from './routes/_app.brief'
 import { Route as AppBudgetRouteImport } from './routes/_app.budget'
+import { Route as AppGoalsRouteImport } from './routes/_app.goals'
 import { Route as AppInboxRouteImport } from './routes/_app.inbox'
 import { Route as AppInsightsRouteImport } from './routes/_app.insights'
 import { Route as AppInvestmentsRouteImport } from './routes/_app.investments'
@@ -74,6 +75,11 @@ const AppBriefRoute = AppBriefRouteImport.update({
 const AppBudgetRoute = AppBudgetRouteImport.update({
   id: '/budget',
   path: '/budget',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGoalsRoute = AppGoalsRouteImport.update({
+  id: '/goals',
+  path: '/goals',
   getParentRoute: () => AppRoute,
 } as any)
 const AppInboxRoute = AppInboxRouteImport.update({
@@ -151,6 +157,7 @@ export interface FileRoutesByFullPath {
   '/accounts': typeof AppAccountsRouteWithChildren
   '/brief': typeof AppBriefRoute
   '/budget': typeof AppBudgetRoute
+  '/goals': typeof AppGoalsRoute
   '/inbox': typeof AppInboxRoute
   '/insights': typeof AppInsightsRoute
   '/investments': typeof AppInvestmentsRoute
@@ -172,6 +179,7 @@ export interface FileRoutesByTo {
   '/unlock': typeof UnlockRoute
   '/brief': typeof AppBriefRoute
   '/budget': typeof AppBudgetRoute
+  '/goals': typeof AppGoalsRoute
   '/inbox': typeof AppInboxRoute
   '/insights': typeof AppInsightsRoute
   '/investments': typeof AppInvestmentsRoute
@@ -197,6 +205,7 @@ export interface FileRoutesById {
   '/_app/accounts': typeof AppAccountsRouteWithChildren
   '/_app/brief': typeof AppBriefRoute
   '/_app/budget': typeof AppBudgetRoute
+  '/_app/goals': typeof AppGoalsRoute
   '/_app/inbox': typeof AppInboxRoute
   '/_app/insights': typeof AppInsightsRoute
   '/_app/investments': typeof AppInvestmentsRoute
@@ -223,6 +232,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/brief'
     | '/budget'
+    | '/goals'
     | '/inbox'
     | '/insights'
     | '/investments'
@@ -244,6 +254,7 @@ export interface FileRouteTypes {
     | '/unlock'
     | '/brief'
     | '/budget'
+    | '/goals'
     | '/inbox'
     | '/insights'
     | '/investments'
@@ -268,6 +279,7 @@ export interface FileRouteTypes {
     | '/_app/accounts'
     | '/_app/brief'
     | '/_app/budget'
+    | '/_app/goals'
     | '/_app/inbox'
     | '/_app/insights'
     | '/_app/investments'
@@ -356,6 +368,13 @@ declare module '@tanstack/react-router' {
       path: '/budget'
       fullPath: '/budget'
       preLoaderRoute: typeof AppBudgetRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/goals': {
+      id: '/_app/goals'
+      path: '/goals'
+      fullPath: '/goals'
+      preLoaderRoute: typeof AppGoalsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/inbox': {
@@ -472,6 +491,7 @@ interface AppRouteChildren {
   AppAccountsRoute: typeof AppAccountsRouteWithChildren
   AppBriefRoute: typeof AppBriefRoute
   AppBudgetRoute: typeof AppBudgetRoute
+  AppGoalsRoute: typeof AppGoalsRoute
   AppInboxRoute: typeof AppInboxRoute
   AppInsightsRoute: typeof AppInsightsRoute
   AppInvestmentsRoute: typeof AppInvestmentsRoute
@@ -488,6 +508,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAccountsRoute: AppAccountsRouteWithChildren,
   AppBriefRoute: AppBriefRoute,
   AppBudgetRoute: AppBudgetRoute,
+  AppGoalsRoute: AppGoalsRoute,
   AppInboxRoute: AppInboxRoute,
   AppInsightsRoute: AppInsightsRoute,
   AppInvestmentsRoute: AppInvestmentsRoute,
