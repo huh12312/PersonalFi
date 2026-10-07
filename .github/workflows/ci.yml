@@ -221,6 +221,19 @@ jobs:
           node-version-file: .node-version
       - run: npm install --global pnpm@12.4.1
       - run: pnpm install --frozen-lockfile
+      # WP 9.11's `just upgrade` tests (scripts/upgrade-test/upgrade-recipe.test.ts)
+      # run the real recipe, so the runner needs `just` — the apt package, which
+      # is the older version an operator gets from a distribution (the first
+      # runner run of the upgrade test found two recipe bugs 1.57 on the host
+      # hid). Same step as upgrade-test.yml.
+      - name: install just
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq just
+          v="$(just --version | awk '{print $2}')"
+          echo "just $v"
+          printf '1.19.0\n%s\n' "$v" | sort -C -V || { echo "just $v is older than 1.19.0"; exit 1; }
 
       # No DATABASE_URL: every project here skips or has no database-dependent
       # tests, proving the unit suite genuinely needs no Postgres. This must

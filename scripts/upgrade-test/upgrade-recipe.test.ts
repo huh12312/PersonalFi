@@ -65,6 +65,12 @@ function upgrade(env: Record<string, string>): { status: number; out: string; do
       ...env,
     },
   });
+  if (result.error !== undefined) {
+    // A missing `just` must read as a missing `just`, never as an empty
+    // transcript that fails every assertion (CI's unit-tests job did not
+    // install it until 2026-10-07).
+    throw new Error(`could not run \`just upgrade\`: ${result.error.message}`);
+  }
   return {
     status: result.status ?? -1,
     out: `${result.stdout}${result.stderr}`,
