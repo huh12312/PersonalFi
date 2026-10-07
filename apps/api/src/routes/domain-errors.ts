@@ -289,6 +289,11 @@ export function toDomainProblem(error: unknown): unknown {
  */
 function connectorDetail(error: ConnectorError, userActionRequired: boolean): string {
   const code = error.providerCode ?? error.condition ?? error.kind;
+  // O-6 (WP 9.8's wiring): a refused link is the holder's input, not the
+  // provider's attention — "reconnect" was the wrong instruction for it.
+  if (error.kind === 'invalid_input') {
+    return `The provider refused what was entered (${code}). Check the details and try again.`;
+  }
   return userActionRequired
     ? `The provider needs your attention (${code}). Reconnect the connection to continue.`
     : `The provider could not be reached (${code}). This will be retried automatically.`;
