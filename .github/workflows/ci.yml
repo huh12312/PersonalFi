@@ -101,7 +101,8 @@
 # means a test is in the wrong directory. The unattended-upgrade test is its
 # own workflow (upgrade-test.yml: by hand, weekly, and as release.yml's
 # required predecessor), not a job here — it builds two image sets and does
-# not fit this workflow's budget.
+# not fit this workflow's budget. Wave C added the perf-skip list and Wave D
+# the docs drift check to `lint`, both plain node scripts, no project.
 name: CI
 
 on:
@@ -201,6 +202,11 @@ jobs:
         run: |
           set -o pipefail
           node scripts/check-perf-skips.ts --summary | tee -a "$GITHUB_STEP_SUMMARY"
+      # WP 9.12 (09 §4 batch 6): the docs drift check — README, RUNBOOK and the
+      # release notes name only recipes, variables, secrets, paths and links the
+      # tree has (self-test first). `just check-docs` is the local twin.
+      - name: docs name only what the tree has
+        run: node scripts/check-docs.ts
 
   test:
     name: unit tests

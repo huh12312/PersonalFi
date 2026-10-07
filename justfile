@@ -855,6 +855,10 @@ harden-secrets:
 check-perf-skips:
     node scripts/check-perf-skips.ts
 
+# The docs drift check (WP 9.12): README, RUNBOOK and the release notes name only recipes, variables, secrets, paths and links the tree has
+check-docs:
+    node scripts/check-docs.ts
+
 # Weekly soak report from the production clone (WP 9.1; orchestrator only)
 soak-report *args:
     bash scripts/soak/run-report.sh {{args}}
