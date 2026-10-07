@@ -53,6 +53,7 @@ import {
   parseAndVerifyBundle,
   serialiseBundle,
 } from '../../src/reports/export/bundle.ts';
+import { RISK_INSTRUMENT, RISK_INSTRUMENT_VERSION, deriveTolerance } from '@ctx/planning';
 import { importBundle } from '../../src/reports/export/import.ts';
 import { assertRegistryIsComplete } from '../../src/reports/export/registry.ts';
 import { createApiHarness, NO_DATABASE, type ApiHarness } from '../helpers/api-harness.ts';
@@ -205,15 +206,30 @@ describeWithDb('export/import — the Phase 3 + Phase 4 tables (Phase 3 gate C-7
        VALUES ($1, $2, $3, 'monthly', 50000, 'USD', '0', '2026-01-01', 'USER')`,
       [contributionId, h.userId, goalId],
     );
+    // The row must be one the questionnaire route could have written: every
+    // item of the real instrument answered, and the stored scores derived by
+    // the production scorer — WP 9.11's O-11 re-validation refuses anything
+    // else on import (this fixture used to carry an invented item id and
+    // invented scores, which is exactly the parallel construction P5-1 warns
+    // about).
+    const riskAnswers = {
+      instrument: RISK_INSTRUMENT_VERSION,
+      items: Object.fromEntries(RISK_INSTRUMENT.map((item) => [item.id, item.options[1]!.id])),
+    };
+    const riskDerived = deriveTolerance(riskAnswers);
     await pool.query(
       `INSERT INTO risk_profile
          (id, user_id, tolerance, composite_score, unpenalised_score, consistency_penalty,
           horizon_years, liquidity_need, answers, answered_at)
-       VALUES ($1, $2, 'moderate', 50, 60, 10, 30, 'medium', $3, now())`,
+       VALUES ($1, $2, $3, $4, $5, $6, 30, 'medium', $7, now())`,
       [
         riskProfileId,
         h.userId,
-        JSON.stringify({ instrument: 'risk-v1', items: { 'loss_tolerance.direct': 'b' } }),
+        riskDerived.tolerance,
+        riskDerived.compositeScore,
+        riskDerived.unpenalisedScore,
+        riskDerived.consistencyPenalty,
+        JSON.stringify(riskAnswers),
       ],
     );
     await pool.query(
