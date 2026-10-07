@@ -75,7 +75,7 @@ export function KindSwitch({ kind }: KindSwitchProps) {
           {problemMessage(query.error, 'This level’s state could not be read.')}
         </p>
       )}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="secondary"
           onClick={() => void set(true)}

@@ -1072,7 +1072,7 @@ export async function installInvestmentsMocks(page: Page): Promise<MockInvestmen
       return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
     }
 
-    return route.continue();
+    return route.fallback();
   });
 
   return state;

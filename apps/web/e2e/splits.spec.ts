@@ -2,7 +2,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-import { expectNoAxeViolations, injectAxe } from './support/axe.ts';
+import { expectNoAxeViolations } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installApiMocks } from './support/mock-api.ts';
 
@@ -31,7 +31,6 @@ test('a split that does not sum to the parent cannot be saved', async ({ page })
   await detailSheet.getByRole('button', { name: /split/i }).click();
   const splitDialog = page.getByRole('dialog', { name: 'Split this transaction' });
   await expect(splitDialog).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'split editor');
 
   // Two lines are seeded evenly ($6.25 / $6.25 for the $12.50 transaction) —
@@ -53,6 +52,5 @@ test('a split that does not sum to the parent cannot be saved', async ({ page })
   await expect(splitDialog.getByText('Balanced')).toBeVisible();
   await expect(saveButton).toBeEnabled();
 
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'split editor (unbalanced then rebalanced)');
 });

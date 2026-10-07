@@ -2,7 +2,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-import { expectNoAxeViolations, injectAxe } from './support/axe.ts';
+import { expectNoAxeViolations } from './support/axe.ts';
 import { installRecurringInsightsMocks } from './support/mock-recurring-insights.ts';
 
 /**
@@ -105,7 +105,6 @@ test('rejecting a candidate removes it and it does not return after a re-detect'
   await goToRecurring(page);
 
   await expect(page.getByText('Needs your confirmation')).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'recurring (candidates)');
 
   const gymRow = candidatesList(page)
@@ -115,7 +114,6 @@ test('rejecting a candidate removes it and it does not return after a re-detect'
 
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByText(/This is permanent/)).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'recurring (reject dialog)');
   await dialog.getByRole('button', { name: 'Reject permanently' }).click();
 
@@ -157,7 +155,6 @@ test('every insight in the feed opens an evidence panel whose links resolve to r
 
   await expect(page.getByText('A subscription went up in price')).toBeVisible();
   await expect(page.getByText('Possible duplicate charge')).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'insights (feed)');
 
   const cards = insightCards(page);
@@ -174,7 +171,6 @@ test('every insight in the feed opens an evidence panel whose links resolve to r
     // every card's panel — the §5 exit criterion's "every recommendation
     // renders a full evidence panel".
     await expect(panel.getByText('Advisor', { exact: true })).toBeVisible();
-    await injectAxe(page);
     await expectNoAxeViolations(page, `insights (evidence panel ${String(index)})`);
   }
 
@@ -196,7 +192,6 @@ test('every insight in the feed opens an evidence panel whose links resolve to r
   // $54.00 in minor units, matching the evidence row exactly.
   expect(body.items[0]!.amount.minor).toBe('-5400');
   await expect(page.getByText('CafeSprocket Coffee').first()).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'transactions (from evidence link)');
 });
 
@@ -231,7 +226,6 @@ test('dismissing an insight captures a reason and shows the cooldown notice', as
   await priceCard.getByRole('button', { name: 'Dismiss' }).click();
 
   const dialog = page.getByRole('dialog');
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'insights (dismiss dialog)');
   // WP 5.14: this used to click a preset literally named "Not useful" — WP
   // 5.11 replaced the dialog's three free-text presets with 07 §8.3's seven
@@ -246,6 +240,5 @@ test('dismissing an insight captures a reason and shows the cooldown notice', as
   const notice = page.getByTestId('cooldown-notice');
   await expect(notice).toContainText('Dismissed');
   await expect(priceCard).toHaveCount(0);
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'insights (after dismissal)');
 });

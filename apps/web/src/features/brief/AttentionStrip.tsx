@@ -24,7 +24,7 @@ function AttentionStripRow({ item }: { item: BriefItemWithNarration }) {
         type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded((prev) => !prev)}
-        className="mt-2 rounded-sm text-small text-accent-text hover:underline focus-visible:outline-none"
+        className="mt-2 min-h-6 rounded-sm text-small text-accent-text hover:underline focus-visible:outline-none"
       >
         {expanded ? 'Hide evidence panel' : 'Why am I seeing this?'}
       </button>

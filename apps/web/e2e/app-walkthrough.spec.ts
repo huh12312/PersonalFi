@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { expect, test } from '@playwright/test';
 
-import { expectNoAxeViolations, injectAxe } from './support/axe.ts';
+import { expectNoAxeViolations } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installApiMocks } from './support/mock-api.ts';
 
@@ -43,7 +43,6 @@ test('login, category combobox, split, rule preview, manual account, inbox, tran
   // --- Login -------------------------------------------------------------
   await page.goto('/login');
   await expect(page.getByRole('heading', { name: 'Sign in to PersonalFi' })).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'login');
 
   await page.getByRole('button', { name: 'Use an authenticator code instead' }).click();
@@ -60,7 +59,6 @@ test('login, category combobox, split, rule preview, manual account, inbox, tran
     .click();
   await expect(page).toHaveURL(/\/transactions$/);
   await expect(page.getByText('Blue Bottle Coffee').first()).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'transactions');
 
   await page.getByText('Blue Bottle Coffee').first().click();
@@ -91,7 +89,6 @@ test('login, category combobox, split, rule preview, manual account, inbox, tran
     .poll(() => api.lastPatchBody, { message: 'clearing the category was never sent' })
     .toEqual({ categoryId: null });
 
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'transaction detail sheet');
 
   // --- Split this transaction ---------------------------------------------
@@ -104,7 +101,6 @@ test('login, category combobox, split, rule preview, manual account, inbox, tran
   await expect
     .poll(() => api.lastSplitsBody, { message: 'POST /transactions/txn_1/splits was never sent' })
     .not.toBeNull();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'transaction detail sheet (after split)');
 
   // --- Rule from transaction, with a preview before applying --------------
@@ -130,7 +126,6 @@ test('login, category combobox, split, rule preview, manual account, inbox, tran
     .toEqual({ retroactive: true });
   expect(previewCount).toBe('2');
 
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'rule from transaction');
 
   await page.keyboard.press('Escape');
@@ -147,14 +142,12 @@ test('login, category combobox, split, rule preview, manual account, inbox, tran
   // outgoing route's own transactions grid can also contain mid-transition).
   const manageConnections = page.getByRole('button', { name: 'Manage connections' });
   await expect(manageConnections).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'accounts');
 
   // --- Connections: add a manual account, step-up gated --------------------
   await manageConnections.click();
   await expect(page).toHaveURL(/\/accounts\/connections$/);
   await expect(page.getByText('No connections yet')).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'connections (empty)');
 
   await page.getByRole('button', { name: 'Add connection' }).first().click();
@@ -172,7 +165,6 @@ test('login, category combobox, split, rule preview, manual account, inbox, tran
   await expect(page.getByRole('heading', { name: 'Add a connection' })).toBeHidden();
   await expect(page.getByText('Rental property')).toBeVisible();
 
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'connections (with a connection)');
 
   // --- Inbox: resolve an uncategorized transaction ------------------------
@@ -182,7 +174,6 @@ test('login, category combobox, split, rule preview, manual account, inbox, tran
     .click();
   await expect(page).toHaveURL(/\/inbox$/);
   await expect(page.getByText('Farmers Market')).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'inbox');
 
   const farmersMarketRow = page.locator('li', { hasText: 'Farmers Market' });
@@ -198,7 +189,6 @@ test('login, category combobox, split, rule preview, manual account, inbox, tran
     .toEqual({ outflowTransactionId: 'txn_out', inflowTransactionId: 'txn_in' });
   await expect(page.getByText(/Transfer to Savings ↔ Transfer from Checking/)).toBeHidden();
 
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'inbox (after resolving items)');
 
   // gate-security-review.md F-4/C-1a: the whole walkthrough above only ever

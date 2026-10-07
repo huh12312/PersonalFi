@@ -43,10 +43,27 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-bg-page">
+      {/* 2.4.1 Bypass Blocks: the first stop for a keyboard user, hidden until it has focus. The target is
+          focused by script rather than followed as a `#hash`, which would put a fragment in the router's URL. */}
+      <a
+        href="#main-content"
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById('main-content')?.focus();
+        }}
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[110] focus:rounded-md focus:bg-bg-surface-raised focus:px-4 focus:py-2 focus:text-small focus:font-medium focus:text-text-primary focus:shadow-[var(--shadow-elev-3)]"
+      >
+        Skip to main content
+      </a>
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar title={titleForPath(pathname)} onOpenSearch={() => setSearchOpen(true)} />
-        <main className="flex-1 overflow-y-auto px-4 pb-20 pt-4 md:px-6 md:pb-6 lg:px-8">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          style={{ outline: 'none' }}
+          className="flex-1 overflow-y-auto px-4 pb-20 pt-4 md:px-6 md:pb-6 lg:px-8"
+        >
           {children}
         </main>
       </div>

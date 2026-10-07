@@ -156,7 +156,7 @@ export function BudgetScreen() {
         onSelectPeriod={setHistoricalPeriod}
       />
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <AddEnvelopeControl periodId={period.id} />
         <Link
           to="/reports"

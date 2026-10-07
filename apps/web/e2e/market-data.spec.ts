@@ -3,8 +3,7 @@
 import { expect, test as base } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-import { injectAxe } from './support/axe.ts';
-import type { AxeViolation } from './support/axe.ts';
+import { expectNoAxeViolations, setTheme } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installNetworthMocks, SYNTHETIC_KEY_MARKER } from './support/mock-networth.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
@@ -59,54 +58,6 @@ async function openMarketDataTab(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/settings$/);
   await page.getByRole('tab', { name: 'Market data' }).click();
   await expect(page.getByRole('heading', { name: 'Providers' })).toBeVisible();
-}
-
-/**
- * Same known, not-owned-by-this-work-package shared-sidebar dark-mode
- * finding `networth.spec.ts` excludes — see that file's own comment. Uses
- * axe's own `exclude` **context** entry (the `a[aria-current="page"]`
- * element), the same mechanism WP 3.11's per-screen runs use — `exclude`
- * belongs on axe-core's `context` argument, not its `options` argument;
- * passing it as the second parameter to `axe.run()` silently excludes
- * nothing.
- */
-async function expectAxeCleanExceptSharedSidebar(page: Page, screenName: string): Promise<void> {
-  await injectAxe(page);
-  const violations: AxeViolation[] = await page.evaluate(async () => {
-    const result = await window.axe.run({
-      include: [['#app-content']],
-      exclude: [['a[aria-current="page"]']],
-    });
-    return result.violations;
-  });
-  if (violations.length > 0) {
-    const details = violations
-      .map(
-        (v) =>
-          `- [${v.impact}] ${v.id}: ${v.description}\n  ${v.nodes
-            .map((n) => `${n.target.join(' ')} :: ${n.html}\n  ${n.failureSummary ?? ''}`)
-            .join('\n  ')}`,
-      )
-      .join('\n');
-    throw new Error(
-      `axe found ${String(violations.length)} violation(s) on ${screenName}:\n${details}`,
-    );
-  }
-}
-
-async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
-  await page.evaluate((value) => {
-    window.localStorage.setItem('personalfi:theme', value);
-    document.documentElement.setAttribute('data-theme', value);
-  }, theme);
-  await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-  // See `networth.spec.ts`'s own copy of this comment: `--dur-fast` (160ms)
-  // animates `color`/`background-color` on `transition-colors` elements
-  // when a referenced custom property changes, so an axe color-contrast
-  // scan immediately after the attribute flip can sample a genuinely
-  // mid-transition frame. Outlasting the transition is a synchronization
-  // fix, not a loosened assertion.
-  await page.waitForTimeout(250);
 }
 
 test('the CoinGecko attribution is present on every screen showing a crypto price', async ({
@@ -185,12 +136,12 @@ test('the market-data settings and crypto tabs are axe clean in both themes', as
 
   for (const theme of ['light', 'dark'] as const) {
     await setTheme(page, theme);
-    await expectAxeCleanExceptSharedSidebar(page, `settings (market data tab, ${theme})`);
+    await expectNoAxeViolations(page, `settings (market data tab, ${theme})`);
     await shoot(page, `market-data-settings-${theme}`);
 
     await page.getByRole('tab', { name: 'Crypto' }).click();
     await expect(page.getByRole('heading', { name: 'Coinbase (read-only)' })).toBeVisible();
-    await expectAxeCleanExceptSharedSidebar(page, `settings (crypto tab, ${theme})`);
+    await expectNoAxeViolations(page, `settings (crypto tab, ${theme})`);
     await shoot(page, `crypto-tab-${theme}`);
     await page.getByRole('tab', { name: 'Market data' }).click();
   }

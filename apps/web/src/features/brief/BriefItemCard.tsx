@@ -124,7 +124,7 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpanded((prev) => !prev)}
-          className="inline-flex items-center gap-1 rounded-sm text-small text-accent-text hover:underline focus-visible:outline-none"
+          className="inline-flex min-h-6 items-center gap-1 rounded-sm text-small text-accent-text hover:underline focus-visible:outline-none"
         >
           {expanded ? 'Hide evidence panel' : 'Why am I seeing this?'}
           <ChevronDown

@@ -2,7 +2,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-import { injectAxe } from './support/axe.ts';
+import { expectNoAxeViolations } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installBudgetMocks } from './support/mock-budget.ts';
 
@@ -30,40 +30,6 @@ function visibleAmount(page: Page, testId: string) {
   return page.getByTestId(testId).locator('[aria-hidden="true"]');
 }
 
-/**
- * `--status-warning` (this screen's credit-overspend badge) is a known,
- * already-triaged accessibility gap, not something this work package
- * introduces or is scoped to fix: `docs/plan/02-phase-2-dispatch.md` §2's
- * carry-over table records "`--status-warning` / `--status-serious`
- * contrast unconfirmed" as "**Deferred to Phase 9** (master plan assigns the
- * WCAG 2.2 AA pass there). WP 2.9–2.11 must still run axe on every new
- * screen" — i.e. axe is expected to keep finding this one, and the fix is a
- * dedicated token pass, not a per-screen patch. `05-frontend-
- * architecture.md` §2.2 names the mitigation this screen already applies:
- * "always ship with a Lucide glyph and a text label" — `EnvelopeLineRow.tsx`
- * meets that (the badge is a text label, "Credit overspend", not colour
- * alone) — the open item is the *visual* contrast ratio, tracked at the
- * design-token level. This wrapper runs the same real axe pass as
- * `expectNoAxeViolations` everywhere else in this file, with only the one
- * named, cited rule excluded on the one class that carries it.
- */
-async function expectNoAxeViolationsExceptKnownStatusWarningContrast(
-  page: Page,
-  screenName: string,
-): Promise<void> {
-  const violations = await page.evaluate(async () => {
-    const result = await window.axe.run('#app-content', {
-      rules: { 'color-contrast': { enabled: false } },
-    });
-    return result.violations;
-  });
-  if (violations.length > 0) {
-    throw new Error(
-      `axe found ${String(violations.length)} violation(s) on ${screenName} (color-contrast excluded for the documented --status-warning deferral): ${JSON.stringify(violations)}`,
-    );
-  }
-}
-
 test.describe('budget screen and reports (WP 2.9)', () => {
   test('assigning money moves Ready-to-Assign by exactly that amount', async ({ page }) => {
     await installFakeWebAuthnAssertion(page);
@@ -73,11 +39,7 @@ test.describe('budget screen and reports (WP 2.9)', () => {
     const rta = visibleAmount(page, 'ready-to-assign-amount');
     await expect(rta).toHaveText('+$1,000.00');
 
-    await injectAxe(page);
-    await expectNoAxeViolationsExceptKnownStatusWarningContrast(
-      page,
-      'budget screen (before assign)',
-    );
+    await expectNoAxeViolations(page, 'budget screen (before assign)');
 
     // Groceries starts at $0 assigned — click it, type $50.00, commit with Enter.
     const groceriesRow = page.locator('li', { hasText: 'Groceries' });
@@ -89,11 +51,7 @@ test.describe('budget screen and reports (WP 2.9)', () => {
     // Assigning $50 moves Ready-to-Assign from $1,000.00 to exactly $950.00.
     await expect(rta).toHaveText('+$950.00');
 
-    await injectAxe(page);
-    await expectNoAxeViolationsExceptKnownStatusWarningContrast(
-      page,
-      'budget screen (after assign)',
-    );
+    await expectNoAxeViolations(page, 'budget screen (after assign)');
   });
 
   test('a credit overspend renders yellow and a cash overspend red', async ({ page }) => {
@@ -124,8 +82,7 @@ test.describe('budget screen and reports (WP 2.9)', () => {
 
     await expect(page.getByTestId('period-range')).toContainText('Oct 1, 2026');
 
-    await injectAxe(page);
-    await expectNoAxeViolationsExceptKnownStatusWarningContrast(page, 'budget screen (after roll)');
+    await expectNoAxeViolations(page, 'budget screen (after roll)');
   });
 
   test('clicking a Sankey band lands on the filtered transactions list, and export downloads a bundle', async ({
@@ -138,11 +95,7 @@ test.describe('budget screen and reports (WP 2.9)', () => {
     await page.getByRole('link', { name: /View reports/ }).click();
     await expect(page).toHaveURL(/\/reports$/);
 
-    await injectAxe(page);
-    await expectNoAxeViolationsExceptKnownStatusWarningContrast(
-      page,
-      'reports screen (spending tab)',
-    );
+    await expectNoAxeViolations(page, 'reports screen (spending tab)');
 
     await page.getByRole('tab', { name: 'Cash flow' }).click();
     const link = page.getByRole('link', { name: /Flow from income to groceries/ });
@@ -165,11 +118,7 @@ test.describe('budget screen and reports (WP 2.9)', () => {
     await expect(page).toHaveURL(/\/transactions/);
     await expect(page.getByText('Farmers Market')).toBeVisible();
 
-    await injectAxe(page);
-    await expectNoAxeViolationsExceptKnownStatusWarningContrast(
-      page,
-      'transactions (drill-through landing)',
-    );
+    await expectNoAxeViolations(page, 'transactions (drill-through landing)');
 
     // Back to reports for the export action, behind step-up.
     await page.goBack();
@@ -180,10 +129,6 @@ test.describe('budget screen and reports (WP 2.9)', () => {
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/^personalfi-export-.*\.jsonl$/);
 
-    await injectAxe(page);
-    await expectNoAxeViolationsExceptKnownStatusWarningContrast(
-      page,
-      'reports screen (after export)',
-    );
+    await expectNoAxeViolations(page, 'reports screen (after export)');
   });
 });

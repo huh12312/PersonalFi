@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { expect, test } from '@playwright/test';
 
-import { expectNoAxeViolations, injectAxe } from './support/axe.ts';
+import { expectNoAxeViolations } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installApiMocks } from './support/mock-api.ts';
 
@@ -27,7 +27,6 @@ test('the preview count matches the count after apply', async ({ page }) => {
   await detailSheet.getByRole('button', { name: /always categorize like this/i }).click();
   const ruleDialog = page.getByRole('dialog', { name: 'Always categorize like this' });
   await expect(ruleDialog).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'rule from transaction (before preview)');
 
   await ruleDialog.getByRole('combobox', { name: 'Category' }).click();
@@ -44,7 +43,6 @@ test('the preview count matches the count after apply', async ({ page }) => {
   const previewCount = /apply to (\d+)/i.exec(previewLabel ?? '')?.[1];
   expect(previewCount).not.toBeUndefined();
 
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'rule from transaction (after preview)');
 
   const [applyResponse] = await Promise.all([

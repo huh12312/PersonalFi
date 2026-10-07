@@ -195,7 +195,7 @@ export async function installPlanSlidersMocks(page: Page): Promise<MockPlanSlide
       return route.fulfill(json({ lifeEvents: [] }));
     }
 
-    return route.continue();
+    return route.fallback();
   });
 
   return state;

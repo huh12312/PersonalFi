@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { expect, test } from '@playwright/test';
 
-import { expectNoAxeViolations, injectAxe } from './support/axe.ts';
+import { expectNoAxeViolations } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installApiMocks } from './support/mock-api.ts';
 
@@ -102,7 +102,6 @@ test('twenty items clear with keyboard only', async ({ page }) => {
   const list = page.locator('ul[aria-label="Review inbox"]');
   const rows = list.locator('> li');
   await expect(rows).toHaveCount(BULK_COUNT);
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'inbox (twenty items)');
 
   // Establish keyboard focus inside the list once — the same starting point
@@ -131,6 +130,5 @@ test('twenty items clear with keyboard only', async ({ page }) => {
   await expect(rows).toHaveCount(0);
   await expect(page.getByText("You're all caught up")).toBeVisible();
 
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'inbox (cleared)');
 });

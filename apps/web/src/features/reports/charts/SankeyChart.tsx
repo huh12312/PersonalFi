@@ -8,6 +8,7 @@ import type { SankeyLink, SankeyNode } from '../../../api/generated/types.gen.ts
 import { categorySeriesVar } from '../../../components/finance/category-color.ts';
 import { toTransactionsSearch } from '../drill-through.ts';
 import { layoutSankey, type LaidOutLink, type LaidOutNode } from './sankey-layout.ts';
+import { ScrollRegion } from '../../../components/patterns/ScrollRegion.tsx';
 
 interface LinkEndpoints {
   readonly source: [number, number];
@@ -102,65 +103,69 @@ export function SankeyChart({
     // targets, which `role="img"` (an atomic, non-interactive picture)
     // forbids under axe's `nested-interactive` rule. `aria-label` alone still
     // names the `<svg>`.
-    <svg width={width} height={height} aria-label={`Cash flow sankey diagram, ${currency}`}>
-      <g transform={`translate(${String(MARGIN.left)}, ${String(MARGIN.top)})`}>
-        {layout.links.map((l, index) => {
-          const sourceNode = nodeById.get(l.source);
-          const color =
-            sourceNode !== undefined ? categorySeriesVar(sourceNode.refId) : 'var(--money-neutral)';
-          return (
-            <path
-              // Links carry no stable id of their own on the wire; the index
-              // disambiguates two links that happen to share source+target.
-              key={`${l.source}->${l.target}-${String(index)}`}
-              d={linkPath(l, nodeById, nodeRight)}
-              fill="none"
-              stroke={color}
-              strokeOpacity={0.45}
-              strokeWidth={l.width}
-              role="link"
-              tabIndex={0}
-              aria-label={`Flow from ${l.source} to ${l.target}, view transactions`}
-              className="cursor-pointer outline-none focus-visible:stroke-opacity-100 hover:stroke-opacity-80"
-              onClick={() => goToDrillThrough(l.drillThrough)}
-              onKeyDown={(event: KeyboardEvent<SVGPathElement>) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  goToDrillThrough(l.drillThrough);
-                }
-              }}
-            />
-          );
-        })}
-        {layout.nodes.map((node) => {
-          const wireNode = nodes.find((n) => n.id === node.id);
-          const label =
-            (wireNode !== undefined ? labelFor?.(wireNode) : undefined) ?? nodeLabel(node);
-          const isLeftColumn = node.column === 0;
-          return (
-            <g key={node.id}>
-              <rect
-                x={node.x}
-                y={node.y}
-                width={14}
-                height={node.height}
-                fill={categorySeriesVar(node.refId)}
-                rx={2}
+    <ScrollRegion label={`Cash flow sankey diagram, ${currency}`}>
+      <svg width={width} height={height} aria-label={`Cash flow sankey diagram, ${currency}`}>
+        <g transform={`translate(${String(MARGIN.left)}, ${String(MARGIN.top)})`}>
+          {layout.links.map((l, index) => {
+            const sourceNode = nodeById.get(l.source);
+            const color =
+              sourceNode !== undefined
+                ? categorySeriesVar(sourceNode.refId)
+                : 'var(--money-neutral)';
+            return (
+              <path
+                // Links carry no stable id of their own on the wire; the index
+                // disambiguates two links that happen to share source+target.
+                key={`${l.source}->${l.target}-${String(index)}`}
+                d={linkPath(l, nodeById, nodeRight)}
+                fill="none"
+                stroke={color}
+                strokeOpacity={0.45}
+                strokeWidth={l.width}
+                role="link"
+                tabIndex={0}
+                aria-label={`Flow from ${l.source} to ${l.target}, view transactions`}
+                className="cursor-pointer outline-none focus-visible:stroke-opacity-100 hover:stroke-opacity-80"
+                onClick={() => goToDrillThrough(l.drillThrough)}
+                onKeyDown={(event: KeyboardEvent<SVGPathElement>) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    goToDrillThrough(l.drillThrough);
+                  }
+                }}
               />
-              <text
-                x={isLeftColumn ? node.x - 6 : node.x + 20}
-                y={node.y + node.height / 2}
-                dy="0.32em"
-                textAnchor={isLeftColumn ? 'end' : 'start'}
-                fontSize={11}
-                fill="var(--text-secondary)"
-              >
-                {label}
-              </text>
-            </g>
-          );
-        })}
-      </g>
-    </svg>
+            );
+          })}
+          {layout.nodes.map((node) => {
+            const wireNode = nodes.find((n) => n.id === node.id);
+            const label =
+              (wireNode !== undefined ? labelFor?.(wireNode) : undefined) ?? nodeLabel(node);
+            const isLeftColumn = node.column === 0;
+            return (
+              <g key={node.id}>
+                <rect
+                  x={node.x}
+                  y={node.y}
+                  width={14}
+                  height={node.height}
+                  fill={categorySeriesVar(node.refId)}
+                  rx={2}
+                />
+                <text
+                  x={isLeftColumn ? node.x - 6 : node.x + 20}
+                  y={node.y + node.height / 2}
+                  dy="0.32em"
+                  textAnchor={isLeftColumn ? 'end' : 'start'}
+                  fontSize={11}
+                  fill="var(--text-secondary)"
+                >
+                  {label}
+                </text>
+              </g>
+            );
+          })}
+        </g>
+      </svg>
+    </ScrollRegion>
   );
 }

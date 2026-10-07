@@ -5,8 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test as base } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 
-import { injectAxe } from './support/axe.ts';
-import type { AxeViolation } from './support/axe.ts';
+import { expectNoAxeViolations, setTheme } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installInvestmentsMocks } from './support/mock-investments.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
@@ -107,55 +106,6 @@ async function loginAndReachInvestments(page: Page): Promise<void> {
     .click();
   await expect(page).toHaveURL(/\/investments/);
   await expect(page.getByRole('heading', { name: 'Investments' })).toBeVisible();
-}
-
-/** `src/lib/theme.ts`'s own two effects: the stored preference and `data-theme` on `<html>`. */
-async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
-  await page.evaluate((value) => {
-    window.localStorage.setItem('personalfi:theme', value);
-    document.documentElement.setAttribute('data-theme', value);
-  }, theme);
-  await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-}
-
-/**
- * The same real axe pass as `support/axe.ts`'s `expectNoAxeViolations`, with **one node
- * excluded**: the sidebar's active nav link, `a[aria-current="page"]`.
- *
- * That link is `src/app/shell/Sidebar.tsx`'s
- * `active && 'bg-accent-wash text-accent-text'`, a **shared shell file this
- * work package does not own**, and in dark mode `--accent-text` (#3987e5) on
- * `--accent-wash` (#132537) measures **4.28:1** against a 4.5:1 requirement.
- * It fires on whichever nav item is current, on every route, and is
- * reproduced on a screen this work package did not touch by
- * `'the one dark-mode axe violation is the shared sidebar, not this screen'`
- * below — which is why it is excluded here rather than treated as an
- * investments-screen defect. Recorded as a finding in
- * `docs/evidence/phase-3/wp3.11-investments-ui.md`.
- *
- * Everything else, including `color-contrast` on every element this work
- * package actually renders, stays enabled.
- */
-async function expectNoAxeViolationsOutsideSharedSidebar(
-  page: Page,
-  screenName: string,
-): Promise<void> {
-  const violations: AxeViolation[] = await page.evaluate(async () => {
-    const result = await window.axe.run({
-      include: [['#app-content']],
-      exclude: [['a[aria-current="page"]']],
-    });
-    return result.violations;
-  });
-  if (violations.length > 0) {
-    throw new Error(
-      `axe found ${String(violations.length)} violation(s) on ${screenName}:\n${JSON.stringify(
-        violations,
-        null,
-        2,
-      )}`,
-    );
-  }
 }
 
 async function shoot(page: Page, evidenceDir: string | undefined, name: string): Promise<void> {
@@ -262,16 +212,14 @@ test.describe('investments screen (WP 3.11)', () => {
     await assertAttribution(page);
     const holdingsLink = page.getByTestId('attribution-coingecko').getByRole('link');
     await expect(holdingsLink).toHaveAttribute('href', 'https://www.coingecko.com');
-    await injectAxe(page);
-    await expectNoAxeViolationsOutsideSharedSidebar(page, 'investments holdings attribution');
+    await expectNoAxeViolations(page, 'investments holdings attribution');
 
     // 2. Per-account detail — the crypto account specifically (a non-crypto
     // account's positions must not carry an obligation that isn't theirs).
     await page.getByRole('button', { name: 'Coinbase' }).first().click();
     await expect(page.getByTestId('position-BTC')).toBeVisible();
     await assertAttribution(page);
-    await injectAxe(page);
-    await expectNoAxeViolationsOutsideSharedSidebar(page, 'investments account detail attribution');
+    await expectNoAxeViolations(page, 'investments account detail attribution');
     await page.getByRole('button', { name: 'All accounts' }).click();
 
     // A non-crypto account has no CoinGecko obligation to render.
@@ -284,16 +232,14 @@ test.describe('investments screen (WP 3.11)', () => {
     await page.getByRole('tab', { name: 'Allocation' }).click();
     await expect(page.getByTestId('allocation-legend')).toBeVisible();
     await assertAttribution(page);
-    await injectAxe(page);
-    await expectNoAxeViolationsOutsideSharedSidebar(page, 'investments allocation attribution');
+    await expectNoAxeViolations(page, 'investments allocation attribution');
 
     // 4. Performance — TWR/MWR/dollar-gain are computed over the same priced
     // positions.
     await page.getByRole('tab', { name: 'Performance' }).click();
     await expect(page.getByTestId('twr-block')).toBeVisible();
     await assertAttribution(page);
-    await injectAxe(page);
-    await expectNoAxeViolationsOutsideSharedSidebar(page, 'investments performance attribution');
+    await expectNoAxeViolations(page, 'investments performance attribution');
   });
 
   test('a stale price is visibly labeled', async ({ page }) => {
@@ -353,21 +299,9 @@ test.describe('investments screen (WP 3.11)', () => {
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
     await setTheme(page, 'dark');
 
-    // The Dashboard is not this work package's screen. When WP 3.11 wrote this
-    // test an unfiltered axe run here, in dark mode, found exactly one thing —
-    // the sidebar's active nav link at 4.28:1 — and this test pinned it so the
-    // `expectNoAxeViolationsOutsideSharedSidebar` exclusion could be seen to
-    // hide that one node and nothing else. WP 4.10 fixed the token pair
-    // (15.58:1, wp4.10-plan-ui.md), so the pin flipped: the unfiltered run must
-    // now find nothing at all, and the exclusion below is proven inert.
-    await injectAxe(page);
-    const violations: AxeViolation[] = await page.evaluate(
-      async () => (await window.axe.run('#app-content')).violations,
-    );
-    expect(violations.map((violation) => violation.id)).toEqual([]);
-
-    // And with the (now redundant) shared node excluded, the same answer.
-    await expectNoAxeViolationsOutsideSharedSidebar(page, 'dashboard (dark, control)');
+    // The Dashboard is not this work package's screen, but its shell is on every screen:
+    // an unfiltered document scan must find nothing (WP 9.8 — no element is excluded any more).
+    await expectNoAxeViolations(page, 'dashboard (dark, control)');
   });
 
   test('every investments screen is axe clean in both themes', async ({ page, evidenceDir }) => {
@@ -382,58 +316,39 @@ test.describe('investments screen (WP 3.11)', () => {
       await expect(page.getByTestId('holdings-table')).toBeVisible();
       await page.getByTestId('holding-row-VTI').getByRole('button').first().click();
       await expect(page.getByTestId('holding-accounts-VTI')).toBeVisible();
-      await injectAxe(page);
-      await expectNoAxeViolationsOutsideSharedSidebar(page, `investments holdings (${theme})`);
+      await expectNoAxeViolations(page, `investments holdings (${theme})`);
       await shoot(page, evidenceDir, `holdings-${theme}`);
 
       await page.getByRole('button', { name: 'Taxable brokerage' }).first().click();
       await expect(page.getByTestId('position-VTI')).toBeVisible();
-      await injectAxe(page);
-      await expectNoAxeViolationsOutsideSharedSidebar(
-        page,
-        `investments account detail (${theme})`,
-      );
+      await expectNoAxeViolations(page, `investments account detail (${theme})`);
       await shoot(page, evidenceDir, `account-detail-${theme}`);
       await page.getByRole('button', { name: 'All accounts' }).click();
 
       await page.getByRole('tab', { name: 'Allocation' }).click();
       await expect(page.getByTestId('allocation-legend')).toBeVisible();
-      await injectAxe(page);
-      await expectNoAxeViolationsOutsideSharedSidebar(page, `investments allocation (${theme})`);
+      await expectNoAxeViolations(page, `investments allocation (${theme})`);
       await shoot(page, evidenceDir, `allocation-${theme}`);
 
       await page.getByRole('radio', { name: 'Sector' }).click();
       await expect(page.getByTestId('allocation-slice-Diversified')).toBeVisible();
-      await injectAxe(page);
-      await expectNoAxeViolationsOutsideSharedSidebar(
-        page,
-        `investments allocation by sector (${theme})`,
-      );
+      await expectNoAxeViolations(page, `investments allocation by sector (${theme})`);
       await page.getByRole('radio', { name: 'Asset class' }).click();
 
       await page.getByRole('tab', { name: 'Drift' }).click();
       await expect(page.getByText('Set a target allocation')).toBeVisible();
-      await injectAxe(page);
-      await expectNoAxeViolationsOutsideSharedSidebar(
-        page,
-        `investments drift empty state (${theme})`,
-      );
+      await expectNoAxeViolations(page, `investments drift empty state (${theme})`);
       await shoot(page, evidenceDir, `drift-empty-${theme}`);
 
       await page.getByRole('button', { name: 'Use an example target' }).click();
       await expect(page.getByTestId('drift-table')).toBeVisible();
-      await injectAxe(page);
-      await expectNoAxeViolationsOutsideSharedSidebar(
-        page,
-        `investments drift with targets (${theme})`,
-      );
+      await expectNoAxeViolations(page, `investments drift with targets (${theme})`);
       await shoot(page, evidenceDir, `drift-${theme}`);
       await page.getByRole('button', { name: 'Clear target' }).click();
 
       await page.getByRole('tab', { name: 'Performance' }).click();
       await expect(page.getByTestId('twr-block')).toBeVisible();
-      await injectAxe(page);
-      await expectNoAxeViolationsOutsideSharedSidebar(page, `investments performance (${theme})`);
+      await expectNoAxeViolations(page, `investments performance (${theme})`);
       await shoot(page, evidenceDir, `performance-${theme}`);
     }
   });

@@ -9,6 +9,7 @@ import type { KeyboardEvent } from 'react';
 import type { ReportCategoryMonthCell } from '../../../api/generated/types.gen.ts';
 import { categorySeriesVar } from '../../../components/finance/category-color.ts';
 import { toTransactionsSearch } from '../drill-through.ts';
+import { ScrollRegion } from '../../../components/patterns/ScrollRegion.tsx';
 
 export interface CategoryMonthBarChartProps {
   cells: readonly ReportCategoryMonthCell[];
@@ -107,64 +108,66 @@ export function CategoryMonthBarChart({
     // not a deferral). `aria-label` alone still gives the `<svg>` an
     // accessible name (SVG-AAM), and each segment is its own reachable
     // `role="button"` drill-through target.
-    <svg
-      width={innerWidth + MARGIN.left + MARGIN.right}
-      height={height}
-      aria-label={ariaLabel}
-      className={className}
-    >
-      <Group left={MARGIN.left} top={MARGIN.top}>
-        {bars.map((bar) => {
-          let cumulative = 0;
-          const x = xScale(bar.month) ?? 0;
-          const barWidth = xScale.bandwidth();
-          return (
-            <Group key={bar.month} left={x}>
-              {bar.segments.map((segment) => {
-                const segmentTop = yScale(cumulative + segment.amount);
-                const segmentHeight = yScale(cumulative) - yScale(cumulative + segment.amount);
-                cumulative += segment.amount;
-                const label =
-                  labelFor?.(segment.categoryId) ?? segment.categoryId ?? 'Uncategorised';
-                return (
-                  <Bar
-                    key={`${bar.month}-${segment.categoryId ?? 'uncategorised'}`}
-                    x={0}
-                    y={segmentTop}
-                    width={barWidth}
-                    height={Math.max(0, segmentHeight)}
-                    fill={categorySeriesVar(segment.categoryId)}
-                    rx={2}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`${label}, ${bar.month}, view transactions`}
-                    className="cursor-pointer outline-none focus-visible:opacity-80 hover:opacity-80"
-                    onClick={() => goTo(segment.cell)}
-                    onKeyDown={(event: KeyboardEvent<SVGRectElement>) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        goTo(segment.cell);
-                      }
-                    }}
-                  />
-                );
-              })}
-            </Group>
-          );
-        })}
-        {bars.map((bar) => (
-          <text
-            key={`label-${bar.month}`}
-            x={(xScale(bar.month) ?? 0) + xScale.bandwidth() / 2}
-            y={innerHeight + 16}
-            textAnchor="middle"
-            fontSize={11}
-            fill="var(--text-muted)"
-          >
-            {bar.month}
-          </text>
-        ))}
-      </Group>
-    </svg>
+    <ScrollRegion label={ariaLabel}>
+      <svg
+        width={innerWidth + MARGIN.left + MARGIN.right}
+        height={height}
+        aria-label={ariaLabel}
+        className={className}
+      >
+        <Group left={MARGIN.left} top={MARGIN.top}>
+          {bars.map((bar) => {
+            let cumulative = 0;
+            const x = xScale(bar.month) ?? 0;
+            const barWidth = xScale.bandwidth();
+            return (
+              <Group key={bar.month} left={x}>
+                {bar.segments.map((segment) => {
+                  const segmentTop = yScale(cumulative + segment.amount);
+                  const segmentHeight = yScale(cumulative) - yScale(cumulative + segment.amount);
+                  cumulative += segment.amount;
+                  const label =
+                    labelFor?.(segment.categoryId) ?? segment.categoryId ?? 'Uncategorised';
+                  return (
+                    <Bar
+                      key={`${bar.month}-${segment.categoryId ?? 'uncategorised'}`}
+                      x={0}
+                      y={segmentTop}
+                      width={barWidth}
+                      height={Math.max(0, segmentHeight)}
+                      fill={categorySeriesVar(segment.categoryId)}
+                      rx={2}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${label}, ${bar.month}, view transactions`}
+                      className="cursor-pointer outline-none focus-visible:opacity-80 hover:opacity-80"
+                      onClick={() => goTo(segment.cell)}
+                      onKeyDown={(event: KeyboardEvent<SVGRectElement>) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          goTo(segment.cell);
+                        }
+                      }}
+                    />
+                  );
+                })}
+              </Group>
+            );
+          })}
+          {bars.map((bar) => (
+            <text
+              key={`label-${bar.month}`}
+              x={(xScale(bar.month) ?? 0) + xScale.bandwidth() / 2}
+              y={innerHeight + 16}
+              textAnchor="middle"
+              fontSize={11}
+              fill="var(--text-muted)"
+            >
+              {bar.month}
+            </text>
+          ))}
+        </Group>
+      </svg>
+    </ScrollRegion>
   );
 }

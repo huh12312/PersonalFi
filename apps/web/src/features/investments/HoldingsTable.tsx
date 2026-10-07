@@ -13,6 +13,7 @@ import type {
 import { StaleBadge } from './StaleBadge.tsx';
 import { MoneyOrUnavailable, UnrealizedCell } from './UnavailableValue.tsx';
 import { assetClassLabel, ratioToNumber, securityTypeLabel } from './labels.ts';
+import { ScrollRegion } from '../../components/patterns/ScrollRegion.tsx';
 
 type AccountPosition = ListAccountHoldingsResponse['positions'][number];
 
@@ -95,161 +96,163 @@ export function HoldingsTable({
 
   return (
     <>
-      <table className="w-full text-small" data-testid="holdings-table">
-        <caption className="sr-only">
-          Holdings aggregated by security across every account. Expand a row to see the accounts
-          that hold it.
-        </caption>
-        <thead>
-          <tr className="border-b border-border-hairline text-left text-text-secondary">
-            <th scope="col" className="py-2 font-medium">
-              Security
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Quantity
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Price
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Market value
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Cost basis
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Unrealized
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Weight
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {holdings.map((holding) => {
-            const isOpen = expanded.has(holding.securityId);
-            const rows = accountRowsFor(holding.securityId);
-            return [
-              <tr
-                key={holding.securityId}
-                className="border-b border-border-hairline"
-                data-testid={`holding-row-${holding.symbol ?? holding.securityId}`}
-              >
-                <th scope="row" className="py-2 text-left font-normal">
-                  <button
-                    type="button"
-                    className="flex items-center gap-1.5 text-left"
-                    aria-expanded={isOpen}
-                    onClick={() => toggle(holding.securityId)}
-                  >
-                    {isOpen ? (
-                      <ChevronDown size={14} aria-hidden="true" />
-                    ) : (
-                      <ChevronRight size={14} aria-hidden="true" />
-                    )}
-                    <span className="font-medium text-text-primary">
-                      {holding.symbol ?? holding.name ?? holding.securityId}
-                    </span>
-                    <span className="sr-only">
-                      , {holding.accountCount} account(s); expand to list them
-                    </span>
-                  </button>
-                  <span className="ml-5 block text-caption text-text-muted">
-                    {holding.name ?? securityTypeLabel(holding.securityType)} ·{' '}
-                    {assetClassLabel(holding.assetClass)} · {holding.accountCount} account
-                    {holding.accountCount === 1 ? '' : 's'}
-                  </span>
-                </th>
-                <td className="py-2 text-right tabular-nums">{holding.quantity}</td>
-                <td className="py-2 text-right">
-                  {holding.price === null ? (
-                    <span className="text-text-muted italic">unavailable</span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="tabular-nums">
-                        {holding.price.close} {holding.price.currency}
-                      </span>
-                      <StaleBadge price={holding.price} />
-                    </span>
-                  )}
-                </td>
-                <td className="py-2 text-right">
-                  <MoneyOrUnavailable value={holding.marketValue} reason="price_unknown" />
-                </td>
-                <td className="py-2 text-right">
-                  <MoneyOrUnavailable value={holding.costBasis} reason="basis_unknown" />
-                </td>
-                <td className="py-2 text-right">
-                  <UnrealizedCell unrealized={holding.unrealized} />
-                </td>
-                <td className="py-2 text-right tabular-nums">
-                  {holding.weight === null ? (
-                    <span className="text-text-muted italic">unavailable</span>
-                  ) : (
-                    <Percent value={ratioToNumber(holding.weight)} />
-                  )}
-                </td>
-              </tr>,
-              isOpen && (
+      <ScrollRegion label="Holdings by security">
+        <table className="w-full text-small" data-testid="holdings-table">
+          <caption className="sr-only">
+            Holdings aggregated by security across every account. Expand a row to see the accounts
+            that hold it.
+          </caption>
+          <thead>
+            <tr className="border-b border-border-hairline text-left text-text-secondary">
+              <th scope="col" className="py-2 font-medium">
+                Security
+              </th>
+              <th scope="col" className="py-2 text-right font-medium">
+                Quantity
+              </th>
+              <th scope="col" className="py-2 text-right font-medium">
+                Price
+              </th>
+              <th scope="col" className="py-2 text-right font-medium">
+                Market value
+              </th>
+              <th scope="col" className="py-2 text-right font-medium">
+                Cost basis
+              </th>
+              <th scope="col" className="py-2 text-right font-medium">
+                Unrealized
+              </th>
+              <th scope="col" className="py-2 text-right font-medium">
+                Weight
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {holdings.map((holding) => {
+              const isOpen = expanded.has(holding.securityId);
+              const rows = accountRowsFor(holding.securityId);
+              return [
                 <tr
-                  key={`${holding.securityId}-accounts`}
-                  className="border-b border-border-hairline bg-bg-subtle"
-                  data-testid={`holding-accounts-${holding.symbol ?? holding.securityId}`}
+                  key={holding.securityId}
+                  className="border-b border-border-hairline"
+                  data-testid={`holding-row-${holding.symbol ?? holding.securityId}`}
                 >
-                  <td colSpan={7} className="px-3 py-2">
-                    {rows.length === 0 ? (
-                      <p className="text-caption text-text-muted">
-                        Per-account detail is still loading for this security.
-                      </p>
+                  <th scope="row" className="py-2 text-left font-normal">
+                    <button
+                      type="button"
+                      className="flex items-center gap-1.5 text-left"
+                      aria-expanded={isOpen}
+                      onClick={() => toggle(holding.securityId)}
+                    >
+                      {isOpen ? (
+                        <ChevronDown size={14} aria-hidden="true" />
+                      ) : (
+                        <ChevronRight size={14} aria-hidden="true" />
+                      )}
+                      <span className="font-medium text-text-primary">
+                        {holding.symbol ?? holding.name ?? holding.securityId}
+                      </span>
+                      <span className="sr-only">
+                        , {holding.accountCount} account(s); expand to list them
+                      </span>
+                    </button>
+                    <span className="ml-5 block text-caption text-text-muted">
+                      {holding.name ?? securityTypeLabel(holding.securityType)} ·{' '}
+                      {assetClassLabel(holding.assetClass)} · {holding.accountCount} account
+                      {holding.accountCount === 1 ? '' : 's'}
+                    </span>
+                  </th>
+                  <td className="py-2 text-right tabular-nums">{holding.quantity}</td>
+                  <td className="py-2 text-right">
+                    {holding.price === null ? (
+                      <span className="text-text-muted italic">unavailable</span>
                     ) : (
-                      <ul className="space-y-1">
-                        {rows.map(({ accountId, position }) => (
-                          <li
-                            key={position.holdingId}
-                            className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption"
-                          >
-                            <button
-                              type="button"
-                              // `text-text-primary`, not `text-accent-text`:
-                              // `--accent-text` on `--bg-subtle` measures 4.33:1
-                              // in dark mode, which axe fails at this size.
-                              // The underline carries "this is a link" without
-                              // relying on the accent hue at all.
-                              className="text-text-primary underline underline-offset-2"
-                              onClick={() => onOpenAccount(accountId)}
-                            >
-                              {accountNameOf(accountId)}
-                            </button>
-                            <span className="tabular-nums text-text-secondary">
-                              {position.quantity} units
-                            </span>
-                            <span className="tabular-nums">
-                              <MoneyOrUnavailable
-                                value={position.marketValue}
-                                reason="price_unknown"
-                              />
-                            </span>
-                            <span className="text-text-muted">
-                              basis:{' '}
-                              <MoneyOrUnavailable
-                                value={position.costBasis}
-                                reason="basis_unknown"
-                              />
-                              {position.costBasisSource !== null &&
-                                ` (${position.costBasisSource})`}
-                            </span>
-                            <StaleBadge price={position.price} />
-                          </li>
-                        ))}
-                      </ul>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="tabular-nums">
+                          {holding.price.close} {holding.price.currency}
+                        </span>
+                        <StaleBadge price={holding.price} />
+                      </span>
                     )}
                   </td>
-                </tr>
-              ),
-            ];
-          })}
-        </tbody>
-      </table>
+                  <td className="py-2 text-right">
+                    <MoneyOrUnavailable value={holding.marketValue} reason="price_unknown" />
+                  </td>
+                  <td className="py-2 text-right">
+                    <MoneyOrUnavailable value={holding.costBasis} reason="basis_unknown" />
+                  </td>
+                  <td className="py-2 text-right">
+                    <UnrealizedCell unrealized={holding.unrealized} />
+                  </td>
+                  <td className="py-2 text-right tabular-nums">
+                    {holding.weight === null ? (
+                      <span className="text-text-muted italic">unavailable</span>
+                    ) : (
+                      <Percent value={ratioToNumber(holding.weight)} />
+                    )}
+                  </td>
+                </tr>,
+                isOpen && (
+                  <tr
+                    key={`${holding.securityId}-accounts`}
+                    className="border-b border-border-hairline bg-bg-subtle"
+                    data-testid={`holding-accounts-${holding.symbol ?? holding.securityId}`}
+                  >
+                    <td colSpan={7} className="px-3 py-2">
+                      {rows.length === 0 ? (
+                        <p className="text-caption text-text-muted">
+                          Per-account detail is still loading for this security.
+                        </p>
+                      ) : (
+                        <ul className="space-y-1">
+                          {rows.map(({ accountId, position }) => (
+                            <li
+                              key={position.holdingId}
+                              className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption"
+                            >
+                              <button
+                                type="button"
+                                // `text-text-primary`, not `text-accent-text`:
+                                // `--accent-text` on `--bg-subtle` measures 4.33:1
+                                // in dark mode, which axe fails at this size.
+                                // The underline carries "this is a link" without
+                                // relying on the accent hue at all.
+                                className="text-text-primary underline underline-offset-2"
+                                onClick={() => onOpenAccount(accountId)}
+                              >
+                                {accountNameOf(accountId)}
+                              </button>
+                              <span className="tabular-nums text-text-secondary">
+                                {position.quantity} units
+                              </span>
+                              <span className="tabular-nums">
+                                <MoneyOrUnavailable
+                                  value={position.marketValue}
+                                  reason="price_unknown"
+                                />
+                              </span>
+                              <span className="text-text-muted">
+                                basis:{' '}
+                                <MoneyOrUnavailable
+                                  value={position.costBasis}
+                                  reason="basis_unknown"
+                                />
+                                {position.costBasisSource !== null &&
+                                  ` (${position.costBasisSource})`}
+                              </span>
+                              <StaleBadge price={position.price} />
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </td>
+                  </tr>
+                ),
+              ];
+            })}
+          </tbody>
+        </table>
+      </ScrollRegion>
       {hasCoinGeckoPrice && coinGeckoAttribution !== undefined && (
         <ProviderAttribution attribution={coinGeckoAttribution} className="mt-3" />
       )}

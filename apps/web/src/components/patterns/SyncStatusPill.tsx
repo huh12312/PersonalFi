@@ -56,7 +56,8 @@ const pillClassName = (status: SyncStatus, className: string | undefined) =>
     status.kind === 'synced' && 'bg-bg-subtle text-text-secondary',
     status.kind === 'syncing' && 'bg-accent-wash text-accent-text',
     status.kind === 'stale' && 'bg-bg-subtle text-status-warning',
-    status.kind === 'error' && 'bg-bg-subtle text-status-serious hover:bg-bg-inset',
+    status.kind === 'error' &&
+      'bg-bg-subtle text-status-serious hover:bg-bg-surface hover:underline',
     className,
   );
 

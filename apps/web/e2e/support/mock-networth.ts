@@ -389,7 +389,7 @@ export async function installNetworthMocks(page: Page): Promise<MockNetworthStat
       return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
     }
 
-    return route.continue();
+    return route.fallback();
   });
 
   return state;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { Combobox as BaseCombobox } from '@base-ui-components/react/combobox';
 import { Check, ChevronDown, X } from 'lucide-react';
+import { useEffect } from 'react';
 import type { ComponentProps } from 'react';
 
 import { cn } from '../../lib/cn.ts';
@@ -83,9 +84,54 @@ export function ComboboxClearButton({
   );
 }
 
+/**
+ * While a combobox popup is open, Base UI hides everything outside it from assistive technology with
+ * `aria-hidden` (its focus manager is modal when the input is outside the popup) but leaves that content
+ * focusable and clickable — which is exactly what WCAG 4.1.2 / axe's `aria-hidden-focus` forbids, and which the
+ * first scan of an open combobox (WP 9.8, CF-7) reported on every region of the page. Base UI marks what it
+ * hides with `data-base-ui-inert`; this mirrors each mark as `inert` for as long as the popup is mounted, so
+ * what is hidden is also unreachable, and takes it off again when the popup goes (the page was not `inert`
+ * before this popup opened, so nothing outlives it).
+ */
+function InertWhereBaseUiHides() {
+  useEffect(() => {
+    const made = new Set<Element>();
+    const sync = (el: Element): void => {
+      if (el.hasAttribute('data-base-ui-inert')) {
+        if (!el.hasAttribute('inert')) {
+          el.setAttribute('inert', '');
+          made.add(el);
+        }
+      } else if (made.has(el)) {
+        el.removeAttribute('inert');
+        made.delete(el);
+      }
+    };
+    document.querySelectorAll('[data-base-ui-inert]').forEach(sync);
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.target instanceof Element) sync(record.target);
+      }
+    });
+    observer.observe(document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-base-ui-inert'],
+    });
+    return () => {
+      observer.disconnect();
+      made.forEach((el) => {
+        el.removeAttribute('inert');
+      });
+    };
+  }, []);
+  return null;
+}
+
 export function ComboboxPortal({ children, ...props }: ComponentProps<typeof BaseCombobox.Portal>) {
   return (
     <BaseCombobox.Portal {...props}>
+      <InertWhereBaseUiHides />
       <BaseCombobox.Positioner className="z-50 outline-none" sideOffset={4} align="start">
         <BaseCombobox.Popup
           className={cn(

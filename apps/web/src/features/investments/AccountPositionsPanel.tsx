@@ -18,6 +18,7 @@ import { UnresolvedSecuritiesNotice } from './UnresolvedSecuritiesNotice.tsx';
 import { MoneyOrUnavailable, Unavailable, UnrealizedCell } from './UnavailableValue.tsx';
 import { assetClassLabel, exclusionReasonLabel, ratioToNumber } from './labels.ts';
 import type { BasisMethodElection } from './api.ts';
+import { ScrollRegion } from '../../components/patterns/ScrollRegion.tsx';
 
 export interface AccountPositionsPanelProps {
   readonly accountName: string;
@@ -152,60 +153,66 @@ export function AccountPositionsPanel({
                   </p>
                 )}
 
-                <table className="mt-3 w-full text-caption" data-testid={`lots-${label}`}>
-                  <caption className="sr-only">Cost-basis lots for {label}</caption>
-                  <thead>
-                    <tr className="border-b border-border-hairline text-left text-text-secondary">
-                      <th scope="col" className="py-1 font-medium">
-                        Opened
-                      </th>
-                      <th scope="col" className="py-1 text-right font-medium">
-                        Quantity
-                      </th>
-                      <th scope="col" className="py-1 text-right font-medium">
-                        Basis
-                      </th>
-                      <th scope="col" className="py-1 font-medium">
-                        Basis source
-                      </th>
-                      <th scope="col" className="py-1 font-medium">
-                        Holding period
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {position.lots.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="py-2 text-text-muted">
-                          No lots on record for this position.
-                        </td>
+                <ScrollRegion label={`Cost-basis lots for ${label}`}>
+                  <table className="mt-3 w-full text-caption" data-testid={`lots-${label}`}>
+                    <caption className="sr-only">Cost-basis lots for {label}</caption>
+                    <thead>
+                      <tr className="border-b border-border-hairline text-left text-text-secondary">
+                        <th scope="col" className="py-1 font-medium">
+                          Opened
+                        </th>
+                        <th scope="col" className="py-1 text-right font-medium">
+                          Quantity
+                        </th>
+                        <th scope="col" className="py-1 text-right font-medium">
+                          Basis
+                        </th>
+                        <th scope="col" className="py-1 font-medium">
+                          Basis source
+                        </th>
+                        <th scope="col" className="py-1 font-medium">
+                          Holding period
+                        </th>
                       </tr>
-                    ) : (
-                      position.lots.map((lot) => (
-                        <tr
-                          key={lot.lotId}
-                          className="border-b border-border-hairline last:border-0"
-                          data-testid={`lot-${lot.lotId}`}
-                        >
-                          <th scope="row" className="py-1 text-left font-normal">
-                            {lot.openDate}
-                          </th>
-                          <td className="py-1 text-right tabular-nums">{lot.quantityRemaining}</td>
-                          <td className="py-1 text-right" data-testid={`lot-basis-${lot.lotId}`}>
-                            <MoneyOrUnavailable value={lot.basis} reason="basis_unknown" />
-                          </td>
-                          <td className="py-1">{lot.basisSource}</td>
-                          <td className="py-1">
-                            {lot.longTerm ? 'long term' : 'short term'} · {lot.ageDays} days
-                            {lot.basisWarning !== null && (
-                              <span className="block text-status-warning">{lot.basisWarning}</span>
-                            )}
+                    </thead>
+                    <tbody>
+                      {position.lots.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-2 text-text-muted">
+                            No lots on record for this position.
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ) : (
+                        position.lots.map((lot) => (
+                          <tr
+                            key={lot.lotId}
+                            className="border-b border-border-hairline last:border-0"
+                            data-testid={`lot-${lot.lotId}`}
+                          >
+                            <th scope="row" className="py-1 text-left font-normal">
+                              {lot.openDate}
+                            </th>
+                            <td className="py-1 text-right tabular-nums">
+                              {lot.quantityRemaining}
+                            </td>
+                            <td className="py-1 text-right" data-testid={`lot-basis-${lot.lotId}`}>
+                              <MoneyOrUnavailable value={lot.basis} reason="basis_unknown" />
+                            </td>
+                            <td className="py-1">{lot.basisSource}</td>
+                            <td className="py-1">
+                              {lot.longTerm ? 'long term' : 'short term'} · {lot.ageDays} days
+                              {lot.basisWarning !== null && (
+                                <span className="block text-status-warning">
+                                  {lot.basisWarning}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </ScrollRegion>
 
                 <div className="mt-3">
                   <BasisMethodControl

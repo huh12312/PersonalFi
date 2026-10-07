@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { expect, test } from '@playwright/test';
 
-import { expectNoAxeViolations, injectAxe } from './support/axe.ts';
+import { expectNoAxeViolations } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installApiMocks } from './support/mock-api.ts';
 
@@ -21,7 +21,6 @@ test('the category filter survives a reload via the URL', async ({ page }) => {
     .getByRole('link', { name: 'Transactions' })
     .click();
   await expect(page).toHaveURL(/\/transactions$/);
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'transactions (before filtering)');
 
   await page.getByRole('button', { name: 'Category' }).click();
@@ -40,6 +39,5 @@ test('the category filter survives a reload via the URL', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Coffee Shops' })).toBeVisible();
   await expect(page).toHaveURL(/categoryIds.*cat_dining_coffee/);
 
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'transactions (category filter applied, after reload)');
 });

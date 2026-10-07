@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test as base } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 
-import { expectNoAxeViolations, injectAxe } from './support/axe.ts';
+import { expectNoAxeViolations } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installPlanMocks } from './support/mock-plan.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
@@ -247,12 +247,10 @@ test.describe('plan screen (WP 4.10)', () => {
     await expect(page.getByTestId('compare-delta')).toBeVisible();
 
     await setTheme(page, 'light');
-    await injectAxe(page);
     await expectNoAxeViolations(page, 'plan screen (light)');
     await shoot(page, 'plan-light');
 
     await setTheme(page, 'dark');
-    await injectAxe(page);
     await expectNoAxeViolations(page, 'plan screen (dark)');
     await shoot(page, 'plan-dark');
   });

@@ -204,7 +204,7 @@ function UncategorizedRow({ transaction, onResolved }: UncategorizedRowProps) {
   }
 
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="min-w-0">
         <p className="truncate text-body font-medium text-text-primary">
           {transaction.merchantName ?? transaction.name}
@@ -249,7 +249,7 @@ function TransferSuggestionRow({ outflow, inflow, onResolved }: TransferSuggesti
   const busy = pair.isPending || reject.isPending;
 
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-2 text-small text-text-secondary">
         <ArrowLeftRight size={14} aria-hidden="true" className="text-accent-text" />
         <div>

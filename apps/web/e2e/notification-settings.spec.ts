@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { expect, test } from '@playwright/test';
 
-import { expectNoAxeViolations, injectAxe } from './support/axe.ts';
+import { expectNoAxeViolations } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installApiMocks } from './support/mock-api.ts';
 
@@ -22,7 +22,6 @@ test('a test send reports a real delivery result', async ({ page }) => {
     .click();
   await expect(page).toHaveURL(/\/settings$/);
   await page.getByRole('tab', { name: 'Notifications' }).click();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'settings (notifications tab, no channels)');
 
   await page.getByLabel('Name').fill('My phone');
@@ -30,7 +29,6 @@ test('a test send reports a real delivery result', async ({ page }) => {
   await page.getByRole('button', { name: 'Add channel' }).click();
 
   await expect(page.getByText('My phone')).toBeVisible();
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'settings (notifications tab, one channel)');
 
   const [testResponse] = await Promise.all([
@@ -51,6 +49,5 @@ test('a test send reports a real delivery result', async ({ page }) => {
   expect(body.result.ok).toBe(true);
   await expect(page.getByText(body.result.message)).toBeVisible();
 
-  await injectAxe(page);
   await expectNoAxeViolations(page, 'settings (notifications tab, after test send)');
 });

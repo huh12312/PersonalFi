@@ -604,7 +604,7 @@ export async function installRecurringInsightsMocks(
       );
     }
 
-    return route.continue();
+    return route.fallback();
   });
 
   return state;

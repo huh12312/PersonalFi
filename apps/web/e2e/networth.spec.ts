@@ -2,8 +2,7 @@
 import { expect, test as base } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-import { injectAxe } from './support/axe.ts';
-import type { AxeViolation } from './support/axe.ts';
+import { expectNoAxeViolations, setTheme } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installNetworthMocks } from './support/mock-networth.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
@@ -56,69 +55,6 @@ async function openFullHistory(page: Page): Promise<void> {
 /** Reads `Money`'s visible (aria-hidden) formatted text, not its sr-only spoken form — `budget.spec.ts`'s own convention. */
 function visibleValue(page: Page, asOfDate: string) {
   return page.getByTestId(`net-worth-value-${asOfDate}`).locator('[aria-hidden="true"]');
-}
-
-/**
- * `expectNoAxeViolations` scoped past the one already-identified, not-owned-
- * by-this-work-package defect: the shared sidebar's active nav link fails
- * `color-contrast` in dark mode (`Sidebar.tsx`, `--accent-text` on
- * `--accent-wash` measuring 4.28:1 against 4.5:1) — first found and recorded
- * by WP 3.11 (`docs/evidence/phase-3/wp3.11-investments-ui.md`), reproduced
- * here because it fires on every authenticated screen's active nav item, not
- * only on investments screens. Everything else, including `color-contrast`
- * on every element this work package actually renders, stays enabled.
- *
- * Excluded via axe's own `exclude` **context** entry (the
- * `a[aria-current="page"]` element itself), the same mechanism WP 3.11's
- * per-screen runs use (`e2e/investments.spec.ts`'s
- * `expectNoAxeViolationsOutsideSharedSidebar`) — not a post-hoc filter over
- * `violation.nodes[].target]` (this file's first draft did that, and
- * separately passed `exclude` as axe's *options* argument rather than as
- * part of its *context* argument — axe-core's `run(context, options)` only
- * reads `include`/`exclude` off `context`, so neither draft actually
- * excluded anything and every run under them failed).
- */
-async function expectAxeCleanExceptSharedSidebar(page: Page, screenName: string): Promise<void> {
-  await injectAxe(page);
-  const violations: AxeViolation[] = await page.evaluate(async () => {
-    const result = await window.axe.run({
-      include: [['#app-content']],
-      exclude: [['a[aria-current="page"]']],
-    });
-    return result.violations;
-  });
-  if (violations.length > 0) {
-    const details = violations
-      .map(
-        (v) =>
-          `- [${v.impact}] ${v.id}: ${v.description}\n  ${v.nodes
-            .map((n) => `${n.target.join(' ')} :: ${n.html}\n  ${n.failureSummary ?? ''}`)
-            .join('\n  ')}`,
-      )
-      .join('\n');
-    throw new Error(
-      `axe found ${String(violations.length)} violation(s) on ${screenName}:\n${details}`,
-    );
-  }
-}
-
-async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
-  await page.evaluate((value) => {
-    window.localStorage.setItem('personalfi:theme', value);
-    document.documentElement.setAttribute('data-theme', value);
-  }, theme);
-  await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-  // `theme.css`'s `--dur-fast` (160ms) animates `color`/`background-color`
-  // on every `transition-colors` element (the `Button` primitive among
-  // them) whenever a referenced custom property's value changes — so a
-  // color-contrast axe run immediately after the attribute flip can sample
-  // a genuinely mid-transition frame and report a contrast ratio (e.g.
-  // "#0b0b0b" light-mode text still animating toward white on a
-  // dark-mode-already-switched background) that is real for one repaint and
-  // gone by the next. Outlasting the transition before scanning is a
-  // synchronization fix, not a loosened assertion — the assertion still
-  // demands zero violations in the settled state.
-  await page.waitForTimeout(250);
 }
 
 test('a past date on the chart is unchanged after a re-sync', async ({ page }) => {
@@ -203,11 +139,11 @@ test('the net-worth screens are axe clean in both themes', async ({ page, eviden
 
   for (const theme of ['light', 'dark'] as const) {
     await setTheme(page, theme);
-    await expectAxeCleanExceptSharedSidebar(page, `dashboard net-worth chart (${theme})`);
+    await expectNoAxeViolations(page, `dashboard net-worth chart (${theme})`);
     await shoot(page, evidenceDir, `dashboard-chart-${theme}`);
 
     await openFullHistory(page);
-    await expectAxeCleanExceptSharedSidebar(page, `net-worth full view (${theme})`);
+    await expectNoAxeViolations(page, `net-worth full view (${theme})`);
     await shoot(page, evidenceDir, `full-view-${theme}`);
     await page.keyboard.press('Escape');
   }

@@ -34,8 +34,8 @@ const AVAILABLE_TONE_CLASS: Record<string, string> = {
 };
 
 const OVERSPEND_BADGE: Record<'cash' | 'credit', { label: string; className: string }> = {
-  cash: { label: 'Cash overspend', className: 'bg-money-neg text-white' },
-  credit: { label: 'Credit overspend', className: 'bg-status-warning text-text-primary' },
+  cash: { label: 'Cash overspend', className: 'bg-danger text-on-danger' },
+  credit: { label: 'Credit overspend', className: 'bg-status-warning text-on-status-warning' },
 };
 
 /**

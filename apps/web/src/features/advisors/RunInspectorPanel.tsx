@@ -140,7 +140,7 @@ export function RunInspectorPanel({ advisorId }: RunInspectorPanelProps) {
               const cancellationLevel = cancellationLevelLabel(run.cancelReason);
               return (
                 <div className="flex flex-col gap-3">
-                  <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-caption text-text-muted">
+                  <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] gap-x-4 gap-y-1 [overflow-wrap:anywhere] text-caption text-text-muted">
                     <dt>Status</dt>
                     <dd className="text-text-secondary">{run.status}</dd>
                     <dt>Input digest</dt>

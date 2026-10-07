@@ -167,7 +167,7 @@ export function PayloadPreviewPanel({ advisorId }: PayloadPreviewPanelProps) {
 
   return (
     <div className="flex flex-col gap-3" data-testid="payload-preview-panel">
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-caption text-text-muted">
+      <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] gap-x-4 gap-y-1 [overflow-wrap:anywhere] text-caption text-text-muted">
         <dt>Kind</dt>
         <dd className="text-text-secondary">{preview.kind}</dd>
         <dt>Query shape</dt>

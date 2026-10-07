@@ -799,7 +799,7 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
     }
 
-    return route.continue();
+    return route.fallback();
   });
 
   return state;

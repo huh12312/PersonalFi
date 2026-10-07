@@ -10,6 +10,7 @@ import { Percent } from '../../components/finance/Percent.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
 import type { GetDriftResponse } from '../../api/generated/types.gen.ts';
 import { assetClassLabel, pointsToNumber, ratioToNumber } from './labels.ts';
+import { ScrollRegion } from '../../components/patterns/ScrollRegion.tsx';
 
 const ROW_HEIGHT = 30;
 const BAR_HEIGHT = 14;
@@ -175,69 +176,71 @@ export function DriftPanel({ data, isLoading, onUseExampleTargets, hasTargets }:
         </svg>
       </div>
 
-      <table className="w-full text-small" data-testid="drift-table">
-        <caption className="sr-only">
-          Target versus actual allocation, with the gap in percentage points and whether it sits
-          inside the ±{data.bandPoints}-point rebalancing band.
-        </caption>
-        <thead>
-          <tr className="border-b border-border-hairline text-left text-text-secondary">
-            <th scope="col" className="py-2 font-medium">
-              Asset class
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Target
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Actual
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Gap
-            </th>
-            <th scope="col" className="py-2 font-medium">
-              Band
-            </th>
-            <th scope="col" className="py-2 text-right font-medium">
-              Suggested move
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.rows.map((row) => (
-            <tr
-              key={row.assetClass}
-              className="border-b border-border-hairline last:border-0"
-              data-testid={`drift-row-${row.assetClass}`}
-            >
-              <th scope="row" className="py-2 text-left font-normal text-text-primary">
-                {assetClassLabel(row.assetClass)}
+      <ScrollRegion label="Target versus actual allocation">
+        <table className="w-full text-small" data-testid="drift-table">
+          <caption className="sr-only">
+            Target versus actual allocation, with the gap in percentage points and whether it sits
+            inside the ±{data.bandPoints}-point rebalancing band.
+          </caption>
+          <thead>
+            <tr className="border-b border-border-hairline text-left text-text-secondary">
+              <th scope="col" className="py-2 font-medium">
+                Asset class
               </th>
-              <td className="py-2 text-right tabular-nums">
-                <Percent value={ratioToNumber(row.targetWeight)} />
-              </td>
-              <td className="py-2 text-right tabular-nums">
-                <Percent value={ratioToNumber(row.actualWeight)} />
-              </td>
-              <td className="py-2 text-right tabular-nums">{row.gapPoints} pts</td>
-              <td className="py-2">
-                <span className={row.insideBand ? 'text-money-pos-text' : 'text-money-neg-text'}>
-                  {row.insideBand ? 'inside band' : 'outside band'}
-                </span>
-              </td>
-              <td className="py-2 text-right">
-                {row.proposal === null ? (
-                  <span className="text-text-muted">—</span>
-                ) : (
-                  <>
-                    {row.proposal.direction === 'increase' ? 'Add ' : 'Reduce by '}
-                    <Money value={row.proposal.amount} signDisplay="auto" colorBySign={false} />
-                  </>
-                )}
-              </td>
+              <th scope="col" className="py-2 text-right font-medium">
+                Target
+              </th>
+              <th scope="col" className="py-2 text-right font-medium">
+                Actual
+              </th>
+              <th scope="col" className="py-2 text-right font-medium">
+                Gap
+              </th>
+              <th scope="col" className="py-2 font-medium">
+                Band
+              </th>
+              <th scope="col" className="py-2 text-right font-medium">
+                Suggested move
+              </th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {data.rows.map((row) => (
+              <tr
+                key={row.assetClass}
+                className="border-b border-border-hairline last:border-0"
+                data-testid={`drift-row-${row.assetClass}`}
+              >
+                <th scope="row" className="py-2 text-left font-normal text-text-primary">
+                  {assetClassLabel(row.assetClass)}
+                </th>
+                <td className="py-2 text-right tabular-nums">
+                  <Percent value={ratioToNumber(row.targetWeight)} />
+                </td>
+                <td className="py-2 text-right tabular-nums">
+                  <Percent value={ratioToNumber(row.actualWeight)} />
+                </td>
+                <td className="py-2 text-right tabular-nums">{row.gapPoints} pts</td>
+                <td className="py-2">
+                  <span className={row.insideBand ? 'text-money-pos-text' : 'text-money-neg-text'}>
+                    {row.insideBand ? 'inside band' : 'outside band'}
+                  </span>
+                </td>
+                <td className="py-2 text-right">
+                  {row.proposal === null ? (
+                    <span className="text-text-muted">—</span>
+                  ) : (
+                    <>
+                      {row.proposal.direction === 'increase' ? 'Add ' : 'Reduce by '}
+                      <Money value={row.proposal.amount} signDisplay="auto" colorBySign={false} />
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ScrollRegion>
     </section>
   );
 }

@@ -36,15 +36,14 @@ export function NarratedSummary({ templateSummaryMd, narration }: NarratedSummar
       <div className="mt-1">
         <p className="text-small text-text-secondary">{text}</p>
         <div className="mt-1 flex items-center gap-2">
-          {/* `neutral`, not `accent`: the accent badge is 4.28:1 in the dark theme (axe, WCAG AA 4.5:1) — a shared Badge token, handed to 9.8. */}
-          <Badge variant="neutral" icon={<Bot size={12} aria-hidden="true" />}>
+          <Badge variant="accent" icon={<Bot size={12} aria-hidden="true" />}>
             AI-assisted wording
           </Badge>
           <button
             type="button"
             aria-expanded={showTemplate}
             onClick={() => setShowTemplate((prev) => !prev)}
-            className="inline-flex items-center gap-1 rounded-sm text-caption text-accent-text hover:underline focus-visible:outline-none"
+            className="inline-flex min-h-6 items-center gap-1 rounded-sm text-caption text-accent-text hover:underline focus-visible:outline-none"
           >
             {showTemplate ? 'Hide the template wording' : 'See the template wording'}
             <ChevronDown
@@ -74,7 +73,7 @@ export function NarratedSummary({ templateSummaryMd, narration }: NarratedSummar
           className="mt-1 flex items-center gap-2 text-caption text-text-muted"
           data-testid="narration-withheld"
         >
-          <Badge variant="neutral" icon={<Bot size={12} aria-hidden="true" />}>
+          <Badge variant="accent" icon={<Bot size={12} aria-hidden="true" />}>
             AI-assisted wording
           </Badge>
           An AI-assisted wording of this item exists and is not shown yet.

@@ -380,7 +380,7 @@ export async function installPlanMocks(page: Page): Promise<MockPlanState> {
       );
     }
 
-    return route.continue();
+    return route.fallback();
   });
 
   return state;

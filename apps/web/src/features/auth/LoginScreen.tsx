@@ -120,14 +120,14 @@ export function LoginScreen() {
           <div className="mt-4 flex flex-col gap-1 text-small">
             <button
               type="button"
-              className="text-accent-text hover:underline"
+              className="min-h-6 text-accent-text hover:underline"
               onClick={() => setMode('totp')}
             >
               Use an authenticator code instead
             </button>
             <button
               type="button"
-              className="text-accent-text hover:underline"
+              className="min-h-6 text-accent-text hover:underline"
               onClick={() => setMode('recovery')}
             >
               Use a recovery code instead
@@ -222,7 +222,7 @@ function TotpForm({
       </Button>
       <button
         type="button"
-        className="mt-3 text-small text-accent-text hover:underline"
+        className="mt-3 min-h-6 text-small text-accent-text hover:underline"
         onClick={onBack}
       >
         Back to passkey sign-in
@@ -280,7 +280,7 @@ function RecoveryCodeForm({
       </Button>
       <button
         type="button"
-        className="mt-3 text-small text-accent-text hover:underline"
+        className="mt-3 min-h-6 text-small text-accent-text hover:underline"
         onClick={onBack}
       >
         Back to passkey sign-in

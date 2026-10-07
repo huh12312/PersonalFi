@@ -32,7 +32,7 @@
   --bg-subtle: #f1f1ee;
   --bg-inset: #eaeae6;
   --border-hairline: rgba(11, 11, 11, 0.1);
-  --border-strong: #d6d6d0;
+  --border-strong: #85847d;
 
   /* Text */
   --text-primary: #0b0b0b;
@@ -64,6 +64,20 @@
   --money-neg-text: #b8391f;
   --money-neutral: #6b6a64;
 
+  /* Destructive actions. Separate from `--money-neg`: that token is a *money*
+     colour (a chart mark, a negative-balance fill) and was also the
+     destructive button's fill, so its tuning for money broke the button
+     (CF-9: white on dark's #e8604a measured 3.38:1) and hovering it blended
+     fill and text with `opacity-90`. The button reads these three, and
+     `contrast.test.ts` holds each pair to 4.5:1 at rest and on hover. */
+  --danger: #c23a25;
+  --on-danger: #ffffff;
+  --danger-hover: #a8321d;
+  /* Text on a `--status-warning` *fill* (the credit-overspend badge). The
+     badge used `--text-primary`, which is near-black on light's dark amber
+     (3.77:1) and white on dark's bright amber (1.83:1). */
+  --on-status-warning: #ffffff;
+
   /* Status (fixed, never themed) — except immediately below: axe
      (apps/web/e2e/app-walkthrough.spec.ts) found `#0ca30c` on `--bg-subtle`
      (a "Connected" badge, `Badge` variant `good`) at 2.96:1, against WCAG
@@ -89,10 +103,10 @@
 
   /* Categorical series — fixed order, never cycled (§2.2) */
   --series-1: #2a78d6;
-  --series-2: #eb6834;
-  --series-3: #1baf7a;
-  --series-4: #eda100;
-  --series-5: #e87ba4;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #b07300;
+  --series-5: #d55181;
   --series-6: #008300;
   --series-7: #4a3aa7;
   --series-8: #e34948;
@@ -117,7 +131,7 @@
 
   /* Chart chrome */
   --chart-gridline: #e1e0d9;
-  --chart-axis-ink: #898781;
+  --chart-axis-ink: #6b6a64;
 
   /* Elevation (shadow layer; dark mode overrides to near-transparent, §2.4) */
   --shadow-elev-1: 0 1px 2px rgba(11, 11, 11, 0.04);
@@ -134,7 +148,7 @@
   --bg-subtle: #202326;
   --bg-inset: #0a0c0d;
   --border-hairline: rgba(255, 255, 255, 0.1);
-  --border-strong: #33373b;
+  --border-strong: #70767c;
 
   --text-primary: #ffffff;
   --text-secondary: #c3c2b7;
@@ -142,7 +156,13 @@
   --focus-ring: #6da7ec;
 
   --accent: #3987e5;
-  --accent-text: #3987e5;
+  /* Dark `--accent-text` was #3987e5 — 4.28:1 on `--accent-wash` and 4.34:1
+     on `--bg-subtle`, so the active nav pill, the shared accent Badge, the
+     combobox highlight and the sync pill all failed AA in dark (CF-8; 9.6 worked
+     around it in `NarrationBadge`). #6da7ec is 6.2:1 on the wash. `--accent`
+     itself stays #3987e5: it is a *fill* (with `--accent-contrast` text, 5.4:1)
+     and a UI boundary (4.3:1+ against every surface). */
+  --accent-text: #6da7ec;
   --accent-contrast: #0b0b0b;
   --accent-wash: #132537;
   /* Dark: a step lighter keeps the dark text readable — #5a9cea on #0b0b0b: 6.9:1. */
@@ -157,13 +177,19 @@
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-serious: #ec835a;
-  --status-critical: #da6464;
+  --status-critical: #e06c6c;
 
   --money-pos: #1ba277;
   --money-pos-text: #3ec49a;
   --money-neg: #e8604a;
   --money-neg-text: #ff8a6e;
   --money-neutral: #9a9a92;
+  /* Dark destructive: a bright fill with dark text, the same pairing as the
+     dark primary button; hover is a step lighter, never an opacity blend. */
+  --danger: #e8604a;
+  --on-danger: #0b0b0b;
+  --danger-hover: #ef7a66;
+  --on-status-warning: #0b0b0b;
 
   --series-1: #3987e5;
   --series-2: #d95926;
@@ -176,7 +202,7 @@
 
   --diverging-mid: #383835;
   --chart-gridline: #2c2c2a;
-  --chart-axis-ink: #898781;
+  --chart-axis-ink: #9a9a92;
 
   /* Dark mode expresses elevation via surface + hairline, not shadow (§2.4) */
   --shadow-elev-1: none;
@@ -195,25 +221,29 @@
     --bg-subtle: #202326;
     --bg-inset: #0a0c0d;
     --border-hairline: rgba(255, 255, 255, 0.1);
-    --border-strong: #33373b;
+    --border-strong: #70767c;
     --text-primary: #ffffff;
     --text-secondary: #c3c2b7;
     --text-muted: #9a9a92;
     --focus-ring: #6da7ec;
     --accent: #3987e5;
-    --accent-text: #3987e5;
+    --accent-text: #6da7ec;
     --accent-contrast: #0b0b0b;
     --accent-wash: #132537;
     --accent-hover: #5a9cea;
     --status-good: #0ca30c;
     --status-warning: #fab219;
     --status-serious: #ec835a;
-    --status-critical: #da6464;
+    --status-critical: #e06c6c;
     --money-pos: #1ba277;
     --money-pos-text: #3ec49a;
     --money-neg: #e8604a;
     --money-neg-text: #ff8a6e;
     --money-neutral: #9a9a92;
+    --danger: #e8604a;
+    --on-danger: #0b0b0b;
+    --danger-hover: #ef7a66;
+    --on-status-warning: #0b0b0b;
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
@@ -224,7 +254,7 @@
     --series-8: #e66767;
     --diverging-mid: #383835;
     --chart-gridline: #2c2c2a;
-    --chart-axis-ink: #898781;
+    --chart-axis-ink: #9a9a92;
     --shadow-elev-1: none;
     --shadow-elev-2: none;
     --shadow-elev-3: 0 16px 40px rgba(0, 0, 0, 0.5);
@@ -283,6 +313,10 @@
   --color-money-neg: var(--money-neg);
   --color-money-neg-text: var(--money-neg-text);
   --color-money-neutral: var(--money-neutral);
+  --color-danger: var(--danger);
+  --color-on-danger: var(--on-danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-on-status-warning: var(--on-status-warning);
   --color-status-good: var(--status-good);
   --color-status-warning: var(--status-warning);
   --color-status-serious: var(--status-serious);

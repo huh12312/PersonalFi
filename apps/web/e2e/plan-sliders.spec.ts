@@ -2,7 +2,7 @@
 import { expect, test as base } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 
-import { expectNoAxeViolations, injectAxe } from './support/axe.ts';
+import { expectNoAxeViolations } from './support/axe.ts';
 import { dragFromTo } from './support/drag.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installPlanSlidersMocks } from './support/mock-plan-sliders.ts';
@@ -199,12 +199,10 @@ test.describe('plan sliders — the client projection worker (WP 4.11, WP 9.7)',
     await expect(page.getByTestId('slider-preview-median')).toBeVisible();
 
     await setTheme(page, 'light');
-    await injectAxe(page);
     await expectNoAxeViolations(page, 'plan sliders (light)');
     await shoot(page, 'sliders-light');
 
     await setTheme(page, 'dark');
-    await injectAxe(page);
     await expectNoAxeViolations(page, 'plan sliders (dark)');
     await shoot(page, 'sliders-dark');
   });
