@@ -194,6 +194,13 @@ jobs:
       # `scripts` project.
       - name: no float at a money or quantity boundary
         run: node scripts/check-numeric-boundaries.ts
+      # WP 9.9 (09 §4 batch 6): every skipIf in a perf test names its reason, and
+      # the list is printed into the step summary so a skipped budget is
+      # visible, never silent. `just check-perf-skips` is the local twin.
+      - name: perf skips are listed by name
+        run: |
+          set -o pipefail
+          node scripts/check-perf-skips.ts --summary | tee -a "$GITHUB_STEP_SUMMARY"
 
   test:
     name: unit tests
