@@ -813,7 +813,7 @@ harden-secrets:
     # Added here in the same edit that adds them to compose.yml, which is the
     # whole lesson of N-1 — the plaid_* secrets were mounted for a release
     # before anyone noticed this list had not grown with them.
-    for f in database_url master_key plaid_client_id plaid_secret plaid_env advisor_token_secret \
+    for f in database_url migrator_database_url master_key plaid_client_id plaid_secret plaid_env advisor_token_secret \
              tiingo_api_key fred_api_key coingecko_api_key openfigi_api_key \
              coinbase_key_name coinbase_private_key etherscan_api_key; do
       [[ -e "$f" ]] || continue

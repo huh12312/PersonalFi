@@ -9,7 +9,11 @@ import { runMigrations, MigrationError } from '../migrate.ts';
 async function main(): Promise<void> {
   const dryRun = process.argv.includes('--dry-run');
   const config = loadConfig();
-  const result = await runMigrations({ databaseUrl: config.databaseUrl.reveal(), dryRun });
+  // CF-18 / G-01 (WP 9.11): the owner's URL when the roles are split; else
+  // `database_url`, as before (`migrator_database_url` is optional and empty
+  // by default — an empty secret file is absent to @core/config).
+  const databaseUrl = (config.secrets.migrator_database_url ?? config.databaseUrl).reveal();
+  const result = await runMigrations({ databaseUrl, dryRun });
 
   if (dryRun) {
     if (result.pending.length === 0) {

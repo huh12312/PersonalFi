@@ -452,6 +452,25 @@ export const SECRET_SPECS = [
   },
   {
     /**
+     * CF-18 / G-01 (WP 9.11): the migrator's own connection string — the
+     * schema OWNER, which keeps DDL — once the operator splits the roles and
+     * `database_url` logs in as the DML-only `personalfi_app` (migration 0039).
+     * **Optional, for every role**: empty or absent, the migrator uses
+     * `database_url` exactly as before, so an install that never splits — and
+     * every unattended upgrade — is unchanged (09 §5 risk row 3). Mounted on
+     * `migrator` only (compose.yml). No `envFallback`: dev runs one URL.
+     */
+    name: 'migrator_database_url',
+    file: 'migrator_database_url',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      "optional: write the schema owner's Postgres URL to ${SECRETS_DIR}/migrator_database_url " +
+      'when database_url logs in as personalfi_app (RUNBOOK "Database roles"); empty means ' +
+      'the migrator uses database_url.',
+  },
+  {
+    /**
      * The KEK passphrase (03 §2.2 Tier 1, P0-2).
      *
      * **File only. There is deliberately no `envFallback`, and there never will
