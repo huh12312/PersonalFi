@@ -95,6 +95,7 @@ export const MORE_NAV_ITEMS: NavItem[] = [
   { to: '/accounts', label: 'Accounts', icon: Landmark },
   { to: '/investments', label: 'Investments', icon: LineChart },
   { to: '/plan', label: 'Plan', icon: Target },
+  { to: '/goals', label: 'Goals', icon: Flag },
   { to: '/recurring', label: 'Recurring', icon: Repeat },
   { to: '/brief', label: 'Brief', icon: CalendarClock },
   { to: '/settings', label: 'Settings', icon: Settings },
