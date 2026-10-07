@@ -98,7 +98,12 @@ import {
   TEST_ORIGIN,
   type ApiHarness,
 } from '../helpers/api-harness.ts';
+import { assertWithinBudget, describeLoad, settleLoad, skipNamed } from './perf-support.ts';
 
+// perf-skip: NO_DATABASE — DATABASE_URL is unset, so there is no Postgres to load the scale seed into (CI's migration-test job has one)
+// perf-skip: ON_SHARED_RUNNER — a GitHub shared runner is not the target hardware (it read 243 ms on the 150 ms net-worth budget, 2026-09-28); the row-count test still runs there
+// perf-skip: NO_RETURN_SERIES — the Monte Carlo timing is meaningless without the fetched return series (409 planning.monte_carlo_unavailable: a silent lognormal would time the wrong engine); fetch it per RUNBOOK C-1
+// perf-skip: HOST_LOADED — an over-budget reading at a 1-minute load of 3 or more is not believed (09 §3 rule 4); in-budget readings pass at any load
 const describeWithDb = describe.skipIf(NO_DATABASE);
 
 /** 08 §7.2 / dispatch §5: the same budget the engine-alone test measures. */
@@ -196,7 +201,7 @@ function summarise(label: string, samples: readonly number[]): Measured {
   const measured = { p50: percentile(sorted, 0.5), p95: percentile(sorted, 0.95), samples: sorted };
   process.stdout.write(
     `perf ${label}: p50=${measured.p50.toFixed(1)}ms p95=${measured.p95.toFixed(1)}ms ` +
-      `samples=${JSON.stringify(sorted.map((s) => Math.round(s)))}\n`,
+      `${describeLoad()} samples=${JSON.stringify(sorted.map((s) => Math.round(s)))}\n`,
   );
   return measured;
 }
@@ -376,7 +381,8 @@ describeWithDb('[slow] the whole-path perf budgets on WP 4.13’s scale seed', (
 
   it.skipIf(ON_SHARED_RUNNER)(
     'POST /plan/scenarios/{id}/projections p95 is within budget over real HTTP',
-    async () => {
+    async (ctx) => {
+      await settleLoad();
       const db = h.database.db;
       const userId = h.userId;
 
@@ -436,7 +442,10 @@ describeWithDb('[slow] the whole-path perf budgets on WP 4.13’s scale seed', (
       }
 
       if (skipReason !== null) {
-        console.warn(`[projection-perf] Monte Carlo budget skipped: ${skipReason}`);
+        // WP 9.9 (i): this used to `console.warn` and `return`, which vitest
+        // reports as a PASS — a budget that read green without measuring a
+        // thing. It is a skip now, by name, so the run and CI's summary say so.
+        skipNamed(ctx, 'NO_RETURN_SERIES', skipReason);
         return;
       }
       expect(
@@ -445,16 +454,18 @@ describeWithDb('[slow] the whole-path perf budgets on WP 4.13’s scale seed', (
       ).toBe(true);
 
       const measured = summarise('POST /plan/scenarios/{id}/projections (real HTTP)', wallSamples);
-      expect(measured.p95, 'the whole-path Monte Carlo projection').toBeLessThanOrEqual(
-        PROJECTION_BUDGET_MS,
-      );
+      assertWithinBudget(ctx, {
+        label: 'the whole-path Monte Carlo projection',
+        p95: measured.p95,
+        budgetMs: PROJECTION_BUDGET_MS,
+      });
     },
     180_000,
   );
 
   it.skipIf(ON_SHARED_RUNNER)(
     `GET /net-worth/series over ${String(scale.days.length)} points is within ${String(NET_WORTH_BUDGET_MS)} ms p95`,
-    async () => {
+    async (ctx) => {
       const from = scale.days[0] as string;
       const to = scale.days.at(-1) as string;
       for (let i = 0; i < 2; i += 1)
@@ -466,7 +477,12 @@ describeWithDb('[slow] the whole-path perf budgets on WP 4.13’s scale seed', (
         `GET /net-worth/series (${String(scale.days.length)} days)`,
         samples,
       );
-      expect(measured.p95, 'GET /net-worth/series').toBeLessThanOrEqual(NET_WORTH_BUDGET_MS);
+      assertWithinBudget(ctx, {
+        label: 'GET /net-worth/series',
+        p95: measured.p95,
+        budgetMs: NET_WORTH_BUDGET_MS,
+      });
     },
+    120_000,
   );
 });

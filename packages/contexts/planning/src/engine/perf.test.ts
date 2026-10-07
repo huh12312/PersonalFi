@@ -54,7 +54,7 @@
  * real size.
  */
 import { cpus, loadavg } from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, type TestContext } from 'vitest';
 import { DateOnly, Money } from '@core/kernel';
 import { generatePhase4Scale } from '@core/seed';
 import { loadAssumptions } from '../assumptions.ts';
@@ -66,6 +66,43 @@ import { runJobInWorker, toMonteCarloJob } from './worker-host.ts';
 const WARM_UPS = 3;
 const SAMPLES = 25;
 const BUDGET_MS = 800;
+/** 09 §3 rule 4's figure: a number taken at or above this 1-minute load is informational. */
+const HOST_LOAD_CEILING = 3;
+
+// perf-skip: HOST_LOADED — an over-budget reading at a 1-minute load of 3 or more is not believed (09 §3 rule 4); in-budget readings pass at any load
+
+/**
+ * `console.log` from a test is not shown by vitest's reporter in a non-TTY run, which
+ * is how this file's own numbers went unprinted until WP 9.9 (the evidence table
+ * needs them): written to stdout directly, as the apps/api budget tests do.
+ */
+function say(line: string): void {
+  process.stdout.write(`${line}\n`);
+}
+
+/**
+ * A local mirror of `assertWithinBudget` in `apps/api/test/db/perf-support.ts` (WP 9.9
+ * item (j); that file's header is the decision): inside the budget passes at any load;
+ * over it on a host below the ceiling fails; over it at or above the ceiling is the
+ * skip named HOST_LOADED. Mirrored, not imported: this package may not reach into `apps/`.
+ */
+function assertWithinBudget(
+  ctx: TestContext,
+  checks: readonly { readonly label: string; readonly p95: number }[],
+): void {
+  const over = checks.filter((check) => !(check.p95 <= BUDGET_MS));
+  const load = loadavg()[0] ?? 0;
+  if (over.length > 0 && load >= HOST_LOAD_CEILING) {
+    ctx.skip(
+      `HOST_LOADED: ${over.map((check) => `${check.label} p95 ${check.p95.toFixed(1)} ms > ${String(BUDGET_MS)} ms`).join('; ')} ` +
+        `at load ${load.toFixed(2)} (the ceiling is ${String(HOST_LOAD_CEILING)}): not believed (09 §3 rule 4). Re-run alone.`,
+    );
+    return;
+  }
+  for (const check of checks) {
+    expect(check.p95, `${check.label} (load ${load.toFixed(2)})`).toBeLessThanOrEqual(BUDGET_MS);
+  }
+}
 
 /**
  * The scale seed's last day, summed by tax bucket the way WP 4.6 sums
@@ -131,7 +168,7 @@ function percentile(sorted: readonly number[], p: number): number {
 }
 
 describe('the 08 §7.2 budget', () => {
-  it('10,000 paths over 40 years complete within 800 ms p95 on one core', async () => {
+  it('10,000 paths over 40 years complete within 800 ms p95 on one core', async (ctx) => {
     const { byBucket, cryptoHolding, positionCount, securityCount } = scaleBalances();
     // Counts before timing: 200 positions, every one a distinct security.
     expect(positionCount).toBe(200);
@@ -208,7 +245,7 @@ describe('the 08 §7.2 budget', () => {
     expect(job.crypto.holding).toBeGreaterThan(0);
 
     const cpu = cpus()[0]?.model ?? 'unknown';
-    console.log(
+    say(
       `[perf] ${cpu} × ${String(cpus().length)} logical, Node ${process.version}, load ${loadavg()
         .map((x) => x.toFixed(2))
         .join(' ')}; WP 4.13 scale seed, 200 positions → buckets ${Object.entries(byBucket)
@@ -248,23 +285,23 @@ describe('the 08 §7.2 budget', () => {
     const line = (stats: ReturnType<typeof summarise>) =>
       `p50 ${stats.p50.toFixed(1)} ms, p95 ${stats.p95.toFixed(1)} ms, p99 ${stats.p99.toFixed(1)} ms ` +
       `(min ${stats.min.toFixed(1)}, max ${stats.max.toFixed(1)})`;
-    console.log(`[perf] warm-ups (excluded), thread cpu/wall: ${warm.join(', ')} ms`);
-    console.log(
-      `[perf] thread cpu samples: ${cpuSamples.map((ms) => ms.toFixed(1)).join(', ')} ms`,
-    );
-    console.log(
+    say(`[perf] warm-ups (excluded), thread cpu/wall: ${warm.join(', ')} ms`);
+    say(`[perf] thread cpu samples: ${cpuSamples.map((ms) => ms.toFixed(1)).join(', ')} ms`);
+    say(
       `[perf] wall samples (spawn to reply): ${wallSamples.map((ms) => ms.toFixed(1)).join(', ')} ms`,
     );
-    console.log(
+    say(
       `[perf] n=${String(SAMPLES)} thread cpu: ${line(cpuStats)}; budget ${String(BUDGET_MS)} ms`,
     );
-    console.log(
+    say(
       `[perf] n=${String(SAMPLES)} wall: ${line(wallStats)}; success ${String(successCount)}/${String(job.paths)}; ` +
         `load average after ${loadavg()
           .map((x) => x.toFixed(2))
           .join(' ')}`,
     );
-    expect(wallStats.p95).toBeLessThanOrEqual(BUDGET_MS);
-    expect(cpuStats.p95).toBeLessThanOrEqual(BUDGET_MS);
+    assertWithinBudget(ctx, [
+      { label: 'wall (spawn to reply)', p95: wallStats.p95 },
+      { label: 'thread cpu', p95: cpuStats.p95 },
+    ]);
   }, 120_000);
 });

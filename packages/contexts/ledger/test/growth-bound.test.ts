@@ -41,6 +41,7 @@ import {
 //   generateDemoData(1, { monthCount: 1264 }).transactions.length === 50_040
 const MONTH_COUNT = 1264;
 
+// perf-skip: NO_DATABASE — DATABASE_URL is unset, so there is no Postgres to load the 50k backfill into (CI's migration-test job has one)
 describe.skipIf(NO_DATABASE)(
   '[slow] R-5: merchant and provider-revision growth bound on a 50k-row backfill',
   () => {

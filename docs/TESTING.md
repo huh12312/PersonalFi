@@ -473,13 +473,14 @@ checked-in files — no database, no build. Every one of them runs its own
 fixtures **before** it looks at the repository, so the check has been observed
 catching the thing it exists for rather than only observed passing:
 
-| Check                                                     | Catches                                                                             | Wired into                    |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------- | ----------------------------- |
-| `check-ci-projects.ts`                                    | a vitest project in no CI job, a stale `--project` name, a project in the wrong job | `just check`, `ci.yml` `lint` |
-| `check-proxy-routes.ts`                                   | an API prefix Caddy does not route                                                  | `just check`, `ci.yml` `lint` |
-| `check-schema-ownership.ts`                               | a table claimed by two packages                                                     | `pnpm run lint`               |
-| `check-numeric-boundaries.ts`                             | **a float at a money or quantity boundary**                                         | `just lint`, `ci.yml` `lint`  |
-| `compose-hardening-check.sh`, `check-secret-ownership.sh` | container hardening, secret file ownership                                          | `just verify`                 |
+| Check                                                     | Catches                                                                             | Wired into                                |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------- |
+| `check-ci-projects.ts`                                    | a vitest project in no CI job, a stale `--project` name, a project in the wrong job | `just check`, `ci.yml` `lint`             |
+| `check-proxy-routes.ts`                                   | an API prefix Caddy does not route                                                  | `just check`, `ci.yml` `lint`             |
+| `check-perf-skips.ts`                                     | a perf test that skips without a named reason; a skip on a row-count sanity check   | `just check-perf-skips`, `ci.yml` summary |
+| `check-schema-ownership.ts`                               | a table claimed by two packages                                                     | `pnpm run lint`                           |
+| `check-numeric-boundaries.ts`                             | **a float at a money or quantity boundary**                                         | `just lint`, `ci.yml` `lint`              |
+| `compose-hardening-check.sh`, `check-secret-ownership.sh` | container hardening, secret file ownership                                          | `just verify`                             |
 
 ### `check-numeric-boundaries.ts` (WP 3.14)
 
@@ -566,6 +567,91 @@ written by `@ctx/planning`'s `computeNetWorth` → `upsertOpenDay`, the two call
 the 04:00 job makes. Budgets: **p95 < 200 ms** for each, against 08 §7.1's
 150 ms for a 1,825-point net-worth chart. The suite asserts its own row counts
 before it times anything — a perf number over an empty table is a lie.
+
+## WP 9.9 — the performance pass: every §3.4 budget, the load rule, skips by name
+
+`docs/plan/00-master-implementation-plan.md` §3.4 names the budgets; each is a
+test with its own declared timeout and a row-count sanity check that never
+skips. The measurements, the hardware and the loads they were taken at are
+`docs/evidence/phase-9/wp9.9-perf.md`; this section is how to re-take them.
+
+| Budget (§3.4)                              | Test                                                                                                                                    | Project                   | Corpus                                                                                           |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------ |
+| transactions list p95 < 200 ms at 50k rows | `apps/api/test/db/transactions-http-perf.test.ts` (over HTTP: first page, deep keyset page, filter, two searches)                       | `api-db`                  | `generateDemoData(1, { monthCount: 1264 })`, 50,040 rows through `loadSeedDataset`               |
+| the same, in-process, with its `EXPLAIN`   | `packages/contexts/ledger/test/perf.test.ts`                                                                                            | `ledger-db`               | 50,000 `generate_series` rows                                                                    |
+| 10k Monte Carlo paths ≤ 800 ms p95         | `packages/contexts/planning/src/engine/perf.test.ts` (engine alone), `apps/api/test/db/projection-perf.test.ts` (whole path, over HTTP) | `planning-perf`, `api-db` | the Phase 4 scale seed                                                                           |
+| byte-identical output for a fixed seed     | `packages/contexts/planning/src/engine/reproducible.test.ts` (REP1: two cold processes)                                                 | `planning`                | the reference plan                                                                               |
+| nightly sync completes in < 5 minutes      | `apps/api/test/db/nightly-perf.test.ts`                                                                                                 | `api-db`                  | eight Plaid-shaped connections, 730 days of backfill, a day's delta; the worker's real job chain |
+| RPO 24 h, RTO 1 h                          | RPO cited from WP 9.1's rows; RTO is `just restore-drill` on the scratch stack                                                          | (not vitest)              | the 50k corpus in a real compose stack                                                           |
+| whole stack under 2 GB RAM                 | `scripts/perf/sample-rss.sh` over the scratch stack (cgroup memory, not `docker stats`)                                                 | (not vitest)              | the same stack, idle ten minutes and through a nightly chain                                     |
+
+Informational rows (09 §5.3, never gating): `GET /holdings` and
+`/investments/allocation` over the 200-position, five-year scale seed
+(`apps/api/test/db/holdings-scale-perf.test.ts`; the two routes' 200 ms budget over
+the small Phase 3 seed is `investments-perf.test.ts`'s), the dashboard's four requests, cold start
+(`scripts/perf/boot-breakdown.sh`), and the 250k-row list —
+`PERF_TXN_MONTHS=6320 pnpm exec vitest run --project api-db apps/api/test/db/transactions-http-perf.test.ts`
+prints the numbers and asserts only the row-count sanity check (§6 Q12: 50k gates
+v0.9, 250k is measured and recorded).
+
+### The load rule, and what a loaded host does to a budget test
+
+Rule 4 (`docs/plan/09-phase-9-dispatch.md` §3): no performance number is believed
+while a model is loaded on the host or another agent builds images, and every
+number prints its load average. Two budget tests read red under load in the week
+this was decided (`GET /holdings` p95 354.6 ms at load ~7; the reports route p95
+1,399 ms at load 7.99, against 37.8 ms alone). The decision, in
+`apps/api/test/db/perf-support.ts`'s header and tested in `host-load-rule.test.ts`:
+
+- every timing test prints `load <1> <5> <15> (<cores> cores)` beside its figures;
+- a reading **inside** its budget passes at any load;
+- a reading **over** its budget on a host whose 1-minute load is **below 3** fails:
+  the machine was quiet, so the number is believed;
+- a reading over its budget at a load **of 3 or more** is a skip named
+  `HOST_LOADED`, with the reading and the load in the note. It can hide a
+  regression only while the host is too loaded to tell a regression from the host,
+  and never a passing reading;
+- after a corpus load the test waits (up to four minutes) for the load to fall
+  below the ceiling before it samples (`settleLoad`), so it does not measure the
+  load its own set-up made;
+- the **row-count sanity check is a separate `it` with no skip of its own** — a
+  perf number over an empty table is a lie at any load.
+
+The evidence tables in `wp9.9-perf.md` are taken only at load < 3 with no build
+running, and say so per row.
+
+### Skips are visible by name (`scripts/check-perf-skips.ts`)
+
+A perf file is a `*.test.ts` under `apps/` or `packages/` whose name contains
+`perf`, or which carries the `[slow]` title marker. In one, every way to skip is
+listed, and a skip without a named reason fails the check:
+
+- `describe.skipIf(NAME)` / `it.skipIf(NAME)` — a bare identifier, never an inline
+  expression;
+- `skipNamed(ctx, 'NAME', detail)` — a skip from inside a test body;
+- `assertWithinBudget(…)` — the load-conditional skip, named `HOST_LOADED`;
+- `it.skip`, `describe.skip`, `.todo` and a bare `ctx.skip(…)` are unconditional and
+  always fail the check.
+
+Each NAME is declared in the same file by `// perf-skip: NAME — <reason, at least
+twelve characters>`. A `skipIf` on an `it` whose title reads like a row-count
+sanity check fails too. `node scripts/check-perf-skips.ts` prints the list
+(`--summary` as a markdown table for `$GITHUB_STEP_SUMMARY`); the suite is
+`scripts/check-perf-skips.test.ts`, fixtures first, then the real tree.
+
+### Re-taking the numbers
+
+```
+PERF_RESULTS_FILE=/tmp/results.jsonl pnpm exec vitest run --project api-db apps/api/test/db/transactions-http-perf.test.ts
+PERF_RESULTS_FILE=/tmp/results.jsonl pnpm exec vitest run --project api-db apps/api/test/db/nightly-perf.test.ts
+```
+
+`PERF_RESULTS_FILE` appends one JSON line per figure (label, p50, p95, load, cores).
+`PERF_NIGHTLY_BACKFILL_DAYS` (default 730) scales the nightly test's first backfill
+for development; `PERF_NIGHTLY_JOB_POLL_MS` is a what-if override of the worker's
+`JOB_POLL_INTERVAL_MS` and a gated run never sets it.
+`scripts/perf/` holds the scratch-stack tools (`load-scale.ts`, `boot-breakdown.sh`,
+`sample-rss.sh`, `curl-pass.sh`); they act only on compose project `pf-perf`.
 
 ## The Phase 4 scale seed (`@core/seed`), and the two whole-path budgets it feeds
 

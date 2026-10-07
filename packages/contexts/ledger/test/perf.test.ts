@@ -22,6 +22,7 @@
  * ninety seconds exercising the write path first would only make it likelier that
  * someone deletes the test for being slow.
  */
+import { cpus, loadavg } from 'node:os';
 import { DateOnly } from '@core/kernel';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -38,6 +39,7 @@ const ROW_COUNT = 50_000;
 const PAGE_SIZE = 50;
 const BUDGET_MS = 200;
 
+// perf-skip: NO_DATABASE — DATABASE_URL is unset, so there is no Postgres to bulk-insert the 50k rows into (CI's migration-test job has one)
 describe.skipIf(NO_DATABASE)('[slow] transaction list at 50k rows', () => {
   let database: TestDatabase;
   let accountId: string;
@@ -117,7 +119,10 @@ describe.skipIf(NO_DATABASE)('[slow] transaction list at 50k rows', () => {
       );
     }
     process.stdout.write(
-      `\n  ${String(ROW_COUNT)} rows, page size ${String(PAGE_SIZE)}:\n${report.join('\n')}\n`,
+      `\n  ${String(ROW_COUNT)} rows, page size ${String(PAGE_SIZE)}, load ` +
+        `${loadavg()
+          .map((x) => x.toFixed(2))
+          .join(' ')} (${String(cpus().length)} cores):\n${report.join('\n')}\n`,
     );
   }, 300_000);
 

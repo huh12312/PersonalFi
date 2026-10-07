@@ -44,7 +44,10 @@ import {
   linkManual,
   type ApiHarness,
 } from '../helpers/api-harness.ts';
+import { assertWithinBudget, describeLoad, settleLoad } from './perf-support.ts';
 
+// perf-skip: NO_DATABASE — DATABASE_URL is unset, so there is no Postgres to load the seed into (CI's migration-test job has one)
+// perf-skip: HOST_LOADED — an over-budget reading at a 1-minute load of 3 or more is not believed (09 §3 rule 4); in-budget readings pass at any load
 const DAY_MS = 86_400_000;
 const BUDGET_MS = 200;
 const SAMPLE_COUNT = 15;
@@ -89,7 +92,7 @@ async function measure(base: string, path: string, cookie: string): Promise<Meas
   const measured = { p50: percentile(samples, 0.5), p95: percentile(samples, 0.95), samples };
   process.stdout.write(
     `perf ${path}: p50=${measured.p50.toFixed(1)}ms p95=${measured.p95.toFixed(1)}ms ` +
-      `samples=${JSON.stringify(samples.map((s) => Math.round(s)))}\n`,
+      `${describeLoad()} samples=${JSON.stringify(samples.map((s) => Math.round(s)))}\n`,
   );
   return measured;
 }
@@ -247,20 +250,29 @@ describe.skipIf(NO_DATABASE)('[slow] investments perf budgets on the seed (WP 3.
     expect(Number(days.rows[0]?.count ?? '0')).toBe(SERIES_DAYS);
   });
 
-  it('holdings and allocation p95 < 200 ms on the seed', async () => {
+  // WP 9.9 (j): an over-budget reading at a 1-minute load of 3 or more is the
+  // named skip HOST_LOADED, not a red (perf-support.ts); a quiet host still fails.
+  it('holdings and allocation p95 < 200 ms on the seed', async (ctx) => {
+    await settleLoad();
     const holdings = await measure(base, '/holdings', cookie);
     const allocation = await measure(base, '/investments/allocation', cookie);
 
-    expect(holdings.p95, 'GET /holdings').toBeLessThan(BUDGET_MS);
-    expect(allocation.p95, 'GET /investments/allocation').toBeLessThan(BUDGET_MS);
-  });
+    assertWithinBudget(ctx, [
+      { label: 'GET /holdings', p95: holdings.p95, budgetMs: BUDGET_MS },
+      { label: 'GET /investments/allocation', p95: allocation.p95, budgetMs: BUDGET_MS },
+    ]);
+  }, 120_000);
 
-  it('the net-worth series p95 < 200 ms over 180 seeded days', async () => {
+  it('the net-worth series p95 < 200 ms over 180 seeded days', async (ctx) => {
     const series = await measure(
       base,
       `/net-worth/series?from=${isoDay(-(SERIES_DAYS - 1))}&to=${isoDay(0)}`,
       cookie,
     );
-    expect(series.p95, 'GET /net-worth/series').toBeLessThan(BUDGET_MS);
-  });
+    assertWithinBudget(ctx, {
+      label: 'GET /net-worth/series',
+      p95: series.p95,
+      budgetMs: BUDGET_MS,
+    });
+  }, 120_000);
 });
