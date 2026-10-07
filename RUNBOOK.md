@@ -2,16 +2,34 @@
 
 # RUNBOOK
 
-Operational procedures for running PersonalFi: first install, upgrade, backup,
-restore, master-key rotation, the panic button, and troubleshooting. This is
-the doc to open when something needs doing on the actual host, not when
-reading the code — see `docs/research/06-platform-devops-licensing.md` and
-`docs/plan/00-master-implementation-plan.md` for the design rationale behind
-the choices this file just tells you to execute.
+Operational procedures for running PersonalFi: install, upgrade, backup, restore, the restore drill,
+the 90-day soak, the local model, the advisor kill switches, key rotation, lockout recovery, the
+panic checklist, the resource envelope and troubleshooting. This is the doc to open when something
+needs doing on the actual host, not when reading the code. For the design rationale behind the
+choices this file tells you to execute, see `docs/research/06-platform-devops-licensing.md` and
+`docs/plan/00-master-implementation-plan.md`; for what an attacker can and cannot do, the
+[threat model](docs/security/threat-model.md) and the
+[ASVS assessment](docs/security/asvs-assessment.md). A first-time reader should start with
+[`README.md`](README.md), which walks one clean host to a passkey login; this file goes deeper at
+every step and covers everything after.
 
-Everything here assumes Docker 29+ with the Compose v2 plugin, on the Arch
-Linux host the master plan targets (D13/D24). Commands are given as `just ...`
-where a target exists (`justfile`) and as raw `docker compose ...` otherwise.
+Commands are given as `just ...` where a recipe exists (`justfile`; `just --list` shows them all)
+and as raw `docker compose ...` otherwise. Everything here assumes Docker 29+ with the Compose v2
+plugin and these host tools: `git`, `just` 1.21+, Node.js 18+ (the host scripts only), `openssl`,
+`bash`. The machine the plan targets is the Arch Linux host of D13/D24; nothing here is
+Arch-specific except where a step says so.
+
+| Section                                                                                                                                     | When you need it                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| [First install](#first-install)                                                                                                             | Once, on a new host                                    |
+| [Upgrade](#upgrade)                                                                                                                         | Every release: `git pull` then `just upgrade`          |
+| [Backup](#backup), [Restore](#restore), [Restore drill](#restore-drill)                                                                     | Nightly (automatic), after a disaster, monthly         |
+| [Production install and the real-use soak](#production-install-and-the-real-use-soak)                                                       | Running it as your only finance tool for 90 days       |
+| [Database roles](#database-roles), [Master-key rotation](#master-key-rotation), [Lockout and operator unlock](#lockout-and-operator-unlock) | Hardening the database login; a key or a login problem |
+| [Advisor kill switches](#advisor-kill-switches), [Local model](#local-model-profile-local-llm)                                              | The advisory layer                                     |
+| [Panic button](#panic-button-outline)                                                                                                       | You think the box or a credential is compromised       |
+| [Cryptography inventory](#cryptography-inventory), [Logging inventory](#logging-inventory)                                                  | What is encrypted, with what, and what is logged where |
+| [Resource envelope](#resource-envelope), [Troubleshooting](#troubleshooting)                                                                | Sizing, and errors with their fixes                    |
 
 ---
 
@@ -22,7 +40,8 @@ where a target exists (`justfile`) and as raw `docker compose ...` otherwise.
 Master plan D24 / P0-13: **the volume holding `pgdata` and `backups` must be
 LUKS2-encrypted at the block-device level.** This is a host-provisioning step,
 not something `docker compose up` can do for you — Docker sees a filesystem
-path and has no idea whether the block device under it is encrypted.
+path and has no idea whether the block device under it is encrypted. (A
+throwaway test host holding no real data can skip it.)
 
 ```bash
 # One-time, on the host, before Docker ever touches the disk:
@@ -40,13 +59,17 @@ the console, and document your own answer here once you've made it. Nothing
 in this repo can make that call for you: it depends on the physical security
 model of wherever the box lives.
 
-### 1. Clone and install workspace tooling
+### 1. Clone the repository
 
 ```bash
-git clone https://github.com/chris/personalfi.git
+git clone https://github.com/huh12312/PersonalFi.git personalfi
 cd personalfi
-just install     # pnpm install --frozen-lockfile
 ```
+
+The host does **not** need pnpm or the workspace's Node: every image is built inside Docker, and
+`just install` (which runs `pnpm install --frozen-lockfile`) is for contributors. The directory name
+becomes the Compose project name and so the prefix of every volume (`personalfi_pgdata`, ...); the
+soak install below sets it explicitly instead.
 
 ### 2. Create secrets
 
@@ -55,197 +78,108 @@ Every secret is a **file** under `./secrets/`, never an environment variable
 directory is gitignored. Docker mounts each one at `/run/secrets/<name>`
 inside the relevant container regardless of the host filename, but the
 host-side filenames below are also what `.env.example` and `just
-gen-master-key` already assume — use exactly these names.
+gen-master-key` already assume — use exactly these names, with no extension.
+`compose.yml`'s top-level `secrets:` block is the authoritative list; `just secrets-placeholders`
+(item 4) reads it, so this section cannot drift from what compose will mount.
+
+**1. The database credentials.** `compose.yml` mounts two: `pg_password` (Postgres's own bootstrap
+password) and `database_url` (the full connection string the app uses). One recipe writes both,
+because the password has to be URL-safe: a base64 password can contain `/`, `+` or `=`, any of
+which breaks `postgres://...` parsing or silently changes what the URL means. `just
+gen-pg-secrets` draws 32 bytes from `openssl` as hex (always URL-safe), writes both files, and parses
+its own output with Node's `URL` before it finishes. It creates `./secrets` at mode 0700 and refuses
+to overwrite an existing `pg_password`.
 
 ```bash
-mkdir -p secrets && chmod 700 secrets
-
-# 1-2. Postgres's own bootstrap password (compose.yml's `pg_password` secret —
-#    not one of the four the memo names; postgres and the backup/restore
-#    scripts need a bare password, database_url is separate) and the full
-#    connection string the app itself uses. One recipe, not raw `openssl`/
-#    `echo`, because the password has to be URL-safe: a base64 password can
-#    contain `/`, `+`, or `=`, any of which either breaks `postgres://...`
-#    parsing outright or silently changes what the URL means. `just
-#    gen-pg-secrets` uses a hex alphabet (always URL-safe, no escaping ever
-#    needed) and parses its own output with Node's `URL` before writing it.
 just gen-pg-secrets
-
-# 3. The KEK passphrase (D5, P0-2). Never hand-type this one — low entropy
-#    here defeats the entire envelope-encryption design.
-just gen-master-key
-
-# 4. An age keypair for backups. The container only ever gets the public
-#    half (see docker/backup/backup.sh's header for why); keep the private
-#    half OUTSIDE this repo and this host — a password manager entry plus
-#    one offline paper/USB copy. Generate it using the backup image itself
-#    so you don't need `age` installed on the host at all:
-just build
-docker run --rm --entrypoint age-keygen personalfi/backup:dev > /tmp/personalfi-age-identity.txt
-grep '^# public key:' /tmp/personalfi-age-identity.txt | cut -d' ' -f4 > secrets/age_recipient
-chmod 444 secrets/age_recipient
-# Move /tmp/personalfi-age-identity.txt to your password manager / offline
-# copy, then delete it from /tmp. Never commit it, never leave it on this host.
-shred -u /tmp/personalfi-age-identity.txt
-
-# 5. Backblaze B2 (optional — skip if you're not pushing backups off-box yet;
-#    placeholder files are fine and are the default, see .env.example).
-echo "placeholder" > secrets/b2_key_id
-echo "placeholder" > secrets/b2_application_key
-# To actually enable it: create a B2 application key scoped to one bucket
-# with object lock enabled, put the key id/secret in the two files above,
-# and set RCLONE_REMOTE=b2:<your-bucket-name> in .env.
-
-chmod 444 secrets/b2_key_id secrets/b2_application_key
-
-# 6. Plaid (optional — C-3, gate-security-review.md §2.2 F-2). `compose.yml`
-#    declares `plaid_client_id`, `plaid_secret` and `plaid_env` as file
-#    secrets on `api` and `worker` (never on `proxy` or `backup` — neither
-#    has any use for a Plaid credential), and Compose refuses to start a
-#    container that mounts a secret whose host file does not exist — there
-#    is no "optional bind mount" in its secret model. So these three are
-#    created **empty** unconditionally, whether or not this deployment is
-#    using Plaid yet:
-touch secrets/plaid_client_id secrets/plaid_secret secrets/plaid_env
-chmod 444 secrets/plaid_client_id secrets/plaid_secret secrets/plaid_env
-#    `packages/config` treats a zero-length secret file exactly as it treats
-#    a missing one (`load.ts`'s `loadConfig`, tested in `load.test.ts`), so
-#    three empty files boot exactly as three absent ones would: the API logs
-#    "plaid not configured; connector not registered" and `GET /connectors`
-#    omits Plaid. Nothing else to do until you actually want Plaid.
-#
-#    To actually enable it: sign up at https://dashboard.plaid.com, create a
-#    Sandbox (then, later, Production) API key, and write the Client ID and
-#    secret into the two files above. `just harden-secrets` now covers these
-#    three (gate-security-review.md §8.2 N-1 / §8.11 D-4 — it did not before,
-#    and a deployment that hardened its secrets per an earlier version of
-#    this sentence crash-looped both `api` and `worker` on EACCES the moment
-#    Plaid was enabled). Run it after writing real content here, same as
-#    every other secret:
-#      echo -n '<client id>'      > secrets/plaid_client_id
-#      echo -n '<secret>'         > secrets/plaid_secret
-#      echo -n 'sandbox'          > secrets/plaid_env   # or 'production' —
-#                                                        # see PLAID_ALLOW_PRODUCTION
-#                                                        # below; D16.
-#    Then, in `.env`: set `PLAID_ENABLED=true` (so `docker/Caddyfile` widens
-#    its CSP for `cdn.plaid.com`/`sandbox.plaid.com`/`production.plaid.com` —
-#    C-2), and, only if you need an OAuth institution (most US banks do not),
-#    `PLAID_REDIRECT_URI=https://<PUBLIC_HOST>/link/oauth` — see
-#    `.env.example` for both. `@core/config` refuses to boot if the redirect
-#    URI is set but is not `https` or does not share an origin with
-#    `AUTH_ALLOWED_ORIGINS`.
-#
-# 7. Insights advisor token secret (optional — wp2.6-insights.md §6, open item
-#    5; docs/evidence/phase-2/wp2.w-wiring.md). `@ctx/insights` keys every
-#    merchant pseudonym it hands a `builtin`/`local_model` advisor from this
-#    value, mixed with the user id; rotating it re-pseudonymises every
-#    merchant and orphans every `MERCHANT_…` reference an evidence row already
-#    stored. File-only, same posture as `master_key` — never an env var, never
-#    read from `NOTIFICATIONS_ALLOWED_HOSTS`'s neighbourhood in `.env`.
-#    `compose.yml` declares it as a file secret on `api` and `worker` only
-#    (never `proxy` or `backup`), and — like the three `plaid_*` secrets above
-#    — Compose refuses to start a container that mounts a secret whose host
-#    file does not exist, so it is created **empty** unconditionally, whether
-#    or not this deployment is opting into insights yet:
-touch secrets/advisor_token_secret        # leave empty to stay opted out
-chmod 444 secrets/advisor_token_secret
-#    `packages/config` treats a zero-length secret file exactly as it treats a
-#    missing one (`load.ts`'s `loadConfig`, tested in `load.test.ts`), so an
-#    empty file boots exactly as an absent one would: `apps/api/src/
-#    modules.ts`'s `insightsModule` registers `module.insights`'s flag with no
-#    consumer, no job and no schedule. Nothing else to do until you actually
-#    want insights.
-#
-#    To actually enable `module.insights`, write a high-entropy value instead,
-#    then run `just harden-secrets` (it covers this file the same way it
-#    covers the three `plaid_*` secrets):
-openssl rand -hex 32 > secrets/advisor_token_secret
-chmod 444 secrets/advisor_token_secret
-
-# 8. Phase 3's seven provider keys (all optional — 03 §6: "Phase 3 completes
-#    with zero keys; it just cannot prove freshness"). `compose.yml` declares
-#    all seven as file secrets on `api` and `worker` only — never `migrator`,
-#    which applies DDL and will never dial a provider — and Compose has no
-#    optional-secret model, so like the plaid_* trio and advisor_token_secret
-#    above they are created **empty** unconditionally. `packages/config` treats
-#    a zero-length file exactly as a missing one, so seven empty files boot
-#    exactly as seven absent ones would.
-touch secrets/tiingo_api_key secrets/fred_api_key secrets/coingecko_api_key \
-      secrets/openfigi_api_key secrets/coinbase_key_name \
-      secrets/coinbase_private_key secrets/etherscan_api_key
-chmod 444 secrets/tiingo_api_key secrets/fred_api_key secrets/coingecko_api_key \
-          secrets/openfigi_api_key secrets/coinbase_key_name \
-          secrets/coinbase_private_key secrets/etherscan_api_key
-#
-#    What each one buys, and what happens without it:
-#
-#      tiingo_api_key        equity/ETF/fund EOD closes. Absent -> that adapter
-#                            is not registered at all; the 03:45 refresh runs,
-#                            asks nobody, and records that honestly.
-#      fred_api_key          macro series and FX. FRED has NO header auth, so
-#                            this key travels in every request's query string —
-#                            which is why @ctx/integrations redacts every
-#                            provider-authored string before logging it or
-#                            storing it in market_data_runs.
-#      coingecko_api_key     crypto prices (Demo plan).
-#      openfigi_api_key      symbol -> FIGI mapping. Also answers anonymously,
-#                            at 10 jobs per batch instead of 100, so absence
-#                            here degrades rather than disables.
-#      coinbase_key_name     the CDP API key name, `organizations/{org}/apiKeys/
-#                            {key}`. All-or-nothing with the next one.
-#      coinbase_private_key  the CDP **Ed25519** key (EdDSA — ES256 is Plaid's
-#                            *webhook* algorithm; 01 §3.2 warns against
-#                            cargo-culting between the two). Create the CDP key
-#                            with the `view` permission only: the connector
-#                            asserts `key_permissions` at startup and refuses a
-#                            key that can trade.
-#      etherscan_api_key     the watch-only wallet connector's ETHEREUM leg
-#                            only. Its BITCOIN leg needs no key — addresses are
-#                            derived locally from the xpub/ypub/zpub and
-#                            Blockstream Esplora is unauthenticated — so with
-#                            no file here the connector is still registered and
-#                            BTC wallets work; an ETH balance request refuses
-#                            by name (CONFIG_ERROR naming this file) rather
-#                            than dialling.
-#
-#    Watch-only wallets, independent of any key above (Phase 3 gate C-2,
-#    closed by WP 4.12a): a funded wallet's HOLDINGS sync and value — the
-#    on-chain quantity, priced through the same ladder a Coinbase sighting of
-#    the same asset joins onto. Its account BALANCE still cannot sync:
-#    `syncBalances` has no fiat quote for a wallet and refuses any non-zero
-#    balance rather than fabricate one, so the account's own balance figure
-#    (as opposed to its holdings and their value, which are correct) stays
-#    unset until `ProviderBalanceFact.current` is widened or the
-#    account-balance path is changed to value from holdings instead.
-#
-#    To enable any of them, write the real value and re-run `just
-#    harden-secrets` (it covers all seven):
-#      echo -n '<token>' > secrets/tiingo_api_key
-#
-#    `CRYPTO_ALLOWED_HOSTS` and `MARKET_DATA_ALLOWED_HOSTS` in `.env` can only
-#    NARROW which hosts these adapters may reach; neither can add one.
-#
-#    Watch-only wallet privacy (Phase 3 gate C-13,
-#    docs/evidence/phase-3/gate-security-review.md §4.1(c)): every address
-#    this connector derives from a linked xpub/ypub/zpub, and every 0x
-#    address linked directly, is queried against `blockstream.info` from
-#    THIS HOST'S IP over its public Esplora API — there is no self-hosted
-#    Esplora option today. Blockstream can therefore link every derived
-#    address of every watch-only wallet an install has ever linked to that
-#    IP. This is inherent to the watch-only design, not a bug this release
-#    fixes; an operator who needs to avoid it needs a self-hosted or
-#    Tor-routed block explorer, which is out of scope here.
-#
-#    `wallet_addresses.descriptor` (the xpub/ypub/zpub or 0x address) is
-#    sealed with SecretBox once a KEK is threaded into the composition
-#    root's `createWalletRpcRuntime` calls (migration 0027; not done by
-#    default in this release — see `docs/evidence/phase-4/
-#    wp4.12c-gate-conditions.md` §1). Until an operator's deployment applies
-#    that wiring, a newly linked wallet's descriptor is stored in the clear,
-#    exactly as every watch-only wallet's descriptor has been since WP 3.6 —
-#    a database dump or backup carries it, and with it every address that
-#    wallet has ever used or will use.
 ```
+
+**2. The key-encryption passphrase.** `master_key` is the passphrase the application derives its
+KEK from (D5, P0-2). Never hand-type this one: low entropy defeats the whole envelope-encryption
+design. The recipe writes 48 random bytes, base64url, and refuses to overwrite an existing file.
+**Back it up somewhere that is not this host**: losing it means re-linking every provider.
+
+```bash
+just gen-master-key
+```
+
+**3. An age keypair for backups.** The `backup` container only ever gets the public half
+(`age_recipient`; see `docker/backup/backup.sh`'s header for why); keep the private half **outside
+this repo and this host**, in a password manager entry plus one offline copy. Generate it with the
+backup image itself, so the host needs no `age`. The image must exist, so build first (several
+minutes the first time):
+
+```bash
+just build
+(umask 077; docker run --rm --entrypoint age-keygen personalfi/backup:dev > "$HOME/personalfi-age-identity.txt")
+grep '^# public key:' "$HOME/personalfi-age-identity.txt" | cut -d' ' -f4 > secrets/age_recipient
+chmod 444 secrets/age_recipient
+```
+
+(`personalfi/backup:dev` is the tag `just build` produced; if `.env` sets `PERSONALFI_VERSION` or
+`REGISTRY`, use that tag.) Move `$HOME/personalfi-age-identity.txt` to your password manager and an
+offline copy, then `shred -u` it once it is safely stored. Never commit it, and do not leave it on a
+host that holds real data: you need it only to restore and to run the restore drill (bring it back
+for those few minutes), and whoever holds it can read every backup.
+
+**4. Every optional secret, empty.** Compose has no optional-secret model: it refuses to start a
+container that mounts a secret whose host file does not exist. So every optional feature's secret is
+created **empty**, and `packages/config` treats a zero-length (or whitespace-only) file exactly as a
+missing one (`load.ts`'s `loadConfig`, tested in `load.test.ts`): an empty placeholder boots exactly
+as no file would, and the feature stays off until you write a real value. One recipe creates all
+of them, computed from `compose.yml` rather than hand-listed:
+
+```bash
+just secrets-placeholders
+```
+
+It never overwrites or re-modes an existing file, keeps `./secrets` at 0700, creates the files at
+mode 0444, prints only secret **names**, and **refuses** (before writing anything) if a required
+secret (`database_url`, `pg_password`, `master_key`, `age_recipient`) is missing or empty. `just
+upgrade` runs it for you, so a release that adds an optional secret needs no hand step.
+
+**5. Turning an optional feature on.** Write the real value, run `just harden-secrets` (see
+below), set the `.env` key if the row names one, and run `docker compose up -d` so the services
+that read it start again: `api` and `worker` read their secrets once, at boot, and the proxy
+reads `PLAID_ENABLED` at start.
+
+| Secret file(s)                                 | What it enables                                                                                                                                                      | Write                                                                                                                                                                                                                     | Also                                                                                                                                                                                |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `b2_key_id`, `b2_application_key`              | Off-site backup to Backblaze B2                                                                                                                                      | A B2 application key scoped to **one bucket with object lock**                                                                                                                                                            | `RCLONE_REMOTE=b2:<your-bucket-name>` in `.env`                                                                                                                                     |
+| `plaid_client_id`, `plaid_secret`, `plaid_env` | Bank linking through Plaid                                                                                                                                           | The client id, the secret, and `sandbox` (or `production`, see below) with `echo -n`                                                                                                                                      | `PLAID_ENABLED=true` so the proxy widens its CSP for Plaid's origins; `PLAID_REDIRECT_URI=https://<PUBLIC_HOST>/link/oauth` only for an OAuth institution (most US banks need none) |
+| `advisor_token_secret`                         | The insights module (`module.insights`): keys every merchant pseudonym an advisor sees                                                                               | `openssl rand -hex 32 > secrets/advisor_token_secret`                                                                                                                                                                     | Rotating it re-pseudonymises every merchant and orphans every `MERCHANT_…` reference already stored                                                                                 |
+| `tiingo_api_key`                               | Equity, ETF and fund end-of-day closes                                                                                                                               | The key                                                                                                                                                                                                                   | `MARKET_DATA_ALLOWED_HOSTS` can only narrow the four hosts the code names                                                                                                           |
+| `fred_api_key`                                 | Macro series and FX. FRED has no header auth, so the key travels in the query string; `@ctx/integrations` redacts every provider-authored string before it is logged | The key                                                                                                                                                                                                                   |                                                                                                                                                                                     |
+| `coingecko_api_key`                            | Crypto prices (Demo plan)                                                                                                                                            | The key                                                                                                                                                                                                                   |                                                                                                                                                                                     |
+| `openfigi_api_key`                             | Symbol-to-FIGI mapping (also answers anonymously, at 10 jobs per batch instead of 100)                                                                               | The key                                                                                                                                                                                                                   |                                                                                                                                                                                     |
+| `coinbase_key_name`, `coinbase_private_key`    | The Coinbase connector. All-or-nothing: one without the other is a boot error                                                                                        | The CDP key name `organizations/{org}/apiKeys/{key}` and the **Ed25519** private key. Create the key with the `view` permission only: the connector asserts `key_permissions` at startup and refuses a key that can trade |                                                                                                                                                                                     |
+| `etherscan_api_key`                            | The watch-only wallet connector's Ethereum leg. The Bitcoin leg needs no key (addresses are derived locally and Blockstream Esplora is unauthenticated)              | The key                                                                                                                                                                                                                   | Without it an ETH balance request refuses by name (`CONFIG_ERROR` naming this file) rather than dialling                                                                            |
+| `migrator_database_url`                        | The hard database-role boundary: the migrator alone connects as the schema owner while `database_url` is the DML-only `personalfi_app`                               | The owner's `postgres://` URL, as [Database roles](#database-roles) describes                                                                                                                                             | Empty means the migrator uses `database_url`, as before                                                                                                                             |
+
+With no provider key, every adapter answers `skipped_no_key` and the app boots normally; Phase 3
+"completes with zero keys, it just cannot prove freshness". `CRYPTO_ALLOWED_HOSTS` and
+`MARKET_DATA_ALLOWED_HOSTS` in `.env` can only **narrow** which hosts those adapters may reach;
+neither can add one. The seven provider keys are mounted on `api` and `worker` only, never on the
+migrator (it applies DDL and will never dial a provider).
+
+Plaid's `plaid_env` file reads `sandbox` or `production`. The api refuses to boot with `production`
+unless `PLAID_ALLOW_PRODUCTION=true` is also set in its environment (D16: two independent settings
+must agree before a real charge is possible), and the shipped `compose.yml` does not pass that
+variable through, so this install runs Plaid **sandbox** only until a `compose.override.yml` adds it
+to `api` and `worker`. `@core/config` also refuses to boot if `PLAID_REDIRECT_URI` is set but is not
+`https` or does not share an origin with `AUTH_ALLOWED_ORIGINS`.
+
+**Watch-only wallet privacy** (Phase 3 gate C-13): every address the connector derives from a linked
+xpub/ypub/zpub, and every `0x` address linked directly, is queried against `blockstream.info` and
+`api.etherscan.io` from **this host's IP**. There is no self-hosted Esplora option today, so
+Blockstream can link every derived address of every watch-only wallet this install has ever linked
+to that IP. This is inherent to the watch-only design. An operator who needs to avoid it needs a
+self-hosted or Tor-routed block explorer, which is out of scope here. The stored descriptor itself
+(`wallet_addresses.descriptor`: the xpub/ypub/zpub or the `0x` address) **is sealed with `SecretBox`**
+when a wallet is linked (migration 0027; WP 5.13b C-4: the api and the worker both pass the unlocked
+keyring into the wallet runtime), and a descriptor an earlier release stored in the clear is
+re-sealed at the worker's next boot (it logs `wallet descriptors: re-sealed at boot`). A database
+dump or a backup therefore carries the descriptor only as ciphertext.
 
 #### Secret file modes: 0444 by default, 0400 via `just harden-secrets`
 
@@ -260,7 +194,7 @@ silently. Measured on Compose v5.5.1:
 
 ```
 host file: -rw-r--r-- 1 1000 1000 s.txt      declared: mode: 0400, uid/gid 10001
-container (running as 10001): -rw-r--r-- 1 1000 1000 /run/secrets/s   -> READABLE
+container (running as 10001): -rw-r--r-- 1 1000 1000 the mounted file   -> READABLE
 ```
 
 Nothing was applied. So with a 0400 file owned by you, every consumer fails:
@@ -272,15 +206,17 @@ The way to actually get 0400 inside the container is to make the host file
 0400 _owned by the consuming uid_, which needs root once:
 
 ```bash
-just harden-secrets     # sudo chown/chmod per consuming service
+just harden-secrets     # chown/chmod per consuming service, one sudo prompt per file
 ls -l secrets/
 # -r-------- 1 10001 10001 database_url      api / worker / migrator
+# -r-------- 1 10001 10001 migrator_database_url  migrator (empty unless the roles are split)
 # -r-------- 1 10001 10001 master_key        api / worker
-# -r-------- 1 10001 10001 plaid_client_id   api / worker
-# -r-------- 1 10001 10001 plaid_secret      api / worker
-# -r-------- 1 10001 10001 plaid_env         api / worker
+# -r-------- 1 10001 10001 plaid_client_id   api / worker   (and plaid_secret, plaid_env,
+#                                                            advisor_token_secret and the
+#                                                            seven provider keys: same)
 # -r--r----- 1     70  10002 pg_password     postgres (owner) + backup (group)
-# -r-------- 1 10002 10002 age_recipient     backup
+# -r--r----- 1 10001 10002 age_recipient     api + backup
+# -r-------- 1 10002 10002 b2_key_id         backup   (and b2_application_key)
 ```
 
 `just hardening-check` (part of `just verify`) then runs
@@ -308,7 +244,12 @@ The two settings that matter for a fresh box:
   on a machine holding financial data.** Defaults to `127.0.0.1` (LAN mode:
   reach it via an SSH port-forward, or `just trust-ca` and a browser on the
   box itself). Set it to the host's actual LAN IP if you want other devices
-  on the same LAN to reach it directly over the internal CA.
+  on the same LAN to reach it directly over the internal CA. **Both** published
+  ports follow it: HTTPS on `PROXY_HTTPS_PORT` (default 443) and a plain-HTTP
+  listener on `PROXY_HTTP_PORT` (default 80) that serves the same app without
+  TLS, there for `tailscale serve` (step 6) to forward to. On a LAN address that
+  second port is reachable by anyone on the LAN in clear text, so firewall it, or
+  keep `BIND_ADDRESS` on loopback and reach the box over Tailscale.
 - `PUBLIC_HOST` — defaults to `personalfi.lan`; **renamed from
   `PERSONALFI_HOSTNAME`** because it is one fact used in four places and they
   were allowed to disagree once (P0-4). Setting it sets, together: Caddy's site
@@ -317,6 +258,10 @@ The two settings that matter for a fresh box:
   entry in `AUTH_ALLOWED_ORIGINS` (the CSRF origin allow-list). Changing it
   after passkeys are enrolled **invalidates every passkey** — the RP id is
   bound into the credential — so pick the final hostname before step 7.
+- `PERSONALFI_VERSION` and `COMPOSE_PROJECT_NAME` — leave unset for a single
+  install on its own host (images are tagged `dev` and the project is the
+  directory name). A **production** install sets both; see "Production install
+  and the real-use soak".
 - `EXTRA_ALLOWED_ORIGINS` — optional, comma-separated, appended to
   `AUTH_ALLOWED_ORIGINS`. Only for a second origin on the **same registrable
   name** (a different port, or a subdomain of `PUBLIC_HOST`). It is _not_ a way
@@ -325,7 +270,9 @@ The two settings that matter for a fresh box:
   `@core/config` enforces that at boot — `<node>.<tailnet>.ts.net` alongside
   `personalfi.lan` refuses to start, by design, rather than failing later in
   the browser. If you want passkeys over Tailscale, set `PUBLIC_HOST` to the
-  tailnet name and reach the box by that name on the LAN too.
+  tailnet name and reach the box by that name on the LAN too. The same goes for
+  a non-default `PROXY_HTTPS_PORT`: the browser's origin then carries the port,
+  so list it here (`https://personalfi.lan:8443`).
 
 If step 2 wrote real content into `secrets/plaid_client_id`/`plaid_secret`,
 also set `PLAID_ENABLED=true` (and, for an OAuth institution,
@@ -375,11 +322,23 @@ one's default:
 ### 4. Bring the stack up
 
 ```bash
-just build
-just up
+just build               # already done in step 2; re-run after any change to the code
+docker compose up -d --wait --wait-timeout 900
 docker compose ps        # everything healthy? the P0-6/-7 evidence in
                           # docs/evidence/phase-0/wp0.4-container-hardening.md
                           # is what "healthy" is checked against
+```
+
+`just up` is `docker compose up -d` without the wait. With `--wait`, the command returns once `db`,
+`api`, `worker`, `proxy` and `backup` are healthy and the one-shot containers have exited 0:
+`pre-migrate-backup` (a backup before any migration; with nothing pending, or on an empty database,
+it exits at once) and `migrator` (applies the migrations). Expect a minute or two on a cold start:
+the API derives its encryption key (Argon2id, about 7 s) before it answers. A cold install ends with
+the readiness check:
+
+```bash
+docker compose exec -T api node -e "fetch('http://127.0.0.1:8080/ready').then(async r => console.log(r.status, await r.text()))"
+# 200 {"status":"ready", ...}
 ```
 
 **`worker` has no account holder yet at this point** — steps 5 and 6 below can
@@ -410,7 +369,16 @@ just trust-ca
 Then import `personalfi-ca.crt` into your OS/browser trust store (exact
 steps vary by OS — Arch: `trust anchor personalfi-ca.crt` as root, or import
 via your browser's certificate settings). Add `personalfi.lan` (or whatever
-`PUBLIC_HOST` is) to `/etc/hosts` pointing at the bind address.
+`PUBLIC_HOST` is) to `/etc/hosts` pointing at the bind address. To prove the
+whole chain, TLS included, without a browser:
+
+```bash
+curl --cacert personalfi-ca.crt --resolve personalfi.lan:443:127.0.0.1 https://personalfi.lan/api/ready
+```
+
+It prints the readiness JSON and exits 0. A certificate error means the CA was
+not applied (the file is the one `just trust-ca` wrote from this install's
+`caddy_data` volume; a rebuilt volume means a new CA and a new file).
 
 ### 6. Enabling remote access (Tailscale Serve + MagicDNS)
 
@@ -447,6 +415,12 @@ This prints a one-time passkey-enrolment link of the form
 `https://<PUBLIC_HOST>/register#token=...`. Open it in a browser that trusts
 the internal CA (step 5), enrol at least two authenticators (D21), and save the
 ten recovery codes somewhere that is not this host.
+
+The token expires **one hour** after it is minted. If it lapses, or you lose
+every passkey and every recovery code, `just bootstrap-user reissue=true`
+mints a fresh enrolment link for the account that already exists (it is
+reachable only from a shell on the host, which already owns the database and
+`master_key`).
 
 The token travels in the URL **fragment**, which is never sent to a server — so
 it cannot land in an access log, a `Referer` header, or a proxy cache the way a
@@ -534,13 +508,14 @@ restart that follows it), `POST /plan/scenarios/{id}/projections
 {"method":"monte_carlo"}` answers **409** with
 `{"code":"planning.monte_carlo_unavailable", ...}` — never a 500, never a
 silently substituted lognormal or deterministic result dressed up as Monte
-Carlo. The nightly refresh keeps producing its usual deterministic baseline
+Carlo. The plan screen says so in words ("The Monte Carlo engine is not
+available on this install. It needs the operator to fetch the pinned return
+series once") and offers the single deterministic path. A deterministic run is
+labelled as one and is never phrased as a probability of success (WP 9.7,
+C-8). The nightly refresh keeps producing its usual deterministic baseline
 run in the meantime (`method: "deterministic"` in `projection_runs`), and the
 retirement-wave advisors that read the newest _Monte Carlo_ baseline
-(`newestBaselineRunId`, C-1) simply have nothing to prefer yet. On the plan
-screen this reads as the ordinary deterministic headline (see G4-13's open
-finding, C-8, for why that headline currently overstates itself as a
-probability) — there is no dedicated "Monte Carlo unavailable" banner today.
+(`newestBaselineRunId`, C-1) simply have nothing to prefer yet.
 
 ---
 
@@ -570,15 +545,18 @@ change to match the new mount, and the check is what makes that visible
 instead of a silent `EACCES` the first time someone downloads an encrypted
 export.
 
-**Not re-walked live by this work package:** downloading `?encrypt=true`
-from a running `api` container built from this Dockerfile and decrypting the
-result with `age` — that needs a rebuilt image and the compose stack up,
-which this work package's rules kept it from doing. `apps/api/test/db/
-export-encrypt.test.ts` (WP 3.13) and `export-encrypt-age-absent.test.ts`
-(WP 4.12b) prove the code path — the happy path against a real `age` binary
-on the dev host, and the `age`-absent refusal in isolation — but the gate
-walk item ("download, decrypt with `age`, diff against the plaintext bundle")
-against the actual shipped image is still owed.
+**Prove your first encrypted export once.** The code path is tested (`apps/api/test/db/export-encrypt.test.ts`
+against a real `age` binary, and `export-encrypt-age-absent.test.ts` for the refusal when `age` is
+missing: it never downgrades to plaintext), but a restore you have not tried is a rumour. After
+your first `?encrypt=true` download, decrypt it with your age identity and compare it with a plain
+`GET /export` of the same data:
+
+```bash
+age --decrypt -i "$HOME/personalfi-age-identity.txt" export.jsonl.age > export.decrypted.jsonl
+```
+
+(Run `age` from the backup image if the host has none:
+`docker run --rm -i -v "$HOME/personalfi-age-identity.txt:/id:ro" --entrypoint age personalfi/backup:dev --decrypt -i /id < export.jsonl.age > export.decrypted.jsonl`.)
 
 `POST /import` refuses to run against an instance that already has user
 data (`409 export.instance_not_empty`) — it is a same-schema restore, not a
@@ -880,6 +858,11 @@ shred -u /tmp/age-identity.txt
 docker compose up -d
 ```
 
+A restore drops every grant (`restore.sh` runs `pg_restore --no-owner --no-privileges`), and a
+restore into a fresh cluster has no `personalfi_app` role at all (a role is in no database dump).
+Nothing to do: `api` and `worker` re-create the role and its grants at every boot
+(["Database roles"](#database-roles)).
+
 `AGE_IDENTITY_FILE` (the private key) is deliberately never a secret declared
 in `compose.yml` — see `docker/backup/backup.sh`'s header. It only ever
 exists on the host filesystem for the duration of a real restore or a drill,
@@ -896,6 +879,8 @@ the few seconds this command runs for; `shred -u` immediately after closes
 it. (The same non-remapping behaviour is why every file under `./secrets/`
 is `chmod 444`, not `400` — see "Create secrets" above.)
 
+---
+
 ## Restore drill
 
 P0-11 / D24: an untested backup is a rumour. Run this monthly at minimum, and
@@ -903,7 +888,6 @@ after any change to `docker/backup/*.sh` or the schema.
 
 ```bash
 export AGE_IDENTITY_FILE=/path/to/your/age-identity.txt
-chmod 644 "$AGE_IDENTITY_FILE"   # see "Restore" above — the container reads this as uid 10002
 just restore-drill
 ```
 
@@ -912,7 +896,16 @@ Postgres container (never the live `db` service), boots a throwaway `api`
 container against it, hits `/ready`, and compares table counts and the latest
 applied migration against the live database. It tears down everything it
 created on exit, pass or fail, and writes
-`docs/evidence/ops/restore-drill-<date>.md` with a **PASS/FAIL verdict**.
+`docs/evidence/ops/restore-drill-<date>.md` with a **PASS/FAIL verdict**
+(`DRILL_EVIDENCE_DIR` redirects where; set it outside the checkout if you do not
+want the report in your working tree). On first use it pulls two small images
+pinned by digest.
+
+The drill reads `AGE_IDENTITY_FILE` through a root container and copies it into a
+scratch directory, so, on a rootful Docker, the file's own mode does not matter.
+That is different from a real restore (above), where the `backup` container
+reads it as uid 10002 and the file must be `chmod 644` for the few seconds the
+command runs.
 
 It asserts, and exits non-zero if any of these fails (H-5 — it used to collect
 these numbers and never compare them, so the committed evidence read
@@ -923,17 +916,43 @@ these numbers and never compare them, so the committed evidence read
 - restored `schema_migrations` max version == live,
 - `/ready` returns 200 from an api container pointed at the restored database.
 
-A green run looks like this:
+A green run writes a report like this one:
 
-````
-- Backup restored: `/backups/personalfi-20260913T024827Z.dump.age` (66346 encrypted bytes)
-- Restored db table count: 20        - Live db table count: 20
-- Restored db schema_migrations: 0003 - Live db schema_migrations: 0003
-- API /ready against restored db: pass (200 from /ready)
+```text
+# Restore drill — 20261005T172944Z
+
 **Verdict: PASS**
-``` It needs `docker compose up` (or
-at least `create`) to have run at least once, so the `backend` network and
-`backups` volume already exist.
+
+- Backup restored: `/backups/personalfi-20261005T172944Z.dump.age` (486249 encrypted bytes)
+- Restored db table count: 97
+- Restored db schema_migrations max id: 0034
+- Live db table count: 97
+- Live db schema_migrations max id: 0034
+- API /ready against restored db: pass (200 from /ready)
+
+All assertions held: restored tables > 0, restored == live, schema_migrations agree,
+and the API served /ready from the restored database. `just restore-drill` exited 0.
+```
+
+**Hold a plan scenario in the live database before you drill.** Since migration 0040 (WP 9.4's
+finding F-94-6), a backup of a database holding a plan scenario restores correctly under
+`pg_restore`'s empty `search_path`; before it, the restore failed on the constraint that checks a
+scenario's levers, and every drill that passed had run against a database with no scenario to
+show it. The drill is only as strong as the data it restores, and one row of any shape in `plan_scenarios`
+is enough to exercise the fix. Check the live database holds one, and create one on the Plan screen
+first if it does not:
+
+```bash
+docker compose exec -T db psql -U personalfi -d personalfi -tAc "select count(*) from plan_scenarios"
+```
+
+The drill needs `docker compose up` (or at least `create`) to have run at least once, so the
+`backend` network and `backups` volume already exist. It finds them, and the live `db` container,
+**by Compose project label**: on a host with more than one project, set `COMPOSE_PROJECT_NAME` to
+the one you are drilling (the recipe refuses when the lookup is ambiguous rather than guess), and
+`DRILL_SECRETS_DIR` redirects where it reads `pg_password` and `master_key` (default `./secrets`).
+The verdict is also recorded in the database (`ops_restore_drills`), which is what the dashboard's
+"restore drill passed" line reads; the dashboard warns after 35 days without a pass.
 
 ---
 
@@ -982,9 +1001,9 @@ destroyable by a routine agent or gate command, and each rule below answers one:
 
 3. **Own secrets, own address.** The production clone has its **own `secrets/`**
    (generated for it, never copied from the dev checkout), hardened per C-16
-   with `sudo just harden-secrets`, and its own bind address — the Tailscale or
+   with `just harden-secrets`, and its own bind address — the Tailscale or
    LAN address on 443 (`BIND_ADDRESS=<tailscale ip>`, `PUBLIC_HOST=<tailnet
-   name>`, see "Enabling remote access"). The dev and gate stack stay on
+name>`, see "Enabling remote access"). The dev and gate stack stay on
    `127.0.0.1`.
 
 **The guard.** `scripts/soak/check-isolation.sh` refuses unless the project is
@@ -1035,14 +1054,14 @@ return-series fetch (`Monte Carlo return series`), and **write day one** in
 `docs/evidence/phase-9/soak/clock.md` holds **your** dated attestations, one table
 row each: `| YYYY-MM-DD | event | one-line note |`. The events:
 
-| Event                       | Meaning                                                                                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `day_one`                   | The soak started: production installed, two institutions linked, other tools retired.                                     |
-| `attest`                    | "This week I used only PersonalFi, nothing went wrong that I have not written here." One per week keeps the week clean.   |
-| `fallback`                  | You used another tool or a spreadsheet for something. **Resets the clock** to this date (09 §8.2: zero in the final 90).  |
-| `data_loss`                 | Data lost beyond the 24 h RPO. **Resets the clock.**                                                                      |
-| `outage_start`/`outage_end` | Production was down. An outage **over 24 h** without loss **pauses** the clock for its length.                            |
-| `upgrade`                   | A record of `just upgrade` (the SHA). Bookkeeping: **never resets or pauses**, and does not count as an attestation.       |
+| Event                       | Meaning                                                                                                                            |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `day_one`                   | The soak started: production installed, two institutions linked, other tools retired.                                              |
+| `attest`                    | "This week I used only PersonalFi, nothing went wrong that I have not written here." One per week keeps the week clean.            |
+| `fallback`                  | You used another tool or a spreadsheet for something. **Resets the clock** to this date (09 §8.2: zero in the final 90).           |
+| `data_loss`                 | Data lost beyond the 24 h RPO. **Resets the clock.**                                                                               |
+| `outage_start`/`outage_end` | Production was down. An outage **over 24 h** without loss **pauses** the clock for its length.                                     |
+| `upgrade`                   | A record of `just upgrade` (the SHA). Bookkeeping: **never resets or pauses**, and does not count as an attestation.               |
 | `criterion`                 | A judged line for the criteria ledger: `3: met - gold set matched my list` (`met`, `failed` or `observing`, criteria 3–8, 10, 11). |
 
 The weekly report prints "day N of 90" from the latest reset, and **prints a
@@ -1067,7 +1086,7 @@ report succeeded):
 cd ~/personalfi-prod
 COMPOSE_PROJECT_NAME=personalfi-prod PERSONALFI_VERSION=<sha> \
 SOAK_EVIDENCE_DIR=/home/chris/Projects/PersonalFi/docs/evidence/phase-9/soak \
-  bash scripts/soak/run-report.sh                      # `just soak-report` once the orchestrator wires it
+  just soak-report                                     # = bash scripts/soak/run-report.sh
 # -> .../week-YYYY-Www.md ; commit it and push
 ```
 
@@ -1134,17 +1153,144 @@ paths the recipe otherwise takes from the checkout (`./secrets`,
 
 ---
 
+## Database roles
+
+Until v0.9.0, `api`, `worker`, `migrator` and `backup` all connected as `personalfi`: the cluster's
+bootstrap **superuser** (it can `COPY ... TO PROGRAM`, disable triggers and read server files) and
+the owner of every table. A SQL injection or a compromised dependency in the serving process was
+therefore a few statements from the host (9.10's finding G-01). Migration 0039 adds a second role.
+
+**`personalfi_app`** is `NOLOGIN` by default and has no superuser, `CREATEDB`, `CREATEROLE`,
+`REPLICATION` or `BYPASSRLS`. It holds `SELECT`, `INSERT`, `UPDATE` and `DELETE` on every table and
+`USAGE`, `SELECT` and `UPDATE` on every sequence (including every table a later migration
+creates), owns nothing, and may create nothing. It can only **read** `schema_migrations`, and it
+cannot `UPDATE`, `DELETE` or `TRUNCATE` `security_events`: the audit trail is append-only (a trigger
+refuses the rest for every role).
+
+**What you get with no action.** `api` and `worker` start every pooled connection with the libpq
+option `-c role=personalfi_app`, so the server sets the role before the first query, and `RESET ROLE`
+returns to it rather than to the login. At every boot each calls `personalfi_app_grants()`
+(idempotent), because a restore drops both the grants (`pg_restore --no-owner --no-privileges`) and,
+into a fresh cluster, the role itself (a role is cluster-wide and is in no database dump). This
+stops accidental DDL and the injection path to `COPY ... TO PROGRAM`. It is **not** a hard boundary
+while the login (`database_url`) is still the superuser: code that runs `SET ROLE NONE` gets it back.
+The `migrator` keeps DDL by connecting as the owner. Check it:
+
+```bash
+docker compose exec -T db psql -U personalfi -d personalfi -tAc \
+  "select rolname, rolsuper, rolcreatedb, rolcreaterole, rolbypassrls, rolcanlogin from pg_roles where rolname in ('personalfi', 'personalfi_app')"
+docker compose logs api | grep "database connections use the app role"
+```
+
+`personalfi_app` shows `f` for the first four columns. The api and the worker each log the line
+above at boot; the line `could not ensure the database app role` means the migrations have not
+run yet (`docker compose logs migrator`).
+
+**The split (optional; the real boundary).** Make `database_url` log in as `personalfi_app` itself,
+and give the migrator the owner's URL through the optional secret `migrator_database_url`. Then the
+serving processes hold no DDL right and no superuser, whatever code runs in them. Nothing about
+`just upgrade`, the pre-migration backup, `backup` or the restore drill changes: they keep using
+`personalfi` and `pg_password`. Do it once, on the stack that is up, as the owner:
+
+```bash
+app_pw="$(openssl rand -hex 32)"
+printf "ALTER ROLE personalfi_app LOGIN PASSWORD '%s';\n" "$app_pw" \
+  | docker compose exec -T db psql -U personalfi -d personalfi -v ON_ERROR_STOP=1
+cp secrets/database_url secrets/migrator_database_url      # the owner's URL, unchanged
+printf 'postgres://personalfi_app:%s@db:5432/personalfi\n' "$app_pw" > secrets/database_url
+unset app_pw
+docker compose restart api worker
+```
+
+(If you have run `just harden-secrets`, the files belong to uid 10001 at mode 0400: write them with
+`sudo tee`, then run `just harden-secrets` again, which also covers `migrator_database_url`.)
+Check that the serving connections are now the app role's own:
+
+```bash
+docker compose exec -T db psql -U personalfi -d personalfi -tAc \
+  "select usename, count(*) from pg_stat_activity where datname = 'personalfi' group by 1"
+```
+
+`personalfi_app` carries the api's and the worker's connections. **To undo the split**, write the owner's
+URL back to `secrets/database_url`, empty `secrets/migrator_database_url` (an empty file is the
+same as none), and `docker compose restart api worker`. `migrator_database_url` is optional by rule:
+a required new secret would break the unattended upgrade, so an install that never splits is
+unchanged, and an empty file means "use `database_url`".
+
+---
+
 ## Master-key rotation
 
-Not yet implemented as a `just` target — this is a pointer, not a procedure,
-because rotating the KEK means re-encrypting every envelope-encrypted column
-in place (03 §2, D5), which is application code that ships with the identity
-context, not an infrastructure script. When it lands, it will live at
-`just rotate-master-key` and this section gets the real procedure. Until
-then: **do not hand-edit `secrets/master_key` on a box with existing
-encrypted data** — the scope rule (D5) is "key loss = re-link providers,
-never = lose the ledger," and that only holds if the rotation path is the
-one the identity context actually implements, not a file swap.
+**There is no operator procedure for rotating the KEK today.** The primitive exists and is
+unit-tested (`SecretBox.rotateKek` in `packages/secretbox`: it re-wraps every DEK under a new KEK
+generation), but no `just` recipe or route reaches it, and it has never been exercised against a
+running stack (9.10's finding G-04, tracked for a later release). The design rationale is in
+03 §2 and D5; the scope rule is **"key loss = re-link providers, never = lose the ledger"**, and it
+only holds if rotation goes through the path the identity context implements, not a file swap.
+So:
+
+- **Do not hand-edit `secrets/master_key` on a box with existing encrypted data.** The api and the
+  worker would derive a different KEK, refuse to unlock (`passphrase_mismatch`, the `/unlock` screen
+  says so) and every sealed value would be unreadable until the original file is back.
+- **If you suspect the passphrase leaked**, run the [panic checklist](#panic-button-outline): it
+  revokes every provider credential at its source, which is what makes the sealed copies of them
+  worthless to whoever holds the passphrase and a database copy.
+- Back up `master_key` somewhere that is not this host, as soon as `just gen-master-key` writes it.
+  Without it, a restored backup holds ciphertext nothing can open.
+
+---
+
+## Lockout and operator unlock
+
+Authentication failures are rate limited and locked out **in Postgres**, so a restart (which an
+attacker who can reach `/auth` might provoke) does not reset them. A locked or limited attempt gets
+`429` with `Too many attempts. Try again in N seconds.`
+
+| Bucket                       | Allowed per window |
+| ---------------------------- | ------------------ |
+| `webauthn` (passkey sign-in) | 10 per 5 minutes   |
+| `totp`                       | 5 per 15 minutes   |
+| `recovery_code`              | 5 per hour         |
+| `refresh`                    | 60 per hour        |
+| `unlock` (KEK passphrase)    | 5 per hour         |
+| `register` (enrolment)       | 10 per hour        |
+
+Separately, **ten consecutive failures** in a bucket lock that subject (an IP address, or
+`user:<uuid>`) for 15 minutes, doubling at each repeat up to a ceiling of **24 hours**. A success
+clears the failure count but not the level; the level decays after a full quiet maximum window.
+The ceiling is deliberate: a permanent lockout on a one-user app with no support desk is a
+self-inflicted denial of service.
+
+**Waiting is the normal answer.** If you cannot wait, read why, then clear it from the host. The
+tables are `auth_lockouts` (the lock) and `auth_attempts` (the window counters), and the audit
+trail is `security_events`:
+
+```bash
+docker compose exec -T db psql -U personalfi -d personalfi -c \
+  "SELECT occurred_at, kind, outcome, ip FROM security_events ORDER BY occurred_at DESC LIMIT 20"
+docker compose exec -T db psql -U personalfi -d personalfi -c \
+  "SELECT bucket, subject, consecutive_failures, lock_level, locked_until FROM auth_lockouts ORDER BY updated_at DESC LIMIT 20"
+```
+
+Only after you know the failures were yours (or that you accept the risk of clearing an attacker's
+lock), clear it:
+
+```bash
+docker compose exec -T db psql -U personalfi -d personalfi -c \
+  "UPDATE auth_lockouts SET consecutive_failures = 0, lock_level = 0, locked_until = NULL, updated_at = now(); DELETE FROM auth_attempts"
+```
+
+**Lost every passkey and every recovery code.** `just bootstrap-user reissue=true` mints a new
+one-hour enrolment link for the existing account. It works only from a shell on the host (which
+already owns the database and `master_key`), so it grants nothing the shell did not. A session
+reached through TOTP or a recovery code alone is single-factor and **cannot** export, change
+factors or credentials, or act on advisors (none of those sessions is step-up fresh); enrol a
+passkey first.
+
+**KEK unlock.** The KEK is unlocked by the server reading `secrets/master_key` at boot, never by a
+passphrase typed into a browser. The `/unlock` screen only reports the state: `no_passphrase` (the
+file was empty or missing when the server started: fix the file and restart `api` and `worker`) or
+`passphrase_mismatch` (the file is not the one this data was sealed with).
 
 ---
 
@@ -1156,12 +1302,12 @@ flight** (the run watcher aborts the call), and at the **write barrier** — und
 anything is written — so a kill that lands between the model's reply and the insert still writes
 nothing. A refused or cancelled run always names the **broadest** level that applied.
 
-| Level | Mechanism | Scope | Default | Who flips it | Survives restart |
-| --- | --- | --- | --- | --- | --- |
-| 1 Module | `ADVISORS_ENABLED` (env) **and** `module.insights` (flag) | every advisor | on | operator / user | yes |
-| 2 Kind | `advisors.kind.local_model` (flag) **and** `LOCAL_MODEL_ENDPOINT` set | every `local_model` advisor | **off** | user, step-up / operator | yes |
-| 3 Advisor | `advisors.enabled` **and** the breaker's `quarantined_at` | one advisor | off | user, step-up / the app | yes — rows |
-| 4 Run | `advisor_runs.cancel_requested_at`; the run's deadline | one run | — | user, step-up / the clock | n/a |
+| Level     | Mechanism                                                             | Scope                       | Default | Who flips it              | Survives restart |
+| --------- | --------------------------------------------------------------------- | --------------------------- | ------- | ------------------------- | ---------------- |
+| 1 Module  | `ADVISORS_ENABLED` (env) **and** `module.insights` (flag)             | every advisor               | on      | operator / user           | yes              |
+| 2 Kind    | `advisors.kind.local_model` (flag) **and** `LOCAL_MODEL_ENDPOINT` set | every `local_model` advisor | **off** | user, step-up / operator  | yes              |
+| 3 Advisor | `advisors.enabled` **and** the breaker's `quarantined_at`             | one advisor                 | off     | user, step-up / the app   | yes — rows       |
+| 4 Run     | `advisor_runs.cancel_requested_at`; the run's deadline                | one run                     | —       | user, step-up / the clock | n/a              |
 
 Under all four sits `docker compose stop ollama`. It is not a level — nothing records it — but it stops
 the model container outright; a run waiting on it fails fast (WP 5.2) and the rest of the app is
@@ -1251,15 +1397,15 @@ SELECT advisor_id, status, refusal, cancel_reason, cancel_requested_at, error_co
   FROM advisor_runs ORDER BY started_at DESC LIMIT 20;
 ```
 
-| Situation | `status` | `refusal` / `cancel_reason` / `error_code` |
-| --- | --- | --- |
-| Level 1 off before the run | `refused` | `refusal = advisors_disabled` or `module_disabled` |
-| Level 2 off before the run | `refused` | `refusal = kind_disabled` |
-| Level 3 off / quarantined before the run | `refused` | `refusal = advisor_disabled` / `advisor_quarantined` |
-| Local model whose payload shape was never approved | `refused` | `refusal = payload_not_approved` |
-| Any level flipped **during** the run, or between the reply and the write | `cancelled` | `cancel_reason` = the broadest level's name; `run_cancelled` for level 4, with `cancel_requested_at` set |
-| The deadline | `failed` | `error_code = advisor_timeout` (counts toward the breaker; a kill does not) |
-| A process killed mid-run | `started`, no `finished_at` | — (what an interrupted run looks like) |
+| Situation                                                                | `status`                    | `refusal` / `cancel_reason` / `error_code`                                                               |
+| ------------------------------------------------------------------------ | --------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Level 1 off before the run                                               | `refused`                   | `refusal = advisors_disabled` or `module_disabled`                                                       |
+| Level 2 off before the run                                               | `refused`                   | `refusal = kind_disabled`                                                                                |
+| Level 3 off / quarantined before the run                                 | `refused`                   | `refusal = advisor_disabled` / `advisor_quarantined`                                                     |
+| Local model whose payload shape was never approved                       | `refused`                   | `refusal = payload_not_approved`                                                                         |
+| Any level flipped **during** the run, or between the reply and the write | `cancelled`                 | `cancel_reason` = the broadest level's name; `run_cancelled` for level 4, with `cancel_requested_at` set |
+| The deadline                                                             | `failed`                    | `error_code = advisor_timeout` (counts toward the breaker; a kill does not)                              |
+| A process killed mid-run                                                 | `started`, no `finished_at` | — (what an interrupted run looks like)                                                                   |
 
 A refused run has no `input_digest`: nothing was built. A cancelled one keeps the digest of what was
 sent before it was stopped, and `insights.AdvisorRunCancelled` names the level and whether the watcher
@@ -1291,7 +1437,7 @@ everything now":
 
 This is deliberately not automated into one script: the right response
 differs enormously between "a Plaid token leaked" and "someone has a shell
-on this box," and a single `just panic` button that always does the same
+on this box," and a single panic script that always does the same
 four things regardless of which is actually true is worse than a checklist a
 human reads under pressure.
 
@@ -1306,7 +1452,7 @@ HEAD the whole time while three of those gates were themselves broken. So:
 
 ```bash
 just verify     # = just check, plus every gate CI runs, same pinned digests
-````
+```
 
 In order, `just verify` runs:
 
@@ -1404,7 +1550,7 @@ refuses to send a prompt unless the served model's digest is the one pinned belo
 
 7. ```bash
    docker compose --profile local-llm up -d ollama
-   docker compose up -d worker            # picks up the LOCAL_MODEL_* values
+   docker compose up -d api worker        # worker: the endpoint; api: the model's name and digest (the payload preview)
    docker compose ps ollama               # healthy after the first `ollama list` succeeds
    ```
    The first request after a start finds the model cold. The adapter then loads it with one
@@ -1448,93 +1594,218 @@ ollama/ollama:<version>`, replace the digest, update `THIRD_PARTY.md`, run
 
 ---
 
+## Cryptography inventory
+
+What is encrypted or hashed, with what, where the key lives, and how it rotates. The primitives
+live in one place, `packages/secretbox/src/primitives.ts`, enforced by ESLint (any `node:crypto` or
+noble import elsewhere fails lint); the two carve-outs are the migration checksum and the Coinbase
+JWT. Every primitive is an industry-validated implementation, none hand-rolled. The assessment's V11
+rows ([ASVS](docs/security/asvs-assessment.md)) are the evidence behind each line.
+
+| What                                                                                             | Algorithm                                                                                                                                                                         | Key or secret                                                                                                                                                      | Where it lives                                                                                                           | Rotation                                                                               |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Key-encryption key (KEK)                                                                         | Argon2id (`hash-wasm`), m = 1 GiB, t = 4, p = 4; the production floor refuses a lower setting                                                                                     | The `master_key` passphrase (48 random bytes, base64url) plus a per-install 32-byte salt                                                                           | The passphrase in `secrets/master_key`; the KEK in memory only (derived at boot by `api` and `worker`, wiped on SIGTERM) | No operator procedure yet ([Master-key rotation](#master-key-rotation))                |
+| Data-encryption keys (DEKs)                                                                      | Random 256-bit keys, wrapped under the KEK with XChaCha20-Poly1305                                                                                                                | Generated per record (provider credentials: deleting one DEK is cryptographic erasure of that credential) or per column epoch (bulk PII such as transaction names) | The `encryption_keys` table (the keyring), wrapped                                                                       | Epoch DEKs rotate by bumping the epoch; per-record DEKs with the credential            |
+| Sealed columns (provider tokens, exchange credentials, wallet descriptors, TOTP seeds, bulk PII) | XChaCha20-Poly1305 with a 24-byte random nonce and a mandatory AAD binding `personalfi/v1`, table, column, row and key version; envelope `version, key id, nonce, ciphertext+tag` | The DEKs above                                                                                                                                                     | Postgres columns                                                                                                         | With their DEK                                                                         |
+| Session and refresh tokens                                                                       | 256 bits from the CSPRNG, base64url; only the **SHA-256 digest** is stored                                                                                                        | The token itself, in the browser                                                                                                                                   | Cookie; digest in `sessions`                                                                                             | Per session; reuse of a refresh token is detected and logged                           |
+| Recovery codes                                                                                   | Argon2id, PHC-encoded (verify only, never decryptable)                                                                                                                            | The ten codes shown once at enrolment                                                                                                                              | Hashes in the database; the codes on paper, off this host                                                                | Regenerate in settings                                                                 |
+| Passkeys (WebAuthn)                                                                              | ES256 or EdDSA public-key credentials; RS256 is rejected                                                                                                                          | The authenticator holds the private key                                                                                                                            | Public keys in the database                                                                                              | Enrol a second authenticator (the app asks for two)                                    |
+| TOTP                                                                                             | HMAC-SHA1 per RFC 6238 (the algorithm authenticator apps speak)                                                                                                                   | The seed, sealed with SecretBox                                                                                                                                    | `totp_secrets.sealed_secret`                                                                                             | Re-enrol                                                                               |
+| Enrolment token                                                                                  | 256-bit random; SHA-256 digest stored; one hour                                                                                                                                   | Printed once by `just bootstrap-user`                                                                                                                              | Digest in the database                                                                                                   | Single use                                                                             |
+| Merchant pseudonyms (`MERCHANT_<12 hex>`)                                                        | HMAC (keyed, one-way, stable per user)                                                                                                                                            | `secrets/advisor_token_secret` mixed with the user id                                                                                                              | The secret file                                                                                                          | Rotating re-pseudonymises every merchant and orphans stored references                 |
+| Backups, and `GET /export?encrypt=true`                                                          | `age`: X25519 recipient, ChaCha20-Poly1305 payload                                                                                                                                | The `age_recipient` **public** key on the host; the private identity off-host with you                                                                             | `secrets/age_recipient`; your password manager and offline copy                                                          | Generate a new keypair, replace `age_recipient`, keep the old identity for old backups |
+| TLS to the browser                                                                               | TLS 1.3 negotiated, 1.2 accepted, 1.1 refused (Caddy defaults); ECDHE with X25519 or P-256; AEAD suites                                                                           | Caddy's internal CA and leaf key (LAN mode); a Let's Encrypt certificate under Tailscale Serve                                                                     | The `caddy_data` volume                                                                                                  | Caddy renews automatically; `just trust-ca` exports the CA root                        |
+| TLS to providers (Plaid, Coinbase, price feeds, Esplora, ntfy, SMTP)                             | TLS 1.2 minimum, certificate verification on (`rejectUnauthorized: true`, one dialer, tested for all five clients)                                                                | The platform trust store                                                                                                                                           | `packages/platform/src/egress/dial.ts`                                                                                   | n/a                                                                                    |
+| Provider request signing                                                                         | Coinbase CDP: an Ed25519 (EdDSA) JWT built per request                                                                                                                            | The CDP private key (`coinbase_private_key`)                                                                                                                       | Secret file                                                                                                              | Create a new CDP key with the `view` permission and replace both files                 |
+| Integrity pins                                                                                   | SHA-256: the Monte Carlo return series (`SHA256SUMS`), the local model (manifest digest), container images (digest in `compose.yml`), migrations (checksum)                       | n/a                                                                                                                                                                | The repository                                                                                                           | When a pin is deliberately moved                                                       |
+| Postgres bootstrap password                                                                      | 32 random bytes, hex                                                                                                                                                              | `secrets/pg_password` and `database_url`                                                                                                                           | Secret files                                                                                                             | The panic checklist, step 4                                                            |
+
+**Not encrypted, on purpose.** Traffic between containers on the compose `backend` network is plain
+(a private bridge on one host; no internal TLS: accepted risk A-08 in the assessment). The plain-HTTP
+listener on `PROXY_HTTP_PORT` exists for `tailscale serve`; see First install, step 3. The database
+volume itself is protected by the host's LUKS2, not by Postgres.
+
+**A crypto-migration plan.** Agility hooks exist (the envelope carries a version and a key id, and
+every KDF parameter is stored with the key it produced), so a primitive can change without
+re-encrypting the world at once. The triggers for a deliberate migration are: a practical attack on
+Argon2id, XChaCha20-Poly1305 or X25519 that the maintainers of `@noble` or `age` announce; the
+arrival of post-quantum recipients in `age` (then generate a new keypair, re-encrypt the backups
+you still need, and retire the old identity), or of a post-quantum key exchange in Caddy and Node
+(then it arrives with a routine image update); and any change to the Argon2 floor in `@core/config`.
+Until a trigger fires, the plan is to change nothing.
+
+---
+
+## Logging inventory
+
+What is logged, where, in what format, for how long, and who can read it.
+
+| Log                                                                             | What it records                                                                                                                                                                                                                                                                                                                | Format and destination                                                                                                      | Retention                                                                                                    | Who can read it                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Container logs (`api`, `worker`, `migrator`, `proxy`, `backup`, `db`, `ollama`) | The api's request lines with a `correlationId`, job and consumer activity, startup and shutdown, errors (the `internal` family at `error` with the error object), refused requests (401/403/404 at `info`)                                                                                                                     | pino JSON lines (one object per line, epoch-millisecond UTC timestamps) to stdout, collected by Docker's `json-file` driver | 10 MB x 5 files per service (`compose.yml`'s shared logging block), rotated; nothing is shipped off the host | Anyone with Docker access on the host (root-equivalent)                                                                                                                                                                                                                                                                                                                               |
+| `security_events` (database)                                                    | Authentication successes and failures (passkey, TOTP, recovery code), lockouts, step-up, refresh and reuse, KEK unlock, credential, TOTP and recovery-code changes. Columns: when, who, kind, outcome, IP, a hash of the user agent, the correlation id; `detail` is scrubbed of credential-shaped values before it is written | A Postgres table                                                                                                            | In the database; the only off-host copy is the nightly encrypted backup                                      | The app role can read and append; it cannot `UPDATE`, `DELETE` or `TRUNCATE` the table, and a trigger refuses every `UPDATE` and `DELETE` for every role (the one exception is the `user_id` set to NULL when a user row is deleted). A database superuser can still disable the trigger; the serving processes are no longer one (migration 0039, [Database roles](#database-roles)) |
+| `snapshot_grant_events` (database)                                              | Every change to what an advisor may see: append-only, enforced by a trigger                                                                                                                                                                                                                                                    | A Postgres table                                                                                                            | In the database and backups                                                                                  | The app role (read)                                                                                                                                                                                                                                                                                                                                                                   |
+| `advisor_runs` (database)                                                       | Every advisor run: status, refusal or cancel reason, the digest of what was sent, never the prompt, the reply or the snapshot                                                                                                                                                                                                  | A Postgres table                                                                                                            | In the database                                                                                              | The app role                                                                                                                                                                                                                                                                                                                                                                          |
+| `ops_backup_runs`, `ops_restore_drills` (database)                              | Backup and drill outcomes, which the dashboard line reads                                                                                                                                                                                                                                                                      | Postgres tables                                                                                                             | In the database                                                                                              | The app role                                                                                                                                                                                                                                                                                                                                                                          |
+| Postgres server log                                                             | Statements slower than 500 ms (`log_min_duration_statement=500`), connection errors                                                                                                                                                                                                                                            | Postgres's stderr, collected as a container log                                                                             | The `db` container's json-file rotation                                                                      | As container logs                                                                                                                                                                                                                                                                                                                                                                     |
+| Caddy's own log                                                                 | Startup, certificate and error lines. No per-request access log is configured                                                                                                                                                                                                                                                  | Caddy's default output on stderr, a container log                                                                           | As container logs                                                                                            | As container logs                                                                                                                                                                                                                                                                                                                                                                     |
+
+What is **never** logged, and is tested: any credential or token (deep redaction by key on every
+log line, and a scrub of every provider-authored string, since FRED puts its key in the query
+string), any amount or merchant in the soak report, and any prompt, reply or snapshot byte from
+the local model (the adapter's lines carry sizes, digests, token counts and durations only). There
+is no remote log sink and no third-party error reporter. Time is UTC everywhere (`TZ: UTC` on every
+service). Not recorded as security events: data export and import, connection link and unlink,
+payload approvals and CSRF refusals appear only in the container log. Read the log:
+
+```bash
+docker compose logs --since 1h api | tail -50
+```
+
+---
+
 ## Resource envelope
 
-Limits are set per service in `compose.yml` (`deploy.resources.limits`). They
-are _limits_, not reservations — steady-state usage is far below these — but
-the sum is what the host must be able to give up at once.
+Limits are set per service in `compose.yml` (`deploy.resources.limits`). They are _limits_, not
+reservations. Steady-state use is far below them (the measured numbers follow), but the sum is what
+the host must be able to give up at once.
 
-| Service      | CPU | Memory    | Why that number                                                                                                                                                                                                                                                                                 |
-| ------------ | --- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api`        | 2.0 | **1536M** | Argon2id KEK derivation allocates 1 GiB in one buffer at boot (P0-2 floor). At 768M the kernel OOM-killed it at exit 137 with no output, and because `/auth/unlock-state` derives lazily, an unauthenticated GET was a remote kill switch.                                                      |
-| `worker`     | 1.0 | **512M**  | Does **not** derive the KEK today — `apps/api/src/worker.ts` constructs no `SecurityRuntime`. **Raise to 1536M in the same PR that makes the worker unlock the keyring** (first sync job that decrypts a provider credential), or it will OOM at exit 137 exactly like the api did.             |
-| `db`         | 2.0 | 1G        | `shared_buffers=256MB`, `max_connections=40`, plus 256M `shm_size`.                                                                                                                                                                                                                             |
-| `proxy`      | 0.5 | 128M      | Caddy plus a static bundle.                                                                                                                                                                                                                                                                     |
-| `backup`     | 0.5 | 256M      | `pg_dump` + `age`; the plaintext dump lives in a 256M tmpfs.                                                                                                                                                                                                                                    |
-| `migrator`   | —   | —         | Runs to completion before api/worker start; no limit set.                                                                                                                                                                                                                                       |
-| placeholders | 0.1 | 32M       | `sleep infinity`, profile-gated, off by default.                                                                                                                                                                                                                                                |
-| `ollama`     | 4.0 | 8G        | Profile `local-llm`, off by default (WP 5.2). A 7–8B model at 4-bit holds ~5 GiB resident and saturates the cores it is given; `pids: 256`. Not in the steady-state sum below — when it runs, the whole-stack target in master plan §3.4 is knowingly exceeded on this host. See "Local model". |
+| Service              | CPU | Memory    | Why that number                                                                                                                                                                                                                                                                                    |
+| -------------------- | --- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api`                | 2.0 | **1536M** | Argon2id KEK derivation allocates 1 GiB in one buffer at boot (P0-2 floor). At 768M the kernel OOM-killed it at exit 137 with no output, and because `/auth/unlock-state` derives lazily, an unauthenticated GET was a remote kill switch.                                                         |
+| `worker`             | 1.0 | **1536M** | **The worker derives the KEK too**: it unlocks the keyring at boot to open provider credentials (G4-2). At 512M it was OOM-killed at every boot once an account holder existed (189 silent restarts, Phase 1 gate N-4).                                                                            |
+| `db`                 | 2.0 | 1G        | `shared_buffers=256MB`, `max_connections=40`, plus 256M `shm_size`.                                                                                                                                                                                                                                |
+| `proxy`              | 0.5 | 128M      | Caddy plus a static bundle.                                                                                                                                                                                                                                                                        |
+| `backup`             | 0.5 | 256M      | `pg_dump` + `age`; the plaintext dump lives in a 256M tmpfs.                                                                                                                                                                                                                                       |
+| `pre-migrate-backup` | 0.5 | 256M      | The same image as `backup`, a one-shot before migrations.                                                                                                                                                                                                                                          |
+| `migrator`           | —   | —         | Runs to completion before api/worker start; no limit set.                                                                                                                                                                                                                                          |
+| placeholders         | 0.1 | 32M       | `sleep infinity`, profile-gated, off by default.                                                                                                                                                                                                                                                   |
+| `ollama`             | 4.0 | 8G        | Profile `local-llm`, off by default (WP 5.2). A 7-8B model at 4-bit holds ~5 GiB resident and saturates the cores it is given; `pids: 256`. Not in the steady-state numbers below: when it runs, the whole-stack target in master plan §3.4 is knowingly exceeded on this host. See "Local model". |
 
-Worst case with everything running and api cold-starting: ~3.4 GiB of limits,
-of which the real simultaneous peak is api's 1 GiB Argon2 spike plus Postgres's
-~1 GiB — comfortably inside the 2 GB whole-stack target in master plan §3.4
-_while the worker stays at 512M_. When the worker starts deriving the KEK, two
-simultaneous 1 GiB spikes exceed that target: the levers are staggering the
-derivations or `KEK_ARGON2_MEMORY_KIB` (a security parameter with a production
-floor — do not lower it casually), not the container limits.
+The limits sum to about 4.6 GiB (api 1.5 + worker 1.5 + db 1 + proxy 0.1 + backup 0.25). **Measured**
+(WP 9.9, `docs/evidence/phase-9/wp9.9-perf.md`: an AMD Ryzen 5 3501U, 4 cores / 8 threads, 23 GiB,
+Docker 29.8, the stack with a 50,040-row ledger, `ollama` stopped, no build running, load printed with
+every number):
+
+| What                                                                         | Measured                                                                        | Budget (master plan §3.4)                        |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------ |
+| RAM, idle ten minutes (all services, resident)                               | 316.7 MiB RSS (447 MiB charged, most of it Postgres's page cache)               | whole stack under 2 GB                           |
+| RAM through one nightly sync chain                                           | 351.3 MiB RSS at its peak (485 MiB charged)                                     | under 2 GB                                       |
+| RAM at boot: api and worker deriving the KEK at once                         | **2.31 to 2.43 GiB RSS for about 3.4 s** (1.2 GiB per container)                | under 2 GB                                       |
+| Cold start                                                                   | 19.5 s to the api's own `/ready`; 24.8 to 25.4 s to the first 200 through Caddy | under 20 s including migrations (met at the api) |
+| Nightly sync, 8 connections, a 730-day backfill, the worker's real job chain | 243 s                                                                           | under 5 minutes                                  |
+| Backup restore (RTO)                                                         | 36 s from restore start to `/ready` (a 116 MB database)                         | under 1 hour                                     |
+| Transactions list at 50,000 rows, over real HTTP                             | p95 15 to 58 ms (through Caddy, worst 82 ms)                                    | p95 under 200 ms                                 |
+| Monte Carlo, 10,000 paths x 40 years                                         | p95 543 ms (engine), 532 ms (over HTTP)                                         | p95 at most 800 ms                               |
+
+**The one place the 2 GB target is exceeded is the boot window.** For about three seconds, api and
+worker each derive a 1 GiB Argon2id key and the stack's resident set peaks near 2.4 GiB; a host
+with less than about 3 GiB free at that moment can OOM-kill one of them (exit 137). The levers
+are to stagger the two derivations or to lower `KEK_ARGON2_MEMORY_KIB` (a security parameter with a
+production floor: do not lower it casually), not to raise the container limits. The numbers above
+were taken before any stagger; if a release adds one it is named in the release notes, and the cold
+numbers move with it. On a host with 4 GiB of RAM, leave the local model off. Where a number was
+informational only, the evidence says so: 200 held positions make `GET /holdings` take about 2 s
+(WP 9.9 finding P-6, not yet fixed), and the 250k-row list's rare-word search passes 200 ms.
 
 ---
 
 ## Troubleshooting
 
-**`age: error: ... permission denied` during restore or a restore drill.**
-`AGE_IDENTITY_FILE` is owner-readable only. It needs `chmod 644` — see
-"Restore" above for why (Docker bind mounts and file-based secrets both
-preserve the host file's own uid/mode as-is; the `backup` container reads it
-as uid 10002, not whichever host user ran the command).
+**`age: error: ... permission denied` during a restore.** `AGE_IDENTITY_FILE` is owner-readable
+only. A **real restore** needs it `chmod 644` for the few seconds the command runs: see "Restore"
+above for why (Docker bind mounts and file-based secrets both preserve the host file's own
+uid/mode as-is; the `backup` container reads it as uid 10002, not whichever host user ran the
+command). The restore **drill** does not have this problem on a rootful Docker (it reads the file
+through a root container); if it reports the file is "empty or unreadable", check the path.
 
-**`db` container fails to start / "database files are incompatible with
-server" / permission errors on the data directory.** `postgres:18`'s own
-image stores data in a major-version subdirectory and expects the _volume
-mount point one level up_, at `/var/lib/postgresql` — **not**
-`/var/lib/postgresql/data` (the path older Postgres images and older
-tutorials use). `compose.yml` and `compose.dev.yml` both mount
-`pgdata:/var/lib/postgresql` for exactly this reason; if you're hand-rolling
-a `docker run` for debugging, mounting at `.../data` instead makes the
-container refuse to start with a confusing message rather than an obvious
-one.
+**`docker compose up` fails with "secret ... file not found", or `bind source path does not
+exist: .../secrets/<name>`.** A file under `./secrets/` that `compose.yml` declares does not exist
+(older Compose says `secret ... file not found`). Run `just secrets-placeholders`: it creates every
+optional one empty, never overwrites, and refuses, naming the secret, if a required one
+(`database_url`, `pg_password`, `master_key`, `age_recipient`) is missing. Every filename is exact
+and extension-less (`secrets/master_key`, not `secrets/master_key.txt`).
 
-**`proxy` exits immediately with "operation not permitted."** This means
-something rebuilt or replaced `docker/caddy.Dockerfile`'s image with stock
-`caddy:2-alpine` while `compose.yml`'s `cap_drop: [ALL]` +
-`no-new-privileges:true` are still set. Stock Caddy's binary carries a
-`cap_net_bind_service` file capability (`getcap /usr/bin/caddy`); with an
-empty capability set and `no-new-privileges`, the kernel refuses to apply it
-at `execve`, and Caddy never starts. `docker/caddy.Dockerfile` strips that
-capability at build time (this proxy only ever binds unprivileged container
-ports 8443/8080, so it never needed the capability) — rebuild with `just
-build` rather than pulling the upstream image directly.
+**A container crash-loops on `EACCES` reading a secret.** The file's owner and mode do not match
+the uid that reads it. After `just harden-secrets`, `just check-secret-ownership` (also part of
+`just hardening-check`) re-derives the expected owner and mode for every secret from `compose.yml`
+and names the mismatched file. A secret hardened under an older release (for example
+`age_recipient` at `10002:10002 0400`, which `api` now also reads) needs `just harden-secrets`
+again.
 
-**`docker compose up` fails with "secret ... file not found."** One of
-`./secrets/*` is missing. See "Create secrets" above — every filename is
-exact and extension-less (`secrets/master_key`, not `secrets/master_key.txt`).
+**A `just` recipe fails with `node: command not found`.** `just gen-pg-secrets`, `just
+gen-master-key`, `just secrets-placeholders` and therefore `just upgrade` use `node` on the host
+(only `node -e` and a JSON read): install any Node.js 18 or newer. The application itself needs no
+host Node, because it runs in the images.
 
-**A container is `unhealthy` in `docker compose ps`.** `api`/`worker`/
-`migrator` depend on `db`'s healthcheck and, for `api`/`worker`, on
-`migrator` completing successfully first. `docker compose logs migrator` is
-almost always the first thing to check — a failed migration is the most
-common reason `api` never becomes healthy on a fresh box.
+**`db` container fails to start / "database files are incompatible with server" / permission errors
+on the data directory.** `postgres:18`'s own image stores data in a major-version subdirectory and
+expects the _volume mount point one level up_, at `/var/lib/postgresql` — **not**
+`/var/lib/postgresql/data` (the path older Postgres images and older tutorials use). `compose.yml`
+and `compose.dev.yml` both mount `pgdata:/var/lib/postgresql` for exactly this reason; if you're
+hand-rolling a `docker run` for debugging, mounting at `.../data` instead makes the container refuse
+to start with a confusing message rather than an obvious one.
 
-**`migrator` exits with `configuration is invalid ... ROLE: Invalid option:
-expected one of "api"|"worker"`.** A known gap as of this writing:
-`packages/config/src/schema.ts`'s `ROLE` schema has not yet been updated to
-include `'migrator'` alongside `'api'`/`'worker'`, even though `compose.yml`
-sets `ROLE: migrator` on that service (D13's three-role single image) and
-`docker/entrypoint.mjs` already dispatches on it correctly. Until
-`packages/config` adds `'migrator'` to that enum, the migrator (and
-therefore `api`/`worker`, which both depend on it completing) cannot start
-from a fresh clone. Not something this file can fix — it lives in a
-different package's schema.
+**`proxy` exits immediately with "operation not permitted."** Something rebuilt or replaced
+`docker/caddy.Dockerfile`'s image with stock `caddy:2-alpine` while `compose.yml`'s `cap_drop:
+[ALL]` + `no-new-privileges:true` are still set. Stock Caddy's binary carries a
+`cap_net_bind_service` file capability (`getcap /usr/bin/caddy`); with an empty capability set and
+`no-new-privileges`, the kernel refuses to apply it at `execve`, and Caddy never starts.
+`docker/caddy.Dockerfile` strips that capability at build time (this proxy only ever binds
+unprivileged container ports 8443/8080) — rebuild with `just build` rather than pulling the
+upstream image directly.
 
-**`just restore-drill` says "backend network or backups volume not found."**
-Run `docker compose up` (or `docker compose create`) at least once first —
-the drill discovers both by their compose-assigned labels rather than
-guessing a project name, and those labels only exist once compose has
-created the resources.
+**A container is `unhealthy` in `docker compose ps`.** `api`/`worker`/`migrator` depend on `db`'s
+healthcheck and, for `api`/`worker`, on `migrator` completing successfully first. `docker compose
+logs migrator` is almost always the first thing to check — a failed migration is the most common
+reason `api` never becomes healthy on a fresh box. `backup` reads `starting` for its first minutes
+on a fresh install and only goes `unhealthy` after a failed attempt: see "Backup".
 
-**Browser shows a certificate warning for `personalfi.lan`.** You haven't
-imported the internal CA yet, or you're hitting the box from a device you
-haven't imported it onto. See "Trust the internal CA" above. This is
-expected and correct behaviour, not a bug — an untrusted-by-default internal
-CA is what makes a stray misconfigured client fail loudly instead of quietly
-trusting an unexpected certificate.
+**`api` or `worker` exits 137 at boot, or restarts in a loop on a small host.** The kernel OOM-killed
+it: each derives a 1 GiB Argon2id key at start, and the two together peak near 2.4 GiB for a few
+seconds ("Resource envelope"). Stop other memory consumers (notably `ollama`), or use a host with
+more RAM. `docker inspect --format '{{.State.OOMKilled}}' <container>` confirms it.
+
+**`/ready` answers 200 with `"status":"degraded"`, or `just upgrade` printed `WARNING: /ready
+reports degraded`.** The app is serving, but the platform sees something stuck: an outbox lagging,
+a job waiting too long, or **a consumer stopped at an event it cannot handle** (`just upgrade`
+names it). Read `curl --cacert personalfi-ca.crt https://personalfi.lan/api/ready` and `docker
+compose logs worker | tail`. The thresholds are defaults compiled into the app: an outbox more than
+1,000 events behind, or a runnable job waiting more than 15 minutes.
+
+**`api` logs `could not ensure the database app role; queries will fail until the migrator has
+run`.** The api and the worker call `personalfi_app_grants()` at boot, and that function comes from
+migration 0039. If the migrator has not run (a failed migration, or a database restored from before
+0039 and not yet migrated), run `docker compose logs migrator`, fix what it says, and `docker compose
+up -d`: the next boot re-asserts the role. With the roles split, a wrong `database_url` password
+shows here too.
+
+**The upgrade stops with `migration.database_newer`.** The database holds a migration this checkout
+does not have, so an older binary was pointed at a newer schema. That is the guard working: it never
+serves such a database. Check out the version the database was last migrated by, or restore the
+pre-migration backup ("Upgrade", "Rollback").
+
+**A narration is refused `payload_not_approved` after an upgrade.** The narrator's prompt template
+changed in v0.9.0 (WP 9.5), so an approval given before it covers a different query shape. Approve
+the payload preview again: "Local model", step 6.
+
+**`just restore-drill` says "backend network or backups volume not found."** Run `docker compose up`
+(or `docker compose create`) at least once first — the drill discovers both by their
+compose-assigned labels rather than guessing a project name, and those labels only exist once
+compose has created the resources. If it says it found **more than one** candidate, set
+`COMPOSE_PROJECT_NAME` to the project you mean.
+
+**A sign-in answers `429 Too many attempts`.** You are rate limited or locked out: see "Lockout and
+operator unlock".
+
+**Browser shows a certificate warning for `personalfi.lan`.** You haven't imported the internal CA
+yet, or you're hitting the box from a device you haven't imported it onto. See "Trust the internal
+CA" above. This is expected and correct behaviour, not a bug — an untrusted-by-default internal CA is
+what makes a stray misconfigured client fail loudly instead of quietly trusting an unexpected
+certificate.
+
+**Sign-in fails with `403 csrf_failed`, or the browser refuses the passkey ceremony.** The origin
+the browser uses is not the one the api was configured with. `PUBLIC_HOST` sets the allowed origin
+and the WebAuthn relying-party id together; a non-default port needs `EXTRA_ALLOWED_ORIGINS`, and a
+different hostname than the one passkeys were enrolled under cannot use them (the relying-party id
+is bound into the credential).

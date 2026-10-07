@@ -1,23 +1,33 @@
 # SPDX-License-Identifier: MIT
 #
-# Production stack (WP 0.4; master plan D12-D15, D24, §4 security baseline).
+# The PersonalFi production stack (WP 0.4; master plan D12-D15, D24, §4 security
+# baseline). README.md walks a clean host to a passkey login; RUNBOOK.md is the
+# operating manual (install, upgrade, backup, restore, the soak, the local model).
 #
-#   docker compose up -d                       -> proxy, api, worker, migrator, db, backup
+#   docker compose up -d --wait                -> proxy, api, worker, db, backup, with the one-shot
+#                                                 pre-migrate-backup and migrator run first
+#                                                 (`just up` is the same without the wait)
+#   just upgrade                               -> the update path after `git pull`; never a bare `up`
 #   docker compose --profile sidecar up -d     -> + placeholder sidecar scaffold (Phase 6)
 #   docker compose --profile local-llm up -d   -> + ollama, the local model runtime (WP 5.2; RUNBOOK "Local model")
 #   docker compose --profile local-llm-pull run --rm ollama-pull  -> the one-shot model pull (WP 5.2)
 #   docker compose --profile webhooks up -d    -> + placeholder webhook listener scaffold
 #
+# Every secret is a file under ./secrets, mounted at /run/secrets (never an env
+# var); the top-level `secrets:` block below is the authoritative list, and
+# `just secrets-placeholders` creates the optional ones empty. Non-secret knobs
+# come from .env (see .env.example), and only the `${NAME}` slots named here
+# reach a container.
+#
 # `compose.dev.yml` is the *other* file (dev-only Postgres). This file is never
 # layered on top of it and never the other way around — see that file's header.
 #
-# Network topology (memo 06 §2.1's four, plus WP 5.2's two — `llm` and
-# `llm-pull`, described at the `networks:` block below):
+# Network topology (memo 06 §2.1's four, plus WP 5.2's two):
 #   frontend  bridge            proxy <-> api only.
-#   backend   bridge            api, worker, db, migrator, backup. Carries both
-#                                internal DB traffic and each service's own
-#                                outbound HTTPS (Plaid, Coinbase, Tiingo, B2, ...).
-#   sidecar   internal: true    placeholder services only right now. `db` never
+#   backend   bridge            api, worker, db, migrator, pre-migrate-backup, backup.
+#                                Carries both internal DB traffic and each service's
+#                                own outbound HTTPS (Plaid, Coinbase, Tiingo, B2, ...).
+#   sidecar   internal: true    the placeholder sidecar scaffold only. `db` never
 #                                joins it, so P0-8 ("sidecar cannot resolve or
 #                                reach db") holds structurally, by construction,
 #                                regardless of what `backend` allows.
@@ -25,6 +35,12 @@
 #                                `backend` until the Phase 0 gate (M-5) pointed
 #                                out that the one placeholder destined to face
 #                                the internet had a direct route to Postgres.
+#   llm       internal: true    `ollama` and `worker` only (the hardening check
+#                                refuses a third member): the local model has no
+#                                route off the host and none to `db` or `api`.
+#   llm-pull  bridge            `ollama-pull` alone, the one container allowed to
+#                                reach the internet to fetch a model, sharing a
+#                                network with nothing else.
 #
 # Only `proxy` publishes a port, and only to `${BIND_ADDRESS}` (default
 # 127.0.0.1 — see .env.example). `scripts/compose-hardening-check.sh` asserts
