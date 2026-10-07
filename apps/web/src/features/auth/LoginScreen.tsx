@@ -114,7 +114,7 @@ export function LoginScreen() {
             disabled={busy}
             onClick={() => void signInWithPasskey(false)}
           >
-            {busy && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+            {busy && <Loader2 size={16} className="motion-safe:animate-spin" aria-hidden="true" />}
             Sign in with a passkey
           </Button>
           <div className="mt-4 flex flex-col gap-1 text-small">
@@ -217,7 +217,7 @@ function TotpForm({
         </p>
       )}
       <Button type="submit" className="mt-4 w-full" disabled={busy || token.length < 6}>
-        {busy && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+        {busy && <Loader2 size={16} className="motion-safe:animate-spin" aria-hidden="true" />}
         Verify code
       </Button>
       <button
@@ -275,7 +275,7 @@ function RecoveryCodeForm({
         </p>
       )}
       <Button type="submit" className="mt-4 w-full" disabled={busy || code.length < 8}>
-        {busy && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+        {busy && <Loader2 size={16} className="motion-safe:animate-spin" aria-hidden="true" />}
         Use recovery code
       </Button>
       <button

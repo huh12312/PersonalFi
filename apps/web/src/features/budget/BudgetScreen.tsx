@@ -80,7 +80,7 @@ export function BudgetScreen() {
     return (
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-h2 font-semibold text-text-primary">Budget</h1>
+          <h2 className="text-h2 font-semibold text-text-primary">Budget</h2>
           <PeriodPicker
             budgetId={budgetId}
             currentPeriodId={period.id}

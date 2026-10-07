@@ -6,16 +6,9 @@ import type { CSSProperties, FormEvent } from 'react';
 import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Label } from '../../components/ui/label.tsx';
+import { linkRefusalDetail } from '../connections/link-refusal.ts';
 import { useCreateConnectionMutation } from '../connections/useConnections.ts';
 import { useStepUpRetry } from '../../lib/step-up.ts';
-
-function problemDetail(cause: unknown, fallback: string): string {
-  if (typeof cause === 'object' && cause !== null && 'detail' in cause) {
-    const detail = (cause as { detail?: unknown }).detail;
-    if (typeof detail === 'string' && detail !== '') return detail;
-  }
-  return fallback;
-}
 
 const KEY_NAME_PLACEHOLDER =
   'organizations/00000000-0000-0000-0000-000000000000/apiKeys/00000000-0000-0000-0000-000000000000';
@@ -60,7 +53,7 @@ export function CoinbaseKeyForm({ onDone }: CoinbaseKeyFormProps) {
       setKeyName('');
       onDone();
     } catch (cause) {
-      setError(problemDetail(cause, 'Could not add this Coinbase connection.'));
+      setError(linkRefusalDetail(cause, 'Could not add this Coinbase connection.'));
     }
   }
 

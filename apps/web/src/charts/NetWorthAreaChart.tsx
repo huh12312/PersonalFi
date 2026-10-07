@@ -10,6 +10,10 @@ import { format } from 'date-fns';
 import { useId, useMemo } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 
+import { ChartDataTable } from '../components/patterns/ChartDataTable.tsx';
+import { formatMoney, parseWireMoney } from '../lib/money.ts';
+import { useChartTooltipRules } from '../components/patterns/chart-tooltip.ts';
+
 /**
  * Small local replacements for `d3-array`'s `extent`/`min`/`max`/`bisector` —
  * `d3-array` and `d3-time-format` ship without bundled types and no
@@ -155,6 +159,7 @@ interface ChartInnerProps {
 function ChartInner({ width, height, data, color, showSealedLegend }: ChartInnerProps) {
   const { tooltipData, tooltipLeft, tooltipTop, tooltipOpen, showTooltip, hideTooltip } =
     useTooltip<NetWorthPoint>();
+  const tooltipRules = useChartTooltipRules(hideTooltip, tooltipOpen);
 
   const innerWidth = Math.max(width - margin.left - margin.right, 0);
   const innerHeight = Math.max(height - margin.top - margin.bottom, 0);
@@ -181,6 +186,7 @@ function ChartInner({ width, height, data, color, showSealedLegend }: ChartInner
   if (innerWidth <= 0 || innerHeight <= 0) return null;
 
   function handlePointerMove(event: ReactPointerEvent<SVGRectElement>): void {
+    tooltipRules.keep();
     const localX = event.clientX - event.currentTarget.getBoundingClientRect().left;
     const date = xScale.invert(localX);
     const chosen = data[nearestIndex(data, date)];
@@ -279,7 +285,7 @@ function ChartInner({ width, height, data, color, showSealedLegend }: ChartInner
             height={innerHeight}
             fill="transparent"
             onPointerMove={handlePointerMove}
-            onPointerLeave={hideTooltip}
+            onPointerLeave={tooltipRules.onChartLeave}
           />
         </Group>
       </svg>
@@ -289,10 +295,13 @@ function ChartInner({ width, height, data, color, showSealedLegend }: ChartInner
         tooltipLeft !== undefined &&
         tooltipTop !== undefined && (
           <Tooltip
+            {...tooltipRules.readoutProps}
+            data-chart-readout=""
             left={tooltipLeft + margin.left}
             top={tooltipTop + margin.top}
             style={{
               ...defaultStyles,
+              pointerEvents: 'auto',
               background: 'var(--bg-surface-raised)',
               color: 'var(--text-primary)',
               boxShadow: 'var(--shadow-elev-2)',
@@ -364,6 +373,29 @@ export interface NetWorthAreaChartProps {
  * rate exists, never a silently-summed line" (dispatch §3). Mock data by
  * default, unchanged from before this work package.
  */
+/** `seriesLabel` is a currency code when the caller draws one series per currency; otherwise the dollar the mock data was in. */
+function currencyOf(seriesLabel: string | undefined): string {
+  return seriesLabel !== undefined && /^[A-Z]{3}$/.test(seriesLabel) ? seriesLabel : 'USD';
+}
+
+function tableRows(data: readonly NetWorthPoint[], currency: string): string[][] {
+  return data.map((point) => [
+    format(point.date, 'MMM d, yyyy'),
+    point.netWorthMinor === null
+      ? 'No value recorded'
+      : formatMoney(parseWireMoney({ minor: String(point.netWorthMinor), currency }), {
+          signDisplay: 'auto',
+        }),
+    [
+      isSealedPoint(point) ? 'Sealed' : 'Live (unsealed)',
+      isInterpolatedPoint(point) ? 'interpolated' : null,
+      point.source === 'corrected' ? 'corrected' : null,
+    ]
+      .filter((part): part is string => part !== null)
+      .join(' · '),
+  ]);
+}
+
 export function NetWorthAreaChart({
   data = MOCK_SERIES,
   height = 220,
@@ -395,6 +427,13 @@ export function NetWorthAreaChart({
           )}
         </ParentSize>
       </div>
+      {/* 09 §5.6: the tooltip above needs a pointer and the line needs sight; this is the same series for everyone. */}
+      <ChartDataTable
+        className="mt-1"
+        caption={`Net worth over time${seriesLabel === undefined ? '' : `, ${seriesLabel}`}`}
+        columns={['Date', 'Value', 'Status']}
+        rows={tableRows(data, currencyOf(seriesLabel))}
+      />
     </div>
   );
 }

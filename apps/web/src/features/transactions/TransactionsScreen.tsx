@@ -43,13 +43,15 @@ export function TransactionsScreen({ search, onSearchChange }: TransactionsScree
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-start justify-between gap-4">
-        <TransactionsFilterBar
-          search={search}
-          accounts={accounts}
-          onChange={patchSearch}
-          onClear={() => onSearchChange(DEFAULT_TRANSACTIONS_SEARCH)}
-        />
+      {/* One column, in the order the eye and Tab both read it: the filters, then the action on them. (The export
+          button used to sit top-right of a wrapping filter bar — visually first, in the tab order last: 2.4.3.) */}
+      <TransactionsFilterBar
+        search={search}
+        accounts={accounts}
+        onChange={patchSearch}
+        onClear={() => onSearchChange(DEFAULT_TRANSACTIONS_SEARCH)}
+      />
+      <div className="flex justify-end">
         <Button
           variant="secondary"
           className="shrink-0 gap-1.5"

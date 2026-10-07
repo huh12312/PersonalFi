@@ -74,10 +74,50 @@ export function IdleLockOverlay() {
     void queryClient.refetchQueries();
   });
 
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const unlockRef = useRef<HTMLButtonElement>(null);
+
+  // A lock that only paints a scrim leaves the whole app behind it reachable by Tab (found by the 9.8 keyboard
+  // journey: focus walked onto "Dashboard", covered by the scrim — 2.4.11 — and past it into every control). While
+  // locked: everything outside the overlay is `inert`, focus moves to Unlock, and Tab stays there; when the lock
+  // lifts, the inertness is undone and focus goes back to where it was.
+  useEffect(() => {
+    if (!locked) return;
+    const overlay = overlayRef.current;
+    if (overlay === null) return;
+    const before = document.activeElement;
+    const made: Element[] = [];
+    for (let node: Element | null = overlay; node !== null && node !== document.body;) {
+      const parent: Element | null = node.parentElement;
+      for (const sibling of parent?.children ?? []) {
+        if (sibling === node || sibling.hasAttribute('inert')) continue;
+        if (['SCRIPT', 'STYLE', 'LINK'].includes(sibling.tagName)) continue;
+        sibling.setAttribute('inert', '');
+        made.push(sibling);
+      }
+      node = parent;
+    }
+    unlockRef.current?.focus();
+    // One control to reach: Tab (either way) stays on it rather than leaving for the browser's own chrome.
+    function holdFocus(event: KeyboardEvent): void {
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        unlockRef.current?.focus();
+      }
+    }
+    overlay.addEventListener('keydown', holdFocus);
+    return () => {
+      overlay.removeEventListener('keydown', holdFocus);
+      made.forEach((el) => el.removeAttribute('inert'));
+      if (before instanceof HTMLElement && before.isConnected) before.focus();
+    };
+  }, [locked]);
+
   if (!locked) return null;
 
   return (
     <div
+      ref={overlayRef}
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="lock-overlay-title"
@@ -99,12 +139,15 @@ export function IdleLockOverlay() {
           </p>
         )}
         <button
+          ref={unlockRef}
           type="button"
           onClick={() => void unlock()}
           disabled={unlocking}
           className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-md bg-accent text-body font-medium text-accent-contrast disabled:opacity-60"
         >
-          {unlocking && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+          {unlocking && (
+            <Loader2 size={16} className="motion-safe:animate-spin" aria-hidden="true" />
+          )}
           Unlock
         </button>
       </div>

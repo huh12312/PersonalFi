@@ -58,11 +58,16 @@ export function TopBar({ title, onOpenSearch }: TopBarProps) {
         type="button"
         onClick={onOpenSearch}
         className="flex h-9 items-center gap-2 rounded-md border border-border-strong px-2.5 text-small text-text-muted hover:bg-bg-subtle focus-visible:outline-none"
-        aria-label="Search (Ctrl K)"
+        aria-keyshortcuts="Control+K Meta+K"
       >
         <Search size={16} aria-hidden="true" />
         <span className="hidden md:inline">Search</span>
-        <kbd className="hidden rounded-sm bg-bg-subtle px-1 py-0.5 text-caption text-text-muted md:inline">
+        {/* The visible label is "Search"; the shortcut is a hint beside it, announced as `aria-keyshortcuts`. */}
+        <span className="sr-only md:hidden">Search</span>
+        <kbd
+          aria-hidden="true"
+          className="hidden rounded-sm bg-bg-subtle px-1 py-0.5 text-caption text-text-muted md:inline"
+        >
           ⌘K
         </kbd>
       </button>

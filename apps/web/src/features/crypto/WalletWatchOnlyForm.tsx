@@ -6,16 +6,9 @@ import type { FormEvent } from 'react';
 import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Label } from '../../components/ui/label.tsx';
+import { linkRefusalDetail } from '../connections/link-refusal.ts';
 import { useCreateConnectionMutation } from '../connections/useConnections.ts';
 import { useStepUpRetry } from '../../lib/step-up.ts';
-
-function problemDetail(cause: unknown, fallback: string): string {
-  if (typeof cause === 'object' && cause !== null && 'detail' in cause) {
-    const detail = (cause as { detail?: unknown }).detail;
-    if (typeof detail === 'string' && detail !== '') return detail;
-  }
-  return fallback;
-}
 
 type WalletChain = 'bitcoin' | 'ethereum';
 
@@ -40,7 +33,7 @@ export interface WalletWatchOnlyFormProps {
  * (`assertNoPrivateMaterial`) refuses a WIF, an `xprv`/`yprv`/`zprv`, a raw
  * 32-byte key or a BIP39-shaped seed phrase before it is stored, logged, or
  * parsed any further, and its refusal message — surfaced verbatim below via
- * `problemDetail` — names the *kind* of thing it saw without ever echoing the
+ * `linkRefusalDetail` — names the *kind* of thing it saw without ever echoing the
  * pasted value.
  */
 export function WalletWatchOnlyForm({ onDone }: WalletWatchOnlyFormProps) {
@@ -71,7 +64,7 @@ export function WalletWatchOnlyForm({ onDone }: WalletWatchOnlyFormProps) {
       // This is the one place a refusal like "value looks like private key
       // material (bip39_mnemonic_shaped)…" reaches the user — the API's own
       // message, not a paraphrase, and it never contains what was pasted.
-      setError(problemDetail(cause, 'Could not add this wallet.'));
+      setError(linkRefusalDetail(cause, 'Could not add this wallet.'));
     }
   }
 

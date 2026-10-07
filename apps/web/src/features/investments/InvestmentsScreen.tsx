@@ -114,7 +114,7 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-h2 font-semibold text-text-primary">Investments</h1>
+          <h2 className="text-h2 font-semibold text-text-primary">Investments</h2>
           {holdings !== undefined && (
             <p className="text-small text-text-secondary">
               As of {holdings.asOf} · {holdings.currency} ·{' '}

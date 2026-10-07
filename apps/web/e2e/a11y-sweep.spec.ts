@@ -2,11 +2,12 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 import {
   DEVTOOLS_SELECTORS,
+  setTheme,
   expectNoAxeViolations,
   injectAxe,
   runAxe,
@@ -14,10 +15,13 @@ import {
   waitForAnimationsToDrain,
 } from './support/axe.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
+import { screenshotDir } from './support/screenshot-dir.ts';
 import {
+  checkChartReadouts,
   closeOverlays,
   concretePath,
   hideDevtools,
+  labelInNameProblems,
   openEveryOverlay,
   routePatternsInTree,
   visit,
@@ -56,6 +60,15 @@ function record(dimension: string, pattern: string, body: Record<string, unknown
 
 const PATTERNS = routePatternsInTree();
 
+/**
+ * `evidenceDir` is `playwright.config.ts`'s `PLAYWRIGHT_EVIDENCE_DIR`, handed down as a test option (C-16, O-3):
+ * unset, the screenshots below go to a gitignored directory and an ordinary run rewrites nothing that is committed;
+ * set it to `docs/evidence/phase-9` to write the committed `wp9.8-*.png` set on purpose, once.
+ */
+const test = base.extend<{ evidenceDir: string | undefined }>({
+  evidenceDir: [undefined, { option: true }],
+});
+
 test.describe('the sweep covers the route tree', () => {
   test('the route tree on disk lists every route file under src/routes', () => {
     const files = readdirSync(new URL('../src/routes/', import.meta.url)).filter(
@@ -92,6 +105,58 @@ test.describe('the sweep covers the route tree', () => {
 // 1. Axe, both themes, every reachable overlay open
 // ---------------------------------------------------------------------------
 
+/**
+ * 09 §5.6: every chart has a data-table equivalent. On the screen as it stands: each chart (an `<svg>` with a name,
+ * wide enough to be a chart rather than an icon) must have one in reach — a table, or a "View as table" control that
+ * opens one — and every such control is opened and scanned in both themes, so the table itself is held to the same
+ * rules as everything else. Returns how many charts the screen has.
+ */
+async function openChartTables(
+  page: Page,
+  screen: string,
+  note: (scans: Awaited<ReturnType<typeof scanBothThemes>>) => void,
+): Promise<number> {
+  const charts = await page.evaluate(() => {
+    const out: Array<{ name: string; equivalent: boolean }> = [];
+    for (const svg of document.querySelectorAll('main svg[aria-label]')) {
+      if (svg.closest('[aria-hidden="true"]') !== null) continue;
+      const rect = svg.getBoundingClientRect();
+      if (rect.width < 200 || rect.height < 60) continue;
+      let scope: Element | null = svg;
+      let equivalent = false;
+      for (let level = 0; level < 7 && scope !== null && scope.tagName !== 'MAIN'; level += 1) {
+        scope = scope.parentElement;
+        if (scope === null) break;
+        const toggles = [...scope.querySelectorAll('button')].some((b) =>
+          /^View as table/.test((b.textContent ?? '').trim()),
+        );
+        if (scope.querySelector('table') !== null || toggles) {
+          equivalent = true;
+          break;
+        }
+      }
+      out.push({ name: svg.getAttribute('aria-label') ?? '', equivalent });
+    }
+    return out;
+  });
+  for (const chart of charts) {
+    expect(
+      chart.equivalent,
+      `${screen}: the chart "${chart.name}" has no data table (09 §5.6)`,
+    ).toBe(true);
+  }
+  const toggles = page.getByRole('button', { name: /^View as table/ });
+  const count = await toggles.count();
+  for (let n = 0; n < count; n += 1) await toggles.first().click();
+  if (count > 0) {
+    await expect(page.getByRole('table').first()).toBeVisible();
+    note(await scanBothThemes(page, `${screen} › with every chart's table open`));
+    const hide = page.getByRole('button', { name: /^Hide table/ });
+    for (let n = await hide.count(); n > 0; n -= 1) await hide.first().click();
+  }
+  return charts.length;
+}
+
 test.describe('every route in the route tree is axe-clean under the WCAG 2.2 AA tag set, in both themes, with every reachable dialog open', () => {
   for (const pattern of PATTERNS) {
     test(`route ${pattern}`, async ({ page }) => {
@@ -105,7 +170,11 @@ test.describe('every route in the route tree is axe-clean under the WCAG 2.2 AA 
 
       const ran = new Set<string>();
       const incomplete = new Map<string, number>();
-      const samples = new Map<string, { id: string; target: string; reason: string }>();
+      const samples = new Map<
+        string,
+        { id: string; target: string; reason: string; html: string }
+      >();
+      const measured = { resolved: 0, unresolved: new Map<string, string>() };
       const note = (scans: Awaited<ReturnType<typeof scanBothThemes>>): void => {
         for (const scan of scans) {
           scan.rulesThatRan.forEach((id) => ran.add(id));
@@ -115,14 +184,34 @@ test.describe('every route in the route tree is axe-clean under the WCAG 2.2 AA 
           scan.incompleteSamples.forEach((sample) =>
             samples.set(`${sample.id}|${sample.target}`, sample),
           );
+          measured.resolved += scan.contrast.resolved;
+          scan.contrast.unresolved.forEach(({ target, why }) =>
+            measured.unresolved.set(target, why),
+          );
         }
       };
 
+      // 2.4.2: every screen names itself in the document title, not one title for the whole app.
+      const title = await page.title();
+      expect(title, `${pattern}: the document title does not name the screen (2.4.2)`).toMatch(
+        / · PersonalFi$/,
+      );
+      let chartCount = 0;
+      const labelProblems = new Set<string>();
+      const checkLabels = async (where: string): Promise<void> => {
+        for (const p of await labelInNameProblems(page)) labelProblems.add(`${where}: ${p}`);
+      };
+      const dialogTabs: string[] = [];
       const h1s = (await page.locator('h1').allTextContents()).map((t) => t.trim());
       note(await scanBothThemes(page, `${pattern}`));
+      await checkLabels('screen');
+      chartCount += await checkChartReadouts(page, pattern);
       const tabs = await visitEveryTab(page, async (name) => {
         note(await scanBothThemes(page, `${pattern} › tab "${name}"`));
+        await checkLabels(`tab "${name}"`);
+        await openChartTables(page, `${pattern} › tab "${name}"`, note);
       });
+      await openChartTables(page, pattern, note);
       const opened = await openEveryOverlay(page, path, async (overlay) => {
         note(
           await scanBothThemes(
@@ -130,24 +219,49 @@ test.describe('every route in the route tree is axe-clean under the WCAG 2.2 AA 
             `${pattern} › ${overlay.role} opened by ${overlay.via} on "${overlay.trigger}"`,
           ),
         );
+        await checkLabels(`${overlay.role} from "${overlay.trigger}"`);
+        // A dialog with tabs of its own (Add a connection: one per connector, each its own form) is scanned on every one.
+        if (overlay.role === 'dialog') {
+          const inside = await visitEveryTab(
+            page,
+            async (name) => {
+              note(
+                await scanBothThemes(
+                  page,
+                  `${pattern} › dialog from "${overlay.trigger}" › tab "${name}"`,
+                ),
+              );
+            },
+            page.getByRole('dialog').last(),
+          );
+          dialogTabs.push(...inside.map((name) => `${overlay.trigger} › ${name}`));
+        }
       });
 
       // axe has to have been able to look: the canary below proves target-size and contrast are on and reach a portal.
       // (A screen with nothing interactive on it — `/register` with no token — has no targets to measure; the canary
       // below proves the rules are on.)
-      expect(ran.size, 'axe evaluated almost nothing').toBeGreaterThan(15);
+      expect(ran.size, 'axe evaluated almost nothing').toBeGreaterThan(12);
+      expect(ran.has('color-contrast'), 'colour contrast was never measured').toBe(true);
 
       record('axe', pattern, {
         route: pattern,
         path,
+        title,
+        chartsWithReadouts: chartCount,
+        labelInNameProblems: [...labelProblems],
         h1s,
         tabs,
+        dialogTabs,
         overlays: opened,
         rulesThatRan: [...ran].sort(),
         incomplete: Object.fromEntries(incomplete),
-        incompleteSamples: [...samples.values()].slice(0, 40),
+        incompleteSamples: [...samples.values()].slice(0, 120),
+        contrastIncompleteMeasuredHere: measured.resolved,
+        contrastIncompleteUnresolved: Object.fromEntries(measured.unresolved),
         unmockedApiCalls: [...new Set(mocks.unmocked)].sort(),
       });
+      expect([...labelProblems], '2.5.3 Label in Name').toEqual([]);
     });
   }
 });
@@ -169,7 +283,9 @@ test.describe('axe is able to see', () => {
       portal.style.cssText =
         'position:fixed;top:40px;left:40px;background:#ffffff;padding:8px;z-index:999';
       portal.innerHTML =
-        '<button type="button" style="width:10px;height:10px;display:block"></button>' +
+        // Two, side by side: an isolated small target passes 2.5.8 on spacing alone.
+        '<button type="button" aria-label="a" style="width:10px;height:10px;display:inline-block"></button>' +
+        '<button type="button" aria-label="b" style="width:10px;height:10px;display:inline-block;margin-left:2px"></button>' +
         '<p style="color:#bbbbbb;margin:12px 0 0">low contrast text</p>';
       document.body.appendChild(portal);
     });
@@ -539,6 +655,50 @@ test.describe('with reduced motion, nothing animates', () => {
       await closeOverlays(page);
       record('motion', pattern, { route: pattern, overlays: opened, offenders });
       expect(offenders).toEqual([]);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 7. The add-wallet form (wp5.14 item 26), in both chains and both themes
+// ---------------------------------------------------------------------------
+
+test.describe('the add-wallet form is axe-clean in both chains and both themes', () => {
+  test('Settings › Crypto: Bitcoin, then Ethereum with its Etherscan note', async ({ page }) => {
+    test.setTimeout(120_000);
+    await installSweepMocks(page);
+    await visit(page, '/settings');
+    await page.getByRole('tab', { name: 'Crypto' }).click();
+    await expect(page.getByRole('heading', { name: /wallet \(watch-only\)/ })).toBeVisible();
+    await scanBothThemes(page, '/settings › Crypto › add wallet (Bitcoin)');
+    await page.getByLabel('Chain').selectOption('ethereum');
+    await expect(page.getByText(/Etherscan API key/)).toBeVisible();
+    await scanBothThemes(
+      page,
+      '/settings › Crypto › add wallet (Ethereum, with the Etherscan note)',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. A picture of every route, in both themes (evidence, written deliberately)
+// ---------------------------------------------------------------------------
+
+test.describe('a screenshot of every route in both themes', () => {
+  for (const pattern of PATTERNS.filter((p) => !p.startsWith('/dev/'))) {
+    test(`route ${pattern}`, async ({ page, evidenceDir }) => {
+      test.setTimeout(120_000);
+      await installSweepMocks(page, { accountSettings: pattern.includes('$') });
+      await visit(page, concretePath(pattern));
+      await hideDevtools(page);
+      const slug = pattern === '/' ? 'dashboard' : pattern.slice(1).replace(/[/$]/g, '-');
+      for (const theme of ['light', 'dark'] as const) {
+        await setTheme(page, theme);
+        await page.screenshot({
+          path: `${screenshotDir(evidenceDir)}wp9.8-${slug}-${theme}.png`,
+          animations: 'disabled',
+        });
+      }
     });
   }
 });

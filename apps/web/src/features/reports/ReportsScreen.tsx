@@ -59,7 +59,7 @@ export function ReportsScreen() {
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-h2 font-semibold text-text-primary">Reports</h1>
+          <h2 className="text-h2 font-semibold text-text-primary">Reports</h2>
           <Link
             to="/budget"
             className="text-small text-accent-text underline-offset-4 hover:underline"

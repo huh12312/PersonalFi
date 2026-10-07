@@ -30,7 +30,11 @@ export function KekUnlockScreen() {
   if (isPending) {
     return (
       <AuthCard>
-        <Loader2 size={22} className="animate-spin text-text-muted" aria-hidden="true" />
+        <Loader2
+          size={22}
+          className="motion-safe:animate-spin text-text-muted"
+          aria-hidden="true"
+        />
         <p className="mt-3 text-small text-text-muted">Checking key custody state…</p>
       </AuthCard>
     );

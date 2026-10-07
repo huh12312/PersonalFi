@@ -282,7 +282,7 @@ export function GoalSliders({ scenario }: GoalSlidersProps) {
       />
 
       <div
-        className="flex flex-col gap-1 rounded-md bg-bg-inset p-3 transition-opacity duration-normal ease-standard"
+        className="flex flex-col gap-1 rounded-md bg-bg-inset p-3 transition-opacity duration-base ease-standard"
         style={{ opacity: phase === 'refining' ? 0.7 : 1 }}
         data-testid="slider-preview"
       >

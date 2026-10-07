@@ -163,7 +163,7 @@ export function PlanScreen({ search, onSearchChange }: PlanScreenProps) {
   return (
     <div className="flex flex-col gap-8">
       <header className="flex flex-col gap-1">
-        <h1 className="text-h2 font-semibold text-text-primary">Plan</h1>
+        <h2 className="text-h2 font-semibold text-text-primary">Plan</h2>
         <PlanHeadline
           loading={projectionQuery.isLoading}
           failed={projectionQuery.isError}
@@ -264,8 +264,12 @@ export function PlanScreen({ search, onSearchChange }: PlanScreenProps) {
             {requiredSavings.result.kind === 'required' && (
               <p>
                 Save an additional{' '}
-                <Money value={requiredSavings.result.monthly} colorBySign={false} /> per month to
-                reach this goal.
+                <Money
+                  value={requiredSavings.result.monthly}
+                  signDisplay="never"
+                  colorBySign={false}
+                />{' '}
+                per month to reach this goal.
               </p>
             )}
             {requiredSavings.result.kind === 'unreachable' && (

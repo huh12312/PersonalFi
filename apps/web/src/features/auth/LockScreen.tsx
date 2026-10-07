@@ -30,7 +30,7 @@ export function LockScreen() {
         </p>
       )}
       <Button className="mt-5 w-full" disabled={busy} onClick={() => void unlock()}>
-        {busy && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+        {busy && <Loader2 size={16} className="motion-safe:animate-spin" aria-hidden="true" />}
         Unlock
       </Button>
     </AuthCard>

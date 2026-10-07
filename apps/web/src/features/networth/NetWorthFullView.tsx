@@ -241,13 +241,19 @@ function parseFxFailure(message: string): ParsedFxFailure | null {
 function SnapshotFxFailureBanner({ failure }: { failure: SnapshotFxFailure }) {
   const parsed = parseFxFailure(failure.message);
   const [open, setOpen] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   return (
     <div className="rounded-md border border-status-warning/40 bg-status-warning/10 p-3">
-      <p className="text-small text-text-primary">
-        Last night’s net worth snapshot could not run: {failure.message}
-      </p>
-      {!open ? (
+      <p className="text-small text-text-primary">{fxFailureSentence(failure, parsed)}</p>
+      {saved ? (
+        // O-7 (iii): without this the banner stayed exactly as it was after a successful save, so the entry looked
+        // like it had done nothing. The snapshot is a nightly job; a rate entered now is read by its next run.
+        <p role="status" className="mt-2 text-small text-text-primary">
+          Rate saved. The net worth snapshot picks it up at its next nightly run, and this notice
+          goes once that run completes.
+        </p>
+      ) : !open ? (
         <Button
           type="button"
           variant="secondary"
@@ -258,10 +264,37 @@ function SnapshotFxFailureBanner({ failure }: { failure: SnapshotFxFailure }) {
           Enter this rate manually
         </Button>
       ) : (
-        <ManualFxRateForm initial={parsed} onDone={() => setOpen(false)} />
+        <ManualFxRateForm
+          initial={parsed}
+          onDone={() => {
+            setOpen(false);
+            setSaved(true);
+          }}
+        />
       )}
     </div>
   );
+}
+
+/**
+ * The banner's sentence (O-7 ii, iv). It says when the snapshot ran, not "last night" (a run can be a daytime
+ * one), and says which rate was missing in words rather than echoing the job's own message, which carries the
+ * resolver's internals ("consulted CAD/USD, USD/CAD") and, in older failures, decision labels.
+ */
+export function fxFailureSentence(
+  failure: Pick<SnapshotFxFailure, 'occurredAt'>,
+  parsed: ParsedFxFailure | null,
+): string {
+  const day = /^\d{4}-\d{2}-\d{2}/.exec(failure.occurredAt)?.[0];
+  const when =
+    day === undefined
+      ? 'The latest net worth snapshot'
+      : `The net worth snapshot that ran on ${formatDateOnly(day, 'MMM d')}`;
+  const what =
+    parsed === null
+      ? 'no exchange rate was available for one of your currencies'
+      : `no exchange rate for ${parsed.base}/${parsed.quote} on or before ${parsed.date} was available`;
+  return `${when} could not complete: ${what}, so that day is missing from the history until a rate is entered.`;
 }
 
 function ManualFxRateForm({

@@ -87,7 +87,7 @@ export function ConnectionCard({ connection, onReconnect }: ConnectionCardProps)
             <RefreshCw
               size={14}
               aria-hidden="true"
-              className={syncNow.isPending ? 'animate-spin' : ''}
+              className={syncNow.isPending ? 'motion-safe:animate-spin' : ''}
             />
             Sync now
           </Button>

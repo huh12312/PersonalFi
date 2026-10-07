@@ -48,13 +48,15 @@ export function DialogContent({
           'transition-all duration-base ease-standard',
           variant === 'dialog' &&
             [
-              'left-1/2 top-1/2 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl p-6',
+              // `max-h` + `overflow-y-auto`: a dialog taller than the viewport (a form on a phone, or at 400 % zoom) scrolls
+              // inside itself instead of running off both edges where its top and bottom cannot be reached (1.4.10).
+              'left-1/2 top-1/2 max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl p-6',
               'data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
               'data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
             ].join(' '),
           variant === 'sheet' &&
             [
-              'inset-x-0 bottom-0 w-full rounded-t-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]',
+              'inset-x-0 bottom-0 max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]',
               'data-[starting-style]:translate-y-full data-[ending-style]:translate-y-full',
             ].join(' '),
           className,

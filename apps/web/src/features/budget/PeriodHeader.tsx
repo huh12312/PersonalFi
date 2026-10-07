@@ -56,7 +56,7 @@ export function PeriodHeader({
     <header className="flex flex-col gap-4 rounded-lg border border-border-hairline bg-bg-surface p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-h2 font-semibold text-text-primary">Budget</h1>
+          <h2 className="text-h2 font-semibold text-text-primary">Budget</h2>
           <p data-testid="period-range" className="text-small text-text-muted">
             {formatDateOnly(period.startDate)} – {formatDateOnly(period.endDate)}
             {period.dirty && ' · recalculating…'}

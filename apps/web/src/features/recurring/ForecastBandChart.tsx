@@ -8,9 +8,11 @@ import { defaultStyles, Tooltip, useTooltip } from '@visx/tooltip';
 import { useMemo } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 
+import { ChartDataTable } from '../../components/patterns/ChartDataTable.tsx';
 import { formatDateOnly } from '../../lib/date.ts';
 import { formatMoney, parseWireMoney } from '../../lib/money.ts';
 import type { ForecastPoint } from './forecast-series.ts';
+import { useChartTooltipRules } from '../../components/patterns/chart-tooltip.ts';
 
 function moneyText(minor: number): string {
   return formatMoney(parseWireMoney({ minor: String(minor), currency: 'USD' }), {
@@ -73,6 +75,7 @@ interface ChartInnerProps {
 function ChartInner({ width, height, data }: ChartInnerProps) {
   const { tooltipData, tooltipLeft, tooltipTop, tooltipOpen, showTooltip, hideTooltip } =
     useTooltip<ForecastPoint>();
+  const tooltipRules = useChartTooltipRules(hideTooltip, tooltipOpen);
 
   const innerWidth = Math.max(width - margin.left - margin.right, 0);
   const innerHeight = Math.max(height - margin.top - margin.bottom, 0);
@@ -91,6 +94,7 @@ function ChartInner({ width, height, data }: ChartInnerProps) {
   if (innerWidth <= 0 || innerHeight <= 0 || data.length === 0) return null;
 
   function handlePointerMove(event: ReactPointerEvent<SVGRectElement>): void {
+    tooltipRules.keep();
     const localX = event.clientX - event.currentTarget.getBoundingClientRect().left;
     const date = xScale.invert(localX);
     const chosen = data[nearestIndex(data, date)];
@@ -182,7 +186,7 @@ function ChartInner({ width, height, data }: ChartInnerProps) {
             height={innerHeight}
             fill="transparent"
             onPointerMove={handlePointerMove}
-            onPointerLeave={hideTooltip}
+            onPointerLeave={tooltipRules.onChartLeave}
           />
         </Group>
       </svg>
@@ -191,10 +195,13 @@ function ChartInner({ width, height, data }: ChartInnerProps) {
         tooltipLeft !== undefined &&
         tooltipTop !== undefined && (
           <Tooltip
+            {...tooltipRules.readoutProps}
+            data-chart-readout=""
             left={tooltipLeft + margin.left}
             top={tooltipTop + margin.top}
             style={{
               ...defaultStyles,
+              pointerEvents: 'auto',
               background: 'var(--bg-surface-raised)',
               color: 'var(--text-primary)',
               boxShadow: 'var(--shadow-elev-2)',
@@ -221,12 +228,26 @@ export interface ForecastBandChartProps {
 
 export function ForecastBandChart({ data, height = 200, className }: ForecastBandChartProps) {
   return (
-    <div className={className} style={{ height }}>
-      <ParentSize>
-        {({ width, height: parentHeight }) => (
-          <ChartInner width={width} height={parentHeight} data={data} />
-        )}
-      </ParentSize>
+    <div className={className}>
+      <div style={{ height }}>
+        <ParentSize>
+          {({ width, height: parentHeight }) => (
+            <ChartInner width={width} height={parentHeight} data={data} />
+          )}
+        </ParentSize>
+      </div>
+      {/* 09 §5.6: the band's own figures, for the reader the tooltip (pointer-only) and the shading cannot reach. */}
+      <ChartDataTable
+        className="mt-1"
+        caption="Projected cumulative cash flow, expected and the band around it"
+        columns={['Date', 'Expected', 'Band low', 'Band high']}
+        rows={data.map((point) => [
+          formatDateOnly(point.date, 'MMM d'),
+          moneyText(point.cumulativeExpectedMinor),
+          moneyText(point.cumulativeLowMinor),
+          moneyText(point.cumulativeHighMinor),
+        ])}
+      />
     </div>
   );
 }

@@ -27,7 +27,7 @@ function content(status: SyncStatus): ReactNode {
     case 'syncing':
       return (
         <>
-          <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+          <Loader2 size={13} className="motion-safe:animate-spin" aria-hidden="true" />
           <span>
             Syncing… {status.current} of {status.total}
           </span>

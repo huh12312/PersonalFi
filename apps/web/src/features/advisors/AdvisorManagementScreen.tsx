@@ -88,7 +88,7 @@ export function AdvisorManagementScreen() {
   return (
     <div className="flex flex-col gap-6" data-testid="advisor-management-screen">
       <div>
-        <h1 className="text-h2 text-text-primary">Advisor management</h1>
+        <h2 className="text-h2 text-text-primary">Advisor management</h2>
         <p className="mt-1 text-small text-text-muted">
           Every advisor, its kind, and the four-level kill ladder that can stop it — module, kind,
           advisor, and a run in flight.

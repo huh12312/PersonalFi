@@ -511,6 +511,6 @@ describe('BriefScreen', () => {
     const card = await screen.findByTestId('brief-item-card');
     // The exact, correctly-rounded dollar figure a bigint-based formatter
     // produces for this minor-unit value.
-    expect(within(card).getByText('+$90,071,992,547,409.93')).toBeInTheDocument();
+    expect(within(card).getByText('$90,071,992,547,409.93')).toBeInTheDocument();
   });
 });

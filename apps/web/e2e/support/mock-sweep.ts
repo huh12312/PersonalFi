@@ -3,12 +3,12 @@ import type { Page, Route } from '@playwright/test';
 
 import { installAccountMocks } from './mock-accounts.ts';
 import { installAdvisorMocks } from './mock-advisors.ts';
-import { installApiMocks } from './mock-api.ts';
+import { installApiMocks, MANUAL_CONNECTOR } from './mock-api.ts';
 import { installBriefMocks } from './mock-brief.ts';
 import { installBudgetMocks } from './mock-budget.ts';
 import { installGoalsMocks } from './mock-goals.ts';
 import { installInvestmentsMocks } from './mock-investments.ts';
-import { installNetworthMocks } from './mock-networth.ts';
+import { COINBASE_CONNECTOR, installNetworthMocks, WALLETRPC_CONNECTOR } from './mock-networth.ts';
 import { installPlanMocks } from './mock-plan.ts';
 import { installRecurringInsightsMocks } from './mock-recurring-insights.ts';
 
@@ -76,6 +76,20 @@ export async function installSweepMocks(
   await installAdvisorMocks(page, base);
   await installBriefMocks(page, { standalone: false });
   if (options.accountSettings === true) await installAccountMocks(page);
+
+  // Every link kind the app renders a form for, so the "Add a connection" dialog and the Crypto settings tab show
+  // the add-wallet and Coinbase-key forms instead of "Not available in this deployment" (the general fixture lists
+  // only the manual connector, which left both forms unscanned: wp5.14 item 26).
+  await page.route('**/api/connectors', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        connectors: [MANUAL_CONNECTOR, COINBASE_CONNECTOR, WALLETRPC_CONNECTOR],
+      }),
+    });
+  });
 
   return { unmocked };
 }

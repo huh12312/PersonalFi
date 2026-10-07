@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { useEffect, useReducer, useRef } from 'react';
+import { useEffect, useId, useReducer, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import type { BudgetLine } from '../../api/generated/types.gen.ts';
@@ -60,6 +60,10 @@ export function EnvelopeLineRow({ line, categoryLabel }: EnvelopeLineRowProps) {
   const [editor, dispatch] = useReducer(assignEditorReducer, CLOSED_ASSIGN_EDITOR);
   const update = useUpdateBudgetLineMutation();
   const inputRef = useRef<HTMLInputElement>(null);
+  const errorId = useId();
+  // 3.3.1/3.3.3: pressing Enter on an amount that cannot be read says so, in text, and keeps the field open. It used
+  // to close and drop what was typed, with only `aria-invalid` (not announced as a message) to show for it.
+  const [rejected, setRejected] = useState(false);
   const currency = line.assigned.currency;
 
   // Focus the field the moment editing opens, without `autoFocus` (banned by
@@ -67,8 +71,19 @@ export function EnvelopeLineRow({ line, categoryLabel }: EnvelopeLineRowProps) {
   // wherever the user actually was; this is scoped to a state transition the
   // user themselves just triggered by clicking/activating the amount cell,
   // which is the accepted exception the rule's own rationale carves out).
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
   useEffect(() => {
-    if (editor.draft !== null) inputRef.current?.focus();
+    if (editor.draft !== null) {
+      wasEditing.current = true;
+      inputRef.current?.focus();
+    } else if (wasEditing.current) {
+      // The field that had focus was replaced by the button; focus would fall to the page. Hand it back to the
+      // button — unless the user has already moved on (committing by Tab leaves focus on the next control).
+      wasEditing.current = false;
+      const active = document.activeElement;
+      if (active === null || active === document.body) buttonRef.current?.focus();
+    }
   }, [editor.draft]);
 
   const readOnly = line.kind === 'credit_card_payment';
@@ -103,6 +118,10 @@ export function EnvelopeLineRow({ line, categoryLabel }: EnvelopeLineRowProps) {
       });
     } else if (event.key === 'Enter') {
       event.preventDefault();
+      if (editor.draft !== null && !isDraftValid(editor.draft, currency)) {
+        setRejected(true);
+        return;
+      }
       commit();
     } else if (event.key === 'Escape') {
       event.preventDefault();
@@ -114,7 +133,7 @@ export function EnvelopeLineRow({ line, categoryLabel }: EnvelopeLineRowProps) {
   return (
     <li className="grid grid-cols-[1fr_repeat(3,minmax(0,7rem))_auto] items-center gap-3 rounded-md border border-border-hairline bg-bg-surface p-3">
       <div className="min-w-0">
-        <p className="truncate text-body font-medium text-text-primary">{categoryLabel}</p>
+        <p className="break-words text-body font-medium text-text-primary">{categoryLabel}</p>
         {readOnly && (
           <p className="text-caption text-text-muted">Card payment — funded automatically</p>
         )}
@@ -139,11 +158,16 @@ export function EnvelopeLineRow({ line, categoryLabel }: EnvelopeLineRowProps) {
           <Money value={line.assigned} className="tabular-nums" />
         ) : editor.draft === null ? (
           <button
+            ref={buttonRef}
             type="button"
             className="w-full rounded px-2 py-1 text-right tabular-nums hover:bg-bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            aria-label={`Assign amount for ${categoryLabel}`}
+            // No `aria-label`: it would replace the amount the button shows ("$0.00") with words that do not
+            // contain it, and a voice-control user saying what they see ("click zero dollars") would find no
+            // such control (2.5.3). The name is built from the button's own content instead — what it does,
+            // then the amount, in the same spoken form `Money` gives everywhere (and "Amount hidden" in privacy mode).
             onClick={() => dispatch({ type: 'open', initial: parseWireMoney(line.assigned) })}
           >
+            <span className="sr-only">Assign amount for {categoryLabel}: </span>
             <Money value={line.assigned} />
           </button>
         ) : (
@@ -154,10 +178,19 @@ export function EnvelopeLineRow({ line, categoryLabel }: EnvelopeLineRowProps) {
             className="h-9 text-right tabular-nums"
             value={editor.draft}
             aria-invalid={!isDraftValid(editor.draft, currency)}
-            onChange={(event) => dispatch({ type: 'type', text: event.target.value })}
+            aria-describedby={rejected ? errorId : undefined}
+            onChange={(event) => {
+              setRejected(false);
+              dispatch({ type: 'type', text: event.target.value });
+            }}
             onKeyDown={handleKeyDown}
             onBlur={commit}
           />
+        )}
+        {editor.draft !== null && rejected && (
+          <p id={errorId} role="alert" className="mt-1 text-caption text-status-critical">
+            Enter an amount such as 50.00.
+          </p>
         )}
       </div>
 

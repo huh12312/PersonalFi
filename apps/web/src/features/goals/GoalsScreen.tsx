@@ -31,7 +31,7 @@ export function GoalsScreen() {
   return (
     <div className="flex flex-col gap-8">
       <header className="flex flex-col gap-1">
-        <h1 className="text-h2 font-semibold text-text-primary">Goals</h1>
+        <h2 className="text-h2 font-semibold text-text-primary">Goals</h2>
         <p className="text-body text-text-secondary">
           What you are saving toward. Your{' '}
           <Link to="/plan" className="text-text-primary underline underline-offset-4">
@@ -100,8 +100,7 @@ function GoalCard({ goal }: { readonly goal: Goal }) {
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Badge>{GOAL_KIND_LABELS[goal.kind]}</Badge>
-            {/* Neutral, not `accent`: the shared accent Badge is 4.28:1 in dark (wp9.6 open item; 9.8 owns the token). */}
-            <Badge>{GOAL_STATUS_LABELS[goal.status]}</Badge>
+            <Badge variant="accent">{GOAL_STATUS_LABELS[goal.status]}</Badge>
             <span className="text-caption text-text-muted">Priority {goal.priority}</span>
           </div>
         </div>

@@ -121,7 +121,7 @@ describe('InsightsScreen', () => {
     expect(await screen.findByText('A subscription went up in price')).toBeInTheDocument();
     expect(screen.getByText('Notable')).toBeInTheDocument();
     expect(screen.getByText('90% confidence')).toBeInTheDocument();
-    expect(screen.getByText('+$36.00')).toBeInTheDocument();
+    expect(screen.getByText('$36.00')).toBeInTheDocument();
   });
 
   it("opening the evidence panel shows a number that equals the insight's own evidence value, with its source named", async () => {

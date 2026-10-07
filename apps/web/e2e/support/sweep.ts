@@ -212,9 +212,18 @@ async function closeDownTo(page: Page, target: number): Promise<void> {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(150);
   }
+  const still = await page
+    .locator(OVERLAY)
+    .filter({ visible: true })
+    .evaluateAll((els) =>
+      els.map((el) => {
+        const active = document.activeElement;
+        return `<${el.tagName.toLowerCase()} role=${el.getAttribute('role') ?? ''}> "${(el.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 50)}" (focus in it: ${String(el.contains(active))}; focus on ${active?.tagName.toLowerCase() ?? 'nothing'} "${(active?.getAttribute('aria-label') ?? active?.textContent ?? '').trim().slice(0, 30)}")`;
+      }),
+    );
   expect(
-    await overlayCount(page),
-    'an overlay did not close on Escape (2.1.2 / 1.4.13)',
+    still.length,
+    `an overlay did not close on Escape (2.1.2 / 1.4.13); still open: ${still.join(' | ')}`,
   ).toBeLessThanOrEqual(target);
 }
 
@@ -378,22 +387,139 @@ async function explore(
   );
 }
 
-/** Every visible, not-selected tab on the screen, clicked in turn; `afterEach` runs on each tab's panel. */
+/**
+ * Every visible, not-selected tab in `scope` (the whole page by default), clicked in turn; `afterEach` runs on each
+ * tab's panel. Pass an open dialog as `scope` to walk the tabs inside it (the "Add a connection" dialog is a tab
+ * per connector, each with its own form).
+ */
 export async function visitEveryTab(
   page: Page,
   afterEach: (name: string) => Promise<void>,
+  scope: Locator = page.locator('body'),
 ): Promise<string[]> {
-  const names = await page
+  const names = await scope
     .locator('[role="tab"]:visible')
     .evaluateAll((tabs) =>
       tabs
         .filter((t) => t.getAttribute('aria-selected') !== 'true')
         .map((t) => (t.textContent ?? '').trim()),
     );
+  // The dev gallery shows skeletons and progress bars on purpose (`visit` says the same); no real screen may.
+  const settles = !new URL(page.url()).pathname.startsWith('/dev/');
   for (const name of names) {
-    await page.getByRole('tab', { name, exact: true }).first().click();
-    await expect(page.locator(LOADING)).toHaveCount(0, { timeout: 15_000 });
+    await scope.getByRole('tab', { name, exact: true }).first().click();
+    if (settles) await expect(page.locator(LOADING)).toHaveCount(0, { timeout: 15_000 });
     await afterEach(name);
   }
   return names;
+}
+
+// ---------------------------------------------------------------------------
+// 2.5.3 Label in Name
+// ---------------------------------------------------------------------------
+
+/**
+ * WCAG 2.5.3: the accessible name of a control with a visible text label contains that text, so a voice-control
+ * user who says what they see gets the control. axe has no rule for it. The failure that happens in practice is an
+ * explicit `aria-label` that replaces the visible text ("Assign amount for Groceries" on a button that reads
+ * "$0.00"), so that is what is measured: every interactive element that carries `aria-label` or `aria-labelledby`
+ * and shows text of its own (anything not `sr-only`, not an icon) must have that text inside its name, compared
+ * ignoring case, spacing and punctuation. Icon-only controls (no visible text) are out of scope by definition.
+ */
+export async function labelInNameProblems(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const norm = (text: string): string => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+    const interactive =
+      'button, a[href], input[type="button"], input[type="submit"], [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="switch"], [role="checkbox"], [role="radio"], [role="combobox"]';
+    const problems: string[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>(interactive)) {
+      if (el.closest('.tsqd-parent-container, .TanStackRouterDevtoolsPanel')) continue;
+      if (el.closest('[inert], [aria-hidden="true"]')) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const aria = el.getAttribute('aria-label');
+      const labelledby = el.getAttribute('aria-labelledby');
+      if (aria === null && labelledby === null) continue;
+      const name =
+        aria ??
+        (labelledby ?? '')
+          .split(/\s+/)
+          .map((id) => document.getElementById(id)?.textContent ?? '')
+          .join(' ');
+      // The text a sighted user reads on the control: its text nodes, minus visually hidden spans.
+      let visible = '';
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const parent = node.parentElement;
+        if (parent === null) continue;
+        if (parent.closest('.sr-only') !== null) continue;
+        const style = getComputedStyle(parent);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        visible += ` ${node.textContent ?? ''}`;
+      }
+      const shown = norm(visible);
+      if (shown === '') continue;
+      if (!norm(name).includes(shown)) {
+        problems.push(
+          `<${el.tagName.toLowerCase()}> shows "${visible.trim().replace(/\s+/g, ' ').slice(0, 40)}" but is named "${name.slice(0, 60)}"`,
+        );
+      }
+    }
+    return [...new Set(problems)];
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 1.4.13 Content on Hover or Focus: a chart's value readout
+// ---------------------------------------------------------------------------
+
+/**
+ * Every chart surface on the screen (the transparent rect a chart listens to the pointer on) is hovered; the readout
+ * it shows must be there, must stay when the pointer moves onto it (hoverable, persistent) and must go on Escape
+ * without the pointer moving (dismissible). Returns how many charts it checked.
+ */
+export async function checkChartReadouts(page: Page, screen: string): Promise<number> {
+  const surfaces = page.locator('main svg rect[fill="transparent"]');
+  const count = await surfaces.count();
+  for (let n = 0; n < count; n += 1) {
+    const surface = surfaces.nth(n);
+    await surface.scrollIntoViewIfNeeded();
+    const box = await surface.boundingBox();
+    if (box === null) continue;
+    const readout = page.locator('[data-chart-readout]');
+    // A chart can have gaps (a day with no value shows no readout), so sweep across it until one appears.
+    let shown = false;
+    for (const fraction of [0.5, 0.3, 0.7, 0.9, 0.1, 0.6, 0.4, 0.8, 0.2]) {
+      await page.mouse.move(box.x + box.width * fraction, box.y + box.height / 2);
+      await page.mouse.move(box.x + box.width * fraction + 2, box.y + box.height / 2);
+      shown = await readout
+        .first()
+        .waitFor({ state: 'visible', timeout: 600 })
+        .then(() => true)
+        .catch(() => false);
+      if (shown) break;
+    }
+    expect(shown, `${screen}: hovering chart ${String(n + 1)} shows no readout`).toBe(true);
+    // The pointer leaves the chart surface (to the margin above it) and is not yet on the readout: it has to still be
+    // there a moment later, or the pointer could never travel from the chart onto it.
+    await page.mouse.move(box.x + box.width * 0.5, Math.max(1, box.y - 6));
+    await page.waitForTimeout(120);
+    await expect(
+      readout,
+      `${screen}: the readout went the instant the pointer left the chart (1.4.13)`,
+    ).toBeVisible();
+    // Hoverable + persistent: onto the readout itself, and it is still there after the grace period would have run out.
+    await readout.hover();
+    await page.waitForTimeout(600);
+    await expect(
+      readout,
+      `${screen}: the readout vanished when the pointer moved onto it (1.4.13)`,
+    ).toBeVisible();
+    // Dismissible: Escape, with the pointer still where it is.
+    await page.keyboard.press('Escape');
+    await expect(readout, `${screen}: Escape did not dismiss the readout (1.4.13)`).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(350);
+  }
+  return count;
 }

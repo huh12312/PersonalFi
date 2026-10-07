@@ -6,18 +6,9 @@ import type { ReactNode } from 'react';
 import { IdleLockOverlay } from '../../features/auth/IdleLockOverlay.tsx';
 import { BottomTabs } from './BottomTabs.tsx';
 import { CommandPalette } from './CommandPalette.tsx';
-import { ALL_NAV_ITEMS } from './nav-items.ts';
+import { titleForPath } from './document-title.ts';
 import { Sidebar } from './Sidebar.tsx';
 import { TopBar } from './TopBar.tsx';
-
-function titleForPath(pathname: string): string {
-  if (pathname === '/') return 'Dashboard';
-  const match = ALL_NAV_ITEMS.find((item) => item.to === pathname);
-  if (match !== undefined) return match.label;
-  if (pathname === '/accounts/connections') return 'Connections';
-  if (pathname.startsWith('/accounts/')) return 'Account';
-  return 'PersonalFi';
-}
 
 /**
  * The authenticated app frame: sidebar (desktop) or bottom tabs (mobile), a
@@ -62,7 +53,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           id="main-content"
           tabIndex={-1}
           style={{ outline: 'none' }}
-          className="flex-1 overflow-y-auto px-4 pb-20 pt-4 md:px-6 md:pb-6 lg:px-8"
+          className="flex-1 scroll-pb-24 overflow-y-auto px-4 pb-20 pt-4 md:px-6 lg:scroll-pb-4 lg:px-8 lg:pb-6"
         >
           {children}
         </main>

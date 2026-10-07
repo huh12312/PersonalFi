@@ -303,7 +303,7 @@ function SplitLineRow({
   const noteId = useId();
   return (
     <div className="rounded-md border border-border-hairline p-3">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Label htmlFor={amountId} className="sr-only">
           Line {index + 1} amount
         </Label>
@@ -320,7 +320,7 @@ function SplitLineRow({
         <CategoryPicker
           value={line.userCategoryId}
           onChange={onCategoryChange}
-          className="flex-1"
+          className="min-w-40 flex-1"
         />
         {removable && (
           <Button

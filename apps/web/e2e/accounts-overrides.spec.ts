@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { expect, test } from '@playwright/test';
-import type { Page, Route } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 import { scanBothThemes } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
@@ -39,7 +39,7 @@ test.describe('account overrides (WP 9.2)', () => {
 
     // --- the account, as the provider describes it --------------------------------
     await page.goto(`/accounts/${IRA}`);
-    await expect(page.getByRole('heading', { name: 'Rollover', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Rollover', level: 2 })).toBeVisible();
     await expect(
       page.getByRole('heading', { name: 'How your plan treats this account' }),
     ).toBeVisible();

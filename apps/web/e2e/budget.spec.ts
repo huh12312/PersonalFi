@@ -66,7 +66,7 @@ test.describe('budget screen and reports (WP 2.9)', () => {
 
     // The CVD-safe cash-vermilion vs. credit-yellow pair (05 §2.2), not
     // colour alone — each badge also carries its own text label.
-    await expect(cashBadge).toHaveClass(/bg-money-neg/);
+    await expect(cashBadge).toHaveClass(/bg-danger/);
     await expect(creditBadge).toHaveClass(/bg-status-warning/);
   });
 

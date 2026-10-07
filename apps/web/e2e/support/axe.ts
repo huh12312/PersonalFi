@@ -93,8 +93,10 @@ export interface AxeScan {
   rulesThatRan: string[];
   /** Rule ids axe could not decide for at least one node (`color-contrast` over an image, say). */
   incomplete: Array<{ id: string; nodes: number }>;
-  /** A few incomplete nodes per rule with axe's own reason, so "could not decide" is read, not assumed benign. */
-  incompleteSamples: Array<{ id: string; target: string; reason: string }>;
+  /** The first incomplete nodes per rule with axe's own reason, so "could not decide" is read, not assumed benign. */
+  incompleteSamples: Array<{ id: string; target: string; reason: string; html: string }>;
+  /** The second opinion on the colour-contrast nodes axe could not decide (`ContrastResolution`). */
+  contrast: ContrastResolution;
 }
 
 /** Injects axe-core into the current page (call again after each full navigation; a client-side route change keeps it). */
@@ -121,6 +123,20 @@ export async function waitForAnimationsToDrain(page: Page): Promise<void> {
   );
 }
 
+/**
+ * What `runAxe` does with axe's "incomplete" colour-contrast results (a node axe could not decide: text over an
+ * SVG or image, an overlapping positioned element, a glyph outside the basic plane). Left alone they are a silent
+ * pass — the way a green axe stays green over text it never measured — so each one is measured here from the
+ * element's own computed colours, composited over its ancestors' backgrounds, and a pair under the threshold is
+ * reported as a violation. A node whose background is a gradient, an image or a translucent layer cannot be
+ * resolved that way and is counted as `unresolved`, which the sweep writes to the evidence (it is not a pass).
+ */
+export interface ContrastResolution {
+  resolved: number;
+  unresolved: Array<{ target: string; why: string }>;
+  failures: Array<{ target: string; ratio: number; needed: number; html: string }>;
+}
+
 /** Runs axe over `document` with the WCAG 2.2 AA tag set and returns what it found and what it ran. */
 export async function runAxe(page: Page): Promise<AxeScan> {
   await injectAxe(page);
@@ -140,17 +156,127 @@ export async function runAxe(page: Page): Promise<AxeScan> {
       for (const group of [result.violations, result.passes, result.incomplete]) {
         for (const rule of group) ran.add(rule.id);
       }
+
+      // --- second opinion on every colour-contrast node axe could not decide ---
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      type Rgba = [number, number, number, number];
+      const parse = (css: string): Rgba | null => {
+        if (context === null) return null;
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = '#000';
+        context.fillStyle = css;
+        context.fillRect(0, 0, 1, 1);
+        const data = context.getImageData(0, 0, 1, 1).data;
+        // Canvas stores premultiplied-then-rounded 8-bit; recover straight alpha for a translucent colour.
+        return [data[0] ?? 0, data[1] ?? 0, data[2] ?? 0, (data[3] ?? 0) / 255];
+      };
+      const over = (top: Rgba, below: [number, number, number]): [number, number, number] => [
+        top[0] * top[3] + below[0] * (1 - top[3]),
+        top[1] * top[3] + below[1] * (1 - top[3]),
+        top[2] * top[3] + below[2] * (1 - top[3]),
+      ];
+      const luminance = (c: [number, number, number]): number => {
+        const lin = c.map((v) => {
+          const x = v / 255;
+          return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * (lin[0] ?? 0) + 0.7152 * (lin[1] ?? 0) + 0.0722 * (lin[2] ?? 0);
+      };
+      const resolution: ContrastResolution = { resolved: 0, unresolved: [], failures: [] };
+      const contrastRule = result.incomplete.find((rule) => rule.id === 'color-contrast');
+      for (const node of contrastRule?.nodes ?? []) {
+        const selector = node.target[node.target.length - 1] ?? '';
+        const label = node.target.join(' ');
+        let element: Element | null;
+        try {
+          element = document.querySelector(selector);
+        } catch {
+          element = null;
+        }
+        if (element === null) {
+          resolution.unresolved.push({ target: label, why: 'element not found by selector' });
+          continue;
+        }
+        const style = getComputedStyle(element);
+        const isSvgText = element instanceof SVGElement;
+        const fg = parse(isSvgText ? style.fill : style.color);
+        if (fg === null || (isSvgText && style.fill === 'none')) {
+          resolution.unresolved.push({ target: label, why: 'foreground not a flat colour' });
+          continue;
+        }
+        // Background: the nearest stack of ancestors' backgrounds down to the first opaque one. An SVG's own
+        // `<rect>` fills are not in this stack, so a chart with a filled plot area is "unresolved", not guessed.
+        const stack: Rgba[] = [];
+        let why = '';
+        let opacity = 1;
+        for (let node2: Element | null = element; node2 !== null; node2 = node2.parentElement) {
+          const s = getComputedStyle(node2);
+          opacity *= Number(s.opacity);
+          if (s.backgroundImage !== 'none') {
+            why = 'a gradient or image sits behind the text';
+            break;
+          }
+          const bg = parse(s.backgroundColor);
+          if (bg !== null && bg[3] > 0) stack.push(bg);
+          if (bg !== null && bg[3] >= 0.999) break;
+        }
+        if (why !== '' || opacity < 0.999) {
+          resolution.unresolved.push({
+            target: label,
+            why: why === '' ? 'the text is translucent (opacity)' : why,
+          });
+          continue;
+        }
+        let colour: [number, number, number] = [255, 255, 255];
+        for (let i = stack.length - 1; i >= 0; i -= 1) colour = over(stack[i] as Rgba, colour);
+        const text = over(fg, colour);
+        const l1 = luminance(text);
+        const l2 = luminance(colour);
+        const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+        const px = parseFloat(style.fontSize);
+        const bold = Number(style.fontWeight) >= 700;
+        const needed = px >= 24 || (bold && px >= 18.66) ? 3 : 4.5;
+        resolution.resolved += 1;
+        if (ratio < needed) {
+          resolution.failures.push({
+            target: label,
+            ratio: Math.round(ratio * 100) / 100,
+            needed,
+            html: node.html.slice(0, 140),
+          });
+        }
+      }
+      const failing: AxeViolation[] =
+        resolution.failures.length === 0
+          ? []
+          : [
+              {
+                id: 'color-contrast (measured here: axe could not decide these nodes)',
+                impact: 'serious',
+                description: 'text colour against the composited background, below the WCAG ratio',
+                nodes: resolution.failures.map((f) => ({
+                  target: [f.target],
+                  html: f.html,
+                  failureSummary: `${String(f.ratio)}:1, needs ${String(f.needed)}:1`,
+                })),
+              },
+            ];
       return {
-        violations: result.violations,
+        violations: [...result.violations, ...failing],
         rulesThatRan: [...ran].sort(),
         incomplete: result.incomplete.map((rule) => ({ id: rule.id, nodes: rule.nodes.length })),
         incompleteSamples: result.incomplete.flatMap((rule) =>
-          rule.nodes.slice(0, 4).map((node) => ({
+          rule.nodes.slice(0, 40).map((node) => ({
             id: rule.id,
             target: node.target.join(' '),
             reason: node.any?.[0]?.data?.messageKey ?? node.any?.[0]?.message ?? '',
+            html: node.html.slice(0, 140),
           })),
         ),
+        contrast: resolution,
       };
     },
     { tags: WCAG_22_AA_TAGS, devtools: DEVTOOLS_SELECTORS },

@@ -179,4 +179,38 @@ describe('WalletWatchOnlyForm', () => {
       await screen.findByText(/looks like private key material \(bip39_mnemonic_shaped\)/),
     ).toBeInTheDocument();
   });
+
+  it('does not say "reconnect the connection" when the link itself was refused (O-6)', async () => {
+    stubFetchRoutes([
+      {
+        match: '/api/connections',
+        method: 'POST',
+        handle: () =>
+          jsonResponse(
+            {
+              type: 'https://personalfi.local/problems/connector.invalid_input',
+              title: 'Bad Request',
+              status: 400,
+              detail:
+                'The provider needs your attention (CONFIG_ERROR). Reconnect the connection to continue.',
+              code: 'connector.invalid_input',
+              correlationId: 'corr_3',
+            },
+            400,
+          ),
+      },
+    ]);
+
+    renderForm();
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText('Extended public key'),
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    );
+    await user.click(screen.getByRole('button', { name: 'Add wallet' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/nothing was connected/i);
+    expect(alert).not.toHaveTextContent(/reconnect/i);
+  });
 });

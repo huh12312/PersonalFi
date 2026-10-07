@@ -82,7 +82,7 @@ export function AccountDetailScreen({ accountId }: AccountDetailScreenProps) {
             <Icon size={22} aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-h2 text-text-primary">{account.name}</h1>
+            <h2 className="text-h2 text-text-primary">{account.name}</h2>
             <p className="text-small text-text-muted">
               {account.mask !== null ? `••${account.mask} · ` : ''}
               {account.officialName ?? account.provider}

@@ -283,10 +283,15 @@ describe('NetWorthFullView', () => {
     renderFullView();
     const user = userEvent.setup();
 
-    expect(
-      await screen.findByText(/Last night.s net worth snapshot could not run/),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/no FX rate for CAD\/USD on or before 2026-09-20/)).toBeInTheDocument();
+    // O-7: it says when the snapshot ran (not "last night"), names the missing rate in words, and does not
+    // echo the job's own message ("consulted …").
+    const sentence = await screen.findByText(
+      /The net worth snapshot that ran on Sep 21 could not complete/,
+    );
+    expect(sentence).toHaveTextContent(
+      'no exchange rate for CAD/USD on or before 2026-09-20 was available',
+    );
+    expect(sentence).not.toHaveTextContent(/last night|consulted|D4/i);
 
     await user.click(screen.getByRole('button', { name: 'Enter this rate manually' }));
 
@@ -302,6 +307,8 @@ describe('NetWorthFullView', () => {
     await waitFor(() =>
       expect(posted).toEqual({ base: 'CAD', quote: 'USD', rateDate: '2026-09-20', rate: '1.35' }),
     );
+    // O-7 (iii): the banner answers the save instead of staying as it was.
+    expect(await screen.findByRole('status')).toHaveTextContent(/Rate saved.*next nightly run/);
   });
 
   it('shows no FX-failure banner when the last snapshot succeeded', async () => {
@@ -319,6 +326,6 @@ describe('NetWorthFullView', () => {
     renderFullView();
 
     await screen.findByText('Every day in this window has a value.');
-    expect(screen.queryByText(/net worth snapshot could not run/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/could not complete/)).not.toBeInTheDocument();
   });
 });

@@ -67,6 +67,15 @@ export function NetWorthDashboardSection({
           />
         ))}
 
+      {seriesQuery.isSuccess && seriesQuery.data.lastSnapshotFailure !== null && (
+        // O-7 (i): the figure above reads as complete, and a currency with no exchange rate is not in it. The
+        // banner explaining this lived only in the full view, one click away from where the number is read.
+        <p className="mt-2 text-small text-text-secondary" data-testid="net-worth-snapshot-failure">
+          A currency may be left out of the latest figure: no exchange rate was available to convert
+          it. Open the full history to enter one.
+        </p>
+      )}
+
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogTrigger
           render={

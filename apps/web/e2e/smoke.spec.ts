@@ -20,7 +20,7 @@ test('an unauthenticated visitor is redirected to /login', async ({ page }) => {
   await page.goto('/');
 
   await expect(page).toHaveURL(/\/login/);
-  await expect(page).toHaveTitle('PersonalFi');
+  await expect(page).toHaveTitle('Sign in · PersonalFi');
   await expect(page.getByRole('heading', { name: 'Sign in to PersonalFi' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Sign in with a passkey' })).toBeVisible();
 });

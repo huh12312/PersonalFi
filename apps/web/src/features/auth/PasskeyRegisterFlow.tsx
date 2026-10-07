@@ -112,7 +112,7 @@ export function PasskeyRegisterFlow({ registrationToken }: PasskeyRegisterFlowPr
           </p>
         )}
         <Button type="submit" className="mt-4 w-full" disabled={busy}>
-          {busy && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+          {busy && <Loader2 size={16} className="motion-safe:animate-spin" aria-hidden="true" />}
           {step === 'first' ? 'Create passkey' : 'Add passkey'}
         </Button>
         {step === 'second' && (

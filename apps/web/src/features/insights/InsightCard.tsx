@@ -74,7 +74,12 @@ export function InsightCard({ insight, onReviewed }: InsightCardProps) {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {impact !== null && (
-            <Money value={impact.money} colorBySign={false} className="text-body font-medium" />
+            <Money
+              value={impact.money}
+              signDisplay="auto"
+              colorBySign={false}
+              className="text-body font-medium"
+            />
           )}
           <span className="text-caption text-text-muted">
             {impact?.kind === 'annualized'

@@ -183,7 +183,7 @@ export function ScenarioCompare({
               </p>
             )}
             <p className="text-small text-text-primary">
-              Δ retirement date: {compare.retirementDeltaMonths} month
+              Δ retirement date: {Math.abs(compare.retirementDeltaMonths)} month
               {Math.abs(compare.retirementDeltaMonths) === 1 ? '' : 's'}{' '}
               {compare.retirementDeltaMonths === 0
                 ? ''

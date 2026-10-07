@@ -32,7 +32,7 @@ describe('ScenarioCompare', () => {
     expect(within(delta).getByText(/Δ success probability/)).toBeInTheDocument();
     expect(within(delta).getByText(/-8%|−8%/)).toBeInTheDocument();
     expect(within(delta).getByText(/Δ retirement date/)).toBeInTheDocument();
-    expect(within(delta).getByText(/36 months earlier/)).toBeInTheDocument();
+    expect(within(delta).getByText(/Δ retirement date: 36 months earlier/)).toBeInTheDocument();
   });
 
   it('lets the reader change either scenario dropdown, deferring to the caller', async () => {

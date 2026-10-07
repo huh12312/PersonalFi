@@ -3,6 +3,7 @@ import { createRootRouteWithContext, Link, Outlet } from '@tanstack/react-router
 import type { QueryClient } from '@tanstack/react-query';
 import { AlertTriangle } from 'lucide-react';
 
+import { useDocumentTitle } from '../app/shell/document-title.ts';
 import { Button } from '../components/ui/button.tsx';
 
 /**
@@ -16,6 +17,11 @@ export interface RouterContext {
   queryClient: QueryClient;
 }
 
+function RootComponent() {
+  useDocumentTitle();
+  return <Outlet />;
+}
+
 /**
  * Root route: no chrome of its own (the authenticated shell lives in
  * `_app.tsx`; `/login`, `/lock`, `/unlock` render full-screen without it) —
@@ -23,7 +29,7 @@ export interface RouterContext {
  * "this route threw" and "nothing matched" (§4.4 tier 3, route-level errors).
  */
 export const Route = createRootRouteWithContext<RouterContext>()({
-  component: () => <Outlet />,
+  component: RootComponent,
   errorComponent: ({ error, reset }) => (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg-page px-4 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-bg-subtle text-status-critical">

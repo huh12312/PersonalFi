@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { expect, test as base } from '@playwright/test';
-import type { Locator, Page, Route } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { expectNoAxeViolations, scanBothThemes, setTheme } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';

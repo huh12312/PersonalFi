@@ -149,7 +149,7 @@ describe('ReportsScreen', () => {
     stubFetchRoutes(commonRoutes());
     renderReports();
 
-    expect(await screen.findByRole('heading', { name: 'Reports' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Reports', level: 1 })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Back to budget/ }).getAttribute('href')).toBe(
       '/budget',
     );
@@ -161,7 +161,7 @@ describe('ReportsScreen', () => {
     renderReports();
     const user = userEvent.setup();
 
-    await screen.findByRole('heading', { name: 'Reports' });
+    await screen.findByRole('heading', { name: 'Reports', level: 1 });
     await user.click(screen.getByRole('tab', { name: 'Budget vs. actual' }));
 
     const rowLink = await screen.findByRole('link', { name: 'Coffee Shops' });
@@ -173,7 +173,7 @@ describe('ReportsScreen', () => {
     renderReports();
     const user = userEvent.setup();
 
-    await screen.findByRole('heading', { name: 'Reports' });
+    await screen.findByRole('heading', { name: 'Reports', level: 1 });
     await user.click(screen.getByRole('tab', { name: 'Cash flow' }));
 
     expect(

@@ -24,6 +24,9 @@ export function ScrollRegion({
     <div
       role="region"
       aria-label={`${label}, scrollable`}
+      // A scrollable region has to be reachable to be scrolled by keyboard (axe `scrollable-region-focusable`, 2.1.1);
+      // that is what this component is for, so the rule against a tab stop on a landmark does not apply to it.
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
       tabIndex={0}
       className={cn('relative max-w-full overflow-x-auto', className)}
     >

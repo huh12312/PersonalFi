@@ -71,7 +71,7 @@ export function BriefScreen() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <div>
-        <h1 className="text-h2 text-text-primary">This week's Brief</h1>
+        <h2 className="text-h2 text-text-primary">This week's Brief</h2>
         <p className="mt-1 text-caption text-text-muted" data-testid="brief-disclaimer">
           {BRIEF_DISCLAIMER}
         </p>

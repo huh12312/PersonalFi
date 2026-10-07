@@ -24,9 +24,34 @@ export const ComboboxCollection = BaseCombobox.Collection;
 export const ComboboxGroup = BaseCombobox.Group;
 export const ComboboxClear = BaseCombobox.Clear;
 
-export function ComboboxInput({ className, ...props }: ComponentProps<typeof BaseCombobox.Input>) {
+export function ComboboxInput({
+  className,
+  onKeyDown,
+  onFocus,
+  ...props
+}: ComponentProps<typeof BaseCombobox.Input>) {
   return (
     <BaseCombobox.Input
+      onFocus={(event) => {
+        // Arriving by keyboard with a value already in the field ("Uncategorized"), typing must replace it, not
+        // append to it ("UncategorizedCoffee" matched nothing — found driving the rule dialog by keyboard).
+        event.currentTarget.select();
+        onFocus?.(event);
+      }}
+      onKeyDown={(event) => {
+        // With the popup closed, Base UI's own Escape handling clears the field and then stops the event from
+        // reaching the dialog around it — and because the category picker always holds a selected row (the
+        // "Uncategorized" pseudo-item, never `null`), "already clear" is never true and the dialog could not be
+        // dismissed with Escape from this field at all (2.1.1: found by the 9.8 sweep, which could not close the
+        // rule dialog). Escape on a closed combobox belongs to the dialog; an open popup still closes first.
+        if (
+          event.key === 'Escape' &&
+          event.currentTarget.getAttribute('aria-expanded') !== 'true'
+        ) {
+          event.preventBaseUIHandler();
+        }
+        onKeyDown?.(event);
+      }}
       className={cn(
         // `w-56` (not `w-full`) so a row-based caller (`BulkActionBar`,
         // `InboxScreen`'s uncategorized row) doesn't have this field demand

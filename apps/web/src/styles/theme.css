@@ -287,10 +287,14 @@
 /* 3. Tailwind theme mapping                                               */
 /* ---------------------------------------------------------------------- */
 
-@theme {
-  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-
+/*
+ * `inline`: a utility reads `var(--bg-page)` itself rather than `var(--color-bg-page)`, a variable that is
+ * resolved once, on `:root`, and inherited as a fixed colour. Without it a `data-theme` on anything but
+ * `<html>` (the dev gallery's second panel) repaints only the tokens used directly and leaves every utility in
+ * the other theme's colours — light text on a light page inside a "dark" panel (found by the 9.8 sweep's
+ * measured second opinion on the gallery's chart axis).
+ */
+@theme inline {
   /* Color utilities: bg-page, text-primary, border-hairline, fill-money-pos, ... */
   --color-bg-page: var(--bg-page);
   --color-bg-surface: var(--bg-surface);
@@ -329,6 +333,11 @@
   --color-series-6: var(--series-6);
   --color-series-7: var(--series-7);
   --color-series-8: var(--series-8);
+}
+
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Spacing — 4px base (§2.4) */
   --spacing-0: 0px;

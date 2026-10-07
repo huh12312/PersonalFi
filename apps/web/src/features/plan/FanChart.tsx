@@ -11,6 +11,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { Money as MoneyJson } from '../../api/generated/types.gen.ts';
 import { formatMoney, parseWireMoney } from '../../lib/money.ts';
 import { BAND_FILL_OPACITY, BAND_STROKE_OPACITY } from './palette.ts';
+import { useChartTooltipRules } from '../../components/patterns/chart-tooltip.ts';
 
 /**
  * The Monte Carlo fan chart — `docs/plan/04-phase-4-dispatch.md` §3 "WP
@@ -144,6 +145,7 @@ export function ChartInner({
 }: ChartInnerProps) {
   const { tooltipData, tooltipLeft, tooltipTop, tooltipOpen, showTooltip, hideTooltip } =
     useTooltip<Row>();
+  const tooltipRules = useChartTooltipRules(hideTooltip, tooltipOpen);
 
   const innerWidth = Math.max(width - margin.left - margin.right, 0);
   const innerHeight = Math.max(height - margin.top - margin.bottom, 0);
@@ -190,6 +192,7 @@ export function ChartInner({
   const gapMedianY = gapTargetRow === undefined ? null : yScale(gapTargetRow.p50);
 
   function handlePointerMove(event: ReactPointerEvent<SVGRectElement>): void {
+    tooltipRules.keep();
     const localX = event.clientX - event.currentTarget.getBoundingClientRect().left;
     const year = xScale.invert(localX);
     let nearest = rows[0]!;
@@ -342,7 +345,7 @@ export function ChartInner({
             height={innerHeight}
             fill="transparent"
             onPointerMove={handlePointerMove}
-            onPointerLeave={hideTooltip}
+            onPointerLeave={tooltipRules.onChartLeave}
           />
         </Group>
       </svg>
@@ -352,10 +355,13 @@ export function ChartInner({
         tooltipLeft !== undefined &&
         tooltipTop !== undefined && (
           <Tooltip
+            {...tooltipRules.readoutProps}
+            data-chart-readout=""
             left={tooltipLeft + margin.left}
             top={tooltipTop + margin.top}
             style={{
               ...defaultStyles,
+              pointerEvents: 'auto',
               background: 'var(--bg-surface-raised)',
               color: 'var(--text-primary)',
               boxShadow: 'var(--shadow-elev-2)',

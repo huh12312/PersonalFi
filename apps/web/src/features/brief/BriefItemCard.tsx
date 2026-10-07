@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import {
   getCurrentBriefQueryKey,
@@ -38,11 +38,23 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [dismissing, setDismissing] = useState(false);
   const queryClient = useQueryClient();
+  const cardRef = useRef<HTMLLIElement>(null);
 
   const review = useMutation({
     ...reviewInsightMutation(),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: getCurrentBriefQueryKey() });
+      void queryClient.invalidateQueries({ queryKey: getCurrentBriefQueryKey() }).then(() => {
+        // A reviewed item may leave the Brief, and the control that had focus goes with it; focus would fall to
+        // the top of the page. If that happened, hand it to the page's content region (the skip link's target).
+        // The card is still here when it merely changed state, and then focus is already where it belongs.
+        window.setTimeout(() => {
+          const active = document.activeElement;
+          const gone = cardRef.current === null || !cardRef.current.isConnected;
+          if (gone && (active === null || active === document.body)) {
+            document.getElementById('main-content')?.focus();
+          }
+        }, 300);
+      });
     },
   });
 
@@ -54,6 +66,7 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
 
   return (
     <li
+      ref={cardRef}
       data-testid="brief-item-card"
       className="rounded-md border border-border-hairline bg-bg-surface p-3"
     >
@@ -68,7 +81,12 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1" data-testid="brief-item-impact">
           {impact !== null ? (
-            <Money value={impact.money} colorBySign={false} className="text-body font-medium" />
+            <Money
+              value={impact.money}
+              signDisplay="auto"
+              colorBySign={false}
+              className="text-body font-medium"
+            />
           ) : (
             <span className="text-caption text-text-muted">No dollar figure</span>
           )}
@@ -139,18 +157,26 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
         <div className="ml-auto flex items-center gap-2">
           <Button
             variant="ghost"
-            onClick={() => setDismissing(true)}
-            disabled={!canReview || review.isPending}
+            onClick={() => {
+              if (!review.isPending) setDismissing(true);
+            }}
+            disabled={!canReview}
+            aria-disabled={review.isPending || undefined}
+            className="aria-disabled:opacity-60"
           >
             Dismiss
           </Button>
           <Button
             variant="primary"
             onClick={() => {
-              if (item.insightId === null) return;
+              // `aria-disabled`, not `disabled`, while the request is in flight: a disabled button drops
+              // keyboard focus to the page, and the next Tab starts again from the top.
+              if (item.insightId === null || review.isPending) return;
               review.mutate({ path: { insightId: item.insightId }, body: { action: 'accept' } });
             }}
-            disabled={!canReview || review.isPending}
+            disabled={!canReview}
+            aria-disabled={review.isPending || undefined}
+            className="aria-disabled:opacity-60"
           >
             Accept
           </Button>

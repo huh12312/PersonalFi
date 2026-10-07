@@ -200,7 +200,7 @@ function marketDataSettingsResponse() {
   };
 }
 
-const COINBASE_CONNECTOR = {
+export const COINBASE_CONNECTOR = {
   provider: 'coinbase',
   displayName: 'Coinbase (read-only)',
   description: 'A read-only Coinbase Advanced Trade key.',
@@ -208,7 +208,7 @@ const COINBASE_CONNECTOR = {
   linkKind: 'credential_form',
 };
 
-const WALLETRPC_CONNECTOR = {
+export const WALLETRPC_CONNECTOR = {
   provider: 'wallet_rpc',
   displayName: 'Bitcoin / Ethereum wallet (watch-only)',
   description: 'A public address or extended public key.',

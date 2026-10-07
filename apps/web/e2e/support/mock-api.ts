@@ -224,7 +224,7 @@ const CATEGORIES = [
   },
 ];
 
-const MANUAL_CONNECTOR = {
+export const MANUAL_CONNECTOR = {
   provider: 'manual',
   displayName: 'Manual account',
   description: 'An account you maintain yourself.',
