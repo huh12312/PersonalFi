@@ -37,11 +37,12 @@ not need to install the workspace's own Node: the application is built inside Do
 | [`just`](https://github.com/casey/just) 1.21+ | The install, backup, restore-drill and upgrade steps are `just` recipes (`just --list` shows them all).                                          |
 | Node.js 18 or newer (`node` on the `PATH`)    | Only the host-side helper scripts use it: `just gen-pg-secrets`, `just gen-master-key` and the secret check that `just upgrade` runs. No `pnpm`. |
 | `openssl`, `bash`, and the usual `coreutils`  | `just gen-pg-secrets` draws its random bytes from `openssl`; the recipes are bash.                                                               |
+| `curl`                                        | The TLS check in install step 8 (`curl --cacert …`).                                                                                             |
 | `sudo` (optional)                             | Only for `just harden-secrets` (tighter secret file modes), the `/etc/hosts` line and importing the TLS certificate into your trust store.       |
 
-Package names, for a clean host: on Alpine, `apk add git just nodejs openssl bash coreutils`
+Package names, for a clean host: on Alpine, `apk add git just nodejs openssl bash coreutils curl`
 (Docker and its Compose plugin come from Docker's own packages); on Arch, `pacman -S git just nodejs
-openssl docker docker-compose`; on Debian or Ubuntu, `apt install git nodejs openssl`, and `just`
+openssl docker docker-compose curl`; on Debian or Ubuntu, `apt install git nodejs openssl curl`, and `just`
 from its [releases](https://github.com/casey/just/releases) because distribution packages are
 often older than 1.21. Run `docker`, `just` and `node` as the user who will own the checkout, and
 add that user to the `docker` group.
@@ -156,10 +157,17 @@ all of them.
    just trust-ca
    ```
 
-   This writes `personalfi-ca.crt` next to the checkout. Import it into your operating system or
-   browser trust store (Arch: `sudo trust anchor personalfi-ca.crt`; Firefox: Settings, Privacy and
-   Security, Certificates, Import). On the machine whose browser you will use, make the name
-   resolve to the bind address:
+   This writes `personalfi-ca.crt` in the repository root (the current directory). Import it into
+   your operating system or browser trust store:
+   - Arch: `sudo trust anchor personalfi-ca.crt`.
+   - Debian, Ubuntu or Alpine: `sudo cp personalfi-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates`.
+   - macOS: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain personalfi-ca.crt`.
+   - Firefox: Settings, Privacy and Security, Certificates, Import (Firefox keeps its own store).
+   - Chrome, Chromium or Edge on Linux read their own NSS store, not the system one:
+     `certutil -d sql:$HOME/.pki/nssdb -A -t 'C,,' -n personalfi -i personalfi-ca.crt` (package
+     `nss-tools` on Alpine and Arch, `libnss3-tools` on Debian and Ubuntu).
+
+   On the machine whose browser you will use, make the name resolve to the bind address:
 
    ```bash
    echo "127.0.0.1 personalfi.lan" | sudo tee -a /etc/hosts
@@ -183,14 +191,23 @@ all of them.
 
    The time zone is an IANA name (`Europe/London`, `America/Los_Angeles`, `UTC`).
 
-   It prints a one-time link of the form `https://personalfi.lan/register#token=...`. Open the
-   **whole** link in a browser that trusts the certificate (step 8). Enrol at least two
-   authenticators (a passkey on this device and a second one: a phone or a security key), and save
-   the ten recovery codes somewhere that is not this machine. The token sits in the URL fragment,
-   which is never sent to a server and never reaches a log.
+   This derives an encryption key inside the running `api` container (about 1 GiB of memory for a
+   few seconds, inside that container's own limit). Run it at least a minute after `up --wait`
+   finishes, and not while the stack is still starting. If it ends with `exit code 137` the kernel
+   OOM-killed that derivation: your user was already created, so wait a minute and run the same
+   command again with `reissue=true` added, which issues a fresh link.
 
-10. **Sign in.** Open `https://personalfi.lan/` and choose **Sign in with a passkey**. You are at the
-    dashboard: the install is complete.
+   It prints a one-time link of the form `https://personalfi.lan/register#token=...`. Open the
+   **whole** link in a browser that trusts the certificate (step 8). Enrol a passkey on this device
+   and, when the wizard offers it, a backup passkey on a second device (a phone or a security key).
+   This release does not show recovery codes at enrolment; the backup passkey is your second way
+   in. The token sits in the URL fragment, which is never sent to a server and never reaches a log.
+   On a headless test host, use Chromium with a virtual authenticator (DevTools → More tools →
+   WebAuthn, or the CDP method `WebAuthn.addVirtualAuthenticator`).
+
+10. **Sign in.** Open `https://personalfi.lan/` and choose **Sign in with a passkey**. Leave the
+    **Account** box empty; the passkey identifies you. You are at the dashboard: the install is
+    complete.
 
 If a step fails, the RUNBOOK's [Troubleshooting](RUNBOOK.md#troubleshooting) section lists the
 failures people actually hit, with the exact error text.
@@ -201,7 +218,8 @@ failures people actually hit, with the exact error text.
    "Connect your first account" and offers **Add account**, which opens **Connections**, where
    **Add connection** opens the dialog. The **Manual account** tab creates an account you enter by hand. The **File
    import** tab imports a CSV: choose the preset **ISO date, one signed amount column**, name the
-   account, and choose the file. A file this small works as a first try:
+   account, and choose the file; leave **Connection name**, **Type** (depository) and **Currency**
+   (USD) at their defaults. A file this small works as a first try:
 
    ```bash
    printf 'Date,Description,Amount\n2026-09-01,Coffee shop,-4.50\n2026-09-02,Payroll,2500.00\n2026-09-03,Grocery store,-62.18\n' > sample.csv
@@ -245,7 +263,8 @@ git pull
 just upgrade
 ```
 
-That is the whole upgrade, from any earlier release, however many you skipped. It creates any
+Expect three to five minutes (the images are rebuilt), and the site is unavailable while the new
+containers start. That is the whole upgrade, from any earlier release, however many you skipped. It creates any
 secret placeholder your install predates, rebuilds the images, takes a verified backup before the
 first migration, applies the migrations, and checks that the stack is ready and stable. If the
 stack comes up on a database newer than the code, it refuses to start rather than guess. The

@@ -164,9 +164,9 @@ migrator (it applies DDL and will never dial a provider).
 
 Plaid's `plaid_env` file reads `sandbox` or `production`. The api refuses to boot with `production`
 unless `PLAID_ALLOW_PRODUCTION=true` is also set in its environment (D16: two independent settings
-must agree before a real charge is possible), and the shipped `compose.yml` does not pass that
-variable through, so this install runs Plaid **sandbox** only until a `compose.override.yml` adds it
-to `api` and `worker`. `@core/config` also refuses to boot if `PLAID_REDIRECT_URI` is set but is not
+must agree before a real charge is possible). `compose.yml` passes that variable to `api` and
+`worker` with a default of `false`, so an install runs Plaid **sandbox** only until you set
+`PLAID_ALLOW_PRODUCTION=true` in `.env` as well as `plaid_env` to `production`. `@core/config` also refuses to boot if `PLAID_REDIRECT_URI` is set but is not
 `https` or does not share an origin with `AUTH_ALLOWED_ORIGINS`.
 
 **Watch-only wallet privacy** (Phase 3 gate C-13): every address the connector derives from a linked
@@ -1805,6 +1805,15 @@ healthcheck and, for `api`/`worker`, on `migrator` completing successfully first
 logs migrator` is almost always the first thing to check — a failed migration is the most common
 reason `api` never becomes healthy on a fresh box. `backup` reads `starting` for its first minutes
 on a fresh install and only goes `unhealthy` after a failed attempt: see "Backup".
+
+**`just bootstrap-user` ends with `exit code 137` after "deriving the key-encryption key".** The
+recipe runs its derivation inside the running `api` container (`docker compose exec`), under that
+container's own 1536M limit, beside the api's own working set: on 3 of 5 attempts on a 6 GiB test
+host the kernel OOM-killed it, every time when run straight after `up --wait` or while another
+derivation was still running (WP 9.13's F-13-4; WP 9.9's P-5). The user row was already written,
+so the next plain run says `A user already exists`. Wait a minute for the api to settle and run
+the same command with `reissue=true`, which issues a fresh one-time link. The structural fix (the
+derivation as its own one-shot container with its own memory budget) is WP 9.14's.
 
 **`api` or `worker` exits 137 at boot, or restarts in a loop on a small host.** The kernel OOM-killed
 it: each derives a 1 GiB Argon2id key at start, and the two together peak near 2.4 GiB for a few
