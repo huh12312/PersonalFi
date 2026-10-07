@@ -46,7 +46,9 @@
 #     categorization-db, connections-db, recurring-db, budgeting-db,
 #     notifications-db, insights-db, investments-db, integrations-db, planning-db
 #   `web` (apps/web has its own vitest config, not part of the root one):
-#     web (vitest), plus Playwright projects `chromium` (smoke) and `csp`
+#     web (vitest), plus Playwright projects `chromium` (the functional specs,
+#     PW_SUITE=functional) and `csp`; `web-a11y` runs the same `chromium`
+#     project with PW_SUITE=a11y (WP 9.8's two specs) in its own job
 #
 # connector-plaid needs neither: it is driven end to end by a hermetic
 # FakePlaidApi over recorded-shape fixtures (see vitest.config.ts's own
@@ -333,7 +335,11 @@ jobs:
   web:
     name: web (unit, build, playwright)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25, not 15: the functional playwright suite alone is ~140 tests on one
+    # worker; WP 9.8's a11y specs (another ~110, ~25 min) run in `web-a11y`
+    # below so neither job hits its limit (the first run after 9.8 landed
+    # timed out at 15 min, 2026-10-07).
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -372,8 +378,36 @@ jobs:
       # Playwright itself; see apps/web/playwright.config.ts.
       - name: install chromium
         run: pnpm --filter @app/web exec playwright install --with-deps chromium
-      - name: playwright (smoke + csp)
+      - name: playwright (functional + csp)
         run: pnpm --filter @app/web exec playwright test
+        env:
+          PW_SUITE: functional
+
+  # WP 9.8: the WCAG 2.2 AA sweep (every route × both themes × 1280/320 px ×
+  # 200 % × reduced motion, every dialog opened) and the keyboard-only
+  # journeys. Serial on purpose (axe + focus assertions), ~25 min, so a job of
+  # its own; the gate re-runs the same two specs.
+  web-a11y:
+    name: web a11y (WCAG sweep + keyboard journeys)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: npm install --global pnpm@12.4.1
+      - run: pnpm install --frozen-lockfile
+      - name: generate the OpenAPI client
+        run: pnpm --filter @app/web gen
+      - name: install chromium
+        run: pnpm --filter @app/web exec playwright install --with-deps chromium
+      - name: playwright (a11y-sweep + a11y-keyboard)
+        run: pnpm --filter @app/web exec playwright test --project chromium
+        env:
+          PW_SUITE: a11y
 
   openapi-current:
     name: openapi spec is current
