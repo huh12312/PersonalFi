@@ -493,6 +493,10 @@ describeWithDb('runMigrations', () => {
       //   with no foreign key because the session will not exist on the far side
       //   of a restore). WP 9.6; expand-only; references only 0002/0012/0032
       //   objects or its own (09 §4); 0035 and this file never reference each other.
+      // 0039_app_role (WP 9.11; CF-18 / G-01, G-25): the DML-only role `personalfi_app`, its grants and
+      //   default privileges, `public.personalfi_app_grants()` (SECURITY DEFINER, re-run by api/worker at
+      //   every boot because a --no-privileges restore drops grants and a fresh cluster lacks the role),
+      //   and the append-only trigger `security_events_append_only`. Expand-only; no table, column or row.
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called

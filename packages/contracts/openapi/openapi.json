@@ -12073,6 +12073,37 @@
           }
         }
       },
+      "SessionSummaryInput": {
+        "type": "object",
+        "properties": {
+          "familyId": {
+            "type": "string"
+          },
+          "authMethod": {
+            "type": "string"
+          },
+          "trustedDevice": {
+            "type": "boolean"
+          },
+          "lastSeenAt": {
+            "type": "string"
+          },
+          "familyExpiresAt": {
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "familyId",
+          "authMethod",
+          "trustedDevice",
+          "lastSeenAt",
+          "familyExpiresAt",
+          "current"
+        ]
+      },
       "PlanLifeEventInput": {
         "type": "object",
         "properties": {
@@ -24391,6 +24422,38 @@
         },
         "additionalProperties": false
       },
+      "SessionSummary": {
+        "type": "object",
+        "properties": {
+          "familyId": {
+            "type": "string"
+          },
+          "authMethod": {
+            "type": "string"
+          },
+          "trustedDevice": {
+            "type": "boolean"
+          },
+          "lastSeenAt": {
+            "type": "string"
+          },
+          "familyExpiresAt": {
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "familyId",
+          "authMethod",
+          "trustedDevice",
+          "lastSeenAt",
+          "familyExpiresAt",
+          "current"
+        ],
+        "additionalProperties": false
+      },
       "PlanLifeEvent": {
         "type": "object",
         "properties": {
@@ -25419,6 +25482,48 @@
         }
       }
     },
+    "/auth/totp": {
+      "delete": {
+        "operationId": "removeTotp",
+        "summary": "Revoke the TOTP seed",
+        "tags": [
+          "auth"
+        ],
+        "description": "G-12: deletes the TOTP seed (confirmed or not), so a leaked seed stops working at once. Needs a step-up assertion. To replace a seed instead, enrol and confirm a new one: confirming swaps it in atomically.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthOk"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/recovery-codes": {
       "post": {
         "operationId": "generateRecoveryCodes",
@@ -25453,6 +25558,175 @@
             }
           },
           "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "summary": "Signed-in sessions",
+        "tags": [
+          "auth"
+        ],
+        "description": "One entry per live session family. Needs a step-up assertion.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SessionSummary"
+                      }
+                    }
+                  },
+                  "required": [
+                    "sessions"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "revokeOtherSessions",
+        "summary": "Sign out every other session",
+        "tags": [
+          "auth"
+        ],
+        "description": "Revokes every live session family except the caller’s. Needs a step-up assertion.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "revoked"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/sessions/{familyId}": {
+      "delete": {
+        "operationId": "revokeSession",
+        "summary": "Sign out one session",
+        "tags": [
+          "auth"
+        ],
+        "description": "Revokes one of the caller’s own session families (the caller’s own included, which also clears its cookies). Needs a step-up assertion. Another holder’s family is a 404.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "familyId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthOk"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {

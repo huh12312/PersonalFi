@@ -639,6 +639,32 @@ code does not match. Step 5 fails after a successful migration: the new
 version is running; read why `api`/`worker` restarted, or why `backup` is
 unhealthy, before anything else.
 
+**On the production install, the isolation guard runs first.** When the compose project is
+`personalfi-prod` (as `docker compose config` resolves it, `.env` included), `just upgrade` runs
+`scripts/soak/check-isolation.sh` before it touches anything and stops on any violation: the
+wrong project name, `PERSONALFI_VERSION` not a 40-character commit SHA, or the agent checkout's
+directory. Every other project (a scratch install, the upgrade test, a gate) skips it, because
+the guard refuses every project but production by design.
+
+**Installing published images instead of building (pull-and-verify).** Once a release is tagged
+(`v0.9.0` onward), the images `release.yml` built, signed and attested can be used instead of a local
+build:
+
+    git pull && git checkout v0.9.0
+    PERSONALFI_VERSION="$(git rev-parse HEAD)" PERSONALFI_PULL=1 PERSONALFI_RELEASE=0.9.0 just upgrade
+
+For each of `api`, `backup` and `proxy`, `scripts/verify-release.sh` resolves
+`ghcr.io/<owner>/personalfi-<image>:0.9.0` to a digest once, then checks — by digest only — that the
+cosign signature was made by this repository's `release.yml` at `refs/tags/v0.9.0` **at the commit
+you have checked out**, and that GitHub holds a provenance attestation for it
+(`gh attestation verify`, so `gh` must be logged in). Only if all three images pass are they pulled
+by digest and tagged as the names compose runs; the upgrade then starts them with `--no-build`.
+Any failure stops before anything is pulled, and the old version keeps serving. `cosign` is used
+from your PATH, or run from its pinned container image if it is not installed. To check a release
+without upgrading: `bash scripts/verify-release.sh --release 0.9.0 --commit <sha>`; to check the
+verifier itself (it must accept a known-good signature and refuse an unsigned image):
+`bash scripts/verify-release.sh --self-test`. Building from source stays the default.
+
 **Rollback is "restore the pre-migration backup"** — never "pin the prior
 image". Migrations are forward-only, and an older binary refuses the newer
 schema (step 4), so the old advice now fails safe instead of serving a schema
@@ -1196,8 +1222,10 @@ serving processes hold no DDL right and no superuser, whatever code runs in them
 app_pw="$(openssl rand -hex 32)"
 printf "ALTER ROLE personalfi_app LOGIN PASSWORD '%s';\n" "$app_pw" \
   | docker compose exec -T db psql -U personalfi -d personalfi -v ON_ERROR_STOP=1
+chmod u+w secrets/database_url secrets/migrator_database_url
 cp secrets/database_url secrets/migrator_database_url      # the owner's URL, unchanged
 printf 'postgres://personalfi_app:%s@db:5432/personalfi\n' "$app_pw" > secrets/database_url
+chmod 0444 secrets/database_url secrets/migrator_database_url
 unset app_pw
 docker compose restart api worker
 ```
@@ -1293,6 +1321,14 @@ file was empty or missing when the server started: fix the file and restart `api
 `passphrase_mismatch` (the file is not the one this data was sealed with).
 
 ---
+
+**Sessions.** Any number of browser sessions may be signed in at once; each lasts 8 hours (14 days
+on a trusted device) unless you sign it out, sign out everywhere, or a replayed refresh token kills
+it. `GET /api/auth/sessions` lists them and `DELETE /api/auth/sessions` signs out every other one
+(both need a fresh passkey assertion); the settings screen for it is WP 9.14's.
+
+**A leaked TOTP seed** is revoked with `DELETE /api/auth/totp` (fresh passkey assertion), or replaced
+by enrolling and confirming a new one, which swaps it in atomically.
 
 ## Advisor kill switches
 
@@ -1687,24 +1723,33 @@ The limits sum to about 4.6 GiB (api 1.5 + worker 1.5 + db 1 + proxy 0.1 + backu
 Docker 29.8, the stack with a 50,040-row ledger, `ollama` stopped, no build running, load printed with
 every number):
 
-| What                                                                         | Measured                                                                        | Budget (master plan §3.4)                        |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------ |
-| RAM, idle ten minutes (all services, resident)                               | 316.7 MiB RSS (447 MiB charged, most of it Postgres's page cache)               | whole stack under 2 GB                           |
-| RAM through one nightly sync chain                                           | 351.3 MiB RSS at its peak (485 MiB charged)                                     | under 2 GB                                       |
-| RAM at boot: api and worker deriving the KEK at once                         | **2.31 to 2.43 GiB RSS for about 3.4 s** (1.2 GiB per container)                | under 2 GB                                       |
-| Cold start                                                                   | 19.5 s to the api's own `/ready`; 24.8 to 25.4 s to the first 200 through Caddy | under 20 s including migrations (met at the api) |
-| Nightly sync, 8 connections, a 730-day backfill, the worker's real job chain | 243 s                                                                           | under 5 minutes                                  |
-| Backup restore (RTO)                                                         | 36 s from restore start to `/ready` (a 116 MB database)                         | under 1 hour                                     |
-| Transactions list at 50,000 rows, over real HTTP                             | p95 15 to 58 ms (through Caddy, worst 82 ms)                                    | p95 under 200 ms                                 |
-| Monte Carlo, 10,000 paths x 40 years                                         | p95 543 ms (engine), 532 ms (over HTTP)                                         | p95 at most 800 ms                               |
+| What                                                                               | Measured                                                                                                                                    | Budget (master plan §3.4)                        |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| RAM, idle ten minutes (all services, resident)                                     | 316.7 MiB RSS (447 MiB charged, most of it Postgres's page cache)                                                                           | whole stack under 2 GB                           |
+| RAM through one nightly sync chain                                                 | 351.3 MiB RSS at its peak (485 MiB charged)                                                                                                 | under 2 GB                                       |
+| RAM at boot (api and worker each derive the KEK, one after the other since v0.9.0) | **1.37 to 1.52 GiB RSS** at the peak (1.2 GiB per container, never two at once; WP 9.11, load 2.7–6.3); before the stagger 2.31 to 2.43 GiB | under 2 GB                                       |
+| Cold start                                                                         | 19.5 s to the api's own `/ready`; 24.8 to 25.4 s to the first 200 through Caddy                                                             | under 20 s including migrations (met at the api) |
+| Nightly sync, 8 connections, a 730-day backfill, the worker's real job chain       | 243 s                                                                                                                                       | under 5 minutes                                  |
+| Backup restore (RTO)                                                               | 36 s from restore start to `/ready` (a 116 MB database)                                                                                     | under 1 hour                                     |
+| Transactions list at 50,000 rows, over real HTTP                                   | p95 15 to 58 ms (through Caddy, worst 82 ms)                                                                                                | p95 under 200 ms                                 |
+| Monte Carlo, 10,000 paths x 40 years                                               | p95 543 ms (engine), 532 ms (over HTTP)                                                                                                     | p95 at most 800 ms                               |
 
-**The one place the 2 GB target is exceeded is the boot window.** For about three seconds, api and
-worker each derive a 1 GiB Argon2id key and the stack's resident set peaks near 2.4 GiB; a host
-with less than about 3 GiB free at that moment can OOM-kill one of them (exit 137). The levers
-are to stagger the two derivations or to lower `KEK_ARGON2_MEMORY_KIB` (a security parameter with a
-production floor: do not lower it casually), not to raise the container limits. The numbers above
-were taken before any stagger; if a release adds one it is named in the release notes, and the cold
-numbers move with it. On a host with 4 GiB of RAM, leave the local model off. Where a number was
+**The boot window.** api and worker each derive a 1 GiB Argon2id key at boot. Since v0.9.0 they
+take turns: a Postgres advisory lock lets only one derivation run at a time (the second waits
+about six seconds on an idle connection), so the stack's resident set peaks near 1.5 GiB instead
+of 2.4 GiB, and the worker becomes ready about six seconds later than the api. The lock fails
+open — if it cannot be taken, both derive and you are back to the old peak — so a host with less
+than about 3 GiB free is still safer with the local model off. Do not lower
+`KEK_ARGON2_MEMORY_KIB` to save memory: it is a security parameter with a production floor.
+
+`just bootstrap-user` (first install, or `reissue=true`) derives a third key **inside the api
+container**, next to the running api: WP 9.9 measured that container at 90 % of its 1536M limit
+during it. It never overlaps the api's or the worker's own derivation (the same lock), but run it
+when the stack is otherwise quiet.
+
+Every service also has a PIDs cap (`deploy.resources.limits.pids`): api, worker and db 256; proxy,
+backup, pre-migrate-backup and migrator 128; the placeholders 16; ollama 256.
+`scripts/compose-hardening-check.sh` refuses a service without one. Where a number above was
 informational only, the evidence says so: 200 held positions make `GET /holdings` take about 2 s
 (WP 9.9 finding P-6, not yet fixed), and the 250k-row list's rare-word search passes 200 ms.
 
@@ -1809,3 +1854,22 @@ the browser uses is not the one the api was configured with. `PUBLIC_HOST` sets 
 and the WebAuthn relying-party id together; a non-default port needs `EXTRA_ALLOWED_ORIGINS`, and a
 different hostname than the one passkeys were enrolled under cannot use them (the relying-party id
 is bound into the credential).
+
+### `/ready` says `degraded` and names a stopped consumer
+
+`GET /api/ready` answers 200 with `"status":"degraded"` and lists
+`outbox.failedConsumers` (and `just upgrade` prints a WARNING) when an event consumer has failed
+the same event five times: the worker stops it rather than skip the event, so whatever it
+maintains (budget actuals, categorisation, …) stops updating. Read why first — the error is in
+`docker compose logs worker` and is printed again by the command below — and fix the cause.
+Then resume it:
+
+    just consumer-resume budgeting.actuals@v1     # the name /ready lists
+
+It retries the **same** event; nothing is skipped. If the cause is still there it stops again
+after five attempts. Before v0.9.0, an on-budget account with no balance yet stopped
+`budgeting.actuals@v1` this way; since v0.9.0 that waits instead (the budget recomputes when the
+balance arrives). Known at v0.9.0 and not yet fixed: a **credit card that already owes money**
+when a budget period is first computed stops the same consumer with
+`identity II failed for card …` (WP 9.4's O-94-1); resuming retries into the same refusal until
+that is fixed (WP 9.14).

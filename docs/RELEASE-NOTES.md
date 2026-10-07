@@ -49,6 +49,13 @@ provider, and no restart sequence.
 
 ### What changed
 
+- **Security: the app no longer runs as the database superuser.** Migration 0039 adds `personalfi_app` (DML only); api and worker use it from the first query with no action. Optional, for a hard boundary: split the roles with the new optional secret `migrator_database_url` (RUNBOOK "Database roles"). No manual step.
+- **Security: published images can be verified before they run.** `PERSONALFI_PULL=1 PERSONALFI_RELEASE=x.y.z just upgrade` pulls only images whose cosign signature and provenance attestation match this repository's tagged release at your checked-out commit (`scripts/verify-release.sh`). Building from source stays the default. On `personalfi-prod`, `just upgrade` now runs the isolation guard first.
+- **Builds no longer expire.** The images pin their base by digest and no longer pin exact Alpine package builds (which Alpine stops serving); the weekly upgrade test rebuilds them with no cache and scans them with `trivy image`.
+- **Budget actuals no longer stop on a new account without a balance**, and a failing `GET /budgets/current` no longer leaves a half-created budget. A stopped consumer can be resumed: `just consumer-resume <name>`. Known: a card already owing at a budget's first period still stops it (O-94-1, WP 9.14).
+- **Boot memory: api and worker derive their keys one at a time**: the boot peak drops from ~2.4 GiB to ~1.5 GiB; the worker is ready ~6 s after the api.
+- Also from the security review's fixes: outbound TLS certificate checks are now tested for every provider client; session list and sign-out-everywhere routes; `DELETE /auth/totp`; step-up refusals, exports and imports are in the security event log, which is append-only; `Cache-Control: no-store` on every API response; Caddy's error pages carry the security headers; every container has a PIDs cap; an import re-validates plan data.
+
 **Upgrades are safe to run unattended (WP 9.4).**
 
 - A database newer than the code is refused (`migration.database_newer`); "newer" is set
