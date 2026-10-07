@@ -62,6 +62,7 @@ function upgrade(env: Record<string, string>): { status: number; out: string; do
       PATH: `${dir}:${process.env['PATH'] ?? ''}`,
       HOME: process.env['HOME'] ?? dir,
       PERSONALFI_VERSION: 'dev',
+      PERSONALFI_DEV_CHECKOUT: REPO_ROOT, // see the .env case below
       ...env,
     },
   });
@@ -100,6 +101,10 @@ describe('just upgrade (G-21)', () => {
         HOME: process.env['HOME'] ?? dir,
         FAKE_PROJECT: 'personalfi-prod',
         FAKE_IMAGE: `personalfi/api:${'b'.repeat(40)}`,
+        // The guard's default "agent checkout" is this host's path; on a CI
+        // runner the checkout lives elsewhere and the guard would ACCEPT it.
+        // The refusal under test is the mechanism, so pin it to this checkout.
+        PERSONALFI_DEV_CHECKOUT: REPO_ROOT,
       },
     });
     const out = `${run.stdout}${run.stderr}`;
