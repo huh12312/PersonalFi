@@ -18,6 +18,10 @@
 # runner's temp directory; the compose project is pf-upgrade-direct on
 # 127.0.0.1:8451/8452; images are tagged pf-upgrade/<svc>:<sha>.
 #
+# The weekly run is also the no-cache image build plus `trivy image` on its
+# output (WP 9.11, G-22: the apk pin policy's detection half, and P2-9's
+# running-image scan): see the step after the jump.
+#
 # Triggers: by hand, weekly, and as a required predecessor of release.yml —
 # release.yml calls this workflow (`workflow_call`) and its build job
 # `needs:` it, so a tag whose direct jump is red never publishes an image.
@@ -88,6 +92,31 @@ jobs:
           timeout 3500 bash scripts/upgrade-test/run.sh --path direct --ci --keep 2>&1 |
             tee "$WORK/direct.log" |
             grep --line-buffered -E 'step .*: (start|done)|timing|FATAL|FAILED|RESULT'
+      # G-22 / F-94-8 / P2-9 (WP 9.11): the HEAD images above were just built on
+      # a fresh runner with no layer cache — so the weekly run of this workflow
+      # IS the weekly no-cache build (an expired apk build or a broken base
+      # fails the jump), and this scans what it produced: the images exactly as
+      # a clean host's `just upgrade` would build them today, not CI's
+      # GHA-cached ones. Same trivy pin and policy as ci.yml's image job.
+      - name: trivy image (the freshly built HEAD images)
+        if: always()
+        timeout-minutes: 15
+        run: |
+          tag="$(git rev-parse --short=7 HEAD)-wp94"
+          scanned=0
+          for svc in api backup proxy; do
+            img="pf-upgrade/${svc}:${tag}"
+            if ! docker image inspect "$img" >/dev/null 2>&1; then
+              echo "::warning::$img was not built (the jump failed before HEAD's build); not scanned"
+              continue
+            fi
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "${{ github.workspace }}:/repo" \
+              aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
+              image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /repo/.trivyignore --exit-code 1 \
+                "$img"
+            scanned=$((scanned + 1))
+          done
+          echo "trivy image: ${scanned}/3 HEAD image(s) scanned"
       - name: report
         if: always()
         timeout-minutes: 2

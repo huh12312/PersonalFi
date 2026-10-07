@@ -23,3 +23,5 @@ services:
     security_opt: ['no-new-privileges:true']
     user: '65534:65534'
     command: ['sleep', 'infinity']
+    # WP 9.11 (G-08): clean includes a PIDs cap.
+    pids_limit: 16

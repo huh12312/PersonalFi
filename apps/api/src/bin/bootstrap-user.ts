@@ -33,6 +33,7 @@ import { systemClock } from '@core/kernel';
 import { createDatabase, createPool } from '@core/db';
 import { SecretBox, isSecretBoxError } from '@core/secretbox';
 import {
+  withKekDerivationLock,
   assertIanaZone,
   isAuthError,
   recordSecurityEvent,
@@ -41,6 +42,7 @@ import {
 } from '@ctx/identity';
 import { seedUserState } from '../bootstrap-seed.ts';
 import { buildPlatform } from '../platform.ts';
+import { appRoleDatabaseUrl, ensureAppRole } from '../db-role.ts';
 
 function out(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -78,8 +80,13 @@ const config = (() => {
   }
 })();
 
+// CF-18 / G-01 (WP 9.11): the DML-only app role, as main.ts and worker.ts.
+// Here a failure is fatal: an operator is watching.
+const appRole = await ensureAppRole(config.databaseUrl.reveal());
+if (!appRole.ok) fail(`could not ensure the database app role: ${appRole.error}`);
+
 const pool = createPool({
-  databaseUrl: config.databaseUrl.reveal(),
+  databaseUrl: appRoleDatabaseUrl(config.databaseUrl.reveal()),
   max: 2,
   applicationName: 'personalfi-bootstrap',
 });
@@ -161,7 +168,14 @@ try {
 
   let state;
   try {
-    state = await secretBox.unlock(passphrase.reveal());
+    // WP 9.11 (Q9, WP 9.9's P-5): this is a THIRD 1 GiB Argon2 derivation,
+    // and `just bootstrap-user` runs it inside the api container's cgroup
+    // (1536M; 9.9 measured a 90 % peak). The derivation lock means it never
+    // overlaps the api's or the worker's own derivation (e.g. right after an
+    // `up`); the api process's steady state beside it is what remains.
+    ({ result: state } = await withKekDerivationLock(pool, () =>
+      secretBox.unlock(passphrase.reveal()),
+    ));
   } catch (error) {
     if (isSecretBoxError(error)) fail(`key custody: ${error.message}`);
     throw error;

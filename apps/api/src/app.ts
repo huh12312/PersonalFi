@@ -349,6 +349,11 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
 
   app.addHook('onSend', async (request, reply) => {
     reply.header(CORRELATION_ID_HEADER, request.id);
+    // G-05 (WP 9.11; ZAP 10015/10049, ASVS V14.3.2): nothing this API answers
+    // is for a cache — authenticated JSON is the holder's finances, and a
+    // refusal or a problem is no more shareable. A route that sets its own
+    // Cache-Control keeps it; the hijacked export stream sets no-store itself.
+    if (!reply.hasHeader('cache-control')) reply.header('cache-control', 'no-store');
   });
 
   /**

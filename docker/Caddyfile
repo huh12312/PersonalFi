@@ -142,6 +142,21 @@
 	}
 }
 
+# ---------- the same headers on error responses (WP 9.11, G-06) ----------
+#
+# The `header` directive in `security_headers` decorates responses a handler
+# writes; it does not reach the responses Caddy writes for an *error* — a
+# `file_server` 404 for `/robots.txt` went out with no HSTS, CSP, XCTO or XFO
+# and with `Server: Caddy` (ZAP 10035, WP 9.10). `handle_errors` is the route
+# Caddy runs for those, so the same snippet is imported there, and the body is
+# the bare status line rather than anything that names the server.
+(error_responses) {
+	handle_errors {
+		import security_headers
+		respond "{err.status_code} {err.status_text}"
+	}
+}
+
 # ---------- one routing policy, imported by every listener ----------
 #
 # The API gets its own namespace: everything under `/api/*` is Caddy stripping
@@ -267,6 +282,7 @@
 	tls internal
 	encode zstd gzip
 	import security_headers
+	import error_responses
 	import app_routes
 }
 
@@ -279,5 +295,6 @@
 :8080 {
 	encode zstd gzip
 	import security_headers
+	import error_responses
 	import app_routes
 }

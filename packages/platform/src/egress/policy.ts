@@ -83,6 +83,7 @@
  */
 import { isIP } from 'node:net';
 import { promises as dns } from 'node:dns';
+import { headerProblem } from './dial.ts';
 
 // ---------------------------------------------------------------------------
 // Vocabulary
@@ -524,12 +525,9 @@ export async function guardUrl(
  * refuses that, and refuses a value long enough to be a smuggled body.
  */
 export function assertHeaderValueSafe(name: string, value: string): void {
-  if (/[\r\n\0]/.test(value)) {
-    throw new EgressRefusedError('header_not_allowed', `${name} contains a control character`);
-  }
-  if (value.length > 4096) {
-    throw new EgressRefusedError('header_not_allowed', `${name} is implausibly long`);
-  }
+  // One rule for both egress policies and the dialer (WP 9.11, G-24).
+  const problem = headerProblem(name, value);
+  if (problem !== null) throw new EgressRefusedError('header_not_allowed', problem);
 }
 
 export type StatusVerdict =

@@ -45,6 +45,8 @@ export {
   type EventRegistry,
 } from './events/registry.ts';
 export { appendEvent, appendEvents, type AppendOptions } from './events/outbox.ts';
+// WP 9.11 (G-23): the operator path back for a dead-lettered consumer.
+export { resumeConsumer, type ResumeOutcome } from './events/resume.ts';
 export {
   registerConsumer,
   createConsumerPump,

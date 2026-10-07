@@ -106,24 +106,17 @@ COPY docker/entrypoint.mjs ./entrypoint.mjs
 
 # ---------- runtime ----------
 FROM ${NODE_IMAGE} AS runtime
-# `apk upgrade` (not a version pin): CVE-2026-14456 (OpenSSL DoS, fixed
-# upstream in 3.5.8-r0) postdates this base image's last build but is already
-# in Alpine 3.24's index — verified with `trivy image` during WP 0.4. Revisit
-# once a Renovate-proposed base-image digest bump makes this redundant.
+# Pin policy (WP 9.11, G-22 / F-94-8; the same as docker/backup.Dockerfile's,
+# which carries the reasoning): the base image is pinned by digest above, apk
+# packages are not pinned to an exact build — Alpine serves only the current
+# build, so an exact pin is a build that expires — and `trivy image` (CI, and
+# upgrade-test.yml's weekly no-cache build) controls what arrives. `apk
+# upgrade` of openssl takes the index's fixed build (CVE-2026-14456 postdated
+# the base's last build).
 #
 # `age` (WP 4.12b, C-5; G3-4): `GET /export?encrypt=true` shells out to it
-# (`apps/api/src/reports/export/bundle.ts`'s `encryptWithAge`) and this image
-# never carried it — the route's own `AgeUnavailableError` refusal was honest
-# (503, no plaintext downgrade) but the branch was permanent. Pinned to the
-# exact apk build, not just the Alpine release, the same way
-# `docker/backup.Dockerfile` already pins it — same base image
-# (`alpine:3.24`), so the same version is available in this index; verified
-# against Alpine 3.24's main index at implementation time (2026-09-27). No
-# Renovate coverage for apk packages (06 §5.6); see RUNBOOK.md for the manual
-# bump procedure.
-# age bumped 2026-10-06 with docker/backup.Dockerfile's (F-94-8: Alpine's
-# index no longer served 1.3.1-r6).
-RUN apk add --no-cache tini age=1.3.2-r0 && \
+# (`apps/api/src/reports/export/bundle.ts`'s `encryptWithAge`).
+RUN apk add --no-cache tini age && \
     apk upgrade --no-cache libssl3 libcrypto3 && \
     addgroup -g 10001 -S app && \
     adduser -u 10001 -S -G app -H -D -s /sbin/nologin app && \

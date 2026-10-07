@@ -107,6 +107,10 @@ export const exportRoutes = (
       },
       async (request, reply) => {
         const session = await guards.requireFreshSession(request);
+        // G-25 (WP 9.11): every table the holder owns is about to leave the box.
+        await guards.recordOperation(request, session.userId, 'export.downloaded', {
+          encrypted: request.query.encrypt === 'true',
+        });
         const bundle = await buildExportBundle(pool, {
           userId: session.userId,
           appVersion: OPENAPI_CONTRACT_VERSION,
@@ -141,6 +145,7 @@ export const exportRoutes = (
             'content-type': 'application/octet-stream',
             'content-disposition': 'attachment; filename="personalfi-export.jsonl.age"',
             [CORRELATION_ID_HEADER]: String(request.id),
+            'cache-control': 'no-store',
           });
           reply.raw.end(ciphertext);
           return;
@@ -151,6 +156,7 @@ export const exportRoutes = (
           'content-type': `${BUNDLE_CONTENT_TYPE}; charset=utf-8`,
           'content-disposition': 'attachment; filename="personalfi-export.jsonl"',
           [CORRELATION_ID_HEADER]: String(request.id),
+          'cache-control': 'no-store',
         });
         reply.raw.end(text);
       },
@@ -203,7 +209,13 @@ export const exportRoutes = (
         // preserved from the export — see `import.ts`'s header for why: the
         // column carries a real foreign key to `users`, and only this
         // instance's own bootstrap user is guaranteed to exist.
-        return importBundle(pool, parsed, session.userId);
+        const loaded = await importBundle(pool, parsed, session.userId);
+        // G-25 (WP 9.11): recorded after the load committed.
+        await guards.recordOperation(request, session.userId, 'import.loaded', {
+          tables: loaded.tablesLoaded.length,
+          rows: loaded.rowsLoaded,
+        });
+        return loaded;
       },
     );
 

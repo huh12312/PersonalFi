@@ -12,6 +12,22 @@
 #   4. `/ready` must answer 200 and api/worker must not have restarted.
 # Rollback is "restore the pre-migration backup", never "pin the prior image".
 #
+# WP 9.11 (G-21 / CF-19) adds two things, neither of which changes a dev,
+# gate or scratch upgrade:
+#   * the production project (`personalfi-prod`, as compose resolves it —
+#     `.env` included) runs scripts/soak/check-isolation.sh first and refuses
+#     on any violation (the floating `dev` tag, this agent checkout, ...).
+#     Every other project is left alone: that guard refuses every project but
+#     production by design, so calling it unconditionally would break the
+#     upgrade test and every scratch install;
+#   * `PERSONALFI_PULL=1 PERSONALFI_RELEASE=x.y.z just upgrade` pulls the
+#     published images instead of building: scripts/verify-release.sh checks
+#     each digest's cosign signature (this repository's release.yml at
+#     `v<release>`, at the checked-out commit) and its provenance attestation,
+#     pulls by digest and tags it as the names compose runs; `up --no-build`
+#     then starts exactly those bytes. Building from source stays the default
+#     until a release is tagged (09 §6 Q8 — the tag is Chris's).
+#
 # Upgrade this install in place, after `git pull` (automatic backup, migrations, checks)
 upgrade:
     #!/usr/bin/env bash
@@ -23,11 +39,32 @@ upgrade:
     # justfile's directory in both, so this line makes the two agree.
     cd "{{justfile_directory()}}"
     echo "upgrade: $(git rev-parse --short HEAD 2>/dev/null || echo 'this checkout') as ${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}, images ${REGISTRY:-personalfi}/*:${PERSONALFI_VERSION:-dev}"
+    # The project and image version exactly as compose resolves them (.env
+    # included): the shell may not carry PERSONALFI_VERSION when .env does.
+    resolved="$(docker compose config --format json 2>/dev/null | node -e 'let s="";process.stdin.on("data",(c)=>(s+=c)).on("end",()=>{try{const d=JSON.parse(s);const img=String(d.services?.api?.image??"");process.stdout.write(String(d.name??"")+"\t"+(img.includes(":")?img.slice(img.lastIndexOf(":")+1):""))}catch{process.exit(1)}})')" ||
+      { echo "upgrade: FAILED: \`docker compose config\` rejected this project" >&2; exit 1; }
+    project="${resolved%%$'\t'*}"
+    version="${resolved#*$'\t'}"
+    version="${version:-${PERSONALFI_VERSION:-}}"
+    if [ "$project" = "personalfi-prod" ]; then
+      # G-21 (d): production refuses to upgrade from the wrong directory, the
+      # wrong project or a floating tag, before anything is pulled or built.
+      bash scripts/soak/check-isolation.sh "$project" "$version" "$PWD"
+    fi
     bash scripts/secrets-placeholders.sh
-    docker compose build
+    up_flags=()
+    if [ "${PERSONALFI_PULL:-0}" = "1" ]; then
+      [ -n "${PERSONALFI_RELEASE:-}" ] || { echo "upgrade: FAILED: PERSONALFI_PULL=1 needs PERSONALFI_RELEASE=x.y.z (the release tag without its v)" >&2; exit 1; }
+      echo "upgrade: pull-and-verify v${PERSONALFI_RELEASE} at $(git rev-parse HEAD)"
+      bash scripts/verify-release.sh --release "$PERSONALFI_RELEASE" --commit "$(git rev-parse HEAD)" \
+        --pull --registry "${REGISTRY:-personalfi}" --version "$version"
+      up_flags+=(--no-build)
+    else
+      docker compose build
+    fi
     started="$(date +%s)"
     echo "upgrade: up -d --wait (load $(cut -d' ' -f1-3 /proc/loadavg))"
-    if ! docker compose up -d --wait --wait-timeout 900; then
+    if ! docker compose up -d --wait --wait-timeout 900 ${up_flags[@]+"${up_flags[@]}"}; then
       echo "upgrade: FAILED to come up. The migrator and the pre-migration backup say why:" >&2
       docker compose logs --no-log-prefix --tail 20 pre-migrate-backup migrator >&2 || true
       exit 1

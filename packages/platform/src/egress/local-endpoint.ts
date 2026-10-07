@@ -38,18 +38,15 @@
  * `compose.yml`'s `llm` network (`internal: true`) and
  * `scripts/compose-hardening-check.sh`'s `ollama-*` rules.
  *
- * ## Why this file carries its own request function
+ * ## One dial, one classification
  *
- * `createNodeTransport` has no `AbortSignal`, and its pinned lookup is a
- * closure rather than an export. The request function below uses the same
- * pinned-lookup construction and adds the signal; folding the two back into
- * one transport is recorded for the orchestrator in
- * `docs/evidence/phase-5/wp5.2-local-model.md` §10. Until then there are two
- * copies of *the dial*, and still exactly one of *the classification*.
+ * Until WP 9.11 this file carried its own copy of the dial (WP 5.2 §10 had
+ * recorded folding it back). It now calls `dial.ts`'s `pinnedRequest`, the
+ * same function `transport.ts` calls, so there is exactly one implementation
+ * of the dial and still exactly one of the classification (G-24).
+ * `dial.test.ts` holds the structural test that the tree has one dialer.
  */
-import http from 'node:http';
-import https from 'node:https';
-import type { LookupFunction } from 'node:net';
+import { headerProblem, isDialError, pinnedRequest } from './dial.ts';
 import {
   classifyAddress,
   looksLikeIpLiteral,
@@ -363,9 +360,9 @@ export function createLocalEndpointTransport(
     }
     const headers: Record<string, string> = {};
     for (const [name, value] of Object.entries(input.headers ?? {})) {
-      if (/[\r\n\0]/u.test(value) || value.length > 4096 || !/^[A-Za-z0-9-]+$/u.test(name)) {
-        throw new LocalEndpointRefusedError('header_not_allowed', `${name} is not a safe header`);
-      }
+      // The dialer checks again before it writes; this refuses before DNS.
+      const problem = headerProblem(name, value);
+      if (problem !== null) throw new LocalEndpointRefusedError('header_not_allowed', problem);
       headers[name.toLowerCase()] = value;
     }
 
@@ -382,119 +379,63 @@ export function createLocalEndpointTransport(
     );
     const timeoutMs = Math.max(1, Math.min(policy.timeoutMs, input.timeoutMs ?? policy.timeoutMs));
 
-    // The rebinding defence, the same construction as `transport.ts`: DNS is
-    // not consulted again, and both callback shapes are answered because
-    // `net` calls `lookup` with `{ all: true }` whenever `autoSelectFamily` is
-    // on (the Node ≥ 20 default).
-    const pinnedLookup: LookupFunction = (_hostname, lookupOptions, callback) => {
-      const family = address.includes(':') ? 6 : 4;
-      if (
-        typeof lookupOptions === 'object' &&
-        lookupOptions !== null &&
-        lookupOptions.all === true
-      ) {
-        (
-          callback as unknown as (
-            error: null,
-            addresses: { address: string; family: number }[],
-          ) => void
-        )(null, [{ address, family }]);
-        return;
-      }
-      (callback as (error: null, addr: string, family: number) => void)(null, address, family);
-    };
-
     const body = input.body === undefined ? undefined : Buffer.from(input.body, 'utf8');
     if (body !== undefined) {
       headers['content-type'] ??= 'application/json';
       headers['content-length'] = String(body.length);
     }
 
-    return await new Promise<LocalEndpointResponse>((resolvePromise, rejectPromise) => {
-      let settled = false;
-      const signal = input.signal;
-      const finish = (outcome: () => void): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(deadline);
-        signal?.removeEventListener('abort', onAbort);
-        outcome();
-      };
-      const fail = (code: LocalEndpointRefusalCode, detail: string): void => {
-        outbound.destroy();
-        finish(() => rejectPromise(new LocalEndpointRefusedError(code, detail)));
-      };
-
-      const client = policy.scheme === 'https' ? https : http;
-      const requestOptions: https.RequestOptions = {
+    // The dial is `dial.ts`'s `pinnedRequest` — the one dialer, shared with
+    // `transport.ts` since WP 9.11 (G-24): the checked address with a lookup
+    // that never consults DNS, TLS verified, one socket per request, a 3xx
+    // refused unread, the body bounded, one deadline and the caller's signal.
+    try {
+      const response = await pinnedRequest({
         host: policy.host,
+        address,
         port: policy.port,
         path: input.path,
         method: input.method,
-        headers: { ...headers, host: `${policy.host}:${String(policy.port)}` },
-        lookup: pinnedLookup,
-        // One socket per request, closed with it: no pooled connection can
-        // outlive the check that justified it, and an abort always has a
-        // socket of its own to destroy.
-        agent: false,
-        ...(policy.scheme === 'https'
-          ? { servername: policy.host, rejectUnauthorized: true, minVersion: 'TLSv1.2' as const }
-          : {}),
+        hostHeader: `${policy.host}:${String(policy.port)}`,
+        headers,
+        ...(body === undefined ? {} : { body }),
+        tls: policy.scheme === 'https',
+        maxResponseBytes,
+        deadlineMs: timeoutMs,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        redirects: 'refuse',
+      });
+      return {
+        status: response.status,
+        body: response.body,
+        bytesRead: response.bytesRead,
+        address,
       };
-
-      const outbound = client.request(requestOptions, (response) => {
-        const status = response.statusCode ?? 0;
-        if (status >= 300 && status < 400) {
-          response.destroy();
-          fail('redirect_not_followed', `HTTP ${String(status)}: redirects are never followed`);
-          return;
-        }
-        const chunks: Buffer[] = [];
-        let bytesRead = 0;
-        response.on('data', (chunk: Buffer) => {
-          bytesRead += chunk.length;
-          if (bytesRead > maxResponseBytes) {
-            response.destroy();
-            fail('response_too_large', `response exceeded ${String(maxResponseBytes)} bytes`);
-            return;
-          }
-          chunks.push(chunk);
-        });
-        response.on('end', () => {
-          finish(() =>
-            resolvePromise({
-              status,
-              body: Buffer.concat(chunks).toString('utf8'),
-              bytesRead,
-              address,
-            }),
-          );
-        });
-        response.on('error', (error) => fail('connection_failed', describe(error)));
-        response.on('close', () => {
-          if (!response.complete) fail('connection_failed', 'the server closed mid-response');
-        });
-      });
-
-      const deadline = setTimeout(() => {
-        fail('timeout', `request did not complete within ${String(timeoutMs)} ms`);
-      }, timeoutMs);
-      deadline.unref?.();
-
-      function onAbort(): void {
-        fail('aborted', 'the caller aborted the request');
-      }
-      signal?.addEventListener('abort', onAbort, { once: true });
-
-      outbound.on('error', (error) => {
-        if (!settled) fail('connection_failed', describe(error));
-      });
-      if (body !== undefined) outbound.write(body);
-      outbound.end();
-    });
+    } catch (error) {
+      throw toLocalEndpointError(error);
+    }
   }
 
   return Object.freeze({ policy, request });
+}
+
+function toLocalEndpointError(error: unknown): LocalEndpointRefusedError {
+  if (isLocalEndpointRefusedError(error)) return error;
+  if (isDialError(error)) {
+    switch (error.code) {
+      case 'header_not_allowed':
+      case 'redirect_not_followed':
+      case 'response_too_large':
+      case 'timeout':
+      case 'aborted':
+        return new LocalEndpointRefusedError(error.code, error.message);
+      case 'idle_timeout':
+        return new LocalEndpointRefusedError('timeout', error.message);
+      case 'incomplete_response':
+        return new LocalEndpointRefusedError('connection_failed', error.message);
+    }
+  }
+  return new LocalEndpointRefusedError('connection_failed', describe(error));
 }
 
 function refuseDecision(code: LocalEndpointRefusalCode, detail: string): LocalEndpointDecision {

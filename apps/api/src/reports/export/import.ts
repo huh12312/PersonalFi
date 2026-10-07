@@ -22,8 +22,19 @@
  * `userId` at the route) and every table's `user_id` column is overwritten
  * with it during insert, before the row ever reaches Postgres.
  */
+import { DateOnly } from '@core/kernel';
 import type { TransactionProviderRow, TransactionRow } from '@ctx/ledger/schema';
 import { projectEffective } from '@ctx/ledger';
+import {
+  currentRegistry,
+  deriveTolerance,
+  LIQUIDITY_NEEDS,
+  profileFromJson,
+  resolveOverrides,
+  UnknownAssumptionsVersion,
+  type AssumptionDeltas,
+  type AssumptionsRegistry,
+} from '@ctx/planning';
 import type { Pool, PoolClient } from 'pg';
 import { AppError } from '../../problem.ts';
 import { TABLE_ORDER } from './registry.ts';
@@ -96,6 +107,125 @@ async function jsonColumnsOf(client: PoolClient, table: string): Promise<Set<str
   return new Set(result.rows.map((row) => row.column_name));
 }
 
+async function columnsOf(client: PoolClient, table: string): Promise<Set<string>> {
+  const result = await client.query<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = $1`,
+    [table],
+  );
+  return new Set(result.rows.map((row) => row.column_name));
+}
+
+function refuseBundle(code: string, detail: string): AppError {
+  return new AppError({ status: 400, code, title: 'Bad Request', detail, family: 'user' });
+}
+
+/**
+ * O-11 (Phase 4 gate; WP 9.11, ASVS V2): the plan data a bundle carries is
+ * re-validated through the same functions the routes use, the way D11 already
+ * re-projects transactions rather than trusting the export. A bundle's
+ * per-stream SHA-256s detect corruption but are not a MAC — a crafted bundle
+ * with recomputed hashes verifies — and until this the only check on its plan
+ * rows was the database's own CHECKs (structural, not semantic: a 99 %
+ * expected return passed, so did a tolerance the answers do not score to).
+ *
+ * - `plan_assumptions`: every delta through `resolveOverrides` — the
+ *   overridable paths and the bounds `PUT /assumptions/overrides` enforces —
+ *   when its assumptions version is one this build carries (a version it does
+ *   not is inert: the read path refuses to apply it, as on a live install);
+ * - `risk_profile`: the stored answers re-scored by `deriveTolerance` (the
+ *   questionnaire's own scoring) and the stored tolerance and scores required
+ *   to be what they score to; horizon and liquidity in the route's vocabulary;
+ * - `plan_scenarios`: a baseline's profile through `profileFromJson`, the
+ *   parser the projection reads it with.
+ *
+ * Pure: runs before the transaction opens, so a refusal writes nothing.
+ */
+export function revalidatePlanRows(
+  parsed: ParsedBundle,
+  registry: AssumptionsRegistry = currentRegistry(),
+): void {
+  const at = DateOnly.parse('2000-01-01');
+  const refuseRow = (table: string, index: number, why: string): never => {
+    throw refuseBundle(
+      'export.bundle_row_invalid',
+      `${table} row ${String(index + 1)} does not pass the checks its route applies: ${why}`,
+    );
+  };
+  const reason = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
+
+  (parsed.rowsByTable.get('plan_assumptions') ?? []).forEach((row, index) => {
+    try {
+      resolveOverrides(
+        {
+          assumptionsVersion: String(row['assumptions_version']),
+          deltas: (row['deltas'] ?? {}) as AssumptionDeltas,
+        },
+        at,
+        registry,
+      );
+    } catch (error) {
+      // An assumptions version this build does not hold (a bundle from a
+      // release whose file has since rolled off) is imported as it is: the
+      // read path refuses to apply such a delta exactly as it does for a row
+      // left behind on a live install by an upgrade (409
+      // `planning.assumptions_version_unknown`), so its values can never
+      // reach a projection. Everything checkable against a known file is.
+      if (error instanceof UnknownAssumptionsVersion) return;
+      refuseRow('plan_assumptions', index, reason(error));
+    }
+  });
+
+  (parsed.rowsByTable.get('risk_profile') ?? []).forEach((row, index) => {
+    let derived: ReturnType<typeof deriveTolerance>;
+    try {
+      derived = deriveTolerance(row['answers']);
+    } catch (error) {
+      return refuseRow('risk_profile', index, reason(error));
+    }
+    const stored = {
+      tolerance: row['tolerance'],
+      composite: Number(row['composite_score']),
+      unpenalised: Number(row['unpenalised_score']),
+      penalty: Number(row['consistency_penalty']),
+    };
+    if (
+      stored.tolerance !== derived.tolerance ||
+      stored.composite !== derived.compositeScore ||
+      stored.unpenalised !== derived.unpenalisedScore ||
+      stored.penalty !== derived.consistencyPenalty
+    ) {
+      refuseRow(
+        'risk_profile',
+        index,
+        `the answers score to ${derived.tolerance} (${String(derived.compositeScore)}), not the ` +
+          `stored ${String(stored.tolerance)} (${String(stored.composite)})`,
+      );
+    }
+    const horizon = Number(row['horizon_years']);
+    if (!Number.isInteger(horizon) || horizon < 0 || horizon > 100) {
+      refuseRow('risk_profile', index, 'horizon_years must be a whole number from 0 to 100');
+    }
+    if (!(LIQUIDITY_NEEDS as readonly unknown[]).includes(row['liquidity_need'])) {
+      refuseRow(
+        'risk_profile',
+        index,
+        `liquidity_need must be one of ${LIQUIDITY_NEEDS.join(', ')}`,
+      );
+    }
+  });
+
+  (parsed.rowsByTable.get('plan_scenarios') ?? []).forEach((row, index) => {
+    if (row['kind'] !== 'baseline') return;
+    try {
+      profileFromJson(row['profile']);
+    } catch (error) {
+      refuseRow('plan_scenarios', index, reason(error));
+    }
+  });
+}
+
 async function insertRows(
   client: PoolClient,
   table: string,
@@ -104,6 +234,18 @@ async function insertRows(
 ): Promise<void> {
   if (rows.length === 0) return;
   const columns = Object.keys(rows[0] ?? {});
+  // O-11 (WP 9.11): a column name is interpolated into the INSERT below, and
+  // it arrives from the bundle — whose hashes are a checksum, not a MAC, so a
+  // crafted bundle chooses them. Every name must be a real column of this
+  // table, or nothing is written.
+  const known = await columnsOf(client, table);
+  const unknown = columns.filter((column) => !known.has(column));
+  if (unknown.length > 0) {
+    throw refuseBundle(
+      'export.bundle_column_unknown',
+      `${table}: ${unknown.map((column) => JSON.stringify(column)).join(', ')} is not a column of this table`,
+    );
+  }
   const jsonColumns = await jsonColumnsOf(client, table);
   const columnList = columns.map((column) => `"${column}"`).join(', ');
   const placeholders = columns.map((_column, index) => `$${String(index + 1)}`).join(', ');
@@ -187,6 +329,8 @@ export async function importBundle(
   parsed: ParsedBundle,
   targetUserId: string,
 ): Promise<ImportResult> {
+  // O-11: before a connection is taken — a refused bundle writes nothing.
+  revalidatePlanRows(parsed);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

@@ -30,6 +30,16 @@ export interface Guards {
   /** The session, if there is one. For routes where absence is not an error. */
   optionalSession(request: FastifyRequest): Promise<SessionRecord | null>;
   contextOf(request: FastifyRequest): RequestContext;
+  /**
+   * G-25 (WP 9.11): write a `security_events` row for an operation a stolen
+   * session would want (the bundle leaving the box, a bundle loaded).
+   */
+  recordOperation(
+    request: FastifyRequest,
+    userId: string,
+    kind: 'export.downloaded' | 'import.loaded',
+    detail: Record<string, unknown>,
+  ): Promise<void>;
 }
 
 export function unauthenticated(): AppError {
@@ -62,13 +72,35 @@ export function createGuards(runtime: SecurityRuntime): Guards {
     return session;
   }
 
+  function contextOf(request: FastifyRequest): RequestContext {
+    return {
+      ip: request.ip,
+      userAgent: request.headers['user-agent'],
+      correlationId: String(request.id),
+    };
+  }
+
   return {
     requireSession,
 
     async requireFreshSession(request: FastifyRequest): Promise<SessionRecord> {
       const identity = runtime.requireIdentity();
       const session = await requireSession(request);
-      if (!identity.sessions.isFresh(session)) throw stepUpRequired();
+      if (!identity.sessions.isFresh(session)) {
+        // G-25 (WP 9.11): a stale session reaching for a guarded operation is
+        // the shape of a stolen cookie, so it is a security event, not only a
+        // log line. Never allowed to turn the 403 into a 500.
+        await identity.flows
+          .recordSensitiveOperation(
+            session.userId,
+            'auth.step_up_refused',
+            'blocked',
+            { method: request.method, route: request.routeOptions.url ?? 'unknown' },
+            contextOf(request),
+          )
+          .catch(() => undefined);
+        throw stepUpRequired();
+      }
       return session;
     },
 
@@ -79,12 +111,12 @@ export function createGuards(runtime: SecurityRuntime): Guards {
       return runtime.requireIdentity().sessions.authenticate(token);
     },
 
-    contextOf(request: FastifyRequest): RequestContext {
-      return {
-        ip: request.ip,
-        userAgent: request.headers['user-agent'],
-        correlationId: String(request.id),
-      };
+    contextOf,
+
+    async recordOperation(request, userId, kind, detail): Promise<void> {
+      await runtime
+        .requireIdentity()
+        .flows.recordSensitiveOperation(userId, kind, 'success', detail, contextOf(request));
     },
   };
 }

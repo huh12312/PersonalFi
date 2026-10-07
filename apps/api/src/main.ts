@@ -19,6 +19,7 @@ import { createPool } from '@core/db';
 import { recordConfigSnapshot } from '@core/platform';
 import { loadAssumptions } from '@ctx/planning';
 import { buildApp } from './app.ts';
+import { APP_DATABASE_ROLE, appRoleDatabaseUrl, ensureAppRole } from './db-role.ts';
 import { buildPlatform } from './platform.ts';
 
 async function main(): Promise<void> {
@@ -33,8 +34,12 @@ async function main(): Promise<void> {
   // way the config snapshot a few lines down deliberately is.
   loadAssumptions();
 
+  // CF-18 / G-01 (WP 9.11): every pooled connection starts as the DML-only
+  // `personalfi_app` role, never the owner the login may still be; the role
+  // and its grants are re-asserted first, because a restore drops both.
+  const appRole = await ensureAppRole(config.databaseUrl.reveal());
   const pool = createPool({
-    databaseUrl: config.databaseUrl.reveal(),
+    databaseUrl: appRoleDatabaseUrl(config.databaseUrl.reveal()),
     max: config.env.DATABASE_POOL_MAX,
     statementTimeoutMs: config.env.DATABASE_STATEMENT_TIMEOUT_MS,
     applicationName: 'personalfi-api',
@@ -61,6 +66,14 @@ async function main(): Promise<void> {
     app.log.warn({ err: error }, 'could not record the config snapshot; continuing');
   }
   app.log.info({ config: describeConfig(config), configHash }, 'configuration loaded');
+  if (appRole.ok) {
+    app.log.info({ role: APP_DATABASE_ROLE }, 'database connections use the app role');
+  } else {
+    app.log.error(
+      { role: APP_DATABASE_ROLE, error: appRole.error },
+      'could not ensure the database app role; queries will fail until the migrator has run',
+    );
+  }
 
   // Derive the KEK before the socket opens, so the first request after a restart
   // does not pay six seconds of Argon2id (03 §2.2 Tier 1: boot is unattended).

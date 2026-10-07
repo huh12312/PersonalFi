@@ -33,7 +33,11 @@ export type SecurityEventKind =
   | 'user.bootstrapped'
   | 'kek.unlocked'
   | 'kek.unlock_failed'
-  | 'kek.rotated';
+  | 'kek.rotated'
+  // WP 9.11 (G-25): operations a stolen session would want, and its refusals.
+  | 'auth.step_up_refused'
+  | 'export.downloaded'
+  | 'import.loaded';
 
 export type SecurityEventOutcome = 'success' | 'failure' | 'blocked';
 

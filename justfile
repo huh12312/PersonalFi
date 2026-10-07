@@ -749,6 +749,21 @@ bootstrap-user name="" timezone="UTC" reissue="false":
       pnpm exec node apps/api/src/bin/bootstrap-user.ts "${args[@]}"
     fi
 
+# Resume a stopped event consumer (one /ready lists under outbox.failedConsumers), e.g. `just consumer-resume budgeting.actuals@v1`
+consumer-resume name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # WP 9.11 (G-23 / F-94-5): the operator path back for a dead-lettered
+    # consumer, which used to be SQL. It retries the SAME event — nothing is
+    # skipped — so fix the cause it prints first. Inside the api container when
+    # the stack is up (the database is not reachable from the host by design),
+    # else against the local dev database — the same shape as bootstrap-user.
+    if docker compose ps --status running --services 2>/dev/null | grep -qx api; then
+      docker compose exec -T api node /app/apps/api/src/bin/consumer-resume.ts {{ quote(name) }}
+    else
+      pnpm exec node apps/api/src/bin/consumer-resume.ts {{ quote(name) }}
+    fi
+
 # Generate a high-entropy KEK passphrase into secrets/master_key (mode 0400).
 # Never an env var: env leaks into `docker inspect` and /proc/<pid>/environ (P0-2).
 gen-master-key:

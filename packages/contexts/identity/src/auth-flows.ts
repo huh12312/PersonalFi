@@ -369,6 +369,45 @@ export class AuthFlows {
     });
   }
 
+  /** G-12 (WP 9.11): the confirmed TOTP seed was revoked by its holder. */
+  async recordTotpRemoved(userId: string, context: RequestContext): Promise<void> {
+    await recordSecurityEvent(this.#db, this.#clock, {
+      kind: 'totp.removed',
+      outcome: 'success',
+      userId,
+      context,
+    });
+  }
+
+  /** G-02 (WP 9.11): session families the holder terminated from the session list. */
+  async recordSessionsRevoked(
+    userId: string,
+    familyIds: readonly string[],
+    context: RequestContext,
+  ): Promise<void> {
+    await recordSecurityEvent(this.#db, this.#clock, {
+      kind: 'session.revoked',
+      outcome: 'success',
+      userId,
+      detail: { families: familyIds.length, familyIds: [...familyIds], reason: 'holder' },
+      context,
+    });
+  }
+
+  /**
+   * G-25 (WP 9.11): the bundle left the box, a bundle was loaded, or a stale
+   * session was refused a step-up-guarded operation.
+   */
+  async recordSensitiveOperation(
+    userId: string,
+    kind: 'export.downloaded' | 'import.loaded' | 'auth.step_up_refused',
+    outcome: 'success' | 'blocked',
+    detail: Record<string, unknown>,
+    context: RequestContext,
+  ): Promise<void> {
+    await recordSecurityEvent(this.#db, this.#clock, { kind, outcome, userId, detail, context });
+  }
+
   async listEvents(userId: string, limit: number): Promise<SecurityEventSummary[]> {
     return listSecurityEvents(this.#db, userId, limit);
   }

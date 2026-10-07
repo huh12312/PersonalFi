@@ -34,6 +34,7 @@ import {
   type CookiePolicy,
 } from '../auth/cookies.ts';
 import { ensureCsrfCookie } from '../auth/csrf.ts';
+import { createGuards } from '../auth/guards.ts';
 import type { SecurityRuntime } from '../auth/runtime.ts';
 
 export interface AuthRouteOptions {
@@ -162,38 +163,17 @@ const securityEventSchema = z
 export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => {
   const { runtime, cookiePolicy } = options;
 
-  /** Resolve the caller's session, or 401. Slides the idle window as a side effect. */
-  async function requireSession(request: FastifyRequest): Promise<SessionRecord> {
-    const identity = runtime.requireIdentity();
-    const token = request.cookies[SESSION_COOKIE];
-    if (typeof token !== 'string' || token.length === 0) throw unauthenticated();
-    const session = await identity.sessions.authenticate(token);
-    if (session === null) throw unauthenticated();
-    return session;
-  }
-
+  // One implementation of "resolve the session, or 401" and of step-up, shared
+  // with every other router (WP 9.11: auth.ts had kept its own copy of both,
+  // which is how a fix lands in one and not the other).
+  const guards = createGuards(runtime);
+  const requireSession = guards.requireSession;
   /**
-   * Require a WebAuthn assertion from within the last five minutes (P1-2).
-   *
-   * Other packages will call the equivalent for Plaid Item add/remove, credential
-   * reads, exports and sidecar acknowledgements. Here it guards the auth settings
-   * themselves, which is the same class of operation: a stolen session cookie must
-   * not be able to enrol a second passkey and make itself permanent.
+   * Require a WebAuthn assertion from within the last five minutes (P1-2). Here
+   * it guards the auth settings themselves: a stolen session cookie must not be
+   * able to enrol a second passkey and make itself permanent.
    */
-  async function requireFreshSession(request: FastifyRequest): Promise<SessionRecord> {
-    const identity = runtime.requireIdentity();
-    const session = await requireSession(request);
-    if (!identity.sessions.isFresh(session)) {
-      throw new AppError({
-        status: 403,
-        code: 'step_up_required',
-        title: 'Forbidden',
-        detail: 'This operation needs a recent passkey assertion. Call /auth/step-up/options.',
-        family: 'user',
-      });
-    }
-    return session;
-  }
+  const requireFreshSession = guards.requireFreshSession;
 
   function contextOf(request: FastifyRequest): RequestContext {
     return {
@@ -691,6 +671,29 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
       },
     );
 
+    app.delete(
+      '/auth/totp',
+      {
+        schema: {
+          operationId: 'removeTotp',
+          summary: 'Revoke the TOTP seed',
+          description:
+            'G-12: deletes the TOTP seed (confirmed or not), so a leaked seed stops working at ' +
+            'once. Needs a step-up assertion. To replace a seed instead, enrol and confirm a new ' +
+            'one: confirming swaps it in atomically.',
+          tags: ['auth'],
+          response: { 200: okResponse, ...problems(401, 403) },
+        },
+      },
+      async (request) => {
+        const identity = runtime.requireIdentity();
+        const session = await requireFreshSession(request);
+        await identity.totp.remove(session.userId);
+        await identity.flows.recordTotpRemoved(session.userId, contextOf(request));
+        return { ok: true } as const;
+      },
+    );
+
     // -------------------------------------------------------- recovery codes
 
     app.post(
@@ -715,6 +718,125 @@ export const authRoutes = (options: AuthRouteOptions): FastifyPluginAsyncZod => 
         const generated = await identity.recoveryCodes.generate(session.userId);
         await identity.flows.recordRecoveryCodesGenerated(session.userId, contextOf(request));
         return { codes: [...generated.codes] };
+      },
+    );
+
+    // -------------------------------------------------------------- sessions
+    //
+    // G-02 (WP 9.11): the holder can see and end their sessions (ASVS V7.4.3,
+    // V7.5.2). Step-up on all three: the list reveals where the holder is
+    // signed in, and a stolen session must not be able to end the real one.
+    // The policy: any number of concurrent families; each lives 8 h (14 days on
+    // a trusted device) unless revoked here, on logout, or by reuse detection.
+
+    const sessionSummary = z
+      .object({
+        familyId: z.string(),
+        authMethod: z.string(),
+        trustedDevice: z.boolean(),
+        lastSeenAt: isoInstant,
+        familyExpiresAt: isoInstant,
+        current: z.boolean(),
+      })
+      .meta({ id: 'SessionSummary' });
+
+    app.get(
+      '/auth/sessions',
+      {
+        schema: {
+          operationId: 'listSessions',
+          summary: 'Signed-in sessions',
+          description: 'One entry per live session family. Needs a step-up assertion.',
+          tags: ['auth'],
+          response: { 200: z.object({ sessions: z.array(sessionSummary) }), ...problems(401, 403) },
+        },
+      },
+      async (request) => {
+        const identity = runtime.requireIdentity();
+        const session = await requireFreshSession(request);
+        const live = await identity.sessions.listLive(session.userId);
+        return {
+          sessions: live.map((entry) => ({
+            familyId: entry.familyId,
+            authMethod: entry.authMethod,
+            trustedDevice: entry.trustedDevice,
+            lastSeenAt: entry.lastSeenAt.toISOString(),
+            familyExpiresAt: entry.familyExpiresAt.toISOString(),
+            current: entry.familyId === session.familyId,
+          })),
+        };
+      },
+    );
+
+    app.delete(
+      '/auth/sessions',
+      {
+        schema: {
+          operationId: 'revokeOtherSessions',
+          summary: 'Sign out every other session',
+          description:
+            'Revokes every live session family except the caller’s. Needs a step-up assertion.',
+          tags: ['auth'],
+          response: { 200: z.object({ revoked: z.int().nonnegative() }), ...problems(401, 403) },
+        },
+      },
+      async (request) => {
+        const identity = runtime.requireIdentity();
+        const session = await requireFreshSession(request);
+        const others = [
+          ...new Set(
+            (await identity.sessions.listLive(session.userId))
+              .map((entry) => entry.familyId)
+              .filter((familyId) => familyId !== session.familyId),
+          ),
+        ];
+        for (const familyId of others) {
+          await identity.sessions.revokeFamily(familyId, 'revoked_by_holder');
+        }
+        if (others.length > 0) {
+          await identity.flows.recordSessionsRevoked(session.userId, others, contextOf(request));
+        }
+        return { revoked: others.length };
+      },
+    );
+
+    app.delete(
+      '/auth/sessions/:familyId',
+      {
+        schema: {
+          operationId: 'revokeSession',
+          summary: 'Sign out one session',
+          description:
+            'Revokes one of the caller’s own session families (the caller’s own included, which ' +
+            'also clears its cookies). Needs a step-up assertion. Another holder’s family is a 404.',
+          tags: ['auth'],
+          params: z.object({ familyId: z.uuid() }),
+          response: { 200: okResponse, ...problems(401, 403, 404) },
+        },
+      },
+      async (request, reply) => {
+        const identity = runtime.requireIdentity();
+        const session = await requireFreshSession(request);
+        const owned = (await identity.sessions.listLive(session.userId)).some(
+          (entry) => entry.familyId === request.params.familyId,
+        );
+        if (!owned) {
+          throw new AppError({
+            status: 404,
+            code: 'session_not_found',
+            title: 'Not Found',
+            detail: 'No live session of yours has that id.',
+            family: 'user',
+          });
+        }
+        await identity.sessions.revokeFamily(request.params.familyId, 'revoked_by_holder');
+        await identity.flows.recordSessionsRevoked(
+          session.userId,
+          [request.params.familyId],
+          contextOf(request),
+        );
+        if (request.params.familyId === session.familyId) clearSessionCookies(reply, cookiePolicy);
+        return { ok: true } as const;
       },
     );
 

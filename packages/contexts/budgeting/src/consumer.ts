@@ -66,6 +66,7 @@ import {
 import { and, eq } from 'drizzle-orm';
 import { budgetPeriods, budgets } from '../schema/index.ts';
 import type { BudgetingDatabase } from './db.ts';
+import { isBudgetingError } from './errors.ts';
 import type { LedgerPort } from './ledger-port.ts';
 import { markDirtyFrom, recomputeDirty } from './service.ts';
 
@@ -246,7 +247,27 @@ export function createBudgetingConsumer(dependencies: {
           } else {
             await markDirtyFrom(tx, budgetingContext, { budgetId: budget.id, date });
           }
-          await recomputeDirty(tx, budgetingContext, { port: dependencies.port }, budget.id);
+          // G-23 / F-94-5 (WP 9.11): an on-budget account with no balance
+          // observation yet (a freshly linked institution) is "not yet", not a
+          // poison event. The recompute runs in a savepoint; that one refusal
+          // rolls it back and leaves the periods marked dirty above, so the
+          // next event — or the balance itself, `ledger.BalanceRecorded` —
+          // recomputes them. At HEAD it threw, five retries dead-lettered the
+          // consumer, and nothing but SQL brought it back.
+          try {
+            await tx.transaction(async (savepoint) => {
+              await recomputeDirty(
+                savepoint,
+                budgetingContext,
+                { port: dependencies.port },
+                budget.id,
+              );
+            });
+          } catch (error) {
+            if (!(isBudgetingError(error) && error.code === 'budgeting.balance_unreported')) {
+              throw error;
+            }
+          }
         });
       }
     },

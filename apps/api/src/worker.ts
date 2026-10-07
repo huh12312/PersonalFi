@@ -24,7 +24,7 @@ import { createDatabase, createPool } from '@core/db';
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { systemClock } from '@core/kernel';
 import { SecretBox } from '@core/secretbox';
-import { UserService, type UserRecord } from '@ctx/identity';
+import { UserService, withKekDerivationLock, type UserRecord } from '@ctx/identity';
 import { loadAssumptions } from '@ctx/planning';
 import {
   createConsumerPump,
@@ -55,6 +55,7 @@ import {
   hydrateMarketDataBudgets,
   resealPlaintextWalletDescriptors,
 } from './domain.ts';
+import { APP_DATABASE_ROLE, appRoleDatabaseUrl, ensureAppRole } from './db-role.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { appModules } from './modules.ts';
 import { createNarratorWiring } from './narrator-wiring.ts';
@@ -237,8 +238,18 @@ async function main(): Promise<void> {
   // `catch` at the bottom of this file and exit non-zero.
   loadAssumptions();
 
+  // CF-18 / G-01 (WP 9.11): the DML-only app role, as in main.ts.
+  const appRole = await ensureAppRole(config.databaseUrl.reveal());
+  if (appRole.ok) {
+    logger.info({ role: APP_DATABASE_ROLE }, 'database connections use the app role');
+  } else {
+    logger.error(
+      { role: APP_DATABASE_ROLE, error: appRole.error },
+      'could not ensure the database app role; queries will fail until the migrator has run',
+    );
+  }
   const pool = createPool({
-    databaseUrl: config.databaseUrl.reveal(),
+    databaseUrl: appRoleDatabaseUrl(config.databaseUrl.reveal()),
     // **Not** `DATABASE_POOL_MAX` on its own — see `WORKER_PINNED_CONNECTIONS`.
     max: config.env.DATABASE_POOL_MAX + WORKER_PINNED_CONNECTIONS,
     statementTimeoutMs: config.env.DATABASE_STATEMENT_TIMEOUT_MS,
@@ -380,7 +391,14 @@ async function main(): Promise<void> {
         kdfParams: config.kek.params,
         kdfFloor: config.kek.floor,
       });
-      const state = await box.unlock(passphrase.reveal());
+      // Q9 / WP 9.9's boot peak (WP 9.11): one KEK derivation at a time across
+      // the api, this worker and bootstrap-user (`@ctx/identity`'s
+      // `withKekDerivationLock`, a Postgres advisory lock held for exactly the
+      // derivation), so a cold `up` never holds two 1 GiB Argon2 blocks at once.
+      const { result: state, lock } = await withKekDerivationLock(pool, () =>
+        box.unlock(passphrase.reveal()),
+      );
+      logger.info({ kekDerivationLock: lock }, 'key custody: derivation lock');
       if (state.state === 'unlocked') {
         secretBox = box;
         logger.info({ kekVersion: state.kekVersion }, 'key custody: unlocked');

@@ -130,7 +130,11 @@ export interface TestAuthenticator {
   readonly credentialId: string;
   /** The counter the authenticator will report on its *next* assertion. */
   signCount: number;
-  register(challenge: string): Promise<RegistrationResponseJSON>;
+  /** `userVerified: false` clears the UV flag (WP 9.11, G-03). */
+  register(
+    challenge: string,
+    overrides?: { readonly userVerified?: boolean },
+  ): Promise<RegistrationResponseJSON>;
   authenticate(
     challenge: string,
     overrides?: { readonly signCount?: number; readonly userVerified?: boolean },
@@ -237,9 +241,12 @@ export async function createAuthenticator(
       state.signCount = value;
     },
 
-    async register(challenge: string): Promise<RegistrationResponseJSON> {
+    async register(
+      challenge: string,
+      overrides: { readonly userVerified?: boolean } = {},
+    ): Promise<RegistrationResponseJSON> {
       const json = clientData('webauthn.create', challenge, options.origin);
-      const authData = authenticatorData(true, FLAG_UV);
+      const authData = authenticatorData(true, overrides.userVerified === false ? 0 : FLAG_UV);
       const attestationObject = isoCBOR.encode(
         new Map<string | number, unknown>([
           ['fmt', 'none'],

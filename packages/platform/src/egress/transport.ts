@@ -29,11 +29,12 @@
  *
  * `rejectUnauthorized` is never set to false and there is no option that would
  * let a caller set it. A notification is not worth a downgraded TLS session.
+ * Since WP 9.11 all four properties, and the TLS options, live in `dial.ts`
+ * (the one dialer); `apps/api/test/tls-verification.test.ts` proves the
+ * certificate check against a self-signed loopback server.
  */
-import http from 'node:http';
-import https from 'node:https';
-import type { LookupFunction } from 'node:net';
-import { EgressRefusedError, assertHeaderValueSafe, type Destination } from './policy.ts';
+import { isDialError, pinnedRequest } from './dial.ts';
+import { EgressRefusedError, type Destination } from './policy.ts';
 
 export interface TransportRequest {
   readonly destination: Destination;
@@ -65,9 +66,16 @@ export interface TransportResponse {
 export type HttpTransport = (request: TransportRequest) => Promise<TransportResponse>;
 
 /**
- * The real transport, over `node:https` (or `node:http` when the destination
- * says so, which only a test fixture ever does — the channel scheme allow-list
- * has no cleartext member).
+ * The real transport, over `node:https` (or `node:http` when the request says
+ * so, which only a test fixture ever does — the channel scheme allow-list has
+ * no cleartext member).
+ *
+ * Since WP 9.11 (G-24) it owns no socket code: the pinned lookup, the TLS
+ * options, the body cap and both timers are `dial.ts`'s `pinnedRequest`, the
+ * one dialer this tree has, shared with `local-endpoint.ts`. This wrapper
+ * keeps its own contract: a 3xx is *returned* (with `location`) so the caller
+ * can record `redirect_not_followed`, and the refusals it raises are
+ * `EgressRefusedError`s with `policy.ts`'s codes.
  */
 export function createNodeTransport(): HttpTransport {
   return async (request: TransportRequest): Promise<TransportResponse> => {
@@ -79,131 +87,44 @@ export function createNodeTransport(): HttpTransport {
         'the transport was handed a destination with no validated address',
       );
     }
-
-    for (const [name, value] of Object.entries(request.headers)) {
-      assertHeaderValueSafe(name, value);
-    }
-
-    const secure = request.secure;
-    const client = secure ? https : http;
-
-    // The whole point: DNS is not consulted again. Whatever the guard resolved
-    // and validated is what the socket connects to.
-    //
-    // Both callback shapes are answered, and that is not defensive padding.
-    // Node's `net` module calls `lookup` with `{ all: true }` whenever
-    // `autoSelectFamily` is on — which it has been by default since Node 20 —
-    // and then reads `addresses[0].address` off the answer. A lookup that only
-    // ever called back with the string form therefore hands `undefined` to
-    // `isIP` and every single send dies with "Invalid IP address: undefined".
-    // `test/egress-allowlist.test.ts`'s live fixtures are what caught it.
-    const pinnedLookup: LookupFunction = (_hostname, options, callback) => {
-      const family = address.includes(':') ? 6 : 4;
-      if (typeof options === 'object' && options !== null && options.all === true) {
-        (
-          callback as unknown as (
-            error: null,
-            addresses: { address: string; family: number }[],
-          ) => void
-        )(null, [{ address, family }]);
-        return;
-      }
-      (callback as (error: null, addr: string, family: number) => void)(null, address, family);
-    };
-
-    return await new Promise<TransportResponse>((resolve, reject) => {
-      let settled = false;
-      const finish = (outcome: () => void): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(deadline);
-        outcome();
-      };
-
-      const requestOptions: https.RequestOptions = {
+    try {
+      return await pinnedRequest({
         host: destination.host,
+        address,
         port: destination.port,
-        path: destination.path === '' ? '/' : destination.path,
+        path: destination.path,
         method: request.method,
-        headers: { ...request.headers, host: destination.host },
-        lookup: pinnedLookup,
-        ...(secure
-          ? {
-              servername: destination.host,
-              rejectUnauthorized: true,
-              minVersion: 'TLSv1.2' as const,
-            }
-          : {}),
-      };
-
-      const outbound = client.request(requestOptions, (response) => {
-        const chunks: Buffer[] = [];
-        let bytesRead = 0;
-        let overflowed = false;
-
-        response.on('data', (chunk: Buffer) => {
-          bytesRead += chunk.length;
-          if (bytesRead > request.maxResponseBytes) {
-            overflowed = true;
-            response.destroy();
-            outbound.destroy();
-            finish(() =>
-              reject(
-                new EgressRefusedError(
-                  'response_too_large',
-                  `response exceeded ${String(request.maxResponseBytes)} bytes`,
-                ),
-              ),
-            );
-            return;
-          }
-          chunks.push(chunk);
-        });
-
-        response.on('end', () => {
-          if (overflowed) return;
-          const location = response.headers.location;
-          finish(() =>
-            resolve({
-              status: response.statusCode ?? 0,
-              body: Buffer.concat(chunks).toString('utf8'),
-              bytesRead,
-              location: typeof location === 'string' ? location : null,
-            }),
-          );
-        });
-
-        response.on('error', (error) => finish(() => reject(error)));
+        hostHeader: destination.host,
+        headers: request.headers,
+        ...(request.body === undefined ? {} : { body: request.body }),
+        tls: request.secure,
+        maxResponseBytes: request.maxResponseBytes,
+        // Idle: no bytes for `timeoutMs`. Deadline: three of those, because the
+        // idle timer can be reset forever by a server sending a byte a second.
+        idleTimeoutMs: request.timeoutMs,
+        deadlineMs: request.timeoutMs * 3,
+        redirects: 'return',
       });
-
-      // Idle timeout: no bytes for `timeoutMs`.
-      outbound.setTimeout(request.timeoutMs, () => {
-        outbound.destroy();
-        finish(() =>
-          reject(
-            new EgressRefusedError('timeout', `no response within ${String(request.timeoutMs)} ms`),
-          ),
-        );
-      });
-
-      // Whole-request deadline, because the idle timer above can be reset
-      // forever by a server that sends one byte per second.
-      const deadline = setTimeout(() => {
-        outbound.destroy();
-        finish(() =>
-          reject(
-            new EgressRefusedError(
-              'timeout',
-              `request did not complete within ${String(request.timeoutMs * 3)} ms`,
-            ),
-          ),
-        );
-      }, request.timeoutMs * 3);
-      deadline.unref?.();
-
-      outbound.on('error', (error) => finish(() => reject(error)));
-      if (request.body !== undefined) outbound.write(request.body);
-      outbound.end();
-    });
+    } catch (error) {
+      throw toEgressError(error);
+    }
   };
+}
+
+function toEgressError(error: unknown): unknown {
+  if (!isDialError(error)) return error;
+  switch (error.code) {
+    case 'header_not_allowed':
+      return new EgressRefusedError('header_not_allowed', error.message);
+    case 'response_too_large':
+      return new EgressRefusedError('response_too_large', error.message);
+    case 'timeout':
+    case 'idle_timeout':
+      return new EgressRefusedError('timeout', error.message);
+    case 'redirect_not_followed':
+      return new EgressRefusedError('redirect_not_followed', error.message);
+    case 'aborted':
+    case 'incomplete_response':
+      return error;
+  }
 }

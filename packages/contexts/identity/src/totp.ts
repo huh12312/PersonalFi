@@ -112,9 +112,20 @@ export class TotpService {
     const delta = await this.#validate(row, token);
     if (delta === null) throw new AuthError('invalid_credential', 'that code is not valid');
 
+    // G-12 (WP 9.11): re-enrolment swaps the seed atomically. One statement
+    // retires the previously confirmed seed and confirms this one, so there is
+    // never a moment with two live seeds (the partial unique index forbids it)
+    // and never one with none: until this commits the old seed still works,
+    // and a wrong code above leaves it untouched.
     await this.#db.query(
-      `UPDATE totp_secrets SET confirmed_at = $2, last_used_step = $3 WHERE id = $1`,
-      [enrolmentId, this.#clock.now(), this.#stepFor(row.periodSeconds, delta)],
+      `WITH retired AS (
+         DELETE FROM totp_secrets
+         WHERE user_id = $4 AND id <> $1 AND confirmed_at IS NOT NULL
+         RETURNING id
+       )
+       UPDATE totp_secrets SET confirmed_at = $2, last_used_step = $3
+       WHERE id = $1 AND user_id = $4 AND (SELECT count(*) FROM retired) >= 0`,
+      [enrolmentId, this.#clock.now(), this.#stepFor(row.periodSeconds, delta), userId],
     );
     // Exactly one confirmed enrolment per user; the partial unique index enforces
     // it, and this keeps the table from accumulating dead seeds.

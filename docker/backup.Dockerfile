@@ -8,39 +8,33 @@
 
 # Base digest bumped 2026-10-06 to 3.24.2 (F-94-8): the 3.24.1 base's index no
 # longer served the pinned openssl build, and 3.5.7-r0 carries CVE-2026-14456
-# (HIGH). This base ships libssl3/libcrypto3 3.5.8-r0 already, so those two
-# pins below are satisfied by the installed packages and cannot expire while
-# this digest is pinned; `age` and `tzdata` are index-fetched and can.
+# (HIGH). This base ships libssl3/libcrypto3 3.5.8-r0. The digest is the pin;
+# the packages below are deliberately not (WP 9.11's pin policy, below).
 ARG ALPINE_IMAGE=alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 FROM ${ALPINE_IMAGE} AS runtime
 
-# Versions pinned to the exact apk build (not just the Alpine release) so a
-# `just scan` / SBOM diff shows precisely what changed on a bump. Renovate does
-# not track apk packages today (06 §5.6 covers npm + Docker + GitHub Actions
-# only) — see RUNBOOK.md for the manual bump procedure until that gap is
-# closed. Versions verified against Alpine 3.24's main/community index at
-# implementation time (2026-09-11); `apk add <pkg>` with no pin will show the
-# current version if a rebuild fails here after an index update.
-#
-# Bumped 2026-10-06 (WP 9.4 F-94-8): the first upgrade-test run on a clean
-# GitHub runner could not build this image — the 3.24.1 base's index had
-# moved past age 1.3.1-r6 / tzdata 2026d and did not serve openssl 3.5.8-r0
-# either (only 3.5.7-r0, which trivy flags): hence the base digest bump above
-# and the versions below. CI's own image job had not noticed because its GHA layer
-# cache still held the old `apk add` layer; a fresh host (a stranger's
-# install, a production clone's first `just upgrade`) would have failed the
-# same way. The pin policy itself is the Phase 9 security review's to re-rule
-# (WP 9.10/9.11): Alpine keeps no old builds, so an exact-version pin is a
-# build that expires. Verified: `docker build --no-cache` from this file.
+# Pin policy (WP 9.11, G-22 / F-94-8, ruled from WP 9.10 §6): the BASE IMAGE
+# is pinned by digest (above), and apk packages are NOT pinned to an exact
+# build. Alpine's index serves only the current build of each package, so an
+# `apk add pkg=1.2.3-r0` is a build that expires: the first clean-host
+# upgrade-test run could not build v0.1 at all, and HEAD's own pins had
+# expired too (a cached layer hid it here and in CI). Exactness bought
+# nothing: apk verifies every package's signature with the keys shipped in the
+# digest-pinned base, so dropping `=version` gives up no authenticity. What
+# arrives is controlled instead by `trivy image` — CI's image job on every push
+# and `upgrade-test.yml`'s weekly no-cache build of all three images — and the
+# postgres client's major version stays in the package NAME. `apk upgrade`
+# takes the index's current openssl (CVE-2026-14456 was fixed in an index
+# build the base predated). A digest bump (Renovate) refreshes the base.
+# `scripts/upgrade-test/dockerfile-pin-policy.test.ts` holds both halves.
 RUN apk add --no-cache \
-      tini=0.19.0-r3 \
-      postgresql18-client=18.6-r0 \
-      age=1.3.2-r0 \
-      rclone=1.74.1-r2 \
-      tzdata=2026e-r0 \
-      libssl3=3.5.8-r0 \
-      libcrypto3=3.5.8-r0 && \
+      tini \
+      postgresql18-client \
+      age \
+      rclone \
+      tzdata && \
+    apk upgrade --no-cache libssl3 libcrypto3 && \
     addgroup -g 10002 -S backup && \
     adduser -u 10002 -S -G backup -H -D -s /sbin/nologin backup && \
     mkdir -p /backups && chown 10002:10002 /backups

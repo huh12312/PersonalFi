@@ -43,6 +43,7 @@ import {
   recomputeDirty,
   rollPeriod,
   type BudgetingContext,
+  type BudgetingExecutor,
   type BudgetLineView,
   type BudgetPeriodView,
 } from '@ctx/budgeting';
@@ -214,14 +215,14 @@ async function requireOwnLine(
 
 /** Find this user's one budget, creating the WP 2.1 §6 default if none exists yet. */
 async function requireOrCreateBudget(
-  deps: RouteDeps,
+  executor: BudgetingExecutor,
   context: BudgetingContext,
   timezone: string,
 ): Promise<{ readonly id: string; readonly currency: string }> {
-  const existing = await listBudgets(deps.database, { userId: context.userId });
+  const existing = await listBudgets(executor, { userId: context.userId });
   const budget = existing[0];
   if (budget !== undefined) return budget;
-  return createBudget(deps.database, context, { name: 'My Budget', currency: 'USD', timezone });
+  return createBudget(executor, context, { name: 'My Budget', currency: 'USD', timezone });
 }
 
 function contextOf(
@@ -240,13 +241,19 @@ export const budgetRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
     context: BudgetingContext,
     timezone: string,
   ): Promise<{ readonly budgetId: string; readonly period: BudgetPeriodView }> {
-    const budget = await requireOrCreateBudget(deps, context, timezone);
-    const today = todayIn(clock, timezone);
-    const opened = await mapBudgetingErrors(() =>
-      openPeriod(database, context, { budgetId: budget.id, on: today }),
-    );
-    await mapBudgetingErrors(() => recomputeDirty(database, context, { port: port() }, budget.id));
-    const view = await getPeriod(database, { userId: context.userId, periodId: opened.id });
+    // G-23 / F-94-5 (WP 9.11): one transaction, so a GET that ends in a 409
+    // (`budgeting.balance_unreported`) leaves no budget and no open period
+    // behind — a read that fails must not have written.
+    const { budget, opened, view } = await database.transaction(async (tx) => {
+      const budget = await requireOrCreateBudget(tx, context, timezone);
+      const today = todayIn(clock, timezone);
+      const opened = await mapBudgetingErrors(() =>
+        openPeriod(tx, context, { budgetId: budget.id, on: today }),
+      );
+      await mapBudgetingErrors(() => recomputeDirty(tx, context, { port: port() }, budget.id));
+      const view = await getPeriod(tx, { userId: context.userId, periodId: opened.id });
+      return { budget, opened, view };
+    });
     if (view === null) {
       throw new AppError({
         status: 404,

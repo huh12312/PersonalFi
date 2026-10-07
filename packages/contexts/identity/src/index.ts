@@ -142,3 +142,9 @@ export {
   type SecurityEventSummary,
 } from './security-events.ts';
 export { AuthFlows } from './auth-flows.ts';
+export {
+  KEK_DERIVATION_LOCK_KEY,
+  withKekDerivationLock,
+  type DerivationLockPool,
+  type DerivationLockReport,
+} from './kek-derivation-lock.ts';

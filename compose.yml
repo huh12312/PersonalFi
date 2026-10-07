@@ -133,6 +133,17 @@ secrets:
   # migrator alike — they all call the same `loadConfig()`.
   database_url:
     file: ./secrets/database_url
+  # CF-18 / G-01 (WP 9.11). OPTIONAL — empty by default, and an empty file is
+  # absent to `@core/config`. Mounted on `migrator` only. When the operator
+  # splits the roles (RUNBOOK "Database roles"), this carries the OWNER's
+  # connection string (DDL; the migrator alone) and `database_url` carries the
+  # DML-only `personalfi_app` login that api and worker use. Until then the
+  # migrator falls back to `database_url`, and api/worker start every pooled
+  # connection as `personalfi_app` regardless (`apps/api/src/db-role.ts`;
+  # migration 0039). Optional by rule: a required new secret would break the
+  # unattended upgrade (09 §5 risk row 3); `just secrets-placeholders` creates it.
+  migrator_database_url:
+    file: ./secrets/migrator_database_url
   # Postgres's own bootstrap credential. Not one of the four secret names the
   # WP 0.4 brief lists (database_url, master_key, age_recipient, b2_*) — added
   # because `postgres:18.6-alpine3.24`'s own entrypoint and the backup/restore
@@ -318,7 +329,7 @@ services:
       start_period: 10s
       retries: 3
     deploy:
-      resources: { limits: { cpus: '0.50', memory: 128M } }
+      resources: { limits: { cpus: '0.50', memory: 128M, pids: 128 } }
 
   api:
     <<: [*common, *app-image]
@@ -476,7 +487,7 @@ services:
       # simultaneous cold start peaks around 2.4 GiB. If that target is hard,
       # the lever is `KEK_ARGON2_MEMORY_KIB` + the production floor, not this
       # number; staggering the two derivations would also work.
-      resources: { limits: { cpus: '2.0', memory: 1536M } }
+      resources: { limits: { cpus: '2.0', memory: 1536M, pids: 256 } }
 
   worker:
     <<: [*common, *app-image]
@@ -637,7 +648,7 @@ services:
       # api, which pays the identical Argon2id cost. KEK_ARGON2_MEMORY_KIB
       # defaults to 1048576 (1 GiB), so any limit at or below that is a silent
       # crash loop; `regate-worker-boot.test.ts` now pins limit > KEK memory.
-      resources: { limits: { cpus: '1.0', memory: 1536M } }
+      resources: { limits: { cpus: '1.0', memory: 1536M, pids: 256 } }
 
   # CF-3 (WP 9.4; 09 §5.7 "automatic and mandatory"): the pre-migration
   # backup. A one-shot on the backup image that runs `docker/backup/
@@ -684,7 +695,7 @@ services:
     depends_on:
       db: { condition: service_healthy }
     deploy:
-      resources: { limits: { cpus: '0.50', memory: 256M } }
+      resources: { limits: { cpus: '0.50', memory: 256M, pids: 128 } }
 
   migrator:
     <<: *app-image
@@ -710,7 +721,9 @@ services:
       AUTH_ALLOWED_ORIGINS: https://${PUBLIC_HOST:-personalfi.lan}${EXTRA_ALLOWED_ORIGINS:+,${EXTRA_ALLOWED_ORIGINS}}
       SECRETS_DIR: /run/secrets
       ROLE: migrator
-    secrets: [database_url]
+    # `migrator_database_url` (optional, WP 9.11): the owner's URL once the
+    # roles are split; empty means `database_url`, as before.
+    secrets: [database_url, migrator_database_url]
     networks: [backend]
     tmpfs: ['/tmp:size=16m,mode=1777,noexec,nosuid,nodev']
     user: '10001:10001'
@@ -718,6 +731,9 @@ services:
       db: { condition: service_healthy }
       # CF-3 (WP 9.4): no migration without the pre-migration backup first.
       pre-migrate-backup: { condition: service_completed_successfully }
+    # G-08 (WP 9.11): every service has a PIDs cap (03 §5.2's baseline).
+    deploy:
+      resources: { limits: { pids: 128 } }
 
   db:
     <<: *common
@@ -760,7 +776,7 @@ services:
       start_period: 30s
       retries: 5
     deploy:
-      resources: { limits: { cpus: '2.0', memory: 1G } }
+      resources: { limits: { cpus: '2.0', memory: 1G, pids: 256 } }
 
   backup:
     <<: *common
@@ -811,7 +827,7 @@ services:
       start_period: 30s
       retries: 1
     deploy:
-      resources: { limits: { cpus: '0.50', memory: 256M } }
+      resources: { limits: { cpus: '0.50', memory: 256M, pids: 128 } }
 
   # ---------- profile: sidecar (Phase 6, D23) ----------
   # Placeholder only — proves the network/profile wiring now so a future WP
@@ -826,7 +842,7 @@ services:
     command: ['sleep', 'infinity']
     tmpfs: ['/tmp:size=8m']
     deploy:
-      resources: { limits: { cpus: '0.10', memory: 32M } }
+      resources: { limits: { cpus: '0.10', memory: 32M, pids: 16 } }
 
   # ---------- profile: local-llm (Phase 5, WP 5.2) ----------
   # The local model runtime. Profile-gated because it budgets several GB of
@@ -974,4 +990,4 @@ services:
     command: ['sleep', 'infinity']
     tmpfs: ['/tmp:size=8m']
     deploy:
-      resources: { limits: { cpus: '0.10', memory: 32M } }
+      resources: { limits: { cpus: '0.10', memory: 32M, pids: 16 } }

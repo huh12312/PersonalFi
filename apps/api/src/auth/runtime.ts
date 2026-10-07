@@ -29,11 +29,22 @@ import { SecretBox, type UnlockState } from '@core/secretbox';
 import {
   createIdentityContext,
   UserService,
+  withKekDerivationLock,
+  type DerivationLockPool,
   type IdentityContext,
   type IdentityQueryable,
 } from '@ctx/identity';
 import type { FastifyBaseLogger } from 'fastify';
 import { AppError } from '../problem.ts';
+
+/** A `db` with no `connect()` (a test fake): the lock fails open and says why. */
+const NOT_A_POOL: DerivationLockPool = {
+  connect: () => Promise.reject(new Error('the runtime was given no pool to lock on')),
+};
+
+function isDerivationLockPool(db: IdentityQueryable): db is IdentityQueryable & DerivationLockPool {
+  return typeof (db as Partial<DerivationLockPool>).connect === 'function';
+}
 
 export interface SecurityRuntimeOptions {
   readonly config: AppConfig;
@@ -135,8 +146,18 @@ export class SecurityRuntime {
     // `reveal()` is the one place the passphrase leaves its `Redacted` box, and it
     // goes straight into the KDF. It is never assigned to a field, never logged,
     // and never placed on `config`.
-    const state = await secretBox.unlock(passphrase.reveal());
+    //
+    // Q9 / WP 9.9's boot peak (WP 9.11): one derivation at a time across the
+    // api, the worker and bootstrap-user — `withKekDerivationLock` holds a
+    // Postgres advisory lock for exactly the derivation, so a cold `up` never
+    // holds two 1 GiB Argon2 blocks at once. Fails open (never a reason to
+    // stay locked). A `db` that is not a pool (a test fake) fails open.
+    const lockPool: DerivationLockPool = isDerivationLockPool(db) ? db : NOT_A_POOL;
+    const { result: state, lock } = await withKekDerivationLock(lockPool, () =>
+      secretBox.unlock(passphrase.reveal()),
+    );
     this.#state = state;
+    logger.info({ kekDerivationLock: lock }, 'key custody: derivation lock');
 
     if (state.state !== 'unlocked') {
       secretBox.destroy();

@@ -93,6 +93,8 @@ EXPECTED_RULES=(
   missing-cap-drop-all
   missing-no-new-privileges
   root-user
+  # WP 9.11 (G-08): every service has a PIDs cap.
+  missing-pids-limit
   # WP 5.2: the local-model sandbox (`ollama`, `ollama-pull`, the `llm` network).
   ollama-network
   ollama-published-port
@@ -138,6 +140,8 @@ EXPECTED_SERVICE_RULES=(
   $'pre-migrate-backup\tmissing-no-new-privileges'
   $'pre-migrate-backup\twritable-volume-wrong-service'
   $'migrator\tmigrator-missing-pre-migrate-backup'
+  # WP 9.11 (G-08): a service with no PIDs cap (the fixture's migrator has none).
+  $'migrator\tmissing-pids-limit'
 )
 
 EVALUATOR="$(mktemp -t compose-hardening-XXXXXX.mjs)"
@@ -169,6 +173,21 @@ const EXCEPTIONS = new Map([
     'postgres writes its own data directory; the write surface is scoped to the ' +
       'pgdata named volume plus two tmpfs mounts, and the service still runs as ' +
       'uid 70 with cap_drop ALL and no-new-privileges (03 §5.2).',
+  ],
+  [
+    'compose.dev.yml:db:missing-pids-limit',
+    'dev-only and loopback-only, holding synthetic data; compose.dev.yml is not a ' +
+      'production file (WP 9.11 G-08 caps every compose.yml service).',
+  ],
+  [
+    'compose.dev.yml:mailpit:missing-pids-limit',
+    'dev-only and loopback-only, holding synthetic data; compose.dev.yml is not a ' +
+      'production file (WP 9.11 G-08 caps every compose.yml service).',
+  ],
+  [
+    'compose.dev.yml:ntfy:missing-pids-limit',
+    'dev-only and loopback-only, holding synthetic data; compose.dev.yml is not a ' +
+      'production file (WP 9.11 G-08 caps every compose.yml service).',
   ],
   [
     'compose.dev.yml:db:missing-read-only',
@@ -429,6 +448,15 @@ for (const [service, spec] of Object.entries(services)) {
 
   if (spec.user === undefined || spec.user === null || isRootUser(spec.user)) {
     report(service, 'root-user', `user is ${spec.user === undefined ? 'unset (root)' : JSON.stringify(spec.user)}`);
+  }
+
+  // G-08 (WP 9.11; 03 §5.2's baseline): a PIDs cap on every service, so a fork
+  // bomb or a runaway thread pool in one container cannot exhaust the host's
+  // PID space for the others (and for the host). Either spelling counts;
+  // compose refuses both at once. 0 or negative means unlimited.
+  const pids = spec.deploy?.resources?.limits?.pids ?? spec.pids_limit;
+  if (pids === undefined || pids === null || !(Number(pids) > 0)) {
+    report(service, 'missing-pids-limit', `no pids limit (deploy.resources.limits.pids or pids_limit)`);
   }
 }
 
