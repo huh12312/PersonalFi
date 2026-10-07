@@ -47,9 +47,10 @@ often older than 1.21. Run `docker`, `just` and `node` as the user who will own 
 add that user to the `docker` group.
 
 Sizing: a host with 4 GiB of RAM or more and a couple of cores. In steady state the whole stack
-sits near 0.3 to 0.5 GiB. For about three seconds at every start, the API and the worker each
-derive their encryption key and the stack peaks near 2.4 GiB, so a host with less than 3 GiB free
-at that moment can be OOM-killed. Build the images on a machine with network access; the first
+sits near 0.3 to 0.5 GiB. At every start the API and the worker each derive their encryption key,
+one after the other, and the stack peaks near 1.5 GiB for a few seconds (the two never derive at
+once; if that lock cannot be taken they both do and the peak is near 2.4 GiB), so a host with less
+than 3 GiB free at that moment can be OOM-killed. Build the images on a machine with network access; the first
 build takes several minutes.
 
 The machine holding real financial data should have its data disk encrypted (LUKS2 or equivalent).
