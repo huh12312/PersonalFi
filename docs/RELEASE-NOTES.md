@@ -160,12 +160,16 @@ out-of-order application. All are expand-only.
 
 - **`NARRATION_TEXT_SHOWN` stays `false`.** The narration's text is hidden until a counted run
   reaches 95% through step 7. Nothing is lost: the Brief shows that a narration exists.
-- **Plaid runs in sandbox only** from the shipped `compose.yml`: the file does not pass
-  `PLAID_ALLOW_PRODUCTION` to the api, and the api refuses `production` without it
+- **Plaid runs in sandbox until you opt in.** `compose.yml` passes `PLAID_ALLOW_PRODUCTION`
+  (default `false`) to the api and worker; production needs it set to `true` in `.env` as well as
+  `plaid_env` reading `production`
   ([RUNBOOK: Create secrets](../RUNBOOK.md#2-create-secrets)).
-- **Two reads are slow at scale** (WP 9.9, not fixed in this release): `GET /holdings` and
-  `/investments/allocation` take about 2 s at 200 positions, and a bulk event is consumed at about
-  one per second.
+- **A first link of years of history is consumed slowly.** The categorisation and recurring
+  consumers re-read a payee's whole history for each page of a backfill, so a 730-day, 20,000-row
+  backfill takes about ten minutes (about 33 rows a second); a day's sync is seconds. Nothing is lost
+  while it runs, and the nightly chain no longer waits on the job poll (243 s became 48 s in WP 9.14).
+  `GET /holdings` and `/investments/allocation` at 200 positions, about 2 s in WP 9.9, are now about
+  60 ms.
 - **Key rotation has no operator procedure yet** ([RUNBOOK: Master-key rotation](../RUNBOOK.md#master-key-rotation)).
 - **v1.0 is not this release.** It needs 90 days as the author's only finance tool, and the
   earliest date is 2027-01-10 ([path to v1.0](plan/06-path-to-v1.md)).

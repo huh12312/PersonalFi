@@ -372,6 +372,14 @@ services:
       # keep the two in agreement; see `.env.example`.
       PLAID_ENABLED: ${PLAID_ENABLED:-false}
       PLAID_REDIRECT_URI: ${PLAID_REDIRECT_URI:-}
+      # D16 / WP 9.14: the second of the two independent settings that must agree
+      # before a Plaid Production call is possible (the first is the `plaid_env`
+      # file secret reading `production`). `@core/config` refuses to boot with
+      # `production` unless this is true, and it was not passed through, so a
+      # stack from the shipped file could never leave sandbox. Default false:
+      # nothing changes for an install that does not set it. Same value on
+      # `worker` — the process that actually syncs.
+      PLAID_ALLOW_PRODUCTION: ${PLAID_ALLOW_PRODUCTION:-false}
       # WP 3.4's four market-data keys and WP 3.5's CDP pair join the list here
       # and on `worker` — and on neither `migrator` nor `proxy` nor `backup`.
       # Kept in step with `just harden-secrets`, in the same edit (N-1).
@@ -507,6 +515,7 @@ services:
       # secrets and the same non-secret shape, not just the credential.
       PLAID_ENABLED: ${PLAID_ENABLED:-false}
       PLAID_REDIRECT_URI: ${PLAID_REDIRECT_URI:-}
+      PLAID_ALLOW_PRODUCTION: ${PLAID_ALLOW_PRODUCTION:-false}
       # D-3 (gate-security-review.md §8.11, §8.5 N-6): named explicitly here,
       # not left to packages/config/src/schema.ts's own defaults, so the
       # healthcheck below reads the *exact same* numbers the job runner and

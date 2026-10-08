@@ -39,6 +39,7 @@ import {
   type SoakPool,
   type SoakQuery,
 } from '../../../../scripts/soak/report.ts';
+import { SEEDED } from './soak-canary-columns.ts';
 import {
   createApiHarness,
   linkManual,
@@ -136,6 +137,68 @@ async function seedBriefs(h: ApiHarness): Promise<void> {
                   ${new Date(Date.UTC(2026, 9, 11 + index * 7, 9)).toISOString()}::timestamptz)`,
     );
   }
+}
+
+/**
+ * G-29 (WP 9.14): put a canary in every free-text column of every table the report reads that the seed
+ * above does not already reach. The classification is `soak-canary-columns.ts` (SEEDED / NOT_FREE_TEXT),
+ * enforced structurally by `soak-canary-coverage.test.ts`, and each SEEDED column is proved to hold a
+ * canary by the test at the end of this file.
+ *
+ * These columns belong to modules whose own write paths need machinery this test does not run (the
+ * advisor runner, the notifier, the job queue's failure path, a provider error), so they are written by
+ * UPDATE on rows the seed already made, or by one INSERT where no row exists. The values are text the
+ * holder could have typed or a provider could have echoed; the report must never print them.
+ */
+async function seedCanaryColumns(h: ApiHarness): Promise<void> {
+  const marker = 'CANARY-MEMO-ORCHID';
+  const note = sql`jsonb_build_object('note', ${marker}::text)`;
+  await exec(
+    h,
+    sql`UPDATE connections SET config = ${note}, last_error = ${note} WHERE user_id = ${h.userId}::uuid`,
+  );
+  await exec(
+    h,
+    sql`UPDATE sync_runs SET error_detail = ${note}, cursor_before = ${marker}, cursor_after = ${marker}
+        WHERE user_id = ${h.userId}::uuid`,
+  );
+  await exec(
+    h,
+    sql`UPDATE category_assignments SET evidence = ${note} WHERE user_id = ${h.userId}::uuid`,
+  );
+  await exec(
+    h,
+    sql`UPDATE advisors SET manifest = ${note}
+        WHERE user_id = ${h.userId}::uuid AND advisor_id = 'canary.advisor'`,
+  );
+  await exec(
+    h,
+    sql`UPDATE insights SET caveats = jsonb_build_array(${marker}::text), derivations = jsonb_build_array(${note})
+        WHERE user_id = ${h.userId}::uuid`,
+  );
+  await exec(
+    h,
+    sql`UPDATE advisory_briefs SET cold_start = TRUE, cold_start_note = ${marker}
+        WHERE user_id = ${h.userId}::uuid AND iso_week = '2026-W44'`,
+  );
+  await exec(
+    h,
+    sql`UPDATE advisory_brief_items SET evidence = jsonb_build_array(${note}), retirement_effect = ${note}
+        WHERE user_id = ${h.userId}::uuid`,
+  );
+  await exec(
+    h,
+    sql`UPDATE insight_feedback SET reason = ${marker} WHERE user_id = ${h.userId}::uuid`,
+  );
+  await exec(
+    h,
+    sql`UPDATE jobs SET payload = ${note}, last_error = ${note} WHERE user_id = ${h.userId}::uuid`,
+  );
+  await exec(
+    h,
+    sql`UPDATE notification_outbox SET actions = jsonb_build_array(${note}), deep_link = ${`/${marker}`}
+        WHERE user_id = ${h.userId}::uuid`,
+  );
 }
 
 describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
@@ -313,6 +376,7 @@ describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
       sql`INSERT INTO ops_restore_drills (id, verdict, ran_at, restored_table_count, live_table_count, max_migration, rto_seconds)
           VALUES (${newId()}::uuid, 'pass', '2026-10-30T10:00:00Z', 99, 99, '0036', 74)`,
     );
+    await seedCanaryColumns(h);
   }, 180_000);
 
   afterAll(async () => {
@@ -366,6 +430,20 @@ describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
     }
     expect(markdown.toLowerCase()).not.toContain('canary');
   }, 60_000);
+
+  it('every column classified SEEDED really holds a canary after the seed (G-29)', async () => {
+    const empty: string[] = [];
+    for (const column of Object.keys(SEEDED)) {
+      const [table, name] = column.split('.');
+      const found = await h.database.pool.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM ${table} WHERE ${name}::text ILIKE '%canary%'`,
+      );
+      if ((found.rows[0]?.n ?? 0) === 0) empty.push(column);
+    }
+    expect(empty, 'SEEDED columns the seed never reached (a canary there proves nothing)').toEqual(
+      [],
+    );
+  });
 
   it('every query in the soak report selects only aggregates and whitelisted dimensions', async () => {
     // The shipped queries pass, and the parser really reads select-lists.

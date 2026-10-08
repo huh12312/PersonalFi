@@ -8,6 +8,89 @@ import globals from 'globals';
 import { boundariesPlugin, CRYPTO_PRIMITIVES } from './scripts/eslint-boundaries.js';
 
 /**
+ * `no-restricted-syntax` is ONE rule per file: a later config block that sets it for a file replaces an
+ * earlier block's selectors outright, so every block that sets it spreads these shared lists instead of
+ * restating a subset.
+ */
+const CLOCK_SELECTORS = [
+  {
+    selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']",
+    message: 'Inject a Clock from @core/kernel instead of calling Date.now().',
+  },
+  {
+    selector: 'NewExpression[callee.name="Date"][arguments.length=0]',
+    message: 'Inject a Clock from @core/kernel instead of constructing new Date().',
+  },
+];
+
+/**
+ * G-28 (WP 9.10; WP 9.14): properties that held by reading and had no lint. SQL parameterisation (no
+ * string-built SQL through `sql.raw`) and no shell in a spawned process.
+ */
+const INJECTION_SELECTORS = [
+  {
+    selector:
+      "CallExpression[callee.type='MemberExpression'][callee.object.name='sql'][callee.property.name='raw']",
+    message:
+      'sql.raw splices a string into SQL. Bind a parameter with the sql`` tag instead (G-28, ASVS V1.2.4).',
+  },
+  {
+    selector: "Property[key.name='shell'][value.value=true]",
+    message:
+      'A spawned process never gets a shell: pass an argv array and no `shell: true` (G-28, ASVS V1.2.5).',
+  },
+];
+
+/**
+ * G-18 (WP 9.10; WP 9.14): in the code that mints tokens, challenges, codes, seeds and nonces, randomness
+ * comes from `@core/secretbox`'s `randomBytes` (the crypto-import rule below already confines `node:crypto`
+ * to it). `Math.random` is legal elsewhere (backoff jitter), so it is banned where a guess would matter.
+ */
+const WEB_HTML_SINKS = [
+  {
+    selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+    message:
+      'dangerouslySetInnerHTML is a raw-HTML sink (XSS). Render React elements instead (G-15).',
+  },
+  {
+    selector:
+      "AssignmentExpression[left.type='MemberExpression'][left.property.name=/^(innerHTML|outerHTML)$/]",
+    message: 'innerHTML/outerHTML assignment is a raw-HTML sink (XSS) (G-15).',
+  },
+  {
+    selector:
+      "CallExpression[callee.type='MemberExpression'][callee.property.name=/^(insertAdjacentHTML|createContextualFragment|parseFromString)$/]",
+    message: 'This parses a string as HTML: a raw-HTML sink (XSS) (G-15).',
+  },
+  {
+    selector:
+      "CallExpression[callee.type='MemberExpression'][callee.object.name='document'][callee.property.name=/^(write|writeln)$/]",
+    message: 'document.write is a raw-HTML sink (XSS) (G-15).',
+  },
+];
+
+/**
+ * G-28 (browser storage stays clean, ASVS V14.3.3): the only writers are `lib/persisted-store.ts` (UI
+ * preferences) and the sidebar's collapse flag; nothing from the API belongs in storage.
+ */
+const WEB_STORAGE_WRITES = [
+  {
+    selector:
+      "CallExpression[callee.property.name='setItem'][callee.object.property.name=/^(localStorage|sessionStorage)$/]",
+    message:
+      'Browser storage holds UI preferences only, written through lib/persisted-store.ts; never API data (G-28, ASVS V14.3.3).',
+  },
+];
+
+const SECURITY_RANDOMNESS_SELECTORS = [
+  {
+    selector: "MemberExpression[object.name='Math'][property.name='random']",
+    message:
+      'Math.random is not a CSPRNG. Use randomBytes from @core/secretbox in code that mints secrets (G-18, ASVS V6.3.8).',
+  },
+];
+
+/**
  * Flat config. Three layers:
  *
  *   1. baseline correctness rules for every TypeScript file;
@@ -120,16 +203,25 @@ export default tseslint.config(
     files: ['apps/**/*.ts', 'packages/**/*.ts'],
     ignores: ['packages/kernel/src/clock.ts', '**/*.test.ts', '**/test/**', 'apps/web/**'],
     rules: {
+      'no-restricted-syntax': ['error', ...CLOCK_SELECTORS, ...INJECTION_SELECTORS],
+    },
+  },
+
+  // G-18: the code that mints secrets. Declared after the block above because it replaces that block's
+  // `no-restricted-syntax` for these files, and so repeats it.
+  {
+    files: [
+      'packages/contexts/identity/src/**/*.ts',
+      'packages/secretbox/src/**/*.ts',
+      'apps/api/src/**/*.ts',
+    ],
+    ignores: ['**/*.test.ts', '**/test/**'],
+    rules: {
       'no-restricted-syntax': [
         'error',
-        {
-          selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']",
-          message: 'Inject a Clock from @core/kernel instead of calling Date.now().',
-        },
-        {
-          selector: 'NewExpression[callee.name="Date"][arguments.length=0]',
-          message: 'Inject a Clock from @core/kernel instead of constructing new Date().',
-        },
+        ...CLOCK_SELECTORS,
+        ...INJECTION_SELECTORS,
+        ...SECURITY_RANDOMNESS_SELECTORS,
       ],
     },
   },
@@ -271,6 +363,17 @@ export default tseslint.config(
     rules: {
       ...jsxA11y.flatConfigs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
+      // G-15 (WP 9.10, ASVS V1.2.x / V3.2.2; WP 9.14): React's escaping is the web app's only XSS control, and
+      // nothing uses a raw-HTML sink today. Ban them so the first one is a lint error with a reason, not a
+      // review catch. A real need (sanitised, trusted-types-wrapped markup) is an eslint-disable with the
+      // reason beside it, which is visible in the diff.
+      'no-restricted-syntax': ['error', ...WEB_HTML_SINKS, ...WEB_STORAGE_WRITES],
     },
+  },
+
+  // The two files allowed to write browser storage (see WEB_STORAGE_WRITES). They keep the HTML-sink ban.
+  {
+    files: ['apps/web/src/lib/persisted-store.ts', 'apps/web/src/app/shell/Sidebar.tsx'],
+    rules: { 'no-restricted-syntax': ['error', ...WEB_HTML_SINKS] },
   },
 );

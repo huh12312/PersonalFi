@@ -657,10 +657,31 @@ describeWithDb(
       return total;
     }
 
+    /** `PERF_NIGHTLY_TRACE=1`: every five seconds, how many events each consumer still has to see (P-4: where a backfill's time goes). */
+    let lastTrace = 0;
+    async function traceLag(what: string): Promise<void> {
+      if (process.env['PERF_NIGHTLY_TRACE'] === undefined || Date.now() - lastTrace < 5_000) return;
+      lastTrace = Date.now();
+      const lag: Record<string, number> = {};
+      for (const consumer of consumerDefinitions) {
+        const rows = await h.database.db.execute<{ pending: string }>(sql`
+          SELECT count(*)::text AS pending FROM domain_events e
+           WHERE e.seq > coalesce((SELECT last_seq FROM event_consumer_offsets WHERE consumer_name = ${consumer.name}), 0)
+             AND (${consumer.filter === undefined}::boolean
+                  OR e.event_type = ANY(string_to_array(${(consumer.filter ?? []).join(',')}, ',')))
+        `);
+        lag[consumer.name] = Number(rows.rows[0]?.pending ?? 0);
+      }
+      process.stdout.write(
+        `perf nightly trace (${what}) ${new Date().toISOString()}: ${JSON.stringify(lag)}\n`,
+      );
+    }
+
     async function untilQuiet(what: string): Promise<void> {
       const deadline = Date.now() + QUIET_TIMEOUT_MS;
       let quiet = 0;
       while (Date.now() < deadline) {
+        await traceLag(what);
         const queue = await queueHealth(platform.db);
         const busy = queue.pending + queue.running > 0 || (await unprocessedEvents()) > 0;
         quiet = busy ? 0 : quiet + 1;
@@ -828,6 +849,43 @@ describeWithDb(
         seconds: Number((backfillMs / 1_000).toFixed(1)),
       });
 
+      // The state the night starts from, asserted rather than assumed (WP 9.14). A CI run once read
+      // 49 of 56 delta rows because ONE connection's scheduled sync re-read its whole 106-row history
+      // (a null or unknown cursor at the night's start), and the only symptom was a count at the end of
+      // the test. Every connection must have finished its first sync with a stored cursor, and nothing
+      // may be dead or failed, BEFORE the night is timed; a violation names the connection and prints
+      // its runs and its failed jobs, which is what the end-of-test count could not say.
+      const firstSyncState = await h.database.db.execute<{
+        connection_ordinal: number;
+        cursor: string | null;
+        initial_ok: number;
+        runs: unknown;
+      }>(sql`
+        SELECT (dense_rank() OVER (ORDER BY c.created_at))::int AS connection_ordinal,
+               c.transactions_cursor AS cursor,
+               (SELECT count(*)::int FROM sync_runs r
+                 WHERE r.connection_id = c.id AND r.trigger = 'initial'
+                   AND r.operation = 'transactions' AND r.status = 'success') AS initial_ok,
+               (SELECT coalesce(jsonb_agg(jsonb_build_object('trigger', r.trigger, 'operation', r.operation,
+                         'status', r.status, 'added', r.added_count, 'error', r.error_code) ORDER BY r.started_at), '[]'::jsonb)
+                  FROM sync_runs r WHERE r.connection_id = c.id) AS runs
+          FROM connections c WHERE c.user_id = ${h.userId}::uuid ORDER BY c.created_at
+      `);
+      const brokenJobs = await h.database.db.execute<{
+        kind: string;
+        status: string;
+        last_error: unknown;
+      }>(sql`
+        SELECT kind, status, last_error FROM jobs WHERE status IN ('dead', 'failed')
+      `);
+      const unsynced = firstSyncState.rows.filter(
+        (row) => row.cursor === null || row.initial_ok !== 1,
+      );
+      expect(
+        { unsynced, brokenJobs: brokenJobs.rows },
+        'every connection finished its first sync with a stored cursor, and no job is dead or failed',
+      ).toEqual({ unsynced: [], brokenJobs: [] });
+
       // A night is ~24 h after the previous sync. Plaid's `minSyncIntervalSeconds` is
       // four hours, and a scheduled sync inside it is skipped (`min_interval`), so a
       // chain that ran seconds after the backfill would time eight skips.
@@ -975,6 +1033,18 @@ describeWithDb(
       process.stdout.write(
         `perf nightly per-connection scheduled runs (added/modified/removed): ${JSON.stringify(perConnection.rows)}\n`,
       );
+      // Every sync run, by connection ordinal and trigger: what a failure of the delta assertion
+      // below has to be read against (WP 9.14: the CI run that read 49 of 56 had one connection
+      // whose scheduled sync re-read its whole history).
+      const allRuns = await h.database.db.execute<Record<string, unknown>>(sql`
+        SELECT (dense_rank() OVER (ORDER BY c.created_at))::int AS connection_ordinal,
+               r.trigger, r.operation, r.status, r.added_count, r.modified_count, r.removed_count,
+               r.started_at
+          FROM sync_runs r JOIN connections c ON c.id = r.connection_id
+         WHERE r.user_id = ${h.userId}::uuid
+         ORDER BY c.created_at, r.started_at
+      `);
+      process.stdout.write(`perf nightly all sync runs: ${JSON.stringify(allRuns.rows)}\n`);
       // The day's delta landed: every row the fake Items added is in the ledger,
       // by its provider id. (The runs' own added/modified counters are printed
       // above; they split a pending row that posted between "added" and "modified"

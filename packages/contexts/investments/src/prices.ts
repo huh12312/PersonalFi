@@ -55,7 +55,7 @@
  */
 import type { Clock } from '@core/kernel';
 import { newId, systemClock } from '@core/kernel';
-import { and, desc, eq, lte } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import {
   prices,
   priceSourcePriority,
@@ -172,13 +172,29 @@ export function ladderRows(
 }
 
 export interface PriceStore {
-  /** Every observation for this security in this currency on or before `date`. */
-  observationsOnOrBefore(
+  /**
+   * The observations the ladder can use for this security in this currency at
+   * `date`: every row dated exactly `date` (any rung may match one) and every
+   * row of the newest date **before** it (the `last_known` rung's carry-forward).
+   * Nothing else on or before `date` is ever consulted, so nothing else is read:
+   * the cost is the number of sources, not the years of history held (P-6).
+   */
+  observationsForLadder(
     userId: string,
     securityId: string,
     currency: string,
     date: string,
   ): Promise<readonly PriceRecord[]>;
+  /**
+   * `observationsForLadder` for many securities in one round trip. Every
+   * requested id has an entry (empty when it has no usable row).
+   */
+  observationsForLadderMany(
+    userId: string,
+    securityIds: readonly string[],
+    currency: string,
+    date: string,
+  ): Promise<ReadonlyMap<string, readonly PriceRecord[]>>;
   /** The user's ladder for a security kind, strongest rung first. Empty ⇒ default. */
   ladderFor(userId: string, kind: string): Promise<readonly PriceSourceName[]>;
 }
@@ -193,6 +209,17 @@ export interface PriceReader {
    * seal has to be able to render "no price" rather than fail.
    */
   price(securityId: string, date: string, currency: string): Promise<PricePoint | null>;
+  /**
+   * `price` for many securities at once, in a fixed number of round trips (one
+   * ladder read per distinct security kind and one observations read), and
+   * answering exactly what `price` answers for each id. Every id is a key of the
+   * result; `null` is the same "no rung can answer" `price` returns.
+   */
+  priceMany(
+    securityIds: readonly string[],
+    date: string,
+    currency: string,
+  ): Promise<ReadonlyMap<string, PricePoint | null>>;
 }
 
 export interface PriceReaderOptions {
@@ -207,47 +234,86 @@ export function createPriceReader(options: PriceReaderOptions): PriceReader {
   const { store, userId } = options;
   const clock = options.clock ?? systemClock;
 
+  async function ladderOf(kind: string): Promise<readonly PriceSourceName[]> {
+    const configured = await store.ladderFor(userId, kind);
+    return configured.length > 0
+      ? configured
+      : (DEFAULT_LADDERS[kind] ?? DEFAULT_LADDERS['other'] ?? []);
+  }
+
   return {
     async price(securityId: string, date: string, currency: string): Promise<PricePoint | null> {
       const quoteCurrency = currency.trim().toUpperCase();
       const kind = await options.kindOf(securityId);
-      const configured = await store.ladderFor(userId, kind);
-      const ladder =
-        configured.length > 0
-          ? configured
-          : (DEFAULT_LADDERS[kind] ?? DEFAULT_LADDERS['other'] ?? []);
-
-      const observations = await store.observationsOnOrBefore(
+      const ladder = await ladderOf(kind);
+      const observations = await store.observationsForLadder(
         userId,
         securityId,
         quoteCurrency,
         date,
       );
-      if (observations.length === 0) return null;
+      return walkLadder(observations, ladder, date, clock.now());
+    },
 
+    async priceMany(
+      securityIds: readonly string[],
+      date: string,
+      currency: string,
+    ): Promise<ReadonlyMap<string, PricePoint | null>> {
+      const quoteCurrency = currency.trim().toUpperCase();
+      const unique = [...new Set(securityIds)];
+      const kindOfId = new Map<string, string>();
+      for (const securityId of unique) kindOfId.set(securityId, await options.kindOf(securityId));
+      const ladders = new Map<string, readonly PriceSourceName[]>();
+      for (const kind of new Set(kindOfId.values())) ladders.set(kind, await ladderOf(kind));
+      const observations = await store.observationsForLadderMany(
+        userId,
+        unique,
+        quoteCurrency,
+        date,
+      );
       const now = clock.now();
-      const onDate = observations.filter((row) => row.priceDate === date);
-
-      for (const rung of ladder) {
-        if (rung === 'last_known') {
-          // The fourth rung. The most recent observation *strictly before* the
-          // date asked for, from any source — a carry-forward does not get to
-          // be choosy, it gets to be labelled.
-          const earlier = observations
-            .filter((row) => row.priceDate < date)
-            .sort((a, b) => (a.priceDate < b.priceDate ? 1 : -1))[0];
-          if (earlier === undefined) continue;
-          return pointOf(earlier, 'last_known', date, now);
-        }
-        // `fred` and other non-price sources can appear in a user-edited ladder;
-        // they simply never match a `prices` row, which is the honest outcome.
-        const match = onDate.find((row) => row.source === (rung as PriceRowSource));
-        if (match !== undefined) return pointOf(match, rung, date, now);
+      const result = new Map<string, PricePoint | null>();
+      for (const securityId of unique) {
+        const ladder = ladders.get(kindOfId.get(securityId) ?? 'other') ?? [];
+        result.set(securityId, walkLadder(observations.get(securityId) ?? [], ladder, date, now));
       }
-
-      return null;
+      return result;
     },
   };
+}
+
+/**
+ * 07 §6.1's ladder over one security's usable observations. One function for
+ * `price` and `priceMany`, so the batched path cannot answer differently.
+ */
+function walkLadder(
+  observations: readonly PriceRecord[],
+  ladder: readonly PriceSourceName[],
+  date: string,
+  now: Date,
+): PricePoint | null {
+  if (observations.length === 0) return null;
+  const onDate = observations.filter((row) => row.priceDate === date);
+
+  for (const rung of ladder) {
+    if (rung === 'last_known') {
+      // The fourth rung. The most recent observation *strictly before* the
+      // date asked for, from any source — a carry-forward does not get to
+      // be choosy, it gets to be labelled.
+      const earlier = observations
+        .filter((row) => row.priceDate < date)
+        .sort((a, b) => (a.priceDate < b.priceDate ? 1 : -1))[0];
+      if (earlier === undefined) continue;
+      return pointOf(earlier, 'last_known', date, now);
+    }
+    // `fred` and other non-price sources can appear in a user-edited ladder;
+    // they simply never match a `prices` row, which is the honest outcome.
+    const match = onDate.find((row) => row.source === (rung as PriceRowSource));
+    if (match !== undefined) return pointOf(match, rung, date, now);
+  }
+
+  return null;
 }
 
 function pointOf(
@@ -331,30 +397,71 @@ export async function recordUserPriceOverride(
 // ---------------------------------------------------------------------------
 
 export function drizzlePriceStore(db: InvestmentsExecutor): PriceStore {
+  async function many(
+    userId: string,
+    securityIds: readonly string[],
+    currency: string,
+    date: string,
+  ): Promise<ReadonlyMap<string, readonly PriceRecord[]>> {
+    const bySecurity = new Map<string, PriceRecord[]>(securityIds.map((id) => [id, []]));
+    if (securityIds.length === 0) return bySecurity;
+    // Two index probes per security (`prices_user_security_date_idx`): the rows
+    // dated `date`, and the rows of the newest date before it. The correlated
+    // `max()` is the carry-forward's date; the join then takes every source's
+    // row on it. No LIMIT is needed because the date, not a row count, bounds it.
+    const result = await db.execute<{
+      security_id: string;
+      price_date: string;
+      close: string;
+      currency: string;
+      source: PriceRowSource;
+      stale: boolean;
+      observed_at: Date | string;
+    }>(sql`
+      SELECT p.security_id,
+             to_char(p.price_date, 'YYYY-MM-DD') AS price_date,
+             p.close::text AS close,
+             p.currency,
+             p.source,
+             p.stale,
+             p.observed_at
+        FROM unnest(${sql.param([...securityIds])}::uuid[]) AS s(id)
+       CROSS JOIN LATERAL (
+              SELECT ${date}::date AS d
+              UNION ALL
+              SELECT max(q.price_date)
+                FROM prices q
+               WHERE q.user_id = ${userId}::uuid
+                 AND q.security_id = s.id
+                 AND q.currency = ${currency}
+                 AND q.price_date < ${date}::date
+            ) AS wanted
+        JOIN prices p
+          ON p.user_id = ${userId}::uuid
+         AND p.security_id = s.id
+         AND p.currency = ${currency}
+         AND p.price_date = wanted.d
+    `);
+    for (const row of result.rows) {
+      bySecurity.get(row.security_id)?.push({
+        securityId: row.security_id,
+        priceDate: row.price_date,
+        close: row.close,
+        currency: row.currency,
+        source: row.source,
+        stale: row.stale,
+        observedAt: new Date(row.observed_at),
+      });
+    }
+    return bySecurity;
+  }
+
   return {
-    async observationsOnOrBefore(userId, securityId, currency, date) {
-      const rows = await db
-        .select({
-          securityId: prices.securityId,
-          priceDate: prices.priceDate,
-          close: prices.close,
-          currency: prices.currency,
-          source: prices.source,
-          stale: prices.stale,
-          observedAt: prices.observedAt,
-        })
-        .from(prices)
-        .where(
-          and(
-            eq(prices.userId, userId),
-            eq(prices.securityId, securityId),
-            eq(prices.currency, currency),
-            lte(prices.priceDate, date),
-          ),
-        )
-        .orderBy(desc(prices.priceDate));
-      return rows.map((row) => ({ ...row, observedAt: new Date(row.observedAt) }));
+    async observationsForLadder(userId, securityId, currency, date) {
+      return (await many(userId, [securityId], currency, date)).get(securityId) ?? [];
     },
+
+    observationsForLadderMany: many,
 
     async ladderFor(userId, kind) {
       const rows = await db
@@ -379,6 +486,15 @@ export function inMemoryPriceStore(
   ladders: Readonly<Record<string, readonly PriceSourceName[]>> = {},
 ): PriceStore & { put(record: PriceRecord): void } {
   const records: PriceRecord[] = [...seed];
+  /** The same bound the SQL store applies: the date itself and the newest date before it. */
+  function boundedFor(securityId: string, currency: string, date: string): PriceRecord[] {
+    const mine = records.filter((r) => r.securityId === securityId && r.currency === currency);
+    const earlier = mine.filter((r) => r.priceDate < date).map((r) => r.priceDate);
+    const newestEarlier = earlier.length === 0 ? null : earlier.reduce((a, b) => (a > b ? a : b));
+    return mine
+      .filter((r) => r.priceDate === date || r.priceDate === newestEarlier)
+      .sort((a, b) => (a.priceDate < b.priceDate ? 1 : -1));
+  }
   return {
     put(record) {
       // The schema's control, enforced in the fake: `last_known` is not a
@@ -391,14 +507,14 @@ export function inMemoryPriceStore(
       }
       records.push(record);
     },
-    observationsOnOrBefore(userId, securityId, currency, date) {
+    observationsForLadder(userId, securityId, currency, date) {
+      void userId;
+      return Promise.resolve(boundedFor(securityId, currency, date));
+    },
+    observationsForLadderMany(userId, securityIds, currency, date) {
       void userId;
       return Promise.resolve(
-        records
-          .filter(
-            (r) => r.securityId === securityId && r.currency === currency && r.priceDate <= date,
-          )
-          .sort((a, b) => (a.priceDate < b.priceDate ? 1 : -1)),
+        new Map(securityIds.map((id) => [id, boundedFor(id, currency, date)] as const)),
       );
     },
     ladderFor(userId, kind) {

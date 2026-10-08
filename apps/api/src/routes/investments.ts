@@ -464,10 +464,13 @@ export async function priceHoldings(
   reader: PriceReader,
   asOf: string,
 ): Promise<PricedPortfolio> {
-  const bySecurity = new Map<string, PricePoint | null>();
-  for (const securityId of new Set(reads.map((read) => read.securityId))) {
-    bySecurity.set(securityId, await reader.price(securityId, asOf, BASE_CURRENCY));
-  }
+  // One batched read for the whole portfolio (WP 9.14 / P-6): 200 sequential
+  // ladder walks were ~2 s, almost all of it round trips and unbounded history.
+  const bySecurity = await reader.priceMany(
+    [...new Set(reads.map((read) => read.securityId))],
+    asOf,
+    BASE_CURRENCY,
+  );
 
   const points = new Map<string, PricePoint | null>();
   const holdings: AnalyticsHolding[] = reads.map((read) => {
@@ -1624,8 +1627,14 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         for (const date of dates) {
           const positions = await positionsOn(database, session.userId, date);
           let total = Money.zero(BASE_CURRENCY);
+          // One batched read per valuation date, not one per position (P-6).
+          const points = await reader.priceMany(
+            positions.map((position) => position.security_id),
+            date,
+            BASE_CURRENCY,
+          );
           for (const position of positions) {
-            const point = await reader.price(position.security_id, date, BASE_CURRENCY);
+            const point = points.get(position.security_id) ?? null;
             if (point === null) continue;
             const priceCurrency = toCurrency(point.currency);
             if (priceCurrency !== BASE_CURRENCY) continue;

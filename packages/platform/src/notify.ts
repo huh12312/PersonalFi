@@ -17,6 +17,13 @@ export type Channel = (typeof CHANNEL)[keyof typeof CHANNEL];
 export interface NotifyListener {
   /** Resolve as soon as a notification arrives, or after `timeoutMs`. */
   wait(timeoutMs: number): Promise<'notified' | 'timeout'>;
+  /**
+   * Wake the current (or, if none is parked, the next) `wait` as though a
+   * notification had arrived, without involving the database. For the owner of
+   * the loop to say "something I run changed what is claimable" — a job
+   * finishing frees capacity, and no `NOTIFY` is sent for that.
+   */
+  nudge(): void;
   close(): Promise<void>;
 }
 
@@ -88,6 +95,12 @@ export async function createNotifyListener(
           resolve('notified');
         };
       });
+    },
+
+    nudge() {
+      if (closed) return;
+      pending = true;
+      wake?.();
     },
 
     async close() {

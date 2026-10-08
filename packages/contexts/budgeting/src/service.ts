@@ -45,7 +45,13 @@
  * the Phase 1 gates' recurring finding was controls that had never been observed
  * failing.
  */
-import { Money, newId, type DateOnly as DateOnlyType, type Money as MoneyType } from '@core/kernel';
+import {
+  DateOnly,
+  Money,
+  newId,
+  type DateOnly as DateOnlyType,
+  type Money as MoneyType,
+} from '@core/kernel';
 import { appendEvent } from '@core/platform';
 import { and, asc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import {
@@ -81,7 +87,12 @@ import {
   BudgetThresholdCrossed,
   ReadyToAssignChanged,
 } from './events.ts';
-import { onBudgetBalances, streamForBudget, type LedgerPort } from './ledger-port.ts';
+import {
+  onBudgetBalances,
+  streamForBudget,
+  type BudgetAccount,
+  type LedgerPort,
+} from './ledger-port.ts';
 import { periodContaining, periodsRemainingInclusive, type PeriodGridSettings } from './periods.ts';
 import { identityHolds, readyToAssign } from './rta.ts';
 
@@ -472,6 +483,80 @@ export async function recomputeDirty(
 // The recompute
 // ---------------------------------------------------------------------------
 
+/**
+ * The debt each *first-line* card carried when this period began (O-94-1).
+ *
+ * A card's first payment line has no earlier period to roll a closing out of, so
+ * debt that predates the budget is in the ledger's balance and in no term of the
+ * cascade, and identity II (`owed = available + unfunded`) refuses it. This
+ * derives it from the ledger rather than from the cascade:
+ *
+ * ```
+ * owed at the period's start = −(balance now − every movement on the card since)
+ * ```
+ *
+ * Every movement counts, categorised or not, transfer leg or not, excluded or
+ * not: this is the card's arithmetic, not the budget's. It is deliberately NOT
+ * `owed − (available + unfunded)`, which would make identity II true by
+ * construction; a card row the cascade cannot explain still fails the identity.
+ * The scan runs to the end of time, so it is exact for a period that is no
+ * longer the newest too. A card that was overpaid at the start (a positive
+ * balance) contributes nothing: that case keeps today's behaviour.
+ */
+async function startingCardDebt(
+  executor: BudgetingExecutor,
+  context: BudgetingContext,
+  dependencies: BudgetingDependencies,
+  budget: BudgetRow,
+  period: BudgetPeriodRow,
+  accounts: readonly BudgetAccount[],
+  lineRows: readonly BudgetLineRow[],
+): Promise<ReadonlyMap<string, MoneyType>> {
+  const code = budget.currency;
+  const cards = lineRows.flatMap((row) =>
+    row.kind === 'credit_card_payment' && row.creditAccountId !== null ? [row.creditAccountId] : [],
+  );
+  const debts = new Map<string, MoneyType>();
+  if (cards.length === 0) return debts;
+
+  const earlier = await executor
+    .select({ creditAccountId: budgetLines.creditAccountId })
+    .from(budgetLines)
+    .innerJoin(budgetPeriods, eq(budgetLines.budgetPeriodId, budgetPeriods.id))
+    .where(
+      and(
+        eq(budgetPeriods.budgetId, budget.id),
+        eq(budgetLines.userId, context.userId),
+        eq(budgetLines.kind, 'credit_card_payment'),
+        lt(budgetPeriods.sequence, period.sequence),
+      ),
+    );
+  const hadEarlierLine = new Set(earlier.map((row) => row.creditAccountId));
+  const first = cards.filter((id) => !hadEarlierLine.has(id));
+  if (first.length === 0) return debts;
+
+  const movement = new Map<string, MoneyType>(first.map((id) => [id, Money.zero(code)]));
+  for await (const row of streamForBudget(dependencies.port, {
+    userId: context.userId,
+    dateFrom: period.startDate as DateOnlyType,
+    dateTo: DateOnly.parse('9999-12-31'),
+    accountIds: first,
+  })) {
+    const soFar = movement.get(row.accountId);
+    if (soFar !== undefined) movement.set(row.accountId, Money.add(soFar, row.amount));
+  }
+
+  for (const cardId of first) {
+    const balance = accounts.find((account) => account.id === cardId)?.workingBalance;
+    if (balance === null || balance === undefined) continue;
+    const owedAtStart = Money.negate(
+      Money.subtract(balance, movement.get(cardId) ?? Money.zero(code)),
+    );
+    if (owedAtStart.minor > 0n) debts.set(cardId, owedAtStart);
+  }
+  return debts;
+}
+
 export interface RecomputeResult {
   readonly periodId: string;
   readonly readyToAssign: MoneyType;
@@ -600,7 +685,37 @@ export async function recomputePeriod(
     });
   }
 
+  // 3b. Card spending with no envelope behind it. A charge in a category the
+  //     budget has no line for, or in none at all, is in the card's balance, so
+  //     it has to be in `CCP[card]` too or identity II refuses the card (and the
+  //     consumer dead-letters on the first unbudgeted purchase). Nothing is
+  //     earmarked for it, so by 07 §1.3's funding rule all of it is borrowed;
+  //     a throwaway zero-opening run yields exactly those card effects. The
+  //     bucket has no line, so no envelope's `available` or RTA moves.
+  const linedCategories = new Set(
+    lineRows.flatMap((row) =>
+      row.kind === 'category' && row.categoryId !== null ? [row.categoryId] : [],
+    ),
+  );
+  for (const [categoryId, activity] of actuals.byCategory) {
+    if (categoryId !== null && linedCategories.has(categoryId)) continue;
+    for (const effect of runEnvelope(zero, activity.transactions).cardEffects) {
+      const list = cardEffects.get(effect.creditAccountId) ?? [];
+      list.push(effect);
+      cardEffects.set(effect.creditAccountId, list);
+    }
+  }
+
   // 4. `CCP[card]`, one per on-budget credit account.
+  const startingDebt = await startingCardDebt(
+    executor,
+    context,
+    dependencies,
+    budget,
+    period,
+    scoped,
+    lineRows,
+  );
   const cardResults = [];
   for (const row of lineRows) {
     if (row.kind !== 'credit_card_payment' || row.creditAccountId === null) continue;
@@ -608,10 +723,18 @@ export async function recomputePeriod(
     // roll writes. Reading `unfundedDebtMinor` here instead would read back this
     // recompute's own previous answer and add the period's borrowing twice —
     // see the column comment in `0009_budgeting.sql`.
+    //
+    // A card's FIRST line (no earlier period has one) also opens with the debt
+    // the card carried before the budget did (O-94-1): there is no earlier
+    // closing to carry, and that debt is borrowed money with no envelope behind
+    // it, which is what `unfundedDebt` is.
     const opening: CardOpening = {
       creditAccountId: row.creditAccountId,
       available: Money.of(row.carryoverMinor, code),
-      unfundedDebt: Money.of(row.carryoverUnfundedDebtMinor, code),
+      unfundedDebt: Money.add(
+        Money.of(row.carryoverUnfundedDebtMinor, code),
+        startingDebt.get(row.creditAccountId) ?? zero,
+      ),
     };
     const result = applyCardEffects({
       opening,

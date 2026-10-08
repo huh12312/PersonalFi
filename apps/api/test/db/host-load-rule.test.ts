@@ -25,11 +25,16 @@ vi.mock('node:os', async (importOriginal) => {
 });
 
 import {
+  BURST_OTHER_CORES,
+  BURST_WINDOW_MS,
   HOST_LOAD_CEILING,
   assertWithinBudget,
   currentLoad,
   describeLoad,
   percentile,
+  recentBurst,
+  recordBusySlot,
+  resetBusySlots,
   summarise,
 } from './perf-support.ts';
 
@@ -47,6 +52,7 @@ const asContext = (fake: FakeContext): Parameters<typeof assertWithinBudget>[0] 
 describe('assertWithinBudget', () => {
   beforeEach(() => {
     load.one = 0;
+    resetBusySlots();
   });
 
   it('an in-budget reading passes at any load and never skips', () => {
@@ -113,6 +119,56 @@ describe('assertWithinBudget', () => {
     expect(() =>
       assertWithinBudget(asContext(fake), { label: 'edge', p95: 200, budgetMs: 200 }),
     ).toThrow();
+  });
+});
+
+/**
+ * The gate lagged the contention it detects (WP 9.14): the Wave D verify read p95 248 ms at a 1-minute load
+ * of 1.29 because sibling test workers burst for a few seconds, and the 1-minute average cannot see that.
+ */
+describe('a CPU burst the 1-minute load cannot see', () => {
+  beforeEach(() => {
+    load.one = 1.29;
+    resetBusySlots();
+  });
+
+  it('an over-budget reading beside a burst is the named skip, and says why', () => {
+    recordBusySlot({ atMs: Date.now() - 2_000, otherCores: BURST_OTHER_CORES + 1 });
+    const fake = context();
+    assertWithinBudget(asContext(fake), { label: 'list first page', p95: 248, budgetMs: 200 });
+    expect(fake.skip).toHaveBeenCalledTimes(1);
+    const note = String(fake.skip.mock.calls[0]?.[0]);
+    expect(note).toMatch(/^HOST_LOADED:/);
+    expect(note).toContain('list first page p95 248.0 ms');
+    expect(note).toContain('a burst the 1-minute load cannot see');
+    expect(note).toContain('load 1.29');
+  });
+
+  it('the same reading with no burst in the window still FAILS (a quiet host is believed)', () => {
+    recordBusySlot({ atMs: Date.now() - 2_000, otherCores: BURST_OTHER_CORES - 0.5 });
+    // A burst that ended before the window opened does not taint it either.
+    recordBusySlot({ atMs: Date.now() - BURST_WINDOW_MS - 1_000, otherCores: 8 });
+    const fake = context();
+    expect(() =>
+      assertWithinBudget(asContext(fake), { label: 'list first page', p95: 248, budgetMs: 200 }),
+    ).toThrow(/list first page over its budget/);
+    expect(fake.skip).not.toHaveBeenCalled();
+    expect(recentBurst()).toBeNull();
+  });
+
+  it('an in-budget reading beside a burst passes: a burst can only turn a failure into a skip', () => {
+    recordBusySlot({ atMs: Date.now(), otherCores: 8 });
+    const fake = context();
+    expect(() =>
+      assertWithinBudget(asContext(fake), { label: 'x', p95: 120, budgetMs: 200 }),
+    ).not.toThrow();
+    expect(fake.skip).not.toHaveBeenCalled();
+  });
+
+  it('reports the worst slot inside the window', () => {
+    recordBusySlot({ atMs: Date.now() - 5_000, otherCores: 3.2 });
+    recordBusySlot({ atMs: Date.now() - 1_000, otherCores: 6.1 });
+    expect(recentBurst()?.otherCores).toBe(6.1);
   });
 });
 

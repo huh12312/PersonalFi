@@ -63,7 +63,7 @@
  *  2. **`excluded[].reason` under-describes the CAD case.** The seeded CAD
  *     position is quoted in CAD and comes back as `price_unknown`, not
  *     `currency_mismatch`, because `createPriceReader` filters observations by
- *     quote currency (`prices.ts` → `observationsOnOrBefore(..., quoteCurrency,
+ *     quote currency (`prices.ts` → `observationsForLadder(..., quoteCurrency,
  *     ...)`) before `valueHoldings`' currency check ever sees a row. The
  *     position is priced; it is just not priced in USD. Asserted as observed —
  *     the test pins the behaviour that exists, and the evidence note says why

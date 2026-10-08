@@ -531,6 +531,32 @@ restore-drill:
       fail "restored schema_migrations max id ($RESTORED_MIGRATIONS) != live ($LIVE_MIGRATIONS)"
     fi
 
+    # Assertion 2b (WP 9.14): the plan. Counting tables proves the schema came back,
+    # not that the data did, and WP 9.4 (F-94-6) found that no backup holding a
+    # `plan_scenarios` row restored from migration 0022 to 0036 -- a CHECK function
+    # called another unqualified and `pg_restore` runs with an empty search_path. The
+    # drill never saw it because the drill's database held no plan. So compare the plan
+    # rows themselves, and say so loudly when there are none to compare (the drill is
+    # then blind to that whole class, which is a fact the holder should hear, not a PASS
+    # that implies otherwise). `q` prints nothing when the table is absent.
+    RESTORED_PLANS="$(q "$DRILL_DB" personalfi_restore_drill "select count(*) from plan_scenarios" || true)"
+    if [ -n "$LIVE_DB_CONTAINER" ]; then
+      LIVE_PLANS="$(q "$LIVE_DB_CONTAINER" personalfi "select count(*) from plan_scenarios" || true)"
+    else
+      LIVE_PLANS=""
+    fi
+    RESTORED_PLANS="${RESTORED_PLANS:-n/a}"
+    LIVE_PLANS="${LIVE_PLANS:-n/a}"
+    PLAN_NOTE=""
+    if [[ "$LIVE_PLANS" =~ ^[0-9]+$ ]]; then
+      if [ "$RESTORED_PLANS" != "$LIVE_PLANS" ]; then
+        fail "restored plan_scenarios row count ($RESTORED_PLANS) != live ($LIVE_PLANS)"
+      elif [ "$LIVE_PLANS" -eq 0 ]; then
+        PLAN_NOTE="WARNING: the live database holds no plan scenario, so this drill cannot see a backup that fails to restore one (F-94-6). Save a plan on the Plan screen, run \`just backup\`, then drill again."
+        echo "restore-drill: $PLAN_NOTE" >&2
+      fi
+    fi
+
     # Assertion 3: the application can actually serve the restored database.
     API_READY="skipped"
     if [ -n "${SKIP_API_BOOT:-}" ]; then
@@ -606,6 +632,8 @@ restore-drill:
       echo "- Restored db schema_migrations max id: $RESTORED_MIGRATIONS"
       echo "- Live db table count: $LIVE_TABLES"
       echo "- Live db schema_migrations max id: $LIVE_MIGRATIONS"
+      echo "- plan_scenarios rows, restored / live: $RESTORED_PLANS / $LIVE_PLANS"
+      if [ -n "$PLAN_NOTE" ]; then echo "- $PLAN_NOTE"; fi
       echo "- API /ready against restored db: $API_READY"
       echo
       if [ "$VERDICT" = "PASS" ]; then
@@ -741,9 +769,21 @@ bootstrap-user name="" timezone="UTC" reissue="false":
     # has the network, the secrets and this exact script baked in. Otherwise
     # fall back to the host, which is what `just dev` against `just db-up`
     # needs. The fallback is the dev path, not the production one.
+    #
+    # In its OWN one-shot container, not `exec` into the running api (WP 9.14,
+    # P-5). This derives the KEK (Argon2id, m = 1 GiB) and the api container's
+    # 1536M cgroup already holds the api's own derivation: WP 9.9 measured 90 %
+    # of the limit, and the stranger install (WP 9.13) saw the kernel OOM-kill
+    # it (exit 137) AFTER the user row was written. `run --rm --no-deps` starts a
+    # fresh container from the api service's own definition — same image,
+    # secrets, networks, read-only root, user and its own 1536M — so the running
+    # api is never the process that is killed. `--no-deps` because the stack is
+    # already up (that is the branch we are in); `--entrypoint node` because the
+    # image's entrypoint starts the api.
     if docker compose ps --status running --services 2>/dev/null | grep -qx api; then
-      echo "bootstrap-user: running inside the api container (the stack is up)" >&2
-      docker compose exec -T api node /app/apps/api/src/bin/bootstrap-user.ts "${args[@]}"
+      echo "bootstrap-user: running in its own one-shot container (the stack is up)" >&2
+      docker compose run --rm --no-deps -T --entrypoint node api \
+        /app/apps/api/src/bin/bootstrap-user.ts "${args[@]}"
     else
       echo "bootstrap-user: the stack is not running; using the local dev database" >&2
       pnpm exec node apps/api/src/bin/bootstrap-user.ts "${args[@]}"

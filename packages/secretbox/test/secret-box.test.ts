@@ -142,6 +142,26 @@ describeWithDb('SecretBox', () => {
     expect(await box.openText(ref, await box.sealText(ref, PLAID_TOKEN))).toBe(PLAID_TOKEN);
   });
 
+  /**
+   * G-18 (WP 9.10; WP 9.14), ASVS V11.3.4 / V11.5.1: a nonce reused under one key breaks XChaCha20-Poly1305
+   * outright. The 24-byte random nonce is what makes reuse negligible, and nothing failed if a refactor
+   * made it a counter that restarts, a constant, or a function of the plaintext.
+   */
+  it('draws a fresh 24-byte nonce for every seal, even of the same plaintext in the same place', async () => {
+    const { box, ref } = await unlockedBox();
+    const seen = new Set<string>();
+    const ciphertexts = new Set<string>();
+    for (let index = 0; index < 200; index += 1) {
+      const sealed = await box.sealText(ref, PLAID_TOKEN);
+      const envelope = decodeEnvelope(sealed);
+      expect(envelope.nonce).toHaveLength(24);
+      seen.add(Buffer.from(envelope.nonce).toString('hex'));
+      ciphertexts.add(Buffer.from(sealed).toString('hex'));
+    }
+    expect(seen.size, 'nonces repeated across 200 seals of one plaintext').toBe(200);
+    expect(ciphertexts.size, 'identical ciphertexts for identical plaintext').toBe(200);
+  });
+
   it('round-trips an empty value and a multi-byte one', async () => {
     const { box, ref } = await unlockedBox();
     expect(await box.openText(ref, await box.sealText(ref, ''))).toBe('');

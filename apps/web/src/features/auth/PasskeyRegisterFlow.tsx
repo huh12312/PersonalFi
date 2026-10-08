@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { useNavigate } from '@tanstack/react-router';
 import { startRegistration } from '@simplewebauthn/browser';
-import { CheckCircle2, Loader2, ShieldPlus } from 'lucide-react';
+import { CheckCircle2, KeyRound, Loader2, ShieldPlus } from 'lucide-react';
 import { useState } from 'react';
 
 import {
@@ -14,13 +14,14 @@ import { AuthCard } from './AuthCard.tsx';
 import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Label } from '../../components/ui/label.tsx';
+import { RecoveryCodes } from '../security/RecoveryCodes.tsx';
 
 export interface PasskeyRegisterFlowProps {
   /** The one-time enrolment token from `just bootstrap-user` (first run). Omitted when a stepped-up session is adding a second authenticator instead. */
   registrationToken?: string | undefined;
 }
 
-type Step = 'first' | 'second' | 'done';
+type Step = 'first' | 'second' | 'codes' | 'done';
 
 /**
  * First-run passkey enrolment (05-frontend-architecture.md §7.1): register
@@ -50,7 +51,13 @@ export function PasskeyRegisterFlow({ registrationToken }: PasskeyRegisterFlowPr
         friendlyName: name,
         response: response as never,
       });
-      setStep(result.enrolSecondAuthenticator && step === 'first' ? 'second' : 'done');
+      setStep(
+        result.enrolSecondAuthenticator && step === 'first'
+          ? 'second'
+          : registrationToken !== undefined
+            ? 'codes'
+            : 'done',
+      );
     } catch (cause) {
       setError(
         describeWebauthnError(cause, {
@@ -59,6 +66,34 @@ export function PasskeyRegisterFlow({ registrationToken }: PasskeyRegisterFlowPr
         }),
       );
     }
+  }
+
+  if (step === 'codes') {
+    return (
+      <AuthCard>
+        <IconCircle tone="accent">
+          <KeyRound size={22} aria-hidden="true" />
+        </IconCircle>
+        <h1 className="mt-3 text-h2 text-text-primary">Save your recovery codes</h1>
+        <p className="mt-1 text-small text-text-muted">
+          If you lose every passkey, a recovery code is the way back in.
+        </p>
+        <div className="mt-5 text-left">
+          <RecoveryCodes
+            generateLabel="Create my recovery codes"
+            savedLabel="Continue"
+            onSaved={() => setStep('done')}
+          />
+        </div>
+        <button
+          type="button"
+          className="mt-3 w-full text-small text-text-muted hover:underline"
+          onClick={() => setStep('done')}
+        >
+          Skip for now — create them later in Settings › Security
+        </button>
+      </AuthCard>
+    );
   }
 
   if (step === 'done') {
@@ -119,7 +154,7 @@ export function PasskeyRegisterFlow({ registrationToken }: PasskeyRegisterFlowPr
           <button
             type="button"
             className="mt-3 w-full text-small text-text-muted hover:underline"
-            onClick={() => setStep('done')}
+            onClick={() => setStep(registrationToken !== undefined ? 'codes' : 'done')}
           >
             Skip for now
           </button>

@@ -10,14 +10,14 @@
  * CAD account), **five years of daily prices** (365,000 `prices` rows), and a
  * declared FX gap. Nothing timed the holdings routes over it; this does.
  *
- * ## Informational, by the spec
+ * ## Informational in WP 9.9, asserted since WP 9.14
  *
- * The dispatch records these two rows "informationally" (§3 WP 9.9 (g)); the 200 ms
- * budget over the small seed is `investments-perf.test.ts`'s. So this test prints
- * its numbers (with the load, to `PERF_RESULTS_FILE` too) and asserts only what a
- * perf number needs to mean something: the rows are in the database, and the route
- * answers 200 with every position in it. A run that read slow would be a finding
- * for the evidence, not a red.
+ * The dispatch recorded these two rows "informationally" (§3 WP 9.9 (g)), and they read
+ * p95 2,051 / 2,012 ms (P-6: the price read walked every row of every security, one
+ * security at a time). WP 9.14 bounded and batched that read (65 / 51 ms), so the last
+ * test now asserts the 200 ms the same routes meet over `investments-perf.test.ts`'s
+ * 12-position seed — through `assertWithinBudget`, so a loaded host skips by name and a
+ * quiet one fails. The rows-in-the-database check stays a separate `it` with no skip.
  *
  * ## Loading
  *
@@ -39,10 +39,17 @@ import {
   type ApiHarness,
 } from '../helpers/api-harness.ts';
 import { priceHoldings, priceReaderFor, readHoldings } from '../../src/routes/investments.ts';
-import { describeLoad, measureGet, recordFigure, settleLoad } from './perf-support.ts';
+import {
+  assertWithinBudget,
+  describeLoad,
+  measureGet,
+  recordFigure,
+  settleLoad,
+} from './perf-support.ts';
 
 // perf-skip: NO_DATABASE — DATABASE_URL is unset, so there is no Postgres to load the 365,000-row scale seed into (CI's migration-test job has one)
-// perf-skip: ON_SHARED_RUNNER — a GitHub shared runner is not the target hardware (09 §6 Q1) and this row is informational anyway; the 365,000-row load is not worth a CI job's minutes
+// perf-skip: HOST_LOADED — an over-budget reading at a 1-minute load of 3 or more (or beside a CPU burst) is not believed (09 §3 rule 4); in-budget readings pass at any load
+// perf-skip: ON_SHARED_RUNNER — a GitHub shared runner is not the target hardware (09 §6 Q1) and the 365,000-row load is not worth a CI job's minutes
 const ON_SHARED_RUNNER = process.env['CI'] !== undefined;
 
 const scale = generatePhase4Scale(20_260_926);
@@ -267,16 +274,22 @@ describe.skipIf(NO_DATABASE)(
         expect(rows.at(-1)?.ms ?? 0).toBeGreaterThan(0);
       }, 300_000);
 
-      it('GET /holdings and GET /investments/allocation, timed over the scale seed (recorded, not gated)', async () => {
+      it('GET /holdings and GET /investments/allocation over the scale seed stay inside 200 ms (P-6, WP 9.14)', async (ctx) => {
         await settleLoad();
+        const checks: { label: string; p95: number; budgetMs: number }[] = [];
         for (const [label, path] of [
           ['GET /holdings (200 positions, 5 years of prices)', '/holdings'],
           ['GET /investments/allocation (200 positions)', '/investments/allocation'],
         ] as const) {
           const measured = await measureGet(label, base, path, cookie, { samples: 30 });
-          // Recorded, never asserted: §3 WP 9.9 (g) lists these informationally.
           expect(measured.samples.length).toBe(30);
+          checks.push({ label, p95: measured.p95, budgetMs: 200 });
         }
+        // Informational in WP 9.9 (p95 2,051 / 2,012 ms: the price read walked every row of every
+        // security, one security at a time). WP 9.14 bounded and batched that read (65 / 51 ms), so the
+        // 200 ms those routes meet over the 12-position seed is now asserted at the scale the plan sizes the
+        // product for. Over budget on a loaded host is the named HOST_LOADED skip; on a quiet one it fails.
+        assertWithinBudget(ctx, checks);
       }, 300_000);
     });
   },

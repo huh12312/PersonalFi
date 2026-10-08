@@ -403,6 +403,13 @@ export function createJobRunner(options: JobRunnerOptions): JobRunner {
         const promise = execute(job).finally(() => {
           inFlight.delete(promise);
           metrics?.gauge(METRIC.jobsInFlight, inFlight.size);
+          // A finished job frees a slot, in this process and under its kind's
+          // cap, and no NOTIFY says so: only an enqueue notifies. Without this
+          // a kind capped at one ran one job per poll interval however short
+          // the job (WP 9.9 P-1: 198 of the nightly chain's 243 s). The wake
+          // costs one extra pass over an empty queue at worst; the poll
+          // interval stays the floor for everything else.
+          listener?.nudge();
         });
         inFlight.add(promise);
       }

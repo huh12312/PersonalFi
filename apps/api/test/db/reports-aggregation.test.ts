@@ -24,6 +24,7 @@ import {
   type ApiHarness,
 } from '../helpers/api-harness.ts';
 
+// perf-skip: NO_DATABASE — DATABASE_URL is unset, so there is no Postgres to load the 50k-row corpus into (CI's migration-test job has one)
 const describeWithDb = describe.skipIf(NO_DATABASE);
 
 interface WireMoney {
@@ -83,7 +84,7 @@ async function addManualTransaction(
   return id;
 }
 
-describeWithDb('reports aggregation (WP 2.8)', () => {
+describeWithDb('[slow] reports aggregation (WP 2.8)', () => {
   let h: ApiHarness;
 
   beforeAll(async () => {
