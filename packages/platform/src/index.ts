@@ -47,6 +47,8 @@ export {
 export { appendEvent, appendEvents, type AppendOptions } from './events/outbox.ts';
 // WP 9.11 (G-23): the operator path back for a dead-lettered consumer.
 export { resumeConsumer, type ResumeOutcome } from './events/resume.ts';
+// WP 9.14 (P-4): a recompute-style consumer leaves the work to the last event of a holder's backlog.
+export { hasLaterEvent } from './events/backlog.ts';
 export {
   registerConsumer,
   createConsumerPump,

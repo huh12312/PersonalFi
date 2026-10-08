@@ -58,12 +58,13 @@
  */
 import { DateOnly, type DateOnly as DateOnlyType } from '@core/kernel';
 import {
+  hasLaterEvent,
   registerConsumer,
   type ConsumerContext,
   type EventEnvelope,
   type RegisteredConsumer,
 } from '@core/platform';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { budgetPeriods, budgets } from '../schema/index.ts';
 import type { BudgetingDatabase } from './db.ts';
 import { isBudgetingError } from './errors.ts';
@@ -198,29 +199,6 @@ async function earliestAffectedDate(
   return earliest;
 }
 
-/**
- * Is a later event waiting for this holder's budget? (P-4, WP 9.14.)
- *
- * The recompute is a deterministic function of current state, so after event 1 of a backlog of 2,737
- * `TransferPaired` events every later recompute but the last is thrown away — and each costs every dirty
- * period's full read. Every event still marks its periods dirty in its own transaction (a retry, a crash
- * or a replay loses nothing); only the recompute is left to the final event of the holder's backlog.
- * Scoped to the holder, because another holder's later event must not be the reason this holder's periods
- * stay dirty. The read is the consumer's own filter (`CONSUMED_EVENT_TYPES`) over `domain_events` by
- * `seq`, one indexed probe through the transaction the receipt is written in.
- */
-async function laterEventWaiting(event: EventEnvelope, context: ConsumerContext): Promise<boolean> {
-  const result = await context.tx.execute<{ later: boolean }>(sql`
-    SELECT EXISTS (
-      SELECT 1 FROM domain_events
-       WHERE seq > ${event.seq.toString()}::bigint
-         AND user_id = ${event.userId}::uuid
-         AND event_type = ANY(${sql.param([...CONSUMED_EVENT_TYPES])}::text[])
-    ) AS later
-  `);
-  return result.rows[0]?.later === true;
-}
-
 export function createBudgetingConsumer(dependencies: {
   readonly database: BudgetingDatabase;
   readonly port: LedgerPort;
@@ -247,7 +225,15 @@ export function createBudgetingConsumer(dependencies: {
         causationId: event.id,
       };
 
-      const backlog = await laterEventWaiting(event, context);
+      // P-4 (WP 9.14): the recompute is a deterministic function of current state, so after event 1 of a
+      // backlog of thousands every later recompute but the last is thrown away. Every event still marks its
+      // periods dirty in its own transaction (a retry, a crash or a replay loses nothing); only the recompute
+      // is left to the final event of THIS holder's backlog. `domain_events` is the platform's table.
+      const backlog = await hasLaterEvent(context.tx, {
+        afterSeq: event.seq,
+        userId: event.userId,
+        eventTypes: CONSUMED_EVENT_TYPES,
+      });
 
       for (const budget of userBudgets) {
         // One transaction per budget, opened on this context's own pool handle

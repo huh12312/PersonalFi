@@ -230,6 +230,27 @@ describeWithDb('WebAuthn', () => {
     ).rejects.toMatchObject({ code: 'challenge_expired' });
   });
 
+  // G-18 (ASVS 6.7.2, 11.5.1; WP 9.14): the challenge's size and uniqueness are the library's default
+  // today, so nothing failed when a change shrank it. 32 bytes is what the library draws; the bar here
+  // is the ASVS floor with room to spare (16 bytes = 128 bits), measured on what a client is sent.
+  it('draws a fresh challenge of at least 128 bits for every registration and every login', async () => {
+    const decodedLength = (challenge: string): number => Buffer.from(challenge, 'base64url').length;
+    const seen = new Set<string>();
+    for (let i = 0; i < 20; i += 1) {
+      const registration = await harness.identity.webauthn.startRegistration(
+        harness.userId,
+        'Chris',
+      );
+      const login = await harness.identity.webauthn.startAuthentication('authentication');
+      const stepUp = await harness.identity.webauthn.startAuthentication('step_up', harness.userId);
+      for (const challenge of [registration.challenge, login.challenge, stepUp.challenge]) {
+        expect(decodedLength(challenge)).toBeGreaterThanOrEqual(16);
+        seen.add(challenge);
+      }
+    }
+    expect(seen.size).toBe(60);
+  });
+
   // --------------------------------------------------------- authentication
 
   it('logs in without a username and does not enumerate credentials', async () => {

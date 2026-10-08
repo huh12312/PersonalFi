@@ -110,9 +110,7 @@ describe('router', () => {
     await router.navigate({ to: '/settings' });
 
     expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeInTheDocument();
-    expect(
-      await screen.findByText(/Profile, security & passkeys, connections/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Profile, passkey management, connections/)).toBeInTheDocument();
   });
 });
 
