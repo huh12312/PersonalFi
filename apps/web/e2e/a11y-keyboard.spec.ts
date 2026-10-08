@@ -112,6 +112,10 @@ test('passkey login completes by keyboard with a virtual authenticator', async (
   await page.goto('/login');
   const journey = new Journey(page, 'passkey login');
   await expect(page.getByRole('heading', { name: 'Sign in to PersonalFi' })).toBeVisible();
+  // The primary action appears after the WebAuthn availability check resolves; under host load the
+  // heading is visible before the button exists, and a Tab loop that starts then walks past the two
+  // fallbacks and fails (seen once in the full suite on 2026-10-08, never alone). Wait for the stop.
+  await expect(page.getByRole('button', { name: /Sign in with a passkey/ })).toBeVisible();
 
   // The theme switch is the first stop (it sits above the card); the primary action is next and the two
   // fallbacks follow it in reading order.
