@@ -163,7 +163,9 @@ all of them.
    - Debian, Ubuntu or Alpine: `sudo cp personalfi-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates`.
    - macOS: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain personalfi-ca.crt`.
    - Firefox: Settings, Privacy and Security, Certificates, Import (Firefox keeps its own store).
-   - Chrome, Chromium or Edge on Linux read their own NSS store, not the system one:
+   - Chrome, Chromium or Edge on Linux read their own NSS store, not the system one. If
+     `~/.pki/nssdb` does not exist yet (the browser has never run), create it first:
+     `mkdir -p $HOME/.pki/nssdb && certutil -d sql:$HOME/.pki/nssdb -N --empty-password`. Then
      `certutil -d sql:$HOME/.pki/nssdb -A -t 'C,,' -n personalfi -i personalfi-ca.crt` (package
      `nss-tools` on Alpine and Arch, `libnss3-tools` on Debian and Ubuntu).
 
@@ -200,8 +202,9 @@ all of them.
    It prints a one-time link of the form `https://personalfi.lan/register#token=...`. Open the
    **whole** link in a browser that trusts the certificate (step 8). Enrol a passkey on this device
    and, when the wizard offers it, a backup passkey on a second device (a phone or a security key).
-   The wizard then shows your ten recovery codes, once: save them somewhere that is not this
-   computer and tick "I have saved these codes somewhere safe" to continue. You can skip that step
+   The wizard then offers **Create my recovery codes**; choose it and it shows your ten codes,
+   once: save them somewhere that is not this computer and tick "I have saved these codes
+   somewhere safe" to continue. You can skip that step
    and create them later in Settings › Security › Recovery codes; a new set replaces the old one.
    The token sits in the URL fragment, which is never sent to a server and never reaches a log.
    On a headless test host, use Chromium with a virtual authenticator (DevTools → More tools →
@@ -249,7 +252,10 @@ failures people actually hit, with the exact error text.
    ```
 
    It pulls two small pinned images the first time, and ends with `Verdict: PASS`; the same report
-   is written under `$DRILL_EVIDENCE_DIR`. If the host runs other Compose projects, also set
+   is written under `$DRILL_EVIDENCE_DIR`. On a fresh install the report also says
+   `WARNING: the live database holds no plan scenario ...`: that is expected until you have saved a
+   plan on the Plan screen, and the verdict is still PASS. Once you have a plan, run `just backup`
+   and the drill again so it also checks that a backup with a plan restores. If the host runs other Compose projects, also set
    `COMPOSE_PROJECT_NAME=personalfi`: the recipe refuses to guess which project to drill. Run it
    monthly; the RUNBOOK's [Restore drill](RUNBOOK.md#restore-drill) section says what it asserts.
 
