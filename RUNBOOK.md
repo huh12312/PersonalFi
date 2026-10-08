@@ -414,7 +414,7 @@ just bootstrap-user name="Chris" timezone="America/New_York"
 This prints a one-time passkey-enrolment link of the form
 `https://<PUBLIC_HOST>/register#token=...`. Open it in a browser that trusts
 the internal CA (step 5), enrol at least two authenticators (D21), and save the
-ten recovery codes somewhere that is not this host.
+ten recovery codes somewhere that is not this host. The wizard shows the codes once after the backup-passkey step; if you skipped it, Settings › Security › Recovery codes creates a set (each new set replaces the last).
 
 The token expires **one hour** after it is minted. If it lapses, or you lose
 every passkey and every recovery code, `just bootstrap-user reissue=true`
@@ -1742,16 +1742,16 @@ open — if it cannot be taken, both derive and you are back to the old peak —
 than about 3 GiB free is still safer with the local model off. Do not lower
 `KEK_ARGON2_MEMORY_KIB` to save memory: it is a security parameter with a production floor.
 
-`just bootstrap-user` (first install, or `reissue=true`) derives a third key **inside the api
-container**, next to the running api: WP 9.9 measured that container at 90 % of its 1536M limit
-during it. It never overlaps the api's or the worker's own derivation (the same lock), but run it
-when the stack is otherwise quiet.
+`just bootstrap-user` (first install, or `reissue=true`) derives its key in a one-shot container
+(`docker compose run --rm --no-deps`) made from the api service's own definition: the same image,
+secrets, read-only root and 1536M limit, in its own cgroup. WP 9.14 measured it at 1.2 GiB for about
+six seconds while the running api stayed at 176 MiB. It takes the same derivation lock as the api's
+and worker's own, so it never overlaps them.
 
 Every service also has a PIDs cap (`deploy.resources.limits.pids`): api, worker and db 256; proxy,
 backup, pre-migrate-backup and migrator 128; the placeholders 16; ollama 256.
 `scripts/compose-hardening-check.sh` refuses a service without one. Where a number above was
-informational only, the evidence says so: 200 held positions make `GET /holdings` take about 2 s
-(WP 9.9 finding P-6, not yet fixed), and the 250k-row list's rare-word search passes 200 ms.
+informational only, the evidence says so: 200 held positions make `GET /holdings` take about 60 ms (2 s before WP 9.14's bounded, batched price read), and the 250k-row list's rare-word search passes 200 ms.
 
 ---
 
@@ -1807,13 +1807,11 @@ reason `api` never becomes healthy on a fresh box. `backup` reads `starting` for
 on a fresh install and only goes `unhealthy` after a failed attempt: see "Backup".
 
 **`just bootstrap-user` ends with `exit code 137` after "deriving the key-encryption key".** The
-recipe runs its derivation inside the running `api` container (`docker compose exec`), under that
-container's own 1536M limit, beside the api's own working set: on 3 of 5 attempts on a 6 GiB test
-host the kernel OOM-killed it, every time when run straight after `up --wait` or while another
-derivation was still running (WP 9.13's F-13-4; WP 9.9's P-5). The user row was already written,
-so the next plain run says `A user already exists`. Wait a minute for the api to settle and run
-the same command with `reissue=true`, which issues a fresh one-time link. The structural fix (the
-derivation as its own one-shot container with its own memory budget) is WP 9.14's.
+recipe runs the derivation in its own one-shot container with a 1536M limit; the kernel OOM-killed
+that container because the host had less than about 1.5 GiB free. The running `api` is not
+affected. The user row was already written, so the next plain run says `A user already exists`:
+free memory (stop `ollama` first) and run the same command with `reissue=true`, which issues a
+fresh one-time link.
 
 **`api` or `worker` exits 137 at boot, or restarts in a loop on a small host.** The kernel OOM-killed
 it: each derives a 1 GiB Argon2id key at start, and the two together peak near 2.4 GiB for a few
