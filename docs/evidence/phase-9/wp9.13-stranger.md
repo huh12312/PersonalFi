@@ -1,6 +1,6 @@
 # WP 9.13 - The stranger install (Phase 9, Wave E)
 
-Status: RUN 2 COMPLETE, 3 NEW FINDINGS (F-13-9..F-13-11; F-13-1..8 of run 1 are fixed); waiting for the orchestrator's README fix for run 3. A finisher resumes from this file; raw per-step logs are under `/tmp/wp913/runs/<n>/`.
+Status: RUN 3 COMPLETE - ZERO FINDINGS (upgrade path and fresh-candidate path). WP 9.13 exit test met.
 
 Harness: `scripts/stranger/{run.sh,lib.sh,phases.sh}`. Candidate commit: see `/tmp/wp913/HEAD_SHA`; previous wave: `/tmp/wp913/PREVIOUS_WAVE_SHA`.
 Rules honoured: the only file I opened in the archives is `README.md` (extracted with `tar -xOf`, never unpacked on the host); the developers' checkout was not read, only `scripts/stranger/**` and this file written.
@@ -3187,3 +3187,1816 @@ setsid nohup scripts/stranger/run2.sh --run 3 --cand-tar <new.tar> --cand-sha <s
 ```
 
 `--no-upgrade` runs the fresh-candidate install only; `--from PHASE` resumes after a harness workaround. If the fixed README changes the NSS step, edit `phase_nss` (it currently runs the README line, and on failure applies the F-13-9 workaround and records it).
+
+## Run 3: candidate ea06ebcde3ce028eee21103b5b5d182bdc259593 (/tmp/wp913/personalfi-src.tar), previous wave 4f0c7b9084071ec75a97395a9acb61e879a940c9 (/tmp/wp913/personalfi-src-previous-wave.tar), started 2026-10-08T15:31:45Z
+
+--- phase start_dind (2026-10-08T15:31:45Z)
+
+### Run 3: dind setup (2026-10-08T15:31:45Z)
+
+#### 2026-10-08T15:32:04Z dind started
+
+```console
+$ docker run -d --name pf-stranger-dind --privileged --memory 6g --memory-swap 6g --cpus 4 -e DOCKER_TLS_CERTDIR= -v /var/lib/docker docker:29-dind
+inner engine 29.8.2
+Docker Compose version v5.5.1
+3.24.2
+8
+MemTotal:       24021296 kB
+6442450944
+uid=0(root) gid=0(root) groups=0(root),0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+```
+
+ready after 19s
+
+--- phase prereqs (2026-10-08T15:32:04Z)
+
+### Run 3: host prerequisites (README 'What you need on the host')
+
+#### 2026-10-08T15:32:04Z prereq-apk (README's Alpine package line)
+
+```console
+$ apk add git just nodejs openssl bash coreutils curl
+( 1/19) Installing readline (8.3.3-r1)
+( 2/19) Installing bash (5.3.9-r1)
+  Executing bash-5.3.9-r1.post-install
+( 3/19) Installing coreutils-env (9.11-r0)
+( 4/19) Installing coreutils-fmt (9.11-r0)
+( 5/19) Installing coreutils-sha512sum (9.11-r0)
+( 6/19) Installing acl-libs (2.3.2-r1)
+( 7/19) Installing libattr (2.5.2-r2)
+( 8/19) Installing coreutils (9.11-r0)
+( 9/19) Installing curl (8.22.0-r0)
+(10/19) Installing libgcc (15.2.0-r5)
+(11/19) Installing just (1.48.1-r0)
+(12/19) Installing libstdc++ (15.2.0-r5)
+(13/19) Installing ada-libs (3.3.0-r0)
+(14/19) Installing icu-data-en (78.1-r0)
+  Executing icu-data-en-78.1-r0.post-install
+  * If you need ICU with non-English locales and legacy charset support, install
+  * package icu-data-full.
+(15/19) Installing icu-libs (78.1-r0)
+(16/19) Installing simdjson (4.2.4-r0)
+(17/19) Installing simdutf (9.0.0-r0)
+(18/19) Installing sqlite-libs (3.53.4-r0)
+(19/19) Installing nodejs (24.18.1-r0)
+Executing busybox-1.37.0-r31.trigger
+OK: 101.3 MiB in 72 packages
+```
+
+exit=0, duration=8s
+
+#### 2026-10-08T15:32:12Z prereq-user (create the owning user and add to docker group (README: 'add that user to the docker group'))
+
+```console
+$ getent group docker || addgroup -S docker; adduser -D -s /bin/bash pf; addgroup pf docker; ls -l /var/run/docker.sock; id pf
+docker:x:2375:
+srw-rw---- 1 root docker 0 Oct  8 15:32 /var/run/docker.sock
+uid=1000(pf) gid=1000(pf) groups=1000(pf),2375(docker)
+```
+
+exit=0, duration=1s
+
+#### 2026-10-08T15:32:13Z prereq-versions (versions vs README minimums (Docker 29+, just 1.21+, Node 18+))
+
+```console
+$ docker version --format 'engine {{.Server.Version}}'; docker compose version; just --version; node --version; git --version; openssl version; bash --version | head -1
+engine 29.8.2
+Docker Compose version v5.5.1
+just 1.48.1
+v24.18.1
+git version 2.54.0
+OpenSSL 3.5.9 29 Sep 2026 (Library: OpenSSL 3.5.9 29 Sep 2026)
+GNU bash, version 5.3.9(1)-release (x86_64-alpine-linux-musl)
+```
+
+exit=0, duration=0s
+
+--- phase sudo (2026-10-08T15:32:13Z)
+
+#### 2026-10-08T15:32:13Z prereq-sudo (README lists sudo (optional) for the /etc/hosts line and trust-store import)
+
+```console
+$ apk add sudo && echo 'pf ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/pf && chmod 440 /etc/sudoers.d/pf
+(1/1) Installing sudo (1.9.17_p2-r1)
+Executing busybox-1.37.0-r31.trigger
+OK: 103.0 MiB in 73 packages
+```
+
+exit=0, duration=1s
+
+--- phase origin (2026-10-08T15:32:14Z)
+
+#### 2026-10-08T15:32:14Z origin-prev (build the stand-in origin (previous-wave commit))
+
+```console
+$ mkdir -p origin-work srv && cd origin-work && git init -q -b main && git config user.name stranger && git config user.email s@x && tar -xf /opt/prev.tar && git add -A && git commit -q -m previous-wave && git clone -q --bare . ../srv/origin.git && cd .. && git -C srv/origin.git log --oneline | head -3
+6e6c4c1 previous-wave
+```
+
+exit=0, duration=3s
+
+--- phase install1 (2026-10-08T15:32:17Z)
+
+### Run 3: README Install steps 1-3 (clone is a stand-in: the repo is private, origin = local bare repo holding the previous-wave commit)
+
+#### 2026-10-08T15:32:17Z s1-clone (README Install 1: git clone (URL substituted by the local origin))
+
+```console
+$ git clone /home/pf/srv/origin.git personalfi && cd personalfi && git log --oneline | head -2 && ls
+Cloning into 'personalfi'...
+done.
+Updating files:  61% (1340/2196)
+Updating files:  62% (1362/2196)
+Updating files:  63% (1384/2196)
+Updating files:  64% (1406/2196)
+Updating files:  65% (1428/2196)
+Updating files:  66% (1450/2196)
+Updating files:  67% (1472/2196)
+Updating files:  68% (1494/2196)
+Updating files:  69% (1516/2196)
+Updating files:  70% (1538/2196)
+Updating files:  71% (1560/2196)
+Updating files:  72% (1582/2196)
+Updating files:  73% (1604/2196)
+Updating files:  74% (1626/2196)
+Updating files:  75% (1647/2196)
+Updating files:  76% (1669/2196)
+Updating files:  77% (1691/2196)
+Updating files:  78% (1713/2196)
+Updating files:  79% (1735/2196)
+Updating files:  80% (1757/2196)
+Updating files:  81% (1779/2196)
+Updating files:  82% (1801/2196)
+Updating files:  83% (1823/2196)
+Updating files:  84% (1845/2196)
+Updating files:  85% (1867/2196)
+Updating files:  86% (1889/2196)
+Updating files:  87% (1911/2196)
+Updating files:  88% (1933/2196)
+Updating files:  89% (1955/2196)
+Updating files:  90% (1977/2196)
+Updating files:  91% (1999/2196)
+Updating files:  92% (2021/2196)
+Updating files:  93% (2043/2196)
+Updating files:  94% (2065/2196)
+Updating files:  95% (2087/2196)
+Updating files:  96% (2109/2196)
+Updating files:  97% (2131/2196)
+Updating files:  98% (2153/2196)
+Updating files:  99% (2175/2196)
+Updating files: 100% (2196/2196)
+Updating files: 100% (2196/2196), done.
+6e6c4c1 previous-wave
+LICENSE
+README.md
+RUNBOOK.md
+THIRD_PARTY.md
+apps
+compose.dev.yml
+compose.override.example.yml
+compose.yml
+docker
+docs
+eslint.config.js
+justfile
+lefthook.yml
+licenses.policy.yaml
+package.json
+packages
+pnpm-lock.yaml
+pnpm-workspace.yaml
+renovate.json
+scripts
+tsconfig.base.json
+tsconfig.json
+vitest.config.ts
+```
+
+exit=0, duration=2s
+
+#### 2026-10-08T15:32:19Z s2-env (README Install 2: cp .env.example .env)
+
+```console
+$ cp .env.example .env && grep -v '^#' .env | grep -v '^$'
+NODE_ENV=development
+LOG_LEVEL=info
+LOG_PRETTY=true
+HTTP_HOST=127.0.0.1
+HTTP_PORT=8080
+BASE_URL=http://127.0.0.1:8080
+TRUST_PROXY=1
+PUBLIC_HOST=personalfi.lan
+BIND_ADDRESS=127.0.0.1
+DATABASE_URL=postgres://personalfi:personalfi@127.0.0.1:5433/personalfi_dev
+DATABASE_POOL_MAX=10
+DATABASE_STATEMENT_TIMEOUT_MS=30000
+SECRETS_DIR=./secrets
+DEMO_MODE=false
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:32:19Z s3-pg (README Install 3: just gen-pg-secrets)
+
+```console
+$ just gen-pg-secrets
+wrote /home/pf/personalfi/secrets/pg_password and /home/pf/personalfi/secrets/database_url
+run 'just harden-secrets' (needs sudo) to take them to 0400 owned by the consuming uid
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:32:19Z s3-mk (README Install 3: just gen-master-key)
+
+```console
+$ just gen-master-key; ls -la secrets
+wrote /home/pf/personalfi/secrets/master_key — back it up somewhere that is not this host
+run 'just harden-secrets' (needs sudo) to take it to 0400 owned by uid 10001
+total 20
+drwx--S---  2 pf pf 4096 Oct  8 15:32 .
+drwxr-sr-x 10 pf pf 4096 Oct  8 15:32 ..
+-r--r--r--  1 pf pf  106 Oct  8 15:32 database_url
+-r--r--r--  1 pf pf   64 Oct  8 15:32 master_key
+-r--r--r--  1 pf pf   65 Oct  8 15:32 pg_password
+```
+
+exit=0, duration=0s
+
+--- phase build (2026-10-08T15:32:19Z)
+
+### Run 3: README Install step 4 (just build) - started 2026-10-08T15:32:19Z
+
+#### 2026-10-08T15:32:19Z s4-build (README Install 4: just build (first build; README: several minutes))
+
+```console
+$ just build 2>&1 | tail -n 400
+#30 1.029 Changelog: https://pnpm.io/v/12.10.1
+#30 1.029 To update, run: curl -fsSL https://get.pnpm.io/install.sh | sh -
+#30 7.491 ✓ Lockfile passes supply-chain policies (1011 entries in 6.8s)
+#30 7.491 Lockfile is up to date, resolution step is skipped
+#30 7.619 Packages are copied from the content-addressable store to the virtual store.
+#30 7.619   Content-addressable store is at: /root/.local/share/pnpm/store/v11
+#30 7.619   Virtual store is at:             node_modules/.pnpm
+#30 7.716 Downloading @swc/core-linux-x64-musl@1.16.2: 0.00 B/14.35 MB
+#30 7.951 Downloading @rolldown/binding-linux-x64-musl@1.2.7: 0.00 B/7.94 MB
+#30 9.168 Progress: resolved 719, reused 0, downloaded 309, added 288
+#30 9.760 Downloading lefthook-linux-x64@2.1.12: 0.00 B/5.42 MB
+#30 10.76 Progress: resolved 719, reused 0, downloaded 678, added 672
+#30 11.79 Progress: resolved 719, reused 0, downloaded 711, added 704
+#30 21.46 Progress: resolved 719, reused 0, downloaded 717, added 707
+#30 22.62 Progress: resolved 719, reused 0, downloaded 717, added 711
+#30 ...
+
+#29 [backup] exporting to image
+#29 exporting layers 24.9s done
+#29 exporting manifest sha256:02e2ccdbf8724e8e8ba04a80971a3ed14e4b03940e2a314820836326fbee602c
+#29 exporting manifest sha256:02e2ccdbf8724e8e8ba04a80971a3ed14e4b03940e2a314820836326fbee602c 4.7s done
+#29 exporting config sha256:9a5ced8bfe5eec1e931766c3e5f840ddf0375ad9c2acf14405d69504814d427e
+#29 exporting config sha256:9a5ced8bfe5eec1e931766c3e5f840ddf0375ad9c2acf14405d69504814d427e 2.9s done
+#29 ...
+
+#22 [migrator deploy 3/9] RUN npm install --global pnpm@12.4.1
+#22 DONE 33.9s
+
+#30 [proxy web-build 5/6] RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked     pnpm install --frozen-lockfile --filter '@app/web...'
+#30 25.64 Progress: resolved 719, reused 0, downloaded 717, added 715
+... [340 lines omitted; full log /tmp/wp913/runs/3/s4-build.out]
+#47 exporting attestation manifest sha256:7dfa90fa6d2679d61f6266fa2d83162ce5b2603485de677a3b7c751f43b1147f 0.1s done
+#47 exporting manifest list sha256:54732ff9ad75c05b4f3f4656fe7e91137adf3be8f1aca7800b96ab6dbcfd397c 0.0s done
+#47 naming to docker.io/personalfi/api:dev done
+#47 ...
+
+#46 [worker] exporting to image
+#46 unpacking to docker.io/personalfi/api:dev 23.0s done
+#46 DONE 27.6s
+
+#47 [migrator] exporting to image
+#47 unpacking to docker.io/personalfi/api:dev 23.0s done
+#47 DONE 27.6s
+
+#45 [api] exporting to image
+#45 unpacking to docker.io/personalfi/api:dev 23.0s done
+#45 DONE 27.7s
+
+#48 [migrator] resolving provenance for metadata file
+#48 DONE 0.1s
+
+#49 [worker] resolving provenance for metadata file
+#49 DONE 0.0s
+
+#50 [api] resolving provenance for metadata file
+#50 DONE 0.0s
+ Image personalfi/api:dev Built
+ Image personalfi/api:dev Built
+ Image personalfi/backup:dev Built
+ Image personalfi/api:dev Built
+ Image personalfi/proxy:dev Built
+```
+
+exit=0, duration=213s
+
+--- phase install5 (2026-10-08T15:35:52Z)
+
+#### 2026-10-08T15:35:52Z s5-age (README Install 5: backup keypair (verbatim))
+
+```console
+$ (umask 077; docker run --rm --entrypoint age-keygen personalfi/backup:dev > "$HOME/personalfi-age-identity.txt")
+grep '^# public key:' "$HOME/personalfi-age-identity.txt" | cut -d' ' -f4 > secrets/age_recipient
+chmod 444 secrets/age_recipient
+cat secrets/age_recipient; ls -la secrets $HOME/personalfi-age-identity.txt
+Public key: age1<redacted>
+age1<redacted>
+-rw------- 1 pf pf  184 Oct  8 15:36 /home/pf/personalfi-age-identity.txt
+
+secrets:
+total 24
+drwx--S---  2 pf pf 4096 Oct  8 15:36 .
+drwxr-sr-x 10 pf pf 4096 Oct  8 15:32 ..
+-r--r--r--  1 pf pf   63 Oct  8 15:36 age_recipient
+-r--r--r--  1 pf pf  106 Oct  8 15:32 database_url
+-r--r--r--  1 pf pf   64 Oct  8 15:32 master_key
+-r--r--r--  1 pf pf   65 Oct  8 15:32 pg_password
+```
+
+exit=0, duration=15s
+
+#### 2026-10-08T15:36:07Z s6-placeholders (README Install 6: just secrets-placeholders)
+
+```console
+$ just secrets-placeholders; ls -la secrets
+bash scripts/secrets-placeholders.sh
+secrets-placeholders: set /home/pf/personalfi/secrets to 0700
+secrets-placeholders: created 14 empty optional placeholder(s): advisor_token_secret b2_application_key b2_key_id coinbase_key_name coinbase_private_key coingecko_api_key etherscan_api_key fred_api_key migrator_database_url openfigi_api_key plaid_client_id plaid_env plaid_secret tiingo_api_key (0 already present, left untouched)
+total 24
+drwx--S---  2 pf pf 4096 Oct  8 15:36 .
+drwxr-sr-x 10 pf pf 4096 Oct  8 15:32 ..
+-r--r--r--  1 pf pf    0 Oct  8 15:36 advisor_token_secret
+-r--r--r--  1 pf pf   63 Oct  8 15:36 age_recipient
+-r--r--r--  1 pf pf    0 Oct  8 15:36 b2_application_key
+-r--r--r--  1 pf pf    0 Oct  8 15:36 b2_key_id
+-r--r--r--  1 pf pf    0 Oct  8 15:36 coinbase_key_name
+-r--r--r--  1 pf pf    0 Oct  8 15:36 coinbase_private_key
+-r--r--r--  1 pf pf    0 Oct  8 15:36 coingecko_api_key
+-r--r--r--  1 pf pf  106 Oct  8 15:32 database_url
+-r--r--r--  1 pf pf    0 Oct  8 15:36 etherscan_api_key
+-r--r--r--  1 pf pf    0 Oct  8 15:36 fred_api_key
+-r--r--r--  1 pf pf   64 Oct  8 15:32 master_key
+-r--r--r--  1 pf pf    0 Oct  8 15:36 migrator_database_url
+-r--r--r--  1 pf pf    0 Oct  8 15:36 openfigi_api_key
+-r--r--r--  1 pf pf   65 Oct  8 15:32 pg_password
+-r--r--r--  1 pf pf    0 Oct  8 15:36 plaid_client_id
+-r--r--r--  1 pf pf    0 Oct  8 15:36 plaid_env
+-r--r--r--  1 pf pf    0 Oct  8 15:36 plaid_secret
+-r--r--r--  1 pf pf    0 Oct  8 15:36 tiingo_api_key
+```
+
+exit=0, duration=1s
+
+--- phase up (2026-10-08T15:36:08Z)
+
+### Run 3: README Install step 7 (up --wait) started 2026-10-08T15:36:08Z
+
+#### 2026-10-08T15:36:08Z s7-up (README Install 7: docker compose up -d --wait --wait-timeout 900)
+
+```console
+$ docker compose up -d --wait --wait-timeout 900 2>&1 | tail -n 60
+ Container personalfi-pre-migrate-backup-1 Creating
+ Container personalfi-pre-migrate-backup-1 Created
+ Container personalfi-migrator-1 Creating
+ Container personalfi-migrator-1 Created
+ Container personalfi-api-1 Creating
+ Container personalfi-backup-1 Creating
+ Container personalfi-worker-1 Creating
+ Container personalfi-backup-1 Created
+ Container personalfi-api-1 Created
+ Container personalfi-proxy-1 Creating
+ Container personalfi-worker-1 Created
+ Container personalfi-proxy-1 Created
+ Container personalfi-db-1 Starting
+ Container personalfi-db-1 Started
+ Container personalfi-db-1 Waiting
+ Container personalfi-db-1 Healthy
+ Container personalfi-pre-migrate-backup-1 Starting
+ Container personalfi-pre-migrate-backup-1 Started
+ Container personalfi-pre-migrate-backup-1 Waiting
+ Container personalfi-db-1 Waiting
+ Container personalfi-pre-migrate-backup-1 Exited
+ Container personalfi-db-1 Healthy
+ Container personalfi-migrator-1 Starting
+ Container personalfi-migrator-1 Started
+ Container personalfi-db-1 Waiting
+ Container personalfi-migrator-1 Waiting
+ Container personalfi-db-1 Waiting
+ Container personalfi-migrator-1 Waiting
+ Container personalfi-migrator-1 Waiting
+ Container personalfi-db-1 Waiting
+ Container personalfi-db-1 Healthy
+ Container personalfi-db-1 Healthy
+ Container personalfi-db-1 Healthy
+ Container personalfi-migrator-1 Exited
+ Container personalfi-api-1 Starting
+ Container personalfi-migrator-1 Exited
+ Container personalfi-migrator-1 Exited
+ Container personalfi-backup-1 Starting
+ Container personalfi-worker-1 Starting
+ Container personalfi-api-1 Started
+ Container personalfi-api-1 Waiting
+ Container personalfi-backup-1 Started
+ Container personalfi-worker-1 Started
+ Container personalfi-api-1 Healthy
+ Container personalfi-proxy-1 Starting
+ Container personalfi-proxy-1 Started
+ Container personalfi-backup-1 Waiting
+ Container personalfi-pre-migrate-backup-1 Waiting
+ Container personalfi-db-1 Waiting
+ Container personalfi-worker-1 Waiting
+ Container personalfi-proxy-1 Waiting
+ Container personalfi-api-1 Waiting
+ Container personalfi-migrator-1 Waiting
+ Container personalfi-pre-migrate-backup-1 Exited
+ Container personalfi-migrator-1 Exited
+ Container personalfi-db-1 Healthy
+ Container personalfi-backup-1 Healthy
+ Container personalfi-worker-1 Healthy
+ Container personalfi-api-1 Healthy
+ Container personalfi-proxy-1 Healthy
+```
+
+exit=0, duration=45s
+
+#### 2026-10-08T15:36:53Z s7-ps (README Install 7: docker compose ps)
+
+```console
+$ docker compose ps
+NAME                  IMAGE                                                                                              COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+personalfi-api-1      personalfi/api:dev                                                                                 "/sbin/tini -- node …"   api       21 seconds ago   Up 11 seconds (healthy)   8080/tcp
+personalfi-backup-1   personalfi/backup:dev                                                                              "/sbin/tini -- /usr/…"   backup    21 seconds ago   Up 10 seconds (healthy)
+personalfi-db-1       postgres:18.6-alpine3.24@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2   "docker-entrypoint.s…"   db        31 seconds ago   Up 20 seconds (healthy)   5432/tcp
+personalfi-proxy-1    personalfi/proxy:dev                                                                               "caddy run --config …"   proxy     21 seconds ago   Up 5 seconds (healthy)    80/tcp, 443/tcp, 2019/tcp, 443/udp, 127.0.0.1:80->8080/tcp, 127.0.0.1:443->8443/tcp
+personalfi-worker-1   personalfi/api:dev                                                                                 "/sbin/tini -- node …"   worker    21 seconds ago   Up 10 seconds (healthy)   8080/tcp
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:36:53Z s7-ready (README Install 7: readiness from inside the api container)
+
+```console
+$ docker compose exec -T api node -e "fetch('http://127.0.0.1:8080/ready').then(async r => console.log(r.status, await r.text()))"
+200 {"status":"ready","database":"reachable","migrations":"current","outbox":{"maxSeq":"0","maxLagEvents":0,"oldestUnprocessedAgeSeconds":null,"failedConsumers":[]},"queue":{"pending":0,"running":0,"dead":0,"stalled":0,"oldestPendingAgeSeconds":null}}
+```
+
+exit=0, duration=0s
+
+--- phase browser_tools (2026-10-08T15:36:53Z)
+
+Harness-only tooling (not a README prerequisite): chromium, nss-tools (certutil), npm + puppeteer-core in /home/pf/harness
+
+#### 2026-10-08T15:36:53Z h-apk (harness: headless browser)
+
+```console
+$ apk add chromium nss-tools npm font-noto 2>&1 | tail -3; chromium --version
+Executing gdk-pixbuf-2.44.7-r1.trigger
+Executing gtk+3.0-3.24.52-r0.trigger
+OK: 865.6 MiB in 245 packages
+Chromium 152.0.7977.82 Alpine Linux
+```
+
+exit=0, duration=55s
+
+#### 2026-10-08T15:37:48Z h-npm (harness: puppeteer-core (CDP client))
+
+```console
+$ mkdir -p harness && cd harness && npm init -y >/dev/null && npm install puppeteer-core 2>&1 | tail -3
+  run `npm fund` for details
+
+found 0 vulnerabilities
+```
+
+exit=0, duration=15s
+
+--- phase trust (2026-10-08T15:38:03Z)
+
+### Run 3: README Install step 8 (trust the TLS certificate)
+
+#### 2026-10-08T15:38:03Z s8-trustca (README Install 8: just trust-ca)
+
+```console
+$ just trust-ca; ls -la personalfi-ca.crt
+docker compose cp proxy:/data/caddy/pki/authorities/local/root.crt ./personalfi-ca.crt
+ personalfi-proxy-1 Copying personalfi-proxy-1:/data/caddy/pki/authorities/local/root.crt to ./personalfi-ca.crt
+ personalfi-proxy-1 Copied personalfi-proxy-1:/data/caddy/pki/authorities/local/root.crt to ./personalfi-ca.crt
+wrote ./personalfi-ca.crt — import it into your OS/browser trust store (see RUNBOOK.md)
+-rw------- 1 pf pf 631 Oct  8 15:36 personalfi-ca.crt
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:38:03Z s8-hosts (README Install 8: /etc/hosts line (verbatim))
+
+```console
+$ echo "127.0.0.1 personalfi.lan" | sudo tee -a /etc/hosts
+127.0.0.1 personalfi.lan
+```
+
+exit=0, duration=1s
+
+#### 2026-10-08T15:38:04Z s8-sys-trust (README Install 8: Debian, Ubuntu or Alpine system store line (verbatim))
+
+```console
+$ sudo cp personalfi-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:38:04Z s8-curl (README Install 8: curl chain check (verbatim))
+
+````console
+$ curl --cacert personalfi-ca.crt --resolve personalfi.lan:443:127.0.0.1 https://personalfi.lan/api/ready
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+
+  0      0   0      0   0      0      0      0                              0
+100    247 100    247   0      0   8099      0                              0
+100    247 100    247   0      0   8085      0                              0
+100    247 100    247   0      0   8071      0                              0
+{"status":"ready","database":"reachable","migrations":"current","outbox":{"maxSeq":"0","maxLagEvents":0,"oldestUnprocessedAgeSeconds":null,"failedConsumers":[]},"queue":{"pending":0,"running":0,"dead":0,"stalled":0,"oldestPendingAgeSeconds":null}}```
+
+exit=0, duration=0s
+
+--- phase nss (2026-10-08T15:38:04Z)
+
+README Install 8: Chrome/Chromium on Linux lines, verbatim (certutil from nss-tools, installed with the harness browser): create the NSS db because ~/.pki/nssdb does not exist yet, then import
+
+#### 2026-10-08T15:38:04Z  h-nss-init  (README step 8: create ~/.pki/nssdb first (it does not exist: the browser has never run))
+
+```console
+$ test -d $HOME/.pki/nssdb && echo 'nssdb exists' || echo 'nssdb missing'; mkdir -p $HOME/.pki/nssdb && certutil -d sql:$HOME/.pki/nssdb -N --empty-password
+nssdb missing
+````
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:38:04Z h-nss (README step 8: certutil import line, verbatim)
+
+```console
+$ certutil -d sql:$HOME/.pki/nssdb -A -t 'C,,' -n personalfi -i personalfi-ca.crt && certutil -d sql:$HOME/.pki/nssdb -L
+
+Certificate Nickname                                         Trust Attributes
+                                                             SSL,S/MIME,JAR/XPI
+
+personalfi                                                   C,,
+```
+
+exit=0, duration=0s
+
+--- phase bootstrap (2026-10-08T15:38:04Z)
+
+### Run 3: README Install step 9 (create account)
+
+#### 2026-10-08T15:38:04Z s9-bootstrap (README Install 9: just bootstrap-user (verbatim))
+
+```console
+$ just bootstrap-user name="Your Name" timezone="America/New_York"
+bootstrap-user: running inside the api container (the stack is up)
+(node:109) ExperimentalWarning: The supports Web Crypto API method is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:109) ExperimentalWarning: The ML-DSA-44 Web Crypto API algorithm is an experimental feature and might change at any time
+user created      Your Name (01a11c2a-29f3-75c8-bce6-173dba1438e8)
+time zone         America/New_York
+taxonomy          153 categories seeded
+advisors          40 manifests registered
+schedules         categorization.retrain_weekly, notifications.deliver, notifications.digest, integrations.price_refresh, planning.net_worth_snapshot
+deriving the key-encryption key (argon2id); this takes a few seconds…
+key custody       unlocked · argon2id m=1048576 KiB t=4 p=4 · 5652 ms · KEK generation 1
+
+Enrol your first passkey within 60 minutes:
+
+  https://personalfi.lan/register#token=<redacted>
+
+  token only: <redacted>
+  expires:    2026-10-08T16:38:14.506Z
+
+Single-use. It is stored only as a SHA-256 digest, so this is the one and only
+time it is readable — and it is not in any log. Enrol a second authenticator
+and print your ten recovery codes straight after: one passkey on one device is
+a self-inflicted denial of service.
+```
+
+exit=0, duration=10s
+
+--- phase enrol (2026-10-08T15:38:14Z)
+
+### Run 3: README Install step 9-10 (browser: enrol, then sign in)
+
+credentials saved: 0
+--- reg-step2: https://personalfi.lan/register#token=<redacted> | Set up a passkey · PersonalFi
+Set up a passkey
+
+Your face, fingerprint, or device PIN replaces a password.
+
+Name this passkey
+Create passkey
+--- interactive:
+input[text] name= id=friendly-name aria= text=Virtual passkey (this device)
+button[submit] name= id= aria= text=Create passkey
+--- screenshot /home/pf/harness/shots/reg-step2.png
+
+PHASE FAILED: enrol (see /tmp/wp913/runs/3) - stopping; this is a finding to record.
+
+Harness fix (not a README matter): the wizard's first click was lost on a cold first page load (no request sent, token untouched); register.mjs now waits for hydration and retries the click. Resuming at enrol.
+
+## Run 3: candidate ea06ebcde3ce028eee21103b5b5d182bdc259593 (/tmp/wp913/personalfi-src.tar), previous wave 4f0c7b9084071ec75a97395a9acb61e879a940c9 (/tmp/wp913/personalfi-src-previous-wave.tar), started 2026-10-08T15:39:21Z
+
+--- phase enrol (2026-10-08T15:39:21Z)
+
+### Run 3: README Install step 9-10 (browser: enrol, then sign in)
+
+[resp] 200 GET https://personalfi.lan/api/auth/unlock-state
+[resp] 200 POST https://personalfi.lan/api/auth/register/options
+[resp] 200 POST https://personalfi.lan/api/auth/register/verify
+credentials saved: 1
+--- reg-step2: https://personalfi.lan/register#token=<redacted> | Set up a passkey · PersonalFi
+Add a backup passkey
+
+A phone, a security key, or another browser — so one lost device can’t lock you out.
+
+Name this passkeyAdd passkeySkip for now
+--- interactive:
+input[text] name= id=friendly-name aria= text=Virtual passkey (this device)
+button[submit] name= id= aria= text=Add passkey
+button[button] name= id= aria= text=Skip for now
+--- screenshot /home/pf/harness/shots/reg-step2.png
+[resp] 200 POST https://personalfi.lan/api/auth/register/options
+[resp] 200 POST https://personalfi.lan/api/auth/register/verify
+credentials saved: 2
+--- reg-step3: https://personalfi.lan/register#token=<redacted> | Set up a passkey · PersonalFi
+You’re all set
+
+Your passkeys are ready.
+
+Continue to PersonalFi
+--- interactive:
+button[button] name= id= aria= text=Continue to PersonalFi
+--- screenshot /home/pf/harness/shots/reg-step3.png
+[resp] 200 GET https://personalfi.lan/api/auth/session
+[console.error] Failed to load resource: the server responded with a status of 404 ()
+[console.error] Failed to load resource: the server responded with a status of 404 ()
+--- reg-step4: https://personalfi.lan/ | Dashboard · PersonalFi
+Skip to main content
+PersonalFi
+OVERVIEW
+Dashboard
+Insights
+Brief
+MONEY
+Inbox
+Transactions
+Budget
+Recurring
+WEALTH
+Accounts
+Investments
+Plan
+Goals
+SYSTEM
+Settings
+No syncs yet
+Collapse
+Dashboard
+No syncs yet
+Search
+⌘K
+Net worth
+—
+No net worth recorded yet
+
+No net worth history yet.
+
+--- phase firstdata (2026-10-08T15:39:47Z)
+
+### Run 3: README 'Your first data' step 1 (sample CSV; browser part is browser/import.mjs)
+
+#### 2026-10-08T15:39:47Z d1-sample (README Your first data 1: sample.csv (verbatim))
+
+```console
+$ printf 'Date,Description,Amount\n2026-09-01,Coffee shop,-4.50\n2026-09-02,Payroll,2500.00\n2026-09-03,Grocery store,-62.18\n' > sample.csv; cat sample.csv
+Date,Description,Amount
+2026-09-01,Coffee shop,-4.50
+2026-09-02,Payroll,2500.00
+2026-09-03,Grocery store,-62.18
+```
+
+exit=0, duration=0s
+
+--- phase backup (2026-10-08T15:41:15Z)
+
+### Run 3: README 'Your first data' step 2 (backup)
+
+#### 2026-10-08T15:41:15Z d2-backup (README Your first data 2: just backup)
+
+```console
+$ just backup
+docker compose exec backup /usr/local/bin/backup.sh
+backup: dumping personalfi@db ...
+backup: verified 589528 bytes, 1119 restorable object(s), schema_migrations present
+backup: wrote /backups/personalfi-20261008T154115Z.dump.age (589856 bytes)
+backup: pruning entries older than 30 day(s) locally
+backup: RCLONE_REMOTE not set; local-only backup (see RUNBOOK.md to enable B2)
+backup: complete
+```
+
+exit=0, duration=0s
+
+--- phase drill (2026-10-08T15:41:15Z)
+
+### Run 3: README 'Your first data' step 3 (restore drill) started 2026-10-08T15:41:16Z
+
+#### 2026-10-08T15:41:16Z d3-drill (README Your first data 3: restore drill (verbatim))
+
+```console
+$ export AGE_IDENTITY_FILE="$HOME/personalfi-age-identity.txt"
+export DRILL_EVIDENCE_DIR="$HOME/personalfi-drills"
+just restore-drill
+Unable to find image 'alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b' locally
+docker.io/library/alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b: Pulling from library/alpine
+56dceff11b33: Download complete
+f5124fb579e2: Download complete
+Digest: sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+Status: Downloaded newer image for alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+restore-drill: starting scratch db (restore-drill-db-6936 on personalfi_backend) ...
+restore-drill: waiting for scratch db to accept connections ...ok
+restore-drill: restoring /backups/personalfi-20261008T154115Z.dump.age (589856 bytes)
+restore: decrypting /backups/personalfi-20261008T154115Z.dump.age
+restore: target personalfi_restore_drill@restore-drill-db; --clean --if-exists will DROP and recreate these:
+restore: archive contains 1119 restorable object(s)
+restore: restoring into personalfi_restore_drill@restore-drill-db (--clean --if-exists --no-owner)
+restore: complete
+restore-drill: booting a throwaway api container against the restored db ...
+# Restore drill — 20261008T154116Z
+
+**Verdict: PASS**
+
+- Backup restored: `/backups/personalfi-20261008T154115Z.dump.age` (589856 encrypted bytes)
+- Restored db table count: 101
+- Restored db schema_migrations max id: 0040
+- Live db table count: 101
+- Live db schema_migrations max id: 0040
+- API /ready against restored db: pass (200 from /ready)
+
+All assertions held: restored tables > 0, restored == live, schema_migrations agree,
+and the API served /ready from the restored database. `just restore-drill` exited 0.
+restore-drill: wrote /home/pf/personalfi-drills/restore-drill-20261008.md
+```
+
+exit=0, duration=33s
+
+--- phase publish (2026-10-08T15:41:49Z)
+
+### Run 3: publish the candidate to the stand-in origin (harness; the README's upgrade starts at 'git pull')
+
+#### 2026-10-08T15:41:49Z u0-publish (push the candidate tree as a child commit of main on the stand-in origin)
+
+```console
+$ cd origin-work && git rm -r -q --cached . >/dev/null && find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} + && tar -xf /opt/cand.tar && git add -A && git commit -q -m candidate && git push -q ../srv/origin.git main && git -C ../srv/origin.git log --oneline | head -3
+07d5d31 candidate
+6e6c4c1 previous-wave
+```
+
+exit=0, duration=2s
+
+--- phase upgrade (2026-10-08T15:41:51Z)
+
+### Run 3: README Upgrade started 2026-10-08T15:41:51Z
+
+#### 2026-10-08T15:41:51Z u1-pull (README Upgrade: git pull (verbatim))
+
+```console
+$ git pull; git status --short | head; git log --oneline | head -3
+From /home/pf/srv/origin
+   6e6c4c1..07d5d31  main       -> origin/main
+Updating 6e6c4c1..07d5d31
+Fast-forward
+ .env.example                                       |    6 +-
+ README.md                                          |   26 +-
+ RUNBOOK.md                                         |   26 +-
+ apps/api/src/routes/investments.ts                 |   19 +-
+ apps/api/test/db/auth-failure-uniform.test.ts      |  111 ++
+ apps/api/test/db/budgets-card-owing.test.ts        |  142 ++
+ apps/api/test/db/holdings-reconcile.test.ts        |    2 +-
+ apps/api/test/db/holdings-scale-perf.test.ts       |   35 +-
+ apps/api/test/db/host-load-rule.test.ts            |   56 +
+ apps/api/test/db/nightly-perf.test.ts              |   70 +
+ apps/api/test/db/patch-mass-assignment.test.ts     |  156 ++
+ apps/api/test/db/perf-support.ts                   |   98 +-
+ apps/api/test/db/reports-aggregation.test.ts       |    3 +-
+ apps/api/test/db/soak-canary-columns.ts            |  132 ++
+ apps/api/test/db/soak-canary-coverage.test.ts      |  101 +
+ apps/api/test/db/soak-report.test.ts               |   78 +
+ apps/api/test/price-holdings-batched.test.ts       |   66 +
+ apps/web/e2e/a11y-keyboard.spec.ts                 |    4 +
+ apps/web/e2e/security.spec.ts                      |  163 ++
+ apps/web/e2e/support/mock-security.ts              |  154 ++
+ apps/web/src/app/router.test.tsx                   |    4 +-
+ apps/web/src/features/auth/LoginRedirect.test.tsx  |  101 +
+ .../src/features/auth/PasskeyRegisterFlow.test.tsx |  142 ++
+ apps/web/src/features/auth/PasskeyRegisterFlow.tsx |   43 +-
+ apps/web/src/features/security/RecoveryCodes.tsx   |  151 ++
+ .../src/features/security/SecurityScreen.test.tsx  |  418 +++++
+... [37 lines omitted; full log /tmp/wp913/runs/3/u1-pull.out]
+ 63 files changed, 7425 insertions(+), 157 deletions(-)
+ create mode 100644 apps/api/test/db/auth-failure-uniform.test.ts
+ create mode 100644 apps/api/test/db/budgets-card-owing.test.ts
+ create mode 100644 apps/api/test/db/patch-mass-assignment.test.ts
+ create mode 100644 apps/api/test/db/soak-canary-columns.ts
+ create mode 100644 apps/api/test/db/soak-canary-coverage.test.ts
+ create mode 100644 apps/api/test/price-holdings-batched.test.ts
+ create mode 100644 apps/web/e2e/security.spec.ts
+ create mode 100644 apps/web/e2e/support/mock-security.ts
+ create mode 100644 apps/web/src/features/auth/LoginRedirect.test.tsx
+ create mode 100644 apps/web/src/features/auth/PasskeyRegisterFlow.test.tsx
+ create mode 100644 apps/web/src/features/security/RecoveryCodes.tsx
+ create mode 100644 apps/web/src/features/security/SecurityScreen.test.tsx
+ create mode 100644 apps/web/src/features/security/SecurityScreen.tsx
+ create mode 100644 apps/web/src/features/security/api.ts
+ create mode 100644 apps/web/src/lib/safe-redirect.test.ts
+ create mode 100644 docs/evidence/phase-9/wp9.14-quality.md
+ create mode 100644 packages/contexts/budgeting/test/db/card-owing-at-first-period.test.ts
+ create mode 100644 packages/contexts/budgeting/test/db/card-spend-without-envelope.test.ts
+ create mode 100644 packages/contexts/budgeting/test/db/consumer-backlog.test.ts
+ create mode 100644 packages/contexts/investments/test/db/prices-bounded-read.test.ts
+ create mode 100644 packages/platform/src/events/backlog.ts
+ create mode 100644 packages/platform/test/jobs-completion-wake.test.ts
+ create mode 100644 scripts/caddy-headers.test.ts
+ create mode 100644 scripts/compose-env-passthrough.test.ts
+ create mode 100644 scripts/eslint-html-sinks.test.ts
+ create mode 100644 scripts/justfile-recipes.test.ts
+?? sample.csv
+07d5d31 candidate
+6e6c4c1 previous-wave
+```
+
+exit=0, duration=2s
+
+#### 2026-10-08T15:41:53Z u2-upgrade (README Upgrade: just upgrade (verbatim))
+
+```console
+$ just upgrade 2>&1 | tail -n 400
+#31 [proxy web-build 6/6] RUN pnpm --filter '@app/web' run gen &&     pnpm --filter '@app/web' exec vite build &&     pnpm --filter '@app/web' exec node scripts/check-sw-precache.ts &&     pnpm --filter '@app/web' exec node scripts/check-csp.ts &&     find apps/web/dist -name '*.map' -delete &&     find apps/web/dist -type f ( -name '*.js' -o -name '*.css' )       -exec sed -i -E '/[#@][[:space:]]*sourceMappingURL=/d' {} + &&     test -f apps/web/dist/index.html
+#31 0.906 $ openapi-ts
+#31 1.817 [90m@hey-api/openapi-ts v0.99.0[39m
+#31 1.817
+#31 1.857 [90m[Job 1] [39m[90m~[39m [36mGenerating...[39m
+#31 1.857 [90m[Job 1] [39m[36m  [1] [39m../../packages/contracts/openapi/openapi.json
+#31 3.329 [90m[Job 1] [39m[32m✓[39m [96m./apps/web/src/api/generated[39m [90m· 5 files · 1s[39m
+#31 5.075 vite v7.3.6 building client environment for production...
+#31 5.230 transforming...
+#31 6.715 ../../node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/regexes.js (70:0): A comment
+#31 6.715
+#31 6.715 "/** Anchors a pattern source. The interpolation lives here rather than at the call site because
+#31 6.715  * esbuild will not drop a `@__PURE__` call whose own argument interpolates a variable, but it
+#31 6.715  * will drop `anchor(dateSource)`. Keeping it inline pinned `date` into every bundle. */"
+#31 6.715
+#31 6.715 in "../../node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/regexes.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.
+#31 6.720 ../../node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/util.js (330:0): A comment
+#31 6.720
+#31 6.720 "// Wrapped in a `@__PURE__` IIFE: esbuild never tree-shakes a top-level initializer that contains a member access on `Number`, so the bare object literal survived into every bundle."
+#31 6.720
+#31 6.720 in "../../node_modules/.pnpm/zod@4.5.4/node_modules/zod/v4/core/util.js" contains an annotation that Rollup cannot interpret due to the position of the comment. The comment will be removed to avoid issues.
+#31 ...
+
+#29 [worker deploy 6/9] RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked     pnpm install --frozen-lockfile --prod --filter-prod=@app/api...
+#29 38.55 Scope: 25 of 29 workspace projects
+#29 38.61 ? Verifying lockfile against supply-chain policies (1011 entries)...
+#29 39.36 Update available! 12.4.1 → 12.10.1.
+#29 39.36 Changelog: https://pnpm.io/v/12.10.1
+#29 39.36 To update, run: curl -fsSL https://get.pnpm.io/install.sh | sh -
+#29 45.52 ✓ Lockfile passes supply-chain policies (1011 entries in 6.9s)
+... [340 lines omitted; full log /tmp/wp913/runs/3/u2-upgrade.out]
+ Container personalfi-worker-1 Started
+ Container personalfi-api-1 Healthy
+ Container personalfi-proxy-1 Starting
+ Container personalfi-proxy-1 Started
+ Container personalfi-migrator-1 Waiting
+ Container personalfi-db-1 Waiting
+ Container personalfi-api-1 Waiting
+ Container personalfi-pre-migrate-backup-1 Waiting
+ Container personalfi-backup-1 Waiting
+ Container personalfi-worker-1 Waiting
+ Container personalfi-proxy-1 Waiting
+ Container personalfi-migrator-1 Exited
+ Container personalfi-backup-1 Healthy
+ Container personalfi-db-1 Healthy
+ Container personalfi-pre-migrate-backup-1 Exited
+ Container personalfi-api-1 Healthy
+ Container personalfi-worker-1 Healthy
+ Container personalfi-proxy-1 Healthy
+upgrade: /ready 200 {"status":"ready","database":"reachable","migrations":"current","outbox":{"maxSeq":"4","maxLagEvents":4,"oldestUnprocessedAgeSeconds":254.321919,"failedConsumer
+upgrade: up-to-ready 37 s (load 5.06 4.24 3.43)
+upgrade: pre-migrate: schema current (38 applied, newest 0040); nothing pending, no backup needed
+upgrade: api running, restarts 0
+upgrade: worker running, restarts 0
+NAME                  IMAGE                                                                                              COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+personalfi-api-1      personalfi/api:dev                                                                                 "/sbin/tini -- node …"   api       53 seconds ago   Up 47 seconds (healthy)   8080/tcp
+personalfi-backup-1   sha256:588c5018348b0b6da64ac2269b34b1c4c667a7e2b4ad808cd68368a32e2aec51                            "/sbin/tini -- /usr/…"   backup    8 minutes ago    Up 7 minutes (healthy)
+personalfi-db-1       postgres:18.6-alpine3.24@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2   "docker-entrypoint.s…"   db        8 minutes ago    Up 8 minutes (healthy)    5432/tcp
+personalfi-proxy-1    personalfi/proxy:dev                                                                               "caddy run --config …"   proxy     53 seconds ago   Up 36 seconds (healthy)   80/tcp, 443/tcp, 2019/tcp, 443/udp, 127.0.0.1:80->8080/tcp, 127.0.0.1:443->8443/tcp
+personalfi-worker-1   personalfi/api:dev                                                                                 "/sbin/tini -- node …"   worker    54 seconds ago   Up 47 seconds (healthy)   8080/tcp
+upgrade: complete
+```
+
+exit=0, duration=168s
+
+#### 2026-10-08T15:44:41Z u3-ps (state after upgrade)
+
+```console
+$ docker compose ps; docker compose exec -T api node -e "fetch('http://127.0.0.1:8080/ready').then(async r => console.log(r.status, await r.text()))"
+NAME                  IMAGE                                                                                              COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+personalfi-api-1      personalfi/api:dev                                                                                 "/sbin/tini -- node …"   api       53 seconds ago   Up 48 seconds (healthy)   8080/tcp
+personalfi-backup-1   sha256:588c5018348b0b6da64ac2269b34b1c4c667a7e2b4ad808cd68368a32e2aec51                            "/sbin/tini -- /usr/…"   backup    8 minutes ago    Up 7 minutes (healthy)
+personalfi-db-1       postgres:18.6-alpine3.24@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2   "docker-entrypoint.s…"   db        8 minutes ago    Up 8 minutes (healthy)    5432/tcp
+personalfi-proxy-1    personalfi/proxy:dev                                                                               "caddy run --config …"   proxy     53 seconds ago   Up 36 seconds (healthy)   80/tcp, 443/tcp, 2019/tcp, 443/udp, 127.0.0.1:80->8080/tcp, 127.0.0.1:443->8443/tcp
+personalfi-worker-1   personalfi/api:dev                                                                                 "/sbin/tini -- node …"   worker    54 seconds ago   Up 48 seconds (healthy)   8080/tcp
+200 {"status":"ready","database":"reachable","migrations":"current","outbox":{"maxSeq":"4","maxLagEvents":4,"oldestUnprocessedAgeSeconds":285.722925,"failedConsumers":[]},"queue":{"pending":0,"running":0,"dead":0,"stalled":0,"oldestPendingAgeSeconds":null}}
+```
+
+exit=0, duration=1s
+
+--- phase verify_after_upgrade (2026-10-08T15:44:42Z)
+
+After upgrade: same passkey signed in; transaction rows seen before/after: 6 / 6
+
+## Run 3: all phases passed (2026-10-08T15:44:53Z); the verdict (findings or none) is written by hand below.
+
+### Run 3: post-upgrade extra checks on the candidate (not README steps)
+
+#### 2026-10-08T15:45:05Z x-backup (just backup on the candidate)
+
+```console
+$ just backup
+docker compose exec backup /usr/local/bin/backup.sh
+backup: dumping personalfi@db ...
+backup: verified 590566 bytes, 1119 restorable object(s), schema_migrations present
+backup: wrote /backups/personalfi-20261008T154505Z.dump.age (590910 bytes)
+backup: pruning entries older than 30 day(s) locally
+backup: RCLONE_REMOTE not set; local-only backup (see RUNBOOK.md to enable B2)
+backup: complete
+```
+
+exit=0, duration=1s
+
+### Run 3: README 'Your first data' step 3 (restore drill) started 2026-10-08T15:45:06Z
+
+#### 2026-10-08T15:45:06Z d3-drill (README Your first data 3: restore drill (verbatim))
+
+```console
+$ export AGE_IDENTITY_FILE="$HOME/personalfi-age-identity.txt"
+export DRILL_EVIDENCE_DIR="$HOME/personalfi-drills"
+just restore-drill
+restore-drill: starting scratch db (restore-drill-db-12382 on personalfi_backend) ...
+restore-drill: waiting for scratch db to accept connections ....ok
+restore-drill: restoring /backups/personalfi-20261008T154505Z.dump.age (590910 bytes)
+restore: decrypting /backups/personalfi-20261008T154505Z.dump.age
+restore: target personalfi_restore_drill@restore-drill-db; --clean --if-exists will DROP and recreate these:
+restore: archive contains 1119 restorable object(s)
+restore: restoring into personalfi_restore_drill@restore-drill-db (--clean --if-exists --no-owner)
+restore: complete
+restore-drill: WARNING: the live database holds no plan scenario, so this drill cannot see a backup that fails to restore one (F-94-6). Save a plan on the Plan screen, run `just backup`, then drill again.
+restore-drill: booting a throwaway api container against the restored db ...
+# Restore drill — 20261008T154506Z
+
+**Verdict: PASS**
+
+- Backup restored: `/backups/personalfi-20261008T154505Z.dump.age` (590910 encrypted bytes)
+- Restored db table count: 101
+- Restored db schema_migrations max id: 0040
+- Live db table count: 101
+- Live db schema_migrations max id: 0040
+- plan_scenarios rows, restored / live: 0 / 0
+- WARNING: the live database holds no plan scenario, so this drill cannot see a backup that fails to restore one (F-94-6). Save a plan on the Plan screen, run `just backup`, then drill again.
+- API /ready against restored db: pass (200 from /ready)
+
+All assertions held: restored tables > 0, restored == live, schema_migrations agree,
+and the API served /ready from the restored database. `just restore-drill` exited 0.
+restore-drill: wrote /home/pf/personalfi-drills/restore-drill-20261008.md
+```
+
+exit=0, duration=29s
+
+#### 2026-10-08T15:45:35Z x-reissue (bootstrap-user reissue=true on the candidate)
+
+```console
+$ just bootstrap-user name="Your Name" timezone="America/New_York" reissue=true
+bootstrap-user: running in its own one-shot container (the stack is up)
+ Container personalfi-api-run-e70f3ff0c799 Creating
+ Container personalfi-api-run-e70f3ff0c799 Created
+(node:1) ExperimentalWarning: The supports Web Crypto API method is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:1) ExperimentalWarning: The ML-DSA-44 Web Crypto API algorithm is an experimental feature and might change at any time
+user              Your Name (01a11c2a-29f3-75c8-bce6-173dba1438e8)
+deriving the key-encryption key (argon2id); this takes a few seconds…
+key custody       unlocked · argon2id m=1048576 KiB t=4 p=4 · 5652 ms · KEK generation 1
+
+Enrol your first passkey within 60 minutes:
+
+  https://personalfi.lan/register#token=<redacted>
+
+  token only: <redacted>
+  expires:    2026-10-08T16:45:44.424Z
+
+Single-use. It is stored only as a SHA-256 digest, so this is the one and only
+time it is readable — and it is not in any log. Enrol a second authenticator
+and print your ten recovery codes straight after: one passkey on one device is
+a self-inflicted denial of service.
+```
+
+exit=0, duration=10s
+
+## Run 3a: candidate ea06ebcde3ce028eee21103b5b5d182bdc259593 (/tmp/wp913/personalfi-src.tar), previous wave ea06ebc (/tmp/wp913/personalfi-src.tar), started 2026-10-08T15:46:13Z
+
+--- phase start_dind (2026-10-08T15:46:13Z)
+
+### Run 3a: dind setup (2026-10-08T15:46:13Z)
+
+#### 2026-10-08T15:46:47Z dind started
+
+```console
+$ docker run -d --name pf-stranger-dind --privileged --memory 6g --memory-swap 6g --cpus 4 -e DOCKER_TLS_CERTDIR= -v /var/lib/docker docker:29-dind
+inner engine 29.8.2
+Docker Compose version v5.5.1
+3.24.2
+8
+MemTotal:       24021296 kB
+6442450944
+uid=0(root) gid=0(root) groups=0(root),0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+```
+
+ready after 21s
+
+--- phase prereqs (2026-10-08T15:46:47Z)
+
+### Run 3a: host prerequisites (README 'What you need on the host')
+
+#### 2026-10-08T15:46:47Z prereq-apk (README's Alpine package line)
+
+```console
+$ apk add git just nodejs openssl bash coreutils curl
+( 1/19) Installing readline (8.3.3-r1)
+( 2/19) Installing bash (5.3.9-r1)
+  Executing bash-5.3.9-r1.post-install
+( 3/19) Installing coreutils-env (9.11-r0)
+( 4/19) Installing coreutils-fmt (9.11-r0)
+( 5/19) Installing coreutils-sha512sum (9.11-r0)
+( 6/19) Installing acl-libs (2.3.2-r1)
+( 7/19) Installing libattr (2.5.2-r2)
+( 8/19) Installing coreutils (9.11-r0)
+( 9/19) Installing curl (8.22.0-r0)
+(10/19) Installing libgcc (15.2.0-r5)
+(11/19) Installing just (1.48.1-r0)
+(12/19) Installing libstdc++ (15.2.0-r5)
+(13/19) Installing ada-libs (3.3.0-r0)
+(14/19) Installing icu-data-en (78.1-r0)
+  Executing icu-data-en-78.1-r0.post-install
+  * If you need ICU with non-English locales and legacy charset support, install
+  * package icu-data-full.
+(15/19) Installing icu-libs (78.1-r0)
+(16/19) Installing simdjson (4.2.4-r0)
+(17/19) Installing simdutf (9.0.0-r0)
+(18/19) Installing sqlite-libs (3.53.4-r0)
+(19/19) Installing nodejs (24.18.1-r0)
+Executing busybox-1.37.0-r31.trigger
+OK: 101.3 MiB in 72 packages
+```
+
+exit=0, duration=8s
+
+#### 2026-10-08T15:46:55Z prereq-user (create the owning user and add to docker group (README: 'add that user to the docker group'))
+
+```console
+$ getent group docker || addgroup -S docker; adduser -D -s /bin/bash pf; addgroup pf docker; ls -l /var/run/docker.sock; id pf
+docker:x:2375:
+srw-rw---- 1 root docker 0 Oct  8 15:46 /var/run/docker.sock
+uid=1000(pf) gid=1000(pf) groups=1000(pf),2375(docker)
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:46:55Z prereq-versions (versions vs README minimums (Docker 29+, just 1.21+, Node 18+))
+
+```console
+$ docker version --format 'engine {{.Server.Version}}'; docker compose version; just --version; node --version; git --version; openssl version; bash --version | head -1
+engine 29.8.2
+Docker Compose version v5.5.1
+just 1.48.1
+v24.18.1
+git version 2.54.0
+OpenSSL 3.5.9 29 Sep 2026 (Library: OpenSSL 3.5.9 29 Sep 2026)
+GNU bash, version 5.3.9(1)-release (x86_64-alpine-linux-musl)
+```
+
+exit=0, duration=0s
+
+--- phase sudo (2026-10-08T15:46:55Z)
+
+#### 2026-10-08T15:46:55Z prereq-sudo (README lists sudo (optional) for the /etc/hosts line and trust-store import)
+
+```console
+$ apk add sudo && echo 'pf ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/pf && chmod 440 /etc/sudoers.d/pf
+(1/1) Installing sudo (1.9.17_p2-r1)
+Executing busybox-1.37.0-r31.trigger
+OK: 103.0 MiB in 73 packages
+```
+
+exit=0, duration=2s
+
+--- phase origin (2026-10-08T15:46:57Z)
+
+#### 2026-10-08T15:46:57Z origin-prev (build the stand-in origin (previous-wave commit))
+
+```console
+$ mkdir -p origin-work srv && cd origin-work && git init -q -b main && git config user.name stranger && git config user.email s@x && tar -xf /opt/prev.tar && git add -A && git commit -q -m previous-wave && git clone -q --bare . ../srv/origin.git && cd .. && git -C srv/origin.git log --oneline | head -3
+e2f77b2 previous-wave
+```
+
+exit=0, duration=3s
+
+--- phase install1 (2026-10-08T15:47:00Z)
+
+### Run 3a: README Install steps 1-3 (clone is a stand-in: the repo is private, origin = local bare repo holding the previous-wave commit)
+
+#### 2026-10-08T15:47:00Z s1-clone (README Install 1: git clone (URL substituted by the local origin))
+
+```console
+$ git clone /home/pf/srv/origin.git personalfi && cd personalfi && git log --oneline | head -2 && ls
+Cloning into 'personalfi'...
+done.
+Updating files:  57% (1288/2222)
+Updating files:  58% (1289/2222)
+Updating files:  59% (1311/2222)
+Updating files:  60% (1334/2222)
+Updating files:  61% (1356/2222)
+Updating files:  62% (1378/2222)
+Updating files:  63% (1400/2222)
+Updating files:  64% (1423/2222)
+Updating files:  65% (1445/2222)
+Updating files:  66% (1467/2222)
+Updating files:  67% (1489/2222)
+Updating files:  68% (1511/2222)
+Updating files:  69% (1534/2222)
+Updating files:  70% (1556/2222)
+Updating files:  71% (1578/2222)
+Updating files:  72% (1600/2222)
+Updating files:  73% (1623/2222)
+Updating files:  74% (1645/2222)
+Updating files:  75% (1667/2222)
+Updating files:  76% (1689/2222)
+Updating files:  77% (1711/2222)
+Updating files:  78% (1734/2222)
+Updating files:  79% (1756/2222)
+Updating files:  80% (1778/2222)
+Updating files:  81% (1800/2222)
+Updating files:  82% (1823/2222)
+Updating files:  83% (1845/2222)
+Updating files:  84% (1867/2222)
+Updating files:  85% (1889/2222)
+Updating files:  86% (1911/2222)
+Updating files:  87% (1934/2222)
+Updating files:  88% (1956/2222)
+Updating files:  89% (1978/2222)
+Updating files:  90% (2000/2222)
+Updating files:  91% (2023/2222)
+Updating files:  92% (2045/2222)
+Updating files:  93% (2067/2222)
+Updating files:  94% (2089/2222)
+Updating files:  95% (2111/2222)
+Updating files:  96% (2134/2222)
+Updating files:  97% (2156/2222)
+Updating files:  98% (2178/2222)
+Updating files:  99% (2200/2222)
+Updating files: 100% (2222/2222)
+Updating files: 100% (2222/2222), done.
+e2f77b2 previous-wave
+LICENSE
+README.md
+RUNBOOK.md
+THIRD_PARTY.md
+apps
+compose.dev.yml
+compose.override.example.yml
+compose.yml
+docker
+docs
+eslint.config.js
+justfile
+lefthook.yml
+licenses.policy.yaml
+package.json
+packages
+pnpm-lock.yaml
+pnpm-workspace.yaml
+renovate.json
+scripts
+tsconfig.base.json
+tsconfig.json
+vitest.config.ts
+```
+
+exit=0, duration=2s
+
+#### 2026-10-08T15:47:02Z s2-env (README Install 2: cp .env.example .env)
+
+```console
+$ cp .env.example .env && grep -v '^#' .env | grep -v '^$'
+NODE_ENV=development
+LOG_LEVEL=info
+LOG_PRETTY=true
+HTTP_HOST=127.0.0.1
+HTTP_PORT=8080
+BASE_URL=http://127.0.0.1:8080
+TRUST_PROXY=1
+PUBLIC_HOST=personalfi.lan
+BIND_ADDRESS=127.0.0.1
+DATABASE_URL=postgres://personalfi:personalfi@127.0.0.1:5433/personalfi_dev
+DATABASE_POOL_MAX=10
+DATABASE_STATEMENT_TIMEOUT_MS=30000
+SECRETS_DIR=./secrets
+DEMO_MODE=false
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:47:02Z s3-pg (README Install 3: just gen-pg-secrets)
+
+```console
+$ just gen-pg-secrets
+wrote /home/pf/personalfi/secrets/pg_password and /home/pf/personalfi/secrets/database_url
+run 'just harden-secrets' (needs sudo) to take them to 0400 owned by the consuming uid
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:47:02Z s3-mk (README Install 3: just gen-master-key)
+
+```console
+$ just gen-master-key; ls -la secrets
+wrote /home/pf/personalfi/secrets/master_key — back it up somewhere that is not this host
+run 'just harden-secrets' (needs sudo) to take it to 0400 owned by uid 10001
+total 20
+drwx--S---  2 pf pf 4096 Oct  8 15:47 .
+drwxr-sr-x 10 pf pf 4096 Oct  8 15:47 ..
+-r--r--r--  1 pf pf  106 Oct  8 15:47 database_url
+-r--r--r--  1 pf pf   64 Oct  8 15:47 master_key
+-r--r--r--  1 pf pf   65 Oct  8 15:47 pg_password
+```
+
+exit=0, duration=0s
+
+--- phase build (2026-10-08T15:47:02Z)
+
+### Run 3a: README Install step 4 (just build) - started 2026-10-08T15:47:02Z
+
+#### 2026-10-08T15:47:02Z s4-build (README Install 4: just build (first build; README: several minutes))
+
+```console
+$ just build 2>&1 | tail -n 400
+#29 15.79 Downloading @rolldown/binding-linux-x64-musl@1.2.7: 7.94 MB/7.94 MB, done
+#29 ...
+
+#26 [worker deploy 3/9] RUN npm install --global pnpm@12.4.1
+#26 DONE 27.5s
+
+#29 [proxy web-build 5/6] RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked     pnpm install --frozen-lockfile --filter '@app/web...'
+#29 ...
+
+#31 [api deploy 4/9] WORKDIR /app
+#31 ...
+
+#29 [proxy web-build 5/6] RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked     pnpm install --frozen-lockfile --filter '@app/web...'
+#29 28.17 Progress: resolved 719, reused 0, downloaded 717, added 710
+#29 29.24 Progress: resolved 719, reused 0, downloaded 717, added 718
+#29 31.68 Progress: resolved 719, reused 0, downloaded 717, added 719
+#29 31.74 Packages: +719
+#29 31.74 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#29 31.80 Progress: resolved 719, reused 0, downloaded 717, added 719, done
+#29 34.23
+#29 34.23 devDependencies:
+#29 34.23 + @eslint/js 10.0.1
+#29 34.23 + @types/node 26.4.1
+#29 34.23 + @vitest/coverage-v8 5.0.0
+#29 34.23 + eslint 10.10.0
+#29 34.23 + eslint-plugin-jsx-a11y 6.10.2
+#29 34.23 + eslint-plugin-react-hooks 7.1.1
+#29 34.23 + fast-check 4.9.0
+#29 34.23 + globals 17.12.0
+#29 34.23 + lefthook 2.1.12
+... [340 lines omitted; full log /tmp/wp913/runs/3a/s4-build.out]
+#47 exporting attestation manifest sha256:c8fc6eed3b800d13aaeb0dc68507b55b360b47664af02709b0105403e38567a6 0.1s done
+#47 exporting manifest list sha256:ceadfa650d3933c46bced7293d217a7d8ea2c8640d79cea392c9b9a7d47c1a96 0.0s done
+#47 naming to docker.io/personalfi/api:dev 0.0s done
+#47 ...
+
+#45 [worker] exporting to image
+#45 unpacking to docker.io/personalfi/api:dev 13.7s done
+#45 DONE 18.2s
+
+#46 [api] exporting to image
+#46 unpacking to docker.io/personalfi/api:dev 13.7s done
+#46 DONE 18.2s
+
+#47 [migrator] exporting to image
+#47 unpacking to docker.io/personalfi/api:dev 13.7s done
+#47 DONE 18.2s
+
+#48 [worker] resolving provenance for metadata file
+#48 DONE 0.0s
+
+#49 [migrator] resolving provenance for metadata file
+#49 DONE 0.0s
+
+#50 [api] resolving provenance for metadata file
+#50 DONE 0.1s
+ Image personalfi/backup:dev Built
+ Image personalfi/api:dev Built
+ Image personalfi/proxy:dev Built
+ Image personalfi/api:dev Built
+ Image personalfi/api:dev Built
+```
+
+exit=0, duration=200s
+
+--- phase install5 (2026-10-08T15:50:22Z)
+
+#### 2026-10-08T15:50:22Z s5-age (README Install 5: backup keypair (verbatim))
+
+```console
+$ (umask 077; docker run --rm --entrypoint age-keygen personalfi/backup:dev > "$HOME/personalfi-age-identity.txt")
+grep '^# public key:' "$HOME/personalfi-age-identity.txt" | cut -d' ' -f4 > secrets/age_recipient
+chmod 444 secrets/age_recipient
+cat secrets/age_recipient; ls -la secrets $HOME/personalfi-age-identity.txt
+Public key: age1<redacted>
+age1<redacted>
+-rw------- 1 pf pf  184 Oct  8 15:50 /home/pf/personalfi-age-identity.txt
+
+secrets:
+total 24
+drwx--S---  2 pf pf 4096 Oct  8 15:50 .
+drwxr-sr-x 10 pf pf 4096 Oct  8 15:47 ..
+-r--r--r--  1 pf pf   63 Oct  8 15:50 age_recipient
+-r--r--r--  1 pf pf  106 Oct  8 15:47 database_url
+-r--r--r--  1 pf pf   64 Oct  8 15:47 master_key
+-r--r--r--  1 pf pf   65 Oct  8 15:47 pg_password
+```
+
+exit=0, duration=15s
+
+#### 2026-10-08T15:50:37Z s6-placeholders (README Install 6: just secrets-placeholders)
+
+```console
+$ just secrets-placeholders; ls -la secrets
+bash scripts/secrets-placeholders.sh
+secrets-placeholders: set /home/pf/personalfi/secrets to 0700
+secrets-placeholders: created 14 empty optional placeholder(s): advisor_token_secret b2_application_key b2_key_id coinbase_key_name coinbase_private_key coingecko_api_key etherscan_api_key fred_api_key migrator_database_url openfigi_api_key plaid_client_id plaid_env plaid_secret tiingo_api_key (0 already present, left untouched)
+total 24
+drwx--S---  2 pf pf 4096 Oct  8 15:50 .
+drwxr-sr-x 10 pf pf 4096 Oct  8 15:47 ..
+-r--r--r--  1 pf pf    0 Oct  8 15:50 advisor_token_secret
+-r--r--r--  1 pf pf   63 Oct  8 15:50 age_recipient
+-r--r--r--  1 pf pf    0 Oct  8 15:50 b2_application_key
+-r--r--r--  1 pf pf    0 Oct  8 15:50 b2_key_id
+-r--r--r--  1 pf pf    0 Oct  8 15:50 coinbase_key_name
+-r--r--r--  1 pf pf    0 Oct  8 15:50 coinbase_private_key
+-r--r--r--  1 pf pf    0 Oct  8 15:50 coingecko_api_key
+-r--r--r--  1 pf pf  106 Oct  8 15:47 database_url
+-r--r--r--  1 pf pf    0 Oct  8 15:50 etherscan_api_key
+-r--r--r--  1 pf pf    0 Oct  8 15:50 fred_api_key
+-r--r--r--  1 pf pf   64 Oct  8 15:47 master_key
+-r--r--r--  1 pf pf    0 Oct  8 15:50 migrator_database_url
+-r--r--r--  1 pf pf    0 Oct  8 15:50 openfigi_api_key
+-r--r--r--  1 pf pf   65 Oct  8 15:47 pg_password
+-r--r--r--  1 pf pf    0 Oct  8 15:50 plaid_client_id
+-r--r--r--  1 pf pf    0 Oct  8 15:50 plaid_env
+-r--r--r--  1 pf pf    0 Oct  8 15:50 plaid_secret
+-r--r--r--  1 pf pf    0 Oct  8 15:50 tiingo_api_key
+```
+
+exit=0, duration=1s
+
+--- phase up (2026-10-08T15:50:38Z)
+
+### Run 3a: README Install step 7 (up --wait) started 2026-10-08T15:50:38Z
+
+#### 2026-10-08T15:50:38Z s7-up (README Install 7: docker compose up -d --wait --wait-timeout 900)
+
+```console
+$ docker compose up -d --wait --wait-timeout 900 2>&1 | tail -n 60
+ Container personalfi-pre-migrate-backup-1 Creating
+ Container personalfi-pre-migrate-backup-1 Created
+ Container personalfi-migrator-1 Creating
+ Container personalfi-migrator-1 Created
+ Container personalfi-backup-1 Creating
+ Container personalfi-worker-1 Creating
+ Container personalfi-api-1 Creating
+ Container personalfi-backup-1 Created
+ Container personalfi-api-1 Created
+ Container personalfi-proxy-1 Creating
+ Container personalfi-worker-1 Created
+ Container personalfi-proxy-1 Created
+ Container personalfi-db-1 Starting
+ Container personalfi-db-1 Started
+ Container personalfi-db-1 Waiting
+ Container personalfi-db-1 Healthy
+ Container personalfi-pre-migrate-backup-1 Starting
+ Container personalfi-pre-migrate-backup-1 Started
+ Container personalfi-pre-migrate-backup-1 Waiting
+ Container personalfi-db-1 Waiting
+ Container personalfi-pre-migrate-backup-1 Exited
+ Container personalfi-db-1 Healthy
+ Container personalfi-migrator-1 Starting
+ Container personalfi-migrator-1 Started
+ Container personalfi-db-1 Waiting
+ Container personalfi-migrator-1 Waiting
+ Container personalfi-migrator-1 Waiting
+ Container personalfi-db-1 Waiting
+ Container personalfi-db-1 Waiting
+ Container personalfi-migrator-1 Waiting
+ Container personalfi-db-1 Healthy
+ Container personalfi-db-1 Healthy
+ Container personalfi-db-1 Healthy
+ Container personalfi-migrator-1 Exited
+ Container personalfi-migrator-1 Exited
+ Container personalfi-migrator-1 Exited
+ Container personalfi-api-1 Starting
+ Container personalfi-backup-1 Starting
+ Container personalfi-worker-1 Starting
+ Container personalfi-api-1 Started
+ Container personalfi-api-1 Waiting
+ Container personalfi-backup-1 Started
+ Container personalfi-worker-1 Started
+ Container personalfi-api-1 Healthy
+ Container personalfi-proxy-1 Starting
+ Container personalfi-proxy-1 Started
+ Container personalfi-worker-1 Waiting
+ Container personalfi-api-1 Waiting
+ Container personalfi-proxy-1 Waiting
+ Container personalfi-migrator-1 Waiting
+ Container personalfi-backup-1 Waiting
+ Container personalfi-db-1 Waiting
+ Container personalfi-pre-migrate-backup-1 Waiting
+ Container personalfi-db-1 Healthy
+ Container personalfi-backup-1 Healthy
+ Container personalfi-worker-1 Healthy
+ Container personalfi-api-1 Healthy
+ Container personalfi-pre-migrate-backup-1 Exited
+ Container personalfi-migrator-1 Exited
+ Container personalfi-proxy-1 Healthy
+```
+
+exit=0, duration=46s
+
+#### 2026-10-08T15:51:24Z s7-ps (README Install 7: docker compose ps)
+
+```console
+$ docker compose ps
+NAME                  IMAGE                                                                                              COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+personalfi-api-1      personalfi/api:dev                                                                                 "/sbin/tini -- node …"   api       21 seconds ago   Up 11 seconds (healthy)   8080/tcp
+personalfi-backup-1   personalfi/backup:dev                                                                              "/sbin/tini -- /usr/…"   backup    21 seconds ago   Up 10 seconds (healthy)
+personalfi-db-1       postgres:18.6-alpine3.24@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2   "docker-entrypoint.s…"   db        30 seconds ago   Up 20 seconds (healthy)   5432/tcp
+personalfi-proxy-1    personalfi/proxy:dev                                                                               "caddy run --config …"   proxy     20 seconds ago   Up 5 seconds (healthy)    80/tcp, 443/tcp, 2019/tcp, 443/udp, 127.0.0.1:80->8080/tcp, 127.0.0.1:443->8443/tcp
+personalfi-worker-1   personalfi/api:dev                                                                                 "/sbin/tini -- node …"   worker    21 seconds ago   Up 10 seconds (healthy)   8080/tcp
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:51:24Z s7-ready (README Install 7: readiness from inside the api container)
+
+```console
+$ docker compose exec -T api node -e "fetch('http://127.0.0.1:8080/ready').then(async r => console.log(r.status, await r.text()))"
+200 {"status":"ready","database":"reachable","migrations":"current","outbox":{"maxSeq":"0","maxLagEvents":0,"oldestUnprocessedAgeSeconds":null,"failedConsumers":[]},"queue":{"pending":0,"running":0,"dead":0,"stalled":0,"oldestPendingAgeSeconds":null}}
+```
+
+exit=0, duration=0s
+
+--- phase browser_tools (2026-10-08T15:51:24Z)
+
+Harness-only tooling (not a README prerequisite): chromium, nss-tools (certutil), npm + puppeteer-core in /home/pf/harness
+
+#### 2026-10-08T15:51:24Z h-apk (harness: headless browser)
+
+```console
+$ apk add chromium nss-tools npm font-noto 2>&1 | tail -3; chromium --version
+Executing gdk-pixbuf-2.44.7-r1.trigger
+Executing gtk+3.0-3.24.52-r0.trigger
+OK: 865.6 MiB in 245 packages
+Chromium 152.0.7977.82 Alpine Linux
+```
+
+exit=0, duration=37s
+
+#### 2026-10-08T15:52:01Z h-npm (harness: puppeteer-core (CDP client))
+
+```console
+$ mkdir -p harness && cd harness && npm init -y >/dev/null && npm install puppeteer-core 2>&1 | tail -3
+  run `npm fund` for details
+
+found 0 vulnerabilities
+```
+
+exit=0, duration=11s
+
+--- phase trust (2026-10-08T15:52:13Z)
+
+### Run 3a: README Install step 8 (trust the TLS certificate)
+
+#### 2026-10-08T15:52:13Z s8-trustca (README Install 8: just trust-ca)
+
+```console
+$ just trust-ca; ls -la personalfi-ca.crt
+docker compose cp proxy:/data/caddy/pki/authorities/local/root.crt ./personalfi-ca.crt
+ personalfi-proxy-1 Copying personalfi-proxy-1:/data/caddy/pki/authorities/local/root.crt to ./personalfi-ca.crt
+ personalfi-proxy-1 Copied personalfi-proxy-1:/data/caddy/pki/authorities/local/root.crt to ./personalfi-ca.crt
+wrote ./personalfi-ca.crt — import it into your OS/browser trust store (see RUNBOOK.md)
+-rw------- 1 pf pf 627 Oct  8 15:51 personalfi-ca.crt
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:52:13Z s8-hosts (README Install 8: /etc/hosts line (verbatim))
+
+```console
+$ echo "127.0.0.1 personalfi.lan" | sudo tee -a /etc/hosts
+127.0.0.1 personalfi.lan
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:52:13Z s8-sys-trust (README Install 8: Debian, Ubuntu or Alpine system store line (verbatim))
+
+```console
+$ sudo cp personalfi-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates
+```
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:52:13Z s8-curl (README Install 8: curl chain check (verbatim))
+
+````console
+$ curl --cacert personalfi-ca.crt --resolve personalfi.lan:443:127.0.0.1 https://personalfi.lan/api/ready
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+
+  0      0   0      0   0      0      0      0                              0
+100    247 100    247   0      0  12612      0                              0
+100    247 100    247   0      0  12563      0                              0
+100    247 100    247   0      0  12518      0                              0
+{"status":"ready","database":"reachable","migrations":"current","outbox":{"maxSeq":"0","maxLagEvents":0,"oldestUnprocessedAgeSeconds":null,"failedConsumers":[]},"queue":{"pending":0,"running":0,"dead":0,"stalled":0,"oldestPendingAgeSeconds":null}}```
+
+exit=0, duration=0s
+
+--- phase nss (2026-10-08T15:52:13Z)
+
+README Install 8: Chrome/Chromium on Linux lines, verbatim (certutil from nss-tools, installed with the harness browser): create the NSS db because ~/.pki/nssdb does not exist yet, then import
+
+#### 2026-10-08T15:52:13Z  h-nss-init  (README step 8: create ~/.pki/nssdb first (it does not exist: the browser has never run))
+
+```console
+$ test -d $HOME/.pki/nssdb && echo 'nssdb exists' || echo 'nssdb missing'; mkdir -p $HOME/.pki/nssdb && certutil -d sql:$HOME/.pki/nssdb -N --empty-password
+nssdb missing
+````
+
+exit=0, duration=0s
+
+#### 2026-10-08T15:52:13Z h-nss (README step 8: certutil import line, verbatim)
+
+```console
+$ certutil -d sql:$HOME/.pki/nssdb -A -t 'C,,' -n personalfi -i personalfi-ca.crt && certutil -d sql:$HOME/.pki/nssdb -L
+
+Certificate Nickname                                         Trust Attributes
+                                                             SSL,S/MIME,JAR/XPI
+
+personalfi                                                   C,,
+```
+
+exit=0, duration=0s
+
+--- phase bootstrap (2026-10-08T15:52:13Z)
+
+### Run 3a: README Install step 9 (create account)
+
+#### 2026-10-08T15:52:13Z s9-bootstrap (README Install 9: just bootstrap-user (verbatim))
+
+```console
+$ just bootstrap-user name="Your Name" timezone="America/New_York"
+bootstrap-user: running in its own one-shot container (the stack is up)
+ Container personalfi-api-run-ea94f18d0eff Creating
+ Container personalfi-api-run-ea94f18d0eff Created
+(node:1) ExperimentalWarning: The supports Web Crypto API method is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:1) ExperimentalWarning: The ML-DSA-44 Web Crypto API algorithm is an experimental feature and might change at any time
+user created      Your Name (01a11c37-3ae5-74d1-8a99-7329ce7cf855)
+time zone         America/New_York
+taxonomy          153 categories seeded
+advisors          40 manifests registered
+schedules         categorization.retrain_weekly, notifications.deliver, notifications.digest, integrations.price_refresh, planning.net_worth_snapshot
+deriving the key-encryption key (argon2id); this takes a few seconds…
+key custody       unlocked · argon2id m=1048576 KiB t=4 p=4 · 6091 ms · KEK generation 1
+
+Enrol your first passkey within 60 minutes:
+
+  https://personalfi.lan/register#token=<redacted>
+
+  token only: <redacted>
+  expires:    2026-10-08T16:52:31.380Z
+
+Single-use. It is stored only as a SHA-256 digest, so this is the one and only
+time it is readable — and it is not in any log. Enrol a second authenticator
+and print your ten recovery codes straight after: one passkey on one device is
+a self-inflicted denial of service.
+```
+
+exit=0, duration=18s
+
+--- phase enrol (2026-10-08T15:52:31Z)
+
+### Run 3a: README Install step 9-10 (browser: enrol, then sign in)
+
+[resp] 200 GET https://personalfi.lan/api/auth/unlock-state
+[resp] 200 POST https://personalfi.lan/api/auth/register/options
+[resp] 200 POST https://personalfi.lan/api/auth/register/verify
+credentials saved: 1
+--- reg-step2: https://personalfi.lan/register#token=<redacted> | Set up a passkey · PersonalFi
+Add a backup passkey
+
+A phone, a security key, or another browser — so one lost device can’t lock you out.
+
+Name this passkeyAdd passkeySkip for now
+--- interactive:
+input[text] name= id=friendly-name aria= text=Virtual passkey (this device)
+button[submit] name= id= aria= text=Add passkey
+button[button] name= id= aria= text=Skip for now
+--- screenshot /home/pf/harness/shots/reg-step2.png
+[resp] 200 POST https://personalfi.lan/api/auth/register/options
+[resp] 200 POST https://personalfi.lan/api/auth/register/verify
+credentials saved: 2
+--- reg-step3: https://personalfi.lan/register#token=<redacted> | Set up a passkey · PersonalFi
+Save your recovery codes
+
+If you lose every passkey, a recovery code is the way back in.
+
+Create my recovery codes
+Skip for now — create them later in Settings › Security
+--- interactive:
+button[button] name= id= aria= text=Create my recovery codes
+button[button] name= id= aria= text=Skip for now — create them later in Settings › Security
+--- screenshot /home/pf/harness/shots/reg-step3.png
+[resp] 200 POST https://personalfi.lan/api/auth/recovery-codes
+--- reg-recovery: https://personalfi.lan/register#token=<redacted> | Set up a passkey · PersonalFi
+Save your recovery codes
+
+If you lose every passkey, a recovery code is the way back in.
+
+Each code works once, in place of a passkey, if you lose every device. They are shown only now and cannot be shown again. Keep them somewhere that is not this computer.
+
+<code>
+<code>
+<code>
+<code>
+<code>
+<code>
+<code>
+<code>
+<code>
+<code>
+Copy codes
+Download as a text file
+I have saved these codes somewhere safe
+Continue
+Skip for now — create them later in Settings › Security
+--- interactive:
+button[button] name= id= aria= text=Copy codes
+button[button] name= id= aria= text=Download as a text file
+input[checkbox] name= id= aria= text=on
+button[button] name= id= aria= text=Continue
+button[button] name= id= aria= text=Skip for now — create them later in Settings › Security
+--- screenshot /home/pf/harness/shots/reg-recovery.png
+--- [10 code-like tokens masked on this page]
+
+--- phase firstdata (2026-10-08T15:53:11Z)
+
+### Run 3a: README 'Your first data' step 1 (sample CSV; browser part is browser/import.mjs)
+
+#### 2026-10-08T15:53:11Z d1-sample (README Your first data 1: sample.csv (verbatim))
+
+```console
+$ printf 'Date,Description,Amount\n2026-09-01,Coffee shop,-4.50\n2026-09-02,Payroll,2500.00\n2026-09-03,Grocery store,-62.18\n' > sample.csv; cat sample.csv
+Date,Description,Amount
+2026-09-01,Coffee shop,-4.50
+2026-09-02,Payroll,2500.00
+2026-09-03,Grocery store,-62.18
+```
+
+exit=0, duration=0s
+
+--- phase backup (2026-10-08T15:54:39Z)
+
+### Run 3a: README 'Your first data' step 2 (backup)
+
+#### 2026-10-08T15:54:39Z d2-backup (README Your first data 2: just backup)
+
+```console
+$ just backup
+docker compose exec backup /usr/local/bin/backup.sh
+backup: dumping personalfi@db ...
+backup: verified 589976 bytes, 1119 restorable object(s), schema_migrations present
+backup: wrote /backups/personalfi-20261008T155440Z.dump.age (590320 bytes)
+backup: pruning entries older than 30 day(s) locally
+backup: RCLONE_REMOTE not set; local-only backup (see RUNBOOK.md to enable B2)
+backup: complete
+```
+
+exit=0, duration=1s
+
+--- phase drill (2026-10-08T15:54:40Z)
+
+### Run 3a: README 'Your first data' step 3 (restore drill) started 2026-10-08T15:54:40Z
+
+#### 2026-10-08T15:54:40Z d3-drill (README Your first data 3: restore drill (verbatim))
+
+```console
+$ export AGE_IDENTITY_FILE="$HOME/personalfi-age-identity.txt"
+export DRILL_EVIDENCE_DIR="$HOME/personalfi-drills"
+just restore-drill
+Unable to find image 'alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b' locally
+docker.io/library/alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b: Pulling from library/alpine
+56dceff11b33: Download complete
+f5124fb579e2: Download complete
+Digest: sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+Status: Downloaded newer image for alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+restore-drill: starting scratch db (restore-drill-db-6480 on personalfi_backend) ...
+restore-drill: waiting for scratch db to accept connections ......ok
+restore-drill: restoring /backups/personalfi-20261008T155440Z.dump.age (590320 bytes)
+restore: decrypting /backups/personalfi-20261008T155440Z.dump.age
+restore: target personalfi_restore_drill@restore-drill-db; --clean --if-exists will DROP and recreate these:
+restore: archive contains 1119 restorable object(s)
+restore: restoring into personalfi_restore_drill@restore-drill-db (--clean --if-exists --no-owner)
+restore: complete
+restore-drill: WARNING: the live database holds no plan scenario, so this drill cannot see a backup that fails to restore one (F-94-6). Save a plan on the Plan screen, run `just backup`, then drill again.
+restore-drill: booting a throwaway api container against the restored db ...
+# Restore drill — 20261008T155440Z
+
+**Verdict: PASS**
+
+- Backup restored: `/backups/personalfi-20261008T155440Z.dump.age` (590320 encrypted bytes)
+- Restored db table count: 101
+- Restored db schema_migrations max id: 0040
+- Live db table count: 101
+- Live db schema_migrations max id: 0040
+- plan_scenarios rows, restored / live: 0 / 0
+- WARNING: the live database holds no plan scenario, so this drill cannot see a backup that fails to restore one (F-94-6). Save a plan on the Plan screen, run `just backup`, then drill again.
+- API /ready against restored db: pass (200 from /ready)
+
+All assertions held: restored tables > 0, restored == live, schema_migrations agree,
+and the API served /ready from the restored database. `just restore-drill` exited 0.
+restore-drill: wrote /home/pf/personalfi-drills/restore-drill-20261008.md
+```
+
+exit=0, duration=34s
+
+## Run 3a: all phases passed (2026-10-08T15:55:14Z); the verdict (findings or none) is written by hand below.
+
+dind torn down (2026-10-08T15:55:28Z)
+
+---
+
+## Run 3 - the exit test (candidate ea06ebcde3ce028eee21103b5b5d182bdc259593, previous wave 4f0c7b9084071ec75a97395a9acb61e879a940c9)
+
+Before running I re-read the candidate's `README.md` (`tar -xOf`; nothing else opened; no RUNBOOK section was needed). The candidate's code is identical to fd02965; the README now carries the F-13-9, F-13-10 and F-13-11 fixes. `phase_nss` was changed to follow the README's lines verbatim (create `~/.pki/nssdb` first because it does not exist, then the `certutil -A` line) and no longer carries a workaround.
+
+Two runs from fresh dind containers (`--memory 6g --cpus 4`), same README:
+
+- **Run 3 (the required upgrade path):** previous wave 4f0c7b9 installed following the README, then `git pull` + `just upgrade` to the candidate.
+- **Run 3a (fresh-candidate install, no upgrade):** the candidate installed directly, because only the candidate has the one-shot bootstrap container and the recovery-codes screen the README describes.
+
+| #   | Goal                              | Run 3 (4f0c7b9 -> ea06ebc)                                                                                                                                                                                                                                     | Run 3a (ea06ebc fresh)                                                                                                                                                                                                                                       |
+| --- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Stack up + passkey login over TLS | REACHED. first `just build` 213 s, `up --wait` 45 s, `bootstrap-user` 10 s, passkey sign-in 200                                                                                                                                                                | REACHED. build 200 s, `up --wait` 46 s, `bootstrap-user` 18 s, wizard: `Add a backup passkey` -> `Save your recovery codes` -> `Create my recovery codes` -> ten codes (10 code-like tokens counted, never stored) -> tick -> `Continue` -> `You're all set` |
+| 2   | Manual account + CSV import       | REACHED (3 rows listed, 2 accounts)                                                                                                                                                                                                                            | REACHED                                                                                                                                                                                                                                                      |
+| 3   | `just backup`                     | `backup: complete`, 1 s                                                                                                                                                                                                                                        | `backup: complete`, 1 s                                                                                                                                                                                                                                      |
+| 4   | Restore drill                     | `Verdict: PASS`, 33 s (no warning on the previous wave)                                                                                                                                                                                                        | `Verdict: PASS`, 34 s, with the plan-scenario WARNING the README now says is expected                                                                                                                                                                        |
+| 5   | `git pull` + `just upgrade`       | REACHED. `git pull` 2 s, `just upgrade` 168 s (inside "three to five minutes"), up-to-ready 37 s, api/worker restarts 0, `upgrade: complete`; the same passkey signed in again and the three imported rows were listed before and after (row-line count 6 = 6) | not applicable                                                                                                                                                                                                                                               |
+
+README steps that previously failed now pass as written: `curl` is on the package line (F-13-1), step 8's NSS lines create the database first and the import succeeds (`h-nss-init`, `h-nss` exit 0 in both runs), no `bootstrap-user` OOM (3 attempts in run 3 and 3a plus one `reissue=true` on the upgraded install, all exit 0), the recovery-codes sentence matches the screen, the drill warning is explained.
+
+Extra checks on the upgraded install (not README steps): `just backup`, `just restore-drill` (PASS plus the expected warning) and `bootstrap-user reissue=true` followed by the recovery-codes screen (ten codes) all worked on the candidate.
+
+### Harness notes (not README findings)
+
+- Run 3 stopped once in `enrol` and was resumed at that phase (the wizard's first click was lost on a cold first page load: no `/api/auth/register/options` request was sent, so the token was untouched; `register.mjs` now waits for hydration and retries the click). The README steps themselves were not affected. The same effect happened once on the first try in run 1. A person clicking after the page has rendered would not meet it; recorded as an observation for the product owners, not a README matter.
+- The harness sign-in uses a time-based signature counter and tolerates the app signing in by itself on page load (browser conditional mediation).
+
+### Findings in run 3 and run 3a
+
+None. The README was followed literally and every step ran as written; the only workaround applied in these runs is the harness item above, which is not a README step.
+
+### Verdict
+
+**Zero findings. WP 9.13 exit test met:** from a clean machine, README alone, the stack came up with a passkey login over TLS, a manual account and a CSV import, `just backup`, a restore drill PASS and `just upgrade` from the previous wave (4f0c7b9) to the candidate with the data and the passkey intact; the fresh-candidate path also passed. Both dind containers were torn down (`docker rm -fv`; none left).

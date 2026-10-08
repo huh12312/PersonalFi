@@ -24,8 +24,20 @@ const save = async () => {
 const text = () => page.evaluate(() => document.body.innerText);
 auths.push(await addAuthenticator(page, 'internal'));
 await page.goto(link, { waitUntil: 'networkidle2', timeout: 60000 });
+await page.waitForSelector('#friendly-name');
+await sleep(3000); // let the app hydrate: a click before that is lost (seen on a cold first load)
 await page.type('#friendly-name', 'Virtual passkey (this device)');
-await page.click('button[type=submit]');
+for (let attempt = 1; attempt <= 3; attempt += 1) {
+  const sent = page
+    .waitForResponse((r) => r.url().includes('/api/auth/register/options'), { timeout: 15000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  await page.click('button[type=submit]');
+  if (await sent) break;
+  out('[no register/options request after click, attempt ' + attempt + ']');
+}
 await sleep(6000);
 await save();
 await describe(page, 'reg-step2');

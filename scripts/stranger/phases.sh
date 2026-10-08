@@ -123,14 +123,11 @@ phase_bcopy() { docker exec "$C" rm -rf /home/pf/harness/browser; docker cp "$(d
 bjs() { local n=$1; shift; docker exec -u pf -w /home/pf/harness/browser -e HOME=$PFHOME "$C" node "$n" "$@"; }
 
 phase_nss() {
-  note "README Install 8: Chrome/Chromium on Linux line, verbatim (certutil from nss-tools, installed with the harness browser)"
-  step h-nss pf "import the CA into ~/.pki/nssdb for Chromium (README line, verbatim)" \
-    "certutil -d sql:\$HOME/.pki/nssdb -A -t 'C,,' -n personalfi -i personalfi-ca.crt && certutil -d sql:\$HOME/.pki/nssdb -L" && return 0
-  # Known finding F-13-9 (run 2a): the README line fails when ~/.pki/nssdb does not exist yet. Work around it and go on.
-  note "FINDING F-13-9 hit again: the README's certutil line fails with SEC_ERROR_BAD_DATABASE when ~/.pki/nssdb does not exist; creating the db (not in the README) and retrying."
-  step h-nss-init pf "workaround (NOT README): create the NSS db first" "mkdir -p \$HOME/.pki/nssdb && certutil -d sql:\$HOME/.pki/nssdb -N --empty-password"
-  step h-nss2 pf "README certutil line, retried" \
-    "certutil -d sql:\$HOME/.pki/nssdb -A -t 'C,,' -n personalfi -i personalfi-ca.crt && certutil -d sql:\$HOME/.pki/nssdb -L" && STEP_FAILED=0
+  note "README Install 8: Chrome/Chromium on Linux lines, verbatim (certutil from nss-tools, installed with the harness browser): create the NSS db because ~/.pki/nssdb does not exist yet, then import"
+  step h-nss-init pf "README step 8: create ~/.pki/nssdb first (it does not exist: the browser has never run)" \
+    "test -d \$HOME/.pki/nssdb && echo 'nssdb exists' || echo 'nssdb missing'; mkdir -p \$HOME/.pki/nssdb && certutil -d sql:\$HOME/.pki/nssdb -N --empty-password"
+  step h-nss pf "README step 8: certutil import line, verbatim" \
+    "certutil -d sql:\$HOME/.pki/nssdb -A -t 'C,,' -n personalfi -i personalfi-ca.crt && certutil -d sql:\$HOME/.pki/nssdb -L"
 }
 
 # Harness-only: wipe THIS test machine's stack data (inside dind) to retry the enrolment wizard after a harness mistake.
