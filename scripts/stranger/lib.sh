@@ -11,7 +11,7 @@ CHECKOUT=$PFHOME/personalfi
 mkdir -p "$RUNDIR"
 
 # redact: real values captured from a run (registration tokens, age public keys) must never reach the evidence file.
-redact() { sed -E 's/(token=)[A-Za-z0-9_-]+/\1<redacted>/g; s/(token only: +)[A-Za-z0-9_-]+/\1<redacted>/g; s/age1[a-z0-9]{50,}/age1<redacted>/g'; }
+redact() { sed -E 's/(token=)[A-Za-z0-9_-]+/\1<redacted>/g; s/(token only: +)[A-Za-z0-9_-]+/\1<redacted>/g; s/age1[a-z0-9]{50,}/age1<redacted>/g; s/\b[A-Z0-9]{5}-[A-Z0-9]{5}\b/<code>/g'; }
 
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 note() { printf '\n%s\n' "$*" >> "$EVID"; echo "[$(ts)] $*"; }
@@ -33,6 +33,7 @@ step() {
     pfhome) dxph "$cmd" > "$out" 2>&1; rc=$? ;;
   esac
   s1=$(date +%s)
+  [ "$rc" -ne 0 ] && STEP_FAILED=1
   local n; n=$(wc -l < "$out")
   {
     printf '\n#### %s  %s  (%s)\n\n' "$t0" "$id" "$desc"

@@ -41,6 +41,17 @@ if ((await text()).includes('backup passkey')) {
   await save();
   await describe(page, 'reg-step3');
 }
+// Recovery-codes step (candidate README: shown once; tick the "saved" box to continue). Only the COUNT is ever printed.
+if (/recovery code/i.test(await text()) && !(await text()).includes('Continue to PersonalFi')) {
+  await clickText(page, 'Create my recovery codes', 'button');
+  await sleep(3000);
+  await describe(page, 'reg-recovery'); // code-like tokens are masked and counted by describe
+  await page.click('input[type=checkbox],[role=checkbox]');
+  await sleep(500);
+  await clickText(page, 'continue', 'button');
+  await sleep(4000);
+  await describe(page, 'reg-after-recovery');
+}
 if ((await text()).includes('Continue to PersonalFi')) {
   await clickText(page, 'Continue to PersonalFi');
   await sleep(4000);

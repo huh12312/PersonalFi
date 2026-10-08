@@ -92,6 +92,7 @@ phase_trust() {
   note "### Run $RUN: README Install step 8 (trust the TLS certificate)"
   step s8-trustca pf "README Install 8: just trust-ca" "just trust-ca; ls -la personalfi-ca.crt"
   step s8-hosts pf "README Install 8: /etc/hosts line (verbatim)" "echo \"127.0.0.1 personalfi.lan\" | sudo tee -a /etc/hosts"
+  step s8-sys-trust pf "README Install 8: Debian, Ubuntu or Alpine system store line (verbatim)" "sudo cp personalfi-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates"
   step s8-curl pf "README Install 8: curl chain check (verbatim)" "curl --cacert personalfi-ca.crt --resolve personalfi.lan:443:127.0.0.1 https://personalfi.lan/api/ready"
 }
 
@@ -122,9 +123,14 @@ phase_bcopy() { docker exec "$C" rm -rf /home/pf/harness/browser; docker cp "$(d
 bjs() { local n=$1; shift; docker exec -u pf -w /home/pf/harness/browser -e HOME=$PFHOME "$C" node "$n" "$@"; }
 
 phase_nss() {
-  note "Harness: import personalfi-ca.crt into Chromium's NSS trust store (README names only Arch 'trust anchor' and Firefox; see finding F-13-3)"
-  step h-nss pf "import the CA into ~/.pki/nssdb for Chromium" \
-    "mkdir -p \$HOME/.pki/nssdb && certutil -d sql:\$HOME/.pki/nssdb -N --empty-password && certutil -d sql:\$HOME/.pki/nssdb -A -t 'C,,' -n personalfi -i personalfi-ca.crt && certutil -d sql:\$HOME/.pki/nssdb -L"
+  note "README Install 8: Chrome/Chromium on Linux line, verbatim (certutil from nss-tools, installed with the harness browser)"
+  step h-nss pf "import the CA into ~/.pki/nssdb for Chromium (README line, verbatim)" \
+    "certutil -d sql:\$HOME/.pki/nssdb -A -t 'C,,' -n personalfi -i personalfi-ca.crt && certutil -d sql:\$HOME/.pki/nssdb -L" && return 0
+  # Known finding F-13-9 (run 2a): the README line fails when ~/.pki/nssdb does not exist yet. Work around it and go on.
+  note "FINDING F-13-9 hit again: the README's certutil line fails with SEC_ERROR_BAD_DATABASE when ~/.pki/nssdb does not exist; creating the db (not in the README) and retrying."
+  step h-nss-init pf "workaround (NOT README): create the NSS db first" "mkdir -p \$HOME/.pki/nssdb && certutil -d sql:\$HOME/.pki/nssdb -N --empty-password"
+  step h-nss2 pf "README certutil line, retried" \
+    "certutil -d sql:\$HOME/.pki/nssdb -A -t 'C,,' -n personalfi -i personalfi-ca.crt && certutil -d sql:\$HOME/.pki/nssdb -L" && STEP_FAILED=0
 }
 
 # Harness-only: wipe THIS test machine's stack data (inside dind) to retry the enrolment wizard after a harness mistake.

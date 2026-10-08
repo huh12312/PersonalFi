@@ -6,6 +6,17 @@ import fs from 'node:fs';
 // The one logger: stdout, no console.
 export const out = (...a) => process.stdout.write(a.map(String).join(' ') + '\n');
 
+// Recovery codes must never reach a log: mask code-like tokens (hyphenated groups, or long tokens with a digit) and count them.
+export const codeCount = { n: 0 };
+export const mask = (t) =>
+  String(t).replace(
+    /\b[A-Z0-9]{4,}(?:-[A-Z0-9]{4,})+\b|\b(?=[A-Za-z0-9-]*\d)[A-Za-z0-9]{3,}(?:-[A-Za-z0-9]{3,})+\b|\b(?=[A-Za-z]*\d)[A-Za-z0-9]{8,}\b/g,
+    () => {
+      codeCount.n += 1;
+      return '<code>';
+    },
+  );
+
 export const CREDS = '/home/pf/harness/credentials.json';
 export const SHOTS = '/home/pf/harness/shots';
 fs.mkdirSync(SHOTS, { recursive: true });
@@ -53,9 +64,16 @@ export async function saveCredentials(a) {
 }
 
 export async function restoreCredentials(a) {
-  const creds = JSON.parse(fs.readFileSync(CREDS, 'utf8'));
+  // One virtual authenticator = the passkey 'on this device' (the first enrolled); the second authenticator is not restored.
+  const creds = JSON.parse(fs.readFileSync(CREDS, 'utf8')).slice(0, 1);
+  // The server refuses a signature counter that did not advance. A time-based counter always advances, even if an
+  // earlier session's final counter was never saved (the app may also sign in by itself via conditional mediation).
+  const signCount = Math.floor(Date.now() / 1000);
   for (const credential of creds)
-    await a.cdp.send('WebAuthn.addCredential', { authenticatorId: a.authenticatorId, credential });
+    await a.cdp.send('WebAuthn.addCredential', {
+      authenticatorId: a.authenticatorId,
+      credential: { ...credential, signCount },
+    });
   return creds.length;
 }
 
@@ -84,8 +102,12 @@ export async function describe(page, tag) {
       els,
     };
   });
+  codeCount.n = 0;
+  const text = mask(info.text);
+  const els = mask(info.els.join('\n'));
   out(
-    `--- ${tag}: ${info.url} | ${info.title}\n${info.text}\n--- interactive:\n${info.els.join('\n')}\n--- screenshot ${png}`,
+    `--- ${tag}: ${info.url} | ${info.title}\n${text}\n--- interactive:\n${els}\n--- screenshot ${png}` +
+      (codeCount.n ? `\n--- [${codeCount.n} code-like tokens masked on this page]` : ''),
   );
 }
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -117,11 +139,24 @@ export async function clickText(
 export async function login(page, auth) {
   await restoreCredentials(auth);
   await page.goto('https://personalfi.lan/', { waitUntil: 'networkidle2', timeout: 60000 });
-  await page.waitForFunction(() => document.body.innerText.includes('Sign in with a passkey'), {
+  // Either the sign-in page, or the app has already signed in by itself (conditional mediation).
+  await page.waitForFunction(
+    () =>
+      document.body.innerText.includes('Sign in with a passkey') ||
+      document.body.innerText.includes('OVERVIEW'),
+    { timeout: 30000 },
+  );
+  await describe(page, 'login1');
+  if ((await page.evaluate(() => document.body.innerText)).includes('Sign in with a passkey')) {
+    try {
+      await clickText(page, 'Sign in with a passkey');
+    } catch {
+      // the app signed in by itself while we were clicking; the wait below settles it
+    }
+  }
+  await page.waitForFunction(() => document.body.innerText.includes('OVERVIEW'), {
     timeout: 30000,
   });
-  await describe(page, 'login1');
-  await clickText(page, 'Sign in with a passkey');
-  await sleep(5000);
-  await saveCredentials(auth); // keep the signature counter current: the server refuses a counter that did not advance
+  await sleep(1000);
+  await saveCredentials(auth);
 }
