@@ -191,17 +191,19 @@ all of them.
 
    The time zone is an IANA name (`Europe/London`, `America/Los_Angeles`, `UTC`).
 
-   This derives an encryption key inside the running `api` container (about 1 GiB of memory for a
-   few seconds, inside that container's own limit). Run it at least a minute after `up --wait`
-   finishes, and not while the stack is still starting. If it ends with `exit code 137` the kernel
-   OOM-killed that derivation: your user was already created, so wait a minute and run the same
-   command again with `reissue=true` added, which issues a fresh link.
+   This starts a short-lived container of its own for the key derivation (about 1.2 GiB of memory
+   for about six seconds, under the same 1536M limit as the `api` service), so the running `api` is
+   never the process the kernel can kill. Run it once the stack is up. If it ever ends with
+   `exit code 137`, the host did not have that memory free: stop other memory users (the local
+   model first) and run the same command again with `reissue=true` added, which issues a fresh link.
 
    It prints a one-time link of the form `https://personalfi.lan/register#token=...`. Open the
    **whole** link in a browser that trusts the certificate (step 8). Enrol a passkey on this device
    and, when the wizard offers it, a backup passkey on a second device (a phone or a security key).
-   This release does not show recovery codes at enrolment; the backup passkey is your second way
-   in. The token sits in the URL fragment, which is never sent to a server and never reaches a log.
+   The wizard then shows your ten recovery codes, once: save them somewhere that is not this
+   computer and tick "I have saved these codes somewhere safe" to continue. You can skip that step
+   and create them later in Settings › Security › Recovery codes; a new set replaces the old one.
+   The token sits in the URL fragment, which is never sent to a server and never reaches a log.
    On a headless test host, use Chromium with a virtual authenticator (DevTools → More tools →
    WebAuthn, or the CDP method `WebAuthn.addVirtualAuthenticator`).
 
