@@ -23,12 +23,11 @@
  * both are reached the way production reaches them, through `modules.ts` and
  * HTTP respectively).
  */
-import { DateOnly, money, newId, systemClock } from '@core/kernel';
+import { DateOnly, money, systemClock } from '@core/kernel';
 import { createConsumerPump, platformExecutor } from '@core/platform';
 import { manualTransaction } from '@connector/manual';
-import { categoryIdsByKey, seedSystemTaxonomy } from '@ctx/categorization';
+import { categoryIdsByKey, createRule, seedSystemTaxonomy } from '@ctx/categorization';
 import { createEgressPolicy, createNtfyChannel, createSmtpChannel } from '@ctx/notifications';
-import { sql } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -71,24 +70,17 @@ describe.skipIf(NO_DATABASE)('categorization wiring (apps/api/src/modules.ts)', 
     // `categorization.taxonomy_not_seeded`.
     await seedSystemTaxonomy(h.database.db, { userId: h.userId, clock: systemClock });
 
-    // A rule, inserted directly: there is no REST surface for rules yet
-    // (deferred, wp1.4 evidence §8), and this suite's claim is about the
-    // consumer's wiring, not the rules CRUD surface.
-    const ruleId = newId();
-    await h.database.db.execute(sql`
-      INSERT INTO rules
-        (id, user_id, name, priority, enabled, conditions, actions, run_on_sync, stop_processing)
-      VALUES (
-        ${ruleId}, ${h.userId}, ${RULE_NAME}, 100, TRUE,
-        ${JSON.stringify({
-          all: [{ type: 'payee', match: 'contains', value: 'BLUE BOTTLE' }],
-          any: [],
-        })}::jsonb,
-        ${JSON.stringify([{ type: 'set_category', categoryKey: 'dining.restaurants' }])}::jsonb,
-        TRUE, FALSE
-      )
-    `);
-
+    // The rule goes in through the production writer — `createRule`, what
+    // `POST /rules` calls (G9-15, C9-9) — so it is a rule the route could have
+    // stored: validated by `ruleSchema`, its category owned by this user. (This
+    // comment used to say there was no REST surface for rules; there has been
+    // since WP 2.5.)
+    await createRule(h.database.db, {
+      userId: h.userId,
+      name: RULE_NAME,
+      conditions: { all: [{ type: 'payee', match: 'contains', value: 'BLUE BOTTLE' }], any: [] },
+      actions: [{ type: 'set_category', categoryKey: 'dining.restaurants' }],
+    });
     // The same path every route test uses: a transaction arrives through the
     // real sync, never an INSERT into transactions_provider.
     await linkManual(h, {

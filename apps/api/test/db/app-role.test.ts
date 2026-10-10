@@ -3,6 +3,13 @@
  * WP 9.11, CF-18 / G-01 (Medium): the serving processes' database connection
  * cannot change the schema.
  *
+ * What this file proves is the **role's** grants. That `main.ts` and `worker.ts`
+ * actually open their pools as this role is `app-role-wiring.test.ts`'s claim
+ * (G9-5, C9-2): it spawns the real entry points and reads `current_user` off the
+ * connection that wrote their boot-time config snapshot. This file builds its
+ * own pool from `db-role.ts`; on its own it would stay green with `main.ts`
+ * reverted to the superuser login.
+ *
  * WP 9.10's probe found api, worker, migrator and backup all logging in as
  * `personalfi` — the cluster's bootstrap SUPERUSER and the owner of all 101
  * tables. This connects **exactly as `main.ts` and `worker.ts` do**
@@ -70,6 +77,7 @@ describeWithDb('G-01: the api/worker connection is the DML-only app role', () =>
     );
     expect(Number(rows[0]?.n)).toBeGreaterThan(30);
     const id = newId();
+    // fixture: users row written by SQL because the grant is the thing under test (the app role may INSERT into an ordinary table); no route asserted, and the row is a plain holder row.
     await app.query(`INSERT INTO users (id, display_name) VALUES ($1, 'Role Probe')`, [id]);
     await app.query(`UPDATE users SET display_name = 'Role Probe 2' WHERE id = $1`, [id]);
     const read = await app.query<{ display_name: string }>(
@@ -157,6 +165,7 @@ describeWithDb('G-25: security_events is append-only', () => {
 
   async function insertEvent(userId: string | null): Promise<string> {
     const id = newId();
+    // fixture: security_events row written by SQL because the grant is the thing under test (the app role may append but not UPDATE/DELETE); the append is exactly the shape @ctx/identity's appender writes (kind 'auth.login', outcome 'success').
     await app.query(
       `INSERT INTO security_events (id, user_id, kind, outcome) VALUES ($1, $2, 'auth.login', 'success')`,
       [id, userId],

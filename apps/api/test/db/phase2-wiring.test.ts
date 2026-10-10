@@ -41,7 +41,7 @@ import { DateOnly, money, newId, systemClock } from '@core/kernel';
 import { createConsumerPump, platformExecutor } from '@core/platform';
 import { manualTransaction } from '@connector/manual';
 import { createBudget, openPeriod, type BudgetingContext } from '@ctx/budgeting';
-import { categoryIdsByKey, seedSystemTaxonomy } from '@ctx/categorization';
+import { categoryIdsByKey, createRule, seedSystemTaxonomy } from '@ctx/categorization';
 import {
   BUILTIN_CATALOGUE,
   createBuiltinRegistry,
@@ -76,6 +76,7 @@ import {
 import { appModules, registerBuiltinAdvisors } from '../../src/modules.ts';
 import {
   createApiHarness,
+  expectStatus,
   linkManual,
   NO_DATABASE,
   type ApiHarness,
@@ -118,20 +119,14 @@ describe.skipIf(NO_DATABASE)(
       const netflixDates = [1, 0].map((monthsAgo) => DateOnly.addMonths(today, -monthsAgo));
 
       // --- 1. A rule, so the dining charge gets a category ------------------
-      // No REST surface for rules exists yet (wp1.4 evidence §8) — the same
-      // gap `categorization-wiring.test.ts` works around the same way.
-      const ruleId = newId();
-      await h.database.db.execute(sql`
-        INSERT INTO rules
-          (id, user_id, name, priority, enabled, conditions, actions, run_on_sync, stop_processing)
-        VALUES (
-          ${ruleId}, ${h.userId}, ${'phase2-wiring: cafe -> dining'}, 100, TRUE,
-          ${JSON.stringify({ all: [{ type: 'payee', match: 'contains', value: 'CAFE DELUXE' }], any: [] })}::jsonb,
-          ${JSON.stringify([{ type: 'set_category', categoryKey: DINING_CATEGORY_KEY }])}::jsonb,
-          TRUE, FALSE
-        )
-      `);
-
+      // Through the production writer, `createRule` (what `POST /rules` calls;
+      // G9-15, C9-9) — not a row inserted by SQL.
+      await createRule(h.database.db, {
+        userId: h.userId,
+        name: 'phase2-wiring: cafe -> dining',
+        conditions: { all: [{ type: 'payee', match: 'contains', value: 'CAFE DELUXE' }], any: [] },
+        actions: [{ type: 'set_category', categoryKey: DINING_CATEGORY_KEY }],
+      });
       // --- 2. A budget with a $0-assigned line for that category ------------
       // Any spending in it is an immediate cash overspend — the "the one hard
       // alert" 07 §1.9 describes, and the trigger `budgeting.BudgetThresholdCrossed`
@@ -150,23 +145,17 @@ describe.skipIf(NO_DATABASE)(
         budgetId: budget.id,
         on: today,
       });
-      // `@ctx/budgeting`'s public surface has `createBudget`/`openPeriod`/
-      // `assign` but no line *constructor* (`assign` requires an existing
-      // `lineId`) — there is no REST route for one either (WP 2.9 owns the
-      // budget screen). The same gap `categorization-wiring.test.ts` works
-      // around for rules: a direct insert into the owning table, matching
-      // `src/budget.ts`'s own `upsertLine` column layout exactly (`dirty:
-      // true`, every other minor column left at its schema default of 0).
-      const lineId = newId();
-      await h.database.db.execute(sql`
-        INSERT INTO budget_lines
-          (id, user_id, budget_id, budget_period_id, kind, category_id, currency, dirty)
-        VALUES (
-          ${lineId}, ${h.userId}, ${budget.id}, ${period.id}, 'category', ${diningCategoryId},
-          'USD', TRUE
-        )
-      `);
-      const line = { id: lineId };
+      // The envelope goes in through the route that creates one (`POST
+      // /budgets/lines`, G9-15 / C9-9), not a row inserted into `budget_lines`
+      // (this comment used to say there was no route for one; there is).
+      const lineResponse = await h.request({
+        method: 'POST',
+        url: '/budgets/lines',
+        session: h.stale,
+        body: { periodId: period.id, categoryId: diningCategoryId },
+      });
+      expectStatus(lineResponse, 201);
+      const line = (lineResponse.json() as { line: { id: string } }).line;
 
       // --- 3. A real sync: three monthly Netflix charges + one dining charge,
       //        plus an opening balance low enough that the emergency-fund-short

@@ -121,6 +121,7 @@ async function insertRun(
   const id = newId();
   const now = systemClock.now();
   const status = overrides.status ?? 'started';
+  // fixture: advisor_runs row written by the schema insert because `startRun`/`finishRun` (store.ts) are not on @ctx/insights' barrel and this test pins the runs routes over the rows; the run pipeline could write each status shape taken here (`started` with finished_at NULL, every other status finished), the CHECKs of migrations 0012/0028 hold, and every row is read back through the routes' response schemas.
   await h.database.db.insert(advisorRuns).values({
     id,
     userId,

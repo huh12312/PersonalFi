@@ -33,7 +33,9 @@
  * assertion back to the one line in the route file it depends on is a
  * five-second read, which is the next best thing to an executed sabotage.
  */
-import { newId } from '@core/kernel';
+import { newId, systemClock } from '@core/kernel';
+import { appendEvent, platformExecutor } from '@core/platform';
+import { SecurityResolutionFailed } from '@ctx/investments';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -46,26 +48,32 @@ import {
 
 const DAY_MS = 86_400_000;
 
-/** A `domain_events` row shaped exactly like a real `investments.SecurityResolutionFailed`. */
+/**
+ * A real `investments.SecurityResolutionFailed`, appended by the production
+ * writer (`appendEvent` over the context's own `defineEvent`; G9-15, C9-9). The
+ * hand-written row this replaces was "shaped exactly like" one but lacked the
+ * `syncRunId` key the event's schema requires and named an abstain reason
+ * (`no_match`) that is not one of `ABSTAIN_REASONS`, so no writer could have stored it.
+ */
 async function insertUnresolvedEvent(
   h: ApiHarness,
   input: { readonly userId: string; readonly provider: string; readonly name: string },
 ): Promise<void> {
-  await h.database.db.execute(sql`
-    INSERT INTO domain_events (
-      id, user_id, aggregate_type, event_type, payload, correlation_id
-    ) VALUES (
-      ${newId()}::uuid, ${input.userId}::uuid, 'security', 'investments.SecurityResolutionFailed',
-      ${JSON.stringify({
+  await appendEvent(
+    platformExecutor(h.database.db),
+    SecurityResolutionFailed.create(
+      {
         provider: input.provider,
+        syncRunId: null,
         providerSecurityId: null,
         name: input.name,
         identifiers: [],
-        abstentions: [{ tier: 'ticker', reason: 'no_match', detail: null }],
-      })}::jsonb,
-      ${newId()}::uuid
-    )
-  `);
+        abstentions: [{ tier: 'ticker', reason: 'absent', detail: null }],
+      },
+      { userId: input.userId, aggregateId: null, correlationId: newId(), causationId: null },
+      systemClock,
+    ),
+  );
 }
 
 describe.skipIf(NO_DATABASE)(
@@ -141,6 +149,7 @@ describe.skipIf(NO_DATABASE)(
         const theirs = await h.issueSession({ userId: otherUserId, fresh: true });
 
         const fxJobRow = (userId: string, message: string, ageMs: number) =>
+          // fixture: jobs row written by SQL because the failure state is the runner's UPDATE (status 'failed', last_error = serializeError(cause)) after a real handler throws, and driving a scheduled snapshot to an FX failure is not what this test is about; the runner could leave it as a failed planning.net_worth_snapshot job whose last_error carries the thrown error's name and message (a subset of what serializeError stores), as here.
           h.database.db.execute(sql`
             INSERT INTO jobs (
               id, user_id, kind, payload, status, last_error, correlation_id, created_at, updated_at

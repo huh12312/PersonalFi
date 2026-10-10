@@ -235,6 +235,7 @@ describe.skipIf(NO_DATABASE)('the retirement wave over a real database (WP 4.9)'
     // all of it tax-deferred — so R3's share is 100% and nothing about it
     // depends on a rounding boundary.
     const securityId = newId();
+    // fixture: securities row written by SQL because its only writer is the investments sync's SecurityResolver (no route writes it) and this test pins a reader/route over it; the resolver writes this shape (identity_kind 'ticker', identity_key 'ticker:<T>:<user>', classification LOCAL_SEED_TABLE) — the same rows investments-routes.test.ts's header rules on
     await h.database.db.execute(sql`
       INSERT INTO securities (
         id, user_id, identity_kind, identity_key, ticker, name, type, currency,
@@ -246,6 +247,7 @@ describe.skipIf(NO_DATABASE)('the retirement wave over a real database (WP 4.9)'
         'US_EQUITY', 'US', 'BROAD', '0.000300', 'LOCAL_SEED_TABLE', 0, false
       )
     `);
+    // fixture: holdings row written by SQL because its only writer is the investments sync (WP 3.7's lot consumer, `upsertHolding`; no route writes it); the sync could write it as a decimal-string quantity on an open account with BROKER/ESTIMATED cost basis, as here
     await h.database.db.execute(sql`
       INSERT INTO holdings (
         id, user_id, account_id, security_id, quantity, institution_value_minor, currency,
@@ -255,6 +257,7 @@ describe.skipIf(NO_DATABASE)('the retirement wave over a real database (WP 4.9)'
         '4000.000000000000000000', 100000000, 'USD', 60000000, false, 'BROKER', ${day(-3)}::date
       )
     `);
+    // fixture: prices row written by SQL because its only writer is the market-data refresh/price ladder (no route writes it); the ladder writes an observation with source tiingo/coingecko/fred, never last_known (the prices_source_is_an_observation CHECK), as here
     await h.database.db.execute(sql`
       INSERT INTO prices (
         id, user_id, security_id, price_date, source, close, currency, stale, observed_at

@@ -169,6 +169,7 @@ async function loadNetWorthDaily(
         ${now}::timestamptz, ${now}::timestamptz, ${now}::timestamptz, ${now}::timestamptz
       )`,
     );
+    // fixture: net_worth_daily rows written by SQL because this is a scale fixture (thousands of sealed days; the snapshot job writes one a day) for a timing test; each row has the shape `upsertOpenDay` + `sealDay` store (revision 1, 'observed', sealed_at set, breakdown per account).
     await db.execute(sql`
       INSERT INTO net_worth_daily (
         id, user_id, as_of_date, revision, base_currency,

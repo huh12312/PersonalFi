@@ -60,6 +60,7 @@ import {
 } from '@connector/plaid/test';
 import { DateOnly, money, newId, systemClock } from '@core/kernel';
 import { createConsumerPump, platformExecutor } from '@core/platform';
+import { createBudget } from '@ctx/budgeting';
 import { createEgressPolicy, createNtfyChannel, createSmtpChannel } from '@ctx/notifications';
 import {
   LOTS_CONSUMER_NAME,
@@ -1020,11 +1021,18 @@ describe.skipIf(NO_DATABASE)(
       const target = before[0];
       expect(target).toBeDefined();
       if (target === undefined) return;
-      await h.database.db.execute(sql`
-        INSERT INTO budgets (id, user_id, name, currency, timezone, off_budget_account_ids)
-        VALUES (${newId()}::uuid, ${h.userId}::uuid, 'p3wire planning budget', 'USD', 'UTC',
-                ${JSON.stringify([target.accountId])}::jsonb)
-      `);
+      // Through `createBudget`, what the budgets route calls (G9-15, C9-9) — not a
+      // `budgets` row inserted by SQL.
+      await createBudget(
+        h.database.db,
+        { userId: h.userId, clock: systemClock, correlationId: newId() },
+        {
+          name: 'p3wire planning budget',
+          currency: 'USD',
+          timezone: 'UTC',
+          offBudgetAccountIds: [target.accountId],
+        },
+      );
       const after = await ports.balances.accounts(h.userId, '2026-06-15');
       expect(after.find((account) => account.accountId === target.accountId)?.flags.onBudget).toBe(
         false,

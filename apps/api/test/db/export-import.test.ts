@@ -37,6 +37,7 @@ const describeWithDb = describe.skipIf(NO_DATABASE);
 const FAKE_CREDENTIAL_MARKER = 'wp28-sealed-credential-marker';
 
 async function seedFakeCredential(h: ApiHarness): Promise<void> {
+  // fixture: connections row (a plaid item with sealed credentials) written by SQL because a Plaid link needs a live public-token exchange the route test cannot reach, and this test asserts the exporter never emits `sealed_credentials` (it excludes the column by name and never reads it); the marker bytes stand in for a sealed envelope, which no reader here opens — not a row the link route would store byte-for-byte, deliberately.
   await h.database.pool.query(
     `INSERT INTO connections (id, user_id, provider, provider_connection_id, display_name, sealed_credentials)
      VALUES ($1, $2, 'plaid', 'plaid-item-1', 'Fake Bank', $3)`,

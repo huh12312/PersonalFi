@@ -63,7 +63,7 @@
  *    easier.
  */
 import { manualTransaction, type ManualTransactionInput } from '@connector/manual';
-import { DateOnly, Money, newId, systemClock, type Money as MoneyType } from '@core/kernel';
+import { DateOnly, Money, systemClock, type Money as MoneyType } from '@core/kernel';
 import { createConsumerPump, platformExecutor } from '@core/platform';
 import { generateDemoData } from '@core/seed';
 import { classificationOf } from '@ctx/ledger';
@@ -71,11 +71,11 @@ import type { AccountType as LedgerAccountType } from '@ctx/ledger/schema';
 import { createEgressPolicy, createNtfyChannel, createSmtpChannel } from '@ctx/notifications';
 import {
   FLAT_TAXONOMY,
+  createRule,
   isAssignableKey,
   seedSystemTaxonomy,
   type FlatCategory,
 } from '@ctx/categorization';
-import { sql } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -287,21 +287,17 @@ describe.skipIf(NO_DATABASE)('Phase 1 seed-based end-to-end proof', () => {
       const group = merchantCategoryById.get(merchant.id);
       if (group === undefined) continue;
       const categoryKey = anyLeafUnder(group);
-      await h.database.db.execute(sql`
-          INSERT INTO rules
-            (id, user_id, name, priority, enabled, conditions, actions, run_on_sync, stop_processing)
-          VALUES (
-            ${newId()}, ${h.userId}, ${`seed-e2e: ${merchant.canonicalName}`}, 100, TRUE,
-            ${JSON.stringify({
-              all: [
-                { type: 'payee', match: 'contains', value: matchTokenFor(merchant.canonicalName) },
-              ],
-              any: [],
-            })}::jsonb,
-            ${JSON.stringify([{ type: 'set_category', categoryKey }])}::jsonb,
-            TRUE, FALSE
-          )
-        `);
+      // `createRule` is what `POST /rules` calls (G9-15, C9-9): each rule is one the
+      // route could have stored.
+      await createRule(h.database.db, {
+        userId: h.userId,
+        name: `seed-e2e: ${merchant.canonicalName}`,
+        conditions: {
+          all: [{ type: 'payee', match: 'contains', value: matchTokenFor(merchant.canonicalName) }],
+          any: [],
+        },
+        actions: [{ type: 'set_category', categoryKey }],
+      });
     }
 
     // Exactly what `worker.ts` builds from `appModules()`'s own registration

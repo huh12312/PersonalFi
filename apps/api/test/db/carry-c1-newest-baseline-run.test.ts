@@ -20,24 +20,62 @@
  * computed was invisible to every advisor the moment a holder looked at the
  * plan screen again.
  *
- * This suite seeds both rows directly (never through the Monte Carlo engine
- * itself — that is WP 4.5/4.6's proof, not this one's) so the ordering is
- * exercised without depending on whether a return series happens to be bound
- * in this process.
+ * Both runs are written by the production writer (G9-15, C9-9): the Monte
+ * Carlo baseline by `@ctx/planning`'s `runProjection` — the function the
+ * nightly `planning.projection_refresh` and `POST …/projections` both call —
+ * with the engine port bound to a double that answers a fixed outcome (the
+ * bootstrap engine is WP 4.5/4.6's proof, not this one's, and needs a fetched
+ * return series), and the deterministic run by the route itself, after it, as
+ * a `/plan` reload would. The rows are therefore real: a real cache key, input
+ * document, digest and assumptions version, in the order the product writes
+ * them (the deterministic run really is newer). The earlier fixture inserted
+ * both by SQL with `input '{}'`, an invented engine and assumptions version and
+ * a digest of nothing, and pinned "the newest baseline run is served" on them.
  */
-// eslint-disable-next-line no-restricted-imports -- a synthetic digest for a CHECK constraint, not cryptography
-import { createHash } from 'node:crypto';
-import { DateOnly, newId, systemClock } from '@core/kernel';
-import { sql } from 'drizzle-orm';
+import { DateOnly, money, newId, systemClock } from '@core/kernel';
+import {
+  computeNetWorth,
+  createProjectionInputsReader,
+  currentRegistry,
+  runProjection,
+  sealDay,
+  upsertOpenDay,
+  type MonteCarloRunner,
+} from '@ctx/planning';
 import { describe, expect, it } from 'vitest';
-import { createInsightsPlanningPort } from '../../src/domain.ts';
+import {
+  createInsightsPlanningPort,
+  planningPortsFor,
+  planningRevealedPortsFor,
+} from '../../src/domain.ts';
 import { NO_DATABASE, createApiHarness, expectStatus } from '../helpers/api-harness.ts';
 
 const ZONE = 'UTC';
 
-function digest(seed: string): string {
-  return `sha256:${createHash('sha256').update(seed).digest('hex')}`;
-}
+/** The engine port, answering what the nightly bootstrap run would: a 60.35 % success. */
+const FIXED_MONTE_CARLO: MonteCarloRunner = {
+  engineVersion: 'carry-c1-engine-double/1',
+  run: async (request) => ({
+    engineVersion: 'carry-c1-engine-double/1',
+    seed: request.seed,
+    paths: request.paths,
+    successProbability: '0.603500',
+    periods: [
+      {
+        index: 0,
+        age: 65,
+        calendarYear: 2026,
+        p5: money(50_000n, 'USD'),
+        p10: money(60_000n, 'USD'),
+        p25: money(80_000n, 'USD'),
+        p50: money(100_000n, 'USD'),
+        p75: money(120_000n, 'USD'),
+        p90: money(140_000n, 'USD'),
+        p95: money(160_000n, 'USD'),
+      },
+    ],
+  }),
+};
 
 describe.skipIf(NO_DATABASE)('C-1: newestBaselineRunId prefers Monte Carlo (carry-c1)', () => {
   it(
@@ -72,66 +110,76 @@ describe.skipIf(NO_DATABASE)('C-1: newestBaselineRunId prefers Monte Carlo (carr
       });
       expectStatus(baseline, 201);
       const baselineId = (baseline.json() as { id: string }).id;
-      const assumptionsVersion = digest('carry-c1-assumptions');
-      const nowMs = Date.now();
 
-      async function insertRun(input: {
-        readonly id: string;
-        readonly method: 'deterministic' | 'monte_carlo';
-        readonly paths: number;
-        readonly successProbability: string;
-        readonly createdAtMs: number;
-        readonly cacheKeySeed: string;
-      }): Promise<void> {
-        await h.database.db.execute(sql`
-          INSERT INTO projection_runs (
-            id, user_id, scenario_id, scenario_kind, method, cache_key, seed,
-            engine_version, assumptions_version, assumptions_overrides,
-            input_digest, input, paths, as_of_date, balances_sealed, currency,
-            success_probability, duration_ms, created_at
-          ) VALUES (
-            ${input.id}::uuid, ${h.userId}::uuid, ${baselineId}::uuid, 'baseline',
-            ${input.method}, ${digest(input.cacheKeySeed)}, 12345,
-            'carry-c1-test/1', ${assumptionsVersion}, '{}'::jsonb,
-            ${digest(`${input.cacheKeySeed}-input`)}, '{}'::jsonb, ${input.paths},
-            '2026-01-01'::date, true, 'USD', ${input.successProbability}, 5,
-            ${new Date(input.createdAtMs).toISOString()}::timestamptz
-          )
-        `);
-        await h.database.db.execute(sql`
-          INSERT INTO projection_percentiles (
-            run_id, user_id, period_index, age, calendar_year, currency, p50_minor
-          ) VALUES (
-            ${input.id}::uuid, ${h.userId}::uuid, 0, 65, 2026, 'USD', 100000
-          )
-        `);
-      }
+      // A projection starts from a sealed net-worth day: written the way the
+      // 04:00 snapshot job writes one (`computeNetWorth` -> `upsertOpenDay` -> `sealDay`).
+      const sealedDay = new Date(systemClock.now().getTime() - 2 * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      const snapshot = await computeNetWorth(
+        planningPortsFor(h.database.db, { userId: h.userId, timeZone: ZONE, clock: systemClock }),
+        { userId: h.userId, asOfDate: sealedDay, baseCurrency: 'USD' },
+      );
+      await upsertOpenDay(h.database.db, { userId: h.userId, snapshot, clock: systemClock });
+      await sealDay(h.database.db, { userId: h.userId, asOfDate: sealedDay, clock: systemClock });
 
-      const monteCarloRunId = newId();
-      const deterministicRunId = newId();
-      // Older, Monte Carlo — the nightly refresh's shape.
-      await insertRun({
-        id: monteCarloRunId,
-        method: 'monte_carlo',
-        paths: 500,
-        successProbability: '0.603500',
-        createdAtMs: nowMs - 60_000,
-        cacheKeySeed: 'carry-c1-mc',
+      // Older, Monte Carlo — the nightly refresh's shape: `runProjection`, the
+      // function the job calls, with the engine port bound.
+      const monteCarlo = await h.database.db.transaction((tx) =>
+        runProjection(
+          tx,
+          {
+            inputs: createProjectionInputsReader(
+              tx,
+              planningRevealedPortsFor(tx, {
+                userId: h.userId,
+                timeZone: ZONE,
+                clock: systemClock,
+              }),
+            ),
+            monteCarlo: FIXED_MONTE_CARLO,
+            clock: systemClock,
+            timeZone: ZONE,
+            registry: currentRegistry(),
+          },
+          {
+            userId: h.userId,
+            scenarioId: baselineId,
+            method: 'monte_carlo',
+            paths: 500,
+            asOf: null,
+            allowOpenDay: true,
+            correlationId: newId(),
+          },
+        ),
+      );
+      expect(monteCarlo.run?.method).toBe('monte_carlo');
+      const monteCarloRunId = monteCarlo.run?.id as string;
+      // A reload can happen at any moment after the nightly run; the clock only
+      // has to have moved for "newer" to be true of `created_at`.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      // Newer, deterministic — an interactive reload after the nightly run, through
+      // the route (no `method`, no Monte Carlo bound on the api in this harness).
+      const reload = await h.request({
+        method: 'POST',
+        url: `/plan/scenarios/${baselineId}/projections`,
+        session: h.stale,
+        body: { method: 'deterministic', allowOpenDay: true },
       });
-      // Newer, deterministic — an interactive reload after the nightly run.
-      await insertRun({
-        id: deterministicRunId,
-        method: 'deterministic',
-        paths: 1,
-        successProbability: '1.000000',
-        createdAtMs: nowMs,
-        cacheKeySeed: 'carry-c1-det',
-      });
+      expectStatus(reload, 200);
+      const deterministicRunId = (reload.json() as { run: { id: string } }).run.id;
+      expect(deterministicRunId).not.toBe(monteCarloRunId);
+      const newest = await h.database.pool.query<{ id: string; method: string }>(
+        `SELECT id, method FROM projection_runs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [h.userId],
+      );
+      expect(newest.rows[0]).toEqual({ id: deterministicRunId, method: 'deterministic' });
 
       const port = createInsightsPlanningPort(h.database.db, systemClock, { timeZone: ZONE });
       const read = await port.projection({
         userId: h.userId,
-        asOf: DateOnly.parse('2026-01-01'),
+        asOf: DateOnly.parse(systemClock.now().toISOString().slice(0, 10)),
       });
 
       expect(read).not.toBeNull();

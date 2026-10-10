@@ -131,6 +131,7 @@ describe.skipIf(NO_DATABASE)(
           { id: newId() },
         );
 
+        // fixture: prices row written by SQL because its only writer is the market-data refresh/price ladder (no route writes it); the ladder writes an observation with source tiingo/coingecko/fred, never last_known (the prices_source_is_an_observation CHECK), as here
         await database.db.execute(sql`
           INSERT INTO prices (
             id, user_id, security_id, price_date, source, close, currency, observed_at

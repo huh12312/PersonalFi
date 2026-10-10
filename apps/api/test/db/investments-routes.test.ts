@@ -139,6 +139,7 @@ describe.skipIf(NO_DATABASE)('/holdings, /securities, /prices and /investments (
     },
   ): Promise<string> {
     const id = newId();
+    // fixture: securities row written by SQL because its only writer is the investments sync's SecurityResolver (no route writes it) and this test pins a reader/route over it; the resolver writes this shape (identity_kind 'ticker', identity_key 'ticker:<T>:<user>', classification LOCAL_SEED_TABLE) — the same rows investments-routes.test.ts's header rules on
     await h.database.db.execute(sql`
       INSERT INTO securities (
         id, user_id, identity_kind, identity_key, ticker, name, type, currency,
@@ -162,6 +163,7 @@ describe.skipIf(NO_DATABASE)('/holdings, /securities, /prices and /investments (
     readonly costBasisMinor: bigint | null;
     readonly institutionValueMinor: bigint;
   }): Promise<void> {
+    // fixture: holdings row written by SQL because its only writer is the investments sync (WP 3.7's lot consumer, `upsertHolding`; no route writes it); the sync could write it as a decimal-string quantity on an open account with BROKER/ESTIMATED cost basis, as here
     await h.database.db.execute(sql`
       INSERT INTO holdings (
         id, user_id, account_id, security_id, quantity, institution_value_minor, currency,
@@ -187,6 +189,7 @@ describe.skipIf(NO_DATABASE)('/holdings, /securities, /prices and /investments (
     readonly observedAtOffsetHours: number;
   }): Promise<void> {
     const observedAt = new Date(Date.now() + input.observedAtOffsetHours * 3_600_000);
+    // fixture: prices row written by SQL because its only writer is the market-data refresh/price ladder (no route writes it); the ladder writes an observation with source tiingo/coingecko/fred, never last_known (the prices_source_is_an_observation CHECK), as here
     await h.database.db.execute(sql`
       INSERT INTO prices (
         id, user_id, security_id, price_date, source, close, currency, stale, observed_at

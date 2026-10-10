@@ -433,6 +433,7 @@ describe.skipIf(NO_DATABASE)(
         // defaulted to 1.0, so the *only* way holder B's snapshot seals
         // cleanly is if the price/FX readers actually queried `fx_rates`
         // under holder B's own `user_id`.
+        // fixture: fx_rates row written by SQL because its only writer is the market-data FX refresh (no route writes it); the refresh writes a dated observation with a named source (fred) and a decimal rate, as here
         await h.database.db.execute(sql`
           INSERT INTO fx_rates (id, user_id, base_currency, quote_currency, rate_date, source, rate, observed_at)
           VALUES (${newId()}::uuid, ${holderB}::uuid, 'EUR', 'USD', ${asOfDate}::date, 'fred',

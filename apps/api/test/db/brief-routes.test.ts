@@ -124,6 +124,7 @@ async function seedBrief(
 ): Promise<string> {
   const briefId = newId();
   const now = systemClock.now();
+  // fixture: advisory_briefs row written by the schema insert because `publishWeeklyBrief` (the weekly job) is its only writer and needs a full advisor run; the job could write it as a published week with items from position 0 (as here), and the routes read it back through their response schemas — input_digest is a placeholder no route or reader recomputes.
   await h.database.db.insert(advisoryBriefs).values({
     id: briefId,
     userId,
@@ -136,6 +137,7 @@ async function seedBrief(
     publishedAt: now,
     createdAt: now,
   });
+  // fixture: advisory_brief_items rows written by the schema insert because `publishWeeklyBrief` is their only writer; the job could write a ranked and an attention item at positions 0.. with evidence and score factors, as here, and the routes read them back through their response schemas.
   await h.database.db.insert(advisoryBriefItems).values([
     {
       id: newId(),
@@ -430,6 +432,7 @@ async function seedFinding(
 ): Promise<string> {
   const id = newId();
   const proposed = input.lastProposedAt ?? new Date('2026-10-05T12:00:00.000Z');
+  // fixture: insights row written by the schema insert because `upsertInsight` (the nightly advisor run) is its only writer; the run could write it as a pending_review finding with evidence and a proposed action (as here), and the Brief/insights routes read it back through their response schemas — input_digest is a placeholder no route recomputes.
   await db.insert(insights).values({
     id,
     userId,
@@ -473,6 +476,7 @@ async function seedFinding(
     resolvedDisplay: '$500.00',
     href: null,
   });
+  // fixture: insight_actions row written by the schema insert because `upsertInsight` is its only writer; the nightly run could write it as a proposed action at the given position (the second, later action and the replaced action are the shapes the test is about).
   await db.insert(insightActions).values({
     id: newId(),
     userId,
@@ -494,6 +498,7 @@ async function seedNarration(
   text: string,
 ): Promise<void> {
   const proposed = new Date('2026-10-05T18:00:00.000Z');
+  // fixture: insights row (the narration) written by the schema insert because the narrator pipeline (`local.narrator`, through the same insight upsert) is its only writer and needs a model run; the pipeline could write it as a pending_review narration of the finding it narrates (narrates_insight_id), as here.
   await db.insert(insights).values({
     id: newId(),
     userId,
@@ -536,6 +541,7 @@ async function seedBriefOver(
   publishedAt = new Date('2026-10-05T12:30:00.000Z'),
 ): Promise<void> {
   const briefId = newId();
+  // fixture: advisory_briefs row written by the schema insert because `publishWeeklyBrief` is its only writer; same shape and same placeholder input_digest as seedBrief's.
   await db.insert(advisoryBriefs).values({
     id: briefId,
     userId,
@@ -550,6 +556,7 @@ async function seedBriefOver(
   });
   let position = 0;
   for (const finding of findings) {
+    // fixture: advisory_brief_items row written by the schema insert because `publishWeeklyBrief` is its only writer; the job could write it as a ranked item at the given position linked to its insight (or insight-less), as here — see the advisory_briefs note on seedBrief.
     await db.insert(advisoryBriefItems).values({
       id: newId(),
       userId,

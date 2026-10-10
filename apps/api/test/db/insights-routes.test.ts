@@ -20,6 +20,7 @@ import {
   runAdvisor,
   type InsightsDependencies,
 } from '@ctx/insights';
+import { createFlagService, platformExecutor, PLATFORM_FLAGS } from '@core/platform';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createInsightsBudgetPort,
@@ -28,6 +29,7 @@ import {
   createInsightsMarketDataPort,
   createInsightsRecurringPort,
 } from '../../src/domain.ts';
+import { ADVISOR_KIND_FLAGS, MODULE_FLAGS } from '../../src/platform.ts';
 import {
   createApiHarness,
   expectStatus,
@@ -348,11 +350,14 @@ describe.skipIf(NO_DATABASE)('POST /advisors/run and kill level 1 (WP 5.1, C-7)'
   }, 60_000);
 
   it('POST /advisors/run with module.insights off refuses and runs nothing', async () => {
-    await h.database.pool.query(
-      `INSERT INTO feature_flags (user_id, key, enabled) VALUES ($1, 'module.insights', false)
-       ON CONFLICT (user_id, key) DO UPDATE SET enabled = EXCLUDED.enabled`,
-      [h.userId],
-    );
+    // The flag is stored by the production flag service (`set`, what the module
+    // toggle calls; G9-15, C9-9), not an INSERT into `feature_flags`.
+    const flags = createFlagService({
+      db: platformExecutor(h.database.db),
+      defaults: [...PLATFORM_FLAGS, ...MODULE_FLAGS, ...ADVISOR_KIND_FLAGS],
+      ttlMs: 0,
+    });
+    await flags.set(platformExecutor(h.database.db), h.userId, 'module.insights', false);
     try {
       const response = await h.request({
         method: 'POST',
@@ -387,10 +392,7 @@ describe.skipIf(NO_DATABASE)('POST /advisors/run and kill level 1 (WP 5.1, C-7)'
         expect(problemOf(answer)['code']).toBe('insights.module_disabled');
       }
     } finally {
-      await h.database.pool.query(
-        `DELETE FROM feature_flags WHERE user_id = $1 AND key = 'module.insights'`,
-        [h.userId],
-      );
+      await flags.set(platformExecutor(h.database.db), h.userId, 'module.insights', true);
     }
   }, 60_000);
 

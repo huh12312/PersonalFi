@@ -90,6 +90,7 @@ async function seedSyncRuns(h: ApiHarness, connectionIds: readonly string[]): Pr
       const startedAt = new Date(AS_OF.getTime() - daysBack * 86_400_000 - 3_600_000);
       await exec(
         h,
+        // fixture: sync_runs row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is the sync orchestrator, which the linked manual connections above already drive for real; this helper adds scheduled successful runs over past days (trigger 'scheduled'), which the orchestrator writes for the nightly sync.
         sql`INSERT INTO sync_runs (id, user_id, connection_id, trigger, operation, status, started_at, finished_at, duration_ms, correlation_id)
             VALUES (${newId()}::uuid, ${h.userId}::uuid, ${connectionId}::uuid, 'scheduled', 'transactions', 'success',
                     ${startedAt.toISOString()}::timestamptz, ${new Date(startedAt.getTime() + 2_000).toISOString()}::timestamptz,
@@ -108,6 +109,7 @@ async function seedBriefs(h: ApiHarness): Promise<void> {
     const accepted = index < 3;
     await exec(
       h,
+      // fixture: insights row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is `upsertInsight` (the nightly advisor run); the run could write it as a pending_review finding with a canary title/summary, as here.
       sql`INSERT INTO insights (id, user_id, advisor_id, advisor_version, key, period, type, severity, title, summary_md,
                                 confidence, confidence_basis, horizon, input_digest, status, reviewed_at)
           VALUES (${insightId}::uuid, ${h.userId}::uuid, 'canary.advisor', '1.0.0', ${`k-${index}`}, '2026-10', 'canary_type', 'info',
@@ -117,12 +119,14 @@ async function seedBriefs(h: ApiHarness): Promise<void> {
     );
     await exec(
       h,
+      // fixture: advisory_briefs row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is `publishWeeklyBrief`; the job could write it as a published week.
       sql`INSERT INTO advisory_briefs (id, user_id, iso_week, currency, input_digest, published_at)
           VALUES (${briefId}::uuid, ${h.userId}::uuid, ${isoWeek}, 'USD', ${`sha256:${'b'.repeat(64)}`},
                   ${new Date(Date.UTC(2026, 9, 10 + index * 7, 9)).toISOString()}::timestamptz)`,
     );
     await exec(
       h,
+      // fixture: advisory_brief_items row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is `publishWeeklyBrief`; the job could write it as a ranked item linked to its insight.
       sql`INSERT INTO advisory_brief_items (id, user_id, brief_id, section, position, insight_id, advisor_id, insight_key, insight_type,
                                             severity, title, summary_md, confidence, horizon, retirement_effect)
           VALUES (${newId()}::uuid, ${h.userId}::uuid, ${briefId}::uuid, ${index % 2 === 0 ? 'ranked' : 'attention'}, 0,
@@ -131,6 +135,7 @@ async function seedBriefs(h: ApiHarness): Promise<void> {
     );
     await exec(
       h,
+      // fixture: insight_feedback row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is @ctx/insights' review path (store.ts, reached by POST /insights/:id/review); it could write an action with a reason code, as here.
       sql`INSERT INTO insight_feedback (id, user_id, insight_id, advisor_id, insight_key, action, reason_code, correlation_id, created_at)
           VALUES (${newId()}::uuid, ${h.userId}::uuid, ${insightId}::uuid, 'canary.advisor', ${`k-${index}`},
                   ${accepted ? 'accept' : 'dismiss'}, ${accepted ? null : 'NOT_TRUE'}, ${newId()}::uuid,
@@ -302,12 +307,22 @@ describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
       sql`UPDATE transactions SET user_note = 'CANARY-MEMO-ORCHID', user_merchant_name = 'CANARY-MERCHANT-OVERRIDE'
           WHERE effective_name LIKE 'CANARY-MERCHANT-ZEBRA%'`,
     );
-    // A goal, with its own canary name and amount.
-    await exec(
-      h,
-      sql`INSERT INTO goals (id, user_id, kind, name, target_minor, currency, target_date)
-          VALUES (${newId()}::uuid, ${h.userId}::uuid, 'purchase', 'CANARY-GOAL-HOUSE', 8765432, 'USD', '2030-01-01')`,
-    );
+    // A goal, with its own canary name and amount -- through the route (G9-15, C9-9).
+    expect(
+      (
+        await h.request({
+          method: 'POST',
+          url: '/goals',
+          session: h.stale,
+          body: {
+            kind: 'purchase',
+            name: 'CANARY-GOAL-HOUSE',
+            target: { minor: '8765432', currency: 'USD' },
+            targetDate: '2030-01-01',
+          },
+        })
+      ).statusCode,
+    ).toBe(201);
     // Category assignments: three automatic (provider, classifier, merchant default) and one the holder
     // set, decided inside the trailing 30 days -- 75 % automatic, one overlay write in 2026-W45.
     await seedSystemTaxonomy(h.database.db, { userId: h.userId, clock: systemClock });
@@ -320,6 +335,7 @@ describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
     ).entries()) {
       await exec(
         h,
+        // fixture: category_assignments rows written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; their writers are @ctx/categorization (the consumer) and the holder's own edit; each source value used is one that writer stores.
         sql`INSERT INTO category_assignments (id, user_id, transaction_id, category_id, source, confidence, decided_at)
             VALUES (${newId()}::uuid, ${h.userId}::uuid, ${spendRows.rows[index]?.id}::uuid, ${categoryId}::uuid, ${source}, 0.9,
                     '2026-11-03T10:00:00Z'::timestamptz)`,
@@ -332,11 +348,13 @@ describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
     // Jobs, advisors, notifications, security events, backups and drills.
     await exec(
       h,
+      // fixture: jobs row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is `enqueueJob` and the runner; the runner could leave it as a failed attempt with attempts/max_attempts, as here.
       sql`INSERT INTO jobs (id, user_id, kind, correlation_id, status, attempts, max_attempts, updated_at)
           VALUES (${newId()}::uuid, ${h.userId}::uuid, 'sync.scheduled', ${newId()}::uuid, 'dead', 5, 5, '2026-11-03T10:00:00Z')`,
     );
     await exec(
       h,
+      // fixture: advisors row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is `registerAdvisor` (@ctx/insights, at boot); registration could write this manifest-bearing row.
       sql`INSERT INTO advisors (id, user_id, advisor_id, version, kind, contract_version, display_name, purpose, manifest,
                                 quarantined_at, quarantine_reason)
           VALUES (${newId()}::uuid, ${h.userId}::uuid, 'canary.advisor', '1.0.0', 'builtin', 1, 'CANARY-ADVISOR', 'CANARY-ADVISOR purpose',
@@ -345,11 +363,13 @@ describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
     const channelId = newId();
     await exec(
       h,
+      // fixture: notification_channels row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is @ctx/notifications' service (routes/notifications.ts); it could write a scheme/host/port row with a sealed config, as here.
       sql`INSERT INTO notification_channels (id, user_id, kind, display_name, destination_host, destination_port, scheme, sealed_config)
           VALUES (${channelId}::uuid, ${h.userId}::uuid, 'ntfy', 'CANARY-CHANNEL', 'ntfy.example', 443, 'https', decode(repeat('00', 64), 'hex'))`,
     );
     await exec(
       h,
+      // fixture: notification_outbox row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is @ctx/notifications' outbox (outbox.ts); it could write a queued row with a dedupe key and delivery class, as here.
       sql`INSERT INTO notification_outbox (id, user_id, channel_id, dedupe_key, delivery_class, title, body_md, correlation_id, queued_at)
           VALUES (${newId()}::uuid, ${h.userId}::uuid, ${channelId}::uuid, 'canary-1', 'PROMPT', 'CANARY-BRIEF-TITLE', 'CANARY-MEMO-ORCHID',
                   ${newId()}::uuid, '2026-11-04T10:00:00Z')`,
@@ -361,18 +381,21 @@ describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
     ] as const) {
       await exec(
         h,
+        // fixture: security_events row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is @ctx/identity's security-events appender (security-events.ts); it could write a kind/outcome/detail row, as here.
         sql`INSERT INTO security_events (id, user_id, occurred_at, kind, outcome, detail)
             VALUES (${newId()}::uuid, ${h.userId}::uuid, '2026-11-05T08:00:00Z', ${kind}, ${outcome}, '{"note":"CANARY-MEMO-ORCHID"}'::jsonb)`,
       );
     }
     await exec(
       h,
+      // fixture: ops_backup_runs row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is docker/backup/backup.sh (columns checked against the script in ops-backup-status.test.ts).
       sql`INSERT INTO ops_backup_runs (id, status, finished_at, plaintext_bytes, toc_entries, reason)
           VALUES (${newId()}::uuid, 'ok', '2026-11-09T08:00:00Z', 66346, 160, 'CANARY-MEMO-ORCHID wrote a backup'),
                  (${newId()}::uuid, 'fail', '2026-11-09T10:00:00Z', NULL, NULL, 'pg_dump failed')`,
     );
     await exec(
       h,
+      // fixture: ops_restore_drills row written by SQL because soak-report: the report reads counts, ages and column presence, never row content or shape (no route is asserted here), and this test plants canary text in free-text columns; its writer is the justfile restore-drill recipe (columns checked against the recipe in ops-backup-status.test.ts).
       sql`INSERT INTO ops_restore_drills (id, verdict, ran_at, restored_table_count, live_table_count, max_migration, rto_seconds)
           VALUES (${newId()}::uuid, 'pass', '2026-10-30T10:00:00Z', 99, 99, '0036', 74)`,
     );

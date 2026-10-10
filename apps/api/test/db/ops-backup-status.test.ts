@@ -10,6 +10,8 @@
  * inserted with the same columns `docker/backup/backup.sh` and the
  * `restore-drill` recipe write.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { fixedClock, newId } from '@core/kernel';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -21,6 +23,25 @@ import {
 } from '../helpers/api-harness.ts';
 
 const NOW = new Date('2026-11-09T12:00:00.000Z');
+
+/** The columns the writers insert — read back out of the scripts by the first test below. */
+const BACKUP_RUN_COLUMNS = [
+  'id',
+  'status',
+  'finished_at',
+  'plaintext_bytes',
+  'toc_entries',
+  'reason',
+];
+const RESTORE_DRILL_COLUMNS = [
+  'id',
+  'verdict',
+  'ran_at',
+  'restored_table_count',
+  'live_table_count',
+  'max_migration',
+  'rto_seconds',
+];
 const hoursAgo = (hours: number) => new Date(NOW.getTime() - hours * 3_600_000).toISOString();
 const daysAgo = (days: number) => hoursAgo(days * 24);
 
@@ -51,18 +72,50 @@ describe.skipIf(NO_DATABASE)('GET /ops/backup-status (WP 9.1 part 2)', () => {
     await h.database.db.execute(sql`TRUNCATE ops_backup_runs, ops_restore_drills`);
   });
 
-  const backup = async (status: 'ok' | 'fail', finishedAt: string, reason = 'test') => {
+  // fixture: ops_backup_runs / ops_restore_drills rows written by SQL because their only
+  // writers are docker/backup/backup.sh and the justfile's restore-drill recipe (no route
+  // writes them) and this test pins the read route over them; the scripts could write each
+  // as written here — exactly the columns BACKUP_RUN_COLUMNS / RESTORE_DRILL_COLUMNS name,
+  // which the first test below reads out of the scripts themselves.
+  const insertRow = async (
+    table: 'ops_backup_runs' | 'ops_restore_drills',
+    row: Readonly<Record<string, unknown>>,
+  ) => {
+    const columns = Object.keys(row);
+    expect(columns).toEqual(
+      table === 'ops_backup_runs' ? BACKUP_RUN_COLUMNS : RESTORE_DRILL_COLUMNS,
+    );
     await h.database.db.execute(
-      sql`INSERT INTO ops_backup_runs (id, status, finished_at, plaintext_bytes, toc_entries, reason)
-          VALUES (${newId()}::uuid, ${status}, ${finishedAt}::timestamptz, ${status === 'ok' ? 66_346 : null},
-                  ${status === 'ok' ? 160 : null}, ${reason})`,
+      sql`INSERT INTO ${sql.identifier(table)} (${sql.join(
+        columns.map((column) => sql.identifier(column)),
+        sql`, `,
+      )})
+          VALUES (${sql.join(
+            columns.map((column) => sql`${row[column]}`),
+            sql`, `,
+          )})`,
     );
   };
+  const backup = async (status: 'ok' | 'fail', finishedAt: string, reason = 'test') => {
+    await insertRow('ops_backup_runs', {
+      id: newId(),
+      status,
+      finished_at: finishedAt,
+      plaintext_bytes: status === 'ok' ? 66_346 : null,
+      toc_entries: status === 'ok' ? 160 : null,
+      reason,
+    });
+  };
   const drill = async (verdict: 'pass' | 'fail', ranAt: string) => {
-    await h.database.db.execute(
-      sql`INSERT INTO ops_restore_drills (id, verdict, ran_at, restored_table_count, live_table_count, max_migration, rto_seconds)
-          VALUES (${newId()}::uuid, ${verdict}, ${ranAt}::timestamptz, 99, 99, '0036', 74)`,
-    );
+    await insertRow('ops_restore_drills', {
+      id: newId(),
+      verdict,
+      ran_at: ranAt,
+      restored_table_count: 99,
+      live_table_count: 99,
+      max_migration: '0036',
+      rto_seconds: 74,
+    });
   };
   const status = async (): Promise<Status> => {
     const response = await h.request({
@@ -73,6 +126,20 @@ describe.skipIf(NO_DATABASE)('GET /ops/backup-status (WP 9.1 part 2)', () => {
     expectStatus(response, 200);
     return response.json() as Status;
   };
+
+  it('the fixtures insert exactly the columns the shipped writers do (G9-15: not a row the scripts could not write)', () => {
+    const repoFile = (path: string): string =>
+      readFileSync(fileURLToPath(new URL(`../../../../${path}`, import.meta.url)), 'utf8');
+    const columnsOf = (source: string, table: string): string[] => {
+      const match = new RegExp(`INSERT INTO ${table}\\s*\\(([^)]*)\\)`).exec(source);
+      expect(match, `no INSERT INTO ${table} in the shipped script`).not.toBeNull();
+      return (match?.[1] ?? '').split(',').map((column) => column.trim());
+    };
+    expect(columnsOf(repoFile('docker/backup/backup.sh'), 'ops_backup_runs')).toEqual(
+      BACKUP_RUN_COLUMNS,
+    );
+    expect(columnsOf(repoFile('justfile'), 'ops_restore_drills')).toEqual(RESTORE_DRILL_COLUMNS);
+  });
 
   it('the status reports the newest successful backup and never a newer failed one', async () => {
     // Nothing yet: no backup is overdue, not "fine".

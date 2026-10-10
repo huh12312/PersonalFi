@@ -256,6 +256,7 @@ describe.skipIf(NO_DATABASE)('WP 5.13b carry C-4 — resealPlaintextWalletDescri
     // straight through `write()`, which is exactly what this fixture wants:
     // a plaintext row already durably on disk, the shape a pre-existing
     // install's `wallet_addresses` table carries.
+    // fixture: connections row (wallet_rpc) written by SQL because the test needs the *legacy* shape — a plaintext descriptor already on disk, as an install predating the seal carries — which the wallet store writes only when built without a secretBox, and its `put` needs the connection row to exist first; the connection row itself is one `createConnection` writes (provider, provider_connection_id, display_name).
     await database.db.execute(sql`
       INSERT INTO connections (id, user_id, provider, provider_connection_id, display_name)
       VALUES (${connectionId}::uuid, ${database.userId}::uuid, ${WALLETRPC_PROVIDER},
