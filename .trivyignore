@@ -30,3 +30,19 @@
 # source-map-js 1.2.1 (CVE-2026-93749): snoozed 2026-10-06 while the fix sat
 # inside minimumReleaseAge; CLOSED 2026-10-07 by the lockfile bump to 1.2.2
 # (pnpm-workspace.yaml override). No suppression remains.
+
+# personalfi/proxy's `usr/bin/caddy` (gobinary): three Go DoS findings published
+# after the Phase 9 gate's green run at 14c391f (2026-10-08) — CVE-2026-78667
+# (net/http, crafted request), CVE-2026-78669 (x/net http2 and stdlib: HTTP/2
+# SETTINGS flood) and CVE-2026-97031 (crypto/tls). Fixed in Go 1.26.9 / 1.27.2
+# and x/net 0.60.0; upstream caddy:2-alpine v2.11.7 (2026-10-05,
+# sha256:d8542f48…) still ships the vulnerable build, so there is no digest to
+# bump to. Residual: denial of service only, against a proxy bound to the LAN
+# or Tailscale (never the internet) — no confidentiality or integrity path.
+# Snoozed 2026-10-10 for four weeks; the bump to the first upstream release
+# that clears them is the procedure in RUNBOOK "Upgrading the image" (Renovate
+# watches the digest). If none exists by the expiry, build caddy with xcaddy on
+# a patched Go, the fallback 09 reserved.
+CVE-2026-78667 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary net/http DoS; no upstream build clears it yet
+CVE-2026-78669 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary x/net+stdlib HTTP/2 SETTINGS DoS; no upstream build clears it yet
+CVE-2026-97031 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary crypto/tls DoS; no upstream build clears it yet
