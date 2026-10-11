@@ -981,6 +981,8 @@ Phase 4's **C-15** (→ C9-13) and **C-16** (→ C9-14) remain open; no other Ph
    digest (or Chris's written acceptance of the wording residual, with R9-3's index-13 fact named); C5-10 ruled.
 6. **Chris's sign-off** — the only thing that declares v1.0.
 
+**C9-12 closed 2026-10-11 (recorded by the orchestrator, not the gate):** Chris accepted all eleven proposed risks and the six recorded Lows "with recommended fixes" — A-01…A-11 accepted (A-06, A-09, A-10 conditional on the host actions he owns: swap and core dumps off, `sudo just harden-secrets`, LUKS2); G-19 and G-30 accepted for v0.9 (G-19 fixed by v1.0); G-04, G-07, G-20 and G-32 to be fixed in the v1.0-close package. The written record is D28 in `docs/plan/00-master-implementation-plan.md`. With C9-1 landed (`9f65762`), nothing the gate held the `v0.9.0` tag for remains.
+
 ## 7. Teardown
 
 _COMPLETE (finisher, 16:15–16:18)._ Executed after §6, in this order:
