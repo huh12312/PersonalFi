@@ -1038,7 +1038,8 @@ the agent/gate checkout. It names **every** violation, not just the first:
 
 ```bash
 cd ~/personalfi-prod
-bash scripts/soak/check-isolation.sh          # reads COMPOSE_PROJECT_NAME and PERSONALFI_VERSION
+set -a; . ./.env; set +a                     # the guard reads the ENVIRONMENT, not .env — export .env first (just upgrade resolves it for you)
+bash scripts/soak/check-isolation.sh          # reads COMPOSE_PROJECT_NAME and PERSONALFI_VERSION from the environment
 bash scripts/soak/check-isolation.sh --self-test   # proves it refuses project personalfi, version dev, and this checkout
 ```
 

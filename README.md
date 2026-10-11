@@ -260,7 +260,7 @@ failures people actually hit, with the exact error text.
    monthly; the RUNBOOK's [Restore drill](RUNBOOK.md#restore-drill) section says what it asserts.
 
 When you are ready to put real data in, read the RUNBOOK's [First install](RUNBOOK.md#first-install)
-for what this walk-through skips: `sudo just harden-secrets` (secret file modes of 0400, owned by
+for what this walk-through skips: `just harden-secrets` (it asks for `sudo` itself; `sudo just …` fails when `just` is installed under your home directory, which `sudo`'s `secure_path` does not search) (secret file modes of 0400, owned by
 the consuming service), encrypting the data disk, off-site backup, remote access over Tailscale,
 and optional Plaid and price-feed keys.
 
