@@ -43,7 +43,7 @@ env:
 jobs:
   direct-jump:
     name: v0.1 -> this commit, by `just upgrade` alone
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     # Job-level, not workflow-level: the same group whether this runs on its
     # own triggers or inside release.yml through `workflow_call`. Two runs on

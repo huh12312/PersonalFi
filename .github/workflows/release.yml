@@ -36,7 +36,7 @@ jobs:
   build-sign-publish:
     name: build, sign, publish (${{ matrix.image }})
     needs: upgrade-test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -134,7 +134,7 @@ jobs:
   github-release:
     name: publish GitHub release
     needs: build-sign-publish
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write

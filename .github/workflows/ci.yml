@@ -127,7 +127,7 @@ env:
 jobs:
   typecheck:
     name: typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -144,7 +144,7 @@ jobs:
 
   lint:
     name: lint (eslint + boundaries + schema ownership)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -212,7 +212,7 @@ jobs:
 
   test:
     name: unit tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -258,7 +258,7 @@ jobs:
 
   migration-test:
     name: migration test (postgres 18)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:
@@ -334,7 +334,7 @@ jobs:
 
   web:
     name: web (unit, build, playwright)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 25, not 15: the functional playwright suite alone is ~140 tests on one
     # worker; WP 9.8's a11y specs (another ~110, ~25 min) run in `web-a11y`
     # below so neither job hits its limit (the first run after 9.8 landed
@@ -389,7 +389,7 @@ jobs:
   # its own; the gate re-runs the same two specs.
   web-a11y:
     name: web a11y (WCAG sweep + keyboard journeys)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -411,7 +411,7 @@ jobs:
 
   openapi-current:
     name: openapi spec is current
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -432,7 +432,7 @@ jobs:
 
   gitleaks:
     name: gitleaks (secrets, full history)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -452,7 +452,7 @@ jobs:
 
   license-gate:
     name: license gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -476,7 +476,7 @@ jobs:
 
   compose-hardening:
     name: compose hardening (P0-6/P0-7, parsed not grepped)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -508,7 +508,7 @@ jobs:
 
   trivy-fs:
     name: trivy filesystem scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -538,7 +538,7 @@ jobs:
 
   docker-build-scan:
     name: docker build + trivy image scan (${{ matrix.image }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
