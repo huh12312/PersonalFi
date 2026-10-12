@@ -354,6 +354,17 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'ops_restore_drills',
     "install telemetry (WP 9.1, CF-17): one row per restore-drill run on this deployment, not the account holder's data.",
   ],
+  // WP 10.1 (migration 0041). A reasoned deferral, and the strongest kind: this
+  // table holds the holder's own Plaid client id and secret, sealed under the
+  // KEK (decision D5). A credential never leaves the install in an export - the
+  // same treatment as `connections.sealed_credentials`, which `SENSITIVE_COLUMNS`
+  // drops by name - and a restored instance has a different KEK, so the
+  // envelopes would be unopenable ciphertext anyway. The holder re-enters the
+  // keys in the Add connection menu on the new install.
+  [
+    'provider_credentials',
+    "the holder's own provider API keys, sealed under this install's KEK (WP 10.1, D5): a credential never leaves the install in an export, and the envelopes could not be opened under another KEK; re-entered after a restore.",
+  ],
 ]);
 
 /**

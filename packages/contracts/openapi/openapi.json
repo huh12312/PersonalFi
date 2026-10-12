@@ -9202,6 +9202,64 @@
           "expiresAt"
         ]
       },
+      "PlaidCredentialsStatusInput": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "True when a Plaid connector is usable for this holder right now."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "files",
+              "stored",
+              "none"
+            ],
+            "description": "`files`: the operator's secret files configure Plaid (read-only here). `stored`: this holder's credentials, sealed in the install. `none`: neither."
+          },
+          "env": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "sandbox",
+                  "production"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientIdHint": {
+            "description": "The last four characters of the stored client id. Never the secret.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rotatedAt": {
+            "description": "When stored credentials were last replaced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "productionAllowed": {
+            "type": "boolean",
+            "description": "PLAID_ALLOW_PRODUCTION: whether `production` may be stored or used (D16)."
+          }
+        },
+        "required": [
+          "configured",
+          "source",
+          "env",
+          "clientIdHint",
+          "rotatedAt",
+          "productionAllowed"
+        ]
+      },
       "BaselineScenarioInput": {
         "type": "object",
         "properties": {
@@ -21466,6 +21524,65 @@
         ],
         "additionalProperties": false
       },
+      "PlaidCredentialsStatus": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "True when a Plaid connector is usable for this holder right now."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "files",
+              "stored",
+              "none"
+            ],
+            "description": "`files`: the operator's secret files configure Plaid (read-only here). `stored`: this holder's credentials, sealed in the install. `none`: neither."
+          },
+          "env": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "sandbox",
+                  "production"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientIdHint": {
+            "description": "The last four characters of the stored client id. Never the secret.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rotatedAt": {
+            "description": "When stored credentials were last replaced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "productionAllowed": {
+            "type": "boolean",
+            "description": "PLAID_ALLOW_PRODUCTION: whether `production` may be stored or used (D16)."
+          }
+        },
+        "required": [
+          "configured",
+          "source",
+          "env",
+          "clientIdHint",
+          "rotatedAt",
+          "productionAllowed"
+        ],
+        "additionalProperties": false
+      },
       "BaselineScenario": {
         "type": "object",
         "properties": {
@@ -31625,6 +31742,226 @@
             }
           },
           "502": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/connections/providers/plaid/credentials": {
+      "get": {
+        "operationId": "getPlaidCredentials",
+        "summary": "Where Plaid is configured from, without the secret",
+        "tags": [
+          "connections"
+        ],
+        "description": "Whether Plaid is usable, and whether that is the operator's secret files (read-only), this holder’s stored credentials, or neither. Carries the environment and the last four characters of the stored client id. The secret is never returned.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaidCredentialsStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putPlaidCredentials",
+        "summary": "Store (or replace) this holder’s Plaid credentials",
+        "tags": [
+          "connections"
+        ],
+        "description": "Needs a step-up assertion (D21). Checks the credentials against Plaid (a Link token request: authenticated, free) before sealing them under the KEK. Refused with 409 when the operator's secret files configure Plaid, 403 for `production` without PLAID_ALLOW_PRODUCTION, 422 when Plaid rejects the credentials, 502 when Plaid cannot be reached. The response is the same shape as the GET; the secret is never returned.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$",
+                    "description": "Plaid client_id."
+                  },
+                  "secret": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$",
+                    "description": "Plaid secret for the chosen environment. Never echoed back."
+                  },
+                  "env": {
+                    "type": "string",
+                    "enum": [
+                      "sandbox",
+                      "production"
+                    ]
+                  }
+                },
+                "required": [
+                  "clientId",
+                  "secret",
+                  "env"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaidCredentialsStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deletePlaidCredentials",
+        "summary": "Remove this holder’s stored Plaid credentials",
+        "tags": [
+          "connections"
+        ],
+        "description": "Needs a step-up assertion (D21). Deletes the sealed row and retires its key. Revokes nothing at Plaid: the key stays valid there until rolled in the Plaid dashboard, and connections linked with it stop syncing. Idempotent. Returns the GET shape.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaidCredentialsStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
             "description": "Default Response",
             "content": {
               "application/json": {

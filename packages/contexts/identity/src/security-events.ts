@@ -34,6 +34,9 @@ export type SecurityEventKind =
   | 'kek.unlocked'
   | 'kek.unlock_failed'
   | 'kek.rotated'
+  | 'provider_credentials.set'
+  | 'provider_credentials.rotated'
+  | 'provider_credentials.removed'
   // WP 9.11 (G-25): operations a stolen session would want, and its refusals.
   | 'auth.step_up_refused'
   | 'export.downloaded'

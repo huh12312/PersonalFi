@@ -58,6 +58,7 @@ import {
 import { APP_DATABASE_ROLE, appRoleDatabaseUrl, ensureAppRole } from './db-role.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { appModules } from './modules.ts';
+import { createStoredPlaid, withStoredPlaid } from './plaid-stored.ts';
 import { createNarratorWiring } from './narrator-wiring.ts';
 import { MODULE_FLAGS, buildPlatform, resolveModules } from './platform.ts';
 
@@ -512,8 +513,68 @@ async function main(): Promise<void> {
       maxConcurrent: config.planning.monteCarloMaxConcurrent,
     });
 
-    const modules =
+    // WP 10.1: Plaid has two sources — the operator's files (`config.plaid`) and the
+    // holder's own credentials stored in the product. `withStoredPlaid` is the same
+    // call `app.ts` makes, so the two processes cannot disagree about where Plaid
+    // comes from; the registry is hoisted so `appModules` can hand the SAME instance
+    // to the consumer that drops its cache when credentials change.
+    // gate-security-review.md §8.5 N-5: this MUST be built from the
+    // same configuration the API's composition root uses
+    // (`app.ts`'s `createConnectorRegistry({ plaid: config.plaid,
+    // … })`). Called with no arguments it silently omits Plaid, and
+    // the worker is the ONLY process that runs a scheduled or
+    // queued sync — so a Plaid Item linked through the API could be
+    // sealed and stored and then never synced, every
+    // `connections.sync` job dying with `no connector is registered
+    // for provider "plaid"` after five attempts. compose.yml mounts
+    // the three plaid_* secrets on this service precisely so this
+    // line can use them.
+    const connectorRegistry =
       secretBox === null
+        ? null
+        : withStoredPlaid(
+            createConnectorRegistry({
+              plaid: config.plaid,
+              // WP 3.6, and the N-5 reasoning below applies to this one
+              // harder than to any other adapter: `wallet_rpc` is *not* in
+              // `PROCESS_LOCAL_PROVIDERS`, so every wallet sync runs here
+              // and nowhere else. A registry that omitted it would leave a
+              // linked wallet with no connector, five failed attempts and a
+              // dead job every night.
+              walletRpc: createWalletRpcRuntime({
+                database,
+                allowedHosts: config.crypto.allowedHosts,
+                etherscanApiKey: config.secrets.etherscan_api_key,
+                // WP 5.13b carry C-4/G4-8: a `SecretBox` is already in
+                // scope here (this branch is only reached when
+                // `secretBox !== null`, line ~439) — every
+                // `wallet_addresses.descriptor` this store writes from now
+                // on is sealed (migration 0027, `domain.ts`'s
+                // `sealWalletDescriptor`) rather than written in the
+                // clear. See `createWalletRpcRuntime`'s own `secretBox`
+                // doc comment, which named this exact line as the one it
+                // was waiting on.
+                secretBox,
+              }),
+              // WP 3.5, and the N-5 reasoning above applies unchanged: the
+              // worker is the only process that runs a scheduled sync, so
+              // a Coinbase connection linked through the API would never
+              // sync if this registry omitted the connector.
+              coinbase: config.coinbase,
+              clock: systemClock,
+              logger,
+            }),
+            createStoredPlaid({
+              config,
+              database,
+              secretBox: () => secretBox ?? undefined,
+              clock: systemClock,
+              logger,
+            }),
+          );
+
+    const modules =
+      secretBox === null || connectorRegistry === null
         ? { consumers: [], jobs: [], enabled: [], disabled: ['module.connections'] }
         : await resolveModules(
             platform,
@@ -526,52 +587,14 @@ async function main(): Promise<void> {
               // `planningModule`), so a job for a second holder is served
               // correctly rather than refused by name.
               userId,
+              // WP 10.1: the registry's cache is dropped by the consumer when the
+              // holder changes their stored provider credentials.
+              connectorRegistry,
               orchestrator: createDomainRuntime({
                 database,
                 clock: systemClock,
                 logger,
-                // gate-security-review.md §8.5 N-5: this MUST be built from the
-                // same configuration the API's composition root uses
-                // (`app.ts`'s `createConnectorRegistry({ plaid: config.plaid,
-                // … })`). Called with no arguments it silently omits Plaid, and
-                // the worker is the ONLY process that runs a scheduled or
-                // queued sync — so a Plaid Item linked through the API could be
-                // sealed and stored and then never synced, every
-                // `connections.sync` job dying with `no connector is registered
-                // for provider "plaid"` after five attempts. compose.yml mounts
-                // the three plaid_* secrets on this service precisely so this
-                // line can use them.
-                registry: createConnectorRegistry({
-                  plaid: config.plaid,
-                  // WP 3.6, and the N-5 reasoning below applies to this one
-                  // harder than to any other adapter: `wallet_rpc` is *not* in
-                  // `PROCESS_LOCAL_PROVIDERS`, so every wallet sync runs here
-                  // and nowhere else. A registry that omitted it would leave a
-                  // linked wallet with no connector, five failed attempts and a
-                  // dead job every night.
-                  walletRpc: createWalletRpcRuntime({
-                    database,
-                    allowedHosts: config.crypto.allowedHosts,
-                    etherscanApiKey: config.secrets.etherscan_api_key,
-                    // WP 5.13b carry C-4/G4-8: a `SecretBox` is already in
-                    // scope here (this branch is only reached when
-                    // `secretBox !== null`, line ~439) — every
-                    // `wallet_addresses.descriptor` this store writes from now
-                    // on is sealed (migration 0027, `domain.ts`'s
-                    // `sealWalletDescriptor`) rather than written in the
-                    // clear. See `createWalletRpcRuntime`'s own `secretBox`
-                    // doc comment, which named this exact line as the one it
-                    // was waiting on.
-                    secretBox,
-                  }),
-                  // WP 3.5, and the N-5 reasoning above applies unchanged: the
-                  // worker is the only process that runs a scheduled sync, so
-                  // a Coinbase connection linked through the API would never
-                  // sync if this registry omitted the connector.
-                  coinbase: config.coinbase,
-                  clock: systemClock,
-                  logger,
-                }),
+                registry: connectorRegistry,
                 secretBox,
               }).orchestrator,
               timezone: user.displayTimezone,

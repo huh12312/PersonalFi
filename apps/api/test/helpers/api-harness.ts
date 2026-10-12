@@ -38,6 +38,7 @@ import {
 } from '@connector/manual';
 import { COINBASE_MANIFEST, type CoinbaseConnector } from '@connector/coinbase';
 import { PLAID_MANIFEST, type PlaidConnector } from '@connector/plaid';
+import type { PlaidApiFactory } from '../../src/plaid-stored.ts';
 import { WALLETRPC_MANIFEST, WalletRpcConnector } from '@connector/walletrpc';
 import { loadConfig, type AppConfig } from '@core/config';
 import { newId, systemClock, type Clock } from '@core/kernel';
@@ -98,6 +99,8 @@ export interface ApiRequest {
 
 export interface ApiHarness {
   readonly app: FastifyInstance;
+  /** The configuration the app was built from. */
+  readonly config: AppConfig;
   readonly database: TestDatabase;
   readonly security: SecurityRuntime;
   readonly userId: string;
@@ -176,6 +179,20 @@ export interface HarnessOptions {
    * would leave the descriptor staged forever and `wallet_addresses` empty.
    */
   readonly walletRpc?: boolean;
+  /**
+   * WP 10.1. Let `buildApp` build its **own** connector registry, exactly as
+   * production does (`createConnectorRegistry` + `withStoredPlaid`), instead of
+   * the harness's hand-built one. The suites that prove Plaid is registered from
+   * the holder's stored credentials need the shipped composition (C5-11), not a
+   * parallel one. The manual/seed/plaid doubles above are not registered then.
+   */
+  readonly appBuildsRegistry?: boolean;
+  /** WP 10.1. Builds the Plaid client for stored credentials; a test hands back `FakePlaidApi`. */
+  readonly plaidApiFactory?: PlaidApiFactory;
+  /** WP 10.1. Where the app's request logger writes, so a suite can read every line. */
+  readonly logStream?: { write(chunk: string): void };
+  /** WP 10.1. Extra environment for `loadConfig` (`PLAID_ALLOW_PRODUCTION`, `LOG_LEVEL`, …). */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -191,7 +208,11 @@ const TEST_KDF = {
   KEK_ARGON2_PARALLELISM: '1',
 } as const;
 
-function testConfig(secrets: TempSecrets, databaseUrl: string): AppConfig {
+function testConfig(
+  secrets: TempSecrets,
+  databaseUrl: string,
+  extraEnv: Readonly<Record<string, string>> = {},
+): AppConfig {
   return loadConfig({
     env: {
       NODE_ENV: 'test',
@@ -202,6 +223,7 @@ function testConfig(secrets: TempSecrets, databaseUrl: string): AppConfig {
       AUTH_ALLOWED_ORIGINS: TEST_ORIGIN,
       AUTH_RP_ID: '127.0.0.1',
       ...TEST_KDF,
+      ...extraEnv,
     },
   });
 }
@@ -257,10 +279,13 @@ export async function createApiHarness(options: HarnessOptions): Promise<ApiHarn
         ]),
   ]);
 
+  const config = testConfig(secrets, database.url, options.env);
   const built = await buildApp({
-    config: testConfig(secrets, database.url),
+    config,
     pool: database.pool,
-    connectorRegistry: registry,
+    ...(options.appBuildsRegistry === true ? {} : { connectorRegistry: registry }),
+    ...(options.plaidApiFactory === undefined ? {} : { plaidApiFactory: options.plaidApiFactory }),
+    ...(options.logStream === undefined ? {} : { logStream: options.logStream }),
     ...(walletRpc === null ? {} : { walletRpc }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
   });
@@ -310,6 +335,7 @@ export async function createApiHarness(options: HarnessOptions): Promise<ApiHarn
 
   return {
     app,
+    config,
     database,
     security,
     userId: database.userId,

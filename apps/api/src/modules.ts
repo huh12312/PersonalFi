@@ -49,9 +49,11 @@ import {
 } from '@ctx/categorization';
 import {
   CONNECTIONS_EVENTS,
+  createProviderCredentialsConsumer,
   listSyncableConnections,
   syncAllJob,
   type ConnectionsDatabase,
+  type ConnectorRegistry,
   type ConnectionsExecutor,
   type SyncOrchestrator,
 } from '@ctx/connections';
@@ -219,6 +221,14 @@ export interface ModuleWiringOptions {
    * is served, not refused by name" drives against a real pump.
    */
   readonly userId: string;
+  /**
+   * WP 10.1. The worker's connector registry, so `module.connections` can register
+   * the consumer that drops its cached Plaid client when a holder changes their
+   * stored provider credentials (`connections.ProviderCredentialsChanged`). Absent
+   * in a caller with no registry to invalidate; the cache's own short TTL then
+   * bounds the staleness.
+   */
+  readonly connectorRegistry?: ConnectorRegistry;
   /**
    * The account holder's display timezone.
    *
@@ -443,6 +453,14 @@ export function appModules(options: ModuleWiringOptions): readonly ModuleRegistr
     {
       flagKey: 'module.connections',
       events: CONNECTIONS_EVENTS,
+      consumers:
+        options.connectorRegistry === undefined
+          ? []
+          : [
+              createProviderCredentialsConsumer({
+                onChanged: (provider) => options.connectorRegistry?.invalidate(provider),
+              }),
+            ],
       jobs: [
         orchestrator.jobHandler(),
         // A schedule enqueues one job; that job enqueues one per connection. The

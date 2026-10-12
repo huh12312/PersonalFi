@@ -466,7 +466,9 @@ export class SyncOrchestrator {
         `connection ${input.connectionId} is disconnected`,
       );
     }
-    const connector = registry.get(row.provider);
+    // Resolved for this holder: a provider whose credentials the holder stored in the product
+    // (WP 10.1) exists only through this call, never through the sync `get`.
+    const connector = await registry.connectorFor(row.provider, input.userId);
     // What the adapter *can* do, narrowed by what this connection was granted.
     // `createConnection` writes `connections.capabilities` from the adapter's
     // declaration intersected with the provider's `observedCapabilities`, and

@@ -44,3 +44,12 @@ export {
   type NewConnectionSyncFactRow,
   type SyncFactKind,
 } from './sync-facts.ts';
+export {
+  PROVIDER_CREDENTIAL_ENVS,
+  PROVIDER_CREDENTIAL_PROVIDERS,
+  providerCredentials,
+  type NewProviderCredentialRow,
+  type ProviderCredentialEnv,
+  type ProviderCredentialProvider,
+  type ProviderCredentialRow,
+} from './provider-credentials.ts';

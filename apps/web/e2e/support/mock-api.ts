@@ -432,6 +432,22 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     // WP 9.1 (09 §4 batch 10): the dashboard's backup-status line. Unmocked it
     // reads as a quiet "Backup status unknown"; mocked, a screenshot is
     // deterministic.
+    // WP 10.1: the Add connection dialog's Plaid path reads the stored-credentials
+    // status; unmocked it would fall through to the Vite proxy and the tab would
+    // vanish from the a11y sweep.
+    if (path === '/api/connections/providers/plaid/credentials' && method === 'GET') {
+      return route.fulfill(
+        json({
+          configured: false,
+          source: 'none',
+          env: null,
+          clientIdHint: null,
+          rotatedAt: null,
+          productionAllowed: false,
+        }),
+      );
+    }
+
     if (path === '/api/ops/backup-status' && method === 'GET') {
       return route.fulfill(
         json({

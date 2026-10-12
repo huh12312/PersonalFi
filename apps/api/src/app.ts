@@ -58,7 +58,9 @@ import { marketDataRoutes } from './routes/market-data.ts';
 import { netWorthRoutes } from './routes/net-worth.ts';
 import { notificationRoutes } from './routes/notifications.ts';
 import { opsRoutes } from './routes/ops.ts';
+import { createStoredPlaid, withStoredPlaid, type PlaidApiFactory } from './plaid-stored.ts';
 import { plaidRoutes } from './routes/plaid.ts';
+import { providerCredentialRoutes } from './routes/provider-credentials.ts';
 import { planRoutes } from './routes/plan.ts';
 import { priceRoutes } from './routes/prices.ts';
 import { recurringRoutes } from './routes/recurring.ts';
@@ -96,6 +98,18 @@ export interface BuildAppOptions {
    * production this is absent and `buildApp` constructs it.
    */
   readonly walletRpc?: WalletRpcRuntime;
+  /**
+   * WP 10.1. A test seam: builds the Plaid client for credentials a holder stored
+   * in the product, so a route test can hand back `FakePlaidApi` and never dial
+   * out. Production leaves it absent and `createPlaidApi` builds the real client.
+   */
+  readonly plaidApiFactory?: PlaidApiFactory;
+  /**
+   * WP 10.1. A test seam: where the request logger writes, so a test can capture
+   * every line and assert a planted secret is absent. Production leaves it
+   * absent and the logger writes to stdout.
+   */
+  readonly logStream?: { write(chunk: string): void };
 }
 
 /**
@@ -124,7 +138,10 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   const clock = options.clock ?? systemClock;
 
   const app = Fastify({
-    logger: buildLoggerOptions(config),
+    logger: {
+      ...buildLoggerOptions(config),
+      ...(options.logStream === undefined ? {} : { stream: options.logStream }),
+    },
     // One correlation id per request, taken from the caller if it supplied one so
     // a browser, the API, and a worker job all appear under the same id. One id
     // reconstructs an entire sync.
@@ -474,25 +491,45 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
         }
       },
     });
-  const registry =
+  // WP 10.1. Plaid has two sources: the operator's secret files (`config.plaid`,
+  // registered statically below and winning) and the holder's own credentials
+  // stored in the product (registered dynamically, resolved per holder, no
+  // restart). `worker.ts` builds its registry through the same `withStoredPlaid`.
+  const storedPlaid = createStoredPlaid({
+    config,
+    database,
+    secretBox: () => {
+      try {
+        return security.requireSecretBox();
+      } catch {
+        return undefined;
+      }
+    },
+    clock,
+    logger: app.log,
+    ...(options.plaidApiFactory === undefined ? {} : { apiFactory: options.plaidApiFactory }),
+  });
+  const registry = withStoredPlaid(
     options.connectorRegistry ??
-    createConnectorRegistry({
-      plaid: config.plaid,
-      // WP 3.5. The API needs the adapter registered too, not only the worker:
-      // `registry.manifests()` is what the "Add a connection" screen renders
-      // from, and the link ceremony (`POST /connections`) runs inline here.
-      coinbase: config.coinbase,
-      // WP 3.6. The link ceremony for a watch-only wallet runs inline here —
-      // `parseConnectInput` refuses private material at this seam, before
-      // anything parses, stores, logs or sends it — so the API needs the
-      // adapter and its store even though every *sync* happens in the worker.
-      // `database` is available at this point (it is built one line up), which
-      // is what lets the store be bound here rather than in
-      // `createDomainRuntime` the way CSV's and Manual's are.
-      walletRpc,
-      clock,
-      logger: app.log,
-    });
+      createConnectorRegistry({
+        plaid: config.plaid,
+        // WP 3.5. The API needs the adapter registered too, not only the worker:
+        // `registry.manifests()` is what the "Add a connection" screen renders
+        // from, and the link ceremony (`POST /connections`) runs inline here.
+        coinbase: config.coinbase,
+        // WP 3.6. The link ceremony for a watch-only wallet runs inline here —
+        // `parseConnectInput` refuses private material at this seam, before
+        // anything parses, stores, logs or sends it — so the API needs the
+        // adapter and its store even though every *sync* happens in the worker.
+        // `database` is available at this point (it is built one line up), which
+        // is what lets the store be bound here rather than in
+        // `createDomainRuntime` the way CSV's and Manual's are.
+        walletRpc,
+        clock,
+        logger: app.log,
+      }),
+    storedPlaid,
+  );
   let domain: DomainRuntime | null = null;
 
   /**
@@ -560,6 +597,8 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(categoryRoutes(deps));
   await app.register(ruleRoutes(deps));
   await app.register(plaidRoutes(deps));
+  // WP 10.1. The holder's own Plaid credentials, through the Add connection menu.
+  await app.register(providerCredentialRoutes(deps, storedPlaid));
   await app.register(eventRoutes(deps));
   await app.register(reportRoutes(deps));
   await app.register(exportRoutes(deps, { secretsDir: config.env.SECRETS_DIR }));

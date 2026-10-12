@@ -9,6 +9,41 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.1: Plaid credentials in the product
+
+**Status:** a patch release on v0.9.0. The tag `v0.9.1` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.1
+
+```bash
+git pull
+just upgrade
+```
+
+That is all. `just upgrade` takes the verified pre-migration backup, applies migration 0041 (one new
+table, `provider_credentials`; expand-only, nothing altered or dropped, so it applies to a live
+install with no contract step) and checks that the stack is ready.
+
+### Manual steps
+
+None. In particular: no new secret, no `.env` edit, no restart sequence beyond the one `just
+upgrade` performs, and nothing to do if you already supply Plaid through the secret files: they
+keep working and keep winning.
+
+### What changed
+
+- **You can add your Plaid keys from the product.** Accounts, Add connection, the Plaid tab ("Set up
+  Plaid"): paste the client id and secret, choose the environment (sandbox, or production once the
+  install allows it), and save with your passkey. The keys are checked with Plaid first, then stored
+  sealed with the same key that protects your bank access tokens, and the Plaid connector is
+  available at once, without a restart. **Change** and **Remove** are on the same tab.
+- **The operator's secret files still win.** If `plaid_client_id` and `plaid_secret` have content, the
+  tab says so and offers no way to change them. `PLAID_ENABLED=true` is still the proxy's switch for
+  Plaid Link's script, whichever way the keys are supplied. Production still needs
+  `PLAID_ALLOW_PRODUCTION=true`.
+- Never in an export bundle, never in a log line, never returned by any route; the evidence is
+  [wp10.1-plaid-credentials.md](evidence/phase-10/wp10.1-plaid-credentials.md).
+
 ## v0.9.0: polish and harden
 
 **Status:** the release candidate for the Phase 9 gate. The tag `v0.9.0` is pushed by the maintainer

@@ -41,6 +41,13 @@ const DB_NAME = 'personalfi_wp02_loghygiene';
 const MASTER_KEY = 'pfi-log-hygiene-kek-Zq7Z4rW2xN8vB1kD6mH0-do-not-use';
 const ALLOWED_ORIGIN = 'http://127.0.0.1:8080';
 
+/**
+ * WP 10.1: a Plaid client id and secret a holder pastes into the Add connection
+ * menu travel in a request body. Distinctive, and not credentials of anything.
+ */
+const PLAID_CANARY_CLIENT_ID = 'hygieneclientid0123456789ab'; // gitleaks:allow — synthetic canary, not a Plaid credential
+const PLAID_CANARY_SECRET = 'hygienesecretZq7f8e7d6c5b4a39281'; // gitleaks:allow — synthetic canary, not a Plaid credential
+
 interface Booted {
   readonly child: ChildProcess;
   readonly port: number;
@@ -55,6 +62,7 @@ describeWithDb('log hygiene (P0-12)', () => {
   let bootstrapOutput: string;
   let api: Booted;
   let log = '';
+  const credentialStatuses: number[] = [];
 
   function childEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
     return {
@@ -212,6 +220,38 @@ describeWithDb('log hygiene (P0-12)', () => {
         body: JSON.stringify(body),
       });
 
+    // WP 10.1: the canary Plaid credentials, on the route that takes them, three ways — a
+    // well-formed body (no session: the route's own 401), a body the schema refuses (400),
+    // and a GET. Both bodies carry the canary secret; none of the three may log it.
+    const putCredentials = (body: unknown): Promise<Response> =>
+      fetch(`${base}/connections/providers/plaid/credentials`, {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/json',
+          origin: ALLOWED_ORIGIN,
+          'sec-fetch-site': 'same-origin',
+          cookie: `__Host-pfi_csrf=${csrf}; __Host-pfi_session=not-a-real-session-token`,
+          'x-csrf-token': csrf,
+        },
+        body: JSON.stringify(body),
+      });
+    credentialStatuses.push(
+      (
+        await putCredentials({
+          clientId: PLAID_CANARY_CLIENT_ID,
+          secret: PLAID_CANARY_SECRET,
+          env: 'sandbox',
+        })
+      ).status,
+      (
+        await putCredentials({
+          clientId: PLAID_CANARY_CLIENT_ID,
+          secret: `${PLAID_CANARY_SECRET} not valid`,
+          env: 'sandbox',
+        })
+      ).status,
+    );
+
     await post('/auth/register/options', { registrationToken });
     await post('/auth/login/verify', { response: { id: 'nope' }, trustedDevice: false });
     await fetch(`${base}/ready`);
@@ -268,6 +308,21 @@ describeWithDb('log hygiene (P0-12)', () => {
     expect(log).not.toMatch(/"cookie"\s*:/i);
     expect(log).not.toMatch(/"set-cookie"\s*:/i);
     expect(log).not.toMatch(/__Host-pfi_csrf=/);
+  });
+
+  it('never writes a Plaid credential submitted to the credentials route to a log line (WP 10.1)', () => {
+    // Not vacuous: both requests reached the route and were refused for the reasons
+    // the test means (no session; a body the schema refuses), and are in the log.
+    expect(credentialStatuses).toEqual([401, 400]);
+    expect(log).toContain('/connections/providers/plaid/credentials');
+    for (const canary of [PLAID_CANARY_SECRET, PLAID_CANARY_CLIENT_ID]) {
+      expect(log.includes(canary), `the log contains ${canary.slice(0, 8)}…`).toBe(false);
+      for (let i = 0; i + 12 <= canary.length; i += 6) {
+        expect(log.includes(canary.slice(i, i + 12)), `a fragment of ${canary.slice(0, 8)}…`).toBe(
+          false,
+        );
+      }
+    }
   });
 
   it('reports which secrets are present, by name only', () => {

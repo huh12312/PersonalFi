@@ -497,6 +497,12 @@ describeWithDb('runMigrations', () => {
       //   default privileges, `public.personalfi_app_grants()` (SECURITY DEFINER, re-run by api/worker at
       //   every boot because a --no-privileges restore drops grants and a fresh cluster lacks the role),
       //   and the append-only trigger `security_events_append_only`. Expand-only; no table, column or row.
+      // 0041_provider_credentials (WP 10.1): one @ctx/connections table, provider_credentials, a
+      //   holder's own provider API credentials (today Plaid's client id and secret), (user_id, provider)
+      //   unique, client_id_sealed and secret_sealed SecretBox envelopes AAD-bound to
+      //   (provider_credentials, column, <user_id>.<provider>), env sandbox|production, client_id_hint
+      //   (last four characters, display only), created_at, rotated_at. Expand-only; references only users
+      //   (0002); never exported (a reasoned deferral in apps/api/src/reports/export/registry.ts).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -577,6 +583,7 @@ describeWithDb('runMigrations', () => {
         'projection_percentiles',
         'projection_runs',
         'provider_category_map',
+        'provider_credentials',
         'recovery_codes',
         'recurring_candidates',
         'recurring_occurrences',

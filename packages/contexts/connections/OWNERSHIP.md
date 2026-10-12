@@ -44,6 +44,15 @@ Tables listed here are _claimed_; most do not exist yet. Claiming early is the p
   `InvestmentSyncPort.factsForRun`. See the migration header for why the row is
   keyed on the natural key rather than on the run.
 
+### Built (migration 0041)
+
+- `provider_credentials` — a holder's own provider API credentials (today: their
+  Plaid client id and secret), `(user_id, provider)` unique. Both values are
+  `SecretBox` envelopes, AAD-bound to `provider_credentials | <column> |
+<user_id>.<provider>`, so a ciphertext opens only for that holder, provider and
+  field; a plaintext `client_id_hint` (the last four characters) is for display
+  only. Never exported (a reasoned deferral in the export registry). WP 10.1.
+
 ### Claimed, not yet built
 
 - `providers`

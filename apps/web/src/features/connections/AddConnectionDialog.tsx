@@ -14,6 +14,9 @@ import { WalletWatchOnlyForm } from '../crypto/WalletWatchOnlyForm.tsx';
 import { CsvImportForm } from './CsvImportForm.tsx';
 import { ManualAccountForm } from './ManualAccountForm.tsx';
 import { PlaidConnectCard } from './PlaidConnectCard.tsx';
+import { PlaidCredentialsPanel } from './PlaidCredentialsPanel.tsx';
+import { PlaidSetupForm } from './PlaidSetupForm.tsx';
+import { usePlaidCredentialsQuery } from './plaid-credentials-api.ts';
 import { iconForConnector } from './connector-icons.tsx';
 import { useConnectorsQuery } from './useConnections.ts';
 
@@ -33,6 +36,13 @@ const CREDENTIAL_FORMS: Readonly<Record<string, ComponentType<{ onDone: () => vo
   coinbase: CoinbaseKeyForm,
   wallet_rpc: WalletWatchOnlyForm,
 };
+
+/** What the Plaid tab says before the api lists a Plaid connector: the holder has no keys yet. */
+const PLAID_SETUP_TAB = Object.freeze({
+  provider: 'plaid',
+  displayName: 'Plaid',
+  iconKey: 'bank',
+});
 
 export interface AddConnectionDialogProps {
   open: boolean;
@@ -54,6 +64,24 @@ export function AddConnectionDialog({ open, onOpenChange }: AddConnectionDialogP
   const connectors = connectorsQuery.data?.connectors ?? [];
   const [activeTab, setActiveTab] = useState<string | undefined>(undefined);
 
+  // WP 10.1. `GET /connectors` lists Plaid only once it is usable (the operator's files, or the
+  // holder's stored keys). Until then the Plaid tab is still offered, as "Set up Plaid", so a holder
+  // can add their own credentials from this menu; once saved the query refetches, Plaid becomes a
+  // normal connector tab, and the Link card replaces the form with no reload.
+  const credentialsQuery = usePlaidCredentialsQuery();
+  const credentials = credentialsQuery.data;
+  const plaidListed = connectors.some((connector) => connector.provider === 'plaid');
+  const offerPlaidSetup =
+    !plaidListed && credentials !== undefined && credentials.source !== 'files';
+  const tabs = [
+    ...connectors.map((connector) => ({
+      provider: connector.provider,
+      displayName: connector.displayName,
+      iconKey: connector.iconKey,
+    })),
+    ...(offerPlaidSetup ? [PLAID_SETUP_TAB] : []),
+  ].sort((a, b) => a.displayName.localeCompare(b.displayName));
+
   function handleDone(): void {
     onOpenChange(false);
   }
@@ -66,14 +94,14 @@ export function AddConnectionDialog({ open, onOpenChange }: AddConnectionDialogP
 
         {connectorsQuery.isLoading && <p className="mt-4 text-small text-text-muted">Loading…</p>}
 
-        {connectors.length > 0 && (
+        {tabs.length > 0 && (
           <Tabs
             className="mt-4"
-            value={activeTab ?? connectors[0]?.provider}
+            value={activeTab ?? connectors[0]?.provider ?? tabs[0]?.provider}
             onValueChange={(value) => setActiveTab(value as string)}
           >
             <TabsList>
-              {connectors.map((connector) => {
+              {tabs.map((connector) => {
                 const Icon = iconForConnector(connector.iconKey);
                 return (
                   <TabsTab
@@ -87,6 +115,22 @@ export function AddConnectionDialog({ open, onOpenChange }: AddConnectionDialogP
                 );
               })}
             </TabsList>
+            {offerPlaidSetup && (
+              <TabsPanel value="plaid">
+                <div className="flex flex-col gap-3">
+                  {credentials.source === 'stored' && (
+                    <PlaidCredentialsPanel status={credentials} />
+                  )}
+                  {credentials.source === 'none' && (
+                    <PlaidSetupForm
+                      mode="setup"
+                      productionAllowed={credentials.productionAllowed}
+                      onSaved={() => setActiveTab('plaid')}
+                    />
+                  )}
+                </div>
+              </TabsPanel>
+            )}
             {connectors.map((connector) => (
               <TabsPanel key={connector.provider} value={connector.provider}>
                 {connector.linkKind === 'manual_entry' && (
@@ -94,7 +138,12 @@ export function AddConnectionDialog({ open, onOpenChange }: AddConnectionDialogP
                 )}
                 {connector.linkKind === 'file_upload' && <CsvImportForm onDone={handleDone} />}
                 {connector.linkKind === 'provider_hosted' && (
-                  <PlaidConnectCard connector={connector} onDone={handleDone} />
+                  <div className="flex flex-col gap-4">
+                    <PlaidConnectCard connector={connector} onDone={handleDone} />
+                    {connector.provider === 'plaid' && credentials !== undefined && (
+                      <PlaidCredentialsPanel status={credentials} />
+                    )}
+                  </div>
                 )}
                 {connector.linkKind === 'credential_form' &&
                   (() => {

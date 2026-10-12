@@ -61,11 +61,43 @@ export {
   CONNECTIONS_EVENTS,
   ConnectionCreated,
   ConnectionStatusChanged,
+  ProviderCredentialsChanged,
   SyncRunCompleted,
 } from './events.ts';
 
 // --- the registry -----------------------------------------------------------
-export { ConnectorRegistry, type RegisteredConnector } from './registry.ts';
+export {
+  ConnectorRegistry,
+  DEFAULT_DYNAMIC_TTL_MS,
+  type ConnectorRegistryOptions as ConnectorRegistryConstructorOptions,
+  type DynamicConnector,
+  type RegisteredConnector,
+} from './registry.ts';
+
+// --- a holder's provider API credentials, sealed (WP 10.1, migration 0041) ---
+export {
+  OpenedProviderCredentials,
+  credentialRef,
+  eraseCredentialKey,
+  getProviderCredentialStatus,
+  openProviderCredentials,
+  removeProviderCredentials,
+  setProviderCredentials,
+  type CredentialField,
+  type ProviderCredentialStatus,
+  type SetProviderCredentialsInput,
+  type SetProviderCredentialsResult,
+} from './provider-credentials.ts';
+export {
+  PROVIDER_CREDENTIAL_ENVS,
+  PROVIDER_CREDENTIAL_PROVIDERS,
+  type ProviderCredentialEnv,
+  type ProviderCredentialProvider,
+} from '../schema/index.ts';
+export {
+  PROVIDER_CREDENTIALS_CONSUMER,
+  createProviderCredentialsConsumer,
+} from './provider-credentials-consumer.ts';
 
 // --- durable staging for the process-local connectors (decision D-5) --------
 export { createCsvStagingStore, createManualStagingStore } from './staging.ts';

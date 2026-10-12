@@ -82,10 +82,11 @@ function notAPlaidConnection(): AppError {
   });
 }
 
-function requirePlaidConnector(deps: RouteDeps): PlaidConnector {
+async function requirePlaidConnector(deps: RouteDeps, userId: string): Promise<PlaidConnector> {
   const { registry } = deps.connections();
-  if (!registry.has(PLAID_PROVIDER)) throw plaidUnavailable();
-  const connector = registry.get(PLAID_PROVIDER);
+  // Per holder (WP 10.1): the credentials may be the holder's own, stored in the product.
+  if (!(await registry.hasFor(PLAID_PROVIDER, userId))) throw plaidUnavailable();
+  const connector = await registry.connectorFor(PLAID_PROVIDER, userId);
   if (!(connector instanceof PlaidConnector)) throw plaidUnavailable();
   return connector;
 }
@@ -137,7 +138,7 @@ export const plaidRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
       async (request) => {
         const session = await guards.requireSession(request);
-        const connector = requirePlaidConnector(deps);
+        const connector = await requirePlaidConnector(deps, session.userId);
         const token = await mapDomainErrors(() =>
           connector.createLinkToken({ clientUserId: session.userId }),
         );
@@ -165,7 +166,7 @@ export const plaidRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
       async (request, reply) => {
         const session = await guards.requireFreshSession(request);
-        requirePlaidConnector(deps);
+        await requirePlaidConnector(deps, session.userId);
 
         // The ratchet itself lives in `linkConnection` now (R-7, C-3) — see the
         // file comment. Duplicating the count-and-refuse here would be a second
@@ -211,7 +212,7 @@ export const plaidRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       async (request) => {
         const session = await guards.requireFreshSession(request);
         const { secretBox } = deps.connections();
-        const connector = requirePlaidConnector(deps);
+        const connector = await requirePlaidConnector(deps, session.userId);
         const row = await mapDomainErrors(() =>
           requireConnection(database, session.userId, request.params.connectionId),
         );

@@ -24,7 +24,13 @@
  */
 import { defineEvent, type EventDefinition } from '@core/platform';
 import { z } from 'zod';
-import { CONNECTION_STATUSES, SYNC_RUN_STATUSES, SYNC_TRIGGERS } from '../schema/index.ts';
+import {
+  CONNECTION_STATUSES,
+  PROVIDER_CREDENTIAL_ENVS,
+  PROVIDER_CREDENTIAL_PROVIDERS,
+  SYNC_RUN_STATUSES,
+  SYNC_TRIGGERS,
+} from '../schema/index.ts';
 import { CONNECTOR_ERROR_KINDS } from './port.ts';
 
 const uuid = z.uuid();
@@ -92,6 +98,22 @@ export const SyncRunCompleted = defineEvent({
   }),
 });
 
+export const ProviderCredentialsChanged = defineEvent({
+  type: 'connections.ProviderCredentialsChanged',
+  aggregateType: 'provider_credentials',
+  description:
+    "A holder set, replaced or removed a provider's API credentials (WP 10.1). A fact with no " +
+    'secret in it: the provider and the kind of change only. Its job is to wake every process ' +
+    "that caches a client built from those credentials - the worker's consumer drops its cache - " +
+    'so a key replaced in the product reaches the next sync without a restart. The credentials ' +
+    're-read from the sealed row, never from this payload.',
+  schema: z.object({
+    provider: z.enum(PROVIDER_CREDENTIAL_PROVIDERS),
+    change: z.enum(['set', 'rotated', 'removed']),
+    env: z.enum(PROVIDER_CREDENTIAL_ENVS).nullable(),
+  }),
+});
+
 /**
  * Registered at the composition root. Exported as a list so `apps/api` cannot
  * forget one: an event type that is appended but not registered is invisible to
@@ -102,4 +124,5 @@ export const CONNECTIONS_EVENTS: readonly EventDefinition[] = Object.freeze([
   ConnectionCreated,
   ConnectionStatusChanged,
   SyncRunCompleted,
+  ProviderCredentialsChanged,
 ]);

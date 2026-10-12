@@ -169,6 +169,39 @@ must agree before a real charge is possible). `compose.yml` passes that variable
 `PLAID_ALLOW_PRODUCTION=true` in `.env` as well as `plaid_env` to `production`. `@core/config` also refuses to boot if `PLAID_REDIRECT_URI` is set but is not
 `https` or does not share an origin with `AUTH_ALLOWED_ORIGINS`.
 
+**Plaid: two ways to supply your keys (v0.9.1).** Bank linking through Plaid needs a Plaid client id
+and secret. They can come from either of two places, and the install tells you which in
+Accounts, then Add connection, then the Plaid tab.
+
+1. **The operator's secret files**: `secrets/plaid_client_id`, `secrets/plaid_secret` and
+   `secrets/plaid_env`, as in the table above. Right for the person who runs the install and wants
+   the keys outside the database altogether. The product shows them read-only ("Plaid is configured
+   by the operator's secret files") and refuses to store a second set.
+2. **The product, for the account holder**: Accounts, Add connection, the Plaid tab ("Set up
+   Plaid") asks for the client id, the secret and the environment. Saving asks for your passkey,
+   checks the keys with Plaid first (a Link token request, which costs nothing), and only then
+   stores them, **sealed with the same key that protects your bank access tokens**. The secret is
+   never shown again, only the last four characters of the client id. The Plaid connector is
+   registered at once: **no restart, no file, no `just harden-secrets`** (the worker picks the
+   change up from the event log within seconds). **Change** and **Remove** are on the same tab,
+   each behind a passkey. Removing stops the connections linked with those keys from syncing and
+   revokes nothing at Plaid; roll the key in your Plaid dashboard if you want it dead.
+
+**Precedence.** If the secret files are non-empty they win and the product's stored keys, if any,
+sit unused. Otherwise the stored keys are used. `PLAID_ENABLED` keeps its old meaning for **both**:
+it is the proxy's switch for Plaid Link's script (D26), not the connector's, so keep it `true`
+whichever way you supply the keys, or Link will not open in the browser.
+
+**Production.** `production` is refused in the product, and a stored production row is ignored,
+unless `PLAID_ALLOW_PRODUCTION=true` is set in `.env` and the stack restarted, exactly as for the
+files path (D16). Start with `sandbox`; the first use is the check that the keys are right.
+
+**What a stored key survives and does not.** The sealed row is in the database, so it is in every
+backup (the dumps are `age`-encrypted) and a restore with the same `master_key` keeps it. It is
+**never** in the app's own export bundle. Entering keys from a different Plaid account than the old
+ones leaves the banks linked under the old account unable to sync; the app's ten-Item counter
+counts every Plaid connection ever made here, whichever keys made it.
+
 **Watch-only wallet privacy** (Phase 3 gate C-13): every address the connector derives from a linked
 xpub/ypub/zpub, and every `0x` address linked directly, is queried against `blockstream.info` and
 `api.etherscan.io` from **this host's IP**. There is no self-hosted Esplora option today, so

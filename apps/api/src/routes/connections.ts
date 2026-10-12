@@ -272,7 +272,9 @@ export async function linkConnection(
 
   const result = await mapDomainErrors(() =>
     database.transaction(async (tx) => {
-      const connector = registry.get(body.provider);
+      // Per holder: Plaid keys stored in the product make the provider exist for
+      // that holder only (WP 10.1); every other provider resolves statically.
+      const connector = await registry.connectorFor(body.provider, userId);
 
       if (body.provider === PLAID_PROVIDER) {
         // Before `connector.connect` — a real Item exchange — is ever called.
@@ -426,15 +428,29 @@ export const connectionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         },
       },
       async (request) => {
-        await guards.requireSession(request);
+        const session = await guards.requireSession(request);
         const { registry } = deps.connections();
+        const manifests = await registry.manifestsFor(session.userId);
+        const adapters = new Map(
+          await Promise.all(
+            manifests.map(
+              async (manifest) =>
+                [
+                  manifest.provider,
+                  await registry.connectorFor(manifest.provider, session.userId),
+                ] as const,
+            ),
+          ),
+        );
         return {
-          connectors: registry.manifests().map((manifest) => {
+          connectors: manifests.map((manifest) => {
             // Copied, not spread through: the adapter's capability object is
             // frozen and its arrays are `readonly`, which the response schema's
             // (mutable) inferred type will not accept. One `[...]` here is
             // cheaper than a mutable capability declaration everywhere else.
-            const capabilities = registry.get(manifest.provider).capabilities();
+            const capabilities = adapters.get(manifest.provider)?.capabilities();
+            if (capabilities === undefined)
+              throw new Error('unreachable: manifest without adapter');
             return {
               ...manifest,
               capabilities: {
@@ -600,7 +616,9 @@ export const connectionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         const row = await mapDomainErrors(() =>
           requireConnection(database, session.userId, request.params.connectionId),
         );
-        const reconnectFlow = registry.get(row.provider).capabilities().reconnectFlow;
+        const reconnectFlow = (
+          await registry.connectorFor(row.provider, session.userId)
+        ).capabilities().reconnectFlow;
         const result = await link(
           session.userId,
           String(request.id),
@@ -753,7 +771,7 @@ export const connectionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             database,
             {
               connectionId: row.id,
-              connector: registry.get(row.provider),
+              connector: await registry.connectorFor(row.provider, session.userId),
               secretBox,
             },
             contextOf(deps, session.userId, String(request.id)),
