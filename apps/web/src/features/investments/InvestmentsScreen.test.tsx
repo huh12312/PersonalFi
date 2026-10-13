@@ -18,6 +18,7 @@ import {
   driftWithoutTargets,
   holdingsResponse,
   marketDataSettingsResponse,
+  activityFixture,
   performanceResponse,
   unresolvedSecurity,
 } from './fixtures.ts';
@@ -52,6 +53,7 @@ interface RouteOverrides {
   readonly holdings?: unknown;
   readonly accountHoldings?: unknown;
   readonly performance?: unknown;
+  readonly onActivity?: (url: URL) => Response;
   readonly onBasisMethod?: (body: unknown) => Response;
 }
 
@@ -74,6 +76,28 @@ function routesFor(overrides: RouteOverrides = {}): FetchRoute[] {
     {
       match: '/api/investments/performance',
       handle: () => jsonResponse(overrides.performance ?? performanceResponse()),
+    },
+    {
+      match: '/api/investments/transactions',
+      handle: ({ request }) =>
+        overrides.onActivity === undefined
+          ? jsonResponse({
+              from: '2025-09-24',
+              to: '2026-09-23',
+              items: [activityFixture({ accountId: 'acct-taxable' })],
+              nextCursor: null,
+              total: 1,
+              accounts: [
+                {
+                  accountId: 'acct-taxable',
+                  name: 'Taxable brokerage',
+                  provider: 'manual',
+                  activitySync: 'not_applicable',
+                  lastSyncedAt: null,
+                },
+              ],
+            })
+          : overrides.onActivity(new URL(request.url)),
     },
     {
       // `useCoinGeckoAttribution` (`features/market-data/api.ts`) fires on
@@ -266,6 +290,50 @@ describe('InvestmentsScreen', () => {
     expect(within(cash).getByText('inside band')).toBeInTheDocument();
     const usEquity = screen.getByTestId('drift-row-US_EQUITY');
     expect(within(usEquity).getByText('outside band')).toBeInTheDocument();
+  });
+
+  it('the Activity tab lists investment transactions for the last twelve months, filterable through the URL (WP 10.3)', async () => {
+    const asked: URL[] = [];
+    stubFetchRoutes(
+      routesFor({
+        onActivity: (url) => {
+          asked.push(url);
+          return jsonResponse({
+            from: url.searchParams.get('from'),
+            to: url.searchParams.get('to'),
+            items: [activityFixture({ accountId: 'acct-taxable' })],
+            nextCursor: null,
+            total: 1,
+            accounts: [],
+          });
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    const { onSearchChange } = renderScreen({ tab: 'activity' });
+
+    const table = await screen.findByTestId('activity-table');
+    expect(within(table).getByText('VTI')).toBeInTheDocument();
+    expect(within(table).getByText('Taxable brokerage')).toBeInTheDocument();
+    // The default window: the twelve months ending today (TODAY = 2026-09-23).
+    expect(asked[0]?.searchParams.get('from')).toBe('2025-09-24');
+    expect(asked[0]?.searchParams.get('to')).toBe('2026-09-23');
+
+    await user.selectOptions(screen.getByLabelText('Type'), 'dividend');
+    expect(onSearchChange).toHaveBeenLastCalledWith({ tab: 'activity', activityKind: 'dividend' });
+  });
+
+  it('the Activity tab is the second tab', async () => {
+    stubFetchRoutes(routesFor());
+    renderScreen();
+    const tabs = await screen.findAllByRole('tab');
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      'Holdings',
+      'Activity',
+      'Allocation',
+      'Drift',
+      'Performance',
+    ]);
   });
 
   it('keeps TWR, MWR and the dollar gain in three separate blocks', async () => {

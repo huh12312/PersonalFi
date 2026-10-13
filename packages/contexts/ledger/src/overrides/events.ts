@@ -17,7 +17,8 @@ export const AccountOverrideChanged = defineEvent({
   type: 'ledger.AccountOverrideChanged',
   aggregateType: 'account',
   description:
-    'The holder set, changed or cleared an account override (tax treatment, role, valuation). ' +
+    'The holder set, changed or cleared an account override (tax treatment, role, valuation, ' +
+    'management). ' +
     'Carries which fields changed by name, not the values. `cleared` is true when the override ' +
     'row was removed, so the account is back to its provider-derived defaults.',
   schema: z.object({

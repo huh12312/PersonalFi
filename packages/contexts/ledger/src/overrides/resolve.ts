@@ -12,7 +12,7 @@
  * it, because the subtype map is `@ctx/planning`'s (`defaultTaxBucketFor`) and
  * this context may not import it. The composition root hands the default in.
  */
-import type { AccountRole, TaxTreatment, ValuationBasis } from './vocab.ts';
+import type { AccountRole, ManagementStyle, TaxTreatment, ValuationBasis } from './vocab.ts';
 
 /** What the holder has said about one account. `null` in a field: nothing said. */
 export interface AccountOverride {
@@ -20,6 +20,8 @@ export interface AccountOverride {
   readonly taxTreatment: TaxTreatment | null;
   readonly role: AccountRole | null;
   readonly valuation: ValuationBasis | null;
+  /** WP 10.3. `null`: unclassified — never inferred. */
+  readonly management: ManagementStyle | null;
   readonly updatedAt: Date;
 }
 
@@ -52,6 +54,10 @@ export interface ResolvedAccountOverlay {
     readonly value: ValuationBasis;
     readonly source: 'holder' | 'default';
   };
+  readonly management: {
+    readonly value: ManagementStyle | null;
+    readonly source: 'holder' | 'none';
+  };
 }
 
 export function resolveAccountOverlay(input: {
@@ -83,6 +89,10 @@ export function resolveAccountOverlay(input: {
     valuation: Object.freeze({
       value: override?.valuation ?? 'holdings',
       source: override?.valuation != null ? ('holder' as const) : ('default' as const),
+    }),
+    management: Object.freeze({
+      value: override?.management ?? null,
+      source: override?.management != null ? ('holder' as const) : ('none' as const),
     }),
   });
 }

@@ -20,9 +20,16 @@ export interface OverrideState {
   taxTreatment: string | null;
   role: string | null;
   valuation: string | null;
+  /** WP 10.3. Not a projection input: `changes()` below never reads it. */
+  management: string | null;
 }
 
-export const NO_OVERRIDE: OverrideState = { taxTreatment: null, role: null, valuation: null };
+export const NO_OVERRIDE: OverrideState = {
+  taxTreatment: null,
+  role: null,
+  valuation: null,
+  management: null,
+};
 
 export const usd = (minor: string) => ({ minor, currency: 'USD' });
 
@@ -60,6 +67,10 @@ export function overlayOf(override: OverrideState) {
       effective: override.valuation ?? 'holdings',
       source: override.valuation === null ? 'default' : 'holder',
     },
+    management: {
+      effective: override.management,
+      source: override.management === null ? 'none' : 'holder',
+    },
   };
 }
 
@@ -72,6 +83,7 @@ export const TYPED_OVERLAY = {
   },
   role: { effective: null, source: 'none' },
   valuation: { effective: 'holdings', source: 'default' },
+  management: { effective: null, source: 'none' },
 };
 
 export const PERCENTILES = [0, 1, 2].map((index) => ({
@@ -180,6 +192,7 @@ export async function installAccountMocks(page: Page) {
         taxTreatment: body.taxTreatment ?? null,
         role: body.role ?? null,
         valuation: body.valuation ?? null,
+        management: body.management ?? null,
       };
       return route.fulfill(json({ account: accountsBody().accounts[0], changed: true }));
     }

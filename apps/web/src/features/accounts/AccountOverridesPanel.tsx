@@ -11,17 +11,21 @@ import {
 } from './useAccountOverrides.ts';
 import {
   ACCOUNT_ROLES,
+  MANAGEMENT_LABELS,
+  MANAGEMENT_STYLES,
   ROLE_LABELS,
   TAX_LABELS,
   TAX_TREATMENTS,
   VALUATION_LABELS,
   applicableFields,
   hasOverride,
+  managementText,
   overlayKeyOf,
   roleText,
   taxTreatmentText,
   valuationText,
   type AccountRole,
+  type ManagementStyle,
   type TaxTreatment,
   type ValuationBasis,
 } from './overlay-labels.ts';
@@ -34,7 +38,7 @@ export interface AccountOverridesPanelProps {
 }
 
 /**
- * What the plan believes about one account, and the three things the holder can
+ * What the plan believes about one account, and the four things the holder can
  * say about it (WP 9.2; CF-16, O-2). The provider's metadata is never edited:
  * each field shows its *effective* value and its source — "from Plaid: 401k",
  * "assumed — Plaid calls this …", "set by you" — and an empty choice means "use
@@ -59,15 +63,18 @@ export function AccountOverridesPanel({ account }: AccountOverridesPanelProps) {
     tax: TaxTreatment | '';
     role: AccountRole | '';
     valuation: ValuationBasis | '';
+    management: ManagementStyle | '';
   } = {
     tax: account.overlay.taxTreatment.override ?? '',
     role: account.overlay.role.effective ?? '',
     valuation:
       account.overlay.valuation.source === 'holder' ? account.overlay.valuation.effective : '',
+    management: account.overlay.management.effective ?? '',
   };
   const [tax, setTax] = useState<TaxTreatment | ''>(saved.tax);
   const [role, setRole] = useState<AccountRole | ''>(saved.role);
   const [valuation, setValuation] = useState<ValuationBasis | ''>(saved.valuation);
+  const [management, setManagement] = useState<ManagementStyle | ''>(saved.management);
   const key = overlayKeyOf(account);
   const [seenKey, setSeenKey] = useState(key);
   if (seenKey !== key) {
@@ -76,17 +83,20 @@ export function AccountOverridesPanel({ account }: AccountOverridesPanelProps) {
     setTax(saved.tax);
     setRole(saved.role);
     setValuation(saved.valuation);
+    setManagement(saved.management);
   }
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const setOverrides = useSetAccountOverridesMutation();
   const clearOverrides = useClearAccountOverridesMutation();
 
-  const dirty = tax !== saved.tax || role !== saved.role || valuation !== saved.valuation;
+  const planFieldsDirty = tax !== saved.tax || role !== saved.role || valuation !== saved.valuation;
+  const dirty = planFieldsDirty || management !== saved.management;
   const busy = setOverrides.isPending || clearOverrides.isPending;
   const taxNow = taxTreatmentText(account);
   const roleNow = roleText(account);
   const valuationNow = valuationText(account);
+  const managementNow = managementText(account);
   const providerDefault = account.overlay.taxTreatment.providerDefault;
 
   async function save(event: FormEvent): Promise<void> {
@@ -100,10 +110,16 @@ export function AccountOverridesPanel({ account }: AccountOverridesPanelProps) {
           taxTreatment: fields.tax && tax !== '' ? tax : null,
           role: role !== '' ? role : null,
           valuation: fields.valuation && valuation !== '' ? valuation : null,
+          // A full replacement: sent whenever set, so saving a role never clears it.
+          management: management !== '' ? management : null,
         },
       });
+      // Who manages an account is not a projection input (WP 10.3), so a
+      // change to it alone leaves a stored projection current.
       setMessage(
-        'Saved. A projection computed before this change is now out of date — open the Plan to recompute it.',
+        planFieldsDirty
+          ? 'Saved. A projection computed before this change is now out of date — open the Plan to recompute it.'
+          : 'Saved. Investment performance by who manages it now uses this.',
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not save these settings.');
@@ -201,6 +217,31 @@ export function AccountOverridesPanel({ account }: AccountOverridesPanelProps) {
               Now: {valuationNow.value} — {valuationNow.source}. An account with no holdings is left
               out of net worth, never counted as zero; choose your typed balance to count it at its
               latest balance, labelled as such.
+            </p>
+          </div>
+        )}
+
+        {fields.management && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="account-management">Managed by</Label>
+            <select
+              id="account-management"
+              className={SELECT_CLASS}
+              value={management}
+              aria-describedby="account-management-now"
+              onChange={(event) => setManagement(event.target.value as ManagementStyle | '')}
+            >
+              <option value="">Not classified</option>
+              {MANAGEMENT_STYLES.map((option) => (
+                <option key={option} value={option}>
+                  {MANAGEMENT_LABELS[option]}
+                </option>
+              ))}
+            </select>
+            <p id="account-management-now" className="text-small text-text-muted">
+              Now: {managementNow.value} — {managementNow.source}. Investments compares the
+              performance of advisor, robo-advisor and self-directed accounts by this; it does not
+              change your plan.
             </p>
           </div>
         )}

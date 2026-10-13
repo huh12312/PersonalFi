@@ -501,6 +501,48 @@ test('settings: tabs by arrow keys, the theme and privacy switches, and the comm
   await expect(palette).toBeHidden();
 });
 
+test('investments (WP 10.3): the Activity tab by arrow keys, its type filter, and the performance scope — by keyboard', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const journey = await begin(page, 'investments', '/investments');
+
+  // The tab list is one stop; arrows move, Enter chooses.
+  const tab = await journey.tabTo(/^Holdings$/, { max: 40 });
+  expect(tab.role).toBe('tab');
+  await journey.press('ArrowRight', 'ArrowRight reaches Activity');
+  await journey.expectFocus(/^Activity$/, 'Activity is the second tab');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('tab', { name: 'Activity', selected: true })).toBeVisible();
+  await expect(page.getByTestId('activity-table')).toBeVisible();
+
+  // The type filter: a native select, reached by Tab and changed by arrow keys.
+  await journey.tabTo(/^Type/, { max: 20 });
+  await page.keyboard.press('ArrowDown');
+  await expect(page).toHaveURL(/activityKind=/);
+  await journey.check('the type filter keeps focus after a change');
+
+  // Back to the tab list, across to Performance, and the scope radios by arrow keys.
+  // Shift+Tab until the stop is the tab itself: the tab panel is a stop too, and it is
+  // also named "Activity" (it is labelled by its tab).
+  let back = await journey.press('Shift+Tab', 'Shift+Tab towards the tab list');
+  for (let n = 0; n < 20 && back.role !== 'tab'; n += 1) {
+    back = await journey.press('Shift+Tab', 'Shift+Tab towards the tab list');
+  }
+  expect(back).toMatchObject({ role: 'tab', name: 'Activity' });
+  for (let n = 0; n < 4 && !/^Performance$/.test(await journey.focusedName()); n += 1) {
+    await journey.press('ArrowRight', 'ArrowRight towards Performance');
+  }
+  await journey.expectFocus(/^Performance$/, 'the arrows reached Performance');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('tab', { name: 'Performance', selected: true })).toBeVisible();
+  await journey.tabTo(/^Whole portfolio$/, { max: 40 });
+  await journey.press('ArrowDown', 'ArrowDown chooses By management');
+  await expect(page).toHaveURL(/scope=management/);
+  await expect(page.getByTestId('management-twr-table')).toBeVisible();
+  await journey.check('the scope radio keeps focus');
+});
+
 // ---------------------------------------------------------------------------
 // 10. The soft-lock: its 60 s warning is operable from the keyboard (2.2.1)
 // ---------------------------------------------------------------------------

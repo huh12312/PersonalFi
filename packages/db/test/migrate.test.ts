@@ -114,8 +114,16 @@ describe('migration files', () => {
   });
 });
 
+/**
+ * The scratch databases' prefix. `personalfi` by default (CI); a work package
+ * running beside others on one dev cluster sets `MIGRATE_TEST_DB_PREFIX` so its
+ * three scratch databases cannot collide with anyone else's (WP 10.3 ran it as
+ * `wp103`).
+ */
+const SCRATCH_PREFIX = process.env['MIGRATE_TEST_DB_PREFIX'] ?? 'personalfi';
+
 describeWithDb('runMigrations', () => {
-  const databaseName = 'personalfi_migrate_test';
+  const databaseName = `${SCRATCH_PREFIX}_migrate_test`;
   let url: string;
 
   beforeAll(async () => {
@@ -503,6 +511,12 @@ describeWithDb('runMigrations', () => {
       //   (provider_credentials, column, <user_id>.<provider>), env sandbox|production, client_id_hint
       //   (last four characters, display only), created_at, rotated_at. Expand-only; references only users
       //   (0002); never exported (a reasoned deferral in apps/api/src/reports/export/registry.ts).
+      // 0042_account_overrides_management (WP 10.3): no new table. account_overrides gains nullable
+      //   management advisor | robo_advisor | self_directed (account_overrides_management_check; NULL =
+      //   unclassified, never inferred), and account_overrides_not_empty is re-declared wider (it also
+      //   accepts a management-only row) -- a DROP + ADD of the same name, 0029's widening shape; every
+      //   row valid before is valid after. Expand-only; references only 0035's account_overrides.
+      //   Exported with the row (the export reads every column); moves no projection.
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -702,7 +716,7 @@ describeWithDb('runMigrations', () => {
     const original = join(DEFAULT_MIGRATIONS_DIR, '0001_initial.sql');
     writeFileSync(join(scratchDir, '0001_initial.sql'), readFileSync(original, 'utf8'));
 
-    const driftName = 'personalfi_drift_test';
+    const driftName = `${SCRATCH_PREFIX}_drift_test`;
     const driftUrl = await createScratchDatabase(driftName);
     try {
       await runMigrations({ databaseUrl: driftUrl, migrationsDir: scratchDir, logger: silent });
@@ -725,7 +739,7 @@ describeWithDb('runMigrations', () => {
       join(scratchDir, '0001_broken.sql'),
       'CREATE TABLE good_table (id UUID PRIMARY KEY);\nTHIS IS NOT SQL;\n',
     );
-    const badName = 'personalfi_rollback_test';
+    const badName = `${SCRATCH_PREFIX}_rollback_test`;
     const badUrl = await createScratchDatabase(badName);
     try {
       await expect(

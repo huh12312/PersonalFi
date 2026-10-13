@@ -37,10 +37,20 @@ export const VALUATION_BASES = ['holdings', 'balance'] as const;
 export type ValuationBasis = (typeof VALUATION_BASES)[number];
 
 /**
+ * Who manages an investment account (WP 10.3, `0042_account_overrides_management.sql`):
+ * a human advisor, a robo-advisor, or the holder. `NULL` is "unclassified" and
+ * is never inferred — a provider knows the institution, not who picks the
+ * trades. Groups `GET /investments/performance/by-management`; moves no
+ * projection. Also a CHECK; the db test asserts the two agree.
+ */
+export const MANAGEMENT_STYLES = ['advisor', 'robo_advisor', 'self_directed'] as const;
+export type ManagementStyle = (typeof MANAGEMENT_STYLES)[number];
+
+/**
  * The holder's overlay on an account (migration `0035_account_overrides.sql`).
  *
  * One row per `(user_id, account_id)`, present exactly when at least one of the
- * three fields is set. `accounts` stays the provider's: a sync refreshes it, an
+ * four fields is set (three from 0035, `management` from 0042). `accounts` stays the provider's: a sync refreshes it, an
  * override survives the refresh, and one pure resolver
  * (`resolveAccountOverlay`) decides which wins.
  *
@@ -58,6 +68,8 @@ export const accountOverrides = pgTable(
     taxTreatment: text('tax_treatment').$type<TaxTreatment>(),
     role: text('role').$type<AccountRole>(),
     valuation: text('valuation').$type<ValuationBasis>(),
+    /** WP 10.3, migration 0042. */
+    management: text('management').$type<ManagementStyle>(),
     createdAt: createdAtColumn(),
     updatedAt: updatedAtColumn(),
   },

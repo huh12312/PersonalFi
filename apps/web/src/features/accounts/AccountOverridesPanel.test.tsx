@@ -36,6 +36,7 @@ const RETIREMENT: Account = {
     },
     role: { effective: null, source: 'none' },
     valuation: { effective: 'holdings', source: 'default' },
+    management: { effective: null, source: 'none' },
   },
 };
 
@@ -84,9 +85,62 @@ describe('AccountOverridesPanel', () => {
     await user.keyboard('{Enter}');
 
     await waitFor(() =>
-      expect(putBody).toEqual({ taxTreatment: 'ROTH', role: null, valuation: null }),
+      expect(putBody).toEqual({
+        taxTreatment: 'ROTH',
+        role: null,
+        valuation: null,
+        management: null,
+      }),
     );
     expect(await screen.findByRole('status')).toHaveTextContent(/out of date/u);
+  });
+
+  it('Managed by (WP 10.3): saved on its own without calling the plan stale, and kept when another field is saved', async () => {
+    const bodies: unknown[] = [];
+    stubFetchRoutes([
+      {
+        match: '/api/accounts/acct_ira/overrides',
+        method: 'PUT',
+        handle: async ({ request }) => {
+          bodies.push(await request.json());
+          return jsonResponse({ account: RETIREMENT, changed: true });
+        },
+      },
+    ]);
+    renderPanel(RETIREMENT);
+    const user = userEvent.setup();
+    expect(screen.getByText(/Now: Not classified — you have not said/u)).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Managed by'), 'robo_advisor');
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    await waitFor(() =>
+      expect(bodies[0]).toEqual({
+        taxTreatment: null,
+        role: null,
+        valuation: null,
+        management: 'robo_advisor',
+      }),
+    );
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent(/performance by who manages it/u);
+    expect(status).not.toHaveTextContent(/out of date/u);
+
+    // A later role change sends the management choice too (PUT is a full replacement).
+    await user.selectOptions(screen.getByLabelText('Role'), 'tax_deferred');
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    await waitFor(() =>
+      expect(bodies[1]).toEqual({
+        taxTreatment: null,
+        role: 'tax_deferred',
+        valuation: null,
+        management: 'robo_advisor',
+      }),
+    );
+  });
+
+  it('offers Managed by only on an investment or crypto account', () => {
+    renderPanel({ ...RETIREMENT, type: 'depository', subtype: 'checking' });
+    expect(screen.queryByLabelText('Managed by')).not.toBeInTheDocument();
   });
 
   it('offers a way back to the provider’s settings only when something is set', () => {

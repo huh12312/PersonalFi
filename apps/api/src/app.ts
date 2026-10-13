@@ -53,6 +53,7 @@ import { exportRoutes } from './routes/export.ts';
 import { goalRoutes } from './routes/goals.ts';
 import { healthRoutes } from './routes/health.ts';
 import { insightRoutes } from './routes/insights.ts';
+import { investmentActivityRoutes } from './routes/investment-activity.ts';
 import { investmentRoutes } from './routes/investments.ts';
 import { marketDataRoutes } from './routes/market-data.ts';
 import { netWorthRoutes } from './routes/net-worth.ts';
@@ -610,6 +611,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   // disjoint readers, and the plan assigns them as five files so a later wave
   // editing the market-data settings cannot collide with one editing holdings.
   await app.register(investmentRoutes(deps));
+  await app.register(investmentActivityRoutes(deps));
   await app.register(securityRoutes(deps));
   await app.register(priceRoutes(deps));
   await app.register(netWorthRoutes(deps));

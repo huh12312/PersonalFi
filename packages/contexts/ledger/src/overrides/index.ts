@@ -22,10 +22,12 @@ export {
 } from './store.ts';
 export {
   ACCOUNT_ROLES,
+  MANAGEMENT_STYLES,
   OVERRIDE_FIELDS,
   TAX_TREATMENTS,
   VALUATION_BASES,
   type AccountRole,
+  type ManagementStyle,
   type OverrideField,
   type TaxTreatment,
   type ValuationBasis,

@@ -54,14 +54,14 @@ test.describe('account overrides (WP 9.2)', () => {
     // Options: provider default, Taxable, Tax-deferred, Roth, HSA — three steps down is Roth.
     for (let step = 0; step < 3; step += 1) await page.keyboard.press('ArrowDown');
     await expect(tax).toHaveValue('ROTH');
-    // Role, Valued by, then Save.
-    for (let step = 0; step < 3; step += 1) await page.keyboard.press('Tab');
+    // Role, Valued by, Managed by (WP 10.3), then Save.
+    for (let step = 0; step < 4; step += 1) await page.keyboard.press('Tab');
     const save = page.getByRole('button', { name: 'Save settings' });
     await expect(save).toBeFocused();
     await page.keyboard.press('Enter');
 
     await expect(page.getByRole('status').filter({ hasText: 'Saved.' })).toBeVisible();
-    expect(puts).toEqual([{ taxTreatment: 'ROTH', role: null, valuation: null }]);
+    expect(puts).toEqual([{ taxTreatment: 'ROTH', role: null, valuation: null, management: null }]);
     // Now it says the holder set it.
     await expect(page.getByText(/Now: Roth \(tax-free\) — set by you/u)).toBeVisible();
 

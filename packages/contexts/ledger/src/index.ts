@@ -75,6 +75,7 @@ export {
 export {
   ACCOUNT_ROLES,
   AccountOverrideChanged,
+  MANAGEMENT_STYLES,
   OVERRIDE_FIELDS,
   OverrideNotApplicable,
   TAX_TREATMENTS,
@@ -89,6 +90,7 @@ export {
   setAccountOverrides,
   type AccountOverride,
   type AccountRole,
+  type ManagementStyle,
   type OverrideField,
   type OverrideWriteResult,
   type ProviderTaxDefault,

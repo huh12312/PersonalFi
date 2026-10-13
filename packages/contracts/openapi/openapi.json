@@ -907,6 +907,286 @@
           }
         ]
       },
+      "PeriodSummaryInput": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "period_summary"
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "openingValue": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "description": "Σ priced positions on `from`."
+          },
+          "closingValue": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "description": "Σ priced positions on `to`: the value at `to`."
+          },
+          "netContributions": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "description": "Σ external flows in (from, to], positive = net money in: contributions, withdrawals, transfers in and out (in kind, valued at the transfer date). The same flows the TWR and MWR are measured against."
+          },
+          "dividendsAndInterest": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "description": "Cash dividends, fund distributions and interest."
+          },
+          "reinvestedDividends": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "description": "Reinvested dividends, apart: a broker reporting both legs would otherwise count one twice."
+          },
+          "feesPaid": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "description": "Fee rows plus commissions on trades. A magnitude."
+          },
+          "taxesWithheld": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "description": "Taxes withheld in the account. A magnitude."
+          },
+          "periodGain": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "description": "closingValue − openingValue − netContributions."
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "false when anything below was excluded."
+          },
+          "exclusions": {
+            "type": "object",
+            "properties": {
+              "unpricedSecurities": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "securityId": {
+                      "type": "string"
+                    },
+                    "symbol": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "securityId",
+                    "symbol",
+                    "name"
+                  ]
+                }
+              },
+              "foreignCurrencyMovements": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unvaluedTransfers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unclassifiedMovements": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "unpricedSecurities",
+              "foreignCurrencyMovements",
+              "unvaluedTransfers",
+              "unclassifiedMovements"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "from",
+          "to",
+          "openingValue",
+          "closingValue",
+          "netContributions",
+          "dividendsAndInterest",
+          "reinvestedDividends",
+          "feesPaid",
+          "taxesWithheld",
+          "periodGain",
+          "complete",
+          "exclusions"
+        ]
+      },
+      "PerformanceScopeInput": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "portfolio",
+              "account",
+              "management"
+            ]
+          },
+          "management": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "advisor",
+                  "robo_advisor",
+                  "self_directed",
+                  "unclassified"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accountIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "description": "The accounts measured; empty for the whole portfolio (every account)."
+          }
+        },
+        "required": [
+          "kind",
+          "management",
+          "accountIds"
+        ]
+      },
       "AccountBalanceInput": {
         "type": "object",
         "properties": {
@@ -1085,12 +1365,45 @@
               "effective",
               "source"
             ]
+          },
+          "management": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "advisor",
+                      "robo_advisor",
+                      "self_directed"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ],
+            "description": "Who manages the account (WP 10.3): advisor, robo_advisor or self_directed. `null` is unclassified — the holder has not said, and nothing infers it. Groups `GET /investments/performance/by-management`; moves no projection."
           }
         },
         "required": [
           "taxTreatment",
           "role",
-          "valuation"
+          "valuation",
+          "management"
         ]
       },
       "AccountInput": {
@@ -8219,6 +8532,241 @@
           "lastRunRejected"
         ]
       },
+      "InvestmentActivityInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "tradeDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "settleDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell",
+              "dividend",
+              "reinvested_dividend",
+              "interest",
+              "contribution",
+              "withdrawal",
+              "fee",
+              "tax",
+              "split",
+              "other"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "description": "The house vocabulary the lot engine reads (`BUY`, `CASH`, …)."
+          },
+          "subtype": {
+            "description": "The provider’s own word, verbatim.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The provider’s description of the movement.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "security": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "symbol": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "symbol",
+                  "name"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null: the movement is about no security (cash, a fee, a deposit)."
+          },
+          "quantity": {
+            "type": "string",
+            "description": "Signed as the provider reported it: negative on a disposal."
+          },
+          "price": {
+            "description": "Unit price; null when nobody stated one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "description": "House sign: negative = cash left the account."
+          },
+          "flow": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a contribution or withdrawal: the external flow the performance route measures against, positive = into the portfolio. A 401(k) payroll contribution arrives as a buy whose `amount` is the cash the buy spent; `flow` is the money that arrived. null for everything else, and for an in-kind transfer (valued only by the performance route, at the transfer date)."
+          },
+          "fees": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "description": "A magnitude."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "BROKER",
+              "IMPORTED",
+              "USER"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "accountId",
+          "tradeDate",
+          "settleDate",
+          "kind",
+          "type",
+          "subtype",
+          "name",
+          "security",
+          "quantity",
+          "price",
+          "amount",
+          "flow",
+          "fees",
+          "source"
+        ]
+      },
+      "InvestmentActivityAccountInput": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "activitySync": {
+            "type": "string",
+            "enum": [
+              "synced",
+              "pending",
+              "failed",
+              "not_applicable"
+            ],
+            "description": "`synced`: the investment-activity leg has completed at least once. `pending`: it has not run yet (an empty list is not \"no activity\"). `failed`: it ran and never completed. `not_applicable`: activity for this account arrives by import or by hand."
+          },
+          "lastSyncedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "accountId",
+          "name",
+          "provider",
+          "activitySync",
+          "lastSyncedAt"
+        ]
+      },
       "AttributionInput": {
         "type": "object",
         "properties": {
@@ -12162,6 +12710,62 @@
           "current"
         ]
       },
+      "ManagementPerformanceRowInput": {
+        "type": "object",
+        "properties": {
+          "management": {
+            "type": "string",
+            "enum": [
+              "advisor",
+              "robo_advisor",
+              "self_directed",
+              "unclassified"
+            ]
+          },
+          "accountIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "timeWeighted": {
+            "$ref": "#/components/schemas/TimeWeightedReturnInput"
+          },
+          "moneyWeighted": {
+            "$ref": "#/components/schemas/MoneyWeightedReturnInput"
+          },
+          "dollarGain": {
+            "$ref": "#/components/schemas/DollarGainInput"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/PeriodSummaryInput"
+          },
+          "unvaluedTransfers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "valuationDates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          }
+        },
+        "required": [
+          "management",
+          "accountIds",
+          "timeWeighted",
+          "moneyWeighted",
+          "dollarGain",
+          "summary",
+          "unvaluedTransfers",
+          "valuationDates"
+        ]
+      },
       "PlanLifeEventInput": {
         "type": "object",
         "properties": {
@@ -13131,6 +13735,298 @@
           }
         ]
       },
+      "PeriodSummary": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "period_summary"
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "openingValue": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false,
+            "description": "Σ priced positions on `from`."
+          },
+          "closingValue": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false,
+            "description": "Σ priced positions on `to`: the value at `to`."
+          },
+          "netContributions": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false,
+            "description": "Σ external flows in (from, to], positive = net money in: contributions, withdrawals, transfers in and out (in kind, valued at the transfer date). The same flows the TWR and MWR are measured against."
+          },
+          "dividendsAndInterest": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false,
+            "description": "Cash dividends, fund distributions and interest."
+          },
+          "reinvestedDividends": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false,
+            "description": "Reinvested dividends, apart: a broker reporting both legs would otherwise count one twice."
+          },
+          "feesPaid": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false,
+            "description": "Fee rows plus commissions on trades. A magnitude."
+          },
+          "taxesWithheld": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false,
+            "description": "Taxes withheld in the account. A magnitude."
+          },
+          "periodGain": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false,
+            "description": "closingValue − openingValue − netContributions."
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "false when anything below was excluded."
+          },
+          "exclusions": {
+            "type": "object",
+            "properties": {
+              "unpricedSecurities": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "securityId": {
+                      "type": "string"
+                    },
+                    "symbol": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "securityId",
+                    "symbol",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "foreignCurrencyMovements": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unvaluedTransfers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unclassifiedMovements": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "unpricedSecurities",
+              "foreignCurrencyMovements",
+              "unvaluedTransfers",
+              "unclassifiedMovements"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "kind",
+          "from",
+          "to",
+          "openingValue",
+          "closingValue",
+          "netContributions",
+          "dividendsAndInterest",
+          "reinvestedDividends",
+          "feesPaid",
+          "taxesWithheld",
+          "periodGain",
+          "complete",
+          "exclusions"
+        ],
+        "additionalProperties": false
+      },
+      "PerformanceScope": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "portfolio",
+              "account",
+              "management"
+            ]
+          },
+          "management": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "advisor",
+                  "robo_advisor",
+                  "self_directed",
+                  "unclassified"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accountIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "description": "The accounts measured; empty for the whole portfolio (every account)."
+          }
+        },
+        "required": [
+          "kind",
+          "management",
+          "accountIds"
+        ],
+        "additionalProperties": false
+      },
       "AccountBalance": {
         "type": "object",
         "properties": {
@@ -13313,12 +14209,46 @@
               "source"
             ],
             "additionalProperties": false
+          },
+          "management": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "advisor",
+                      "robo_advisor",
+                      "self_directed"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ],
+            "additionalProperties": false,
+            "description": "Who manages the account (WP 10.3): advisor, robo_advisor or self_directed. `null` is unclassified — the holder has not said, and nothing infers it. Groups `GET /investments/performance/by-management`; moves no projection."
           }
         },
         "required": [
           "taxTreatment",
           "role",
-          "valuation"
+          "valuation",
+          "management"
         ],
         "additionalProperties": false
       },
@@ -20521,6 +21451,247 @@
         ],
         "additionalProperties": false
       },
+      "InvestmentActivity": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "tradeDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "settleDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell",
+              "dividend",
+              "reinvested_dividend",
+              "interest",
+              "contribution",
+              "withdrawal",
+              "fee",
+              "tax",
+              "split",
+              "other"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "description": "The house vocabulary the lot engine reads (`BUY`, `CASH`, …)."
+          },
+          "subtype": {
+            "description": "The provider’s own word, verbatim.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The provider’s description of the movement.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "security": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "symbol": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "symbol",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null: the movement is about no security (cash, a fee, a deposit)."
+          },
+          "quantity": {
+            "type": "string",
+            "description": "Signed as the provider reported it: negative on a disposal."
+          },
+          "price": {
+            "description": "Unit price; null when nobody stated one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false,
+            "description": "House sign: negative = cash left the account."
+          },
+          "flow": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a contribution or withdrawal: the external flow the performance route measures against, positive = into the portfolio. A 401(k) payroll contribution arrives as a buy whose `amount` is the cash the buy spent; `flow` is the money that arrived. null for everything else, and for an in-kind transfer (valued only by the performance route, at the transfer date)."
+          },
+          "fees": {
+            "type": "object",
+            "properties": {
+              "minor": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              }
+            },
+            "required": [
+              "minor",
+              "currency"
+            ],
+            "additionalProperties": false,
+            "description": "A magnitude."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "BROKER",
+              "IMPORTED",
+              "USER"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "accountId",
+          "tradeDate",
+          "settleDate",
+          "kind",
+          "type",
+          "subtype",
+          "name",
+          "security",
+          "quantity",
+          "price",
+          "amount",
+          "flow",
+          "fees",
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "InvestmentActivityAccount": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "activitySync": {
+            "type": "string",
+            "enum": [
+              "synced",
+              "pending",
+              "failed",
+              "not_applicable"
+            ],
+            "description": "`synced`: the investment-activity leg has completed at least once. `pending`: it has not run yet (an empty list is not \"no activity\"). `failed`: it ran and never completed. `not_applicable`: activity for this account arrives by import or by hand."
+          },
+          "lastSyncedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "accountId",
+          "name",
+          "provider",
+          "activitySync",
+          "lastSyncedAt"
+        ],
+        "additionalProperties": false
+      },
       "Attribution": {
         "type": "object",
         "properties": {
@@ -24571,6 +25742,63 @@
         ],
         "additionalProperties": false
       },
+      "ManagementPerformanceRow": {
+        "type": "object",
+        "properties": {
+          "management": {
+            "type": "string",
+            "enum": [
+              "advisor",
+              "robo_advisor",
+              "self_directed",
+              "unclassified"
+            ]
+          },
+          "accountIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "timeWeighted": {
+            "$ref": "#/components/schemas/TimeWeightedReturn"
+          },
+          "moneyWeighted": {
+            "$ref": "#/components/schemas/MoneyWeightedReturn"
+          },
+          "dollarGain": {
+            "$ref": "#/components/schemas/DollarGain"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/PeriodSummary"
+          },
+          "unvaluedTransfers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "valuationDates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          }
+        },
+        "required": [
+          "management",
+          "accountIds",
+          "timeWeighted",
+          "moneyWeighted",
+          "dollarGain",
+          "summary",
+          "unvaluedTransfers",
+          "valuationDates"
+        ],
+        "additionalProperties": false
+      },
       "PlanLifeEvent": {
         "type": "object",
         "properties": {
@@ -26100,11 +27328,11 @@
     "/accounts/{accountId}/overrides": {
       "put": {
         "operationId": "setAccountOverrides",
-        "summary": "Set what an account is: its tax treatment, role and valuation basis",
+        "summary": "Set what an account is: its tax treatment, role, valuation basis and who manages it",
         "tags": [
           "accounts"
         ],
-        "description": "The holder’s overlay on the provider’s facts, which are never mutated. A **full replacement**: an omitted or `null` field is cleared, and when none is left the override is removed. `taxTreatment` outranks the provider-subtype default the projection starts from (CF-16). `valuation: \"balance\"` counts an investment or crypto account that has no priced holdings at its latest balance instead of leaving it out — labelled as such wherever it appears (O-2). Changing any field makes a stored projection read `stale`, naming the change; nothing is recomputed. Another holder’s account is a 404, exactly as a missing one. Emits `ledger.AccountOverrideChanged`. Session only: no money moves.",
+        "description": "The holder’s overlay on the provider’s facts, which are never mutated. A **full replacement**: an omitted or `null` field is cleared, and when none is left the override is removed. `taxTreatment` outranks the provider-subtype default the projection starts from (CF-16). `valuation: \"balance\"` counts an investment or crypto account that has no priced holdings at its latest balance instead of leaving it out — labelled as such wherever it appears (O-2). `management` (advisor, robo_advisor, self_directed) groups the performance-by-management comparison and moves no projection. Changing tax treatment, role or valuation makes a stored projection read `stale`, naming the change; nothing is recomputed. Another holder’s account is a 404, exactly as a missing one. Emits `ledger.AccountOverrideChanged`. Session only: no money moves.",
         "requestBody": {
           "required": true,
           "content": {
@@ -26153,6 +27381,21 @@
                         "enum": [
                           "holdings",
                           "balance"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "management": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "advisor",
+                          "robo_advisor",
+                          "self_directed"
                         ]
                       },
                       {
@@ -37108,7 +38351,170 @@
         "tags": [
           "investments"
         ],
-        "description": "07 §4.2: never a TWR beside a dollar gain, never a benchmarked MWR. The three answers occupy three disjoint objects under three keys, so no object in this payload expresses the forbidden pairing.",
+        "description": "07 §4.2: never a TWR beside a dollar gain, never a benchmarked MWR. The three answers occupy three disjoint objects under three keys, so no object in this payload expresses the forbidden pairing. WP 10.3: `account` or `management` (never both — 400) restricts the valuations and the flows to that scope; `summary` is the period’s dollar picture (value, net contributions, income, fees), a fourth disjoint object with every exclusion named.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "account",
+            "required": false,
+            "description": "One account. Mutually exclusive with management."
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "advisor",
+                "robo_advisor",
+                "self_directed",
+                "unclassified"
+              ]
+            },
+            "in": "query",
+            "name": "management",
+            "required": false,
+            "description": "Every account the holder classified so (account overrides), or `unclassified`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "to": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 3
+                    },
+                    "scope": {
+                      "$ref": "#/components/schemas/PerformanceScope"
+                    },
+                    "timeWeighted": {
+                      "$ref": "#/components/schemas/TimeWeightedReturn"
+                    },
+                    "moneyWeighted": {
+                      "$ref": "#/components/schemas/MoneyWeightedReturn"
+                    },
+                    "dollarGain": {
+                      "$ref": "#/components/schemas/DollarGain"
+                    },
+                    "summary": {
+                      "$ref": "#/components/schemas/PeriodSummary"
+                    },
+                    "unvaluedTransfers": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "valuationDates": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "currency",
+                    "scope",
+                    "timeWeighted",
+                    "moneyWeighted",
+                    "dollarGain",
+                    "summary",
+                    "unvaluedTransfers",
+                    "valuationDates"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/investments/performance/by-management": {
+      "get": {
+        "operationId": "getPerformanceByManagement",
+        "summary": "Performance per management class: advisor, robo-advisor, self-directed",
+        "tags": [
+          "investments"
+        ],
+        "description": "One row per management class the holder has at least one investment account in, plus `unclassified` when an account has none (WP 10.3). Each row is the scoped `/investments/performance` answer: the same three disjoint objects (TWR, MWR, dollar gain) and the period summary, never merged. Only the TWR is comparable across rows (07 §4.2: it removes the effect of when money arrived); an MWR is the holder’s own rate and is never benchmarked.",
         "parameters": [
           {
             "schema": {
@@ -37150,25 +38556,10 @@
                       "minLength": 3,
                       "maxLength": 3
                     },
-                    "timeWeighted": {
-                      "$ref": "#/components/schemas/TimeWeightedReturn"
-                    },
-                    "moneyWeighted": {
-                      "$ref": "#/components/schemas/MoneyWeightedReturn"
-                    },
-                    "dollarGain": {
-                      "$ref": "#/components/schemas/DollarGain"
-                    },
-                    "unvaluedTransfers": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "valuationDates": {
+                    "rows": {
                       "type": "array",
                       "items": {
-                        "type": "string",
-                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        "$ref": "#/components/schemas/ManagementPerformanceRow"
                       }
                     }
                   },
@@ -37176,11 +38567,7 @@
                     "from",
                     "to",
                     "currency",
-                    "timeWeighted",
-                    "moneyWeighted",
-                    "dollarGain",
-                    "unvaluedTransfers",
-                    "valuationDates"
+                    "rows"
                   ],
                   "additionalProperties": false
                 }
@@ -37359,6 +38746,204 @@
             }
           },
           "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/investments/transactions": {
+      "get": {
+        "operationId": "listInvestmentTransactions",
+        "summary": "Investment activity: buys, sells, dividends, contributions, fees",
+        "tags": [
+          "investments"
+        ],
+        "description": "Every investment movement in the window, newest first, with the kind the performance route classifies it as (`classifyActivity`): a contribution here is exactly an external flow there. `from`/`to` are inclusive and default to the last twelve months. Keyset pagination: pass `nextCursor` back as `cursor`. `accounts[].activitySync` distinguishes an account whose activity has not been synced yet from one that has none (WP 10.3).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "account",
+            "required": false
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "buy",
+                    "sell",
+                    "dividend",
+                    "reinvested_dividend",
+                    "interest",
+                    "contribution",
+                    "withdrawal",
+                    "fee",
+                    "tax",
+                    "split",
+                    "other"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "buy",
+                      "sell",
+                      "dividend",
+                      "reinvested_dividend",
+                      "interest",
+                      "contribution",
+                      "withdrawal",
+                      "fee",
+                      "tax",
+                      "split",
+                      "other"
+                    ]
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "kind",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "to": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/InvestmentActivity"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991,
+                      "description": "Rows matching the filters in the window, across every page."
+                    },
+                    "accounts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/InvestmentActivityAccount"
+                      }
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "items",
+                    "nextCursor",
+                    "total",
+                    "accounts"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {

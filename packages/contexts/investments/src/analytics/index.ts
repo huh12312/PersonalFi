@@ -80,6 +80,21 @@ export {
 
 export { HIGH_EXPENSE_RATIO, feeDrag, feeDragOf, type FeeDragReport, type FeeRow } from './fees.ts';
 
+export {
+  ACTIVITY_KINDS,
+  PERFORMANCE_ROLES,
+  classifyActivity,
+  externalFlowsOf,
+  summariseActivity,
+  type ActivityInput,
+  type ActivityKind,
+  type ActivityTotals,
+  type ClassifiedActivity,
+  type PerformanceRole,
+  type PeriodFlows,
+  type SummaryMovement,
+} from './flows.ts';
+
 export { cashFlowsOf, moneyWeightedReturn, type MwrInput } from './mwr.ts';
 
 export {

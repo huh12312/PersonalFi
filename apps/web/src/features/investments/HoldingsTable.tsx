@@ -216,8 +216,10 @@ export function HoldingsTable({
                                 // `--accent-text` on `--bg-subtle` measures 4.33:1
                                 // in dark mode, which axe fails at this size.
                                 // The underline carries "this is a link" without
-                                // relying on the accent hue at all.
-                                className="text-text-primary underline underline-offset-2"
+                                // relying on the accent hue at all. `min-h-6`: a
+                                // 24 px target (WCAG 2.5.8), which the 16 px line
+                                // box alone was not (WP 10.3 found it red in axe).
+                                className="inline-flex min-h-6 items-center text-text-primary underline underline-offset-2"
                                 onClick={() => onOpenAccount(accountId)}
                               >
                                 {accountNameOf(accountId)}

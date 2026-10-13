@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
-import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import {
   getAllocationOptions,
   getDriftOptions,
+  getPerformanceByManagementOptions,
   getPerformanceOptions,
   listAccountHoldingsOptions,
   listHoldingsOptions,
+  listInvestmentTransactionsInfiniteOptions,
 } from '../../api/generated/@tanstack/react-query.gen.ts';
 import { Sdk } from '../../api/generated/index.ts';
 import type {
@@ -15,7 +17,7 @@ import type {
   ListAccountHoldingsResponse,
 } from '../../api/generated/types.gen.ts';
 import { useStepUpRetry } from '../../lib/step-up.ts';
-import type { ValuationBasis } from './search.ts';
+import type { ActivityKind, PerformanceScopeKind, ValuationBasis } from './search.ts';
 
 const STALE_TIME_MS = 30_000;
 
@@ -108,12 +110,82 @@ export function useDriftQuery(basis: ValuationBasis, targets: readonly string[])
   });
 }
 
-/** `GET /investments/performance` — TWR, MWR and a dollar gain under three separate keys. */
-export function usePerformanceQuery(from: string) {
+/**
+ * `GET /investments/performance` — TWR, MWR and a dollar gain under three
+ * separate keys, plus the period summary. WP 10.3: scoped to one account when
+ * `scope` is `account`; the whole portfolio otherwise (the by-management view
+ * shows the whole portfolio's snapshot above its comparison table).
+ */
+export function usePerformanceQuery(
+  from: string,
+  scope: PerformanceScopeKind = 'portfolio',
+  accountId?: string,
+) {
+  const account = scope === 'account' ? accountId : undefined;
   return useQuery({
-    ...getPerformanceOptions({ query: { from } }),
+    ...getPerformanceOptions({
+      query: { from, ...(account === undefined ? {} : { account }) },
+    }),
+    enabled: scope !== 'account' || account !== undefined,
     staleTime: STALE_TIME_MS,
   });
+}
+
+/** `GET /investments/performance/by-management` — one row per management class. */
+export function usePerformanceByManagementQuery(from: string, enabled: boolean) {
+  return useQuery({
+    ...getPerformanceByManagementOptions({ query: { from } }),
+    enabled,
+    staleTime: STALE_TIME_MS,
+  });
+}
+
+const ACTIVITY_PAGE_SIZE = 50;
+
+/** The generator's page-param type, as `useTransactionsList` explains. */
+type ActivityPageParam = ReturnType<
+  typeof listInvestmentTransactionsInfiniteOptions
+>['initialPageParam'];
+
+export interface ActivityFilters {
+  readonly from: string;
+  readonly to: string;
+  readonly account?: string | undefined;
+  readonly kind?: ActivityKind | undefined;
+}
+
+/**
+ * `GET /investments/transactions`, keyset-paginated (WP 10.3): each "Load
+ * more" passes the last page's `nextCursor`. `total` and `accounts` (with each
+ * account's activity-sync state) are the first page's.
+ */
+export function useInvestmentActivity(filters: ActivityFilters, enabled = true) {
+  const infinite = useInfiniteQuery({
+    ...listInvestmentTransactionsInfiniteOptions({
+      query: {
+        from: filters.from,
+        to: filters.to,
+        limit: ACTIVITY_PAGE_SIZE,
+        ...(filters.account === undefined ? {} : { account: filters.account }),
+        ...(filters.kind === undefined ? {} : { kind: filters.kind }),
+      },
+    }),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    // Page one has no cursor; see `ActivityPageParam`.
+    initialPageParam: undefined as unknown as ActivityPageParam,
+    enabled,
+    staleTime: STALE_TIME_MS,
+  });
+  const pages = infinite.data?.pages ?? [];
+  return {
+    items: pages.flatMap((page) => page.items),
+    first: pages[0],
+    isLoading: infinite.isLoading,
+    isError: infinite.isError,
+    hasNextPage: infinite.hasNextPage,
+    isFetchingNextPage: infinite.isFetchingNextPage,
+    fetchNextPage: infinite.fetchNextPage,
+  };
 }
 
 export interface BasisMethodElection {

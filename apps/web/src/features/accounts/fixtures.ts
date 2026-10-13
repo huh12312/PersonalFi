@@ -10,4 +10,5 @@ export const DEFAULT_OVERLAY: Account['overlay'] = {
   taxTreatment: { effective: null, source: 'none', override: null, providerDefault: null },
   role: { effective: null, source: 'none' },
   valuation: { effective: 'holdings', source: 'default' },
+  management: { effective: null, source: 'none' },
 };

@@ -22,6 +22,7 @@ import type { AccountOverride } from './resolve.ts';
 import {
   OVERRIDE_FIELDS,
   type AccountRole,
+  type ManagementStyle,
   type OverrideField,
   type TaxTreatment,
   type ValuationBasis,
@@ -49,6 +50,8 @@ export interface SetAccountOverridesInput {
   readonly taxTreatment?: TaxTreatment | null;
   readonly role?: AccountRole | null;
   readonly valuation?: ValuationBasis | null;
+  /** WP 10.3: who manages the account. Any account may carry it; it moves no projection. */
+  readonly management?: ManagementStyle | null;
 }
 
 export interface OverrideWriteResult {
@@ -64,6 +67,7 @@ function toOverride(row: AccountOverrideRow): AccountOverride {
     taxTreatment: row.taxTreatment,
     role: row.role,
     valuation: row.valuation,
+    management: row.management,
     updatedAt: row.updatedAt,
   };
 }
@@ -133,7 +137,7 @@ export function overrideRefusal(
 }
 
 /**
- * Replace the holder's override on one account. All three fields are set as
+ * Replace the holder's override on one account. All four fields are set as
  * given — absent or `null` clears a field — and when none is left the row is
  * deleted, so "no override" has one representation.
  *
@@ -162,6 +166,7 @@ export async function setAccountOverrides(
     taxTreatment: input.taxTreatment ?? null,
     role: input.role ?? null,
     valuation: input.valuation ?? null,
+    management: input.management ?? null,
   };
   const existing = await getAccountOverride(executor, input);
   const changedFields = OVERRIDE_FIELDS.filter(
@@ -170,7 +175,11 @@ export async function setAccountOverrides(
   if (changedFields.length === 0) return { changed: false, changedFields: [], cleared: false };
 
   const now = context.clock.now();
-  const empty = next.taxTreatment === null && next.role === null && next.valuation === null;
+  const empty =
+    next.taxTreatment === null &&
+    next.role === null &&
+    next.valuation === null &&
+    next.management === null;
   if (empty) {
     await executor
       .delete(accountOverrides)

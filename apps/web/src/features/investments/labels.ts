@@ -124,3 +124,48 @@ export function pointsToNumber(points: string): number {
   const parsed = Number(points);
   return Number.isFinite(parsed) ? parsed : 0;
 }
+
+/** WP 10.3: the Activity tab's "Type" column and filter. */
+export const ACTIVITY_KIND_LABELS: Readonly<Record<string, string>> = {
+  buy: 'Buy',
+  sell: 'Sell',
+  dividend: 'Dividend',
+  reinvested_dividend: 'Reinvested dividend',
+  interest: 'Interest',
+  contribution: 'Contribution / transfer in',
+  withdrawal: 'Withdrawal / transfer out',
+  fee: 'Fee',
+  tax: 'Tax withheld',
+  split: 'Split',
+  other: 'Other',
+};
+
+export function activityKindLabel(kind: string): string {
+  return ACTIVITY_KIND_LABELS[kind] ?? kind;
+}
+
+/** WP 10.3: who manages an account, as the holder reads it. */
+export const MANAGEMENT_SCOPE_LABELS: Readonly<Record<string, string>> = {
+  advisor: 'Advisor',
+  robo_advisor: 'Robo-advisor',
+  self_directed: 'Self-directed',
+  unclassified: 'Not classified',
+};
+
+export function managementLabel(value: string): string {
+  return MANAGEMENT_SCOPE_LABELS[value] ?? value;
+}
+
+/** `BROKER`/`IMPORTED`/`USER` → where the row came from, in words. */
+export function activitySourceLabel(source: string): string {
+  switch (source) {
+    case 'BROKER':
+      return 'Broker';
+    case 'IMPORTED':
+      return 'Imported';
+    case 'USER':
+      return 'Entered by you';
+    default:
+      return source;
+  }
+}

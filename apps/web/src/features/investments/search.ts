@@ -15,7 +15,7 @@ import { z } from 'zod';
  * second UI-side spelling, so the mapping into the query is an identity.
  */
 export const investmentsSearchSchema = z.object({
-  tab: z.enum(['holdings', 'allocation', 'drift', 'performance']).optional(),
+  tab: z.enum(['holdings', 'activity', 'allocation', 'drift', 'performance']).optional(),
   /** The account whose per-account detail (lots, basis source) is open. */
   account: z.string().min(1).optional(),
   dimension: z.enum(['asset_class', 'region', 'sector']).optional(),
@@ -32,6 +32,37 @@ export const investmentsSearchSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
+  /**
+   * WP 10.3. The performance scope: the whole portfolio (default), the
+   * by-management comparison, or one account (`scopeAccount`).
+   */
+  scope: z.enum(['portfolio', 'management', 'account']).optional(),
+  scopeAccount: z.string().min(1).optional(),
+  /** WP 10.3. The Activity tab's filters: one account, one kind, a window. */
+  activityAccount: z.string().min(1).optional(),
+  activityKind: z
+    .enum([
+      'buy',
+      'sell',
+      'dividend',
+      'reinvested_dividend',
+      'interest',
+      'contribution',
+      'withdrawal',
+      'fee',
+      'tax',
+      'split',
+      'other',
+    ])
+    .optional(),
+  activityFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  activityTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 
 export type InvestmentsSearch = z.infer<typeof investmentsSearchSchema>;
@@ -39,6 +70,8 @@ export type InvestmentsSearch = z.infer<typeof investmentsSearchSchema>;
 export type InvestmentsTab = NonNullable<InvestmentsSearch['tab']>;
 export type AllocationDimension = NonNullable<InvestmentsSearch['dimension']>;
 export type ValuationBasis = NonNullable<InvestmentsSearch['basis']>;
+export type PerformanceScopeKind = NonNullable<InvestmentsSearch['scope']>;
+export type ActivityKind = NonNullable<InvestmentsSearch['activityKind']>;
 
 export const DEFAULT_TAB: InvestmentsTab = 'holdings';
 export const DEFAULT_DIMENSION: AllocationDimension = 'asset_class';
@@ -55,4 +88,17 @@ export function defaultPerformanceFrom(today: Date): string {
     Date.UTC(today.getUTCFullYear() - 1, today.getUTCMonth(), today.getUTCDate()),
   );
   return from.toISOString().slice(0, 10);
+}
+
+/**
+ * The Activity tab's default window: the twelve months ending today, both
+ * ends inclusive — the same window `GET /investments/transactions` defaults
+ * to, stated here so the date inputs show it rather than sit blank.
+ */
+export function defaultActivityWindow(today: Date): { readonly from: string; readonly to: string } {
+  const to = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const from = new Date(
+    Date.UTC(today.getUTCFullYear() - 1, today.getUTCMonth(), today.getUTCDate() + 1),
+  );
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
 }

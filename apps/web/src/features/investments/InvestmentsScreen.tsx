@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/button.tsx';
 import { useAccountsLookup } from '../accounts/useAccountsLookup.ts';
 import { useCoinGeckoAttribution } from '../market-data/api.ts';
 import { AccountPositionsPanel } from './AccountPositionsPanel.tsx';
+import { ActivityPanel } from './ActivityPanel.tsx';
 import { AllocationPanel } from './AllocationPanel.tsx';
 import { DriftPanel } from './DriftPanel.tsx';
 import { HoldingsTable } from './HoldingsTable.tsx';
@@ -22,6 +23,8 @@ import {
   useBasisMethodElection,
   useDriftQuery,
   useHoldingsQuery,
+  useInvestmentActivity,
+  usePerformanceByManagementQuery,
   usePerformanceQuery,
 } from './api.ts';
 import { ratioToNumber } from './labels.ts';
@@ -29,6 +32,7 @@ import {
   DEFAULT_BASIS,
   DEFAULT_DIMENSION,
   DEFAULT_TAB,
+  defaultActivityWindow,
   defaultPerformanceFrom,
   type InvestmentsSearch,
   type InvestmentsTab,
@@ -48,6 +52,7 @@ const SAMPLE_TARGETS = ['US_EQUITY:0.6', 'US_BOND:0.3', 'CASH:0.1'] as const;
 
 const TABS: readonly { id: InvestmentsTab; label: string }[] = [
   { id: 'holdings', label: 'Holdings' },
+  { id: 'activity', label: 'Activity' },
   { id: 'allocation', label: 'Allocation' },
   { id: 'drift', label: 'Drift' },
   { id: 'performance', label: 'Performance' },
@@ -90,7 +95,25 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
   const selectedAccountQuery = useAccountHoldingsQuery(search.account, basis);
   const allocationQuery = useAllocationQuery(basis);
   const driftQuery = useDriftQuery(basis, targets);
-  const performanceQuery = usePerformanceQuery(performanceFrom);
+  const performanceScope = search.scope ?? 'portfolio';
+  const investmentAccounts = investmentAccountIds.map((id) => ({
+    id,
+    name: accounts.nameOf(id),
+  }));
+  const scopeAccount = search.scopeAccount ?? investmentAccountIds[0];
+  const performanceQuery = usePerformanceQuery(performanceFrom, performanceScope, scopeAccount);
+  const byManagementQuery = usePerformanceByManagementQuery(
+    performanceFrom,
+    performanceScope === 'management',
+  );
+  const activityWindow = defaultActivityWindow(today ?? new Date());
+  const activityFilters = {
+    from: search.activityFrom ?? activityWindow.from,
+    to: search.activityTo ?? activityWindow.to,
+    account: search.activityAccount,
+    kind: search.activityKind,
+  };
+  const activity = useInvestmentActivity(activityFilters, tab === 'activity');
   const election = useBasisMethodElection();
 
   function update(patch: Partial<InvestmentsSearch>): void {
@@ -226,6 +249,29 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
           )}
         </TabsPanel>
 
+        <TabsPanel value="activity">
+          <ActivityPanel
+            filters={activityFilters}
+            onFiltersChange={(patch) =>
+              update({
+                ...('account' in patch ? { activityAccount: patch.account } : {}),
+                ...('kind' in patch ? { activityKind: patch.kind } : {}),
+                ...('from' in patch ? { activityFrom: patch.from } : {}),
+                ...('to' in patch ? { activityTo: patch.to } : {}),
+              })
+            }
+            accounts={investmentAccounts}
+            accountNameOf={accounts.nameOf}
+            items={activity.items}
+            syncStates={activity.first?.accounts}
+            total={activity.first?.total}
+            isLoading={activity.isLoading}
+            hasNextPage={activity.hasNextPage}
+            isFetchingNextPage={activity.isFetchingNextPage}
+            onLoadMore={() => void activity.fetchNextPage()}
+          />
+        </TabsPanel>
+
         <TabsPanel value="allocation">
           <AllocationPanel
             data={allocationQuery.data}
@@ -264,6 +310,14 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
           <PerformancePanel
             data={performanceQuery.data}
             isLoading={performanceQuery.isLoading}
+            scope={performanceScope}
+            scopeAccount={scopeAccount}
+            onScopeChange={(scope, accountId) =>
+              update({ scope, scopeAccount: scope === 'account' ? accountId : undefined })
+            }
+            accounts={investmentAccounts}
+            byManagement={byManagementQuery.data}
+            byManagementLoading={byManagementQuery.isLoading}
             hasCoinGeckoCryptoHolding={hasCoinGeckoCryptoHolding}
             coinGeckoAttribution={coinGeckoAttribution}
           />

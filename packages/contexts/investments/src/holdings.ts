@@ -128,12 +128,18 @@ export function normaliseTransactionType(
   if (/min(e|ing)/.test(key)) return 'MINING';
   if (/fork/.test(key)) return 'FORK';
   if (/dividend/.test(key)) return 'DIVIDEND';
+  // WP 10.3: Plaid's `cash/long-term capital gain`, `cash/short-term capital
+  // gain` and `cash/unqualified gain` are a fund's distributions — income, like
+  // a dividend. Before this line they fell through to `cash` → `CASH`, which
+  // `GET /investments/performance` counted as a contribution.
+  if (/capital gain|unqualified gain/.test(key)) return 'DIVIDEND';
   if (/interest/.test(key)) return 'INTEREST';
   // `receive`/`send` are the CSV export's words for the two halves of a
   // self-transfer; `deposit`/`withdrawal` are its words for fiat.
   if (/receive|transfer.*in|deposit/.test(key)) return 'TRANSFER_IN';
   if (/send|transfer.*out|withdraw/.test(key)) return 'TRANSFER_OUT';
-  if (/\bfee\b/.test(key)) return 'FEE';
+  // `cash/margin expense` is a cost, not a cash movement (WP 10.3, as above).
+  if (/\bfee\b|margin expense/.test(key)) return 'FEE';
   if (/cash|sweep/.test(key)) return 'CASH';
   if (/split/.test(key)) return 'SPLIT';
   if (/transfer/.test(key)) return 'TRANSFER_IN';

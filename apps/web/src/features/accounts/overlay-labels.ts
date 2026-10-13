@@ -10,6 +10,7 @@ import type { Account } from '../../api/generated/types.gen.ts';
 export type TaxTreatment = NonNullable<Account['overlay']['taxTreatment']['effective']>;
 export type AccountRole = NonNullable<Account['overlay']['role']['effective']>;
 export type ValuationBasis = Account['overlay']['valuation']['effective'];
+export type ManagementStyle = NonNullable<Account['overlay']['management']['effective']>;
 
 export const TAX_TREATMENTS: readonly TaxTreatment[] = ['TAXABLE', 'TAX_DEFERRED', 'ROTH', 'HSA'];
 export const ACCOUNT_ROLES: readonly AccountRole[] = [
@@ -35,6 +36,19 @@ export const ROLE_LABELS: Readonly<Record<AccountRole, string>> = {
   tax_deferred: 'Tax-deferred retirement',
   tax_free: 'Tax-free',
   liability: 'Liability',
+};
+
+/** WP 10.3: who manages an investment account. */
+export const MANAGEMENT_STYLES: readonly ManagementStyle[] = [
+  'advisor',
+  'robo_advisor',
+  'self_directed',
+];
+
+export const MANAGEMENT_LABELS: Readonly<Record<ManagementStyle, string>> = {
+  advisor: 'An advisor',
+  robo_advisor: 'A robo-advisor',
+  self_directed: 'Me (self-directed)',
 };
 
 export const VALUATION_LABELS: Readonly<Record<ValuationBasis, string>> = {
@@ -94,12 +108,20 @@ export function valuationText(account: Account): { value: string; source: string
     : { value: VALUATION_LABELS[valuation.effective], source: 'default' };
 }
 
+export function managementText(account: Account): { value: string; source: string } {
+  const management = account.overlay.management;
+  return management.effective === null
+    ? { value: 'Not classified', source: 'you have not said' }
+    : { value: MANAGEMENT_LABELS[management.effective], source: 'set by you' };
+}
+
 /** Whether the holder has set anything on this account. */
 export function hasOverride(account: Account): boolean {
   return (
     account.overlay.taxTreatment.override !== null ||
     account.overlay.role.source === 'holder' ||
-    account.overlay.valuation.source === 'holder'
+    account.overlay.valuation.source === 'holder' ||
+    account.overlay.management.source === 'holder'
   );
 }
 
@@ -108,11 +130,16 @@ export function applicableFields(account: Account): {
   tax: boolean;
   role: boolean;
   valuation: boolean;
+  management: boolean;
 } {
+  const investing = account.type === 'investment' || account.type === 'crypto';
   return {
     tax: account.classification === 'asset',
     role: true,
-    valuation: account.type === 'investment' || account.type === 'crypto',
+    valuation: investing,
+    // The server accepts it on any account; the screen offers it where a
+    // portfolio lives, which is where "who picks the trades" means something.
+    management: investing,
   };
 }
 
@@ -122,11 +149,12 @@ export function applicableFields(account: Account): {
  * instead of keeping a draft over it.
  */
 export function overlayKeyOf(account: Account): string {
-  const { taxTreatment, role, valuation } = account.overlay;
+  const { taxTreatment, role, valuation, management } = account.overlay;
   return [
     taxTreatment.override ?? '-',
     role.effective ?? '-',
     valuation.source,
     valuation.effective,
+    management.effective ?? '-',
   ].join('|');
 }

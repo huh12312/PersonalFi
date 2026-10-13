@@ -21,9 +21,12 @@ import type {
   GetAllocationResponse,
   GetDriftResponse,
   GetMarketDataSettingsResponse,
+  GetPerformanceByManagementResponse,
   GetPerformanceResponse,
+  InvestmentActivity,
   ListAccountHoldingsResponse,
   ListHoldingsResponse,
+  PeriodSummary,
   PriceQuote,
 } from '../../api/generated/types.gen.ts';
 
@@ -464,8 +467,91 @@ export function performanceResponse(
       marketValue: usd('17649960'),
       costBasis: usd('15825750'),
     },
+    summary: summaryFixture({ closingValue: usd('17649960') }),
+    scope: { kind: 'portfolio', management: null, accountIds: [] },
     unvaluedTransfers: 0,
     valuationDates: ['2025-09-23', '2026-09-23'],
+    ...overrides,
+  };
+}
+
+/** WP 10.3: a period summary — the health snapshot's dollars. */
+export function summaryFixture(overrides: Partial<PeriodSummary> = {}): PeriodSummary {
+  return {
+    kind: 'period_summary',
+    from: '2025-09-23',
+    to: '2026-09-23',
+    openingValue: usd('14200000'),
+    closingValue: usd('17649960'),
+    netContributions: usd('1800000'),
+    dividendsAndInterest: usd('312455'),
+    reinvestedDividends: usd('0'),
+    feesPaid: usd('4210'),
+    taxesWithheld: usd('0'),
+    periodGain: usd('1649960'),
+    complete: true,
+    exclusions: {
+      unpricedSecurities: [],
+      foreignCurrencyMovements: [],
+      unvaluedTransfers: [],
+      unclassifiedMovements: [],
+    },
+    ...overrides,
+  };
+}
+
+/** WP 10.3: `GET /investments/performance/by-management`. */
+export function byManagementResponse(): GetPerformanceByManagementResponse {
+  const base = performanceResponse();
+  const row = (
+    management: GetPerformanceByManagementResponse['rows'][number]['management'],
+    accountIds: string[],
+    twr: string,
+    summary: Partial<PeriodSummary>,
+  ): GetPerformanceByManagementResponse['rows'][number] => ({
+    management,
+    accountIds,
+    timeWeighted: { ...base.timeWeighted, periodReturn: twr, annualized: twr },
+    moneyWeighted: base.moneyWeighted,
+    dollarGain: base.dollarGain,
+    summary: summaryFixture(summary),
+    unvaluedTransfers: 0,
+    valuationDates: base.valuationDates,
+  });
+  return {
+    from: base.from,
+    to: base.to,
+    currency: 'USD',
+    rows: [
+      row('advisor', ['acct-ira'], '0.0812', { closingValue: usd('9000000') }),
+      row('robo_advisor', ['acct-robo'], '0.1024', { closingValue: usd('4500000') }),
+      row('self_directed', ['acct-brokerage'], '0.1377', { closingValue: usd('4149960') }),
+    ],
+  };
+}
+
+/** WP 10.3: one `GET /investments/transactions` row. */
+export function activityFixture(overrides: Partial<InvestmentActivity> = {}): InvestmentActivity {
+  return {
+    id: '019a0000-0000-7000-8000-000000000001',
+    accountId: 'acct-brokerage',
+    tradeDate: '2026-05-28',
+    settleDate: null,
+    kind: 'buy',
+    type: 'BUY',
+    subtype: 'buy',
+    name: 'BUY VTI',
+    security: {
+      id: '019a0000-0000-7000-8000-0000000000aa',
+      symbol: 'VTI',
+      name: 'Vanguard Total Stock Market ETF',
+    },
+    quantity: '5.000000000000000000',
+    price: '268.4000000000',
+    amount: usd('-134200'),
+    flow: null,
+    fees: usd('0'),
+    source: 'BROKER',
     ...overrides,
   };
 }

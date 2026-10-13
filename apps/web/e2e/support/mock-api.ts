@@ -811,6 +811,32 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       );
     }
 
+    // WP 10.3: the Activity tab and the by-management comparison, answered as
+    // an install with no investment activity would answer them. The screen's
+    // own fixtures (a Sandbox-shaped portfolio) are `mock-investments.ts`'s.
+    if (path === '/api/investments/transactions' && method === 'GET') {
+      return route.fulfill(
+        json({
+          from: url.searchParams.get('from') ?? '2025-10-14',
+          to: url.searchParams.get('to') ?? '2026-10-13',
+          items: [],
+          nextCursor: null,
+          total: 0,
+          accounts: [],
+        }),
+      );
+    }
+    if (path === '/api/investments/performance/by-management' && method === 'GET') {
+      return route.fulfill(
+        json({
+          from: url.searchParams.get('from') ?? '2025-10-13',
+          to: '2026-10-13',
+          currency: 'USD',
+          rows: [],
+        }),
+      );
+    }
+
     if (path === '/api/sync/stream' || path.endsWith('/events')) {
       return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
     }

@@ -9,6 +9,51 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.2: investment activity, and performance by who manages each account
+
+**Status:** a patch release on v0.9.1. The tag `v0.9.2` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.2
+
+```bash
+git pull
+just upgrade
+```
+
+That is all. `just upgrade` takes the verified pre-migration backup, applies migration 0042 (one
+nullable column, `account_overrides.management`, with a CHECK, and the row-not-empty CHECK
+re-declared wider so a row may hold only that field; expand-only: every row valid before is valid
+after, nothing dropped from the data) and checks that the stack is ready.
+
+### Manual steps
+
+None. Investment activity a Plaid sync already fetched is listed at once; an account whose
+investment activity has not synced yet says so until the next sync.
+
+### What changed
+
+- **Activity.** Investments has an Activity tab: every buy, sell, dividend, reinvested dividend,
+  interest payment, contribution, withdrawal, fee and split in your investment accounts (Plaid's
+  investment transactions, which never appear under Transactions), with the account, the security,
+  quantity, price, amount and where the row came from. Filter by account, type and dates; the last
+  twelve months by default.
+- **Who manages each account.** An investment account's settings page has "Managed by": an
+  advisor, a robo-advisor, or you. It changes nothing in your plan.
+- **Performance by scope.** The Performance tab measures the whole portfolio, one account, or each
+  kind of manager side by side. The comparison puts the time-weighted returns in one table (the
+  one rate that is fair to compare) and the money-weighted returns and the dollars in separate
+  tables, never on one row.
+- **A health snapshot** above it: the value, what you put in or took out, dividends and interest,
+  fees, and the gain that did not come from your own money; the time-weighted return beside it in
+  its own block, with whether it is annualized. Anything that could not be valued is named rather
+  than counted as zero.
+- **Fixed: what counts as money in or out.** A 401(k) payroll contribution that a provider reports
+  as a purchase, and an IRA distribution reported as a sale, are now counted as contributions and
+  withdrawals; a fund's capital-gain distribution, a tax withheld and a margin expense are no longer
+  counted as deposits or withdrawals; a transfer of shares is valued on the day it happened. Returns
+  for affected accounts change on upgrade, to the right numbers
+  ([wp10.3-investment-activity-performance.md](evidence/phase-10/wp10.3-investment-activity-performance.md)).
+
 ## v0.9.1: Plaid credentials in the product
 
 **Status:** a patch release on v0.9.0. The tag `v0.9.1` is pushed by the maintainer once CI is green.

@@ -38,6 +38,7 @@ import { isLedgerError } from '../../src/errors.ts';
 import { LEDGER_EVENTS } from '../../src/events.ts';
 import {
   ACCOUNT_ROLES,
+  MANAGEMENT_STYLES,
   TAX_TREATMENTS,
   VALUATION_BASES,
   clearAccountOverrides,
@@ -399,6 +400,65 @@ describe.skipIf(NO_DATABASE)(
       expect(valuesIn('tax_treatment').sort()).toEqual([...TAX_TREATMENTS].sort());
       expect(valuesIn('role').sort()).toEqual([...ACCOUNT_ROLES].sort());
       expect(valuesIn('valuation').sort()).toEqual([...VALUATION_BASES].sort());
+      // WP 10.3 (0042).
+      expect(valuesIn('management').sort()).toEqual([...MANAGEMENT_STYLES].sort());
+    });
+
+    it('management alone is an override: set, resolved, announced, cleared — and it moves no projection fingerprint (WP 10.3)', async () => {
+      const { accountId } = await seedInvestment(database, clock);
+      const holder = database.userId;
+
+      // A management-only row is allowed: 0042 widened account_overrides_not_empty.
+      expect(
+        await setOverrides(database, clock, {
+          userId: holder,
+          accountId,
+          management: 'robo_advisor',
+        }),
+      ).toEqual({ changed: true, changedFields: ['management'], cleared: false });
+      const stored = await getAccountOverride(database.db, { userId: holder, accountId });
+      expect(stored).toMatchObject({
+        taxTreatment: null,
+        role: null,
+        valuation: null,
+        management: 'robo_advisor',
+      });
+      expect(
+        resolveAccountOverlay({ override: stored, providerTaxDefault: FOUR_OH_ONE_K }).management,
+      ).toEqual({ value: 'robo_advisor', source: 'holder' });
+      expect(
+        resolveAccountOverlay({ override: null, providerTaxDefault: FOUR_OH_ONE_K }).management,
+      ).toEqual({ value: null, source: 'none' });
+
+      // Who manages an account is not a projection input: a holder whose only
+      // override is `management` digests exactly as one with none.
+      expect(
+        overrideFingerprint(await listAccountOverrides(database.db, { userId: holder })),
+      ).toBeNull();
+
+      // A full replacement that omits it clears it, and the empty row goes.
+      expect(await setOverrides(database, clock, { userId: holder, accountId })).toEqual({
+        changed: true,
+        changedFields: ['management'],
+        cleared: true,
+      });
+      expect(await overrideRows(database)).toHaveLength(0);
+      expect(
+        (
+          await eventPayloads<{ changedFields: string[] }>(
+            database,
+            'ledger.AccountOverrideChanged',
+          )
+        ).map((event) => event.changedFields),
+      ).toEqual([['management'], ['management']]);
+
+      // The CHECK refuses a word outside the vocabulary, whatever the code above it does.
+      await expect(
+        database.db.execute(sql`
+          INSERT INTO account_overrides (id, user_id, account_id, management)
+          VALUES (${newId()}::uuid, ${holder}::uuid, ${accountId}::uuid, 'hedge_fund')
+        `),
+      ).rejects.toThrow();
     });
 
     it('the event is registered with the ledger, so the pump upcasts it', () => {

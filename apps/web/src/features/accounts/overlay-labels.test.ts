@@ -93,11 +93,17 @@ describe('the words an overlay is read in', () => {
     expect(hasOverride(account({}))).toBe(false);
     expect(hasOverride(typed)).toBe(true);
 
-    expect(applicableFields(account({}))).toEqual({ tax: true, role: true, valuation: true });
+    expect(applicableFields(account({}))).toEqual({
+      tax: true,
+      role: true,
+      valuation: true,
+      management: true,
+    });
     expect(applicableFields(account({ type: 'credit', classification: 'liability' }))).toEqual({
       tax: false,
       role: true,
       valuation: false,
+      management: false,
     });
     expect(applicableFields(account({ type: 'depository' })).valuation).toBe(false);
   });

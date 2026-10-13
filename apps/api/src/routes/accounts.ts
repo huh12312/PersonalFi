@@ -52,6 +52,7 @@
 import { DateOnly, Money } from '@core/kernel';
 import {
   ACCOUNT_ROLES,
+  MANAGEMENT_STYLES,
   TAX_TREATMENTS,
   VALUATION_BASES,
   applyProviderTransactions,
@@ -101,6 +102,8 @@ const accountBalanceSchema = z
 const taxTreatmentSchema = z.enum(TAX_TREATMENTS);
 const accountRoleSchema = z.enum(ACCOUNT_ROLES);
 const valuationSchema = z.enum(VALUATION_BASES);
+/** WP 10.3: who manages the account. */
+const managementSchema = z.enum(MANAGEMENT_STYLES);
 
 /**
  * What an account is, as the holder sees it — the effective value *and where it
@@ -129,6 +132,16 @@ const accountOverlaySchema = z
       effective: valuationSchema,
       source: z.enum(['holder', 'default']),
     }),
+    management: z
+      .object({
+        effective: managementSchema.nullable(),
+        source: z.enum(['holder', 'none']),
+      })
+      .describe(
+        'Who manages the account (WP 10.3): advisor, robo_advisor or self_directed. `null` is ' +
+          'unclassified — the holder has not said, and nothing infers it. Groups ' +
+          '`GET /investments/performance/by-management`; moves no projection.',
+      ),
   })
   .meta({ id: 'AccountOverlay' });
 
@@ -191,6 +204,7 @@ function serialiseOverlay(overlay: ResolvedAccountOverlay): z.infer<typeof accou
     },
     role: { effective: overlay.role.value, source: overlay.role.source },
     valuation: { effective: overlay.valuation.value, source: overlay.valuation.source },
+    management: { effective: overlay.management.value, source: overlay.management.source },
   };
 }
 
@@ -427,14 +441,17 @@ export const accountRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       {
         schema: {
           operationId: 'setAccountOverrides',
-          summary: 'Set what an account is: its tax treatment, role and valuation basis',
+          summary:
+            'Set what an account is: its tax treatment, role, valuation basis and who manages it',
           description:
             'The holder’s overlay on the provider’s facts, which are never mutated. A **full ' +
             'replacement**: an omitted or `null` field is cleared, and when none is left the ' +
             'override is removed. `taxTreatment` outranks the provider-subtype default the ' +
             'projection starts from (CF-16). `valuation: "balance"` counts an investment or ' +
             'crypto account that has no priced holdings at its latest balance instead of leaving ' +
-            'it out — labelled as such wherever it appears (O-2). Changing any field makes a ' +
+            'it out — labelled as such wherever it appears (O-2). `management` (advisor, ' +
+            'robo_advisor, self_directed) groups the performance-by-management comparison and ' +
+            'moves no projection. Changing tax treatment, role or valuation makes a ' +
             'stored projection read `stale`, naming the change; nothing is recomputed. Another ' +
             'holder’s account is a 404, exactly as a missing one. Emits ' +
             '`ledger.AccountOverrideChanged`. Session only: no money moves.',
@@ -444,6 +461,7 @@ export const accountRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             taxTreatment: taxTreatmentSchema.nullable().optional(),
             role: accountRoleSchema.nullable().optional(),
             valuation: valuationSchema.nullable().optional(),
+            management: managementSchema.nullable().optional(),
           }),
           response: {
             200: z.object({ account: accountSchema, changed: z.boolean() }),
@@ -465,6 +483,7 @@ export const accountRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
                   taxTreatment: request.body.taxTreatment ?? null,
                   role: request.body.role ?? null,
                   valuation: request.body.valuation ?? null,
+                  management: request.body.management ?? null,
                 },
                 { clock, correlationId: String(request.id) },
               ),

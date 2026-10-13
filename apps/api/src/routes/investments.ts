@@ -58,23 +58,27 @@ import {
   type DateOnly as DateOnlyType,
   type Money as MoneyType,
 } from '@core/kernel';
-import { listAccounts } from '@ctx/ledger';
+import { MANAGEMENT_STYLES, listAccounts } from '@ctx/ledger';
 import {
   AVERAGE_COST_ELIGIBLE_TYPES,
   BASIS_METHODS,
   allocationOf,
+  classifyActivity,
   createPriceReader,
   driftAgainstTargets,
   drizzleLotStore,
   drizzlePriceStore,
   effectiveClassificationOf,
+  externalFlowsOf,
   identifierKeyOf,
   marketValueOf,
   moneyWeightedReturn,
   portfolioDollarGain,
   ratio,
+  summariseActivity,
   timeWeightedReturn,
   valueHoldings,
+  type ActivityInput,
   type AllocationDimension,
   type AllocationReport,
   type AllocationTarget,
@@ -90,6 +94,7 @@ import {
   type PricePoint,
   type PriceReader,
   type StoredOverlay,
+  type SummaryMovement,
   type TimeWeightedReturn,
   type ValuationBasis,
   type ValuationOptions,
@@ -676,6 +681,10 @@ export interface WireTimeWeightedReturn {
   readonly dollarGain?: never;
   readonly marketValue?: never;
   readonly costBasis?: never;
+  /** WP 10.3: nor any of the period summary's dollar figures. */
+  readonly periodGain?: never;
+  readonly netContributions?: never;
+  readonly closingValue?: never;
 }
 
 export type WireMoneyWeightedReturn =
@@ -865,73 +874,246 @@ function dollarGainWireOf(report: DollarGain): WireDollarGain {
   };
 }
 
+/**
+ * The health snapshot's dollar half (WP 10.3): what the scope was worth, what
+ * went in and out, what it earned in income and paid in fees over the period.
+ *
+ * A **fourth** disjoint shape, guarded like the other three: it carries dollar
+ * figures and therefore no rate, so the strip that renders it cannot put a TWR
+ * beside a dollar gain (07 §4.2) — the TWR is a separate object the UI renders
+ * in a separate block. `periodGain` is `closing − opening − netContributions`:
+ * the change in value that did not come from the holder's own money.
+ *
+ * Nothing in it is fabricated (O-2, `fees.ts`'s house style): a position with
+ * no price on a valuation date, a movement in another currency, an external
+ * transfer that could not be valued and a cash movement that could not be
+ * classified are each **excluded and named** under `exclusions`, and
+ * `complete` is `false` whenever any list is non-empty.
+ */
+export interface WirePeriodSummary {
+  readonly kind: 'period_summary';
+  readonly from: string;
+  readonly to: string;
+  readonly openingValue: { readonly minor: string; readonly currency: string };
+  readonly closingValue: { readonly minor: string; readonly currency: string };
+  readonly netContributions: { readonly minor: string; readonly currency: string };
+  readonly dividendsAndInterest: { readonly minor: string; readonly currency: string };
+  readonly reinvestedDividends: { readonly minor: string; readonly currency: string };
+  readonly feesPaid: { readonly minor: string; readonly currency: string };
+  readonly taxesWithheld: { readonly minor: string; readonly currency: string };
+  readonly periodGain: { readonly minor: string; readonly currency: string };
+  readonly complete: boolean;
+  readonly exclusions: {
+    unpricedSecurities: { securityId: string; symbol: string | null; name: string | null }[];
+    foreignCurrencyMovements: string[];
+    unvaluedTransfers: string[];
+    unclassifiedMovements: string[];
+  };
+  /** 07 §4.2: a dollar figure never shares an object with a rate. */
+  readonly periodReturn?: never;
+  readonly annualized?: never;
+  readonly timeWeighted?: never;
+  readonly benchmarkComparable?: never;
+}
+
+const periodSummaryWire = z
+  .object({
+    kind: z.literal('period_summary'),
+    from: dateOnly,
+    to: dateOnly,
+    openingValue: moneyWire.describe('Σ priced positions on `from`.'),
+    closingValue: moneyWire.describe('Σ priced positions on `to`: the value at `to`.'),
+    netContributions: moneyWire.describe(
+      'Σ external flows in (from, to], positive = net money in: contributions, withdrawals, ' +
+        'transfers in and out (in kind, valued at the transfer date). The same flows the TWR ' +
+        'and MWR are measured against.',
+    ),
+    dividendsAndInterest: moneyWire.describe('Cash dividends, fund distributions and interest.'),
+    reinvestedDividends: moneyWire.describe(
+      'Reinvested dividends, apart: a broker reporting both legs would otherwise count one twice.',
+    ),
+    feesPaid: moneyWire.describe('Fee rows plus commissions on trades. A magnitude.'),
+    taxesWithheld: moneyWire.describe('Taxes withheld in the account. A magnitude.'),
+    periodGain: moneyWire.describe('closingValue − openingValue − netContributions.'),
+    complete: z.boolean().describe('false when anything below was excluded.'),
+    exclusions: z.object({
+      unpricedSecurities: z.array(
+        z.object({
+          securityId: z.string(),
+          symbol: z.string().nullable(),
+          name: z.string().nullable(),
+        }),
+      ),
+      foreignCurrencyMovements: z.array(z.string()),
+      unvaluedTransfers: z.array(z.string()),
+      unclassifiedMovements: z.array(z.string()),
+    }),
+  })
+  .meta({ id: 'PeriodSummary' });
+
 // ---------------------------------------------------------------------------
 // Performance inputs
 // ---------------------------------------------------------------------------
 
-interface FlowRow extends Record<string, unknown> {
+interface MovementRow extends Record<string, unknown> {
+  id: string;
+  account_id: string;
+  security_id: string | null;
   trade_date: string;
-  amount_minor: string | bigint;
-  currency: string;
   type: string;
+  subtype: string | null;
+  amount_minor: string | bigint;
+  fees_minor: string | bigint;
+  currency: string;
+  quantity: string;
 }
 
 /**
- * The external cash flows a return is measured against.
+ * Which accounts a performance question is about. `null` is the whole
+ * portfolio — every position and every movement the holder has — which is
+ * exactly what the route answered before WP 10.3 added the other two.
+ */
+export type AccountScope = readonly string[] | null;
+
+/**
+ * One bound `uuid[]` parameter as a Postgres array literal (`domain.ts`'s
+ * `uuidArrayParameter`, for the reason it gives: Drizzle's `sql` template
+ * expands an interpolated array into a row constructor, not an array). The ids
+ * are this file's own reads of `accounts.id`, checked to be UUIDs anyway.
+ */
+function uuidArrayLiteral(ids: readonly string[]): string {
+  for (const id of ids) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)) {
+      throw new Error(`not a UUID: ${JSON.stringify(id)}`);
+    }
+  }
+  return `{${ids.join(',')}}`;
+}
+
+/**
+ * The `account_id` predicate for a scope: everything, or the listed accounts.
+ * Every table it is used on names the column `account_id`, so the column is
+ * written here rather than spliced in (G-28: no `sql.raw`).
+ */
+function accountPredicate(scope: AccountScope) {
+  return scope === null ? sql`TRUE` : sql`account_id = ANY(${uuidArrayLiteral(scope)}::uuid[])`;
+}
+
+/**
+ * Every investment movement in `(from, to]` for the scope, classified once.
  *
- * **Which rows count, and why.** A `BUY` inside an investment account moves cash
- * from that account's sweep into a security; it changes nothing about what the
- * user *put in*, so it is internal and must not appear here — counting it would
- * make every purchase look like a deposit and drag the measured return towards
- * zero. What counts is value crossing the account boundary: `CASH` (deposits
- * and withdrawals, house sign convention, negative = out), `TRANSFER_IN` and
- * `TRANSFER_OUT`.
+ * **Which rows are external flows, and why** — WP 10.3 replaced a filter on
+ * the house type (`type IN ('CASH', 'TRANSFER_IN', 'TRANSFER_OUT')`) with
+ * `@ctx/investments`' `classifyActivity`, because the house type answers the
+ * lot engine's question, not this one. The filter counted a fund's capital
+ * gain distribution, a tax withheld and a margin expense (all `CASH`) as
+ * deposits and withdrawals, a merger (`TRANSFER_IN`) as a transfer, and missed
+ * a 401(k) payroll contribution and an IRA distribution entirely (Plaid files
+ * them as `buy/contribution` and `sell/distribution`, which are `BUY` and
+ * `SELL` to the lot engine). The audit and the regression tests are in
+ * `docs/evidence/phase-10/wp10.3-investment-activity-performance.md` §4.
  *
- * A transfer whose `amount_minor` is zero is a real movement we cannot value —
- * an in-kind securities transfer with no cash leg — and it is **counted in
- * `unvaluedTransfers` rather than treated as a zero flow**, because a zero flow
+ * What counts is value crossing the account boundary; a dividend, a reinvested
+ * dividend, interest, a fee, a tax and a trade are part of the return. An
+ * in-kind transfer (no cash amount) is priced at its trade date by
+ * {@link valueInKindTransfers}; one that cannot be priced is counted in
+ * `unvaluedTransfers` rather than treated as a zero flow, because a zero flow
  * silently attributes the whole transferred position to performance.
  */
-async function readFlows(
+async function readMovements(
   database: Database,
   userId: string,
   from: string,
   to: string,
-): Promise<{ readonly flows: readonly ExternalFlow[]; readonly unvaluedTransfers: number }> {
-  const result = await database.execute<FlowRow>(sql`
-    SELECT to_char(trade_date, 'YYYY-MM-DD') AS trade_date,
+  scope: AccountScope,
+): Promise<SummaryMovement[]> {
+  const result = await database.execute<MovementRow>(sql`
+    SELECT id,
+           account_id,
+           security_id,
+           to_char(trade_date, 'YYYY-MM-DD') AS trade_date,
+           type,
+           subtype,
            amount_minor,
+           fees_minor,
            currency,
-           type
+           quantity
       FROM investment_transactions
      WHERE user_id = ${userId}::uuid
-       AND type IN ('CASH', 'TRANSFER_IN', 'TRANSFER_OUT')
+       AND ${accountPredicate(scope)}
        AND trade_date > ${from}::date
        AND trade_date <= ${to}::date
-     ORDER BY trade_date
+     ORDER BY trade_date, id
   `);
-
-  const flows: ExternalFlow[] = [];
-  let unvaluedTransfers = 0;
-  for (const row of result.rows) {
+  return result.rows.map((row) => {
     const code = toCurrency(row.currency.trim());
-    // D4 again: a foreign-currency flow is not converted at a rate this route
-    // did not read. It is left out and named, never folded in at par.
-    if (code !== BASE_CURRENCY) {
-      unvaluedTransfers += 1;
-      continue;
-    }
-    const minor = BigInt(row.amount_minor);
-    if (minor === 0n) {
-      unvaluedTransfers += 1;
-      continue;
-    }
-    flows.push({
+    const input: ActivityInput = {
+      type: row.type,
+      subtype: row.subtype,
+      amount: Money.of(BigInt(row.amount_minor), code),
+      fees: Money.of(BigInt(row.fees_minor), code),
+      quantity: Quantity.fromDatabaseString(String(row.quantity)),
+      securityId: row.security_id,
+    };
+    return {
+      id: row.id,
       date: DateOnly.parse(String(row.trade_date).slice(0, 10)),
-      amount: Money.of(minor, code),
-    });
+      input,
+      classified: classifyActivity(input),
+    };
+  });
+}
+
+/**
+ * Price every in-kind external transfer at its trade date, through the same
+ * ladder the valuations use. One batched read per distinct date. A transfer
+ * whose security has no price that day (or a price in another currency) is
+ * left unpriced and named, never valued at zero.
+ */
+async function valueInKindTransfers(
+  movements: readonly SummaryMovement[],
+  reader: PriceReader,
+): Promise<{ readonly movements: SummaryMovement[]; readonly unpriced: ReadonlySet<string> }> {
+  const scale = minorUnitScale(BASE_CURRENCY);
+  const byDate = new Map<string, SummaryMovement[]>();
+  for (const movement of movements) {
+    if (movement.classified.inKind === null) continue;
+    if (movement.input.amount.currency !== BASE_CURRENCY) continue;
+    const list = byDate.get(movement.date) ?? [];
+    list.push(movement);
+    byDate.set(movement.date, list);
   }
-  return { flows, unvaluedTransfers };
+  const valued = new Map<string, MoneyType>();
+  const unpriced = new Set<string>();
+  for (const [date, list] of byDate) {
+    const points = await reader.priceMany(
+      [...new Set(list.map((movement) => movement.classified.inKind?.securityId ?? ''))],
+      date,
+      BASE_CURRENCY,
+    );
+    for (const movement of list) {
+      const inKind = movement.classified.inKind;
+      if (inKind === null) continue;
+      const point = points.get(inKind.securityId) ?? null;
+      if (point === null || toCurrency(point.currency) !== BASE_CURRENCY) {
+        unpriced.add(inKind.securityId);
+        continue;
+      }
+      const value = marketValueOf(
+        inKind.quantity,
+        { amount: Quantity.of(point.close), currency: BASE_CURRENCY },
+        scale,
+      );
+      valued.set(movement.id, inKind.direction === 'in' ? value : Money.negate(value));
+    }
+  }
+  return {
+    movements: movements.map((movement) => {
+      const value = valued.get(movement.id);
+      return value === undefined ? movement : { ...movement, valuedFlow: value };
+    }),
+    unpriced,
+  };
 }
 
 /**
@@ -962,7 +1144,8 @@ interface PositionRow extends Record<string, unknown> {
 }
 
 /**
- * What was held on `date`, across every account, one row per account × security.
+ * What was held on `date`, across the scope's accounts (every account when the
+ * scope is `null`), one row per account × security.
  *
  * The union of `holdings_snapshots` (the per-day history) and `holdings` (the
  * current position) — `domain.ts`'s `createPlanningHoldingsReader` gives the
@@ -974,6 +1157,7 @@ async function positionsOn(
   database: Database,
   userId: string,
   date: string,
+  scope: AccountScope,
 ): Promise<readonly PositionRow[]> {
   const result = await database.execute<PositionRow>(sql`
     SELECT DISTINCT ON (security_id, account_id)
@@ -982,10 +1166,12 @@ async function positionsOn(
         SELECT security_id, account_id, quantity, as_of_date
           FROM holdings_snapshots
          WHERE user_id = ${userId}::uuid
+           AND ${accountPredicate(scope)}
         UNION ALL
         SELECT security_id, account_id, quantity, as_of_date
           FROM holdings
          WHERE user_id = ${userId}::uuid
+           AND ${accountPredicate(scope)}
       ) AS o
      WHERE as_of_date <= ${date}::date
      ORDER BY security_id, account_id, as_of_date DESC
@@ -1081,6 +1267,79 @@ function parseTargets(raw: readonly string[]): readonly AllocationTarget[] {
 }
 
 // ---------------------------------------------------------------------------
+// Scope (WP 10.3): one account, or every account one kind of manager runs
+// ---------------------------------------------------------------------------
+
+/**
+ * `management` as a performance scope: the holder's three classes from the
+ * account overlay (`@ctx/ledger`'s `MANAGEMENT_STYLES`, a CHECK in 0042), plus
+ * `unclassified` for an investment account the holder has not classified —
+ * named, so it is a row of its own and never silently folded into another.
+ */
+export const MANAGEMENT_SCOPES = [...MANAGEMENT_STYLES, 'unclassified'] as const;
+export type ManagementScope = (typeof MANAGEMENT_SCOPES)[number];
+
+const scopeWire = z
+  .object({
+    kind: z.enum(['portfolio', 'account', 'management']),
+    management: z.enum(MANAGEMENT_SCOPES).nullable(),
+    accountIds: z
+      .array(z.uuid())
+      .describe('The accounts measured; empty for the whole portfolio (every account).'),
+  })
+  .meta({ id: 'PerformanceScope' });
+
+export interface InvestmentAccountRead {
+  readonly id: string;
+  readonly name: string;
+  readonly type: string;
+  readonly provider: string;
+  readonly connectionId: string | null;
+  readonly management: (typeof MANAGEMENT_STYLES)[number] | null;
+}
+
+/**
+ * The accounts a performance or activity question can be about: every
+ * investment or crypto account, plus any other account that holds a position
+ * or has an investment movement (a manual account typed otherwise still has a
+ * portfolio if it holds one). Joined to the holder's overlay for `management`.
+ * `user_id` is in the predicate of every table touched, not trusted to a join.
+ */
+export async function investmentAccountsOf(
+  database: Database,
+  userId: string,
+): Promise<readonly InvestmentAccountRead[]> {
+  const result = await database.execute<{
+    id: string;
+    name: string;
+    type: string;
+    provider: string;
+    connection_id: string | null;
+    management: (typeof MANAGEMENT_STYLES)[number] | null;
+  }>(sql`
+    SELECT a.id, a.name, a.type, a.provider, a.connection_id, o.management
+      FROM accounts a
+      LEFT JOIN account_overrides o
+        ON o.user_id = ${userId}::uuid AND o.account_id = a.id
+     WHERE a.user_id = ${userId}::uuid
+       AND (a.type IN ('investment', 'crypto')
+            OR EXISTS (SELECT 1 FROM holdings h
+                        WHERE h.user_id = ${userId}::uuid AND h.account_id = a.id)
+            OR EXISTS (SELECT 1 FROM investment_transactions t
+                        WHERE t.user_id = ${userId}::uuid AND t.account_id = a.id))
+     ORDER BY a.name, a.id
+  `);
+  return result.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    provider: row.provider,
+    connectionId: row.connection_id,
+    management: row.management,
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
@@ -1098,6 +1357,84 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       reads.map((read) => [read.securityId, read.securityType]),
     );
     return priceHoldings(reads, priceReaderFor(database, userId, clock, kinds), asOf);
+  };
+
+  /** {@link portfolioFor} over a scope: every account (`null`) or the listed ones. */
+  const portfolioForScope = async (
+    userId: string,
+    scope: AccountScope,
+    asOf: string,
+  ): Promise<PricedPortfolio> => {
+    const all = await readHoldings(database, userId, null);
+    const inScope = scope === null ? null : new Set(scope);
+    const reads = inScope === null ? all : all.filter((read) => inScope.has(read.accountId));
+    const kinds = new Map<string, string>(
+      reads.map((read) => [read.securityId, read.securityType]),
+    );
+    return priceHoldings(reads, priceReaderFor(database, userId, clock, kinds), asOf);
+  };
+
+  /**
+   * `?account=` or `?management=` → the accounts to measure (WP 10.3).
+   *
+   * Both at once is a 400: "this account, but only if an advisor runs it" is
+   * a question with two answers, and picking one silently is how a screen ends
+   * up labelled with the scope it did not compute. An account that is not
+   * this holder's — or not an investment account — is a 404, indistinguishable
+   * from one that does not exist. A management class with no accounts is a
+   * 404 too, naming the class: a portfolio of nothing has no return.
+   */
+  const resolveScope = async (
+    userId: string,
+    query: {
+      readonly account?: string | undefined;
+      readonly management?: ManagementScope | undefined;
+    },
+  ): Promise<{
+    readonly kind: 'portfolio' | 'account' | 'management';
+    readonly management: ManagementScope | null;
+    readonly accountIds: AccountScope;
+  }> => {
+    if (query.account !== undefined && query.management !== undefined) {
+      throw new AppError({
+        status: 400,
+        code: 'investments.scope_conflict',
+        title: 'Bad Request',
+        detail: 'pass `account` or `management`, not both',
+        family: 'user',
+      });
+    }
+    if (query.account === undefined && query.management === undefined) {
+      return { kind: 'portfolio', management: null, accountIds: null };
+    }
+    const accounts = await investmentAccountsOf(database, userId);
+    if (query.account !== undefined) {
+      const account = accounts.find((entry) => entry.id === query.account);
+      if (account === undefined) {
+        throw new AppError({
+          status: 404,
+          code: 'investments.account_not_found',
+          title: 'Not Found',
+          detail: 'no investment account with that id',
+          family: 'user',
+        });
+      }
+      return { kind: 'account', management: null, accountIds: [account.id] };
+    }
+    const management = query.management ?? 'unclassified';
+    const accountIds = accounts
+      .filter((entry) => (entry.management ?? 'unclassified') === management)
+      .map((entry) => entry.id);
+    if (accountIds.length === 0) {
+      throw new AppError({
+        status: 404,
+        code: 'investments.scope_empty',
+        title: 'Not Found',
+        detail: `no investment account is classified as ${management}`,
+        family: 'user',
+      });
+    }
+    return { kind: 'management', management, accountIds };
   };
 
   return async (app) => {
@@ -1554,6 +1891,182 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
     );
 
+    /**
+     * Every answer `/investments/performance` gives, for one scope (WP 10.3).
+     *
+     * Valuations (`positionsOn`) and flows (`readMovements`) are restricted to
+     * the scope's accounts; everything after that — sub-period linking, the
+     * Modified Dietz fallback flagged `approximate`, XIRR, the under-a-year
+     * annualization withholding, the disjoint wire shapes — is exactly the
+     * engine the whole-portfolio answer has always used.
+     */
+    const performanceFor = async (
+      userId: string,
+      fromDate: DateOnlyType,
+      toDate: DateOnlyType,
+      scope: AccountScope,
+    ) => {
+      // One kind lookup for the whole user, so the price ladder is asked for
+      // one kind per security rather than one per (security, date). The ticker
+      // and name are what an exclusion is named by.
+      const securityRows = await database.execute<{
+        id: string;
+        type: string;
+        ticker: string | null;
+        name: string | null;
+      }>(sql`
+        SELECT id, type, ticker, name FROM securities WHERE user_id = ${userId}::uuid
+      `);
+      const kinds = new Map(securityRows.rows.map((row) => [row.id, row.type]));
+      const securityById = new Map(securityRows.rows.map((row) => [row.id, row]));
+      const reader = priceReaderFor(database, userId, clock, kinds);
+      const scale = minorUnitScale(BASE_CURRENCY);
+
+      const read = await readMovements(database, userId, fromDate, toDate, scope);
+      const { movements, unpriced: unpricedTransfers } = await valueInKindTransfers(read, reader);
+      const { flows, unvalued } = externalFlowsOf(movements, BASE_CURRENCY);
+      const totals = summariseActivity(movements, BASE_CURRENCY);
+      const dates = valuationDatesFor(fromDate, toDate, flows);
+
+      const unpricedSecurities = new Set<string>(unpricedTransfers);
+      const valuations: DatedValuation[] = [];
+      for (const date of dates) {
+        const positions = await positionsOn(database, userId, date, scope);
+        let total = Money.zero(BASE_CURRENCY);
+        // One batched read per valuation date, not one per position (P-6).
+        const points = await reader.priceMany(
+          positions.map((position) => position.security_id),
+          date,
+          BASE_CURRENCY,
+        );
+        for (const position of positions) {
+          const point = points.get(position.security_id) ?? null;
+          const quantity = Quantity.fromDatabaseString(String(position.quantity));
+          // A position with no price (or a price in another currency) is left
+          // out of the valuation — and, since WP 10.3, *named* in the period
+          // summary rather than silently missing. A zero quantity is no
+          // position at all, priced or not.
+          if (point === null || toCurrency(point.currency) !== BASE_CURRENCY) {
+            if (!Quantity.isZero(quantity)) unpricedSecurities.add(position.security_id);
+            continue;
+          }
+          // `marketValueOf` is `@ctx/investments`' own `quantity × price`,
+          // rounded once, half-even, at the boundary into minor units. Reused
+          // rather than rewritten: a second rounding rule here would put two
+          // different portfolio values on two different screens.
+          total = Money.add(
+            total,
+            marketValueOf(
+              quantity,
+              { amount: Quantity.of(point.close), currency: BASE_CURRENCY },
+              scale,
+            ),
+          );
+        }
+        valuations.push({ date, value: total });
+      }
+
+      const opening = valuations[0];
+      const closing = valuations[valuations.length - 1];
+      if (opening === undefined || closing === undefined || valuations.length < 2) {
+        throw new AppError({
+          status: 400,
+          code: 'investments.no_valuations',
+          title: 'Bad Request',
+          detail: 'there is nothing to value over that period',
+          family: 'user',
+        });
+      }
+
+      const twr = timeWeightedReturn({ valuations, flows }, { allowApproximateFallback: true });
+      const mwr = moneyWeightedReturn({ openingValue: opening, flows, closingValue: closing });
+
+      // The dollar gain is answered over *today's* positions, which is the
+      // only set whose cost basis is known: a historical basis would need the
+      // lot ledger replayed to `from`, and WP 3.2's engine holds lots, not
+      // dated basis snapshots. Stated rather than implied.
+      const portfolio = await portfolioForScope(userId, scope, toDate);
+      const set = valueHoldings(portfolio.holdings, valuationOptionsFor('last_known'));
+      const valuedById = new Map(set.valued.map((entry) => [entry.holding.holdingId, entry]));
+      const positions: ValuedPosition[] = portfolio.reads.map((holding) => ({
+        id: holding.holdingId,
+        marketValue: valuedById.get(holding.holdingId)?.marketValue ?? null,
+        costBasis: holding.costBasis,
+      }));
+
+      const exclusions = {
+        unpricedSecurities: [...unpricedSecurities].sort().map((securityId) => ({
+          securityId,
+          symbol: securityById.get(securityId)?.ticker ?? null,
+          name: securityById.get(securityId)?.name ?? null,
+        })),
+        foreignCurrencyMovements: [...totals.foreignCurrency],
+        unvaluedTransfers: [...totals.unvaluedTransfers],
+        unclassifiedMovements: [...totals.unclassified],
+      };
+      const summary: WirePeriodSummary = {
+        kind: 'period_summary',
+        from: fromDate,
+        to: toDate,
+        openingValue: money(opening.value),
+        closingValue: money(closing.value),
+        netContributions: money(totals.netContributions),
+        dividendsAndInterest: money(totals.dividendsAndInterest),
+        reinvestedDividends: money(totals.reinvestedDividends),
+        feesPaid: money(totals.feesPaid),
+        taxesWithheld: money(totals.taxesWithheld),
+        periodGain: money(
+          Money.subtract(Money.subtract(closing.value, opening.value), totals.netContributions),
+        ),
+        complete:
+          exclusions.unpricedSecurities.length === 0 &&
+          exclusions.foreignCurrencyMovements.length === 0 &&
+          exclusions.unvaluedTransfers.length === 0 &&
+          exclusions.unclassifiedMovements.length === 0,
+        exclusions,
+      };
+
+      return {
+        timeWeighted: timeWeightedWireOf(twr),
+        moneyWeighted: moneyWeightedWireOf(mwr),
+        dollarGain: dollarGainWireOf(portfolioDollarGain(positions, BASE_CURRENCY)),
+        summary,
+        // Movements we could see but could not value: an external transfer
+        // with no price, or one in another currency. Never counted as zero.
+        unvaluedTransfers: unvalued.length,
+        valuationDates: [...dates],
+      };
+    };
+
+    /** `from`/`to` → two real dates, `to` strictly later, or a 400 naming why. */
+    const periodOf = async (query: {
+      readonly from: string;
+      readonly to?: string | undefined;
+    }): Promise<{ readonly fromDate: DateOnlyType; readonly toDate: DateOnlyType }> => {
+      const to = query.to ?? (await todayFor(deps));
+      if (!DateOnly.is(query.from) || !DateOnly.is(to)) {
+        throw new AppError({
+          status: 400,
+          code: 'investments.invalid_period',
+          title: 'Bad Request',
+          detail: 'from and to must be calendar dates that exist',
+          family: 'user',
+        });
+      }
+      const fromDate = DateOnly.parse(query.from);
+      const toDate = DateOnly.parse(to);
+      if (DateOnly.differenceInDays(fromDate, toDate) <= 0) {
+        throw new AppError({
+          status: 400,
+          code: 'investments.invalid_period',
+          title: 'Bad Request',
+          detail: '`to` must be later than `from`',
+          family: 'user',
+        });
+      }
+      return { fromDate, toDate };
+    };
+
     app.get(
       '/investments/performance',
       {
@@ -1563,7 +2076,75 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           description:
             '07 §4.2: never a TWR beside a dollar gain, never a benchmarked MWR. The three ' +
             'answers occupy three disjoint objects under three keys, so no object in this ' +
-            'payload expresses the forbidden pairing.',
+            'payload expresses the forbidden pairing. WP 10.3: `account` or `management` ' +
+            '(never both — 400) restricts the valuations and the flows to that scope; ' +
+            '`summary` is the period’s dollar picture (value, net contributions, income, fees), ' +
+            'a fourth disjoint object with every exclusion named.',
+          tags: ['investments'],
+          querystring: z.object({
+            from: dateOnly,
+            to: dateOnly.optional(),
+            account: z
+              .uuid()
+              .optional()
+              .describe('One account. Mutually exclusive with management.'),
+            management: z
+              .enum(MANAGEMENT_SCOPES)
+              .optional()
+              .describe(
+                'Every account the holder classified so (account overrides), or `unclassified`.',
+              ),
+          }),
+          response: {
+            200: z.object({
+              from: dateOnly,
+              to: dateOnly,
+              currency: z.string().length(3),
+              scope: scopeWire,
+              timeWeighted: timeWeightedWire,
+              moneyWeighted: moneyWeightedWire,
+              dollarGain: dollarGainWire,
+              summary: periodSummaryWire,
+              /** Movements we could see but could not value. Never counted as zero. */
+              unvaluedTransfers: z.int().nonnegative(),
+              valuationDates: z.array(dateOnly),
+            }),
+            ...problems(400, 401, 404, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const { fromDate, toDate } = await periodOf(request.query);
+        const scope = await resolveScope(session.userId, request.query);
+        const answer = await performanceFor(session.userId, fromDate, toDate, scope.accountIds);
+        return {
+          from: fromDate,
+          to: toDate,
+          currency: BASE_CURRENCY,
+          scope: {
+            kind: scope.kind,
+            management: scope.management,
+            accountIds: scope.accountIds === null ? [] : [...scope.accountIds],
+          },
+          ...answer,
+        };
+      },
+    );
+
+    app.get(
+      '/investments/performance/by-management',
+      {
+        schema: {
+          operationId: 'getPerformanceByManagement',
+          summary: 'Performance per management class: advisor, robo-advisor, self-directed',
+          description:
+            'One row per management class the holder has at least one investment account in, ' +
+            'plus `unclassified` when an account has none (WP 10.3). Each row is the scoped ' +
+            '`/investments/performance` answer: the same three disjoint objects (TWR, MWR, ' +
+            'dollar gain) and the period summary, never merged. Only the TWR is comparable ' +
+            'across rows (07 §4.2: it removes the effect of when money arrived); an MWR is the ' +
+            'holder’s own rate and is never benchmarked.',
           tags: ['investments'],
           querystring: z.object({ from: dateOnly, to: dateOnly.optional() }),
           response: {
@@ -1571,12 +2152,20 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               from: dateOnly,
               to: dateOnly,
               currency: z.string().length(3),
-              timeWeighted: timeWeightedWire,
-              moneyWeighted: moneyWeightedWire,
-              dollarGain: dollarGainWire,
-              /** Movements we could see but could not value. Never counted as zero. */
-              unvaluedTransfers: z.int().nonnegative(),
-              valuationDates: z.array(dateOnly),
+              rows: z.array(
+                z
+                  .object({
+                    management: z.enum(MANAGEMENT_SCOPES),
+                    accountIds: z.array(z.uuid()),
+                    timeWeighted: timeWeightedWire,
+                    moneyWeighted: moneyWeightedWire,
+                    dollarGain: dollarGainWire,
+                    summary: periodSummaryWire,
+                    unvaluedTransfers: z.int().nonnegative(),
+                    valuationDates: z.array(dateOnly),
+                  })
+                  .meta({ id: 'ManagementPerformanceRow' }),
+              ),
             }),
             ...problems(400, 401, 503),
           },
@@ -1584,114 +2173,21 @@ export const investmentRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
       async (request) => {
         const session = await guards.requireSession(request);
-        const to = request.query.to ?? (await todayFor(deps));
-        if (!DateOnly.is(request.query.from) || !DateOnly.is(to)) {
-          throw new AppError({
-            status: 400,
-            code: 'investments.invalid_period',
-            title: 'Bad Request',
-            detail: 'from and to must be calendar dates that exist',
-            family: 'user',
+        const { fromDate, toDate } = await periodOf(request.query);
+        const accounts = await investmentAccountsOf(database, session.userId);
+        const rows = [];
+        for (const management of MANAGEMENT_SCOPES) {
+          const accountIds = accounts
+            .filter((account) => (account.management ?? 'unclassified') === management)
+            .map((account) => account.id);
+          if (accountIds.length === 0) continue;
+          rows.push({
+            management,
+            accountIds,
+            ...(await performanceFor(session.userId, fromDate, toDate, accountIds)),
           });
         }
-        const fromDate = DateOnly.parse(request.query.from);
-        const toDate = DateOnly.parse(to);
-        if (DateOnly.differenceInDays(fromDate, toDate) <= 0) {
-          throw new AppError({
-            status: 400,
-            code: 'investments.invalid_period',
-            title: 'Bad Request',
-            detail: '`to` must be later than `from`',
-            family: 'user',
-          });
-        }
-
-        const { flows, unvaluedTransfers } = await readFlows(
-          database,
-          session.userId,
-          fromDate,
-          toDate,
-        );
-        const dates = valuationDatesFor(fromDate, toDate, flows);
-
-        // One kind lookup for the whole user, so the price ladder is asked for
-        // one kind per security rather than one per (security, date).
-        const kindRows = await database.execute<{ id: string; type: string }>(sql`
-          SELECT id, type FROM securities WHERE user_id = ${session.userId}::uuid
-        `);
-        const kinds = new Map(kindRows.rows.map((row) => [row.id, row.type]));
-        const reader = priceReaderFor(database, session.userId, clock, kinds);
-        const scale = minorUnitScale(BASE_CURRENCY);
-
-        const valuations: DatedValuation[] = [];
-        for (const date of dates) {
-          const positions = await positionsOn(database, session.userId, date);
-          let total = Money.zero(BASE_CURRENCY);
-          // One batched read per valuation date, not one per position (P-6).
-          const points = await reader.priceMany(
-            positions.map((position) => position.security_id),
-            date,
-            BASE_CURRENCY,
-          );
-          for (const position of positions) {
-            const point = points.get(position.security_id) ?? null;
-            if (point === null) continue;
-            const priceCurrency = toCurrency(point.currency);
-            if (priceCurrency !== BASE_CURRENCY) continue;
-            // `marketValueOf` is `@ctx/investments`' own `quantity × price`,
-            // rounded once, half-even, at the boundary into minor units. Reused
-            // rather than rewritten: a second rounding rule here would put two
-            // different portfolio values on two different screens.
-            total = Money.add(
-              total,
-              marketValueOf(
-                Quantity.fromDatabaseString(String(position.quantity)),
-                { amount: Quantity.of(point.close), currency: priceCurrency },
-                scale,
-              ),
-            );
-          }
-          valuations.push({ date, value: total });
-        }
-
-        const opening = valuations[0];
-        const closing = valuations[valuations.length - 1];
-        if (opening === undefined || closing === undefined || valuations.length < 2) {
-          throw new AppError({
-            status: 400,
-            code: 'investments.no_valuations',
-            title: 'Bad Request',
-            detail: 'there is nothing to value over that period',
-            family: 'user',
-          });
-        }
-
-        const twr = timeWeightedReturn({ valuations, flows }, { allowApproximateFallback: true });
-        const mwr = moneyWeightedReturn({ openingValue: opening, flows, closingValue: closing });
-
-        // The dollar gain is answered over *today's* positions, which is the
-        // only set whose cost basis is known: a historical basis would need the
-        // lot ledger replayed to `from`, and WP 3.2's engine holds lots, not
-        // dated basis snapshots. Stated rather than implied.
-        const portfolio = await portfolioFor(session.userId, null, toDate);
-        const set = valueHoldings(portfolio.holdings, valuationOptionsFor('last_known'));
-        const valuedById = new Map(set.valued.map((entry) => [entry.holding.holdingId, entry]));
-        const positions: ValuedPosition[] = portfolio.reads.map((read) => ({
-          id: read.holdingId,
-          marketValue: valuedById.get(read.holdingId)?.marketValue ?? null,
-          costBasis: read.costBasis,
-        }));
-
-        return {
-          from: fromDate,
-          to: toDate,
-          currency: BASE_CURRENCY,
-          timeWeighted: timeWeightedWireOf(twr),
-          moneyWeighted: moneyWeightedWireOf(mwr),
-          dollarGain: dollarGainWireOf(portfolioDollarGain(positions, BASE_CURRENCY)),
-          unvaluedTransfers,
-          valuationDates: [...dates],
-        };
+        return { from: fromDate, to: toDate, currency: BASE_CURRENCY, rows };
       },
     );
 

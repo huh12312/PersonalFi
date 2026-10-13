@@ -875,11 +875,15 @@ function driftResponse(targets: readonly string[]) {
   };
 }
 
-function performanceResponse(from: string) {
+function performanceResponse(from: string, account: string | null = null) {
   return {
     from,
     to: AS_OF,
     currency: 'USD',
+    scope:
+      account === null
+        ? { kind: 'portfolio', management: null, accountIds: [] }
+        : { kind: 'account', management: null, accountIds: [account] },
     timeWeighted: {
       kind: 'time_weighted',
       periodReturn: '0.1142',
@@ -913,8 +917,328 @@ function performanceResponse(from: string) {
       marketValue: usd('17649960'),
       costBasis: usd('15825750'),
     },
+    summary: summaryOf(from, {
+      closingValue: usd('17649960'),
+      openingValue: usd('14200000'),
+      netContributions: usd('1800000'),
+      dividendsAndInterest: usd('312455'),
+      feesPaid: usd('4210'),
+      periodGain: usd('1649960'),
+    }),
     unvaluedTransfers: 0,
     valuationDates: [from, AS_OF],
+  };
+}
+
+/** WP 10.3: the period summary — the health snapshot's dollars, no rate. */
+function summaryOf(
+  from: string,
+  figures: {
+    closingValue: { minor: string; currency: string };
+    openingValue: { minor: string; currency: string };
+    netContributions: { minor: string; currency: string };
+    dividendsAndInterest: { minor: string; currency: string };
+    feesPaid: { minor: string; currency: string };
+    periodGain: { minor: string; currency: string };
+  },
+) {
+  return {
+    kind: 'period_summary',
+    from,
+    to: AS_OF,
+    ...figures,
+    reinvestedDividends: usd('0'),
+    taxesWithheld: usd('0'),
+    complete: true,
+    exclusions: {
+      unpricedSecurities: [],
+      foreignCurrencyMovements: [],
+      unvaluedTransfers: [],
+      unclassifiedMovements: [],
+    },
+  };
+}
+
+/**
+ * WP 10.3: `GET /investments/performance/by-management`. Three classes, each
+ * the scoped answer; the TWRs differ so the comparison table has something
+ * to compare.
+ */
+function byManagementResponse(from: string) {
+  const base = performanceResponse(from);
+  const row = (
+    management: string,
+    accountIds: string[],
+    twr: string,
+    mwr: string,
+    figures: Parameters<typeof summaryOf>[1],
+    gain: string,
+  ) => ({
+    management,
+    accountIds,
+    timeWeighted: { ...base.timeWeighted, periodReturn: twr, annualized: twr },
+    moneyWeighted: { ...base.moneyWeighted, periodReturn: mwr, annualized: mwr },
+    dollarGain: { ...base.dollarGain, gain: usd(gain) },
+    summary: summaryOf(from, figures),
+    unvaluedTransfers: 0,
+    valuationDates: base.valuationDates,
+  });
+  return {
+    from,
+    to: AS_OF,
+    currency: 'USD',
+    rows: [
+      row(
+        'advisor',
+        ['acct-ira'],
+        '0.0812',
+        '0.0790',
+        {
+          closingValue: usd('6120000'),
+          openingValue: usd('5300000'),
+          netContributions: usd('700000'),
+          dividendsAndInterest: usd('142310'),
+          feesPaid: usd('61200'),
+          periodGain: usd('120000'),
+        },
+        '410000',
+      ),
+      row(
+        'robo_advisor',
+        ['acct-crypto'],
+        '0.1024',
+        '0.1102',
+        {
+          closingValue: usd('2450000'),
+          openingValue: usd('2000000'),
+          netContributions: usd('250000'),
+          dividendsAndInterest: usd('31045'),
+          feesPaid: usd('6125'),
+          periodGain: usd('200000'),
+        },
+        '305000',
+      ),
+      row(
+        'self_directed',
+        ['acct-taxable'],
+        '0.1377',
+        '0.1290',
+        {
+          closingValue: usd('9079960'),
+          openingValue: usd('6900000'),
+          netContributions: usd('850000'),
+          dividendsAndInterest: usd('139100'),
+          feesPaid: usd('2065'),
+          periodGain: usd('1329960'),
+        },
+        '1109210',
+      ),
+    ],
+  };
+}
+
+/**
+ * WP 10.3: the Activity tab's rows. The taxable account carries the recorded
+ * Plaid Sandbox fixture's five movements (a buy, a sell, a dividend, a
+ * contribution and an account fee); the IRA carries a payroll-style
+ * contribution buy and a reinvested dividend. The crypto account's activity
+ * has not synced, so the tab names it as pending.
+ */
+const ACTIVITY = [
+  activity(
+    'ivt-0005',
+    'acct-taxable',
+    '2026-06-01',
+    'fee',
+    'FEE',
+    'account fee',
+    'ANNUAL ACCOUNT FEE',
+    null,
+    '0',
+    null,
+    '-2000',
+  ),
+  activity(
+    'ivt-0004',
+    'acct-taxable',
+    '2026-05-31',
+    'contribution',
+    'CASH',
+    'contribution',
+    'ACH CONTRIBUTION',
+    null,
+    '0',
+    null,
+    '100000',
+  ),
+  activity(
+    'ivt-0003',
+    'acct-taxable',
+    '2026-05-30',
+    'dividend',
+    'DIVIDEND',
+    'dividend',
+    'DIVIDEND VTI',
+    VTI_SECURITY(),
+    '0',
+    null,
+    '4118',
+  ),
+  activity(
+    'ivt-0002',
+    'acct-taxable',
+    '2026-05-29',
+    'sell',
+    'SELL',
+    'sell',
+    'SELL VTI',
+    VTI_SECURITY(),
+    '-2',
+    '268.4',
+    '53680',
+  ),
+  activity(
+    'ivt-0001',
+    'acct-taxable',
+    '2026-05-28',
+    'buy',
+    'BUY',
+    'buy',
+    'BUY VTI',
+    VTI_SECURITY(),
+    '5',
+    '268.4',
+    '-134200',
+  ),
+  activity(
+    'ira-0002',
+    'acct-ira',
+    '2026-04-15',
+    'contribution',
+    'BUY',
+    'contribution',
+    'PAYROLL CONTRIBUTION',
+    BND_SECURITY(),
+    '6.5',
+    '72.1',
+    '-46865',
+  ),
+  activity(
+    'ira-0001',
+    'acct-ira',
+    '2026-03-31',
+    'reinvested_dividend',
+    'REINVESTED_DIVIDEND',
+    'dividend reinvestment',
+    'REINVEST BND',
+    BND_SECURITY(),
+    '0.42',
+    '71.9',
+    '-3020',
+  ),
+];
+
+function VTI_SECURITY() {
+  return {
+    id: '019a0000-0000-7000-8000-00000000a001',
+    symbol: 'VTI',
+    name: 'Vanguard Total Stock Market ETF',
+  };
+}
+
+function BND_SECURITY() {
+  return {
+    id: '019a0000-0000-7000-8000-00000000a002',
+    symbol: 'BND',
+    name: 'Vanguard Total Bond Market ETF',
+  };
+}
+
+function activity(
+  id: string,
+  accountId: string,
+  tradeDate: string,
+  kind: string,
+  type: string,
+  subtype: string,
+  name: string,
+  security: { id: string; symbol: string; name: string } | null,
+  quantity: string,
+  price: string | null,
+  amountMinor: string,
+) {
+  return {
+    id: `019a0000-0000-7000-8000-${id
+      .replace(/[^0-9a-f]/gu, '')
+      .padStart(12, '0')
+      .slice(-12)}`,
+    accountId,
+    tradeDate,
+    settleDate: null,
+    kind,
+    type,
+    subtype,
+    name,
+    security,
+    quantity,
+    price,
+    amount: usd(amountMinor),
+    // The classifier's flow: the cash row's own amount, or the buy's negated.
+    flow:
+      kind === 'contribution' || kind === 'withdrawal'
+        ? usd(type === 'BUY' || type === 'SELL' ? String(-Number(amountMinor)) : amountMinor)
+        : null,
+    fees: usd(kind === 'sell' ? '65' : kind === 'fee' ? '2000' : '0'),
+    source: 'BROKER',
+  };
+}
+
+function activityResponse(url: URL) {
+  const from = url.searchParams.get('from') ?? '2025-09-24';
+  const to = url.searchParams.get('to') ?? AS_OF;
+  const account = url.searchParams.get('account');
+  const kinds = url.searchParams.getAll('kind');
+  const limit = Number(url.searchParams.get('limit') ?? '50');
+  const offset = Number(url.searchParams.get('cursor') ?? '0');
+  const matching = ACTIVITY.filter(
+    (item) =>
+      item.tradeDate >= from &&
+      item.tradeDate <= to &&
+      (account === null || item.accountId === account) &&
+      (kinds.length === 0 || kinds.includes(item.kind)),
+  );
+  const page = matching.slice(offset, offset + limit);
+  const syncStates = [
+    {
+      accountId: 'acct-taxable',
+      name: 'Taxable brokerage',
+      provider: 'plaid',
+      activitySync: 'synced',
+      lastSyncedAt: '2026-09-23T04:00:00.000Z',
+    },
+    {
+      accountId: 'acct-ira',
+      name: 'Traditional IRA',
+      provider: 'plaid',
+      activitySync: 'synced',
+      lastSyncedAt: '2026-09-23T04:00:00.000Z',
+    },
+    {
+      accountId: 'acct-crypto',
+      name: 'Coinbase',
+      provider: 'coinbase',
+      activitySync: 'pending',
+      lastSyncedAt: null,
+    },
+  ];
+  return {
+    from,
+    to,
+    items: page,
+    nextCursor: offset + limit < matching.length ? String(offset + limit) : null,
+    total: matching.length,
+    accounts:
+      account === null ? syncStates : syncStates.filter((state) => state.accountId === account),
   };
 }
 
@@ -923,12 +1247,15 @@ export interface MockInvestmentsState {
   lastBasisMethodBody: unknown;
   /** Whether that call arrived only after a step-up assertion. */
   basisMethodRequiredStepUp: boolean;
+  /** WP 10.3: every `GET /investments/transactions` query string, in order. */
+  activityQueries: string[];
 }
 
 export async function installInvestmentsMocks(page: Page): Promise<MockInvestmentsState> {
   const state: MockInvestmentsState = {
     lastBasisMethodBody: null,
     basisMethodRequiredStepUp: false,
+    activityQueries: [],
   };
   let authenticated = false;
   let steppedUp = false;
@@ -1009,7 +1336,26 @@ export async function installInvestmentsMocks(page: Page): Promise<MockInvestmen
     }
 
     if (path === '/api/investments/performance' && method === 'GET') {
-      return route.fulfill(json(performanceResponse(url.searchParams.get('from') ?? '2025-09-23')));
+      return route.fulfill(
+        json(
+          performanceResponse(
+            url.searchParams.get('from') ?? '2025-09-23',
+            url.searchParams.get('account'),
+          ),
+        ),
+      );
+    }
+
+    // WP 10.3.
+    if (path === '/api/investments/performance/by-management' && method === 'GET') {
+      return route.fulfill(
+        json(byManagementResponse(url.searchParams.get('from') ?? '2025-09-23')),
+      );
+    }
+
+    if (path === '/api/investments/transactions' && method === 'GET') {
+      state.activityQueries.push(url.search);
+      return route.fulfill(json(activityResponse(url)));
     }
 
     // `useCoinGeckoAttribution` (`features/market-data/api.ts`), fired by

@@ -52,9 +52,11 @@ export {
 export {
   accountOverrides,
   ACCOUNT_ROLES,
+  MANAGEMENT_STYLES,
   TAX_TREATMENTS,
   VALUATION_BASES,
   type AccountRole,
+  type ManagementStyle,
   type TaxTreatment,
   type ValuationBasis,
   type AccountOverrideRow,

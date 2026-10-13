@@ -9,6 +9,7 @@ import { expectNoAxeViolations, setTheme } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installInvestmentsMocks } from './support/mock-investments.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
+import { hideDevtools } from './support/sweep.ts';
 
 /**
  * WP 3.11's exit tests, verbatim from `docs/plan/03-phase-3-dispatch.md` §3,
@@ -404,5 +405,116 @@ test.describe('investments screen (WP 3.11)', () => {
       .poll(() => state.lastBasisMethodBody)
       .toEqual({ accountId: 'acct-taxable', securityId: 'sec-vti', method: 'HIFO' });
     expect(state.basisMethodRequiredStepUp).toBe(true);
+  });
+});
+
+/**
+ * WP 10.3: the Activity tab, the health snapshot, and performance by who
+ * manages each account. Its own `shoot`, so a deliberate evidence run
+ * (`PLAYWRIGHT_EVIDENCE_DIR=docs/evidence/phase-10 … -g "WP 10.3"`) writes
+ * only `wp10.3-*.png`.
+ */
+async function shoot103(page: Page, evidenceDir: string | undefined, name: string): Promise<void> {
+  // The dev server's router devtools are not in a production build.
+  await hideDevtools(page);
+  await page.screenshot({
+    path: `${screenshotDir(evidenceDir)}wp10.3-${name}.png`,
+    fullPage: true,
+  });
+}
+
+test.describe('investment activity and performance by management (WP 10.3)', () => {
+  // The app scrolls inside its main pane, so `fullPage` stops at the viewport:
+  // a tall one keeps the comparison tables in the evidence frame.
+  test.use({ viewport: { width: 1280, height: 1900 } });
+
+  test('Activity lists the fixture movements, filters by type, names the account still pending, and is axe clean in both themes', async ({
+    page,
+    evidenceDir,
+  }) => {
+    await installFakeWebAuthnAssertion(page);
+    const state = await installInvestmentsMocks(page);
+    await loginAndReachInvestments(page);
+
+    await page.getByRole('tab', { name: 'Activity' }).click();
+    const table = page.getByTestId('activity-table');
+    await expect(table).toBeVisible();
+    await expect(page.getByTestId('activity-row')).toHaveCount(7);
+    await expect(page.getByTestId('activity-pending')).toContainText(
+      'Investment activity for Coinbase has not synced yet',
+    );
+    // The default window is the last twelve months.
+    expect(state.activityQueries[0]).toContain('from=');
+    expect(state.activityQueries[0]).toContain('to=');
+
+    // Every numeric cell is set in tabular figures (WP 10.2's rule, confirmed in the browser).
+    const numeric = await table
+      .locator('tbody td.tabular-nums')
+      .evaluateAll((cells) => cells.map((cell) => getComputedStyle(cell).fontVariantNumeric));
+    expect(numeric.length).toBe(7 * 3);
+    for (const value of numeric) expect(value).toContain('tabular-nums');
+
+    for (const theme of ['light', 'dark'] as const) {
+      await setTheme(page, theme);
+      await expect(table).toBeVisible();
+      await expectNoAxeViolations(page, `investments activity (${theme})`);
+      await shoot103(page, evidenceDir, `activity-${theme}`);
+    }
+
+    await page.getByLabel('Type', { exact: true }).selectOption('dividend');
+    await expect(page).toHaveURL(/activityKind=dividend/);
+    await expect(page.getByTestId('activity-row')).toHaveCount(1);
+    await expect(page.getByTestId('activity-row').first()).toContainText('Dividend');
+
+    await page.getByLabel('Type', { exact: true }).selectOption('fee');
+    await page.getByLabel('Account', { exact: true }).selectOption({ label: 'Traditional IRA' });
+    await expect(
+      page.getByRole('heading', { name: 'No investment activity in this period' }),
+    ).toBeVisible();
+    await expectNoAxeViolations(page, 'investments activity, empty period');
+  });
+
+  test('Performance by management compares TWRs in one table and keeps MWR and dollars apart; axe clean in both themes', async ({
+    page,
+    evidenceDir,
+  }) => {
+    await installFakeWebAuthnAssertion(page);
+    await installInvestmentsMocks(page);
+    await loginAndReachInvestments(page);
+
+    await page.getByRole('tab', { name: 'Performance' }).click();
+    await expect(page.getByTestId('health-dollars')).toContainText('Net contributions');
+    expect(await page.getByTestId('health-dollars').innerText()).not.toMatch(/\d%/u);
+    expect(await page.getByTestId('health-twr').innerText()).not.toContain('$');
+
+    await page.getByRole('radio', { name: 'By management' }).check();
+    await expect(page).toHaveURL(/scope=management/);
+    const twrTable = page.getByTestId('management-twr-table');
+    await expect(twrTable).toBeVisible();
+    const rows = twrTable.locator('tbody tr');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toContainText('Advisor');
+    await expect(rows.nth(1)).toContainText('Robo-advisor');
+    await expect(rows.nth(2)).toContainText('Self-directed');
+    for (const text of await rows.allInnerTexts()) expect(text).not.toContain('$');
+    for (const text of await page
+      .getByTestId('management-dollars-table')
+      .locator('tbody tr')
+      .allInnerTexts()) {
+      expect(text).not.toMatch(/\d%/u);
+    }
+
+    for (const theme of ['light', 'dark'] as const) {
+      await setTheme(page, theme);
+      await expect(twrTable).toBeVisible();
+      await expectNoAxeViolations(page, `investments performance by management (${theme})`);
+      await shoot103(page, evidenceDir, `performance-by-management-${theme}`);
+    }
+
+    await page.getByRole('radio', { name: 'One account' }).check();
+    await expect(page).toHaveURL(/scope=account/);
+    await expect(page.getByTestId('health-dollars')).toContainText('Health snapshot · ');
+    await expect(page.getByTestId('twr-block')).toBeVisible();
+    await expectNoAxeViolations(page, 'investments performance, one account');
   });
 });
