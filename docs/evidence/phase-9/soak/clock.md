@@ -36,5 +36,6 @@ e.g. | 2026-11-02 | criterion | 3: met - the recurring gold set matched my own l
 
 ## Attestations
 
-| Date | Event | Note |
-| ---- | ----- | ---- |
+| Date       | Event   | Note                                                                                                                                                                                                                                                                                        |
+| ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-12 | day_one | production at b63ddfa (v0.9.0 + WP 10.1) in ~/personalfi-prod, project personalfi-prod; installed and upgraded by the orchestrator on Chris's instruction; Plaid set-up in the product pending his sandbox keys; row written by the orchestrator at Chris's request ("Write the day 1 row") |
