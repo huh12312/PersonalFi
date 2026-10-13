@@ -11,10 +11,14 @@ export interface DateOnlyTextProps extends Omit<HTMLAttributes<HTMLTimeElement>,
 }
 
 /** Renders a `DateOnly` as a `<time>` with a machine-readable `dateTime`. */
-export function DateOnlyText({ value, format = 'long', ...props }: DateOnlyTextProps) {
+export function DateOnlyText({ value, format = 'long', className, ...props }: DateOnlyTextProps) {
   const text = format === 'short' ? formatDateOnlyShort(value) : formatDateOnly(value);
   return (
-    <time dateTime={value} {...props}>
+    <time
+      dateTime={value}
+      className={className === undefined ? 'tabular-nums' : `tabular-nums ${className}`}
+      {...props}
+    >
       {text}
     </time>
   );

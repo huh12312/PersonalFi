@@ -111,11 +111,13 @@ month-over-month change maps.
 | `--text-caption`     | 12 / 16            | 400    | Badges, chart ticks                          |
 
 Numeric alignment: any element showing money or a count gets `.tabular-nums`
-(`font-variant-numeric: tabular-nums slashed-zero`) so columns of figures
-align and a `0` is never mistaken for an `O`.
+(`font-variant-numeric: tabular-nums lining-nums slashed-zero`) so columns of
+figures align and a `0` is never mistaken for an `O`. Tables, grids and `<time>`
+get tabular, lining figures from a base rule without the class.
 
-Font: self-hosted **Inter Variable** (`public/fonts/inter-variable-latin.woff2`,
-OFL-1.1), weight range 100–900, no CDN.
+Font: self-hosted **Geist Variable** for the UI and **Geist Mono Variable** for
+code and identifiers (`public/fonts/geist-variable-latin.woff2`,
+`geist-mono-variable-latin.woff2`, OFL-1.1), weight range 100–900, no CDN.
 
 ## Spacing (4px base)
 

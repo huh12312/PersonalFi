@@ -38,7 +38,7 @@ export function StatTile({
       </div>
       <div
         className={cn(
-          'mt-1 text-text-primary',
+          'mt-1 tabular-nums text-text-primary',
           size === 'hero'
             ? 'text-[38px]/[42px] @sm:text-hero'
             : 'text-[28px]/[34px] @sm:text-display',

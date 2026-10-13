@@ -336,8 +336,8 @@
 }
 
 @theme {
-  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Spacing — 4px base (§2.4) */
   --spacing-0: 0px;
@@ -391,7 +391,8 @@
   --text-small--line-height: 18px;
   --text-caption: 12px;
   --text-caption--line-height: 16px;
-  --text-caption--letter-spacing: 0.01em;
+  /* Geist is set more openly than Inter; the extra 0.01em Inter needed at 12px is dropped (WP 10.2). */
+  --text-caption--letter-spacing: 0;
 
   /* Motion */
   --duration-instant: var(--dur-instant);

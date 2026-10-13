@@ -21,6 +21,12 @@ dependency tree and are not listed here. The model weights it serves are data th
 pulls (`local-llm-pull`), not something this repository redistributes; the reference model,
 `qwen2.5:7b-instruct-q4_K_M`, is Apache-2.0.
 
+The web app vendors two typefaces, not npm packages, so they are not in the tree below:
+Geist and Geist Mono (variable woff2, Google Fonts `latin` subset), Copyright 2024 The Geist
+Project Authors (https://github.com/vercel/geist-font), SIL Open Font License 1.1. They are
+served from `apps/web/public/fonts/`, which also holds the licence text (`OFL-Geist.txt`) and a
+README with the source URLs and sha256 of each file.
+
 ## 0BSD
 
 - `tslib`@1.14.1, 2.8.1 — https://www.typescriptlang.org/

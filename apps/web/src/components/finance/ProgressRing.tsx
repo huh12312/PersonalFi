@@ -91,7 +91,7 @@ export function ProgressRing({
       </svg>
       {children !== undefined && (
         <div
-          className="absolute inset-0 flex flex-col items-center justify-center"
+          className="absolute inset-0 flex flex-col items-center justify-center tabular-nums"
           aria-hidden="true"
         >
           {children}

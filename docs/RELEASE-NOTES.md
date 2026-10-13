@@ -43,6 +43,11 @@ keep working and keep winning.
   `PLAID_ALLOW_PRODUCTION=true`.
 - Never in an export bundle, never in a log line, never returned by any route; the evidence is
   [wp10.1-plaid-credentials.md](evidence/phase-10/wp10.1-plaid-credentials.md).
+- **A new typeface.** The interface is set in Geist, and code and identifiers in Geist Mono, in
+  place of Inter: both open-licensed (SIL OFL 1.1) and shipped inside the app, so nothing is loaded
+  from Google or any other host. Figures in money columns, tables, dates and counts use tabular,
+  lining digits so they line up. Nothing to do on upgrade
+  ([wp10.2-typeface.md](evidence/phase-10/wp10.2-typeface.md)).
 
 ## v0.9.0: polish and harden
 

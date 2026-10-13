@@ -3,15 +3,25 @@
 @import './theme.css';
 
 /* ---------------------------------------------------------------------- */
-/* Self-hosted font. No @import, no CDN — a single local `url()` (§2.3,§7.4)*/
+/* Self-hosted fonts (WP 10.2): Geist for the UI, Geist Mono for figures   */
+/* and code. No @import, no CDN — one local `url()` each (§2.3,§7.4); the  */
+/* files, their source URLs and hashes are in public/fonts/README.md.      */
 /* ---------------------------------------------------------------------- */
 
 @font-face {
-  font-family: 'Inter Variable';
+  font-family: 'Geist Variable';
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url('/fonts/inter-variable-latin.woff2') format('woff2');
+  src: url('/fonts/geist-variable-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono Variable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/geist-mono-variable-latin.woff2') format('woff2');
 }
 
 /* ---------------------------------------------------------------------- */
@@ -66,7 +76,17 @@ body {
 /* ---------------------------------------------------------------------- */
 
 .tabular-nums {
-  font-variant-numeric: tabular-nums slashed-zero;
+  font-variant-numeric: tabular-nums lining-nums slashed-zero;
+}
+
+/* Anywhere digits line up by construction — a table cell, a grid row (the
+   transactions list), a <time> — gets tabular, lining figures without each
+   call site having to remember the class (WP 10.2). */
+table,
+time,
+[role='grid'],
+[role='treegrid'] {
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
 /* ---------------------------------------------------------------------- */
