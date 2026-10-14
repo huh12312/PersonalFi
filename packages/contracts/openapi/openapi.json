@@ -95,6 +95,17 @@
       "UnresolvedSecurityInput": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "This row. Changes on every sync; not a security id."
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "provider": {
             "type": "string"
           },
@@ -105,10 +116,46 @@
             ]
           },
           "name": {
+            "description": "The provider's own name for the security.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "ticker": {
+            "description": "The provider's own ticker, as given.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "institutionValue": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The institution's own value for the position, as reported. Not a price × quantity."
           },
           "abstentions": {
             "type": "array",
@@ -135,15 +182,33 @@
               ]
             }
           },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Why it could not be identified, in plain words, one sentence each."
+          },
+          "asOfDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
           "observedAt": {
             "type": "string"
           }
         },
         "required": [
+          "id",
+          "accountId",
           "provider",
           "providerSecurityId",
           "name",
+          "ticker",
+          "quantity",
+          "institutionValue",
           "abstentions",
+          "reasons",
+          "asOfDate",
           "observedAt"
         ]
       },
@@ -552,7 +617,8 @@
                   "enum": [
                     "stale_price",
                     "price_unknown",
-                    "currency_mismatch"
+                    "currency_mismatch",
+                    "security_unresolved"
                   ]
                 }
               },
@@ -1118,13 +1184,51 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "unresolvedSecurities": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "symbol": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "symbol",
+                    "name"
+                  ]
+                },
+                "description": "Positions the resolver could not identify (WP 10.4): outside every valuation, named."
+              },
+              "unresolvedMovements": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Movements in a security nobody could identify (WP 10.4): listed in Activity, left out of every flow — their value is outside the valuation too, so counting the flow alone would book the money as a loss."
               }
             },
             "required": [
               "unpricedSecurities",
               "foreignCurrencyMovements",
               "unvaluedTransfers",
-              "unclassifiedMovements"
+              "unclassifiedMovements",
+              "unresolvedSecurities",
+              "unresolvedMovements"
             ]
           }
         },
@@ -8627,7 +8731,36 @@
                 "type": "null"
               }
             ],
-            "description": "null: the movement is about no security (cash, a fee, a deposit)."
+            "description": "null: the movement is about no security (cash, a fee, a deposit), or about one nobody could identify — then `unresolvedSecurity` is set."
+          },
+          "unresolvedSecurity": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "symbol": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "symbol"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "WP 10.4: the provider named a security the resolver could not identify. Its own name and ticker, verbatim. The movement is listed here and left out of lots and performance; its `kind` and `flow` are classified as for any other row."
           },
           "quantity": {
             "type": "string",
@@ -8720,6 +8853,7 @@
           "subtype",
           "name",
           "security",
+          "unresolvedSecurity",
           "quantity",
           "price",
           "amount",
@@ -8826,6 +8960,14 @@
           "keyPresent": {
             "type": "boolean"
           },
+          "keySource": {
+            "type": "string",
+            "enum": [
+              "file",
+              "stored",
+              "none"
+            ]
+          },
           "registered": {
             "type": "boolean"
           },
@@ -8885,10 +9027,82 @@
         "required": [
           "provider",
           "keyPresent",
+          "keySource",
           "registered",
           "capabilities",
           "budget",
           "attribution"
+        ]
+      },
+      "MarketDataCredentialsStatusInput": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "tiingo",
+              "fred",
+              "coingecko",
+              "openfigi"
+            ]
+          },
+          "purpose": {
+            "type": "string",
+            "description": "What the key is for, one line, from the RUNBOOK."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "file",
+              "stored",
+              "none"
+            ],
+            "description": "`file`: the operator's secret file supplies the key (it wins; read-only here). `stored`: this holder's key, sealed in the install. `none`: neither."
+          },
+          "configured": {
+            "type": "boolean",
+            "description": "True when a key is in force (file or stored)."
+          },
+          "anonymous": {
+            "type": "boolean",
+            "description": "OpenFIGI only: no key, and the anonymous tier is in use (10 jobs per request)."
+          },
+          "keyHint": {
+            "description": "The last four characters of the stored key. Never the key.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "storedAt": {
+            "description": "When the stored key was first saved.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rotatedAt": {
+            "description": "When the stored key was last replaced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "narrowedOut": {
+            "type": "boolean",
+            "description": "True when MARKET_DATA_ALLOWED_HOSTS excludes this provider's host."
+          }
+        },
+        "required": [
+          "provider",
+          "purpose",
+          "source",
+          "configured",
+          "anonymous",
+          "keyHint",
+          "storedAt",
+          "rotatedAt",
+          "narrowedOut"
         ]
       },
       "SnapshotFxFailureInput": {
@@ -12899,6 +13113,17 @@
       "UnresolvedSecurity": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "This row. Changes on every sync; not a security id."
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "provider": {
             "type": "string"
           },
@@ -12909,10 +13134,47 @@
             ]
           },
           "name": {
+            "description": "The provider's own name for the security.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "ticker": {
+            "description": "The provider's own ticker, as given.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "institutionValue": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "minor": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  }
+                },
+                "required": [
+                  "minor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The institution's own value for the position, as reported. Not a price × quantity."
           },
           "abstentions": {
             "type": "array",
@@ -12940,15 +13202,33 @@
               "additionalProperties": false
             }
           },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Why it could not be identified, in plain words, one sentence each."
+          },
+          "asOfDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
           "observedAt": {
             "type": "string"
           }
         },
         "required": [
+          "id",
+          "accountId",
           "provider",
           "providerSecurityId",
           "name",
+          "ticker",
+          "quantity",
+          "institutionValue",
           "abstentions",
+          "reasons",
+          "asOfDate",
           "observedAt"
         ],
         "additionalProperties": false
@@ -13368,7 +13648,8 @@
                   "enum": [
                     "stale_price",
                     "price_unknown",
-                    "currency_mismatch"
+                    "currency_mismatch",
+                    "security_unresolved"
                   ]
                 }
               },
@@ -13955,13 +14236,52 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "unresolvedSecurities": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "symbol": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "symbol",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Positions the resolver could not identify (WP 10.4): outside every valuation, named."
+              },
+              "unresolvedMovements": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Movements in a security nobody could identify (WP 10.4): listed in Activity, left out of every flow — their value is outside the valuation too, so counting the flow alone would book the money as a loss."
               }
             },
             "required": [
               "unpricedSecurities",
               "foreignCurrencyMovements",
               "unvaluedTransfers",
-              "unclassifiedMovements"
+              "unclassifiedMovements",
+              "unresolvedSecurities",
+              "unresolvedMovements"
             ],
             "additionalProperties": false
           }
@@ -21547,7 +21867,37 @@
                 "type": "null"
               }
             ],
-            "description": "null: the movement is about no security (cash, a fee, a deposit)."
+            "description": "null: the movement is about no security (cash, a fee, a deposit), or about one nobody could identify — then `unresolvedSecurity` is set."
+          },
+          "unresolvedSecurity": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "symbol": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "symbol"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "WP 10.4: the provider named a security the resolver could not identify. Its own name and ticker, verbatim. The movement is listed here and left out of lots and performance; its `kind` and `flow` are classified as for any other row."
           },
           "quantity": {
             "type": "string",
@@ -21643,6 +21993,7 @@
           "subtype",
           "name",
           "security",
+          "unresolvedSecurity",
           "quantity",
           "price",
           "amount",
@@ -21752,6 +22103,14 @@
           "keyPresent": {
             "type": "boolean"
           },
+          "keySource": {
+            "type": "string",
+            "enum": [
+              "file",
+              "stored",
+              "none"
+            ]
+          },
           "registered": {
             "type": "boolean"
           },
@@ -21813,10 +22172,83 @@
         "required": [
           "provider",
           "keyPresent",
+          "keySource",
           "registered",
           "capabilities",
           "budget",
           "attribution"
+        ],
+        "additionalProperties": false
+      },
+      "MarketDataCredentialsStatus": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "tiingo",
+              "fred",
+              "coingecko",
+              "openfigi"
+            ]
+          },
+          "purpose": {
+            "type": "string",
+            "description": "What the key is for, one line, from the RUNBOOK."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "file",
+              "stored",
+              "none"
+            ],
+            "description": "`file`: the operator's secret file supplies the key (it wins; read-only here). `stored`: this holder's key, sealed in the install. `none`: neither."
+          },
+          "configured": {
+            "type": "boolean",
+            "description": "True when a key is in force (file or stored)."
+          },
+          "anonymous": {
+            "type": "boolean",
+            "description": "OpenFIGI only: no key, and the anonymous tier is in use (10 jobs per request)."
+          },
+          "keyHint": {
+            "description": "The last four characters of the stored key. Never the key.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "storedAt": {
+            "description": "When the stored key was first saved.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rotatedAt": {
+            "description": "When the stored key was last replaced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "narrowedOut": {
+            "type": "boolean",
+            "description": "True when MARKET_DATA_ALLOWED_HOSTS excludes this provider's host."
+          }
+        },
+        "required": [
+          "provider",
+          "purpose",
+          "source",
+          "configured",
+          "anonymous",
+          "keyHint",
+          "storedAt",
+          "rotatedAt",
+          "narrowedOut"
         ],
         "additionalProperties": false
       },
@@ -37411,7 +37843,7 @@
         "tags": [
           "investments"
         ],
-        "description": "One row per security, summed over every account that holds it. `unclassifiedPct` and each row’s `stale` are fields, not inferences: 07 §4.3 makes the first normative and 07 §6.1 makes the second a statement about the clock at read time. `unresolved` (C-8, G3-11) lists positions the resolver could not identify at all — user-wide rather than aggregated by security, because there is no security to key them by; the event never carries an account id either, so this list is the same on every account’s own holdings response.",
+        "description": "One row per security, summed over every account that holds it. `unclassifiedPct` and each row’s `stale` are fields, not inferences: 07 §4.3 makes the first normative and 07 §6.1 makes the second a statement about the clock at read time. `unresolved` (C-8, G3-11; WP 10.4) lists positions the resolver could not identify, one row per account and position, with the provider’s name and ticker, the quantity, the institution’s own value and the reasons in plain words. They are never valued, and each is also named in `excluded` (`security_unresolved`).",
         "parameters": [
           {
             "schema": {
@@ -37507,7 +37939,8 @@
                             "enum": [
                               "stale_price",
                               "price_unknown",
-                              "currency_mismatch"
+                              "currency_mismatch",
+                              "security_unresolved"
                             ]
                           }
                         },
@@ -37571,7 +38004,7 @@
         "tags": [
           "investments"
         ],
-        "description": "Per-position lots with their ages, basis source, and an `unavailable` unrealized gain where the basis is unknown — 04 §5.5’s rule, carried onto the wire rather than computed from a zero. `unresolved` (C-8, G3-11) is the same user-wide list `GET /holdings` carries, not filtered to this account: the resolution-failure event never carries an account id, so there is nothing to filter by.",
+        "description": "Per-position lots with their ages, basis source, and an `unavailable` unrealized gain where the basis is unknown — 04 §5.5’s rule, carried onto the wire rather than computed from a zero. `unresolved` (C-8, G3-11; WP 10.4) is this account’s positions the resolver could not identify — never valued, and each also named in `excluded` (`security_unresolved`).",
         "parameters": [
           {
             "schema": {
@@ -37898,7 +38331,8 @@
                             "enum": [
                               "stale_price",
                               "price_unknown",
-                              "currency_mismatch"
+                              "currency_mismatch",
+                              "security_unresolved"
                             ]
                           }
                         },
@@ -38281,7 +38715,8 @@
                             "enum": [
                               "stale_price",
                               "price_unknown",
-                              "currency_mismatch"
+                              "currency_mismatch",
+                              "security_unresolved"
                             ]
                           }
                         },
@@ -40471,6 +40906,258 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market-data/providers/{provider}/credentials": {
+      "get": {
+        "operationId": "getMarketDataCredentials",
+        "summary": "Where a market-data key comes from, without the key",
+        "tags": [
+          "market-data"
+        ],
+        "description": "Whether a key for this provider is in force, and whether it is the operator's secret file (read-only here), this holder’s stored key, or neither — and for OpenFIGI, whether the anonymous tier is in use. Carries the last four characters of a stored key and its dates. The key is never returned (WP 10.4).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tiingo",
+                "fred",
+                "coingecko",
+                "openfigi"
+              ]
+            },
+            "in": "path",
+            "name": "provider",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketDataCredentialsStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putMarketDataCredentials",
+        "summary": "Store (or replace) this holder’s key for one market-data provider",
+        "tags": [
+          "market-data"
+        ],
+        "description": "Needs a step-up assertion (D21). Checks the key with the provider (one cheap authenticated call through the existing adapter) before sealing it under the KEK. 409 when the operator's secret file supplies this provider's key; 409 `market_data.provider_narrowed_out` when MARKET_DATA_ALLOWED_HOSTS excludes the host; 422 when the provider refuses the key; 502 when it cannot be reached. Nothing is stored unless the provider accepted the key. The response is the GET shape; the key is never returned.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 256,
+                    "pattern": "^[A-Za-z0-9_-]+$",
+                    "description": "The API key. Validated with the provider, sealed, and never echoed back."
+                  }
+                },
+                "required": [
+                  "key"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tiingo",
+                "fred",
+                "coingecko",
+                "openfigi"
+              ]
+            },
+            "in": "path",
+            "name": "provider",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketDataCredentialsStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteMarketDataCredentials",
+        "summary": "Remove this holder’s stored key for one market-data provider",
+        "tags": [
+          "market-data"
+        ],
+        "description": "Needs a step-up assertion (D21). Deletes the sealed row and retires its key. Revokes nothing at the provider. Leaves an operator's secret file untouched. Idempotent. Returns the GET shape.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tiingo",
+                "fred",
+                "coingecko",
+                "openfigi"
+              ]
+            },
+            "in": "path",
+            "name": "provider",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketDataCredentialsStatus"
                 }
               }
             }

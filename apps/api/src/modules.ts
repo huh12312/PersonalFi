@@ -453,12 +453,19 @@ export function appModules(options: ModuleWiringOptions): readonly ModuleRegistr
     {
       flagKey: 'module.connections',
       events: CONNECTIONS_EVENTS,
+      // WP 10.1 + WP 10.4: one consumer drops every cache built from stored
+      // provider credentials — the connector registry's (Plaid) and the
+      // market-data runtime's (tiingo / fred / coingecko / openfigi) — so a
+      // key changed in the product reaches this process without a restart.
       consumers:
-        options.connectorRegistry === undefined
+        options.connectorRegistry === undefined && options.marketData === undefined
           ? []
           : [
               createProviderCredentialsConsumer({
-                onChanged: (provider) => options.connectorRegistry?.invalidate(provider),
+                onChanged: (provider) => {
+                  options.connectorRegistry?.invalidate(provider);
+                  if (provider !== 'plaid') options.marketData?.runtime.invalidate();
+                },
               }),
             ],
       jobs: [
@@ -752,16 +759,20 @@ function integrationsModule(options: ModuleWiringOptions, clock: Clock): ModuleR
         const plan = await planFor(context.userId, asOfDate);
         // One transaction for the whole refresh: the rows and the events that
         // announce them commit together or not at all.
+        // WP 10.4: this holder's view — the files, or their stored keys where
+        // the files are empty — resolved per run, so a key saved in Settings
+        // is used by the next refresh without a restart.
+        const view = await marketData.runtime.forUser(context.userId);
         await database.transaction(async (tx) => {
           const job = createPriceRefreshJob({
             userId: context.userId,
-            sources: marketData.runtime.sources,
+            sources: view.sources,
             writer: marketData.writer,
             recorder: marketData.recorder,
             outbox: { execute: (query) => tx.execute(query) as never },
             correlationId: context.correlationId,
             clock,
-            keys: marketData.runtime.keys,
+            keys: view.keys,
           });
           const result = await job.run(plan);
           context.logger.info(
@@ -772,7 +783,7 @@ function integrationsModule(options: ModuleWiringOptions, clock: Clock): ModuleR
               securitiesPriced: result.securitiesPriced.length,
               securitiesUnpriced: result.securitiesUnpriced.length,
               unavailable: result.unavailable.map((entry) => entry.reason),
-              sources: marketData.runtime.sources.map((source) => source.provider),
+              sources: view.sources.map((source) => source.provider),
             },
             'price refresh complete',
           );
@@ -987,6 +998,13 @@ function insightsModule(
       // hidden: see `wp3.10a-snapshot-readers.md` §6.
       marketData: createInsightsMarketDataPort({
         source: fredSourceOf(options.marketData?.runtime.sources),
+        // WP 10.4: a FRED key stored in Settings counts too, per holder.
+        ...(options.marketData === undefined
+          ? {}
+          : {
+              sourceFor: async (userId: string) =>
+                fredSourceOf((await options.marketData?.runtime.forUser(userId))?.sources),
+            }),
       }),
     },
     settings: {

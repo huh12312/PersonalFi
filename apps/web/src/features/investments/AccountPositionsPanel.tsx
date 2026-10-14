@@ -14,9 +14,17 @@ import type {
 } from '../../api/generated/types.gen.ts';
 import { BasisMethodControl } from './BasisMethodControl.tsx';
 import { StaleBadge } from './StaleBadge.tsx';
-import { UnresolvedSecuritiesNotice } from './UnresolvedSecuritiesNotice.tsx';
+import {
+  UnresolvedPositionCard,
+  UnresolvedSecuritiesNotice,
+} from './UnresolvedSecuritiesNotice.tsx';
 import { MoneyOrUnavailable, Unavailable, UnrealizedCell } from './UnavailableValue.tsx';
-import { assetClassLabel, exclusionReasonLabel, ratioToNumber } from './labels.ts';
+import {
+  assetClassLabel,
+  excludedItemLabel,
+  exclusionReasonLabel,
+  ratioToNumber,
+} from './labels.ts';
 import type { BasisMethodElection } from './api.ts';
 import { ScrollRegion } from '../../components/patterns/ScrollRegion.tsx';
 
@@ -76,7 +84,8 @@ export function AccountPositionsPanel({
             {accountName}
           </h2>
           <p className="text-small text-text-secondary">
-            {data.positions.length} position{data.positions.length === 1 ? '' : 's'} ·{' '}
+            {data.positions.length} position{data.positions.length === 1 ? '' : 's'}
+            {data.unresolved.length > 0 && <> + {data.unresolved.length} not identified</>} ·{' '}
             <Money value={data.total} signDisplay="auto" colorBySign={false} /> · unclassified{' '}
             <Percent value={ratioToNumber(data.unclassifiedPct)} /> · as of {data.asOf}
           </p>
@@ -87,7 +96,7 @@ export function AccountPositionsPanel({
         </Button>
       </div>
 
-      {data.positions.length === 0 ? (
+      {data.positions.length === 0 && data.unresolved.length === 0 ? (
         <EmptyState
           icon={Layers}
           headline="No positions in this account"
@@ -227,6 +236,10 @@ export function AccountPositionsPanel({
               </li>
             );
           })}
+          {/* WP 10.4: this account's unidentified positions, named, after the identified ones. */}
+          {data.unresolved.map((item) => (
+            <UnresolvedPositionCard key={item.id} item={item} />
+          ))}
         </ul>
       )}
 
@@ -238,7 +251,7 @@ export function AccountPositionsPanel({
           <ul className="mt-2 space-y-1 text-small text-text-muted">
             {data.excluded.map((item) => (
               <li key={item.holdingId}>
-                {item.symbol ?? item.holdingId} — {exclusionReasonLabel(item.reason)}
+                {excludedItemLabel(item)} — {exclusionReasonLabel(item.reason)}
               </li>
             ))}
           </ul>

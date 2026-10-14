@@ -439,7 +439,8 @@ test.describe('investment activity and performance by management (WP 10.3)', () 
     await page.getByRole('tab', { name: 'Activity' }).click();
     const table = page.getByTestId('activity-table');
     await expect(table).toBeVisible();
-    await expect(page.getByTestId('activity-row')).toHaveCount(7);
+    // Seven WP 10.3 movements and WP 10.4's contribution into an unidentified fund.
+    await expect(page.getByTestId('activity-row')).toHaveCount(8);
     await expect(page.getByTestId('activity-pending')).toContainText(
       'Investment activity for Coinbase has not synced yet',
     );
@@ -451,7 +452,7 @@ test.describe('investment activity and performance by management (WP 10.3)', () 
     const numeric = await table
       .locator('tbody td.tabular-nums')
       .evaluateAll((cells) => cells.map((cell) => getComputedStyle(cell).fontVariantNumeric));
-    expect(numeric.length).toBe(7 * 3);
+    expect(numeric.length).toBe(8 * 3);
     for (const value of numeric) expect(value).toContain('tabular-nums');
 
     for (const theme of ['light', 'dark'] as const) {
@@ -516,5 +517,121 @@ test.describe('investment activity and performance by management (WP 10.3)', () 
     await expect(page.getByTestId('health-dollars')).toContainText('Health snapshot · ');
     await expect(page.getByTestId('twr-block')).toBeVisible();
     await expectNoAxeViolations(page, 'investments performance, one account');
+  });
+});
+
+/**
+ * WP 10.4: a position whose security nobody could identify is a named row, and
+ * its movements stay in Activity. Its own `shoot`, so a deliberate evidence run
+ * (`PLAYWRIGHT_EVIDENCE_DIR=docs/evidence/phase-10 … -g "WP 10.4"`) writes only
+ * `wp10.4-*.png`.
+ */
+async function shoot104(page: Page, evidenceDir: string | undefined, name: string): Promise<void> {
+  await hideDevtools(page);
+  await page.screenshot({
+    path: `${screenshotDir(evidenceDir)}wp10.4-${name}.png`,
+    fullPage: true,
+  });
+}
+
+test.describe('unidentified securities are named rows (WP 10.4)', () => {
+  test.use({ viewport: { width: 1280, height: 1900 } });
+
+  test("the Holdings tab lists the IRA's unidentified fund by name with the marker and the institution's figure; its panel and Allocation name it; axe clean in both themes", async ({
+    page,
+    evidenceDir,
+  }) => {
+    await installFakeWebAuthnAssertion(page);
+    await installInvestmentsMocks(page);
+    await loginAndReachInvestments(page);
+
+    const row = page.getByTestId('unresolved-row-019a0000-0000-7000-8000-0000000000f1');
+    await expect(row).toBeVisible();
+    // Inside the holdings table, with its seven columns.
+    await expect(
+      page.getByTestId('holdings-table').locator('[data-testid^="unresolved-row-"]'),
+    ).toHaveCount(1);
+    await expect(row.getByRole('rowheader')).toContainText('VFIFX');
+    await expect(row.getByRole('rowheader')).toContainText('Vanguard Target Retirement 2050 Fund');
+    await expect(row.getByRole('rowheader')).toContainText('Traditional IRA');
+    await expect(row.getByTestId('unresolved-marker')).toHaveText(
+      'Could not identify this security',
+    );
+    await expect(row.getByRole('cell').first()).toHaveText('12.5');
+    await expect(row.getByTestId('institution-figure')).toContainText('$2,140.33');
+    await expect(row.getByTestId('institution-figure')).toContainText("(institution's figure)");
+    // The reasons, in words, behind the disclosure.
+    await row.getByText('Why it could not be identified').click();
+    await expect(row.getByText(/A ticker alone can name more than one security/)).toBeVisible();
+    await expect(page.getByTestId('unresolved-securities')).toContainText(
+      '1 position could not be identified',
+    );
+    // The portfolio total is the server's, unchanged: the fund is outside it.
+    await expect(visible(page, 'portfolio-total')).toHaveText('$176,499.60');
+
+    for (const theme of ['light', 'dark'] as const) {
+      await setTheme(page, theme);
+      await expect(row).toBeVisible();
+      await expectNoAxeViolations(
+        page,
+        `investments holdings with an unidentified fund (${theme})`,
+      );
+      await shoot104(page, evidenceDir, `holdings-unresolved-${theme}`);
+    }
+    await setTheme(page, 'light');
+
+    // The IRA's own panel: only its rows (the account route filters), as a card.
+    await page
+      .getByRole('navigation', { name: 'Investment accounts' })
+      .getByRole('button', { name: 'Traditional IRA' })
+      .click();
+    const ira = page.getByTestId('unresolved-position-019a0000-0000-7000-8000-0000000000f1');
+    await expect(ira).toBeVisible();
+    await expect(ira).toContainText('Could not identify this security');
+    await expect(ira).toContainText("(institution's figure)");
+    await expectNoAxeViolations(page, 'investments IRA panel with an unidentified fund');
+    await page.getByRole('button', { name: 'All accounts' }).click();
+    await page
+      .getByRole('navigation', { name: 'Investment accounts' })
+      .getByRole('button', { name: 'Taxable brokerage' })
+      .click();
+    await expect(page.getByTestId('position-VTI')).toBeVisible();
+    await expect(page.locator('[data-testid^="unresolved-position-"]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'All accounts' }).click();
+
+    // Allocation names it with words for `security_unresolved`, never the raw enum.
+    await page.getByRole('tab', { name: 'Allocation' }).click();
+    const excluded = page.getByTestId('allocation-excluded');
+    await expect(excluded).toContainText('VFIFX — the security could not be identified');
+    await expect(excluded).not.toContainText('security_unresolved');
+  });
+
+  test('Activity keeps the movement in the unidentified fund under its own name, with the marker; axe clean in both themes', async ({
+    page,
+    evidenceDir,
+  }) => {
+    await installFakeWebAuthnAssertion(page);
+    await installInvestmentsMocks(page);
+    await loginAndReachInvestments(page);
+
+    await page.getByRole('tab', { name: 'Activity' }).click();
+    const marked = page
+      .getByTestId('activity-row')
+      .filter({ has: page.getByTestId('unresolved-marker') });
+    await expect(marked).toHaveCount(1);
+    await expect(marked).toContainText('VFIFX');
+    await expect(marked).toContainText('Vanguard Target Retirement 2050 Fund');
+    await expect(marked).toContainText('Contribution / transfer in');
+    await expect(marked).toContainText('Traditional IRA');
+
+    for (const theme of ['light', 'dark'] as const) {
+      await setTheme(page, theme);
+      await expect(marked).toBeVisible();
+      await expectNoAxeViolations(
+        page,
+        `investments activity with an unidentified fund (${theme})`,
+      );
+      await shoot104(page, evidenceDir, `activity-unresolved-${theme}`);
+    }
   });
 });

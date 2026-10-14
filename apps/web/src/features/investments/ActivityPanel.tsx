@@ -14,6 +14,7 @@ import { Button } from '../../components/ui/button.tsx';
 import { Label } from '../../components/ui/label.tsx';
 import type { ActivityFilters } from './api.ts';
 import { ACTIVITY_KIND_LABELS, activityKindLabel, activitySourceLabel } from './labels.ts';
+import { UnresolvedMarker } from './UnresolvedMarker.tsx';
 import type { ActivityKind } from './search.ts';
 
 const CONTROL_CLASS =
@@ -263,7 +264,26 @@ export function ActivityPanel({
                         )}
                     </td>
                     <td className="py-2 pr-3">
-                      {item.security === null ? (
+                      {item.unresolvedSecurity != null ? (
+                        // WP 10.4: a movement in a security nobody could identify, under the
+                        // provider's own name and ticker. Listed here; left out of lots and
+                        // performance (the Performance tab names it among the exclusions).
+                        <>
+                          <span className="font-medium text-text-primary">
+                            {item.unresolvedSecurity.symbol ??
+                              item.unresolvedSecurity.name ??
+                              item.name ??
+                              'An unnamed security'}
+                          </span>
+                          {item.unresolvedSecurity.symbol !== null &&
+                            item.unresolvedSecurity.name !== null && (
+                              <span className="block text-caption text-text-muted">
+                                {item.unresolvedSecurity.name}
+                              </span>
+                            )}
+                          <UnresolvedMarker className="mt-1 flex w-fit" />
+                        </>
+                      ) : item.security === null ? (
                         <span className="text-text-muted">{item.name ?? '—'}</span>
                       ) : item.security.symbol !== null ? (
                         <>

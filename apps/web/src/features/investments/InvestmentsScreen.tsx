@@ -232,6 +232,7 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
               )}
               <HoldingsTable
                 holdings={holdings?.holdings ?? []}
+                unresolved={holdings?.unresolved ?? []}
                 accountHoldings={accountHoldings.byAccountId}
                 accountNameOf={accounts.nameOf}
                 onOpenAccount={(accountId) => update({ account: accountId })}

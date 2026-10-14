@@ -93,6 +93,7 @@ export function marketDataSettingsResponse(): GetMarketDataSettingsResponse {
       {
         provider: 'coingecko',
         keyPresent: false,
+        keySource: 'none',
         registered: true,
         capabilities: { prices: true, fx: false, macro: false, search: false },
         budget: [{ label: 'requests/min', used: 3, limit: 100 }],
@@ -154,20 +155,30 @@ export function holdingsResponse(
 }
 
 /**
- * A position `investments.SecurityResolutionFailed` (C-8, G3-11):
- * `openfigi.test.ts` sends when a bare ticker with no key configured
- * never resolves. Exported for `InvestmentsScreen.test.tsx`/
- * `HoldingsTable.test.tsx` to prove the holdings screen shows "a position
- * the app could not identify" rather than nothing.
+ * A position `investments.SecurityResolutionFailed` (C-8, G3-11; WP 10.4's
+ * shape): a bare ticker (no exchange) never identifies a security, so the position
+ * is kept as an unresolved row with the provider's own name, ticker, quantity
+ * and value. Exported for `InvestmentsScreen.test.tsx` and
+ * `UnresolvedSecurities.test.tsx` to prove the holdings screen shows it as a
+ * named row rather than nothing.
  */
 export function unresolvedSecurity(
   overrides: Partial<ListHoldingsResponse['unresolved'][number]> = {},
 ): ListHoldingsResponse['unresolved'][number] {
   return {
+    id: '019a0000-0000-7000-8000-0000000000f1',
+    accountId: 'acct-taxable',
     provider: 'plaid',
     providerSecurityId: 'sec-plaid-9f2c',
-    name: 'Mystery Fund',
-    abstentions: [{ tier: 'cusip', reason: 'not_provided', detail: null }],
+    name: 'Vanguard Target Retirement 2050 Fund',
+    ticker: 'VFIFX',
+    quantity: '12.500000000000000000',
+    institutionValue: usd('214033'),
+    abstentions: [{ tier: 'ticker', reason: 'bare_ticker', detail: null }],
+    reasons: [
+      'Only a ticker (VFIFX) was given, with no exchange. A ticker alone can name more than one security, so it is not used to identify one.',
+    ],
+    asOfDate: '2026-09-23',
     observedAt: '2026-09-27T04:00:00.000Z',
     ...overrides,
   };
@@ -495,6 +506,8 @@ export function summaryFixture(overrides: Partial<PeriodSummary> = {}): PeriodSu
       foreignCurrencyMovements: [],
       unvaluedTransfers: [],
       unclassifiedMovements: [],
+      unresolvedSecurities: [],
+      unresolvedMovements: [],
     },
     ...overrides,
   };
@@ -552,6 +565,7 @@ export function activityFixture(overrides: Partial<InvestmentActivity> = {}): In
     flow: null,
     fees: usd('0'),
     source: 'BROKER',
+    unresolvedSecurity: null,
     ...overrides,
   };
 }

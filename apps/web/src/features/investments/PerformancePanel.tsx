@@ -235,6 +235,9 @@ function Exclusions({ summary }: { summary: PeriodSummary }) {
   if (summary.complete) return null;
   const { unpricedSecurities, foreignCurrencyMovements, unvaluedTransfers, unclassifiedMovements } =
     summary.exclusions;
+  // WP 10.4. `?? []`: an api from before 10.4 does not send them, and a missing list is not a crash.
+  const unresolvedSecurities = summary.exclusions.unresolvedSecurities ?? [];
+  const unresolvedMovements = summary.exclusions.unresolvedMovements ?? [];
   return (
     <ul
       className="mt-2 space-y-0.5 text-caption text-status-warning"
@@ -264,6 +267,21 @@ function Exclusions({ summary }: { summary: PeriodSummary }) {
         <li>
           {unclassifiedMovements.length} cash movement(s) could not be classified as a contribution
           or as income, and were left out.
+        </li>
+      )}
+      {unresolvedSecurities.length > 0 && (
+        <li data-testid="exclusion-unresolved-securities">
+          Left out, could not identify the security:{' '}
+          {unresolvedSecurities
+            .map((security) => security.symbol ?? security.name ?? 'an unnamed position')
+            .join(', ')}
+          .
+        </li>
+      )}
+      {unresolvedMovements.length > 0 && (
+        <li data-testid="exclusion-unresolved-movements">
+          {unresolvedMovements.length} movement(s) in a security that could not be identified were
+          left out (they are listed in Activity).
         </li>
       )}
     </ul>

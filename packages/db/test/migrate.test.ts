@@ -517,6 +517,16 @@ describeWithDb('runMigrations', () => {
       //   accepts a management-only row) -- a DROP + ADD of the same name, 0029's widening shape; every
       //   row valid before is valid after. Expand-only; references only 0035's account_overrides.
       //   Exported with the row (the export reads every column); moves no projection.
+      // 0043_provider_credentials_market_data (WP 10.4): one new @ctx/investments table,
+      //   unresolved_holdings (a position a sync reported that the resolver could not identify;
+      //   replaced per account on every sync; never exported). provider_credentials' provider CHECK
+      //   re-declared wider (+ tiingo, fred, coingecko, openfigi -- DROP + ADD of the same name),
+      //   env made nullable with provider_credentials_env_by_provider (plaid has an env, a
+      //   market-data key has none). investment_transactions gains security_unresolved (NOT NULL
+      //   DEFAULT FALSE), provider_security_name and provider_ticker,
+      //   investment_transactions_unresolved_has_no_security, and 0014's
+      //   investment_transactions_trades_name_a_security re-declared wider (a trade names a
+      //   security or is marked unresolved). Expand-only; references only 0002, 0014 and 0041.
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -625,6 +635,7 @@ describeWithDb('runMigrations', () => {
         'transactions',
         'transactions_provider',
         'transfer_links',
+        'unresolved_holdings',
         'users',
         'wallet_addresses',
         'webauthn_challenges',

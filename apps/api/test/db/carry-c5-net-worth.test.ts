@@ -33,9 +33,8 @@
  * assertion back to the one line in the route file it depends on is a
  * five-second read, which is the next best thing to an executed sabotage.
  */
-import { newId, systemClock } from '@core/kernel';
-import { appendEvent, platformExecutor } from '@core/platform';
-import { SecurityResolutionFailed } from '@ctx/investments';
+import { DateOnly, Quantity, newId, systemClock } from '@core/kernel';
+import { drizzleLotStore } from '@ctx/investments';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -49,30 +48,37 @@ import {
 const DAY_MS = 86_400_000;
 
 /**
- * A real `investments.SecurityResolutionFailed`, appended by the production
- * writer (`appendEvent` over the context's own `defineEvent`; G9-15, C9-9). The
- * hand-written row this replaces was "shaped exactly like" one but lacked the
- * `syncRunId` key the event's schema requires and named an abstain reason
- * (`no_match`) that is not one of `ABSTAIN_REASONS`, so no writer could have stored it.
+ * A real `unresolved_holdings` row, written by the production writer — the lot
+ * store's `replaceUnresolvedHoldings`, which the lot consumer calls on every
+ * sync. Since WP 10.4 that table, not the `investments.SecurityResolutionFailed`
+ * event, is what `GET /holdings`' `unresolved` list reads (the event carries no
+ * account, quantity or value, and cannot be retracted when a later sync
+ * resolves the position).
  */
-async function insertUnresolvedEvent(
+async function insertUnresolvedHolding(
   h: ApiHarness,
   input: { readonly userId: string; readonly provider: string; readonly name: string },
 ): Promise<void> {
-  await appendEvent(
-    platformExecutor(h.database.db),
-    SecurityResolutionFailed.create(
+  const accountId = newId();
+  await drizzleLotStore(h.database.db, systemClock).replaceUnresolvedHoldings(
+    input.userId,
+    { accountId, provider: input.provider },
+    [
       {
+        accountId,
         provider: input.provider,
-        syncRunId: null,
         providerSecurityId: null,
         name: input.name,
-        identifiers: [],
+        ticker: null,
+        quantity: Quantity.of('1'),
+        institutionValue: null,
+        currency: 'USD',
         abstentions: [{ tier: 'ticker', reason: 'absent', detail: null }],
+        syncRunId: null,
+        asOfDate: DateOnly.parse('2026-10-01'),
+        observedAt: new Date('2026-10-01T00:00:00.000Z'),
       },
-      { userId: input.userId, aggregateId: null, correlationId: newId(), causationId: null },
-      systemClock,
-    ),
+    ],
   );
 }
 
@@ -91,20 +97,20 @@ describe.skipIf(NO_DATABASE)(
 
     it(
       "GET /holdings' unresolved list names the caller's own unresolved securities, never another holder's — " +
-        'readUnresolvedSecurities (routes/investments.ts) reads `domain_events WHERE user_id = …`',
+        'readUnresolvedHoldings (routes/investments.ts) reads `unresolved_holdings WHERE user_id = …`',
       async () => {
         const otherUserId = await h.database.createUser('Bob (unresolved)');
         const theirs = await h.issueSession({ userId: otherUserId, fresh: true });
 
         // Bob's failure, planted first, with a name distinctive enough that
         // finding it in Alice's response could not be a coincidence.
-        await insertUnresolvedEvent(h, {
+        await insertUnresolvedHolding(h, {
           userId: otherUserId,
           provider: 'plaid',
           name: 'BOBS-ONLY-UNRESOLVED-SECURITY',
         });
         // The caller's own failure, a different name.
-        await insertUnresolvedEvent(h, {
+        await insertUnresolvedHolding(h, {
           userId: h.userId,
           provider: 'plaid',
           name: 'ALICES-OWN-UNRESOLVED-SECURITY',
@@ -119,8 +125,8 @@ describe.skipIf(NO_DATABASE)(
         );
         expect(
           names,
-          // If `readUnresolvedSecurities`'s `WHERE user_id = ${userId}::uuid`
-          // (routes/investments.ts, ~line 336) were dropped, this is exactly
+          // If `readUnresolvedHoldings`'s `WHERE user_id = ${userId}::uuid`
+          // (routes/investments.ts) were dropped, this is exactly
           // what would appear — the whole point of the predicate.
           "never another holder's — dropping the WHERE user_id predicate would surface this",
         ).not.toContain('BOBS-ONLY-UNRESOLVED-SECURITY');

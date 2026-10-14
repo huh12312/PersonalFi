@@ -681,6 +681,63 @@ test.describe('the add-wallet form is axe-clean in both chains and both themes',
 });
 
 // ---------------------------------------------------------------------------
+// 7b. WP 10.4's states, pinned: the sweep reaches them through the shared fixtures
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep above already walks `/settings`'s "Market data" tab and `/investments`'s Holdings tab with every
+ * overlay open; these pin that the fixtures it walks them with carry WP 10.4's states (a key card of each kind,
+ * the Remove confirmation, an unidentified position as a named row and as a card in its account), so a fixture change
+ * cannot quietly take them out of the sweep.
+ */
+test.describe('WP 10.4 states are axe-clean in both themes', () => {
+  test('Settings › Market data: the four key cards and the Remove confirmation', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await installSweepMocks(page);
+    await visit(page, '/settings');
+    await page.getByRole('tab', { name: 'Market data' }).click();
+    await expect(page.getByRole('heading', { name: 'API keys' })).toBeVisible();
+    for (const provider of ['tiingo', 'fred', 'coingecko', 'openfigi']) {
+      await expect(page.getByTestId(`market-data-key-${provider}`)).toBeVisible();
+    }
+    await expect(page.getByTestId('market-data-key-tiingo')).toContainText(
+      "Set by the operator's secret file",
+    );
+    await expect(page.getByTestId('market-data-key-coingecko')).toContainText('ends in 9f2c');
+    await scanBothThemes(page, '/settings › Market data › API keys');
+    await page
+      .getByTestId('market-data-key-coingecko')
+      .getByRole('button', { name: 'Remove' })
+      .click();
+    await expect(
+      page.getByRole('dialog', { name: 'Remove the stored CoinGecko key?' }),
+    ).toBeVisible();
+    await scanBothThemes(page, '/settings › Market data › confirm removing a stored key');
+  });
+
+  test('Investments: an unidentified position as a named row, on the Holdings tab and in its account', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await installSweepMocks(page);
+    await visit(page, '/investments');
+    const row = page.locator('[data-testid^="unresolved-row-"]');
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText('Could not identify this security');
+    await row.getByText('Why it could not be identified').click();
+    await scanBothThemes(page, '/investments › Holdings with an unidentified position');
+    await visit(page, '/investments?account=acct-ira');
+    await expect(page.locator('[data-testid^="unresolved-position-"]')).toHaveCount(1);
+    await scanBothThemes(page, "/investments › the IRA's panel with an unidentified position");
+    // Activity's marker is scanned in both themes by `investments.spec.ts` ('Activity keeps the movement in the
+    // unidentified fund …'): under these layered fixtures `mock-api.ts` answers `/investments/transactions` as
+    // an install with no activity (WP 10.3), so the sweep's Activity tab is its empty state.
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 8. A picture of every route, in both themes (evidence, written deliberately)
 // ---------------------------------------------------------------------------
 

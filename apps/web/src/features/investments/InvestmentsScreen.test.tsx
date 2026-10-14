@@ -152,19 +152,28 @@ describe('InvestmentsScreen', () => {
     expect(screen.getByTestId('holdings-unclassified-pct')).toHaveTextContent('1.7%');
   });
 
-  it('shows a position the resolver could not identify, rather than nothing (C-8, G3-11)', async () => {
+  it('shows a position the resolver could not identify as a named row, rather than nothing (C-8, G3-11, WP 10.4)', async () => {
+    const item = unresolvedSecurity({ accountId: 'acct-taxable' });
     stubFetchRoutes(
       routesFor({
-        holdings: { ...holdingsResponse(), unresolved: [unresolvedSecurity()] },
+        holdings: {
+          ...holdingsResponse(),
+          unresolved: [item],
+          excluded: [{ holdingId: item.id, symbol: 'VFIFX', reason: 'security_unresolved' }],
+        },
       }),
     );
 
     renderScreen();
 
-    const notice = await screen.findByTestId('unresolved-securities');
+    const row = await screen.findByTestId(`unresolved-row-${item.id}`);
+    expect(row).toHaveTextContent('VFIFX');
+    expect(row).toHaveTextContent('Vanguard Target Retirement 2050 Fund');
+    expect(row).toHaveTextContent('Taxable brokerage');
+    expect(row).toHaveTextContent('Could not identify this security');
+    expect(row).toHaveTextContent("(institution's figure)");
+    const notice = screen.getByTestId('unresolved-securities');
     expect(notice).toHaveTextContent('1 position could not be identified');
-    expect(notice).toHaveTextContent('Mystery Fund');
-    expect(notice).toHaveTextContent('plaid');
   });
 
   it('shows nothing when every position resolved', async () => {

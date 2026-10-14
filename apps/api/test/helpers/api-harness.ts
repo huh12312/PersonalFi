@@ -42,7 +42,7 @@ import type { PlaidApiFactory } from '../../src/plaid-stored.ts';
 import { WALLETRPC_MANIFEST, WalletRpcConnector } from '@connector/walletrpc';
 import { loadConfig, type AppConfig } from '@core/config';
 import { newId, systemClock, type Clock } from '@core/kernel';
-import { silentLogger } from '@core/platform';
+import { silentLogger, type HttpTransport, type Resolver } from '@core/platform';
 import { ADMIN_URL, createTestDatabase, type TestDatabase } from '@core/testkit';
 import { ConnectorRegistry, SyncOrchestrator } from '@ctx/connections';
 // `InjectOptions`/`LightMyRequestResponse` are re-exported by Fastify itself, so
@@ -193,6 +193,10 @@ export interface HarnessOptions {
   readonly logStream?: { write(chunk: string): void };
   /** WP 10.1. Extra environment for `loadConfig` (`PLAID_ALLOW_PRODUCTION`, `LOG_LEVEL`, …). */
   readonly env?: Readonly<Record<string, string>>;
+  /** WP 10.4. The socket under the market-data adapters; a test hands `createFakeTransport`'s. */
+  readonly marketDataTransport?: HttpTransport;
+  /** WP 10.4. DNS for that seam; defaults to a public address so the egress guard passes. */
+  readonly marketDataResolve?: Resolver;
 }
 
 /**
@@ -286,6 +290,13 @@ export async function createApiHarness(options: HarnessOptions): Promise<ApiHarn
     ...(options.appBuildsRegistry === true ? {} : { connectorRegistry: registry }),
     ...(options.plaidApiFactory === undefined ? {} : { plaidApiFactory: options.plaidApiFactory }),
     ...(options.logStream === undefined ? {} : { logStream: options.logStream }),
+    ...(options.marketDataTransport === undefined
+      ? {}
+      : {
+          marketDataTransport: options.marketDataTransport,
+          marketDataResolve:
+            options.marketDataResolve ?? (() => Promise.resolve(['93.184.216.34'])),
+        }),
     ...(walletRpc === null ? {} : { walletRpc }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
   });

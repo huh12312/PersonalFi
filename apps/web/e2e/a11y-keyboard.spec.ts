@@ -543,6 +543,64 @@ test('investments (WP 10.3): the Activity tab by arrow keys, its type filter, an
   await journey.check('the scope radio keeps focus');
 });
 
+test('settings › market data keys (WP 10.4): Tab to a key field, type, save through a real passkey step-up, remove behind the confirmation — by keyboard', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(120_000);
+  await installSweepMocks(page);
+  const passkey = await installVirtualPasskey(page, context);
+  await visit(page, '/settings');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'market data keys');
+  const fred = page.getByTestId('market-data-key-fred');
+
+  // The tab list is one stop; arrows move through it and Enter chooses.
+  await journey.tabTo(/Rules|Notifications|Market data|Crypto/, { max: 40 });
+  for (let n = 0; n < 4 && !/Market data/.test(await journey.focusedName()); n += 1) {
+    await journey.press('ArrowRight', 'ArrowRight along the tabs');
+  }
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'API keys' })).toBeVisible();
+  await expect(fred).toContainText('Not set.');
+
+  // Tiingo (the operator's file) offers nothing to stop on: the first field is FRED's.
+  const first = await journey.tabTo(/API key$/, { max: 20 });
+  expect(first.name).toBe('FRED API key');
+  await journey.type('kbdFredKey0123456789abcdK3yQ'); // gitleaks:allow — synthetic, not a FRED key
+  await journey.tabTo(/^Save with passkey$/, { max: 3 });
+  await passkey.respond(true);
+  await page.keyboard.press('Enter');
+  await expect(fred).toContainText('ends in K3yQ', { timeout: 15_000 });
+  // Focus comes back to the emptied field, not to the document body.
+  await journey.expectFocus(/^FRED API key$/, 'focus returns to the key field after the save');
+  await expect(fred.getByLabel('FRED API key')).toHaveValue('');
+  expect(passkey.assertions(), 'the save crossed the passkey step-up').toBeGreaterThan(0);
+
+  // Remove: a confirmation first. Escape closes it and focus returns to Remove (2.4.3).
+  await journey.tabTo(/^Remove$/, { max: 3 });
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Remove the stored FRED key?' });
+  await expect(dialog).toBeVisible();
+  await journey.settle();
+  await journey.check('focus is inside the confirmation');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await journey.expectFocus(/^Remove$/, 'Escape returns focus to Remove');
+  await expect(fred).toContainText('ends in K3yQ');
+
+  // Again, and confirm by keyboard: the step-up runs, the dialog closes, focus lands on the field.
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeVisible();
+  await journey.settle();
+  await journey.tabTo(/^Remove key$/, { max: 4 });
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden({ timeout: 15_000 });
+  await expect(fred).toContainText('Not set.');
+  await journey.expectFocus(/^FRED API key$/, 'focus lands on the key field after the removal');
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
 // ---------------------------------------------------------------------------
 // 10. The soft-lock: its 60 s warning is operable from the keyboard (2.2.1)
 // ---------------------------------------------------------------------------

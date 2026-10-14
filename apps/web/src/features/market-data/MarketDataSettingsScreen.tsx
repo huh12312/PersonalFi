@@ -51,6 +51,13 @@ function ProviderRow({ provider }: { provider: Provider }) {
           <Badge variant={provider.keyPresent ? 'good' : 'neutral'}>
             {provider.keyPresent ? 'Key configured' : 'No key configured'}
           </Badge>
+          {/* WP 10.4: where the key in force comes from (the "API keys" cards above change it). */}
+          {provider.keyPresent && provider.keySource === 'file' && (
+            <span className="text-caption text-text-muted">from the operator&apos;s file</span>
+          )}
+          {provider.keyPresent && provider.keySource === 'stored' && (
+            <span className="text-caption text-text-muted">stored in this install</span>
+          )}
           <Badge variant={provider.registered ? 'good' : 'neutral'}>
             {provider.registered ? 'Registered' : 'Not registered'}
           </Badge>

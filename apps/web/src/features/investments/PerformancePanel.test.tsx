@@ -64,6 +64,8 @@ describe('PerformancePanel (WP 10.3)', () => {
               foreignCurrencyMovements: ['m1'],
               unvaluedTransfers: ['m2'],
               unclassifiedMovements: ['m3', 'm4'],
+              unresolvedSecurities: [{ id: 'u1', symbol: 'VFIFX', name: 'Vanguard 2050' }],
+              unresolvedMovements: ['m5', 'm6', 'm7'],
             },
           }),
         })}
@@ -75,6 +77,27 @@ describe('PerformancePanel (WP 10.3)', () => {
     expect(exclusions).toHaveTextContent('1 movement(s) in another currency');
     expect(exclusions).toHaveTextContent('1 transfer(s) could not be valued');
     expect(exclusions).toHaveTextContent('2 cash movement(s) could not be classified');
+    // WP 10.4: unidentified securities by name, and their movements by count, in words.
+    expect(exclusions).toHaveTextContent('Left out, could not identify the security: VFIFX.');
+    expect(exclusions).toHaveTextContent(
+      '3 movement(s) in a security that could not be identified were left out',
+    );
+  });
+
+  it('an api from before WP 10.4 (no unresolved lists) still renders its exclusions', () => {
+    const legacy = summaryFixture({
+      complete: false,
+      exclusions: {
+        unpricedSecurities: [],
+        foreignCurrencyMovements: ['m1'],
+        unvaluedTransfers: [],
+        unclassifiedMovements: [],
+      } as unknown as ReturnType<typeof summaryFixture>['exclusions'],
+    });
+    render(<PerformancePanel data={performanceResponse({ summary: legacy })} isLoading={false} />);
+    expect(screen.getByTestId('health-exclusions')).toHaveTextContent(
+      '1 movement(s) in another currency',
+    );
   });
 
   it('by management: TWRs side by side in one table, MWRs and dollars in two others — no row carries a rate and a dollar', () => {

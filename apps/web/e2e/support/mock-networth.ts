@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 import type { Page, Route } from '@playwright/test';
 
+import { createMarketDataKeysState, handleMarketDataKeys } from './mock-market-data-keys.ts';
+
 /**
  * WP 3.12's own mock module, entirely separate from `mock-api.ts` — the
  * dispatch forbids both UI work packages (3.11, 3.12) from editing that
@@ -152,6 +154,7 @@ function marketDataSettingsResponse() {
       {
         provider: 'tiingo',
         keyPresent: true,
+        keySource: 'file',
         registered: true,
         capabilities: { prices: true, fx: false, macro: false, search: false },
         budget: [{ label: 'requests/day', used: 12, limit: 1000 }],
@@ -163,6 +166,7 @@ function marketDataSettingsResponse() {
       {
         provider: 'fred',
         keyPresent: false,
+        keySource: 'none',
         registered: true,
         capabilities: { prices: false, fx: false, macro: true, search: false },
         budget: [{ label: 'requests/min', used: 0, limit: 120 }],
@@ -171,6 +175,7 @@ function marketDataSettingsResponse() {
       {
         provider: 'coingecko',
         keyPresent: false,
+        keySource: 'none',
         registered: true,
         capabilities: { prices: true, fx: false, macro: false, search: false },
         budget: [{ label: 'requests/min', used: 3, limit: 100 }],
@@ -240,6 +245,7 @@ export async function installNetworthMocks(page: Page): Promise<MockNetworthStat
   };
   let authenticated = false;
   let steppedUp = false;
+  const marketDataKeys = createMarketDataKeysState();
 
   await page.route('**/*', async (route: Route) => {
     const request = route.request();
@@ -291,6 +297,10 @@ export async function installNetworthMocks(page: Page): Promise<MockNetworthStat
       state.seriesCallCount += 1;
       return route.fulfill(json(seriesResponse(state.seriesCallCount)));
     }
+
+    // WP 10.4: Settings › Market data now opens with the key cards; answered here so this
+    // spec's screens never fall through to the Vite proxy.
+    if (await handleMarketDataKeys(route, path, method, marketDataKeys, () => steppedUp)) return;
 
     if (path === '/api/market-data/settings' && method === 'GET') {
       return route.fulfill(json(marketDataSettingsResponse()));

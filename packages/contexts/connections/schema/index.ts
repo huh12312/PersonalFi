@@ -45,9 +45,11 @@ export {
   type SyncFactKind,
 } from './sync-facts.ts';
 export {
+  MARKET_DATA_KEY_PROVIDERS,
   PROVIDER_CREDENTIAL_ENVS,
   PROVIDER_CREDENTIAL_PROVIDERS,
   providerCredentials,
+  type MarketDataKeyProvider,
   type NewProviderCredentialRow,
   type ProviderCredentialEnv,
   type ProviderCredentialProvider,

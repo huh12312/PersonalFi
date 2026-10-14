@@ -93,6 +93,7 @@ import {
   type EgressPolicy,
   type Executor,
   type HttpTransport,
+  type Resolver,
   type PlatformLogger,
   type TransactionalExecutor,
 } from '@core/platform';
@@ -277,6 +278,7 @@ import {
   type InvestmentsExecutor,
   type ResolvedHoldingFact,
   type ResolvedTransactionFact,
+  type UnresolvedHoldingFact,
   type SecurityResolver,
   type ValuationOptions,
 } from '@ctx/investments';
@@ -295,6 +297,7 @@ import {
   COINGECKO_WINDOWS,
   FRED_MACRO_SERIES,
   FRED_WINDOWS,
+  OPENFIGI_ANONYMOUS_WINDOWS,
   OPENFIGI_WINDOWS,
   TIINGO_WINDOWS,
   USER_AGENT,
@@ -1507,16 +1510,24 @@ const MACRO_LOOKBACK_DAYS = 10;
 export function createInsightsMarketDataPort(options: {
   /** `createMarketDataRuntime(...)`'s FRED source, or `undefined` with no key. */
   readonly source: FredSource | undefined;
+  /**
+   * WP 10.4. The holder's FRED source — their stored key where the file is
+   * empty. When present it is asked first, per call; `source` is the fallback.
+   */
+  readonly sourceFor?: (userId: string) => Promise<FredSource | undefined>;
   readonly series?: readonly {
     readonly seriesId: string;
     readonly kind: MarketRateKind;
     readonly units: string;
   }[];
 }): InsightsMarketDataPort {
-  const source = options.source;
   const series = options.series ?? TRACKED_MACRO_SERIES;
   return {
     async rates(input) {
+      const source =
+        options.sourceFor === undefined
+          ? options.source
+          : ((await options.sourceFor(input.userId)) ?? options.source);
       if (source === undefined || !source.hasKey) return null;
 
       const observations: InsightsMarketRateObservation[] = [];
@@ -2242,6 +2253,16 @@ export function securityResolverFor(
 export function createInvestmentSyncPort(
   database: Database,
   clock: Clock = systemClock,
+  options: {
+    /**
+     * WP 10.4. The OpenFIGI mapper for a holder — `marketDataRuntime.forUser(userId)`'s
+     * `figi`, keyed or anonymous. Before WP 10.4 nothing passed one: the runtime
+     * built a mapper and no resolver ever received it, so the FIGI tier abstained
+     * on every install, keyed or not. Absent ⇒ the resolver's own no-match fake,
+     * which is the behaviour this port had before.
+     */
+    readonly figiFor?: (userId: string) => Promise<FigiMapper | undefined>;
+  } = {},
 ): InvestmentSyncPort {
   return {
     async factsForRun(userId, syncRunId) {
@@ -2268,7 +2289,10 @@ export function createInvestmentSyncPort(
           transactions: [],
         };
       }
-      return database.transaction((tx) => resolveRunFacts(tx, clock, userId, syncRunId, observed));
+      const figi = options.figiFor === undefined ? undefined : await options.figiFor(userId);
+      return database.transaction((tx) =>
+        resolveRunFacts(tx, clock, userId, syncRunId, observed, figi),
+      );
     },
 
     /**
@@ -2354,10 +2378,12 @@ function runFactsResolverFor(
   clock: Clock,
   userId: string,
   syncRunId: string,
+  figi?: FigiMapper,
 ): SecurityResolver {
   return createSecurityResolver({
     store: drizzleSecurityStore(executor, clock),
     clock,
+    ...(figi === undefined ? {} : { figi }),
     events: {
       append: async (event) => {
         const payload = (event.payload ?? {}) as {
@@ -2407,13 +2433,15 @@ async function resolveRunFacts(
   userId: string,
   syncRunId: string,
   observed: RunInvestmentFacts,
+  figi?: FigiMapper,
 ): Promise<{
   readonly provider: string;
   readonly asOfDate: DateOnly;
   readonly holdings: readonly ResolvedHoldingFact[];
   readonly transactions: readonly ResolvedTransactionFact[];
+  readonly unresolvedHoldings: readonly UnresolvedHoldingFact[];
 }> {
-  const resolver = runFactsResolverFor(executor, clock, userId, syncRunId);
+  const resolver = runFactsResolverFor(executor, clock, userId, syncRunId, figi);
   const context = { userId, provider: observed.provider, syncRunId };
 
   // One list, one call. `resolveAll` exists so a 120-position brokerage is two
@@ -2442,6 +2470,7 @@ async function resolveRunFacts(
   const resolutions = await resolver.resolveAll(withSecurity, context);
 
   const holdings: ResolvedHoldingFact[] = [];
+  const unresolvedHoldings: UnresolvedHoldingFact[] = [];
   let cursor = 0;
   for (const holding of observed.holdings) {
     const resolution = resolutions[cursor];
@@ -2449,8 +2478,21 @@ async function resolveRunFacts(
     // 07's rule: an unresolved thing fails loudly rather than minting a row,
     // and the `SecurityResolutionFailed` the resolver just appended is the
     // record that this position existed. A holding with a null security is not
-    // a holding in anything.
-    if (resolution?.outcome !== 'resolved') continue;
+    // a holding in anything — but since WP 10.4 it is a named row in
+    // `unresolved_holdings`, which the consumer writes from this list, so the
+    // holder sees it on the Holdings tab instead of nothing.
+    if (resolution?.outcome !== 'resolved') {
+      unresolvedHoldings.push({
+        fact: holding.fact,
+        accountId: holding.accountId,
+        abstentions: (resolution?.abstentions ?? []).map((entry) => ({
+          tier: entry.tier,
+          reason: entry.reason,
+          detail: entry.detail,
+        })),
+      });
+      continue;
+    }
     holdings.push({
       fact: holding.fact,
       accountId: holding.accountId,
@@ -2461,20 +2503,33 @@ async function resolveRunFacts(
   const transactions: ResolvedTransactionFact[] = [];
   for (const transaction of observed.transactions) {
     let securityId: string | null = null;
-    if (transaction.fact.security !== null) {
+    let unresolved: { name: string | null; ticker: string | null } | null = null;
+    const security = transaction.fact.security;
+    if (security !== null) {
       const resolution = resolutions[cursor];
       cursor += 1;
       // Same rule, different consequence: a *buy* whose security nobody can
-      // name cannot open a lot, so it is dropped exactly as a holding is. A
-      // transaction that named no security at all never entered `withSecurity`
-      // and never reaches this branch — it is kept below with a null id.
-      if (resolution?.outcome !== 'resolved') continue;
-      securityId = resolution.securityId;
+      // name cannot open a lot. Until WP 10.4 it was dropped exactly as a
+      // holding was, and the Activity tab could not list it; it is now kept
+      // with a null security and the provider's own name and ticker, and the
+      // lot engine skips it on that null as it skips a cash sweep. A
+      // transaction that named no security at all never entered
+      // `withSecurity` and never reaches this branch.
+      if (resolution?.outcome === 'resolved') {
+        securityId = resolution.securityId;
+      } else {
+        unresolved = {
+          name: security.name ?? null,
+          ticker:
+            security.identifiers.find((identifier) => identifier.kind === 'ticker')?.value ?? null,
+        };
+      }
     }
     transactions.push({
       fact: transaction.fact,
       accountId: transaction.accountId,
       securityId,
+      unresolved,
       // Exact, as the provider stated it. `IMPORTED` is the CSV leg's label
       // and `USER` is hand entry; neither is reachable from here.
       source: 'BROKER',
@@ -2486,6 +2541,7 @@ async function resolveRunFacts(
     asOfDate: dateOnlyOfInstant(observed.startedAt),
     holdings,
     transactions,
+    unresolvedHoldings,
   };
 }
 
@@ -2693,23 +2749,80 @@ export function createMarketDataRunRecorder(database: Database): MarketDataRunRe
  */
 const HYDRATE_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 
-/** Everything `module.integrations` needs, built once per process. */
-export interface MarketDataRuntime {
+/**
+ * Where a provider's key came from, as the status route reports it (WP 10.4).
+ * `file`: the operator's secret file (it wins). `stored`: the holder's own key,
+ * sealed in `provider_credentials`. `none`: neither.
+ */
+export type MarketDataKeySource = 'file' | 'stored' | 'none';
+
+/** The four keyed providers, in the order every list in this file uses. */
+export const MARKET_DATA_KEYED_PROVIDERS = ['tiingo', 'fred', 'coingecko', 'openfigi'] as const;
+export type MarketDataKeyedProvider = (typeof MARKET_DATA_KEYED_PROVIDERS)[number];
+
+/**
+ * The holder's stored market-data keys, opened. A port so this file never names
+ * `provider_credentials` or a `SecretBox`: `market-data-keys.ts` supplies it.
+ * Each value sits behind a method so a logged map prints no key.
+ */
+export type StoredMarketDataKeys = (
+  userId: string,
+) => Promise<ReadonlyMap<MarketDataKeyedProvider, { key(): string }>>;
+
+/** One holder's view of the market-data adapters: the keys in force, and the adapters built from them. */
+export interface MarketDataView {
   /** The adapters whose key is present. A provider with no key is simply absent. */
   readonly sources: readonly PriceSource[];
-  /** `undefined` when `openfigi_api_key` is absent; the resolver then abstains at that tier. */
+  /**
+   * The OpenFIGI mapper. Keyed when a key is in force, **anonymous** otherwise
+   * (10 jobs per request, 25 requests per minute — `OPENFIGI_ANONYMOUS_WINDOWS`,
+   * C-8). `undefined` only when `MARKET_DATA_ALLOWED_HOSTS` narrowed OpenFIGI out.
+   */
   readonly figi: FigiMapper | undefined;
-  /** Every key this process holds, so nothing provider-authored is logged raw. */
+  /** Every key this view holds, so nothing provider-authored is logged raw. */
   readonly keys: readonly ApiKey[];
-  /** Per-provider budgets, kept so `hydrateMarketDataBudgets` can prime them at boot. */
+  /** The budgets of the providers in force, kept so `hydrateMarketDataBudgets` can prime them. */
   readonly budgets: ReadonlyMap<MarketDataProvider, RateBudget>;
+  /** Where each provider's key came from. */
+  readonly keySources: Readonly<Record<MarketDataKeyedProvider, MarketDataKeySource>>;
 }
 
 /**
- * The four WP 3.4 adapters, feature-detected on their key files exactly the
- * way `createConnectorRegistry` feature-detects Plaid's credentials.
+ * Everything `module.integrations` needs, built once per process.
  *
- * Four properties are deliberate and each one is a line somebody could
+ * The fields it carries directly are the **operator's** view — the secret files
+ * only — exactly what this object was before WP 10.4, so every caller that held
+ * one keeps working. `forUser(userId)` is the view a job or a route should use:
+ * the files where they are non-empty (they win), otherwise the holder's own
+ * stored keys, cached for `MARKET_DATA_KEY_CACHE_TTL_MS` and dropped by
+ * `invalidate()` (the api's PUT/DELETE in-process, the worker's
+ * `connections.ProviderCredentialsChanged` consumer), with a generation counter
+ * so a read in flight when a key changes cannot repopulate the cache with its
+ * stale answer — WP 10.1's `ConnectorRegistry` shape, applied here.
+ */
+export interface MarketDataRuntime extends MarketDataView {
+  forUser(userId: string): Promise<MarketDataView>;
+  /** Drop every cached view. Idempotent. */
+  invalidate(): void;
+  /**
+   * Every budget this runtime may ever spend against, file or stored, keyed or
+   * anonymous — so the worker primes them all at boot (`hydrateMarketDataBudgets`)
+   * whether a key arrives by file now or by the store later. One budget per
+   * provider (two for OpenFIGI, whose tiers count different units), shared by
+   * every view this runtime builds, so a rebuilt view never resets a day's spend.
+   */
+  readonly allBudgets: readonly (readonly [MarketDataProvider, RateBudget])[];
+}
+
+/** Same as WP 10.1's `DEFAULT_DYNAMIC_TTL_MS`: a key changed elsewhere reaches this process within it. */
+export const MARKET_DATA_KEY_CACHE_TTL_MS = 30_000;
+
+/**
+ * The four WP 3.4 adapters, feature-detected on their key files exactly the
+ * way `createConnectorRegistry` feature-detects Plaid's credentials — and,
+ * since WP 10.4, on the holder's stored keys where the files are empty.
+ *
+ * Five properties are deliberate and each one is a line somebody could
  * plausibly have written differently:
  *
  *   * **`policyFor(provider)`, never one shared policy.** Each adapter gets an
@@ -2718,13 +2831,21 @@ export interface MarketDataRuntime {
  *     from the environment can only *narrow* this further (see
  *     `packages/config/src/schema.ts`); it is intersected, never substituted,
  *     so a deployment cannot point a price fetcher at a host of its choosing.
- *   * **A provider with no key is left out of `sources` entirely** rather than
+ *     A stored key changes which key an adapter carries, never which host it
+ *     may reach: no new host, no new policy.
+ *   * **A price provider with no key is left out of `sources` entirely** rather than
  *     included and allowed to answer `skipped_no_key`. Both behave correctly —
  *     the adapters degrade honestly either way, which `@ctx/integrations`
  *     proves in its own suite — but an absent source produces no
  *     `market_data_runs` row and no `PriceSourceUnavailable` event, and a
  *     nightly `skipped_no_key` for a provider the operator never configured is
  *     noise that trains the reader to ignore the table.
+ *   * **OpenFIGI is the exception, on purpose (WP 10.4, C-8's wiring).** It
+ *     answers anonymously, so with no key the mapper is built anyway in
+ *     anonymous mode — 10 jobs per request against `OPENFIGI_ANONYMOUS_WINDOWS`
+ *     (25 requests a minute) — and the RUNBOOK's "also answers anonymously" is
+ *     true of the running product, not only of the adapter. The keyed path is
+ *     unchanged: `OPENFIGI_WINDOWS`, 100 jobs per request.
  *   * **`now: () => clock.now()`**, not the `Clock` itself: the adapters take a
  *     thunk, and passing `clock.now` unbound would lose `this`.
  *   * **One shared `createNodeTransport()`.** The transport performs no policy;
@@ -2745,12 +2866,24 @@ export function createMarketDataRuntime(options: {
   readonly allowedHosts: readonly string[];
   readonly clock?: Clock;
   readonly logger?: PlatformLogger;
+  /**
+   * WP 10.4. The holder's stored keys. Absent ⇒ `forUser` answers the
+   * operator's view for everybody (a test, or a process with no `SecretBox`).
+   */
+  readonly storedKeys?: StoredMarketDataKeys;
+  /** A seam for tests: the socket under every adapter. Production builds the real one. */
+  readonly transport?: HttpTransport;
+  /** A seam for tests: DNS for the egress guard. Production uses the system resolver. */
+  readonly resolve?: Resolver;
+  /** How long a holder's view is trusted. Defaults to `MARKET_DATA_KEY_CACHE_TTL_MS`. */
+  readonly cacheTtlMs?: number;
 }): MarketDataRuntime {
   const clock = options.clock ?? systemClock;
   const logger = options.logger;
   const now = (): Date => clock.now();
-  const transport = createNodeTransport();
+  const transport = options.transport ?? createNodeTransport();
   const narrowing = options.allowedHosts;
+  const ttlMs = options.cacheTtlMs ?? MARKET_DATA_KEY_CACHE_TTL_MS;
 
   const keyFor = (provider: MarketDataProvider, secret: Redacted<string> | undefined): ApiKey =>
     secret === undefined ? missingKey(provider) : apiKeyOf(provider, secret.reveal());
@@ -2766,79 +2899,205 @@ export function createMarketDataRuntime(options: {
       policy: policyFor(provider, {}),
       transport,
       keys,
+      ...(options.resolve === undefined ? {} : { resolve: options.resolve }),
     });
 
-  const sources: PriceSource[] = [];
-  const keys: ApiKey[] = [];
-  const budgets = new Map<MarketDataProvider, RateBudget>();
+  // One budget per provider for the life of the runtime, shared by every view.
+  const tiingoBudget = createRateBudget(TIINGO_WINDOWS);
+  const fredBudget = createRateBudget(FRED_WINDOWS);
+  const coingeckoBudget = createRateBudget(COINGECKO_WINDOWS);
+  const openfigiKeyedBudget = createRateBudget(OPENFIGI_WINDOWS);
+  const openfigiAnonymousBudget = createRateBudget(OPENFIGI_ANONYMOUS_WINDOWS);
 
-  const tiingoKey = keyFor('tiingo', options.secrets.tiingo_api_key);
-  const fredKey = keyFor('fred', options.secrets.fred_api_key);
-  const coingeckoKey = keyFor('coingecko', options.secrets.coingecko_api_key);
-  const openfigiKey = keyFor('openfigi', options.secrets.openfigi_api_key);
-  for (const key of [tiingoKey, fredKey, coingeckoKey, openfigiKey]) {
-    if (key.present) keys.push(key);
-  }
+  const fileKeys: Readonly<Record<MarketDataKeyedProvider, ApiKey>> = {
+    tiingo: keyFor('tiingo', options.secrets.tiingo_api_key),
+    fred: keyFor('fred', options.secrets.fred_api_key),
+    coingecko: keyFor('coingecko', options.secrets.coingecko_api_key),
+    openfigi: keyFor('openfigi', options.secrets.openfigi_api_key),
+  };
 
-  const announce = (provider: MarketDataProvider, present: boolean): void => {
+  const buildView = (
+    chosen: Readonly<Record<MarketDataKeyedProvider, ApiKey>>,
+    keySources: Readonly<Record<MarketDataKeyedProvider, MarketDataKeySource>>,
+  ): MarketDataView => {
+    const sources: PriceSource[] = [];
+    const keys: ApiKey[] = [];
+    const budgets = new Map<MarketDataProvider, RateBudget>();
+    for (const provider of MARKET_DATA_KEYED_PROVIDERS) {
+      if (chosen[provider].present) keys.push(chosen[provider]);
+    }
+
+    const tiingoKey = chosen.tiingo;
+    if (tiingoKey.present && !narrowedOut('tiingo', narrowing)) {
+      budgets.set('tiingo', tiingoBudget);
+      sources.push(
+        createTiingoPriceSource({
+          client: clientFor('tiingo', keys),
+          key: tiingoKey,
+          now,
+          budget: tiingoBudget,
+        }),
+      );
+    }
+
+    const fredKey = chosen.fred;
+    if (fredKey.present && !narrowedOut('fred', narrowing)) {
+      budgets.set('fred', fredBudget);
+      sources.push(
+        createFredSource({
+          client: clientFor('fred', keys),
+          key: fredKey,
+          now,
+          budget: fredBudget,
+        }),
+      );
+    }
+
+    const coingeckoKey = chosen.coingecko;
+    if (coingeckoKey.present && !narrowedOut('coingecko', narrowing)) {
+      budgets.set('coingecko', coingeckoBudget);
+      sources.push(
+        createCoinGeckoPriceSource({
+          client: clientFor('coingecko', keys),
+          key: coingeckoKey,
+          now,
+          budget: coingeckoBudget,
+        }),
+      );
+    }
+
+    // The one adapter that is not a `PriceSource`. `createOpenFigiMapper` returns
+    // an `OpenFigiMapper`, which `@ctx/integrations` declares as a structural
+    // mirror of `@ctx/investments`' `FigiMapper` because the boundary lint
+    // forbids the cross-context import — so this assignment is where TypeScript
+    // checks the two halves still fit, and it is meant to be the build-time
+    // failure if they ever drift (wp3.4-market-data.md §9 item 4).
+    //
+    // WP 10.4: built with or without a key. Keyed: `OPENFIGI_WINDOWS` (25,000
+    // jobs a minute), 100 jobs a request — unchanged. Anonymous: the adapter's
+    // own anonymous mode, 10 jobs a request, billed one per request against
+    // `OPENFIGI_ANONYMOUS_WINDOWS` (25 requests a minute).
+    let figi: FigiMapper | undefined;
+    const openfigiKey = chosen.openfigi;
+    if (!narrowedOut('openfigi', narrowing)) {
+      const budget = openfigiKey.present ? openfigiKeyedBudget : openfigiAnonymousBudget;
+      budgets.set('openfigi', budget);
+      figi = createOpenFigiMapper({
+        client: clientFor('openfigi', keys),
+        key: openfigiKey,
+        now,
+        budget,
+      });
+    }
+
+    return { sources, figi, keys, budgets, keySources };
+  };
+
+  const fileSources: Record<MarketDataKeyedProvider, MarketDataKeySource> = {
+    tiingo: fileKeys.tiingo.present ? 'file' : 'none',
+    fred: fileKeys.fred.present ? 'file' : 'none',
+    coingecko: fileKeys.coingecko.present ? 'file' : 'none',
+    openfigi: fileKeys.openfigi.present ? 'file' : 'none',
+  };
+  const operatorView = buildView(fileKeys, fileSources);
+
+  const announce = (provider: MarketDataKeyedProvider, present: boolean): void => {
+    const host = narrowedOut(provider, narrowing) ? 'narrowed-out' : 'allowed';
+    if (provider === 'openfigi') {
+      logger?.info(
+        { provider, host, mode: present ? 'keyed' : 'anonymous' },
+        present
+          ? 'openfigi configured; keyed mapper registered'
+          : 'openfigi not configured; anonymous mapper registered (10 jobs per request, 25 requests per minute)',
+      );
+      return;
+    }
     logger?.info(
-      { provider, host: narrowedOut(provider, narrowing) ? 'narrowed-out' : 'allowed' },
+      { provider, host },
       present
         ? `${provider} configured; price source registered`
         : `${provider} not configured; price source not registered`,
     );
   };
+  for (const provider of MARKET_DATA_KEYED_PROVIDERS) {
+    announce(provider, fileKeys[provider].present);
+  }
 
-  if (tiingoKey.present && !narrowedOut('tiingo', narrowing)) {
-    const budget = createRateBudget(TIINGO_WINDOWS);
-    budgets.set('tiingo', budget);
-    sources.push(
-      createTiingoPriceSource({ client: clientFor('tiingo', keys), key: tiingoKey, now, budget }),
+  // The per-holder cache, WP 10.1's `ConnectorRegistry` shape.
+  interface CacheEntry {
+    readonly expiresAtMs: number;
+    readonly view: MarketDataView;
+  }
+  const cache = new Map<string, CacheEntry>();
+  const inflight = new Map<string, Promise<MarketDataView>>();
+  let generation = 0;
+
+  const resolve = async (userId: string): Promise<MarketDataView> => {
+    const storedKeys = options.storedKeys;
+    if (storedKeys === undefined) return operatorView;
+    // The files win: a provider whose file is non-empty never consults the store.
+    if (MARKET_DATA_KEYED_PROVIDERS.every((provider) => fileKeys[provider].present)) {
+      return operatorView;
+    }
+    const stored = await storedKeys(userId);
+    const chosen = { ...fileKeys };
+    const keySources = { ...fileSources };
+    let anyStored = false;
+    for (const provider of MARKET_DATA_KEYED_PROVIDERS) {
+      if (fileKeys[provider].present) continue;
+      const opened = stored.get(provider);
+      if (opened === undefined) continue;
+      chosen[provider] = apiKeyOf(provider, opened.key());
+      keySources[provider] = 'stored';
+      anyStored = true;
+    }
+    if (!anyStored) return operatorView;
+    logger?.info(
+      {
+        providers: MARKET_DATA_KEYED_PROVIDERS.filter(
+          (provider) => keySources[provider] === 'stored',
+        ),
+        source: 'stored',
+      },
+      'market data: holder-stored keys in force',
     );
-  }
-  announce('tiingo', tiingoKey.present);
+    return buildView(chosen, keySources);
+  };
 
-  if (fredKey.present && !narrowedOut('fred', narrowing)) {
-    const budget = createRateBudget(FRED_WINDOWS);
-    budgets.set('fred', budget);
-    sources.push(createFredSource({ client: clientFor('fred', keys), key: fredKey, now, budget }));
-  }
-  announce('fred', fredKey.present);
-
-  if (coingeckoKey.present && !narrowedOut('coingecko', narrowing)) {
-    const budget = createRateBudget(COINGECKO_WINDOWS);
-    budgets.set('coingecko', budget);
-    sources.push(
-      createCoinGeckoPriceSource({
-        client: clientFor('coingecko', keys),
-        key: coingeckoKey,
-        now,
-        budget,
-      }),
-    );
-  }
-  announce('coingecko', coingeckoKey.present);
-
-  // The one adapter that is not a `PriceSource`. `createOpenFigiMapper` returns
-  // an `OpenFigiMapper`, which `@ctx/integrations` declares as a structural
-  // mirror of `@ctx/investments`' `FigiMapper` because the boundary lint
-  // forbids the cross-context import — so this assignment is where TypeScript
-  // checks the two halves still fit, and it is meant to be the build-time
-  // failure if they ever drift (wp3.4-market-data.md §9 item 4).
-  let figi: FigiMapper | undefined;
-  if (openfigiKey.present && !narrowedOut('openfigi', narrowing)) {
-    const budget = createRateBudget(OPENFIGI_WINDOWS);
-    budgets.set('openfigi', budget);
-    figi = createOpenFigiMapper({
-      client: clientFor('openfigi', keys),
-      key: openfigiKey,
-      now,
-      budget,
-    });
-  }
-  announce('openfigi', openfigiKey.present);
-
-  return { sources, figi, keys, budgets };
+  return {
+    ...operatorView,
+    allBudgets: Object.freeze([
+      ['tiingo', tiingoBudget],
+      ['fred', fredBudget],
+      ['coingecko', coingeckoBudget],
+      ['openfigi', openfigiKeyedBudget],
+      ['openfigi', openfigiAnonymousBudget],
+    ] as const),
+    async forUser(userId) {
+      const cached = cache.get(userId);
+      if (cached !== undefined && cached.expiresAtMs > clock.now().getTime()) return cached.view;
+      const pending = inflight.get(userId);
+      if (pending !== undefined) return pending;
+      const started = generation;
+      const promise = resolve(userId)
+        .then((view) => {
+          if (started === generation) {
+            cache.set(userId, { view, expiresAtMs: clock.now().getTime() + ttlMs });
+          }
+          return view;
+        })
+        .finally(() => {
+          if (inflight.get(userId) === promise) inflight.delete(userId);
+        });
+      inflight.set(userId, promise);
+      return promise;
+    },
+    invalidate() {
+      generation += 1;
+      cache.clear();
+      inflight.clear();
+    },
+  };
 }
 
 /** `@ctx/integrations`' own host for a provider, per `PROVIDER_HOSTS`. */
@@ -2884,10 +3143,14 @@ function narrowedOut(provider: MarketDataProvider, narrowing: readonly string[])
 export async function hydrateMarketDataBudgets(
   database: Database,
   userId: string,
-  budgets: ReadonlyMap<MarketDataProvider, RateBudget>,
+  // A `Map` (a view's `budgets`) or a runtime's `allBudgets`: WP 10.4 primes
+  // every budget a key might later arrive for, by file or by the store, and
+  // OpenFIGI has two (keyed and anonymous), so a provider can repeat here.
+  budgets: Iterable<readonly [MarketDataProvider, RateBudget]>,
   clock: Clock = systemClock,
 ): Promise<number> {
-  if (budgets.size === 0) return 0;
+  const entries = [...budgets];
+  if (entries.length === 0) return 0;
   const since = new Date(clock.now().getTime() - HYDRATE_LOOKBACK_MS);
   const rows = await database
     .select({
@@ -2906,7 +3169,7 @@ export async function hydrateMarketDataBudgets(
     byProvider.set(row.provider, bucket);
   }
   let hydrated = 0;
-  for (const [provider, budget] of budgets) {
+  for (const [provider, budget] of entries) {
     const spends = byProvider.get(provider) ?? [];
     budget.hydrate(spends);
     hydrated += spends.length;

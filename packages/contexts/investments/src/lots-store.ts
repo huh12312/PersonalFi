@@ -38,6 +38,8 @@ import {
   newId,
   type Clock,
   type DateOnly as DateOnlyType,
+  type Money as MoneyType,
+  type Quantity as QuantityType,
 } from '@core/kernel';
 import { and, eq, sql } from 'drizzle-orm';
 import {
@@ -46,8 +48,10 @@ import {
   holdings,
   holdingsSnapshots,
   investmentTransactions,
+  unresolvedHoldings,
   type BasisMethod,
   type CostBasisLotRow,
+  type StoredAbstention,
 } from '../schema/index.ts';
 import { DEFAULT_HOLDING_CURRENCY, type Holding, type InvestmentTransaction } from './holdings.ts';
 import { DEFAULT_BASIS_METHOD, type Lot } from './lots.ts';
@@ -71,6 +75,27 @@ export interface UpsertResult {
   readonly inserted: boolean;
 }
 
+/**
+ * A position a sync reported whose security the resolver could not identify
+ * (WP 10.4). Display only: nothing here is priced, and it never becomes a
+ * `holdings` row.
+ */
+export interface UnresolvedHolding {
+  readonly accountId: string;
+  readonly provider: string;
+  readonly providerSecurityId: string | null;
+  readonly name: string | null;
+  readonly ticker: string | null;
+  readonly quantity: QuantityType;
+  /** The institution's own value, as reported. */
+  readonly institutionValue: MoneyType | null;
+  readonly currency: string;
+  readonly abstentions: readonly StoredAbstention[];
+  readonly syncRunId: string | null;
+  readonly asOfDate: DateOnlyType;
+  readonly observedAt: Date;
+}
+
 export interface LotStore {
   /**
    * Current position, per account × security. Idempotent on that key.
@@ -87,6 +112,16 @@ export interface LotStore {
   ): Promise<{ readonly changed: boolean }>;
   /** One row per calendar day, so a past allocation is a read. */
   recordHoldingSnapshot(userId: string, holding: Holding): Promise<void>;
+  /**
+   * WP 10.4. Replace one account's unresolved positions from one provider with
+   * `rows` (which may be empty). Replace, never merge: a security that resolved
+   * on this run is simply absent from `rows`, and that is what clears it.
+   */
+  replaceUnresolvedHoldings(
+    userId: string,
+    scope: { readonly accountId: string; readonly provider: string },
+    rows: readonly UnresolvedHolding[],
+  ): Promise<void>;
   /** Idempotent on the provider natural key. 01 §5.5: a window and an upsert, no cursor. */
   upsertInvestmentTransaction(
     userId: string,
@@ -221,6 +256,8 @@ export interface InMemoryLotStore extends LotStore {
   readonly snapshots: Map<string, Holding>;
   readonly transactions: Map<string, InvestmentTransaction>;
   readonly elections: Map<string, BasisMethod>;
+  /** Keyed `userId|accountId|provider`. */
+  readonly unresolved: Map<string, readonly UnresolvedHolding[]>;
 }
 
 const scopeKey = (userId: string, accountId: string, securityId: string): string =>
@@ -232,6 +269,7 @@ export function inMemoryLotStore(): InMemoryLotStore {
   const snapshots = new Map<string, Holding>();
   const transactions = new Map<string, InvestmentTransaction>();
   const elections = new Map<string, BasisMethod>();
+  const unresolved = new Map<string, readonly UnresolvedHolding[]>();
 
   return {
     lots,
@@ -239,6 +277,13 @@ export function inMemoryLotStore(): InMemoryLotStore {
     snapshots,
     transactions,
     elections,
+    unresolved,
+
+    async replaceUnresolvedHoldings(userId, scope, rows) {
+      const key = `${userId}|${scope.accountId}|${scope.provider}`;
+      if (rows.length === 0) unresolved.delete(key);
+      else unresolved.set(key, [...rows]);
+    },
 
     async upsertHolding(userId, holding) {
       const key = scopeKey(userId, holding.accountId, holding.securityId);
@@ -412,7 +457,40 @@ export function drizzleLotStore(db: Database, clock: Clock): LotStore {
         });
     },
 
+    async replaceUnresolvedHoldings(userId, scope, rows) {
+      await db
+        .delete(unresolvedHoldings)
+        .where(
+          and(
+            eq(unresolvedHoldings.userId, userId),
+            eq(unresolvedHoldings.accountId, scope.accountId),
+            eq(unresolvedHoldings.provider, scope.provider),
+          ),
+        );
+      if (rows.length === 0) return;
+      await db.insert(unresolvedHoldings).values(
+        rows.map((row) => ({
+          id: newId(),
+          userId,
+          accountId: scope.accountId,
+          provider: scope.provider,
+          providerSecurityId: row.providerSecurityId,
+          name: row.name,
+          ticker: row.ticker,
+          quantity: Quantity.toDatabaseString(row.quantity),
+          institutionValueMinor: row.institutionValue?.minor ?? null,
+          currency: row.currency,
+          abstentions: row.abstentions.map((entry) => ({ ...entry })),
+          syncRunId: row.syncRunId,
+          asOfDate: row.asOfDate,
+          observedAt: row.observedAt,
+          createdAt: now(),
+        })),
+      );
+    },
+
     async upsertInvestmentTransaction(userId, transaction) {
+      const unresolved = transaction.unresolved ?? null;
       const rows = await db
         .insert(investmentTransactions)
         .values({
@@ -434,6 +512,9 @@ export function drizzleLotStore(db: Database, clock: Clock): LotStore {
           settleDate: transaction.settleDate,
           source: transaction.source,
           fingerprint: transaction.fingerprint,
+          securityUnresolved: unresolved !== null,
+          providerSecurityName: unresolved?.name ?? null,
+          providerTicker: unresolved?.ticker ?? null,
           createdAt: now(),
           updatedAt: now(),
         })
@@ -445,7 +526,18 @@ export function drizzleLotStore(db: Database, clock: Clock): LotStore {
             investmentTransactions.providerTransactionId,
           ],
           set: {
-            securityId: transaction.securityId,
+            // WP 10.4: a movement that resolved on an earlier run and fails to
+            // resolve on this one (OpenFIGI throttled, a key removed) keeps the
+            // security it had. Downgrading it to NULL would orphan its lots on
+            // the next rebuild for the sake of a transient abstention.
+            securityId:
+              unresolved === null
+                ? transaction.securityId
+                : sql`${investmentTransactions.securityId}`,
+            securityUnresolved:
+              unresolved === null ? false : sql`${investmentTransactions.securityId} IS NULL`,
+            providerSecurityName: unresolved?.name ?? null,
+            providerTicker: unresolved?.ticker ?? null,
             type: transaction.type,
             subtype: transaction.subtype,
             name: transaction.name,

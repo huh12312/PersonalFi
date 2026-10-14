@@ -10,7 +10,7 @@ import type { AppConfig } from '@core/config';
 import { createDatabase } from '@core/db';
 import { OPENAPI_CONTRACT_VERSION } from '@core/contracts';
 import { newId, systemClock, type Clock } from '@core/kernel';
-import type { TransactionalExecutor } from '@core/platform';
+import type { HttpTransport, Resolver, TransactionalExecutor } from '@core/platform';
 import type { ConnectorRegistry } from '@ctx/connections';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import {
@@ -56,6 +56,7 @@ import { insightRoutes } from './routes/insights.ts';
 import { investmentActivityRoutes } from './routes/investment-activity.ts';
 import { investmentRoutes } from './routes/investments.ts';
 import { marketDataRoutes } from './routes/market-data.ts';
+import { createStoredMarketDataKeys } from './market-data-keys.ts';
 import { netWorthRoutes } from './routes/net-worth.ts';
 import { notificationRoutes } from './routes/notifications.ts';
 import { opsRoutes } from './routes/ops.ts';
@@ -111,6 +112,15 @@ export interface BuildAppOptions {
    * absent and the logger writes to stdout.
    */
   readonly logStream?: { write(chunk: string): void };
+  /**
+   * WP 10.4. A test seam: the socket under the market-data adapters the
+   * `/market-data/*` routes build (the key-validation call and test-fetch), so a
+   * route test answers from `createFakeTransport` and never dials out.
+   * Production leaves it absent and the real Node transport is used.
+   */
+  readonly marketDataTransport?: HttpTransport;
+  /** WP 10.4. The DNS answer for that seam's egress guard (a public address in tests). */
+  readonly marketDataResolve?: Resolver;
 }
 
 /**
@@ -615,7 +625,27 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(securityRoutes(deps));
   await app.register(priceRoutes(deps));
   await app.register(netWorthRoutes(deps));
-  await app.register(marketDataRoutes(deps));
+  // WP 10.4. The holder's own market-data keys, beside the settings they feed;
+  // `worker.ts` reads them through the same `createStoredMarketDataKeys`.
+  await app.register(
+    marketDataRoutes(deps, {
+      storedKeys: createStoredMarketDataKeys({
+        database,
+        secretBox: () => {
+          try {
+            return security.requireSecretBox();
+          } catch {
+            return undefined;
+          }
+        },
+        logger: app.log,
+      }),
+      ...(options.marketDataTransport === undefined
+        ? {}
+        : { transport: options.marketDataTransport }),
+      ...(options.marketDataResolve === undefined ? {} : { resolve: options.marketDataResolve }),
+    }),
+  );
   // WP 4.8. Four routers, matching the dispatch's file split: `goals.ts`
   // (goals, contribution plans, the risk-profile questionnaire — WP 4.1's
   // domain), `plan.ts` (scenarios, life events, projections, required

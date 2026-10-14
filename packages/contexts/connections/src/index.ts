@@ -83,14 +83,28 @@ export {
   openProviderCredentials,
   removeProviderCredentials,
   setProviderCredentials,
+  // WP 10.4: a market-data provider's single key, in the same table.
+  MARKET_DATA_KEY_HINT_LENGTH,
+  MARKET_DATA_KEY_MIN_LENGTH,
+  MARKET_DATA_KEY_SENTINEL,
+  OpenedMarketDataKey,
+  isMarketDataKeyProvider,
+  listMarketDataKeyStatuses,
+  marketDataKeyHintOf,
+  openMarketDataKeys,
+  setMarketDataKey,
+  type MarketDataKeyStatus,
+  type PairCredentialProvider,
   type CredentialField,
   type ProviderCredentialStatus,
   type SetProviderCredentialsInput,
   type SetProviderCredentialsResult,
 } from './provider-credentials.ts';
 export {
+  MARKET_DATA_KEY_PROVIDERS,
   PROVIDER_CREDENTIAL_ENVS,
   PROVIDER_CREDENTIAL_PROVIDERS,
+  type MarketDataKeyProvider,
   type ProviderCredentialEnv,
   type ProviderCredentialProvider,
 } from '../schema/index.ts';

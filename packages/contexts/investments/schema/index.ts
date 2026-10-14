@@ -37,6 +37,13 @@ export {
 } from './investment-transactions.ts';
 
 export {
+  unresolvedHoldings,
+  type NewUnresolvedHoldingRow,
+  type StoredAbstention,
+  type UnresolvedHoldingRow,
+} from './unresolved-holdings.ts';
+
+export {
   ACQUISITION_TYPES,
   BASIS_METHODS,
   basisMethodElections,

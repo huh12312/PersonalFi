@@ -249,9 +249,14 @@ describe.skipIf(NO_DATABASE)(
       expect(integrations?.schedules).toBeDefined();
 
       // A zero-key install registers no price source at all. This is what
-      // makes `module.integrations: true` safe as a default.
+      // makes `module.integrations: true` safe as a default. WP 10.4 (C-8's
+      // wiring): OpenFIGI is the exception — it answers anonymously, so the
+      // mapper exists with no key, on the anonymous 25-requests-a-minute budget.
       expect(marketDataRuntime.sources).toHaveLength(0);
-      expect(marketDataRuntime.figi).toBeUndefined();
+      expect(marketDataRuntime.figi).toBeDefined();
+      expect(marketDataRuntime.budgets.get('openfigi')?.spent(new Date())[0]?.window.limit).toBe(
+        25,
+      );
       expect(marketDataRuntime.keys).toHaveLength(0);
 
       // --- the schedule row, declared through the real upsert ----------

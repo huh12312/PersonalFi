@@ -9,6 +9,51 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.3: market-data keys in Settings, and positions nobody could identify made visible
+
+**Status:** a patch release on v0.9.2. The tag `v0.9.3` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.3
+
+```bash
+git pull
+just upgrade
+```
+
+That is all. `just upgrade` takes the verified pre-migration backup, applies migration 0043
+(expand-only: `provider_credentials` accepts the four market-data providers and a NULL environment
+for them; `investment_transactions` gains `security_unresolved`, `provider_security_name` and
+`provider_ticker`, and its "a trade names a security" CHECK is re-declared wider; one new table,
+`unresolved_holdings`; every row valid before is valid after, nothing dropped from the data) and
+checks that the stack is ready.
+
+### Manual steps
+
+None. To add a market-data key without touching the secrets directory: Settings, Market data, paste
+the key, **Save with passkey**. Positions that could not be identified appear on Holdings after the
+next investment sync (nightly, or Sync now).
+
+### What changed
+
+- **Market-data keys in Settings** (the WP 10.1 Plaid pattern): Tiingo, FRED, CoinGecko and
+  OpenFIGI keys can be saved in the product, checked with the provider first, sealed under the
+  install's key, never shown again (only the last four characters), never exported, taken up by the
+  worker within 30 seconds with no restart. A non-empty secret file still wins, and Settings says
+  which source is in force.
+- **OpenFIGI without a key works.** The anonymous tier (10 per request, 25 requests a minute) is
+  now wired, as the RUNBOOK always said. And the OpenFIGI mapper now actually reaches the security
+  resolver: before this release the runtime built it and nothing ever used it, keyed or not.
+- **"Could not identify this security."** A position the resolver could not identify is a named
+  row on Holdings (and on the account's own page): the institution's name and ticker, quantity,
+  the institution's own value (labelled as such), no price, no gain, and the reasons in plain
+  words. It is left out of allocation and performance and named in their excluded lists.
+- **Activity keeps those movements.** A buy, sell, dividend or contribution in such a security is
+  stored and listed under Activity with the same marker; lots and performance leave it out (and
+  performance names it), and a contribution is still classified as a contribution.
+- **Note for the upgrade:** a Plaid cash position whose only name is the institution's own id (or a
+  bare ticker such as `CUR:USD`) now shows on Holdings as "could not identify", with its value as
+  the institution's figure, where before it showed nothing.
+
 ## v0.9.2: investment activity, and performance by who manages each account
 
 **Status:** a patch release on v0.9.1. The tag `v0.9.2` is pushed by the maintainer once CI is green.

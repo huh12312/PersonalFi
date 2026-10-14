@@ -64,6 +64,7 @@ import {
   type ModuleWiringOptions,
 } from '../src/modules.ts';
 import { resolveModules, type Platform } from '../src/platform.ts';
+import { createMarketDataRuntime } from '../src/domain.ts';
 
 /**
  * The narrowest `appModules()` argument that still builds every Phase 3
@@ -117,7 +118,16 @@ function wiringOptions(
       isDigitalAsset: noop,
     } as unknown as ModuleWiringOptions['investmentSyncPort'],
     marketData: {
-      runtime: { sources: [], figi: undefined, keys: [], budgets: new Map() },
+      // WP 10.4: the real zero-key runtime (no stored keys, no I/O at build).
+      runtime: createMarketDataRuntime({
+        secrets: {
+          tiingo_api_key: undefined,
+          fred_api_key: undefined,
+          coingecko_api_key: undefined,
+          openfigi_api_key: undefined,
+        },
+        allowedHosts: [],
+      }),
       writer: inMemoryMarketDataWriter(),
       recorder: inMemoryRunRecorder(),
     },

@@ -31,7 +31,7 @@ import {
   updatedAtColumn,
   userIdColumn,
 } from '@core/db';
-import { pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
+import { boolean, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * The normalised movement vocabulary.
@@ -103,6 +103,16 @@ export const investmentTransactions = pgTable(
 
     source: text('source').$type<TransactionSource>().notNull(),
     fingerprint: text('fingerprint'),
+
+    /**
+     * WP 10.4 (migration 0043). TRUE only when the provider named a security
+     * the resolver could not identify; `security_id` is then NULL, and the two
+     * columns below carry what the provider called it so Activity can list the
+     * row. A cash sweep, a fee or a deposit names no security and stays FALSE.
+     */
+    securityUnresolved: boolean('security_unresolved').notNull().default(false),
+    providerSecurityName: text('provider_security_name'),
+    providerTicker: text('provider_ticker'),
 
     createdAt: createdAtColumn(),
     updatedAt: updatedAtColumn(),

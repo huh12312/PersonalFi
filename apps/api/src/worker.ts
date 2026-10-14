@@ -58,6 +58,7 @@ import {
 import { APP_DATABASE_ROLE, appRoleDatabaseUrl, ensureAppRole } from './db-role.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { appModules } from './modules.ts';
+import { createStoredMarketDataKeys } from './market-data-keys.ts';
 import { createStoredPlaid, withStoredPlaid } from './plaid-stored.ts';
 import { createNarratorWiring } from './narrator-wiring.ts';
 import { MODULE_FLAGS, buildPlatform, resolveModules } from './platform.ts';
@@ -471,20 +472,41 @@ async function main(): Promise<void> {
     // market-data runtime there would be four adapters nobody can invoke —
     // and four API keys held in a process that is directly reachable from the
     // network, which is the opposite of what `SECRETS_DIR` is for.
+    //
+    // WP 10.4: the files, and — where a file is empty — the holder's own keys
+    // stored in Settings (`createStoredMarketDataKeys`, the same reader the api's
+    // routes use). Resolved per holder through `forUser`, cached 30 s, and
+    // dropped by the `connections.ProviderCredentialsChanged` consumer
+    // `appModules` registers below, so a key saved in the UI reaches the next
+    // refresh and the next sync without a restart.
     const marketDataRuntime = createMarketDataRuntime({
       secrets: config.secrets,
       allowedHosts: config.marketData.allowedHosts,
       clock: systemClock,
       logger,
+      storedKeys: createStoredMarketDataKeys({
+        database,
+        secretBox: () => secretBox ?? undefined,
+        logger,
+      }),
     });
     // Prime each provider's budget from `market_data_runs` so a restart does
     // not reset the day's spend (wp3.4-market-data.md §9 item 4). Best-effort
     // on purpose: an empty budget is exactly the behaviour before this line
     // existed, so a read failure must not stop the worker booting.
     try {
-      const hydrated = await hydrateMarketDataBudgets(database, userId, marketDataRuntime.budgets);
+      // Every budget, not only the file-keyed ones: a key stored in Settings
+      // after boot spends against a budget primed here (WP 10.4).
+      const hydrated = await hydrateMarketDataBudgets(
+        database,
+        userId,
+        marketDataRuntime.allBudgets,
+      );
       logger.info(
-        { providers: [...marketDataRuntime.budgets.keys()], spends: hydrated },
+        {
+          providers: [...new Set(marketDataRuntime.allBudgets.map(([provider]) => provider))],
+          spends: hydrated,
+        },
         'market-data rate budgets hydrated from market_data_runs',
       );
     } catch (error) {
@@ -622,7 +644,12 @@ async function main(): Promise<void> {
               // WP 3.2 — the port the lot consumer reads accounts and sync
               // bookkeeping through. Always supplied: unlike a provider key
               // there is no deployment in which it is legitimately absent.
-              investmentSyncPort: createInvestmentSyncPort(database),
+              // WP 10.4: the resolver gets the holder's OpenFIGI mapper — keyed when a
+              // key is in force (file or Settings), anonymous otherwise. Before this
+              // the runtime built a mapper and no resolver ever received it.
+              investmentSyncPort: createInvestmentSyncPort(database, systemClock, {
+                figiFor: async (holder) => (await marketDataRuntime.forUser(holder)).figi,
+              }),
               // WP 3.4 — supplied here and *not* in `app.ts`, which is what
               // makes `module.integrations` register its schedule in the one
               // process that has a scheduler to fire it.

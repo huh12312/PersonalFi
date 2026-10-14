@@ -34,6 +34,13 @@ down and drift is an investments analytic (`GET /investments/drift` is this
 context's own route). See that migration's header for the ownership argument in
 full.
 
+`unresolved_holdings` exists as of `0043_provider_credentials_market_data.sql`
+(WP 10.4): a position a sync reported whose security the resolver could not
+identify, replaced per account on every sync so a later resolution clears it.
+The same migration gives `investment_transactions` `security_unresolved`,
+`provider_security_name` and `provider_ticker`, so a movement in such a
+security is stored (with `security_id` NULL) rather than dropped.
+
 ## Depends on
 
 - Platform
@@ -56,3 +63,4 @@ full.
 - `price_source_priority`
 - `allocation_targets`
 - `security_tags`
+- `unresolved_holdings`

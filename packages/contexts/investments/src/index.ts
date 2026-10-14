@@ -176,6 +176,7 @@ export {
   type InvestmentTransaction,
   type LotEffect,
   type MapTransactionOptions,
+  type UnresolvedSecurityLabel,
 } from './holdings.ts';
 
 export {
@@ -187,6 +188,7 @@ export {
   type ElectionInput,
   type InMemoryLotStore,
   type LotStore,
+  type UnresolvedHolding,
   type UpsertHoldingOptions,
   type UpsertResult,
 } from './lots-store.ts';
@@ -204,6 +206,7 @@ export {
   type LotSyncResult,
   type ResolvedHoldingFact,
   type ResolvedTransactionFact,
+  type UnresolvedHoldingFact,
 } from './consumer.ts';
 
 export {

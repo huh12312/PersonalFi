@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 import type { Page, Route } from '@playwright/test';
 
+import {
+  createMarketDataKeysState,
+  handleMarketDataKeys,
+  type MarketDataKeysMockState,
+} from './mock-market-data-keys.ts';
+
 /**
  * Mocks every REST/SSE call the walkthrough spec's screens make, entirely
  * client-side (`page.route`) — no live `apps/api`, no database. This suite
@@ -254,6 +260,8 @@ export interface MockApiState {
   lastRuleApplyBody: unknown;
   lastTransferPairBody: unknown;
   lastNotificationTestChannelId: string | null;
+  /** WP 10.4: Settings › Market data's key cards (`mock-market-data-keys.ts`). */
+  marketDataKeys: MarketDataKeysMockState;
 }
 
 function json(body: unknown, status = 200) {
@@ -278,6 +286,7 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     lastRuleApplyBody: null,
     lastTransferPairBody: null,
     lastNotificationTestChannelId: null,
+    marketDataKeys: createMarketDataKeysState(),
   };
 
   const transactions = new Map<string, MockTransaction>([
@@ -419,6 +428,13 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     const url = new URL(request.url());
     const path = url.pathname;
     const method = request.method();
+
+    // WP 10.4: the market-data key cards (GET per provider; PUT/DELETE behind the step-up).
+    if (
+      await handleMarketDataKeys(route, path, method, state.marketDataKeys, () => state.steppedUp)
+    ) {
+      return;
+    }
 
     if (path === '/api/auth/session') {
       if (!state.authenticated) {

@@ -8,7 +8,12 @@ import { Skeleton } from '../../components/patterns/Skeleton.tsx';
 import { ProviderAttribution } from '../market-data/Attribution.tsx';
 import type { Attribution, GetAllocationResponse } from '../../api/generated/types.gen.ts';
 import { AllocationDonut } from './AllocationDonut.tsx';
-import { DIMENSION_LABELS, exclusionReasonLabel, ratioToNumber } from './labels.ts';
+import {
+  DIMENSION_LABELS,
+  excludedItemLabel,
+  exclusionReasonLabel,
+  ratioToNumber,
+} from './labels.ts';
 import type { AllocationDimension } from './search.ts';
 
 const DIMENSIONS: readonly AllocationDimension[] = ['asset_class', 'region', 'sector'];
@@ -145,7 +150,7 @@ export function AllocationPanel({
           <ul className="mt-2 space-y-1 text-small text-text-muted">
             {report.excluded.map((item) => (
               <li key={item.holdingId}>
-                {item.symbol ?? item.holdingId} — {exclusionReasonLabel(item.reason)}
+                {excludedItemLabel(item)} — {exclusionReasonLabel(item.reason)}
               </li>
             ))}
           </ul>

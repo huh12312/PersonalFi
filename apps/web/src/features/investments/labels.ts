@@ -87,10 +87,26 @@ const EXCLUSION_REASONS: Record<string, string> = {
   stale_price: 'the price is stale',
   price_unknown: 'no price is known',
   currency_mismatch: 'its currency differs from the portfolio currency',
+  // WP 10.4: a position whose security nobody could identify (`holdingId` is the unresolved row's id).
+  security_unresolved: 'the security could not be identified',
 };
 
 export function exclusionReasonLabel(reason: string): string {
   return EXCLUSION_REASONS[reason] ?? reason;
+}
+
+/**
+ * What an `excluded[]` entry is called. The api sends the ticker (or, for an unidentified position, the
+ * provider's own name) as `symbol`; an id is never shown for an unidentified position, because it is a row id
+ * that changes on every sync, not something a holder can recognise.
+ */
+export function excludedItemLabel(item: {
+  readonly holdingId: string;
+  readonly symbol: string | null;
+  readonly reason: string;
+}): string {
+  if (item.symbol !== null) return item.symbol;
+  return item.reason === 'security_unresolved' ? 'An unnamed position' : item.holdingId;
 }
 
 const UNREALIZED_REASONS: Record<string, string> = {

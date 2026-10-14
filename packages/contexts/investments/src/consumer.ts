@@ -90,6 +90,7 @@ import {
   acquisitionTypeOf,
   warningForEstimatedBasis,
   type InvestmentTransaction,
+  type UnresolvedSecurityLabel,
 } from './holdings.ts';
 import {
   carryLotsOnTransfer,
@@ -98,7 +99,7 @@ import {
   type DisposalResult,
   type Lot,
 } from './lots.ts';
-import type { LotStore } from './lots-store.ts';
+import type { LotStore, UnresolvedHolding } from './lots-store.ts';
 import {
   applyWashSales,
   scanForPossibleWashSales,
@@ -146,6 +147,13 @@ export interface InvestmentSyncPort {
     readonly asOfDate: DateOnlyType;
     readonly holdings: readonly ResolvedHoldingFact[];
     readonly transactions: readonly ResolvedTransactionFact[];
+    /**
+     * WP 10.4. The positions this run reported that the resolver abstained on,
+     * with the account they are in and why. Optional so a port that predates
+     * it still type-checks; when it is present, the consumer replaces each
+     * reported account's `unresolved_holdings` with exactly these.
+     */
+    readonly unresolvedHoldings?: readonly UnresolvedHoldingFact[];
   }>;
   /** True when the account is tax-advantaged — Rev. Rul. 2008-5's IRA case. */
   isRetirementAccount(accountId: string): Promise<boolean>;
@@ -159,10 +167,30 @@ export interface ResolvedHoldingFact {
   readonly securityId: string;
 }
 
+/**
+ * WP 10.4. A position the resolver could not identify: the provider's fact, the
+ * ledger account it is in, and every tier's abstention. Never a holding.
+ */
+export interface UnresolvedHoldingFact {
+  readonly fact: ProviderHoldingFact;
+  readonly accountId: string;
+  readonly abstentions: readonly {
+    readonly tier: string;
+    readonly reason: string;
+    readonly detail: string | null;
+  }[];
+}
+
 export interface ResolvedTransactionFact {
   readonly fact: ProviderInvestmentTransactionFact;
   readonly accountId: string;
   readonly securityId: string | null;
+  /**
+   * WP 10.4. Present when the fact named a security the resolver could not
+   * identify; `securityId` is then `null`. The movement is stored (Activity
+   * lists it under this name) and excluded from lots and performance.
+   */
+  readonly unresolved?: UnresolvedSecurityLabel | null;
   /** `BROKER` for an exact provider leg, `IMPORTED` for a CSV one. */
   readonly source: 'BROKER' | 'IMPORTED' | 'USER';
 }
@@ -240,6 +268,7 @@ export async function runLotSync(
       securityId: resolved.securityId,
       provider: facts.provider,
       source: resolved.source,
+      unresolved: resolved.unresolved ?? null,
     });
     const { id } = await store.upsertInvestmentTransaction(input.userId, transaction);
     stored.push({ ...transaction, id });
@@ -538,6 +567,36 @@ export async function runLotSync(
     byAccount.set(resolved.accountId, entry);
   }
 
+  // ---- 6. the positions nobody could identify (WP 10.4) ----------------
+  //
+  // Replaced per (account, provider) for every account this run reported
+  // holdings for — resolved or not — so a security that resolved this time is
+  // simply not re-inserted, and that is what clears its row. An account whose
+  // positions all resolved gets an empty replacement. A port that does not
+  // report unresolved positions (`undefined`) leaves the table alone rather
+  // than wiping it on the strength of an answer it never gave.
+  if (facts.unresolvedHoldings !== undefined) {
+    const reported = new Set<string>([
+      ...facts.holdings.map((holding) => holding.accountId),
+      ...facts.unresolvedHoldings.map((holding) => holding.accountId),
+    ]);
+    const observedAt = clock.now();
+    for (const accountId of reported) {
+      await store.replaceUnresolvedHoldings(
+        input.userId,
+        { accountId, provider: facts.provider },
+        facts.unresolvedHoldings
+          .filter((holding) => holding.accountId === accountId)
+          .map((holding) =>
+            unresolvedHoldingOf(holding, facts.provider, facts.asOfDate, {
+              syncRunId: input.syncRunId,
+              observedAt,
+            }),
+          ),
+      );
+    }
+  }
+
   for (const [accountId, entry] of byAccount) {
     // Nothing in this account's positions moved, so there is nothing to say.
     if (!entry.changed) continue;
@@ -564,6 +623,41 @@ export async function runLotSync(
     lotsClosed,
     washSales,
     realized,
+  };
+}
+
+/**
+ * A provider's holding fact, as the row `unresolved_holdings` keeps: the
+ * provider's own names, the quantity, and the institution's own value labelled
+ * as such. A ticker is the first `ticker` identifier the provider gave.
+ */
+function unresolvedHoldingOf(
+  holding: UnresolvedHoldingFact,
+  provider: string,
+  asOfDate: DateOnlyType,
+  run: { readonly syncRunId: string; readonly observedAt: Date },
+): UnresolvedHolding {
+  const security = holding.fact.security;
+  const ticker =
+    security.identifiers.find((identifier) => identifier.kind === 'ticker')?.value ?? null;
+  const quantityText = holding.fact.quantity.trim();
+  return {
+    accountId: holding.accountId,
+    provider,
+    providerSecurityId: security.providerSecurityId ?? null,
+    name: security.name ?? null,
+    ticker,
+    quantity: Quantity.of(quantityText === '' ? '0' : quantityText),
+    institutionValue: holding.fact.value,
+    currency: holding.fact.value?.currency ?? security.currency ?? 'USD',
+    abstentions: holding.abstentions.map((entry) => ({
+      tier: entry.tier,
+      reason: entry.reason,
+      detail: entry.detail,
+    })),
+    syncRunId: run.syncRunId,
+    asOfDate,
+    observedAt: run.observedAt,
   };
 }
 

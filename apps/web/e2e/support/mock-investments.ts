@@ -125,6 +125,7 @@ function marketDataSettingsResponse() {
       {
         provider: 'coingecko',
         keyPresent: false,
+        keySource: 'none',
         registered: true,
         capabilities: { prices: true, fx: false, macro: false, search: false },
         budget: [{ label: 'requests/min', used: 3, limit: 100 }],
@@ -349,6 +350,42 @@ function unrealized(marketMinor: string, basisMinor: string | null) {
   };
 }
 
+/**
+ * WP 10.4: a position the resolver could not identify - the IRA's target-date
+ * fund, reported by Plaid with a bare ticker (no exchange) and no CUSIP/ISIN,
+ * which nothing can map to one security. It is a named row on the Holdings tab
+ * and in the IRA's panel (the provider's name and ticker, quantity, the
+ * institution's own value), outside every total, and `excluded[]` names it
+ * with `security_unresolved`.
+ */
+const UNRESOLVED_IRA = {
+  id: '019a0000-0000-7000-8000-0000000000f1',
+  accountId: 'acct-ira',
+  provider: 'plaid',
+  providerSecurityId: 'plaid-sec-vfifx',
+  name: 'Vanguard Target Retirement 2050 Fund',
+  ticker: 'VFIFX',
+  quantity: '12.500000000000000000',
+  institutionValue: usd('214033'),
+  abstentions: [
+    { tier: 'cusip', reason: 'not_provided', detail: null },
+    { tier: 'isin', reason: 'not_provided', detail: null },
+    { tier: 'ticker', reason: 'bare_ticker', detail: 'VFIFX' },
+  ],
+  reasons: [
+    'Only a ticker (VFIFX) was given, with no exchange. A ticker alone can name more than one security, so it is not used to identify one.',
+    'No FIGI, ISIN, CUSIP was given, and no match was found for it.',
+  ],
+  asOfDate: AS_OF,
+  observedAt: `${AS_OF}T04:00:00.000Z`,
+};
+
+const UNRESOLVED_EXCLUDED = {
+  holdingId: UNRESOLVED_IRA.id,
+  symbol: 'VFIFX',
+  reason: 'security_unresolved',
+};
+
 function holdingsResponse() {
   return {
     asOf: AS_OF,
@@ -375,8 +412,8 @@ function holdingsResponse() {
       price: holding.price,
       stale: holding.stale,
     })),
-    excluded: [],
-    unresolved: [],
+    excluded: [UNRESOLVED_EXCLUDED],
+    unresolved: [UNRESOLVED_IRA],
   };
 }
 
@@ -744,8 +781,9 @@ function accountHoldingsResponse(accountId: string) {
         basisWarning: lot.basisWarning,
       })),
     })),
-    excluded: [],
-    unresolved: [],
+    // WP 10.4: the account route filters to its own unresolved rows.
+    excluded: accountId === UNRESOLVED_IRA.accountId ? [UNRESOLVED_EXCLUDED] : [],
+    unresolved: accountId === UNRESOLVED_IRA.accountId ? [UNRESOLVED_IRA] : [],
   };
 }
 
@@ -800,7 +838,7 @@ function allocationReport(dimension: 'asset_class' | 'region' | 'sector') {
     })),
     unclassifiedPct: UNCLASSIFIED[dimension].pct,
     unclassifiedValue: usd(UNCLASSIFIED[dimension].minor),
-    excluded: [],
+    excluded: [UNRESOLVED_EXCLUDED],
     unresolved: [],
     includesCash: true,
     lookThrough: 'fund_level_only',
@@ -955,6 +993,8 @@ function summaryOf(
       foreignCurrencyMovements: [],
       unvaluedTransfers: [],
       unclassifiedMovements: [],
+      unresolvedSecurities: [],
+      unresolvedMovements: [],
     },
   };
 }
@@ -1041,7 +1081,8 @@ function byManagementResponse(from: string) {
  * WP 10.3: the Activity tab's rows. The taxable account carries the recorded
  * Plaid Sandbox fixture's five movements (a buy, a sell, a dividend, a
  * contribution and an account fee); the IRA carries a payroll-style
- * contribution buy and a reinvested dividend. The crypto account's activity
+ * contribution buy, a reinvested dividend and (WP 10.4) a contribution into a
+ * fund nobody could identify. The crypto account's activity
  * has not synced, so the tab names it as pending.
  */
 const ACTIVITY = [
@@ -1110,6 +1151,23 @@ const ACTIVITY = [
     '268.4',
     '-134200',
   ),
+  // WP 10.4: a payroll contribution into the target-date fund nobody could
+  // identify. Listed under the provider's own name and ticker, with the marker;
+  // `security` is null.
+  activity(
+    'ira-0003',
+    'acct-ira',
+    '2026-04-30',
+    'contribution',
+    'BUY',
+    'contribution',
+    'PAYROLL CONTRIBUTION VFIFX',
+    null,
+    '2',
+    '171.22',
+    '-34244',
+    { name: 'Vanguard Target Retirement 2050 Fund', symbol: 'VFIFX' },
+  ),
   activity(
     'ira-0002',
     'acct-ira',
@@ -1166,6 +1224,7 @@ function activity(
   quantity: string,
   price: string | null,
   amountMinor: string,
+  unresolvedSecurity: { name: string | null; symbol: string | null } | null = null,
 ) {
   return {
     id: `019a0000-0000-7000-8000-${id
@@ -1190,6 +1249,7 @@ function activity(
         : null,
     fees: usd(kind === 'sell' ? '65' : kind === 'fee' ? '2000' : '0'),
     source: 'BROKER',
+    unresolvedSecurity,
   };
 }
 

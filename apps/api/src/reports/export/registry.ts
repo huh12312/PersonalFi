@@ -365,6 +365,15 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'provider_credentials',
     "the holder's own provider API keys, sealed under this install's KEK (WP 10.1, D5): a credential never leaves the install in an export, and the envelopes could not be opened under another KEK; re-entered after a restore.",
   ],
+  // WP 10.4 (migration 0043). A derived read model, not a record: the lot
+  // consumer replaces an account's rows on every investment sync, from the
+  // provider's own facts, so a restored install's first sync rebuilds it
+  // exactly. Exporting it would carry a stale "could not identify" list into a
+  // bundle that the next sync would overwrite anyway.
+  [
+    'unresolved_holdings',
+    'a derived read model of positions the security resolver could not identify (WP 10.4), replaced on every investment sync; the first sync after a restore rebuilds it.',
+  ],
 ]);
 
 /**

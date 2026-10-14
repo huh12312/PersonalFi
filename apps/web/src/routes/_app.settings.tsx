@@ -2,6 +2,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 
 import { CryptoConnectScreen } from '../features/crypto/CryptoConnectScreen.tsx';
+import { MarketDataKeysSection } from '../features/market-data/MarketDataKeysSection.tsx';
 import { MarketDataSettingsScreen } from '../features/market-data/MarketDataSettingsScreen.tsx';
 import { NotificationSettingsScreen } from '../features/notifications/NotificationSettingsScreen.tsx';
 import { RulesListScreen } from '../features/rules/RulesListScreen.tsx';
@@ -25,6 +26,9 @@ export const Route = createFileRoute('/_app/settings')({
  * forms, but it is `features/connections/**`, which this work package may
  * not edit — see `features/crypto/CryptoConnectScreen.tsx`'s own header and
  * `docs/evidence/phase-3/wp3.12-networth-ui.md` §6).
+ *
+ * WP 10.4 puts the market-data API key cards (`MarketDataKeysSection`) at the
+ * top of the "Market data" tab, beside the provider list they configure.
  *
  * "Advisor management" (WP 5.12) is a separate route rather than a tab here:
  * `routes/_app.settings_.advisors.tsx` escapes this file's layout (that
@@ -50,7 +54,10 @@ function SettingsRoute() {
           <NotificationSettingsScreen />
         </TabsPanel>
         <TabsPanel value="market-data">
-          <MarketDataSettingsScreen />
+          <div className="flex flex-col gap-6">
+            <MarketDataKeysSection />
+            <MarketDataSettingsScreen />
+          </div>
         </TabsPanel>
         <TabsPanel value="crypto">
           <CryptoConnectScreen />

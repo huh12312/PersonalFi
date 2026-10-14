@@ -185,6 +185,19 @@ export interface InvestmentTransaction {
   readonly settleDate: DateOnlyType | null;
   readonly source: TransactionSource;
   readonly fingerprint: string | null;
+  /**
+   * WP 10.4. Present when the provider named a security the resolver could not
+   * identify: `securityId` is then `null`, and this is what the provider called
+   * it, so Activity can list the movement. Absent (or `null`) for a resolved
+   * security and for a movement that names none (a cash sweep, a fee).
+   */
+  readonly unresolved?: UnresolvedSecurityLabel | null;
+}
+
+/** What a provider called a security nobody could identify. Display evidence only. */
+export interface UnresolvedSecurityLabel {
+  readonly name: string | null;
+  readonly ticker: string | null;
 }
 
 export interface MapTransactionOptions {
@@ -193,6 +206,8 @@ export interface MapTransactionOptions {
   readonly securityId: string | null;
   readonly provider: string;
   readonly source: TransactionSource;
+  /** WP 10.4: see `InvestmentTransaction.unresolved`. Ignored when `securityId` is set. */
+  readonly unresolved?: UnresolvedSecurityLabel | null;
 }
 
 /**
@@ -228,6 +243,7 @@ export function investmentTransactionOf(
     settleDate: null,
     source: options.source,
     fingerprint: fact.fingerprint,
+    unresolved: options.securityId === null ? (options.unresolved ?? null) : null,
   };
 }
 

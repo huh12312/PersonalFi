@@ -116,6 +116,7 @@ export { apiKeyOf, missingKey, redactSecrets, redactedMessageOf, type ApiKey } f
 export {
   COINGECKO_WINDOWS,
   FRED_WINDOWS,
+  OPENFIGI_ANONYMOUS_WINDOWS,
   OPENFIGI_WINDOWS,
   RateLimitExceededError,
   TIINGO_WINDOWS,

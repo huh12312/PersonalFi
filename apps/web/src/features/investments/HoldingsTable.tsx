@@ -9,8 +9,10 @@ import type {
   AggregatedHolding,
   Attribution,
   ListAccountHoldingsResponse,
+  UnresolvedSecurity,
 } from '../../api/generated/types.gen.ts';
 import { StaleBadge } from './StaleBadge.tsx';
+import { UnresolvedHoldingRows } from './UnresolvedSecuritiesNotice.tsx';
 import { MoneyOrUnavailable, UnrealizedCell } from './UnavailableValue.tsx';
 import { assetClassLabel, ratioToNumber, securityTypeLabel } from './labels.ts';
 import { ScrollRegion } from '../../components/patterns/ScrollRegion.tsx';
@@ -19,6 +21,12 @@ type AccountPosition = ListAccountHoldingsResponse['positions'][number];
 
 export interface HoldingsTableProps {
   readonly holdings: readonly AggregatedHolding[];
+  /**
+   * WP 10.4: `GET /holdings`'s `unresolved` - positions whose security nobody could identify. Each is a named
+   * row under the identified ones (its own name and ticker, quantity, the institution's figure), so an
+   * account whose every position is unidentified still shows its positions instead of "No holdings yet".
+   */
+  readonly unresolved?: readonly UnresolvedSecurity[];
   /** `accountId -> GET /accounts/{id}/holdings`, for the per-account expansion. */
   readonly accountHoldings: ReadonlyMap<string, ListAccountHoldingsResponse>;
   readonly accountNameOf: (accountId: string) => string;
@@ -56,6 +64,7 @@ interface AccountRow {
  */
 export function HoldingsTable({
   holdings,
+  unresolved = [],
   accountHoldings,
   accountNameOf,
   onOpenAccount,
@@ -63,7 +72,7 @@ export function HoldingsTable({
 }: HoldingsTableProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
-  if (holdings.length === 0) {
+  if (holdings.length === 0 && unresolved.length === 0) {
     return (
       <EmptyState
         icon={Layers}
@@ -100,7 +109,8 @@ export function HoldingsTable({
         <table className="w-full text-small" data-testid="holdings-table">
           <caption className="sr-only">
             Holdings aggregated by security across every account. Expand a row to see the accounts
-            that hold it.
+            that hold it. Positions that could not be identified are listed last, with the
+            institution&apos;s own figure, and are not in any total.
           </caption>
           <thead>
             <tr className="border-b border-border-hairline text-left text-text-secondary">
@@ -252,6 +262,7 @@ export function HoldingsTable({
                 ),
               ];
             })}
+            <UnresolvedHoldingRows unresolved={unresolved} accountNameOf={accountNameOf} />
           </tbody>
         </table>
       </ScrollRegion>

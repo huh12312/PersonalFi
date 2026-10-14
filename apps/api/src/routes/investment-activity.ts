@@ -81,7 +81,18 @@ const activityWire = z
     security: z
       .object({ id: z.uuid(), symbol: z.string().nullable(), name: z.string().nullable() })
       .nullable()
-      .describe('null: the movement is about no security (cash, a fee, a deposit).'),
+      .describe(
+        'null: the movement is about no security (cash, a fee, a deposit), or about one nobody ' +
+          'could identify — then `unresolvedSecurity` is set.',
+      ),
+    unresolvedSecurity: z
+      .object({ name: z.string().nullable(), symbol: z.string().nullable() })
+      .nullable()
+      .describe(
+        'WP 10.4: the provider named a security the resolver could not identify. Its own name ' +
+          'and ticker, verbatim. The movement is listed here and left out of lots and ' +
+          'performance; its `kind` and `flow` are classified as for any other row.',
+      ),
     quantity: z.string().describe('Signed as the provider reported it: negative on a disposal.'),
     price: z.string().nullable().describe('Unit price; null when nobody stated one.'),
     amount: moneyWire.describe('House sign: negative = cash left the account.'),
@@ -140,6 +151,9 @@ interface ActivityRow extends Record<string, unknown> {
   source: (typeof TRANSACTION_SOURCES)[number];
   ticker: string | null;
   security_name: string | null;
+  security_unresolved: boolean;
+  provider_security_name: string | null;
+  provider_ticker: string | null;
 }
 
 interface Cursor {
@@ -278,7 +292,10 @@ export const investmentActivityRoutes = (deps: RouteDeps): FastifyPluginAsyncZod
                  t.currency,
                  t.source,
                  s.ticker,
-                 COALESCE(o.name, s.name) AS security_name
+                 COALESCE(o.name, s.name) AS security_name,
+                 t.security_unresolved,
+                 t.provider_security_name,
+                 t.provider_ticker
             FROM investment_transactions t
             LEFT JOIN securities s
               ON s.id = t.security_id AND s.user_id = ${userId}::uuid
@@ -330,6 +347,9 @@ export const investmentActivityRoutes = (deps: RouteDeps): FastifyPluginAsyncZod
                 row.security_id === null
                   ? null
                   : { id: row.security_id, symbol: row.ticker, name: row.security_name },
+              unresolvedSecurity: row.security_unresolved
+                ? { name: row.provider_security_name, symbol: row.provider_ticker }
+                : null,
               quantity: Quantity.toDatabaseString(quantity),
               price:
                 row.price === null
