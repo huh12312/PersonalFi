@@ -9,6 +9,8 @@ import { Tabs, TabsIndicator, TabsList, TabsPanel, TabsTab } from '../../compone
 import { Button } from '../../components/ui/button.tsx';
 import { useAccountsLookup } from '../accounts/useAccountsLookup.ts';
 import { useCoinGeckoAttribution } from '../market-data/api.ts';
+import { useRefreshPrices } from '../market-data/refresh-api.ts';
+import { RefreshPricesButton, RefreshPricesResult } from '../market-data/RefreshPricesButton.tsx';
 import { AccountPositionsPanel } from './AccountPositionsPanel.tsx';
 import { ActivityPanel } from './ActivityPanel.tsx';
 import { AllocationPanel } from './AllocationPanel.tsx';
@@ -115,6 +117,7 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
   };
   const activity = useInvestmentActivity(activityFilters, tab === 'activity');
   const election = useBasisMethodElection();
+  const refreshPrices = useRefreshPrices();
 
   function update(patch: Partial<InvestmentsSearch>): void {
     onSearchChange({ ...search, ...patch });
@@ -147,7 +150,7 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <label htmlFor="investments-basis" className="text-small text-text-secondary">
             Valuation basis
           </label>
@@ -162,7 +165,9 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
             <option value="as_of_now">As of now</option>
             <option value="last_known">Last known</option>
           </select>
+          <RefreshPricesButton refresh={refreshPrices} />
         </div>
+        <RefreshPricesResult refresh={refreshPrices} className="basis-full" />
       </header>
 
       {holdingsQuery.isLoading ? (

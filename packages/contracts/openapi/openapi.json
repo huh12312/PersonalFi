@@ -9105,6 +9105,387 @@
           "narrowedOut"
         ]
       },
+      "PriceRefreshSummaryInput": {
+        "type": "object",
+        "properties": {
+          "asOfDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "The holder’s calendar day the refresh priced as of."
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "held": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Securities with a non-zero position."
+              },
+              "priceable": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Held securities whose kind a provider prices (`priced + unpriced`)."
+              },
+              "priced": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "unpriced": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "notPricedByProvider": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Cash, bonds and other kinds no provider prices. Not asked about."
+              }
+            },
+            "required": [
+              "held",
+              "priceable",
+              "priced",
+              "unpriced",
+              "notPricedByProvider"
+            ]
+          },
+          "priced": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "securityId": {
+                  "type": "string"
+                },
+                "symbol": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "tiingo",
+                    "fred",
+                    "coingecko",
+                    "openfigi",
+                    "yfinance"
+                  ]
+                }
+              },
+              "required": [
+                "securityId",
+                "symbol",
+                "name",
+                "kind",
+                "provider"
+              ]
+            }
+          },
+          "unpriced": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "securityId": {
+                  "type": "string"
+                },
+                "symbol": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "provider": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "tiingo",
+                        "fred",
+                        "coingecko",
+                        "openfigi",
+                        "yfinance"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "no_provider_for_kind",
+                    "source_not_configured",
+                    "no_data",
+                    "skipped_no_key",
+                    "rate_limited",
+                    "refused",
+                    "error",
+                    "no_ticker",
+                    "no_coin_id"
+                  ],
+                  "description": "`source_not_configured`: no key for the provider that prices this kind (by file or in Settings), or MARKET_DATA_ALLOWED_HOSTS excludes it; no request was made. `no_ticker` / `no_coin_id`: the planner could not build what the provider prices by. `no_data`: the provider answered with no close. `skipped_no_key`, `rate_limited`, `refused`, `error`: as the adapter reported them. `no_provider_for_kind`: no provider prices this kind."
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "securityId",
+                "symbol",
+                "name",
+                "kind",
+                "provider",
+                "reason",
+                "detail"
+              ]
+            }
+          },
+          "notPricedByProvider": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "securityId": {
+                  "type": "string"
+                },
+                "symbol": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "securityId",
+                "symbol",
+                "name",
+                "kind"
+              ]
+            }
+          },
+          "fx": {
+            "type": "object",
+            "properties": {
+              "rowsWritten": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "pairs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "type": "string"
+                    },
+                    "quote": {
+                      "type": "string"
+                    },
+                    "fetched": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "no_provider_for_kind",
+                            "source_not_configured",
+                            "no_data",
+                            "skipped_no_key",
+                            "rate_limited",
+                            "refused",
+                            "error",
+                            "no_ticker",
+                            "no_coin_id"
+                          ],
+                          "description": "`source_not_configured`: no key for the provider that prices this kind (by file or in Settings), or MARKET_DATA_ALLOWED_HOSTS excludes it; no request was made. `no_ticker` / `no_coin_id`: the planner could not build what the provider prices by. `no_data`: the provider answered with no close. `skipped_no_key`, `rate_limited`, `refused`, `error`: as the adapter reported them. `no_provider_for_kind`: no provider prices this kind."
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "detail": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "base",
+                    "quote",
+                    "fetched",
+                    "reason",
+                    "detail"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "rowsWritten",
+              "pairs"
+            ]
+          },
+          "priceRowsWritten": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "tiingo",
+                    "fred",
+                    "coingecko",
+                    "openfigi",
+                    "yfinance"
+                  ]
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "price_refresh",
+                    "fx_refresh",
+                    "macro_series",
+                    "symbol_search",
+                    "figi_map",
+                    "test_fetch"
+                  ]
+                },
+                "requestsMade": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "symbolsAsked": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "ok",
+                    "partial",
+                    "failed",
+                    "refused",
+                    "rate_limited",
+                    "skipped_no_key"
+                  ]
+                }
+              },
+              "required": [
+                "provider",
+                "operation",
+                "requestsMade",
+                "symbolsAsked",
+                "outcome"
+              ]
+            },
+            "description": "What each provider was asked this run, as `market_data_runs` records it."
+          },
+          "budgets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "tiingo",
+                    "fred",
+                    "coingecko",
+                    "openfigi",
+                    "yfinance"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "used": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "provider",
+                "label",
+                "used",
+                "limit"
+              ]
+            },
+            "description": "Each configured provider’s budget after the run."
+          },
+          "nextRefreshAt": {
+            "type": "string",
+            "description": "The earliest instant another Refresh prices is accepted."
+          }
+        },
+        "required": [
+          "asOfDate",
+          "counts",
+          "priced",
+          "unpriced",
+          "notPricedByProvider",
+          "fx",
+          "priceRowsWritten",
+          "requests",
+          "budgets",
+          "nextRefreshAt"
+        ]
+      },
       "SnapshotFxFailureInput": {
         "type": "object",
         "properties": {
@@ -22249,6 +22630,396 @@
           "storedAt",
           "rotatedAt",
           "narrowedOut"
+        ],
+        "additionalProperties": false
+      },
+      "PriceRefreshSummary": {
+        "type": "object",
+        "properties": {
+          "asOfDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "The holder’s calendar day the refresh priced as of."
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "held": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Securities with a non-zero position."
+              },
+              "priceable": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Held securities whose kind a provider prices (`priced + unpriced`)."
+              },
+              "priced": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "unpriced": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "notPricedByProvider": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Cash, bonds and other kinds no provider prices. Not asked about."
+              }
+            },
+            "required": [
+              "held",
+              "priceable",
+              "priced",
+              "unpriced",
+              "notPricedByProvider"
+            ],
+            "additionalProperties": false
+          },
+          "priced": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "securityId": {
+                  "type": "string"
+                },
+                "symbol": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "tiingo",
+                    "fred",
+                    "coingecko",
+                    "openfigi",
+                    "yfinance"
+                  ]
+                }
+              },
+              "required": [
+                "securityId",
+                "symbol",
+                "name",
+                "kind",
+                "provider"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unpriced": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "securityId": {
+                  "type": "string"
+                },
+                "symbol": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "provider": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "tiingo",
+                        "fred",
+                        "coingecko",
+                        "openfigi",
+                        "yfinance"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "no_provider_for_kind",
+                    "source_not_configured",
+                    "no_data",
+                    "skipped_no_key",
+                    "rate_limited",
+                    "refused",
+                    "error",
+                    "no_ticker",
+                    "no_coin_id"
+                  ],
+                  "description": "`source_not_configured`: no key for the provider that prices this kind (by file or in Settings), or MARKET_DATA_ALLOWED_HOSTS excludes it; no request was made. `no_ticker` / `no_coin_id`: the planner could not build what the provider prices by. `no_data`: the provider answered with no close. `skipped_no_key`, `rate_limited`, `refused`, `error`: as the adapter reported them. `no_provider_for_kind`: no provider prices this kind."
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "securityId",
+                "symbol",
+                "name",
+                "kind",
+                "provider",
+                "reason",
+                "detail"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "notPricedByProvider": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "securityId": {
+                  "type": "string"
+                },
+                "symbol": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "securityId",
+                "symbol",
+                "name",
+                "kind"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "fx": {
+            "type": "object",
+            "properties": {
+              "rowsWritten": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "pairs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "type": "string"
+                    },
+                    "quote": {
+                      "type": "string"
+                    },
+                    "fetched": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "no_provider_for_kind",
+                            "source_not_configured",
+                            "no_data",
+                            "skipped_no_key",
+                            "rate_limited",
+                            "refused",
+                            "error",
+                            "no_ticker",
+                            "no_coin_id"
+                          ],
+                          "description": "`source_not_configured`: no key for the provider that prices this kind (by file or in Settings), or MARKET_DATA_ALLOWED_HOSTS excludes it; no request was made. `no_ticker` / `no_coin_id`: the planner could not build what the provider prices by. `no_data`: the provider answered with no close. `skipped_no_key`, `rate_limited`, `refused`, `error`: as the adapter reported them. `no_provider_for_kind`: no provider prices this kind."
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "detail": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "base",
+                    "quote",
+                    "fetched",
+                    "reason",
+                    "detail"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "rowsWritten",
+              "pairs"
+            ],
+            "additionalProperties": false
+          },
+          "priceRowsWritten": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "tiingo",
+                    "fred",
+                    "coingecko",
+                    "openfigi",
+                    "yfinance"
+                  ]
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "price_refresh",
+                    "fx_refresh",
+                    "macro_series",
+                    "symbol_search",
+                    "figi_map",
+                    "test_fetch"
+                  ]
+                },
+                "requestsMade": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "symbolsAsked": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "ok",
+                    "partial",
+                    "failed",
+                    "refused",
+                    "rate_limited",
+                    "skipped_no_key"
+                  ]
+                }
+              },
+              "required": [
+                "provider",
+                "operation",
+                "requestsMade",
+                "symbolsAsked",
+                "outcome"
+              ],
+              "additionalProperties": false
+            },
+            "description": "What each provider was asked this run, as `market_data_runs` records it."
+          },
+          "budgets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "tiingo",
+                    "fred",
+                    "coingecko",
+                    "openfigi",
+                    "yfinance"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "used": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "provider",
+                "label",
+                "used",
+                "limit"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Each configured provider’s budget after the run."
+          },
+          "nextRefreshAt": {
+            "type": "string",
+            "description": "The earliest instant another Refresh prices is accepted."
+          }
+        },
+        "required": [
+          "asOfDate",
+          "counts",
+          "priced",
+          "unpriced",
+          "notPricedByProvider",
+          "fx",
+          "priceRowsWritten",
+          "requests",
+          "budgets",
+          "nextRefreshAt"
         ],
         "additionalProperties": false
       },
@@ -40921,6 +41692,58 @@
             }
           },
           "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market-data/refresh": {
+      "post": {
+        "operationId": "refreshMarketData",
+        "summary": "Run the price refresh for the caller now",
+        "tags": [
+          "market-data"
+        ],
+        "description": "Runs the nightly price refresh (`integrations.price_refresh`) for the caller immediately: every security with a non-zero position, routed by kind to the provider that prices it (Tiingo for equities, ETFs and funds; CoinGecko for crypto), plus FX for every non-USD position currency through FRED. Spends against the same per-provider budgets as the schedule. At most one run per holder per ten minutes: 409 `market_data.refresh_too_soon` with `Retry-After` and the instant in the detail. The response names every security that was not priced and why.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceRefreshSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "Default Response",
             "content": {
               "application/json": {

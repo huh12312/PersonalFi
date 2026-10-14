@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
+import { RefreshPrices } from './RefreshPricesButton.tsx';
 import { MarketDataKeyCard } from './MarketDataKeyCard.tsx';
 import {
   MARKET_DATA_KEY_PROVIDERS,
@@ -27,6 +28,13 @@ export function MarketDataKeysSection() {
         secrets directory — a key in the secrets directory wins and is shown read-only. Saving or
         removing a key asks for your passkey.
       </p>
+      <div className="mt-3 flex flex-col gap-2">
+        <p className="text-caption text-text-muted">
+          Fetches prices for what you hold now, instead of waiting for the nightly run. Once every
+          ten minutes.
+        </p>
+        <RefreshPrices />
+      </div>
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         {MARKET_DATA_KEY_PROVIDERS.map((provider, index) => {
           const query = queries[index];

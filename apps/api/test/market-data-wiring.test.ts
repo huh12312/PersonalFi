@@ -45,7 +45,11 @@ describe('stored market-data keys: one reader for both processes (WP 10.4)', () 
   it("the price refresh and the consumer use the holder's view, and a credential change drops it", () => {
     const modules = repoFile('apps/api/src/modules.ts');
     expect(modules).toMatch(/const view = await marketData\.runtime\.forUser\(context\.userId\);/u);
-    expect(modules).toMatch(/sources: view\.sources,/u);
+    // WP 10.5: the job body moved into `runPriceRefresh` (shared with the
+    // Refresh prices route); the view still travels into it and is what the job
+    // is built from.
+    expect(modules).toMatch(/runPriceRefresh\(\{[\s\S]*?\bview,[\s\S]*?\}\)/u);
+    expect(repoFile('apps/api/src/price-refresh.ts')).toMatch(/sources: input\.view\.sources,/u);
     expect(modules).toMatch(
       /if \(provider !== 'plaid'\) options\.marketData\?\.runtime\.invalidate\(\);/u,
     );

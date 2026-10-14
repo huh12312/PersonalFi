@@ -13,13 +13,26 @@
  * ## Endpoint
  *
  * `GET /tiingo/daily/{ticker}/prices?startDate=&endDate=` returns an array of
- * daily bars. We ask for exactly one day and read `close` — **not** `adjClose`.
+ * daily bars. We ask for the week ending on the day wanted and keep the latest
+ * bar on or before it (WP 10.5, below), and read `close` — **not** `adjClose`.
  * That is a deliberate choice with a reason: adjusted closes are rewritten
  * retroactively every time a split or dividend happens, so a chart built from
  * them silently changes shape months later, which is exactly the "a past net
  * worth changes" failure the Phase 3 risk table calls out. Corporate actions
  * are WP 3.2's job, applied forward to quantity and basis; the price series
  * stays as-traded.
+ *
+ * ## Why a week, not one day (WP 10.5)
+ *
+ * Before WP 10.5 the window was exactly the day asked about. Nothing priced
+ * through it until the planner existed, so nobody saw that it answers `no_data`
+ * on every weekend, every market holiday, and on every weekday before the close
+ * is published: the 03:45 refresh asks about a day whose bar does not exist yet,
+ * and so does a "Refresh prices" pressed at lunchtime. The window is now
+ * `TIINGO_LOOKBACK_DAYS` ending on the day asked about, still **one request**,
+ * and the latest bar in it wins. A bar for an earlier day is the carry-forward
+ * the `stale` flag already existed for, and the row is dated with the bar's own
+ * day, never the day we asked about.
  *
  * ## Key handling
  *
@@ -34,6 +47,7 @@
  * socket opens (`TIINGO_WINDOWS`). `test/rate-limit.test.ts` → *'the Tiingo
  * adapter refuses its own 1,001st call of a day rather than being refused'*.
  */
+import { DateOnly } from '@core/kernel';
 import { ATTRIBUTIONS } from '../attribution.ts';
 import { arrayOf, decimalAt, plainDecimal, stringAt } from '../json.ts';
 import type { ProviderClient } from '../http.ts';
@@ -49,6 +63,13 @@ import {
   type SourceOutcome,
 } from '../price-source.ts';
 import { budgetReport, callJson, isIsoDate, type CallContext } from './common.ts';
+
+/**
+ * How far back a price request looks for the latest close (WP 10.5): a long
+ * weekend plus a market holiday is four days, so a week covers every gap the
+ * NYSE calendar has, in the same single request.
+ */
+export const TIINGO_LOOKBACK_DAYS = 7;
 
 export interface TiingoOptions {
   readonly client: ProviderClient;
@@ -102,7 +123,11 @@ export function createTiingoPriceSource(options: TiingoOptions): PriceSource {
       const call = await callJson(context, () => ({
         method: 'GET',
         path: `/tiingo/daily/${symbol}/prices`,
-        query: { startDate: request.date, endDate: request.date, format: 'json' },
+        query: {
+          startDate: DateOnly.addDays(DateOnly.parse(request.date), -TIINGO_LOOKBACK_DAYS),
+          endDate: request.date,
+          format: 'json',
+        },
         headers: { authorization: `Token ${options.key.reveal()}` },
       }));
       if (!call.ok) return call.outcome;
@@ -111,13 +136,24 @@ export function createTiingoPriceSource(options: TiingoOptions): PriceSource {
       if (bars === null) {
         return { kind: 'error', detail: 'tiingo answered something other than an array of bars' };
       }
-      const bar = bars[0];
+      // The latest bar on or before the day asked about. Tiingo returns them in
+      // date order, but the order is not what this relies on.
+      let bar: unknown = undefined;
+      let latest = '';
+      for (const candidate of bars) {
+        const day = (stringAt(candidate, 'date') ?? '').slice(0, 10);
+        if (!isIsoDate(day) || day > request.date || day <= latest) continue;
+        bar = candidate;
+        latest = day;
+      }
       if (bar === undefined) {
         // A market holiday, a delisting, or a symbol Tiingo does not carry.
         // All three are "no close for that day", which is a fact, not a fault.
         return {
           kind: 'no_data',
-          detail: `tiingo has no bar for ${request.subject.symbol} on ${request.date}`,
+          detail:
+            `tiingo has no bar for ${request.subject.symbol} in the ${String(TIINGO_LOOKBACK_DAYS)} ` +
+            `days to ${request.date}`,
         };
       }
       const close = decimalAt(bar, 'close');
@@ -126,7 +162,7 @@ export function createTiingoPriceSource(options: TiingoOptions): PriceSource {
       }
       // The date Tiingo stamped the bar with, which is the authority on whether
       // this is the day we asked for. An ISO instant; we keep the calendar day.
-      const barDate = (stringAt(bar, 'date') ?? request.date).slice(0, 10);
+      const barDate = latest;
 
       return {
         kind: 'ok',

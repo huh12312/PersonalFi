@@ -54,6 +54,13 @@ export interface FigiMapJob {
   readonly idValue: string;
   /** ISO-10383 MIC, when we have one. A `TICKER` job without it is ambiguous. */
   readonly micCode: string | null;
+  /**
+   * OpenFIGI's own exchange code — *not* a MIC. D29 uses exactly one value,
+   * `US`, OpenFIGI's composite code for the United States, on a bare-ticker job
+   * (`usCompositeJobOf`). Optional so every MIC- and identity-qualified job
+   * keeps its shape; absent and `null` both mean "not sent".
+   */
+  readonly exchCode?: string | null;
 }
 
 /** One mapping OpenFIGI returned. Only the fields we are willing to believe. */
@@ -65,6 +72,13 @@ export interface FigiMapping {
   readonly exchCode: string | null;
   readonly securityType: string | null;
   readonly marketSector: string | null;
+  /**
+   * OpenFIGI's `compositeFIGI`: the country-level FIGI every venue line of one
+   * listing shares. D29's US-ticker tier establishes identity on it, and only
+   * when every mapping in the answer names the same one. `null` when OpenFIGI
+   * gave none.
+   */
+  readonly compositeFigi: string | null;
 }
 
 /**
@@ -134,10 +148,12 @@ export function figiJobOf(identifier: NormalisedIdentifier): FigiMapJob | null {
     case 'cusip':
       return { idType: 'ID_CUSIP', idValue: identifier.value, micCode: null };
     case 'ticker':
-      // An unqualified ticker is deliberately still sent: OpenFIGI answering
-      // with several mappings is *itself* the evidence that the ticker was
-      // ambiguous, and `firstUnambiguousFigi` refuses that answer rather than
-      // picking one. Asking is free; guessing is not.
+      // The job a ticker *would* need. The resolver only sends it for an
+      // identity-bearing (MIC-qualified) ticker; a bare one is never sent this
+      // way, because OpenFIGI answering a bare `TICKER` job with one mapping
+      // would still not say *which* market's security it is. The one bare
+      // ticker that is sent goes as `usCompositeJobOf`'s job, under D29's
+      // narrower rule.
       return { idType: 'TICKER', idValue: identifier.value, micCode: identifier.mic };
     case 'figi':
     case 'chain_contract':
@@ -161,22 +177,104 @@ export function firstUnambiguousFigi(outcome: FigiMapOutcome): string | null {
   return outcome.mappings[0]?.figi ?? null;
 }
 
+/**
+ * D29: the OpenFIGI exchange code a bare US-dollar ticker is asked under.
+ *
+ * `US` is OpenFIGI's *composite* code for the United States — every US venue
+ * line of one listing rolls up to it — and it is not an ISO-10383 MIC, which is
+ * why it travels as `exchCode` and never as `micCode`.
+ */
+export const US_COMPOSITE_EXCH_CODE = 'US';
+
+/**
+ * D29's provenance for a FIGI established from a bare US ticker.
+ *
+ * `security_identifiers.provider` is "who said so"; for this row that is
+ * OpenFIGI answering *our* question (bare ticker + `exchCode: US`), which is a
+ * weaker statement than a connector or an ISIN mapping naming the FIGI. The
+ * value is namespaced so a reader can tell it from a connector name and from
+ * the `NULL` an ISIN/CUSIP upgrade records.
+ */
+export const US_COMPOSITE_FIGI_PROVIDER = 'openfigi:us_composite';
+
+/**
+ * Below the `1.0000` a FIGI carries when a provider says it, and below the
+ * `0.9000` of a check-digited CUSIP, because the evidence is a bare ticker plus
+ * a currency plus a type plus OpenFIGI's single answer; above a MIC-qualified
+ * ticker's `0.7500`, because the answer was unique across every US venue.
+ */
+export const US_COMPOSITE_FIGI_CONFIDENCE = '0.8000';
+
+/** The `TICKER` + `exchCode: US` job for one bare ticker. No MIC, by construction. */
+export function usCompositeJobOf(symbol: string): FigiMapJob {
+  return {
+    idType: 'TICKER',
+    idValue: symbol.trim().toUpperCase(),
+    micCode: null,
+    exchCode: US_COMPOSITE_EXCH_CODE,
+  };
+}
+
+/** What D29's tier made of one outcome. */
+export type UsCompositeVerdict =
+  | { readonly status: 'unique'; readonly compositeFigi: string }
+  | { readonly status: 'ambiguous' }
+  | { readonly status: 'no_match' }
+  | { readonly status: 'error' };
+
+/**
+ * The composite FIGI from a bare-US-ticker answer, **only** when it is unique.
+ *
+ * OpenFIGI answers `TICKER VTI exchCode US` with one mapping per US venue line
+ * (and sometimes per share class), so "exactly one mapping" is the wrong test:
+ * what must be unique is the *composite* those lines roll up to. Several
+ * distinct composites — two securities trading under one symbol — is
+ * ambiguous, and so is any mapping with no composite at all, because then the
+ * answer does not say which listing the line belongs to. A malformed composite
+ * is treated as missing. `error` stays `error`: it is a fact about the call.
+ */
+export function usCompositeVerdictOf(outcome: FigiMapOutcome): UsCompositeVerdict {
+  if (outcome.status === 'error') return { status: 'error' };
+  if (outcome.status === 'no_match' || outcome.mappings.length === 0) {
+    return { status: 'no_match' };
+  }
+  const composites = new Set<string>();
+  for (const mapping of outcome.mappings) {
+    const composite = mapping.compositeFigi?.trim().toUpperCase() ?? '';
+    if (!COMPOSITE_FIGI_SHAPE.test(composite)) return { status: 'ambiguous' };
+    composites.add(composite);
+  }
+  const [only] = [...composites];
+  return composites.size === 1 && only !== undefined
+    ? { status: 'unique', compositeFigi: only }
+    : { status: 'ambiguous' };
+}
+
+/** `identifiers.ts`' `figiIsWellFormed`, restated so this file keeps one import. */
+const COMPOSITE_FIGI_SHAPE = /^[BCDFGHJKLMNPQRSTVWXYZ]{2}G[BCDFGHJKLMNPQRSTVWXYZ0-9]{8}[0-9]$/u;
+
 export interface FakeFigiMapper extends FigiMapper {
   /** Every batch the fake was asked for, in order. What the batching test counts. */
   readonly requests: readonly (readonly FigiMapJob[])[];
 }
 
 export interface FakeFigiMapperOptions {
-  /** `${idType}:${idValue}` → the mappings to answer with. Missing ⇒ `no_match`. */
+  /** `figiTableKeyOf(job)` → the mappings to answer with. Missing ⇒ `no_match`. */
   readonly table?: Readonly<Record<string, readonly FigiMapping[]>>;
   /** Keys to answer with `error` instead, so a caller's degradation is testable. */
   readonly errors?: Readonly<Record<string, string>>;
   readonly jobsPerRequest?: number;
 }
 
-/** The key `FakeFigiMapperOptions.table` is written in. */
+/**
+ * The key `FakeFigiMapperOptions.table` is written in: `${idType}:${idValue}`,
+ * plus `/${exchCode}` when the job carries one — so D29's `TICKER:VTI/US` is a
+ * different entry from a MIC-qualified `TICKER:VTI` job, and a table written
+ * before D29 answers exactly what it answered before.
+ */
 export function figiTableKeyOf(job: FigiMapJob): string {
-  return `${job.idType}:${job.idValue.toUpperCase()}`;
+  const exchCode = job.exchCode?.trim().toUpperCase() ?? '';
+  return `${job.idType}:${job.idValue.toUpperCase()}${exchCode.length > 0 ? `/${exchCode}` : ''}`;
 }
 
 /**
@@ -232,5 +330,6 @@ export function figiMappingOf(
     exchCode: fields.exchCode ?? null,
     securityType: fields.securityType ?? null,
     marketSector: fields.marketSector ?? null,
+    compositeFigi: fields.compositeFigi ?? null,
   };
 }

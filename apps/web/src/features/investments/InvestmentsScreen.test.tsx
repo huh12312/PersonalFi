@@ -10,6 +10,10 @@ import {
   stubFetchRoutes,
   type FetchRoute,
 } from '../../test-support/api-test-utils.ts';
+import {
+  summary as refreshSummary,
+  unpriced as refreshUnpriced,
+} from '../market-data/refresh-fixtures.ts';
 import { InvestmentsScreen } from './InvestmentsScreen.tsx';
 import {
   accountHoldingsResponse,
@@ -174,6 +178,41 @@ describe('InvestmentsScreen', () => {
     expect(row).toHaveTextContent("(institution's figure)");
     const notice = screen.getByTestId('unresolved-securities');
     expect(notice).toHaveTextContent('1 position could not be identified');
+  });
+
+  it('offers Refresh prices in the header: it runs the refresh, says the result in words, and reads the holdings again (WP 10.5)', async () => {
+    let holdingsReads = 0;
+    stubFetchRoutes([
+      ...routesFor().map((route) =>
+        route.match === '/api/holdings'
+          ? {
+              ...route,
+              handle: (context: Parameters<typeof route.handle>[0]) => {
+                holdingsReads += 1;
+                return route.handle(context);
+              },
+            }
+          : route,
+      ),
+      {
+        method: 'POST',
+        match: '/api/market-data/refresh',
+        handle: () => jsonResponse(refreshSummary({ unpriced: [refreshUnpriced()] })),
+      },
+    ]);
+
+    renderScreen();
+    await screen.findByTestId('portfolio-total');
+    const header = screen.getByRole('banner');
+    expect(header).toBeInTheDocument();
+    const before = holdingsReads;
+
+    await userEvent.click(within(header).getByRole('button', { name: 'Refresh prices' }));
+
+    expect(await within(header).findByRole('status')).toHaveTextContent(
+      'Priced 12 of 13; 1 unpriced: no CoinGecko key.',
+    );
+    await waitFor(() => expect(holdingsReads).toBeGreaterThan(before));
   });
 
   it('shows nothing when every position resolved', async () => {

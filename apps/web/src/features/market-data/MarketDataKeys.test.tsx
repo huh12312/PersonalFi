@@ -24,6 +24,8 @@ vi.mock('@simplewebauthn/browser', () => ({
  * through the step-up, and the only thing about a stored key ever shown is its last four characters.
  */
 
+const KEY_USED_LINE =
+  'Holdings sync and price refresh use this key from the next run; use Refresh prices to fetch now.';
 const KEY = 'unitFredKey0123456789abcdWXYZ'; // gitleaks:allow — synthetic canary, not a credential
 const STORED_KEY_CANARY = 'unitStoredCoinGeckoKeyDoNotShow9f2c'; // gitleaks:allow — synthetic canary
 
@@ -243,6 +245,34 @@ describe('Settings › Market data › API keys (WP 10.4)', () => {
     expect(document.body.textContent).not.toContain(KEY);
     expect(screen.queryByDisplayValue(KEY)).not.toBeInTheDocument();
     expect(within(fred).getByRole('status')).toHaveTextContent('FRED accepted the key');
+    // WP 10.5: where the key is used from, and how to fetch now - in the same announced status.
+    expect(within(fred).getByRole('status')).toHaveTextContent(KEY_USED_LINE);
+  });
+
+  it('says when a saved key is used only after a save, not before and not after a refusal (WP 10.5)', async () => {
+    const api = keysApi({
+      putFails: {
+        status: 422,
+        body: { type: 'about:blank', title: 'Unprocessable Content', status: 422, detail: 'No.' },
+      },
+    });
+    stubFetchRoutes(api.routes);
+    renderSection();
+    const fred = await card('fred');
+    expect(fred).not.toHaveTextContent(KEY_USED_LINE);
+    const coingecko = await card('coingecko');
+    expect(coingecko).not.toHaveTextContent(KEY_USED_LINE);
+    const user = userEvent.setup();
+    await user.type(within(fred).getByLabelText('FRED API key'), KEY);
+    await user.click(within(fred).getByRole('button', { name: 'Save with passkey' }));
+    await within(fred).findByRole('alert');
+    expect(fred).not.toHaveTextContent(KEY_USED_LINE);
+  });
+
+  it('offers Refresh prices above the cards (WP 10.5)', async () => {
+    stubFetchRoutes(keysApi().routes);
+    renderSection();
+    expect(await screen.findByRole('button', { name: 'Refresh prices' })).toBeEnabled();
   });
 
   it("shows the api's detail when the provider refuses the key, and clears the field anyway", async () => {

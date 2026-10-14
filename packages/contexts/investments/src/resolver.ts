@@ -20,18 +20,37 @@
  * | 3 | `cusip` | the CUSIP passes its check digit | `absent` / `malformed` |
  * | 4 | `ticker` + MIC | the MIC is a well-formed ISO-10383 code | `absent` / `malformed` / **`unqualified_ticker`** |
  * | 5 | `chain` + `contract` | the chain is named | `absent` / `malformed` |
+ * | 5a | `figi` from a **bare US ticker** (D29) | tiers 1–5 all abstained, the fact carries a bare ticker, currency `USD` and a type `securityTypeOf` maps to `equity` / `etf` / `mutual_fund`, and OpenFIGI's answer to `TICKER` + `exchCode: US` names **exactly one composite FIGI** | **`ambiguous_us_ticker`** (several composites, or a line with none) / **`no_us_match`** / **`us_ticker_not_checked`** (the call failed; nothing learned) |
  * | 6 | `proprietary` | **never** | always `proprietary_is_not_an_identity` |
  *
  * Three consequences are worth stating plainly, because each is a thing the
  * resolver deliberately does *not* do:
  *
- *   * **A bare ticker never establishes a security.** `BHP` is a different
- *     company on XNYS, XASX and XLON, and a delisted ticker is reissued. An
- *     unqualified ticker is attached as corroborating evidence and abstains.
- *     The one exception is not an exception to the rule but to the premise: a
- *     crypto ticker *cannot* carry a MIC, because a chain is not a venue, so
- *     `ETH`, `ETHEREUM` and a wallet's native-coin sentinel address all
- *     canonicalise onto one `chain_contract` (see `NATIVE_ASSETS`).
+ *   * **A bare ticker never establishes a security by itself.** `BHP` is a
+ *     different company on XNYS, XASX and XLON, and a delisted ticker is
+ *     reissued. An unqualified ticker is attached as corroborating evidence
+ *     and abstains, and (WP 10.5) it does not even *find* a row: only an
+ *     identity-bearing name or the provider's own id may. Two exceptions, each
+ *     narrower than the rule:
+ *       - a crypto ticker *cannot* carry a MIC, because a chain is not a venue,
+ *         so `ETH`, `ETHEREUM` and a wallet's native-coin sentinel address all
+ *         canonicalise onto one `chain_contract` (see `NATIVE_ASSETS`);
+ *       - **D29, tier 5a:** a bare ticker on a fact with no stronger identity,
+ *         priced in **USD** and typed equity / ETF / mutual fund, is *asked
+ *         about* — OpenFIGI `TICKER` with `exchCode: US`, OpenFIGI's composite
+ *         code for the United States — in the same single batched FIGI pass,
+ *         and the security is established on the **composite FIGI** only when
+ *         every mapping in the answer names the same one. What identifies is
+ *         that FIGI, never the ticker; the ticker stays attached as evidence.
+ *         Plaid sends bare tickers for US listings, and a holder with nothing
+ *         resolved has no product. The derived FIGI row records its
+ *         provenance — `provider` `openfigi:us_composite`, confidence
+ *         `US_COMPOSITE_FIGI_CONFIDENCE` (below a provider-stated FIGI's 1.0) —
+ *         so it is never mistaken for a FIGI a connector or an ISIN gave us.
+ *         A non-USD or unknown-currency bare ticker, or a type outside those
+ *         three, is never sent and abstains `unqualified_ticker` as before; so
+ *         does every bare ticker when no mapper is configured, because "OpenFIGI
+ *         found no US listing" would then be a claim nobody checked.
  *   * **A provider's own id never establishes one either** — D25's shape. It
  *     *can* find a row it has corroborated before, which is the whole reason to
  *     store it, and that lookup mints nothing.
@@ -74,7 +93,12 @@ import {
   createFakeFigiMapper,
   figiJobOf,
   firstUnambiguousFigi,
+  US_COMPOSITE_FIGI_CONFIDENCE,
+  US_COMPOSITE_FIGI_PROVIDER,
+  usCompositeJobOf,
+  usCompositeVerdictOf,
   type FigiMapJob,
+  type FigiMapOutcome,
   type FigiMapper,
 } from './figi.ts';
 import {
@@ -84,6 +108,8 @@ import {
   isIdentityBearing,
   normaliseIdentifiers,
   strongestIdentity,
+  type AbstainReason,
+  type NormaliseResult,
   type NormalisedIdentifier,
   type SecurityIdentifier,
   type TierAbstention,
@@ -258,6 +284,11 @@ export function createSecurityResolver(options: SecurityResolverOptions): Securi
   // is identical either way and "no FIGI adapter configured" cannot be a branch
   // that only production takes.
   const figi = options.figi ?? createFakeFigiMapper();
+  // …with one deliberate exception. D29's tier turns an OpenFIGI `no_match`
+  // into the abstain reason `no_us_match`, which a user reads as "OpenFIGI was
+  // asked and knows no US listing". With no mapper configured nobody asked, so
+  // the tier is off and a bare ticker abstains `unqualified_ticker` as before.
+  const usTickerTier = options.figi !== undefined;
 
   /**
    * Follow `merged_into_id` to the surviving row.
@@ -289,7 +320,10 @@ export function createSecurityResolver(options: SecurityResolverOptions): Securi
       mic: identifier.mic,
       identifierKey: identifier.key,
       provider: identifier.provider,
-      confidence: confidenceOf(identifier.kind, identifier.mic !== null || identifier.identity),
+      confidence:
+        identifier.kind === 'figi' && identifier.provider === US_COMPOSITE_FIGI_PROVIDER
+          ? US_COMPOSITE_FIGI_CONFIDENCE
+          : confidenceOf(identifier.kind, identifier.mic !== null || identifier.identity),
       seenAt,
     }));
   }
@@ -447,25 +481,31 @@ export function createSecurityResolver(options: SecurityResolverOptions): Securi
     return winner;
   }
 
-  /** The FIGI jobs a batch of facts would need, deduplicated by job key. */
-  function figiJobsFor(
-    normalised: readonly { readonly identifiers: readonly NormalisedIdentifier[] }[],
-  ): readonly FigiMapJob[] {
-    const jobs = new Map<string, FigiMapJob>();
-    for (const entry of normalised) {
-      if (entry.identifiers.some((identifier) => identifier.kind === 'figi')) continue;
-      // The strongest mappable name only: asking OpenFIGI for both the CUSIP
-      // and the ticker of one security would double the job count to answer a
-      // question the CUSIP already answers better.
-      const mappable = entry.identifiers.find(
-        (identifier) => identifier.identity && figiJobOf(identifier) !== null,
-      );
-      if (mappable === undefined) continue;
+  /**
+   * The one FIGI question a fact needs, or `null` if it needs none.
+   *
+   * Two kinds of question, never both for one fact:
+   *
+   *   * `identity` — the strongest *identity-bearing* mappable name (ISIN,
+   *     CUSIP, MIC-qualified ticker). Asking for both the CUSIP and the ticker
+   *     of one security would double the job count to answer a question the
+   *     CUSIP already answers better. Accepted on a single mapping
+   *     (`firstUnambiguousFigi`); recorded with `provider: null`.
+   *   * `us_composite` — D29: only when the fact has **no** identity at all,
+   *     and only for a bare ticker that `usBareTickerOf` admits.
+   */
+  function figiPlanOf(fact: ResolvableSecurity, entry: NormaliseResult): FigiPlan | null {
+    if (entry.identifiers.some((identifier) => identifier.kind === 'figi')) return null;
+    const mappable = entry.identifiers.find(
+      (identifier) => identifier.identity && figiJobOf(identifier) !== null,
+    );
+    if (mappable !== undefined) {
       const job = figiJobOf(mappable);
-      if (job === null) continue;
-      jobs.set(`${job.idType}:${job.idValue}:${job.micCode ?? ''}`, job);
+      return job === null ? null : { kind: 'identity', job };
     }
-    return [...jobs.values()];
+    if (!usTickerTier) return null;
+    const symbol = usBareTickerOf(fact, entry);
+    return symbol === null ? null : { kind: 'us_composite', job: usCompositeJobOf(symbol), symbol };
   }
 
   async function resolveOne(
@@ -477,7 +517,20 @@ export function createSecurityResolver(options: SecurityResolverOptions): Securi
     const now = clock.now();
     const identity = strongestIdentity(normalised);
     const keys = normalised.map((identifier) => identifier.key);
-    const matches = await store.findByIdentifierKeys(context.userId, keys);
+    // WP 10.5: only an identity-bearing name or the provider's own id may
+    // *find* a row. A bare ticker is attached as evidence and never finds one:
+    // before D29 a bare ticker rode along beside a FIGI often enough, and once
+    // D29 attaches `VTI` to the row its composite FIGI established, a CSV's
+    // CAD `VTI` would otherwise land on that row through the ticker's key —
+    // identity from a bare ticker, through the back door.
+    const finders = new Set(
+      normalised
+        .filter((identifier) => identifier.identity || identifier.kind === 'proprietary')
+        .map((identifier) => identifier.key),
+    );
+    const matches = (await store.findByIdentifierKeys(context.userId, keys)).filter((match) =>
+      finders.has(match.identifierKey),
+    );
 
     const candidates = new Map<string, SecurityRecord>();
     for (const match of matches) {
@@ -557,7 +610,7 @@ export function createSecurityResolver(options: SecurityResolverOptions): Securi
         // survives concurrency rather than merely surviving a sequential test.
         if (!isUniqueViolation(error)) throw error;
         const again = await store.findByIdentifierKeys(context.userId, keys);
-        const raced = again[0];
+        const raced = again.find((match) => finders.has(match.identifierKey));
         if (raced === undefined) throw error;
         const survivor = await survivorOf(context.userId, raced.securityId);
         if (survivor === null) throw error;
@@ -623,15 +676,26 @@ export function createSecurityResolver(options: SecurityResolverOptions): Securi
       );
 
       // --- one batched FIGI pass for the whole list --------------------------
-      const jobs = figiJobsFor(normalised);
-      const upgrades = new Map<string, string>();
-      if (jobs.length > 0) {
-        const outcomes = await figi.map(jobs);
-        jobs.forEach((job, index) => {
+      // Jobs are deduplicated, and answers looked up, on the *whole* job —
+      // id type, value, MIC and exchange code. Before WP 10.5 the answers were
+      // keyed on type and value alone, so `VTI@XNYS`'s FIGI could be handed to
+      // a bare `VTI` in the same batch (or `BHP@XASX` to `BHP@XNYS`); each fact
+      // now reads only the answer to its own question.
+      const plans = facts.map((fact, index) => {
+        const entry = normalised[index];
+        return entry === undefined ? null : figiPlanOf(fact, entry);
+      });
+      const jobs = new Map<string, FigiMapJob>();
+      for (const plan of plans) {
+        if (plan !== null) jobs.set(figiJobKeyOf(plan.job), plan.job);
+      }
+      const answers = new Map<string, FigiMapOutcome>();
+      if (jobs.size > 0) {
+        const asked = [...jobs.values()];
+        const outcomes = await figi.map(asked);
+        asked.forEach((job, index) => {
           const outcome = outcomes[index];
-          if (outcome === undefined) return;
-          const mapped = firstUnambiguousFigi(outcome);
-          if (mapped !== null) upgrades.set(`${job.idType}:${job.idValue}`, mapped);
+          if (outcome !== undefined) answers.set(figiJobKeyOf(job), outcome);
         });
       }
 
@@ -640,46 +704,133 @@ export function createSecurityResolver(options: SecurityResolverOptions): Securi
         const entry = normalised[index];
         if (entry === undefined) continue;
         let identifiers = entry.identifiers;
-        if (upgrades.size > 0) {
-          const upgraded = figiUpgradeOf(identifiers, upgrades);
-          if (upgraded !== null) identifiers = [upgraded, ...identifiers];
+        let abstentions = entry.abstentions;
+        const plan = plans[index] ?? null;
+        if (plan !== null) {
+          const outcome = answers.get(figiJobKeyOf(plan.job));
+          if (plan.kind === 'identity') {
+            const mapped = outcome === undefined ? null : firstUnambiguousFigi(outcome);
+            if (mapped !== null) identifiers = [derivedFigiOf(mapped, null), ...identifiers];
+          } else {
+            // A missing answer is the adapter breaking the positional contract;
+            // it is treated as the call failing, never as "no such listing".
+            const verdict = usCompositeVerdictOf(
+              outcome ?? { status: 'error', message: 'no answer for this job' },
+            );
+            if (verdict.status === 'unique') {
+              identifiers = [
+                derivedFigiOf(verdict.compositeFigi, US_COMPOSITE_FIGI_PROVIDER),
+                ...identifiers,
+              ];
+            } else {
+              abstentions = withUsTickerReason(
+                abstentions,
+                plan.symbol,
+                US_TICKER_REASONS[verdict.status],
+              );
+            }
+          }
         }
-        resolutions.push(await resolveOne(fact, identifiers, entry.abstentions, context));
+        resolutions.push(await resolveOne(fact, identifiers, abstentions, context));
       }
       return resolutions;
     },
   };
 }
 
+/** The one FIGI question a fact asks. See `figiPlanOf`. */
+type FigiPlan =
+  | { readonly kind: 'identity'; readonly job: FigiMapJob }
+  | { readonly kind: 'us_composite'; readonly job: FigiMapJob; readonly symbol: string };
+
+/** A job's full identity: every field OpenFIGI answers differently on. */
+function figiJobKeyOf(job: FigiMapJob): string {
+  return [job.idType, job.idValue, job.micCode ?? '', job.exchCode ?? ''].join('\u001f');
+}
+
+/** D29: the types a bare US ticker may be asked about under. */
+const US_TICKER_TYPES: ReadonlySet<SecurityType> = new Set(['equity', 'etf', 'mutual_fund']);
+
+/** D29: what each non-answer is called. */
+const US_TICKER_REASONS = {
+  ambiguous: 'ambiguous_us_ticker',
+  no_match: 'no_us_match',
+  error: 'us_ticker_not_checked',
+} as const satisfies Record<string, AbstainReason>;
+
 /**
- * The FIGI OpenFIGI gave us for this security's strongest mappable name.
+ * D29's admission rule: the bare ticker a fact may be asked about under
+ * `exchCode: US`, or `null`.
  *
- * Attached with `provider: null` and full confidence: we derived it, no
- * connector said it, and recording it as though Plaid had would misattribute
- * evidence. It is prepended so `strongestIdentity` sees it first.
+ * Every condition is a reason the answer could be wrong without it:
+ *
+ *   * **no identity at all** (`strongestIdentity` is `null`) — a fact with an
+ *     ISIN, a CUSIP, a qualified ticker or a chain contract is already decided
+ *     better than a bare ticker could decide it;
+ *   * **a bare ticker**, i.e. one `normaliseIdentifiers` abstained on as
+ *     `unqualified_ticker` (a ticker with a *malformed* MIC was given a venue
+ *     we cannot read, and is not admitted);
+ *   * **currency `USD`**, case-folded — unknown currency is not USD. A CAD
+ *     `VTI` is a different security, and US composite FIGIs are US listings;
+ *   * **type equity, ETF or mutual fund** by `securityTypeOf` — the kinds
+ *     OpenFIGI's US composite reliably names. Cash, bonds, options and
+ *     anything untyped are never sent.
  */
-function figiUpgradeOf(
-  identifiers: readonly NormalisedIdentifier[],
-  upgrades: ReadonlyMap<string, string>,
-): NormalisedIdentifier | null {
-  if (identifiers.some((identifier) => identifier.kind === 'figi')) return null;
-  for (const identifier of identifiers) {
-    const job = figiJobOf(identifier);
-    if (job === null) continue;
-    const mapped = upgrades.get(`${job.idType}:${job.idValue}`);
-    if (mapped === undefined) continue;
-    return {
-      kind: 'figi',
-      value: mapped,
-      chain: null,
-      mic: null,
-      provider: null,
-      key: identifierKeyOf({ kind: 'figi', value: mapped }),
-      identity: isIdentityBearing('figi'),
-      canonicalisedFrom: null,
-    };
-  }
-  return null;
+function usBareTickerOf(fact: ResolvableSecurity, entry: NormaliseResult): string | null {
+  if (strongestIdentity(entry.identifiers) !== null) return null;
+  if ((fact.currency ?? '').trim().toUpperCase() !== 'USD') return null;
+  const bare = entry.abstentions.find(
+    (abstention) =>
+      abstention.tier === 'ticker' &&
+      abstention.reason === 'unqualified_ticker' &&
+      abstention.detail !== null,
+  );
+  if (bare?.detail == null) return null;
+  const ticker = entry.identifiers.find(
+    (identifier) =>
+      identifier.kind === 'ticker' && identifier.mic === null && identifier.value === bare.detail,
+  );
+  if (ticker === undefined) return null;
+  const type = securityTypeOf(fact.type, ticker, fact.isCashEquivalent);
+  return US_TICKER_TYPES.has(type) ? bare.detail : null;
+}
+
+/** The ticker tier's abstention for `symbol`, restated with D29's reason. */
+function withUsTickerReason(
+  abstentions: readonly TierAbstention[],
+  symbol: string,
+  reason: AbstainReason,
+): readonly TierAbstention[] {
+  return abstentions.map((abstention) =>
+    abstention.tier === 'ticker' &&
+    abstention.reason === 'unqualified_ticker' &&
+    abstention.detail === symbol
+      ? { ...abstention, reason }
+      : abstention,
+  );
+}
+
+/**
+ * A FIGI OpenFIGI gave us, as a name to prepend so `strongestIdentity` sees it
+ * first.
+ *
+ * `provider` is the provenance. An ISIN/CUSIP/qualified-ticker upgrade is
+ * `null` with full confidence: we derived it, no connector said it, and
+ * recording it as though Plaid had would misattribute evidence. D29's composite
+ * is `US_COMPOSITE_FIGI_PROVIDER`, which `identifierRowsOf` records at
+ * `US_COMPOSITE_FIGI_CONFIDENCE`.
+ */
+function derivedFigiOf(value: string, provider: string | null): NormalisedIdentifier {
+  return {
+    kind: 'figi',
+    value,
+    chain: null,
+    mic: null,
+    provider,
+    key: identifierKeyOf({ kind: 'figi', value }),
+    identity: isIdentityBearing('figi'),
+    canonicalisedFrom: null,
+  };
 }
 
 function identityOfRecord(record: SecurityRecord): NormalisedIdentifier {

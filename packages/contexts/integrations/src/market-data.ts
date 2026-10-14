@@ -148,12 +148,67 @@ export interface PriceRefreshOptions {
   readonly keys?: readonly ApiKey[];
 }
 
+/**
+ * Why one planned security got no price this run (WP 10.5). Every entry of
+ * `securitiesUnpriced` has exactly one of these, so a screen can say "1 unpriced:
+ * no CoinGecko key" rather than a bare count.
+ *
+ *   * `no_provider_for_kind` — `PROVIDER_FOR_KIND` names no source for the kind.
+ *   * `source_not_configured` — a source prices the kind, but none is registered
+ *     in this view: no key (by file or in Settings), or narrowed out of
+ *     `MARKET_DATA_ALLOWED_HOSTS`. No request was made.
+ *   * `no_data` — the provider answered and had no close for the subject.
+ *   * the four `PriceSourceUnavailableReason`s, as the adapter reported them.
+ */
+export const UNPRICED_REASONS = [
+  'no_provider_for_kind',
+  'source_not_configured',
+  'no_data',
+  'skipped_no_key',
+  'rate_limited',
+  'refused',
+  'error',
+] as const;
+export type UnpricedReason = (typeof UNPRICED_REASONS)[number];
+
+export interface UnpricedSecurity {
+  readonly securityId: string;
+  /** The provider that would have priced it, or `null` when no provider prices its kind. */
+  readonly provider: MarketDataProvider | null;
+  readonly reason: UnpricedReason;
+  /** The adapter's own sentence, redacted. `null` when there is nothing to add. */
+  readonly detail: string | null;
+}
+
+/** One FX pair the run could not fetch, and why. */
+export interface UnfetchedFxPair {
+  readonly base: string;
+  readonly quote: string;
+  readonly reason: UnpricedReason;
+  readonly detail: string | null;
+}
+
+/** What one provider was asked, as recorded in `market_data_runs`. */
+export interface RefreshProviderTally {
+  readonly provider: MarketDataProvider;
+  readonly operation: MarketDataOperation;
+  readonly requestsMade: number;
+  readonly symbolsAsked: number;
+  readonly outcome: MarketDataOutcome;
+}
+
 export interface PriceRefreshResult {
   readonly asOfDate: string;
   readonly priceRowsWritten: number;
   readonly fxRowsWritten: number;
   readonly securitiesPriced: readonly string[];
   readonly securitiesUnpriced: readonly string[];
+  /** WP 10.5: one entry per id in `securitiesUnpriced`, with its reason. */
+  readonly unpriced: readonly UnpricedSecurity[];
+  /** WP 10.5: the FX pairs that were planned and not fetched, with the reason. */
+  readonly fxUnfetched: readonly UnfetchedFxPair[];
+  /** WP 10.5: one entry per provider and operation, the same numbers `market_data_runs` records. */
+  readonly tallies: readonly RefreshProviderTally[];
   readonly unavailable: readonly {
     readonly provider: MarketDataProvider;
     readonly reason: PriceSourceUnavailableReason;
@@ -242,6 +297,9 @@ export function createPriceRefreshJob(options: PriceRefreshOptions) {
       const fxRows: FxRowToWrite[] = [];
       const priced: string[] = [];
       const unpriced: string[] = [];
+      const unpricedDetail: UnpricedSecurity[] = [];
+      const fxUnfetched: UnfetchedFxPair[] = [];
+      const tallyReport: RefreshProviderTally[] = [];
       const unavailable: { provider: MarketDataProvider; reason: PriceSourceUnavailableReason }[] =
         [];
       const contributing = new Set<MarketDataProvider>();
@@ -282,6 +340,12 @@ export function createPriceRefreshJob(options: PriceRefreshOptions) {
           // No provider prices this kind. Not a failure: `@ctx/investments`'
           // ladder answers from `exchange_fill` or `last_known`.
           unpriced.push(security.securityId);
+          unpricedDetail.push({
+            securityId: security.securityId,
+            provider: provider ?? null,
+            reason: provider === undefined ? 'no_provider_for_kind' : 'source_not_configured',
+            detail: null,
+          });
           continue;
         }
 
@@ -315,6 +379,12 @@ export function createPriceRefreshJob(options: PriceRefreshOptions) {
         if (failure === null) {
           // `no_data`. The request was still made and still cost a unit.
           entry.requestsMade += 1;
+          unpricedDetail.push({
+            securityId: security.securityId,
+            provider,
+            reason: 'no_data',
+            detail: outcome.kind === 'no_data' ? redactSecrets(outcome.detail, keys) : null,
+          });
           continue;
         }
         // A refusal never left the process, so it is not a request. Everything
@@ -322,6 +392,12 @@ export function createPriceRefreshJob(options: PriceRefreshOptions) {
         if (failure.reason !== 'refused' && failure.reason !== 'skipped_no_key') {
           entry.requestsMade += 1;
         }
+        unpricedDetail.push({
+          securityId: security.securityId,
+          provider,
+          reason: failure.reason,
+          detail: failure.detail,
+        });
         recordFailure(entry, failure);
       }
 
@@ -330,10 +406,15 @@ export function createPriceRefreshJob(options: PriceRefreshOptions) {
       // -------------------------------------------------------------------
       const fredSource = byProvider.get('fred');
       for (const pair of plan.fxPairs) {
-        if (fredSource === undefined) break;
         // The identity is answered by `FxReader` without a row and must never
         // be fetched: a stored 1.0 is exactly what D4 forbids.
         if (pair.base.toUpperCase() === pair.quote.toUpperCase()) continue;
+        if (fredSource === undefined) {
+          // WP 10.5: named rather than silently skipped. No FRED key, so no
+          // request; the pair is reported so a screen can say why.
+          fxUnfetched.push({ ...pair, reason: 'source_not_configured', detail: null });
+          continue;
+        }
 
         const entry = tally('fred', 'fx_refresh');
         entry.symbolsAsked += 1;
@@ -355,11 +436,17 @@ export function createPriceRefreshJob(options: PriceRefreshOptions) {
         const failure = unavailabilityOf(outcome);
         if (failure === null) {
           entry.requestsMade += 1;
+          fxUnfetched.push({
+            ...pair,
+            reason: 'no_data',
+            detail: outcome.kind === 'no_data' ? redactSecrets(outcome.detail, keys) : null,
+          });
           continue;
         }
         if (failure.reason !== 'refused' && failure.reason !== 'skipped_no_key') {
           entry.requestsMade += 1;
         }
+        fxUnfetched.push({ ...pair, reason: failure.reason, detail: failure.detail });
         recordFailure(entry, failure);
       }
 
@@ -373,6 +460,13 @@ export function createPriceRefreshJob(options: PriceRefreshOptions) {
 
       for (const entry of tallies.values()) {
         const rowsWritten = entry.operation === 'price_refresh' ? priceRowsWritten : fxRowsWritten;
+        tallyReport.push({
+          provider: entry.provider,
+          operation: entry.operation,
+          requestsMade: entry.requestsMade,
+          symbolsAsked: entry.symbolsAsked,
+          outcome: runOutcomeOf(entry),
+        });
         await options.recorder.record({
           userId: options.userId,
           provider: entry.provider,
@@ -437,6 +531,9 @@ export function createPriceRefreshJob(options: PriceRefreshOptions) {
         fxRowsWritten,
         securitiesPriced: priced,
         securitiesUnpriced: unpriced,
+        unpriced: unpricedDetail,
+        fxUnfetched,
+        tallies: tallyReport,
         unavailable,
         // The obligations the UI owes for the providers that actually
         // contributed. CoinGecko's is `required: true`, so any screen showing

@@ -57,6 +57,11 @@ export interface FigiMapJob {
   readonly idType: 'ID_ISIN' | 'ID_CUSIP' | 'TICKER' | 'ID_BB_GLOBAL';
   readonly idValue: string;
   readonly micCode: string | null;
+  /**
+   * OpenFIGI's exchange code (not a MIC). D29 sends `US`, the composite code,
+   * on a bare-ticker job. Omitted from the body when absent or `null`.
+   */
+  readonly exchCode?: string | null;
 }
 
 /** Structural mirror of `@ctx/investments`' `FigiMapping`. */
@@ -67,6 +72,8 @@ export interface FigiMapping {
   readonly exchCode: string | null;
   readonly securityType: string | null;
   readonly marketSector: string | null;
+  /** OpenFIGI's `compositeFIGI`; D29 establishes identity on it when unique. */
+  readonly compositeFigi: string | null;
 }
 
 /** Structural mirror of `@ctx/investments`' `FigiMapOutcome`. */
@@ -134,6 +141,9 @@ export function createOpenFigiMapper(options: OpenFigiOptions): OpenFigiMapper {
         idType: job.idType,
         idValue: job.idValue,
         ...(job.micCode === null ? {} : { micCode: job.micCode }),
+        // D29: `exchCode: 'US'` on a bare US-dollar ticker. Like `micCode`, a
+        // null is omitted rather than sent, because OpenFIGI rejects one.
+        ...(job.exchCode === undefined || job.exchCode === null ? {} : { exchCode: job.exchCode }),
       })),
     );
 
@@ -194,6 +204,7 @@ export function createOpenFigiMapper(options: OpenFigiOptions): OpenFigiMapper {
           exchCode: stringOrNull(mapping?.['exchCode']),
           securityType: stringOrNull(mapping?.['securityType']),
           marketSector: stringOrNull(mapping?.['marketSector']),
+          compositeFigi: stringOrNull(mapping?.['compositeFIGI']),
         });
       }
       return mappings.length === 0 ? { status: 'no_match' } : { status: 'matched', mappings };

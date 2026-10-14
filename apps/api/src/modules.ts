@@ -112,14 +112,17 @@ import {
 } from '@ctx/investments';
 import {
   INTEGRATIONS_EVENTS,
-  createPriceRefreshJob,
   type FredSource,
   type MarketDataRunRecorder,
   type MarketDataWriter,
   type PriceSource,
-  type RefreshPlan,
 } from '@ctx/integrations';
-import { newId, systemClock, type Clock } from '@core/kernel';
+import { newId, systemClock, todayIn, type Clock } from '@core/kernel';
+import {
+  createPriceRefreshPlanner,
+  runPriceRefresh,
+  type PriceRefreshPlanner,
+} from './price-refresh.ts';
 import {
   PLATFORM_FLAGS,
   createFlagService,
@@ -320,18 +323,18 @@ export interface MarketDataWiringOptions {
   readonly writer: MarketDataWriter;
   readonly recorder: MarketDataRunRecorder;
   /**
-   * What to refresh. Supplied by the caller because `createPriceRefreshJob`
-   * deliberately does not query holdings — it prices what it is handed.
+   * What to refresh. `createPriceRefreshJob` deliberately does not query
+   * holdings — it prices what it is handed — so the plan is built here, in the
+   * composition root.
    *
-   * Returns an empty plan today: `holdings` is populated by WP 3.7's provider
-   * legs (see `createInvestmentSyncPort`'s note in `domain.ts`), so there is
-   * nothing to price yet and the honest plan is the empty one. The job still
-   * runs, still records a `market_data_runs` row and still proves the schedule
-   * fires — which is precisely what the Phase 3 gate's cold walk has to
-   * observe, and what it could not observe if the schedule were withheld until
-   * there were prices to fetch.
+   * WP 10.5: absent means **the real planner** (`createPriceRefreshPlanner`,
+   * `price-refresh.ts`: every security with a non-zero position, routed through
+   * `PROVIDER_FOR_KIND`), not an empty plan. Before WP 10.5 the default was
+   * "the honest empty plan" and nothing ever supplied this, so the nightly
+   * refresh priced nothing on any install (WP 10.4 §0, defect (f)). A caller
+   * passes one only to substitute a plan in a test.
    */
-  readonly planFor?: (userId: string, asOfDate: string) => Promise<RefreshPlan>;
+  readonly planFor?: PriceRefreshPlanner;
 }
 
 /**
@@ -733,19 +736,12 @@ function integrationsModule(options: ModuleWiringOptions, clock: Clock): ModuleR
   }
 
   const database = options.database;
+  // WP 10.5: the real planner — the holder's current positions, through
+  // `@ctx/investments`' read model, each routed by `securities.type` through
+  // `PROVIDER_FOR_KIND`. The same function `POST /market-data/refresh` uses.
   const planFor =
     marketData.planFor ??
-    // The honest empty plan. WP 3.7's real planner will read the user's
-    // holdings and route each one's `securities.type` through
-    // `@ctx/integrations`' `PROVIDER_FOR_KIND` to the source that prices it;
-    // until those holdings exist there is nothing to plan, and an invented
-    // subject would be a request to a provider on behalf of a position nobody
-    // holds.
-    (async (_userId: string, asOfDate: string): Promise<RefreshPlan> => ({
-      asOfDate,
-      securities: [],
-      fxPairs: [],
-    }));
+    createPriceRefreshPlanner(database, { baseCurrency: options.baseCurrency ?? 'USD' });
 
   return {
     flagKey: 'module.integrations',
@@ -755,39 +751,46 @@ function integrationsModule(options: ModuleWiringOptions, clock: Clock): ModuleR
     // events any more than it may read their tables (08 §1.3 #11).
     jobs: [
       defineJob(PRICE_REFRESH_JOB_KIND, async (_payload, context) => {
-        const asOfDate = clock.now().toISOString().slice(0, 10);
-        const plan = await planFor(context.userId, asOfDate);
-        // One transaction for the whole refresh: the rows and the events that
-        // announce them commit together or not at all.
+        // The holder's own calendar day (CONVENTIONS "Time": every "today" is
+        // computed in the user's zone). The Tiingo adapter looks back a week
+        // from it for the latest close, so 03:45 — before that day's close
+        // exists — still prices from the previous session (WP 10.5).
+        const asOfDate = todayIn(clock, options.timezone);
         // WP 10.4: this holder's view — the files, or their stored keys where
         // the files are empty — resolved per run, so a key saved in Settings
         // is used by the next refresh without a restart.
         const view = await marketData.runtime.forUser(context.userId);
-        await database.transaction(async (tx) => {
-          const job = createPriceRefreshJob({
-            userId: context.userId,
-            sources: view.sources,
-            writer: marketData.writer,
-            recorder: marketData.recorder,
-            outbox: { execute: (query) => tx.execute(query) as never },
-            correlationId: context.correlationId,
-            clock,
-            keys: view.keys,
-          });
-          const result = await job.run(plan);
-          context.logger.info(
-            {
-              asOfDate: result.asOfDate,
-              priceRowsWritten: result.priceRowsWritten,
-              fxRowsWritten: result.fxRowsWritten,
-              securitiesPriced: result.securitiesPriced.length,
-              securitiesUnpriced: result.securitiesUnpriced.length,
-              unavailable: result.unavailable.map((entry) => entry.reason),
-              sources: view.sources.map((source) => source.provider),
-            },
-            'price refresh complete',
-          );
+        // One transaction for the whole refresh: the rows and the events that
+        // announce them commit together or not at all (`runPriceRefresh`).
+        const { plan, result } = await runPriceRefresh({
+          database,
+          clock,
+          userId: context.userId,
+          correlationId: context.correlationId,
+          asOfDate,
+          planFor,
+          view,
+          writer: marketData.writer,
+          recorder: marketData.recorder,
         });
+        context.logger.info(
+          {
+            asOfDate: result.asOfDate,
+            held: plan.held.length,
+            planned: plan.securities.length,
+            unplannable: plan.unplannable.map((entry) => entry.reason),
+            notPricedByProvider: plan.notPricedByProvider.length,
+            fxPairs: plan.fxPairs.length,
+            priceRowsWritten: result.priceRowsWritten,
+            fxRowsWritten: result.fxRowsWritten,
+            securitiesPriced: result.securitiesPriced.length,
+            securitiesUnpriced: result.securitiesUnpriced.length,
+            unpricedReasons: result.unpriced.map((entry) => entry.reason),
+            unavailable: result.unavailable.map((entry) => entry.reason),
+            sources: view.sources.map((source) => source.provider),
+          },
+          'price refresh complete',
+        );
       }),
     ],
     schedules: async (userId: string): Promise<void> => {

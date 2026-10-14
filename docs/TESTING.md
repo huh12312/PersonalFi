@@ -26,6 +26,13 @@ what the demo-seed generator is for. Everything mechanised here is asserted by
 
 Run everything with a database up: `just db-up && DATABASE_URL=postgres://personalfi:personalfi@127.0.0.1:5433/personalfi_dev pnpm exec vitest run`.
 
+A second Postgres from `compose.dev.yml` under another project name (`docker compose -p wpNNN -f
+compose.dev.yml …`) gets its **own** data volume, `wpNNN-pgdata`; only the dev project
+(`personalfi-dev`) mounts `personalfi_dev_pgdata` (WP 10.5, after the WP 10.4 incident in which a
+`-p wp104` stack shared the running dev database's data directory).
+`scripts/compose-dev-volume.test.ts` renders both and fails if any other project name resolves to
+the dev volume. Still prefer the running dev database with scratch database names.
+
 ## Database-backed tests (`@core/testkit`)
 
 `packages/testkit` (`@core/testkit`) is where every `*-db` suite in the repo

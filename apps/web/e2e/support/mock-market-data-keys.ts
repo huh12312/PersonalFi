@@ -182,3 +182,112 @@ export async function handleMarketDataKeys(
   await route.fulfill(json(state.statuses[provider]));
   return true;
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// WP 10.5: POST /api/market-data/refresh ("Refresh prices")
+// ---------------------------------------------------------------------------------------------------------
+
+export interface MarketDataRefreshMockState {
+  /** How many `POST /market-data/refresh` calls have arrived. */
+  calls: number;
+  /**
+   * Calls after this many are answered `409 market_data.refresh_too_soon`, as the api does for a second
+   * refresh inside ten minutes. `Infinity` accepts every call.
+   */
+  acceptCalls: number;
+  /** How long the answer is held back, in ms - so a spec can see the busy state. Default 0. */
+  delayMs: number;
+}
+
+export function createMarketDataRefreshState(): MarketDataRefreshMockState {
+  return { calls: 0, acceptCalls: 1, delayMs: 0 };
+}
+
+/**
+ * The refresh summary in the shape `PriceRefreshSummary` has: 13 held, 12 priced, one unpriced (BTC, for want of a
+ * CoinGecko key) and one cash position no provider prices.
+ */
+export function refreshSummary(): unknown {
+  const pricedNames = [
+    ['VTI', 'Vanguard Total Stock Market ETF', 'etf'],
+    ['VXUS', 'Vanguard Total International Stock ETF', 'etf'],
+    ['BND', 'Vanguard Total Bond Market ETF', 'etf'],
+    ['AAPL', 'Apple Inc.', 'equity'],
+    ['MSFT', 'Microsoft Corporation', 'equity'],
+    ['GOOGL', 'Alphabet Inc.', 'equity'],
+    ['AMZN', 'Amazon.com, Inc.', 'equity'],
+    ['VFIAX', 'Vanguard 500 Index Fund Admiral', 'mutual_fund'],
+    ['SCHD', 'Schwab US Dividend Equity ETF', 'etf'],
+    ['QQQ', 'Invesco QQQ Trust', 'etf'],
+    ['VNQ', 'Vanguard Real Estate ETF', 'etf'],
+    ['ETH', 'Ethereum', 'crypto'],
+  ] as const;
+  return {
+    asOfDate: '2026-10-14',
+    counts: { held: 14, priceable: 13, priced: 12, unpriced: 1, notPricedByProvider: 1 },
+    priced: pricedNames.map(([symbol, name, kind], index) => ({
+      securityId: `sec_priced_${String(index)}`,
+      symbol,
+      name,
+      kind,
+      provider: kind === 'crypto' ? 'coingecko' : 'tiingo',
+    })),
+    unpriced: [
+      {
+        securityId: 'sec_btc',
+        symbol: 'BTC',
+        name: 'Bitcoin',
+        kind: 'crypto',
+        provider: 'coingecko',
+        reason: 'source_not_configured',
+        detail: 'No CoinGecko key is set for this install, so no request was made.',
+      },
+    ],
+    notPricedByProvider: [
+      { securityId: 'sec_cash', symbol: null, name: 'US Dollar cash', kind: 'cash' },
+    ],
+    fx: { rowsWritten: 0, pairs: [] },
+    priceRowsWritten: 12,
+    requests: [
+      {
+        provider: 'tiingo',
+        operation: 'price_refresh',
+        requestsMade: 1,
+        symbolsAsked: 11,
+        outcome: 'ok',
+      },
+    ],
+    budgets: [{ provider: 'tiingo', label: 'requests/hour', used: 1, limit: 50 }],
+    nextRefreshAt: '2026-10-14T09:10:00.000Z',
+  };
+}
+
+/** Answers `POST /api/market-data/refresh` and returns `true`; any other request is left alone (`false`). */
+export async function handleMarketDataRefresh(
+  route: Route,
+  path: string,
+  method: string,
+  state: MarketDataRefreshMockState,
+): Promise<boolean> {
+  if (path !== '/api/market-data/refresh' || method !== 'POST') return false;
+  state.calls += 1;
+  if (state.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.delayMs));
+  if (state.calls > state.acceptCalls) {
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      headers: { 'Retry-After': '540' },
+      body: JSON.stringify({
+        type: 'about:blank',
+        title: 'Conflict',
+        status: 409,
+        code: 'market_data.refresh_too_soon',
+        detail:
+          'Prices were refreshed less than ten minutes ago. Try again after 2026-10-14T09:10:00.000Z.',
+      }),
+    });
+    return true;
+  }
+  await route.fulfill(json(refreshSummary()));
+  return true;
+}

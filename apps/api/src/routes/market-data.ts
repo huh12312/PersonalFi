@@ -51,7 +51,11 @@ import type { AppConfig } from '@core/config';
 import { DateOnly } from '@core/kernel';
 import {
   ATTRIBUTIONS,
+  MARKET_DATA_OPERATIONS,
+  MARKET_DATA_OUTCOMES,
   MARKET_DATA_PROVIDERS,
+  PROVIDER_FOR_KIND,
+  UNPRICED_REASONS,
   redactedMessageOf,
   type MarketDataProvider,
   type PriceSource,
@@ -67,6 +71,7 @@ import { z } from 'zod';
 import {
   createMarketDataRunRecorder,
   createMarketDataRuntime,
+  createMarketDataWriter,
   hydrateMarketDataBudgets,
   MARKET_DATA_KEYED_PROVIDERS,
   type MarketDataKeyedProvider,
@@ -88,7 +93,14 @@ import type { HttpTransport, Resolver } from '@core/platform';
 import { contextOf } from './connections.ts';
 import { mapDomainErrors } from './domain-errors.ts';
 import type { RouteDeps } from './deps.ts';
-import { todayFor } from './investments.ts';
+import { BASE_CURRENCY, todayFor } from './investments.ts';
+import {
+  PLAN_EXCLUSION_REASONS,
+  createPriceRefreshPlanner,
+  runPriceRefresh,
+  type PriceRefreshPlan,
+} from '../price-refresh.ts';
+import type { PriceRefreshResult } from '@ctx/integrations';
 
 /**
  * Which `config.secrets` entry holds each provider's key.
@@ -249,6 +261,185 @@ const EVENT_KIND = {
   removed: 'provider_credentials.removed',
 } as const;
 
+/**
+ * WP 10.5. One "Refresh prices" per holder per this long. The refresh spends
+ * real requests against free tiers (Tiingo 50 an hour, CoinGecko's monthly
+ * credits), and the button is one click on two screens; the nightly job is the
+ * schedule, this is the "now". The adapters' own budgets still apply inside a
+ * run — this bounds how often a person can start one.
+ */
+export const PRICE_REFRESH_MIN_INTERVAL_MS = 10 * 60_000;
+
+const refreshReasonWire = z
+  .enum([...UNPRICED_REASONS, ...PLAN_EXCLUSION_REASONS])
+  .describe(
+    '`source_not_configured`: no key for the provider that prices this kind (by file or in ' +
+      'Settings), or MARKET_DATA_ALLOWED_HOSTS excludes it; no request was made. `no_ticker` / ' +
+      '`no_coin_id`: the planner could not build what the provider prices by. `no_data`: the ' +
+      'provider answered with no close. `skipped_no_key`, `rate_limited`, `refused`, `error`: ' +
+      'as the adapter reported them. `no_provider_for_kind`: no provider prices this kind.',
+  );
+
+const refreshSecurityWire = z.object({
+  securityId: z.string(),
+  symbol: z.string().nullable(),
+  name: z.string().nullable(),
+  kind: z.string(),
+});
+
+const priceRefreshSummaryWire = z
+  .object({
+    asOfDate: dateOnly.describe('The holder’s calendar day the refresh priced as of.'),
+    counts: z.object({
+      held: z.int().nonnegative().describe('Securities with a non-zero position.'),
+      priceable: z
+        .int()
+        .nonnegative()
+        .describe('Held securities whose kind a provider prices (`priced + unpriced`).'),
+      priced: z.int().nonnegative(),
+      unpriced: z.int().nonnegative(),
+      notPricedByProvider: z
+        .int()
+        .nonnegative()
+        .describe('Cash, bonds and other kinds no provider prices. Not asked about.'),
+    }),
+    priced: z.array(refreshSecurityWire.extend({ provider: z.enum(MARKET_DATA_PROVIDERS) })),
+    unpriced: z.array(
+      refreshSecurityWire.extend({
+        provider: z.enum(MARKET_DATA_PROVIDERS).nullable(),
+        reason: refreshReasonWire,
+        /** Adapter-authored, redacted. */
+        detail: z.string().nullable(),
+      }),
+    ),
+    notPricedByProvider: z.array(refreshSecurityWire),
+    fx: z.object({
+      rowsWritten: z.int().nonnegative(),
+      pairs: z.array(
+        z.object({
+          base: z.string(),
+          quote: z.string(),
+          fetched: z.boolean(),
+          reason: refreshReasonWire.nullable(),
+          detail: z.string().nullable(),
+        }),
+      ),
+    }),
+    priceRowsWritten: z.int().nonnegative(),
+    requests: z
+      .array(
+        z.object({
+          provider: z.enum(MARKET_DATA_PROVIDERS),
+          operation: z.enum(MARKET_DATA_OPERATIONS),
+          requestsMade: z.int().nonnegative(),
+          symbolsAsked: z.int().nonnegative(),
+          outcome: z.enum(MARKET_DATA_OUTCOMES),
+        }),
+      )
+      .describe('What each provider was asked this run, as `market_data_runs` records it.'),
+    budgets: z
+      .array(
+        z.object({
+          provider: z.enum(MARKET_DATA_PROVIDERS),
+          label: z.string(),
+          used: z.int().nonnegative(),
+          limit: z.int().nonnegative(),
+        }),
+      )
+      .describe('Each configured provider’s budget after the run.'),
+    nextRefreshAt: isoInstant.describe('The earliest instant another Refresh prices is accepted.'),
+  })
+  .meta({ id: 'PriceRefreshSummary' });
+
+type PriceRefreshSummary = z.infer<typeof priceRefreshSummaryWire>;
+
+/** The plan and the job's result, as the holder reads them. */
+function summaryOf(
+  plan: PriceRefreshPlan,
+  result: PriceRefreshResult,
+  view: MarketDataView,
+  now: Date,
+  nextRefreshAt: Date,
+): PriceRefreshSummary {
+  const byId = new Map(plan.held.map((security) => [security.securityId, security]));
+  const describe = (securityId: string) => {
+    const held = byId.get(securityId);
+    return {
+      securityId,
+      symbol: held?.symbol ?? null,
+      name: held?.name ?? null,
+      kind: held?.kind ?? 'other',
+    };
+  };
+  const kindOf = new Map(
+    plan.securities.map((security) => [security.securityId, security.kind] as const),
+  );
+  // The job routes each planned security through `PROVIDER_FOR_KIND`; a priced
+  // one was priced by exactly that provider.
+  const priced = result.securitiesPriced.flatMap((securityId) => {
+    const provider = PROVIDER_FOR_KIND[kindOf.get(securityId) ?? ''];
+    return provider === undefined ? [] : [{ ...describe(securityId), provider }];
+  });
+  const unpriced = [
+    ...plan.unplannable.map((entry) => ({
+      ...describe(entry.securityId),
+      provider: entry.provider,
+      reason: entry.reason,
+      detail: entry.detail,
+    })),
+    ...result.unpriced.map((entry) => ({
+      ...describe(entry.securityId),
+      provider: entry.provider,
+      reason: entry.reason,
+      detail: entry.detail === null ? null : redactSafely(entry.detail, view),
+    })),
+  ];
+  const unfetched = new Map(
+    result.fxUnfetched.map((pair) => [`${pair.base}/${pair.quote}`, pair] as const),
+  );
+  const budgets = [...view.budgets].flatMap(([provider, budget]) =>
+    budget.spent(now).map((entry) => ({
+      provider,
+      label: entry.window.label,
+      used: entry.used,
+      limit: entry.window.limit,
+    })),
+  );
+  return {
+    asOfDate: result.asOfDate,
+    counts: {
+      held: plan.held.length,
+      priceable: priced.length + unpriced.length,
+      priced: priced.length,
+      unpriced: unpriced.length,
+      notPricedByProvider: plan.notPricedByProvider.length,
+    },
+    priced,
+    unpriced,
+    notPricedByProvider: plan.notPricedByProvider.map((entry) => describe(entry.securityId)),
+    fx: {
+      rowsWritten: result.fxRowsWritten,
+      pairs: plan.fxPairs.map((pair) => {
+        const failed = unfetched.get(`${pair.base}/${pair.quote}`);
+        return {
+          base: pair.base,
+          quote: pair.quote,
+          fetched: failed === undefined,
+          reason: failed?.reason ?? null,
+          detail:
+            failed === undefined || failed.detail === null
+              ? null
+              : redactSafely(failed.detail, view),
+        };
+      }),
+    },
+    priceRowsWritten: result.priceRowsWritten,
+    requests: result.tallies.map((tally) => ({ ...tally })),
+    budgets,
+    nextRefreshAt: nextRefreshAt.toISOString(),
+  };
+}
+
 export interface MarketDataRouteOptions {
   /** WP 10.4: the holder's stored keys (`createStoredMarketDataKeys`). Absent ⇒ files only. */
   readonly storedKeys?: StoredMarketDataKeys;
@@ -263,6 +454,8 @@ export const marketDataRoutes = (
   options: MarketDataRouteOptions = {},
 ): FastifyPluginAsyncZod => {
   const { guards, database, clock, config, pool } = deps;
+  /** WP 10.5: when each holder last started a Refresh prices, in this process. */
+  const lastRefreshAt = new Map<string, number>();
 
   /**
    * The holder's view, built per request (see this file's header for why) from
@@ -707,6 +900,92 @@ export const marketDataRoutes = (
           retryAfterMs: outcome.kind === 'rate_limited' ? outcome.retryAfterMs : null,
           budget: budgetOf(),
         };
+      },
+    );
+
+    // -------------------------------------------------------------------------
+    // WP 10.5: Refresh prices — the 03:45 job, for the caller, now.
+    //
+    // The same planner and the same job as the schedule (`runPriceRefresh`),
+    // over the same view the settings and test-fetch routes build (the files,
+    // else the holder's stored keys), with the budgets primed from
+    // `market_data_runs` first so a run here and the nightly run spend against
+    // one ledger. A session is enough, not a step-up: nothing in the request
+    // reaches the egress path (the subjects come from the holder's own
+    // positions, the hosts from `policyFor`), and the scheduled job makes the
+    // same calls unattended every night. What bounds it is the interval below.
+    // -------------------------------------------------------------------------
+
+    app.post(
+      '/market-data/refresh',
+      {
+        schema: {
+          operationId: 'refreshMarketData',
+          summary: 'Run the price refresh for the caller now',
+          description:
+            'Runs the nightly price refresh (`integrations.price_refresh`) for the caller ' +
+            'immediately: every security with a non-zero position, routed by kind to the ' +
+            'provider that prices it (Tiingo for equities, ETFs and funds; CoinGecko for ' +
+            'crypto), plus FX for every non-USD position currency through FRED. Spends against ' +
+            'the same per-provider budgets as the schedule. At most one run per holder per ten ' +
+            'minutes: 409 `market_data.refresh_too_soon` with `Retry-After` and the instant in ' +
+            'the detail. The response names every security that was not priced and why.',
+          tags: ['market-data'],
+          response: { 200: priceRefreshSummaryWire, ...problems(401, 409, 503) },
+        },
+      },
+      async (request, reply) => {
+        const session = await guards.requireSession(request);
+        const now = clock.now();
+        const last = lastRefreshAt.get(session.userId);
+        if (last !== undefined && now.getTime() - last < PRICE_REFRESH_MIN_INTERVAL_MS) {
+          const retryAt = new Date(last + PRICE_REFRESH_MIN_INTERVAL_MS);
+          const seconds = Math.max(1, Math.ceil((retryAt.getTime() - now.getTime()) / 1000));
+          void reply.header('retry-after', String(seconds));
+          throw new AppError({
+            status: 409,
+            code: 'market_data.refresh_too_soon',
+            title: 'Conflict',
+            detail:
+              'Prices were refreshed less than ten minutes ago. Try again after ' +
+              `${retryAt.toISOString()}.`,
+            family: 'user',
+          });
+        }
+        // Claimed before the run, so a double click cannot start two.
+        lastRefreshAt.set(session.userId, now.getTime());
+
+        const view = await viewFor(session.userId);
+        await hydrateMarketDataBudgets(database, session.userId, view.budgets, clock);
+        const { plan, result } = await runPriceRefresh({
+          database,
+          clock,
+          userId: session.userId,
+          correlationId: String(request.id),
+          asOfDate: await todayFor(deps),
+          planFor: createPriceRefreshPlanner(database, { baseCurrency: BASE_CURRENCY }),
+          view,
+          writer: createMarketDataWriter(database),
+          recorder: createMarketDataRunRecorder(database),
+        });
+        request.log.info(
+          {
+            held: plan.held.length,
+            planned: plan.securities.length,
+            priced: result.securitiesPriced.length,
+            unpriced: result.unpriced.length + plan.unplannable.length,
+            priceRowsWritten: result.priceRowsWritten,
+            fxRowsWritten: result.fxRowsWritten,
+          },
+          'manual price refresh complete',
+        );
+        return summaryOf(
+          plan,
+          result,
+          view,
+          clock.now(),
+          new Date(now.getTime() + PRICE_REFRESH_MIN_INTERVAL_MS),
+        );
       },
     );
 

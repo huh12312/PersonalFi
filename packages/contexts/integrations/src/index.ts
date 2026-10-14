@@ -145,7 +145,11 @@ export {
 // Adapters
 // ---------------------------------------------------------------------------
 
-export { createTiingoPriceSource, type TiingoOptions } from './adapters/tiingo.ts';
+export {
+  TIINGO_LOOKBACK_DAYS,
+  createTiingoPriceSource,
+  type TiingoOptions,
+} from './adapters/tiingo.ts';
 export {
   CHAIN_NATIVE_COIN_IDS,
   coinGeckoDate,
@@ -154,6 +158,7 @@ export {
 } from './adapters/coingecko.ts';
 export {
   FRED_FX_SERIES,
+  FRED_LOOKBACK_DAYS,
   FRED_MACRO_SERIES,
   createFredSource,
   type FredOptions,
@@ -189,6 +194,7 @@ export {
 
 export {
   PROVIDER_FOR_KIND,
+  UNPRICED_REASONS,
   createPriceRefreshJob,
   inMemoryMarketDataWriter,
   inMemoryRunRecorder,
@@ -202,5 +208,9 @@ export {
   type PriceRowToWrite,
   type RefreshFxPair,
   type RefreshPlan,
+  type RefreshProviderTally,
   type RefreshSubject,
+  type UnfetchedFxPair,
+  type UnpricedReason,
+  type UnpricedSecurity,
 } from './market-data.ts';

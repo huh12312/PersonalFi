@@ -34,7 +34,10 @@
  *   4. **ticker + MIC** — a *qualified* ticker is an identity. A bare one is
  *      not: `BHP` is a different security on XNYS, XASX and XLON, and tickers
  *      are reused after delistings. An unqualified ticker may corroborate and
- *      may never identify.
+ *      may never identify. D29 does not change that: a bare US-dollar equity,
+ *      ETF or fund ticker may be *asked about* (OpenFIGI, `exchCode: US`), and
+ *      what identifies it then is the one composite FIGI OpenFIGI answered —
+ *      never the ticker itself. See `resolver.ts`.
  *   5. **chain + contract** — exact for the token it names. Below `ticker` only
  *      for *fingerprint selection* (which single name will two providers most
  *      likely share); as evidence it is as exact as anything here, which is why
@@ -389,6 +392,19 @@ export const ABSTAIN_REASONS = [
   'unqualified_ticker',
   /** A provider's own id. Corroborates; never identifies. */
   'proprietary_is_not_an_identity',
+  /**
+   * D29. A bare USD ticker OpenFIGI answered with more than one US composite
+   * FIGI, or with a line that carried none: it names more than one listing.
+   */
+  'ambiguous_us_ticker',
+  /** D29. A bare USD ticker OpenFIGI does not know as a US listing (`no_match`). */
+  'no_us_match',
+  /**
+   * D29. A bare USD ticker whose OpenFIGI call did not complete (`error`). A
+   * fact about the *call*, not about the ticker: it says nothing was learned,
+   * and the next sync asks again.
+   */
+  'us_ticker_not_checked',
 ] as const;
 export type AbstainReason = (typeof ABSTAIN_REASONS)[number];
 

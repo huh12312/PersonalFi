@@ -6,7 +6,9 @@
 # committed so any gate can re-run it rather than re-typing a diff from evidence
 # (WP 9.11). Three sabotages, each the exact edit wp5.13 §4.3 names:
 #
-#   P3-C8r  routes/investments.ts  readUnresolvedSecurities: the user_id predicate dropped
+#   P3-C8r  routes/investments.ts  readUnresolvedHoldings: the user_id predicate dropped
+#           (re-anchored by WP 10.5: WP 10.4 replaced the event reader with
+#           `unresolved_holdings` and left the old anchor behind)
 #   P3-C9r  routes/net-worth.ts    readLastSnapshotFxFailure: AND user_id = $2 dropped
 #   P3-C9s  routes/net-worth.ts    POST /net-worth/fx-rates: requireFreshSession -> requireSession
 #
@@ -35,12 +37,12 @@ declare -A RED=(
   [P3-C9s]="refuses a stale session"
 )
 declare -A OLD=(
-  [P3-C8r]=$'     WHERE user_id = ${userId}::uuid\n       AND event_type = \'investments.SecurityResolutionFailed\''
+  [P3-C8r]=$'      FROM unresolved_holdings\n     WHERE user_id = ${userId}::uuid'
   [P3-C9r]=$'      WHERE kind = $1 AND user_id = $2'
   [P3-C9s]=$'      async (request) => {\n        const session = await guards.requireFreshSession(request);\n        const base = request.body.base'
 )
 declare -A NEW=(
-  [P3-C8r]=$'     WHERE ${userId}::uuid IS NOT NULL -- SABOTAGE C-5 P3-C8r\n       AND event_type = \'investments.SecurityResolutionFailed\''
+  [P3-C8r]=$'      FROM unresolved_holdings\n     WHERE ${userId}::uuid IS NOT NULL -- SABOTAGE C-5 P3-C8r'
   [P3-C9r]=$'      WHERE kind = $1 AND $2::uuid IS NOT NULL -- SABOTAGE C-5 P3-C9r'
   [P3-C9s]=$'      async (request) => {\n        const session = await guards.requireSession(request); // SABOTAGE C-5 P3-C9s\n        const base = request.body.base'
 )

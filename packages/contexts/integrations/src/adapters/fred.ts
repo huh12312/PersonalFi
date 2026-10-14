@@ -39,6 +39,7 @@
  * EUR→USD→CAD would produce a number with no observation behind it, and D4's
  * requirement is a *historical rate*, not a plausible one.
  */
+import { DateOnly } from '@core/kernel';
 import { ATTRIBUTIONS } from '../attribution.ts';
 import { arrayOf, decimalAt, isDecimalLiteral, plainDecimal, recordOf, stringAt } from '../json.ts';
 import type { ProviderClient } from '../http.ts';
@@ -54,6 +55,13 @@ import {
   type SourceOutcome,
 } from '../price-source.ts';
 import { budgetReport, callJson, isIsoDate, type CallContext } from './common.ts';
+
+/**
+ * How far back an observation request looks (WP 10.5). The H.10 `DEX*` series
+ * are published weekly with a few days' lag and skip weekends and holidays, so
+ * two weeks always holds the latest published rate; one request either way.
+ */
+export const FRED_LOOKBACK_DAYS = 14;
 
 /**
  * Pair → the FRED series that quotes it, and in which direction.
@@ -113,10 +121,18 @@ export function createFredSource(options: FredOptions): FredSource {
   const attribution = ATTRIBUTIONS.fred;
 
   /**
-   * `GET /fred/series/observations`, windowed to one day.
+   * `GET /fred/series/observations`: the latest observation on or before `date`.
    *
    * `file_type=json` because the default is XML. `api_key` in the query,
    * because FRED offers nothing else — see the header.
+   *
+   * WP 10.5: windowed to `FRED_LOOKBACK_DAYS` ending on `date`, newest first,
+   * rather than to the one day. The H.10 exchange-rate series (`DEX*`) have no
+   * weekend or holiday observation and are published with a lag of days, so a
+   * one-day window answered `no_data` for nearly every date the 03:45 refresh
+   * or "Refresh prices" asks about — invisible until a planner existed to ask.
+   * Still one request. A holiday's `"."` is skipped, never read as a number;
+   * the row keeps the observation's own date.
    */
   async function observation(
     seriesId: string,
@@ -131,8 +147,10 @@ export function createFredSource(options: FredOptions): FredSource {
         series_id: seriesId,
         api_key: options.key.reveal(),
         file_type: 'json',
-        observation_start: date,
+        observation_start: DateOnly.addDays(DateOnly.parse(date), -FRED_LOOKBACK_DAYS),
         observation_end: date,
+        sort_order: 'desc',
+        limit: String(FRED_LOOKBACK_DAYS + 1),
       },
     }));
     if (!call.ok) return call.outcome;
@@ -141,9 +159,18 @@ export function createFredSource(options: FredOptions): FredSource {
     if (rows === null) {
       return { kind: 'error', detail: `fred returned no observations array for ${seriesId}` };
     }
-    const row = rows[0];
+    // Newest first; the first with a real number on or before `date` wins.
+    const row =
+      rows.find((candidate) => {
+        const value = stringAt(candidate, 'value') ?? decimalAt(candidate, 'value');
+        const day = stringAt(candidate, 'date') ?? '';
+        return value !== null && value !== '.' && isDecimalLiteral(value) && day <= date;
+      }) ?? rows[0];
     if (row === undefined) {
-      return { kind: 'no_data', detail: `fred has no ${seriesId} observation for ${date}` };
+      return {
+        kind: 'no_data',
+        detail: `fred has no ${seriesId} observation in the ${String(FRED_LOOKBACK_DAYS)} days to ${date}`,
+      };
     }
     // FRED marks a missing observation — a market holiday — with the string
     // ".". It is not a number, it is not zero, and treating it as either would

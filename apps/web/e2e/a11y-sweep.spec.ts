@@ -738,6 +738,56 @@ test.describe('WP 10.4 states are axe-clean in both themes', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 7c. WP 10.5's states, pinned: Refresh prices, its result, its disclosure and the 409
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /market-data/refresh` is answered by `mock-market-data-keys.ts` (accepted once, then the ten-minute 409), so
+ * these walk the one state the route sweep cannot reach by opening an overlay: the result in words with its
+ * disclosure open, and the "try again after" sentence, on both screens that offer the button.
+ */
+test.describe('WP 10.5 states are axe-clean in both themes', () => {
+  test('Investments: the Refresh prices result with its disclosure open, then the 409', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await installSweepMocks(page);
+    await visit(page, '/investments');
+    const refresh = page.getByRole('button', { name: 'Refresh prices' });
+    await expect(refresh).toBeVisible();
+    await refresh.click();
+    await expect(page.getByRole('status').filter({ hasText: 'Priced 12 of 13' })).toBeVisible();
+    await page.getByText('Which holdings were not priced (1)').click();
+    await expect(
+      page.getByRole('listitem').filter({ hasText: 'BTC: no CoinGecko key' }),
+    ).toBeVisible();
+    await scanBothThemes(page, '/investments › Refresh prices result');
+    await refresh.click();
+    await expect(page.getByRole('status').filter({ hasText: 'Try again after' })).toBeVisible();
+    await scanBothThemes(page, '/investments › Refresh prices, refused as too soon');
+  });
+
+  test('Settings › Market data: the Refresh prices result with its disclosure open, then the 409', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await installSweepMocks(page);
+    await visit(page, '/settings');
+    await page.getByRole('tab', { name: 'Market data' }).click();
+    const keys = page.getByTestId('market-data-keys');
+    const refresh = keys.getByRole('button', { name: 'Refresh prices' });
+    await expect(refresh).toBeVisible();
+    await refresh.click();
+    await expect(keys.getByRole('status').filter({ hasText: 'Priced 12 of 13' })).toBeVisible();
+    await keys.getByText('Which holdings were not priced (1)').click();
+    await scanBothThemes(page, '/settings › Market data › Refresh prices result');
+    await refresh.click();
+    await expect(keys.getByRole('status').filter({ hasText: 'Try again after' })).toBeVisible();
+    await scanBothThemes(page, '/settings › Market data › Refresh prices, refused as too soon');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 8. A picture of every route, in both themes (evidence, written deliberately)
 // ---------------------------------------------------------------------------
 

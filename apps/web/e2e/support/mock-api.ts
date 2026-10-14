@@ -3,8 +3,11 @@ import type { Page, Route } from '@playwright/test';
 
 import {
   createMarketDataKeysState,
+  createMarketDataRefreshState,
   handleMarketDataKeys,
+  handleMarketDataRefresh,
   type MarketDataKeysMockState,
+  type MarketDataRefreshMockState,
 } from './mock-market-data-keys.ts';
 
 /**
@@ -262,6 +265,8 @@ export interface MockApiState {
   lastNotificationTestChannelId: string | null;
   /** WP 10.4: Settings › Market data's key cards (`mock-market-data-keys.ts`). */
   marketDataKeys: MarketDataKeysMockState;
+  /** WP 10.5: `POST /market-data/refresh` ("Refresh prices"), `mock-market-data-keys.ts`. */
+  marketDataRefresh: MarketDataRefreshMockState;
 }
 
 function json(body: unknown, status = 200) {
@@ -287,6 +292,7 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     lastTransferPairBody: null,
     lastNotificationTestChannelId: null,
     marketDataKeys: createMarketDataKeysState(),
+    marketDataRefresh: createMarketDataRefreshState(),
   };
 
   const transactions = new Map<string, MockTransaction>([
@@ -435,6 +441,9 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     ) {
       return;
     }
+
+    // WP 10.5: Refresh prices (accepted once, then the api's ten-minute 409).
+    if (await handleMarketDataRefresh(route, path, method, state.marketDataRefresh)) return;
 
     if (path === '/api/auth/session') {
       if (!state.authenticated) {

@@ -22,6 +22,10 @@ import {
   useSaveMarketDataKeyMutation,
 } from './credentials-api.ts';
 
+/** Shown once a key has been saved in this session: the key is used on the next run, or on demand. */
+const KEY_USED_LINE =
+  'Holdings sync and price refresh use this key from the next run; use Refresh prices to fetch now.';
+
 function formatDate(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime())
@@ -236,7 +240,7 @@ export function MarketDataKeyCard({ status }: MarketDataKeyCardProps) {
           )}
           {saved && (
             <p className="text-small text-text-primary" role="status">
-              Saved. {name} accepted the key.
+              Saved. {name} accepted the key. {KEY_USED_LINE}
             </p>
           )}
         </form>

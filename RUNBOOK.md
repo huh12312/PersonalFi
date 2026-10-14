@@ -230,13 +230,36 @@ jobs per request, 25 requests per minute): the card says "using OpenFIGI anonymo
 `MARKET_DATA_ALLOWED_HOSTS` still only narrows: a provider it excludes cannot be saved or used,
 whichever way the key arrives.
 
+**When prices refresh (v0.9.4).** Every night at about 03:45 (your time zone, with up to fifteen
+minutes' jitter) the worker prices **every security you hold a non-zero position in**, across every
+account: stocks, ETFs and mutual funds through Tiingo by ticker, crypto through CoinGecko by its coin
+id (Bitcoin, Ether and Solana are mapped; a token contract is not), and an FX rate through FRED for
+every non-US-dollar currency a position is held in. Cash, bonds and "other" are not sent to any
+provider. Each provider is asked for the latest close in the week before the day (two weeks for
+FRED's exchange rates, which are published with a lag), so a weekend, a holiday or a run before
+today's close still gets the last session's price, marked as carried forward. **Refresh prices**, on
+the Investments screen header and in Settings, Market data, runs the same refresh for you at once,
+at most once every ten minutes, and says what happened in words ("Priced 12 of 13; 1 unpriced: no
+CoinGecko key"), naming every holding it could not price and why. Both spend against the same
+per-provider budgets (`market_data_runs`). Before v0.9.4 the nightly job priced nothing on any
+install: it was never given the list of holdings.
+
 **What OpenFIGI does and does not fix.** It turns an ISIN, a CUSIP or an exchange-qualified ticker
 into a FIGI, so the same security reported two ways by two institutions becomes one row. A **bare
-ticker** with no exchange is not sent and never identifies a security on its own (`BHP` is three
-companies); such a position is listed on Holdings as **"Could not identify this security"**, with
-the institution's name, ticker, quantity and its own value labelled as the institution's figure,
-and the reasons in plain words. It is left out of allocation and performance and named in their
-"excluded" lists, and its buys, sells and contributions are still listed under Activity.
+ticker** with no exchange never identifies a security on its own (`BHP` is three companies), with
+one narrow exception (decision D29): when the institution gave nothing stronger, the position is
+priced in **US dollars** and is a **stock, ETF or mutual fund**, the ticker is sent to OpenFIGI as a
+US listing (`exchCode: US`), and the position is identified by the **composite FIGI** OpenFIGI
+returns — only when every line of the answer names the same one. This is how Plaid's US holdings,
+which usually arrive as bare tickers, become real holdings; it works keyed or anonymous, and not at
+all when OpenFIGI is excluded by `MARKET_DATA_ALLOWED_HOSTS`. A bare ticker in another currency, of
+another type (cash, bonds, options) or with no currency is never sent. Any position still not
+identified is listed on Holdings as **"Could not identify this security"**, with the institution's
+name, ticker, quantity and its own value labelled as the institution's figure, and the reasons in
+plain words — for a US ticker OpenFIGI could not settle, "matched it to more than one US listing",
+"found no US listing with that ticker", or "could not be reached … the next sync will try again".
+It is left out of allocation and performance and named in their "excluded" lists, and its buys,
+sells and contributions are still listed under Activity.
 
 **What a stored key survives and does not.** As for Plaid: in every backup (encrypted), kept by a
 restore with the same `master_key`, **never** in the app's own export bundle.

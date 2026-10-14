@@ -8,6 +8,9 @@ coverage/
 .env
 .env.*
 !.env.example
+# WP 10.5: compose.dev.yml's per-project volume switch. Not a secret; it names
+# the dev project's existing data volume (see docker/dev-db/pgdata.yml).
+!docker/dev-db/projects/personalfi-dev/.env
 secrets/
 compose.override.yml
 .drizzle/

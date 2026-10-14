@@ -270,6 +270,11 @@ export {
   figiMappingOf,
   figiTableKeyOf,
   firstUnambiguousFigi,
+  US_COMPOSITE_EXCH_CODE,
+  US_COMPOSITE_FIGI_CONFIDENCE,
+  US_COMPOSITE_FIGI_PROVIDER,
+  usCompositeJobOf,
+  usCompositeVerdictOf,
   type FakeFigiMapper,
   type FakeFigiMapperOptions,
   type FigiIdType,
@@ -277,6 +282,7 @@ export {
   type FigiMapOutcome,
   type FigiMapper,
   type FigiMapping,
+  type UsCompositeVerdict,
 } from './figi.ts';
 
 export {
@@ -362,6 +368,12 @@ export {
   type PriceStore,
   type UserPriceOverride,
 } from './prices.ts';
+
+// WP 10.5 — what the price refresh should price. The composition root builds the
+// `RefreshPlan` `@ctx/integrations` executes, and reads the holder's current
+// positions through this rather than through its own SQL over this context's
+// tables (08 §1.3 #11).
+export { readPricingPositions, type PricingPosition } from './pricing-positions.ts';
 
 // ---------------------------------------------------------------------------
 // WP 4.7 — the Phase 3 gap-field sources: stored allocation targets, security

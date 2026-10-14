@@ -305,11 +305,25 @@ export function plainReasonsOf(abstentions: readonly StoredAbstentionRead[]): st
     .filter((entry) => entry.reason === 'absent' && entry.tier !== 'chain_contract')
     .map((entry) => TIER_WORDS[entry.tier] ?? entry.tier);
   for (const entry of abstentions) {
+    const onlyTicker = `Only a ticker${entry.detail === null ? '' : ` (${entry.detail})`} was given, with no exchange.`;
     if (entry.reason === 'unqualified_ticker') {
+      // D29: a bare ticker *is* looked up for a US-dollar stock, ETF or fund, so
+      // this no longer says a ticker alone is never used.
       reasons.push(
-        `Only a ticker${entry.detail === null ? '' : ` (${entry.detail})`} was given, with no ` +
-          'exchange. A ticker alone can name more than one security, so it is not used to ' +
+        `${onlyTicker} A ticker alone can name more than one security, so it is used only for ` +
+          'a US-dollar stock, ETF or fund that OpenFIGI matches to exactly one US listing.',
+      );
+    } else if (entry.reason === 'ambiguous_us_ticker') {
+      reasons.push(
+        `${onlyTicker} OpenFIGI matched it to more than one US listing, so it is not used to ` +
           'identify one.',
+      );
+    } else if (entry.reason === 'no_us_match') {
+      reasons.push(`${onlyTicker} OpenFIGI found no US listing with that ticker.`);
+    } else if (entry.reason === 'us_ticker_not_checked') {
+      reasons.push(
+        `${onlyTicker} OpenFIGI could not be reached to look it up this time; the next sync ` +
+          'will try again.',
       );
     } else if (entry.reason === 'malformed') {
       reasons.push(

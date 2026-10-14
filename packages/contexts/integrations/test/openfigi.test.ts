@@ -223,6 +223,57 @@ describe('the OpenFIGI adapter', () => {
     expect(request?.body).not.toContain('null');
   });
 
+  it('D29: sends exchCode on a US-composite job and parses compositeFIGI', async () => {
+    // A bare US-dollar ticker is asked as `TICKER` + `exchCode: US` with no
+    // `micCode`; the answer's per-venue lines carry the composite FIGI the
+    // resolver establishes identity on. A line without one parses as `null`.
+    const transport = createFakeTransport(() =>
+      jsonResponse([
+        {
+          data: [
+            { figi: 'BBG000BDTF76', ticker: 'VTI', exchCode: 'US', compositeFIGI: 'BBG000BDTF76' },
+            { figi: 'BBG000BDTG11', ticker: 'VTI', exchCode: 'UP' },
+          ],
+        },
+        { data: [{ figi: 'BBG000BHTMY2', compositeFIGI: 'BBG000BHTMY2' }] },
+      ]),
+    );
+    const outcomes = await mapperOver(transport).map([
+      { idType: 'TICKER', idValue: 'VTI', micCode: null, exchCode: 'US' },
+      { idType: 'ID_ISIN', idValue: 'US9229087690', micCode: null },
+    ]);
+
+    expect(JSON.parse(transport.requests[0]?.body ?? 'null')).toEqual([
+      { idType: 'TICKER', idValue: 'VTI', exchCode: 'US' },
+      { idType: 'ID_ISIN', idValue: 'US9229087690' },
+    ]);
+    expect(outcomes[0]).toEqual({
+      status: 'matched',
+      mappings: [
+        {
+          figi: 'BBG000BDTF76',
+          name: null,
+          ticker: 'VTI',
+          exchCode: 'US',
+          securityType: null,
+          marketSector: null,
+          compositeFigi: 'BBG000BDTF76',
+        },
+        {
+          figi: 'BBG000BDTG11',
+          name: null,
+          ticker: 'VTI',
+          exchCode: 'UP',
+          securityType: null,
+          marketSector: null,
+          compositeFigi: null,
+        },
+      ],
+    });
+    if (outcomes[1]?.status !== 'matched') throw new Error('expected a match');
+    expect(outcomes[1].mappings[0]?.compositeFigi).toBe('BBG000BHTMY2');
+  });
+
   it('an empty job list makes no request at all', async () => {
     const transport = batchEcho();
     const outcomes = await mapperOver(transport).map([]);

@@ -601,6 +601,37 @@ test('settings › market data keys (WP 10.4): Tab to a key field, type, save th
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
 
+test('investments (WP 10.5): Tab to Refresh prices, press it, and the result is in a live region while focus stays on the button — by keyboard', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const journey = await begin(page, 'investments refresh prices', '/investments');
+
+  const stop = await journey.tabTo(/^Refresh prices$/, { max: 40 });
+  expect(stop.tag).toBe('button');
+  await page.keyboard.press('Enter');
+  const result = page.getByRole('status').filter({ hasText: 'Priced 12 of 13' });
+  await expect(result).toBeVisible();
+  await expect(result).toHaveAttribute('aria-live', 'polite');
+  // Disabled while it ran: focus must come back to the button, not fall to the document body (2.4.3).
+  await journey.expectFocus(/^Refresh prices$/, 'focus is back on Refresh prices after the run');
+  await journey.check('Refresh prices keeps a visible focus ring after the run');
+
+  // The disclosure is a native <details>: Tab to its summary, Enter opens it.
+  await journey.tabTo(/^Which holdings were not priced/, { max: 5 });
+  await page.keyboard.press('Enter');
+  await expect(
+    page.getByRole('listitem').filter({ hasText: 'BTC: no CoinGecko key' }),
+  ).toBeVisible();
+
+  // A second press is the api's ten-minute 409, said as a sentence, not an alert.
+  await journey.tabTo(/^Refresh prices$/, { max: 5, backwards: true });
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status').filter({ hasText: 'Try again after' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await journey.expectFocus(/^Refresh prices$/, 'focus is back on Refresh prices after the 409');
+});
+
 // ---------------------------------------------------------------------------
 // 10. The soft-lock: its 60 s warning is operable from the keyboard (2.2.1)
 // ---------------------------------------------------------------------------

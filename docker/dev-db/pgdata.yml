@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+#
+# The dev database's data volume, included by compose.dev.yml (WP 10.5).
+#
+# Not a compose file on its own (no services), so the hardening gate's sweep,
+# which matches `compose*.yml`, does not pick it up standalone; it is checked
+# as part of `compose.dev.yml`'s rendered config, which includes it.
+#
+# The name is scoped to the compose project: `<project>-pgdata`, unless the
+# project's own `.env` under docker/dev-db/projects/<project>/ names the volume.
+# Only the dev project (`personalfi-dev`) has one, and it keeps the volume that
+# already holds the dev data, `personalfi_dev_pgdata`. Any other project name
+# (an agent's `-p wp105`, a test stack) gets its own empty volume and can never
+# mount the running dev database's data directory. A hyphen, not Compose's own
+# underscore, so no project name can spell the dev volume's: `-p personalfi_dev`
+# would otherwise have rendered `personalfi_dev_pgdata` exactly (the test caught
+# it).
+volumes:
+  pgdata:
+    name: ${PERSONALFI_DEV_PGDATA_VOLUME:-${COMPOSE_PROJECT_NAME}-pgdata}

@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 import type { Page, Route } from '@playwright/test';
 
+import {
+  createMarketDataRefreshState,
+  handleMarketDataRefresh,
+  type MarketDataRefreshMockState,
+} from './mock-market-data-keys.ts';
+
 /**
  * WP 3.11's own network mock for `e2e/investments.spec.ts`, entirely separate
  * from `e2e/support/mock-api.ts` — this work package's rules forbid editing
@@ -1309,6 +1315,8 @@ export interface MockInvestmentsState {
   basisMethodRequiredStepUp: boolean;
   /** WP 10.3: every `GET /investments/transactions` query string, in order. */
   activityQueries: string[];
+  /** WP 10.5: `POST /market-data/refresh` ("Refresh prices"), from `mock-market-data-keys.ts`. */
+  marketDataRefresh: MarketDataRefreshMockState;
 }
 
 export async function installInvestmentsMocks(page: Page): Promise<MockInvestmentsState> {
@@ -1316,6 +1324,7 @@ export async function installInvestmentsMocks(page: Page): Promise<MockInvestmen
     lastBasisMethodBody: null,
     basisMethodRequiredStepUp: false,
     activityQueries: [],
+    marketDataRefresh: createMarketDataRefreshState(),
   };
   let authenticated = false;
   let steppedUp = false;
@@ -1325,6 +1334,9 @@ export async function installInvestmentsMocks(page: Page): Promise<MockInvestmen
     const url = new URL(request.url());
     const path = url.pathname;
     const method = request.method();
+
+    // WP 10.5: Refresh prices (accepted once, then the api's ten-minute 409).
+    if (await handleMarketDataRefresh(route, path, method, state.marketDataRefresh)) return;
 
     if (path === '/api/auth/session') {
       if (!authenticated) {

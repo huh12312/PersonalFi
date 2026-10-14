@@ -59,6 +59,37 @@
 
 name: personalfi-dev
 
+# WP 10.5: the data volume's name is scoped to the compose project.
+#
+# Before this, `pgdata` was pinned to the literal name `personalfi_dev_pgdata`,
+# so any stack built from this file under another project name (`docker compose
+# -p wp104 -f compose.dev.yml ...`) mounted the *running* dev database's data
+# directory: two postmasters on one directory (the WP 10.4 incident).
+#
+# The volume is declared in `docker/dev-db/pgdata.yml` as
+# `${PERSONALFI_DEV_PGDATA_VOLUME:-${COMPOSE_PROJECT_NAME}-pgdata}`, and that
+# include's project directory is `docker/dev-db/projects/<project name>`, whose
+# `.env` (if there is one) is read for the include's interpolation. Only
+# `docker/dev-db/projects/personalfi-dev/.env` exists, and it sets the existing
+# name, so:
+#
+#   docker compose -f compose.dev.yml config              -> personalfi_dev_pgdata
+#   docker compose -p personalfi-dev -f compose.dev.yml config -> personalfi_dev_pgdata
+#   docker compose -p wp999 -f compose.dev.yml config      -> wp999-pgdata
+#
+# Why an include rather than one interpolated `name:`: Compose interpolation has
+# defaults and alternates but no substitution or comparison, so no expression
+# over `COMPOSE_PROJECT_NAME` (`personalfi-dev`, with a hyphen) can produce the
+# existing underscore name for this project and a project-scoped name for every
+# other. A per-project `.env` read through the include's project directory is
+# the one per-project switch Compose offers. The volume key stays `pgdata`, so
+# the db service's mount, its config hash and the hardening gate's
+# `pgdata:db` allowance are unchanged, and the running container is not
+# recreated by this edit.
+include:
+  - path: docker/dev-db/pgdata.yml
+    project_directory: docker/dev-db/projects/${COMPOSE_PROJECT_NAME}
+
 services:
   db:
     # Pinned to a patch tag, and to Alpine 3.24 to match decision D13. Renovate
@@ -181,7 +212,3 @@ services:
       timeout: 5s
       retries: 12
       start_period: 5s
-
-volumes:
-  pgdata:
-    name: personalfi_dev_pgdata

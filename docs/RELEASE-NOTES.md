@@ -9,6 +9,52 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.4: prices actually refresh, Refresh prices, and US tickers identified
+
+**Status:** a patch release on v0.9.3. The tag `v0.9.4` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.4
+
+```bash
+git pull
+just upgrade
+```
+
+That is all. No migration. `just upgrade` still takes the verified pre-migration backup and checks
+that the stack is ready.
+
+### Manual steps
+
+None. To see prices at once instead of after the next 03:45 run: Investments, **Refresh prices**
+(or Settings, Market data). US-dollar stocks, ETFs and funds that showed as "Could not identify this
+security" are identified on the next investment sync (nightly, or Sync now on the connection), then
+priced by the next refresh.
+
+### What changed
+
+- **The nightly price refresh prices your holdings.** It never did: nothing gave the 03:45 job the
+  list of holdings, so it ran an empty plan every night and a saved Tiingo or CoinGecko key priced
+  nothing. It now prices every security with a non-zero position, routed by kind (Tiingo for
+  equities, ETFs and funds; CoinGecko for crypto by coin id), with FX through FRED for every
+  non-US-dollar position currency. Cash, bonds and "other" are counted, not sent anywhere; a
+  holding it cannot price (no ticker, a token CoinGecko has no id for, no key) is named with the
+  reason.
+- **Refresh prices**: a button on the Investments header and in Settings, Market data runs the same
+  refresh for you now, once per ten minutes, and says what happened in words ("Priced 12 of 13;
+  1 unpriced: no CoinGecko key"). A saved key's card now says "Holdings sync and price refresh use
+  this key from the next run; use Refresh prices to fetch now."
+- **The latest close, not today's.** Tiingo was asked for exactly one day, so a run on a weekend, a
+  holiday or before the close found nothing; it now takes the latest close in the week before (one
+  request), marked as carried forward. FRED's exchange rates, published with a lag, look back two
+  weeks.
+- **US tickers identified (decision D29).** A bare ticker still never identifies a security on its
+  own, with one exception: a US-dollar stock, ETF or mutual fund with nothing stronger is looked up
+  on OpenFIGI as a US listing and identified only when OpenFIGI returns exactly one composite FIGI.
+  Plaid sends bare tickers for US holdings, so this is what turns them from "Could not identify" into
+  holdings. Anything ambiguous stays a named "could not identify" row, with the reason in words.
+- Developers: `compose.dev.yml`'s data volume is scoped to the compose project, so a second stack
+  under another `-p` name can no longer mount the dev database's data directory.
+
 ## v0.9.3: market-data keys in Settings, and positions nobody could identify made visible
 
 **Status:** a patch release on v0.9.2. The tag `v0.9.3` is pushed by the maintainer once CI is green.
