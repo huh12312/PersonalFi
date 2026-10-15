@@ -172,6 +172,16 @@ export interface RunSwitchSources {
    * and a digest). A kind that is not configured is off whatever its flag says.
    */
   readonly configuredKinds: ReadonlySet<AdvisorKind>;
+  /**
+   * WP 10.6 (D30): level 2's operator half **per holder** — is anything
+   * configured to serve this holder's `local_model` kind (their chosen
+   * provider with a key and a consent, or the local model), or have they
+   * chosen Off? Read on every check, like the flags, so switching to Off
+   * stops a run in flight within a tick. When bound it replaces
+   * `configuredKinds`; the implementation must not cache longer than the
+   * composition root's 30 s narrator cache, which a settings change drops.
+   */
+  readonly configuredKindsFor?: (userId: string) => Promise<ReadonlySet<AdvisorKind>>;
 }
 
 export function createRunSwitches(sources: RunSwitchSources): RunSwitches {
@@ -181,7 +191,11 @@ export function createRunSwitches(sources: RunSwitchSources): RunSwitches {
     async kindEnabled(userId, kind) {
       if (kind === 'builtin') return true;
       const key = KIND_FLAG_KEYS[kind];
-      if (key === undefined || !sources.configuredKinds.has(kind)) return false;
+      const configured =
+        sources.configuredKindsFor === undefined
+          ? sources.configuredKinds
+          : await sources.configuredKindsFor(userId);
+      if (key === undefined || !configured.has(kind)) return false;
       return sources.flags.isEnabled(userId, key);
     },
   };

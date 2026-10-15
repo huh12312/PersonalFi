@@ -23,6 +23,17 @@ export interface BriefItemNarration {
   readonly textShown: boolean;
   /** The narrator's alternative wording; `null` unless narrated and `textShown`. */
   readonly summaryMd: string | null;
+  /**
+   * WP 10.6: which provider and model wrote the wording, named on the badge. `null` (or absent, from a response
+   * that predates the field) keeps the badge's plain "AI-assisted wording".
+   */
+  readonly narratedBy?: NarratedBy | null;
+}
+
+/** The narrator that wrote an item's wording (WP 10.6, D30). */
+export interface NarratedBy {
+  readonly provider: 'ollama' | 'openai' | 'openrouter' | 'anthropic';
+  readonly model: string;
 }
 
 /** CF-24: the action as the Brief said it at publication. `null` on the item: published before 0038. */

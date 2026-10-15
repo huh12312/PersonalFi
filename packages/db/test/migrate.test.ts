@@ -527,6 +527,13 @@ describeWithDb('runMigrations', () => {
       //   investment_transactions_unresolved_has_no_security, and 0014's
       //   investment_transactions_trades_name_a_security re-declared wider (a trade names a
       //   security or is marked unresolved). Expand-only; references only 0002, 0014 and 0041.
+      // 0044_narrator_settings (WP 10.6, D30): two new @ctx/insights tables, narrator_settings (one row
+      //   per holder: the active narrator provider -- ollama | openai | openrouter | anthropic | off --,
+      //   hosted model ids, an Ollama endpoint/name/digest set in Settings; no row = the environment, as
+      //   before) and narrator_provider_consents (per hosted provider: the consent text version and its
+      //   sha256, consented_at, withdrawn_at; one standing consent per provider). provider_credentials'
+      //   provider CHECK re-declared wider (+ openai, openrouter, anthropic, ollama). advisor_payload_approvals
+      //   gains nullable llm_provider and llm_model. Expand-only; references only 0002, 0028 and 0041/0043.
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -591,6 +598,8 @@ describeWithDb('runMigrations', () => {
         'mcc_codes',
         'merchant_profiles',
         'merchants',
+        'narrator_provider_consents',
+        'narrator_settings',
         'net_worth_daily',
         'notification_channels',
         'notification_outbox',

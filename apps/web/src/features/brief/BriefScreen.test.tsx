@@ -80,7 +80,13 @@ function buildItem(overrides: Partial<BriefItem> & Pick<BriefItem, 'id'>): Brief
     score: 50400,
     retirementEffect: COMPUTED_EFFECT,
     primaryAction: null,
-    narration: { status: 'none', aiAssisted: false, textShown: false, summaryMd: null },
+    narration: {
+      status: 'none',
+      aiAssisted: false,
+      textShown: false,
+      summaryMd: null,
+      narratedBy: null,
+    },
     ...overrides,
   };
 }
@@ -214,6 +220,7 @@ describe('BriefScreen', () => {
         aiAssisted: true,
         textShown: true,
         summaryMd: 'Fee hunter found $720 you could get back this year.',
+        narratedBy: null,
       },
     };
     stubFetchRoutes([briefRoute(buildBrief({ items: [narrated] })), healthScoreNotComputedRoute()]);
@@ -243,6 +250,7 @@ describe('BriefScreen', () => {
         aiAssisted: true,
         textShown: false,
         summaryMd: null,
+        narratedBy: null,
       },
     };
     stubFetchRoutes([briefRoute(buildBrief({ items: [withheld] })), healthScoreNotComputedRoute()]);
@@ -259,6 +267,46 @@ describe('BriefScreen', () => {
     expect(screen.queryByRole('button', { name: 'See the template wording' })).toBeNull();
   });
 
+  it('WP 10.6: the badge names the provider and model that wrote the wording, shown and withheld alike', async () => {
+    const shown = {
+      ...buildItem({ id: '1', title: 'Shown wording' }),
+      narration: {
+        status: 'narrated' as const,
+        aiAssisted: true,
+        textShown: true,
+        summaryMd: 'Fee hunter found $720 you could get back this year.',
+        narratedBy: { provider: 'anthropic' as const, model: 'claude-sonnet-5-5' },
+      },
+    };
+    const withheld = {
+      ...buildItem({ id: '2', position: 1, title: 'Withheld wording' }),
+      narration: {
+        status: 'narrated' as const,
+        aiAssisted: true,
+        textShown: false,
+        summaryMd: null,
+        narratedBy: { provider: 'ollama' as const, model: 'qwen2.5:7b-instruct-q4_K_M' },
+      },
+    };
+    stubFetchRoutes([
+      briefRoute(buildBrief({ items: [shown, withheld] })),
+      healthScoreNotComputedRoute(),
+    ]);
+
+    renderScreen();
+
+    expect(await screen.findByText('Narrated by Anthropic claude-sonnet-5-5')).toBeInTheDocument();
+    expect(screen.getByTestId('narration-withheld')).toHaveTextContent(
+      'Narrated by the local model qwen2.5:7b-instruct-q4_K_M',
+    );
+    expect(screen.getByTestId('narration-withheld')).toHaveTextContent(
+      'An AI-assisted wording of this item exists and is not shown yet.',
+    );
+    // A named narrator replaces the generic words; nothing else on the card changes.
+    expect(screen.queryByText('AI-assisted wording')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'See the template wording' })).toBeInTheDocument();
+  });
+
   it('a narration that is expected but has not arrived says it may follow', async () => {
     const pending = {
       ...buildItem({ id: '1' }),
@@ -267,6 +315,7 @@ describe('BriefScreen', () => {
         aiAssisted: false,
         textShown: true,
         summaryMd: null,
+        narratedBy: null,
       },
     };
     stubFetchRoutes([briefRoute(buildBrief({ items: [pending] })), healthScoreNotComputedRoute()]);

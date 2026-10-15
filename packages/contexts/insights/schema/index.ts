@@ -108,5 +108,18 @@ export {
   type NewAdvisoryBriefRow,
 } from './briefs.ts';
 
+// WP 10.6 — the language model in Settings (migration 0044_narrator_settings.sql).
+export {
+  HOSTED_NARRATOR_PROVIDERS,
+  NARRATOR_PROVIDER_VALUES,
+  narratorProviderConsents,
+  narratorSettings,
+  type HostedNarratorProvider,
+  type NarratorProviderConsentRow,
+  type NarratorProviderValue,
+  type NarratorSettingsRow,
+  type NewNarratorSettingsRow,
+} from './narrator.ts';
+
 // WP 5.8 — the health score with breakdown (migration 0033_health_scores.sql).
 export { healthScores, type HealthScoreRow, type NewHealthScoreRow } from './health.ts';

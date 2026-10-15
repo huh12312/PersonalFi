@@ -21,6 +21,16 @@ source of regulated financial advice. It has no cloud account to sign up for. It
 money: connections are read-only. The optional AI narrator runs a model on your own machine and is
 off until you turn it on.
 
+**The language model, local or your own key (v0.9.5).** The narrator, which rewords a Brief finding
+in plain English and may not add a number, runs on the local model by default. In Settings, Language
+model you can instead point it at OpenAI, OpenRouter or Anthropic with your own API key (or turn it
+Off). A hosted provider is used only after you tick its consent, which says exactly what leaves the
+machine — Brief findings: aggregated amounts, bucketed, merchants pseudonymised, never a transaction
+or an account number — and only on the payload you previewed and approved; each narration names the
+provider and model that wrote it. The RUNBOOK's
+[Language model: local or bring your own key](RUNBOOK.md#language-model-local-or-bring-your-own-key-v095)
+has the details and the one host each provider may reach.
+
 Its security posture is documented, including what it does not defend against. Read the
 [threat model](docs/security/threat-model.md) and the
 [ASVS assessment](docs/security/asvs-assessment.md) before you put real data in it.

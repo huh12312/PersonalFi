@@ -18,6 +18,12 @@ export const PROVIDER_CREDENTIAL_PROVIDERS = [
   'fred',
   'coingecko',
   'openfigi',
+  // WP 10.6 (0044): the narrator's hosted providers' keys and an optional
+  // Ollama bearer token — single-value keys with 0043's shape.
+  'openai',
+  'openrouter',
+  'anthropic',
+  'ollama',
 ] as const;
 export type ProviderCredentialProvider = (typeof PROVIDER_CREDENTIAL_PROVIDERS)[number];
 
@@ -28,6 +34,18 @@ export type ProviderCredentialProvider = (typeof PROVIDER_CREDENTIAL_PROVIDERS)[
  */
 export const MARKET_DATA_KEY_PROVIDERS = ['tiingo', 'fred', 'coingecko', 'openfigi'] as const;
 export type MarketDataKeyProvider = (typeof MARKET_DATA_KEY_PROVIDERS)[number];
+
+/** WP 10.6: the language-model keys (and Ollama's optional bearer token). Single values, 0043's shape. */
+export const LANGUAGE_MODEL_KEY_PROVIDERS = [
+  'openai',
+  'openrouter',
+  'anthropic',
+  'ollama',
+] as const;
+export type LanguageModelKeyProvider = (typeof LANGUAGE_MODEL_KEY_PROVIDERS)[number];
+
+/** Every provider whose credential is one sealed value rather than Plaid's pair. */
+export type SingleKeyProvider = MarketDataKeyProvider | LanguageModelKeyProvider;
 
 export const PROVIDER_CREDENTIAL_ENVS = ['sandbox', 'production'] as const;
 export type ProviderCredentialEnv = (typeof PROVIDER_CREDENTIAL_ENVS)[number];

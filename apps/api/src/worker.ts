@@ -60,7 +60,8 @@ import { buildLoggerOptions } from './logging.ts';
 import { appModules } from './modules.ts';
 import { createStoredMarketDataKeys } from './market-data-keys.ts';
 import { createStoredPlaid, withStoredPlaid } from './plaid-stored.ts';
-import { createNarratorWiring } from './narrator-wiring.ts';
+import { createNarratorRuntime, createNarratorWiring } from './narrator-wiring.ts';
+import { createNarratorStores } from './narrator-stores.ts';
 import { MODULE_FLAGS, buildPlatform, resolveModules } from './platform.ts';
 
 /**
@@ -467,6 +468,28 @@ async function main(): Promise<void> {
     // `insightsModule` must not register `local.narrator` either.
     const narratorModel = narratorWiring?.narratorModel;
 
+    // WP 10.6 (D30): the holder's own narrator — the local model (the
+    // environment above, or one set in Settings), a hosted provider with their
+    // key and consent, or Off — resolved per run through the same
+    // `narrator-wiring.ts`, cached 30 s and dropped by the settings and
+    // credentials consumers `appModules` registers, so a change in Settings
+    // reaches the next narration without a restart. A non-empty secret file
+    // wins over a stored key.
+    const narratorRuntime = createNarratorRuntime({
+      mode: 'run',
+      stores: createNarratorStores({ database, secretBox: () => secretBox ?? undefined }),
+      localModel: config.localModel,
+      timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+      allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+      fileKeys: {
+        openai: config.secrets.openai_api_key,
+        openrouter: config.secrets.openrouter_api_key,
+        anthropic: config.secrets.anthropic_api_key,
+      },
+      logger,
+      clock: systemClock,
+    });
+
     // WP 3.4 (docs/evidence/phase-3/wp3.w-wiring.md). Built once per process,
     // in the worker only: the API runs no job runner and no scheduler, so a
     // market-data runtime there would be four adapters nobody can invoke —
@@ -634,6 +657,8 @@ async function main(): Promise<void> {
               // WP 5.3 / W-C: `local.narrator` is registered in
               // `insightsModule` only when this is present too.
               ...(narratorModel === undefined ? {} : { narratorModel }),
+              // WP 10.6: per holder, per run (see above).
+              narratorRuntime,
               // wp2.6-insights.md §6 open item 5: absent until an operator
               // writes `${SECRETS_DIR}/advisor_token_secret`; `module.insights`
               // then registers no consumer, no job and no schedule (see

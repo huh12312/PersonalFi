@@ -706,3 +706,28 @@ export {
   type ComputedHealthScore,
   type StoredHealthScore,
 } from './health/store.ts';
+
+// WP 10.6 — the language model in Settings (D30, revising D22; migration
+// 0044). The holder's narrator is resolved per run (`holder.ts`), the settings
+// and consents live in `narrator_settings` / `narrator_provider_consents`, and
+// a change is announced so the worker drops its cached narrator.
+export { dependenciesForHolder, type HolderNarrator } from './holder.ts';
+export { NarratorSettingsChanged } from './events.ts';
+export {
+  giveNarratorConsent,
+  isHostedNarratorProvider,
+  NarratorSettingsError,
+  readNarratorSettings,
+  setActiveNarratorProvider,
+  setHostedNarratorModel,
+  setOllamaNarratorEndpoint,
+  storedModelOf,
+  withdrawNarratorConsent,
+  type NarratorConsentView,
+  type NarratorSettingsChange,
+  type NarratorSettingsView,
+} from './narrator-settings.ts';
+export {
+  createNarratorSettingsConsumer,
+  NARRATOR_SETTINGS_CONSUMER,
+} from './narrator-settings-consumer.ts';

@@ -26,3 +26,18 @@ export {
   type FakeOllama,
   type RecordedRequest,
 } from './fake-ollama.ts';
+// WP 10.6: the hermetic OpenAI / OpenRouter / Anthropic stand-in.
+export {
+  FakeHostedTransport,
+  narrationJson,
+  ok as fakeHostedOk,
+  PRIVATE_RESOLVE,
+  PUBLIC_RESOLVE,
+  recordedReply,
+  RejectingHostedTransport,
+  SYNTHETIC_KEY,
+  vendorError,
+  type FakeResponder,
+  type RecordedHostedCall,
+  type RejectionMode,
+} from './fake-hosted.ts';

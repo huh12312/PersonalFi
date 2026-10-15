@@ -46,6 +46,13 @@ export interface PromptRenderer {
    * `advisor_runs.llm_model`.
    */
   readonly model: string;
+  /**
+   * WP 10.6: the provider the model is served by — `ollama` for the local
+   * model, else `openai` / `openrouter` / `anthropic`. Recorded on the payload
+   * approval with `model`, so an approval says what it was given for.
+   * Optional: a renderer from before WP 10.6 records none.
+   */
+  readonly provider?: string;
   /** Render the prompt for this request. Pure; invokes nothing. */
   render(request: AdvisorRequest): RenderedPrompt;
 }

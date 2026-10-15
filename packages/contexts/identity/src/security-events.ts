@@ -40,7 +40,9 @@ export type SecurityEventKind =
   // WP 9.11 (G-25): operations a stolen session would want, and its refusals.
   | 'auth.step_up_refused'
   | 'export.downloaded'
-  | 'import.loaded';
+  | 'import.loaded'
+  // WP 10.6 (D30): the narrator's provider or model changed. Detail: provider and model, never a key.
+  | 'narrator.provider_changed';
 
 export type SecurityEventOutcome = 'success' | 'failure' | 'blocked';
 

@@ -649,12 +649,14 @@ describe.skipIf(NO_DATABASE)(
             aiAssisted: true,
             textShown: false,
             summaryMd: null,
+            narratedBy: null,
           });
           expect(plain?.narration).toEqual({
             status: 'none',
             aiAssisted: false,
             textShown: false,
             summaryMd: null,
+            narratedBy: null,
           });
           // The text never reaches the wire while the gate is closed — not even
           // somewhere a client could dig it out.
@@ -686,6 +688,7 @@ describe.skipIf(NO_DATABASE)(
             aiAssisted: true,
             textShown: true,
             summaryMd: TEXT,
+            narratedBy: null,
           });
           // The built-in's own summary is untouched: a narration is alternative
           // wording, never a replacement of what the Brief stored.
@@ -697,6 +700,7 @@ describe.skipIf(NO_DATABASE)(
             aiAssisted: false,
             textShown: true,
             summaryMd: null,
+            narratedBy: null,
           });
         } finally {
           await api.close();
@@ -704,6 +708,42 @@ describe.skipIf(NO_DATABASE)(
       },
       120_000,
     );
+
+    it('WP 10.6 (D30): the narration names its provider and model, from the run that wrote it', async () => {
+      const api = await startApiWithEnv('narrby', { NARRATION_TEXT_SHOWN: 'true' });
+      try {
+        const userId = api.database.userId;
+        const { narrated } = await seedNarratedWeek(api.database.db, userId, '2026-W41');
+        async function narratedByRun(llmModel: string): Promise<unknown> {
+          const runId = newId();
+          await api.database.db.execute(sql`
+              INSERT INTO advisor_runs (id, user_id, advisor_id, advisor_version, trigger, status,
+                granted_scopes, emitted_scopes, proposed_count, accepted_count, rejected_count,
+                rejections, correlation_id, started_at, finished_at, llm_model)
+              VALUES (${runId}::uuid, ${userId}::uuid, 'local.narrator', '1', 'event', 'completed',
+                '{}', '{}', 1, 1, 0, '[]'::jsonb, ${newId()}::uuid, now(), now(), ${llmModel})`);
+          await api.database.db.execute(sql`
+              UPDATE insights SET run_id = ${runId}::uuid
+               WHERE user_id = ${userId}::uuid AND narrates_insight_id = ${narrated}::uuid`);
+          const items = await itemsOf(api, '2026-W41');
+          return items.find((item) => item.insightKey.startsWith('wp96-narrated'))?.narration;
+        }
+        expect(await narratedByRun('anthropic:claude-sonnet-5-5')).toMatchObject({
+          status: 'narrated',
+          narratedBy: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+        });
+        expect(await narratedByRun('openrouter:anthropic/claude-sonnet-5.5')).toMatchObject({
+          narratedBy: { provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5' },
+        });
+        expect(
+          await narratedByRun(`qwen2.5:7b-instruct-q4_K_M@sha256:${'8'.repeat(64)}`),
+        ).toMatchObject({
+          narratedBy: { provider: 'ollama', model: 'qwen2.5:7b-instruct-q4_K_M' },
+        });
+      } finally {
+        await api.close();
+      }
+    }, 120_000);
 
     it(
       "another holder's narration is never joined onto this holder's item (userId alone), " +

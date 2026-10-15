@@ -657,6 +657,45 @@ export const SECRET_SPECS = [
       '10 jobs per batch instead of 100. Request a key at https://www.openfigi.com/api.',
   },
 
+  // ------------------------------------------------------------ narrator (WP 10.6)
+  //
+  // The holder's own key for a hosted language model (D30, which revises D22).
+  // **File only, no `envFallback`**, for the reason every provider key here has
+  // none (01 §1.10). **Optional, required for no role**: the narrator runs on
+  // the local model by default, and a hosted provider is used only when the
+  // holder makes it active in Settings with their explicit consent. A
+  // non-empty file wins over a key stored in Settings, as everywhere else.
+  {
+    name: 'openai_api_key',
+    file: 'openai_api_key',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write an OpenAI API key to ${SECRETS_DIR}/openai_api_key (mode 0400). Optional: used only ' +
+      'when the holder makes OpenAI the narrator in Settings, Language model, with their consent; ' +
+      'a non-empty file wins over a key stored there. Create one at platform.openai.com.',
+  },
+  {
+    name: 'openrouter_api_key',
+    file: 'openrouter_api_key',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write an OpenRouter API key to ${SECRETS_DIR}/openrouter_api_key (mode 0400). Optional: ' +
+      'used only when the holder makes OpenRouter the narrator in Settings, Language model, with ' +
+      'their consent; a non-empty file wins over a key stored there. Create one at openrouter.ai.',
+  },
+  {
+    name: 'anthropic_api_key',
+    file: 'anthropic_api_key',
+    requiredForRoles: [] as RequiredForRoles,
+    envFallback: undefined,
+    hint:
+      'write an Anthropic API key to ${SECRETS_DIR}/anthropic_api_key (mode 0400). Optional: used ' +
+      'only when the holder makes Anthropic the narrator in Settings, Language model, with their ' +
+      'consent; a non-empty file wins over a key stored there. Create one at platform.claude.com.',
+  },
+
   // --------------------------------------------------------------- coinbase
   //
   // `@connector/coinbase`'s CDP credential pair (wp3.5-coinbase.md §8.1). D5

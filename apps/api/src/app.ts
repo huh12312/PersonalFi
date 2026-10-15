@@ -36,6 +36,9 @@ import {
 } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { createPreviewModel } from './modules.ts';
+import { createNarratorStores } from './narrator-stores.ts';
+import { createNarratorRuntime } from './narrator-wiring.ts';
+import { narratorSettingsRoutes } from './routes/narrator-settings.ts';
 import { buildPlatform } from './platform.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
 import { accountRoutes } from './routes/accounts.ts';
@@ -121,6 +124,14 @@ export interface BuildAppOptions {
   readonly marketDataTransport?: HttpTransport;
   /** WP 10.4. The DNS answer for that seam's egress guard (a public address in tests). */
   readonly marketDataResolve?: Resolver;
+  /**
+   * WP 10.6. A test seam: the socket under the Settings, Language model Test
+   * button's hosted probe, so a route test answers from the hermetic vendor
+   * fake and never calls OpenAI, OpenRouter or Anthropic.
+   */
+  readonly narratorTransport?: HttpTransport;
+  /** WP 10.6. The DNS answer for that seam's egress guard. */
+  readonly narratorResolve?: Resolver;
 }
 
 /**
@@ -663,14 +674,54 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   // switch and rule health, under the existing `/advisors` prefix). No
   // `docker/Caddyfile` edit needed — both prefixes already route to this
   // process (`scripts/check-proxy-routes.ts`).
-  await app.register(briefRoutes(deps));
+  // WP 10.6 (D30): the holder's narrator, in preview mode — every transport it
+  // builds rejects; this process renders, approves and shows, never narrates.
+  // The worker builds the same runtime in run mode from the same stores.
+  const narratorFileKeys = {
+    openai: config.secrets.openai_api_key,
+    openrouter: config.secrets.openrouter_api_key,
+    anthropic: config.secrets.anthropic_api_key,
+  };
+  const narratorPreview = createNarratorRuntime({
+    mode: 'preview',
+    stores: createNarratorStores({
+      database,
+      secretBox: () => {
+        try {
+          return security.requireSecretBox();
+        } catch {
+          return undefined;
+        }
+      },
+    }),
+    localModel: undefined,
+    localModelPin: config.localModelPin,
+    timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+    allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+    fileKeys: narratorFileKeys,
+    clock,
+  });
+  await app.register(
+    narratorSettingsRoutes(deps, {
+      runtime: narratorPreview,
+      timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+      allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+      fileKeys: narratorFileKeys,
+      ...(options.narratorTransport === undefined ? {} : { transport: options.narratorTransport }),
+      ...(options.narratorResolve === undefined ? {} : { resolve: options.narratorResolve }),
+    }),
+  );
+  await app.register(briefRoutes(deps, { narrator: narratorPreview }));
   // WP 9.6 (CF-1, C5-1, Phase 5 gate R-4): when a model is configured the api
   // binds the pure, preview-only `PromptRenderer` and registers
   // `local.narrator`'s manifest (never its executor, never an endpoint — the
   // api is given the model's name and digest, `LOCAL_MODEL_PIN_*`), so preview
   // and "Approve this payload" work through the product and the worker's next
   // narration is not refused `payload_not_approved`.
-  await app.register(advisorRunRoutes(deps, createPreviewModel(config.localModelPin)));
+  // WP 10.6: per holder — their provider and model key the approval.
+  await app.register(
+    advisorRunRoutes(deps, createPreviewModel(config.localModelPin), narratorPreview),
+  );
   // WP 9.1 (09 §4 batch 3, W-A): `GET /ops/backup-status` — install-wide
   // backup and restore-drill status from `@core/platform`'s ops tables
   // (0036). Session only; nothing in the answer is a holder's.

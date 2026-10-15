@@ -197,6 +197,8 @@ export interface HarnessOptions {
   readonly marketDataTransport?: HttpTransport;
   /** WP 10.4. DNS for that seam; defaults to a public address so the egress guard passes. */
   readonly marketDataResolve?: Resolver;
+  /** WP 10.6. The socket under the Language model Test button; a test hands the hermetic vendor fake. */
+  readonly narratorTransport?: HttpTransport;
 }
 
 /**
@@ -296,6 +298,12 @@ export async function createApiHarness(options: HarnessOptions): Promise<ApiHarn
           marketDataTransport: options.marketDataTransport,
           marketDataResolve:
             options.marketDataResolve ?? (() => Promise.resolve(['93.184.216.34'])),
+        }),
+    ...(options.narratorTransport === undefined
+      ? {}
+      : {
+          narratorTransport: options.narratorTransport,
+          narratorResolve: () => Promise.resolve(['93.184.216.34']),
         }),
     ...(walletRpc === null ? {} : { walletRpc }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),

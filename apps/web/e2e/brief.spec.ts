@@ -12,6 +12,7 @@ import {
   installBriefMocks,
 } from './support/mock-brief.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
+import { hideDevtools } from './support/sweep.ts';
 
 /**
  * WP 5.11's exit tests for the Brief screen (and 9.6's additions). The mock is `support/mock-brief.ts`
@@ -118,6 +119,53 @@ test.describe('Brief screen (WP 5.11)', () => {
     );
 
     await shoot(page, evidenceDir, 'narration-badge');
+  });
+
+  test('WP 10.6: the badge names the provider and model that wrote the wording, in light and in dark', async ({
+    page,
+    evidenceDir,
+  }) => {
+    await installFakeWebAuthnAssertion(page);
+    const narrated = briefItem({
+      id: '1',
+      narration: {
+        status: 'narrated',
+        aiAssisted: true,
+        textShown: true,
+        summaryMd: 'Fee hunter found $720 you could get back this year.',
+        narratedBy: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+      },
+    });
+    const withheld = briefItem({
+      id: '2',
+      position: 1,
+      title: 'Withheld wording',
+      narration: {
+        status: 'narrated',
+        aiAssisted: true,
+        textShown: false,
+        summaryMd: null,
+        narratedBy: { provider: 'ollama', model: 'qwen2.5:7b-instruct-q4_K_M' },
+      },
+    });
+    await installBriefMocks(page, { brief: buildBrief({ items: [narrated, withheld] }) });
+    await loginAndReachBrief(page);
+
+    await expect(page.getByText('Narrated by Anthropic claude-sonnet-5-5')).toBeVisible();
+    await expect(page.getByTestId('narration-withheld')).toContainText(
+      'Narrated by the local model qwen2.5:7b-instruct-q4_K_M',
+    );
+    await expect(page.getByText('AI-assisted wording', { exact: true })).toHaveCount(0);
+    await hideDevtools(page);
+
+    for (const theme of ['light', 'dark'] as const) {
+      await setTheme(page, theme);
+      await expectNoAxeViolations(page, `Brief › narration badge naming its narrator (${theme})`);
+      await page.screenshot({
+        path: `${screenshotDir(evidenceDir)}wp10.6-brief-badge-${theme}.png`,
+        fullPage: true,
+      });
+    }
   });
 
   test('while the deployment withholds narration text (R-2) the built-in wording stays and the page says so', async ({

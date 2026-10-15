@@ -9,6 +9,52 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.5: the language model in Settings — local, or your own key
+
+**Status:** a patch release on v0.9.4. The tag `v0.9.5` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.5
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0044_narrator_settings` (expand-only: two new tables, one CHECK widened, two nullable
+columns on `advisor_payload_approvals`; every row valid before is valid after). `just upgrade` takes
+the verified pre-migration backup first and creates the three new optional secret files empty
+(`secrets-placeholders`).
+
+### Manual steps
+
+None. Nothing changes until you choose a provider: with no choice the narrator behaves exactly as in
+v0.9.4 (the local model if the operator configured one, otherwise none). To use a hosted model:
+Settings, **Language model**, the provider's card: save your key with your passkey, tick the
+consent, press **Test**, then make it active — and approve the narrator's payload again in Advisor
+management (a switch withdraws the old approval on purpose).
+
+### What changed
+
+- **Settings, Language model (decision D30, revising D22).** Choose the narrator: Ollama (local, the
+  default), OpenAI, OpenRouter, Anthropic, or Off. A hosted provider needs your own key (saved with
+  your passkey, sealed, shown only by its last four characters; or the operator's
+  `openai_api_key` / `openrouter_api_key` / `anthropic_api_key` file, which wins) and your consent,
+  whose text says what leaves the machine: _Brief findings: aggregated amounts, bucketed, merchants
+  pseudonymised — never a transaction, never an account number_. A model id per provider (defaults:
+  `claude-sonnet-5-5`, `gpt-6.1-sol`, `anthropic/claude-sonnet-5.5`). A **Test** button sends a
+  fixed probe with no personal data and says how it went, in words.
+- **The same payload, the same checks.** A hosted narrator gets exactly what the local model gets —
+  the minimised, previewed, approved payload — and its reply goes through the same reply format,
+  the same narration match and the same rule that it may not introduce a number. Each provider's
+  adapter can reach one host only (`api.openai.com`, `openrouter.ai`, `api.anthropic.com`), within
+  the local model's timeout ceiling, under the same kill switches, with an hourly call window.
+- **Switching withdraws the approval.** Making a hosted provider active, or changing its model,
+  withdraws the narrator's payload approval; the approval now records the provider and model it was
+  given for.
+- **The Brief names the model.** Each narration's badge says who wrote it: "Narrated by Anthropic
+  claude-sonnet-5-5", "Narrated by the local model qwen2.5:7b-instruct-q4_K_M".
+- Changes reach the worker without a restart.
+
 ## v0.9.4: prices actually refresh, Refresh prices, and US tickers identified
 
 **Status:** a patch release on v0.9.3. The tag `v0.9.4` is pushed by the maintainer once CI is green.

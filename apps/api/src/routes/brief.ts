@@ -114,6 +114,7 @@ import { z } from 'zod';
 import { ADVISOR_KIND_FLAGS, MODULE_FLAGS } from '../platform.ts';
 import { AppError, problems } from '../problem.ts';
 import { isoInstant, moneySchema } from '../wire.ts';
+import type { NarratorRuntime } from '../narrator-wiring.ts';
 import type { RouteDeps } from './deps.ts';
 
 /** Mirrors `brief/iso-week.ts`'s `ISO_WEEK_PATTERN` — see this file's header. */
@@ -233,7 +234,42 @@ const narrationSchema = z.object({
   textShown: z.boolean(),
   /** The narrator's alternative wording; null unless `narrated` AND `textShown`. */
   summaryMd: z.string().nullable(),
+  /**
+   * WP 10.6 (D30): who wrote the narration, named on every narration the
+   * holder reads — `ollama` (the local model, by name) or the hosted provider
+   * and model, as the narration's run recorded it. `null` unless `narrated`,
+   * or when the run recorded no model.
+   */
+  narratedBy: z
+    .object({
+      provider: z.enum(['ollama', 'openai', 'openrouter', 'anthropic']),
+      model: z.string(),
+    })
+    .nullable(),
 });
+
+const HOSTED_LABEL_PROVIDERS = ['openai', 'openrouter', 'anthropic'] as const;
+
+/**
+ * `advisor_runs.llm_model` in words: `name@sha256:<digest>` is the local
+ * model (Ollama's names contain `:` themselves, so the digest suffix is what
+ * tells it apart); `provider:model` is a hosted one. Anything else names
+ * nobody, and is `null` rather than a guess.
+ */
+export function narratedByOf(
+  llmModel: string | null,
+): { provider: 'ollama' | (typeof HOSTED_LABEL_PROVIDERS)[number]; model: string } | null {
+  if (llmModel === null) return null;
+  const pin = llmModel.indexOf('@sha256:');
+  if (pin > 0) return { provider: 'ollama', model: llmModel.slice(0, pin) };
+  const colon = llmModel.indexOf(':');
+  const provider = colon > 0 ? llmModel.slice(0, colon) : '';
+  const model = llmModel.slice(colon + 1);
+  for (const hosted of HOSTED_LABEL_PROVIDERS) {
+    if (provider === hosted && model.length > 0) return { provider: hosted, model };
+  }
+  return null;
+}
 
 const briefItemSchema = z
   .object({
@@ -414,6 +450,7 @@ function narrationOfItem(
       aiAssisted: true,
       textShown: context.textShown,
       summaryMd: context.textShown ? found.summaryMd : null,
+      narratedBy: narratedByOf(found.llmModel),
     };
   }
   return {
@@ -421,6 +458,7 @@ function narrationOfItem(
     aiAssisted: false,
     textShown: context.textShown,
     summaryMd: null,
+    narratedBy: null,
   };
 }
 
@@ -443,8 +481,14 @@ async function narrationExpected(
   deps: RouteDeps,
   userId: string,
   publishedAt: Date,
+  runtime: BriefRouteOptions['narrator'],
 ): Promise<boolean> {
-  if (deps.config.localModelPin === undefined) return false;
+  // WP 10.6: per holder — their chosen provider, or the local model; Off is none.
+  if (runtime === undefined) {
+    if (deps.config.localModelPin === undefined) return false;
+  } else if ((await runtime.forUser(userId)) === null) {
+    return false;
+  }
   if (!deps.config.env.ADVISORS_ENABLED) return false;
   if (deps.clock.now().getTime() - publishedAt.getTime() > NARRATION_PENDING_WINDOW_MS) {
     return false;
@@ -458,6 +502,7 @@ async function narrationExpected(
 
 async function narrationContextFor(
   deps: RouteDeps,
+  options: BriefRouteOptions,
   userId: string,
   brief: typeof advisoryBriefs.$inferSelect,
   items: readonly (typeof advisoryBriefItems.$inferSelect)[],
@@ -465,7 +510,7 @@ async function narrationContextFor(
   const findingIds = items.flatMap((item) => (item.insightId === null ? [] : [item.insightId]));
   const [byFinding, expected] = await Promise.all([
     narrationsFor(deps.database, userId, findingIds),
-    narrationExpected(deps, userId, brief.publishedAt),
+    narrationExpected(deps, userId, brief.publishedAt, options.narrator),
   ]);
   return { byFinding, expected, textShown: deps.config.env.NARRATION_TEXT_SHOWN };
 }
@@ -518,7 +563,15 @@ function serialiseBrief(
   };
 }
 
-export const briefRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
+export interface BriefRouteOptions {
+  /** WP 10.6: the holder's narrator (the api's preview-mode runtime). Absent: `LOCAL_MODEL_PIN_*`, as before. */
+  readonly narrator?: Pick<NarratorRuntime, 'forUser'>;
+}
+
+export const briefRoutes = (
+  deps: RouteDeps,
+  options: BriefRouteOptions = {},
+): FastifyPluginAsyncZod => {
   const { guards } = deps;
 
   return async (app) => {
@@ -545,7 +598,7 @@ export const briefRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           throw briefNotFound('no Weekly Advisory Brief has been published for this holder yet');
         }
         const items = await loadItems(deps.database, session.userId, brief.id);
-        const narrations = await narrationContextFor(deps, session.userId, brief, items);
+        const narrations = await narrationContextFor(deps, options, session.userId, brief, items);
         return { brief: serialiseBrief(brief, items, narrations) };
       },
     );
@@ -571,7 +624,7 @@ export const briefRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           throw briefNotFound(`no Weekly Advisory Brief for ${request.params.isoWeek}`);
         }
         const items = await loadItems(deps.database, session.userId, brief.id);
-        const narrations = await narrationContextFor(deps, session.userId, brief, items);
+        const narrations = await narrationContextFor(deps, options, session.userId, brief, items);
         return { brief: serialiseBrief(brief, items, narrations) };
       },
     );

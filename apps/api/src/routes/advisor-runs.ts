@@ -79,6 +79,7 @@ import {
   inspectRunPayload,
   latestRuns,
   listAdvisors,
+  NARRATOR_MANIFEST,
   previewRequest,
   requestRunCancel,
   ruleHealth,
@@ -104,6 +105,7 @@ import { ADVISOR_KIND_FLAGS, MODULE_FLAGS } from '../platform.ts';
 import { AppError, problems } from '../problem.ts';
 import { isoInstant } from '../wire.ts';
 import type { PreviewModel } from '../modules.ts';
+import type { NarratorRuntime } from '../narrator-wiring.ts';
 import type { RouteDeps } from './deps.ts';
 
 /** D6: one account holder — the same reading every other route file uses. */
@@ -430,9 +432,36 @@ function previewProblem(error: PreviewError): AppError {
 
 export const advisorRunRoutes = (
   deps: RouteDeps,
-  preview?: PreviewModel,
+  staticPreview?: PreviewModel,
+  narratorPreview?: Pick<NarratorRuntime, 'forUser'>,
 ): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
+
+  /**
+   * WP 10.6 (D30): the holder's own narrator — their provider and model, or
+   * the local model, or none (Off) — as a preview-only renderer and a
+   * manifest whose `run` rejects. The renderer's template hash covers the
+   * provider and the model, so the shape an approval is keyed to is the one
+   * the worker's run will compute for the same holder. Without a runtime (a
+   * narrow test app) the static `LOCAL_MODEL_PIN_*` preview, as before.
+   */
+  async function previewFor(userId: string): Promise<PreviewModel | undefined> {
+    if (narratorPreview === undefined) return staticPreview;
+    const narrator = await narratorPreview.forUser(userId);
+    if (narrator === null) return undefined;
+    return Object.freeze({
+      promptRenderer: narrator.renderer,
+      narrator: Object.freeze({
+        manifest: NARRATOR_MANIFEST,
+        run: () =>
+          Promise.reject(
+            new Error(
+              'the api process never executes an advisor: local.narrator is registered here as a manifest only',
+            ),
+          ),
+      }),
+    });
+  }
 
   return async (app) => {
     app.get(
@@ -570,7 +599,13 @@ export const advisorRunRoutes = (
       async (request) => {
         const session = await guards.requireSession(request);
         const timeZone = await timezoneOf(deps);
-        const dependencies = await previewDependenciesOf(deps, session.userId, timeZone, preview);
+        const holderPreview = await previewFor(session.userId);
+        const dependencies = await previewDependenciesOf(
+          deps,
+          session.userId,
+          timeZone,
+          holderPreview,
+        );
         try {
           const preview = await previewRequest(
             database,
@@ -619,6 +654,7 @@ export const advisorRunRoutes = (
       async (request) => {
         const session = await guards.requireFreshSession(request);
         const timeZone = await timezoneOf(deps);
+        const preview = await previewFor(session.userId);
         const dependencies = await previewDependenciesOf(deps, session.userId, timeZone, preview);
         // `approvePayload` does not itself check this — it only refuses a
         // *mismatched* shape (`shape_changed`) — and `advisor_payload_approvals`'
@@ -705,7 +741,12 @@ export const advisorRunRoutes = (
           throw kindFlagNotFound(kind);
         }
         const enabled = await flagServiceOf(deps).isEnabled(session.userId, key);
-        const configured = kind === 'local_model' && deps.config.localModelPin !== undefined;
+        // WP 10.6: per holder — their provider (with a key and a consent) or the local model.
+        const configured =
+          kind === 'local_model' &&
+          (narratorPreview === undefined
+            ? deps.config.localModelPin !== undefined
+            : (await narratorPreview.forUser(session.userId)) !== null);
         return { kind, enabled, configured, effective: enabled && configured };
       },
     );

@@ -61,8 +61,15 @@ import {
   WARM_UP_MESSAGES,
   type RenderedPrompt,
 } from './prompt.ts';
+import {
+  insightsFromReply,
+  narratorResponse,
+  requestShape,
+  sanitiserWarnings,
+  type NarratorReplyResponse,
+} from './reply.ts';
 import type { LocalModelRequest } from './request.ts';
-import { countFlags, FLAG_ONLY_KINDS, type SanitiserFlag } from './sanitise.ts';
+import { countFlags } from './sanitise.ts';
 
 /** `@core/config`'s `LocalModelConfig`, structurally — this layer does not import `@core/config`. */
 export interface LocalModelAdapterConfig {
@@ -92,22 +99,16 @@ export interface LocalModelAdapterDeps {
   /** WP 5.3's narrower narration schema, if it wants one. Still a convenience, never a control. */
   readonly format?: Readonly<Record<string, unknown>>;
   readonly generation?: Partial<GenerationOptions>;
+  /**
+   * WP 10.6: an optional bearer token for an Ollama endpoint behind a proxy
+   * that asks for one (stored in Settings, sealed). Sent as `authorization` on
+   * every request to the local endpoint and nowhere else; read at send time.
+   */
+  readonly bearer?: { reveal(): string };
 }
 
-/** The `AdvisorResponse` v1 shape the adapter builds. Returned as `unknown` from `run`. */
-export interface LocalModelResponse {
-  readonly contract_version: number;
-  readonly request_id: string;
-  readonly advisor_id: string;
-  readonly advisor_version: string;
-  readonly produced_at: string;
-  readonly diagnostics: {
-    readonly runtime_ms: number;
-    readonly model: string;
-    readonly warnings: readonly string[];
-  };
-  readonly insights: unknown;
-}
+/** The `AdvisorResponse` v1 shape the adapter builds (`reply.ts`, shared with `hosted.ts`). */
+export type LocalModelResponse = NarratorReplyResponse;
 
 export interface LocalModelAdapter {
   /** The `Advisor.run` half. WP 5.3's narrator supplies the manifest. */
@@ -134,6 +135,8 @@ export interface LocalModelAdapter {
   readonly promptRenderer: {
     readonly templateHash: string;
     readonly model: string;
+    /** WP 10.6: which provider the approval records. Always `ollama` here. */
+    readonly provider: 'ollama';
     render(request: LocalModelRequest): { readonly text: string; readonly hash: string };
   };
   /** `null` when a transport was injected. */
@@ -153,10 +156,6 @@ export interface WarmUpOutcome {
 
 /** Below this much headroom a warm-up is not attempted: it could not load a model anyway. */
 export const MIN_WARM_UP_MS = 5_000;
-
-/** `AdvisorResponse.diagnostics.warnings`: at most 16, each at most 240 characters. */
-const MAX_WARNINGS = 16;
-const MAX_WARNING_CHARS = 240;
 
 export function createLocalModelAdapter(
   config: LocalModelAdapterConfig,
@@ -186,6 +185,17 @@ export function createLocalModelAdapter(
       maxResponseBytes: generation.maxStreamBytes,
     });
     transport = createLocalEndpointTransport(policy);
+  }
+  if (deps.bearer !== undefined) {
+    const inner = transport;
+    const bearer = deps.bearer;
+    transport = {
+      request: (input) =>
+        inner.request({
+          ...input,
+          headers: { ...input.headers, authorization: `Bearer ${bearer.reveal()}` },
+        }),
+    };
   }
 
   const model = Object.freeze({ name: config.name, digest });
@@ -302,41 +312,24 @@ export function createLocalModelAdapter(
       if (reply.doneReason === 'length') {
         warnings.push(`model reply cut at num_predict ${String(generation.numPredict)}`);
       }
-      let insights: unknown = null;
       if (reply.contentBytes > request.limits.max_response_bytes) {
         throw new LocalModelError(
           'model_reply_too_large',
           `the reply is ${String(reply.contentBytes)} bytes; the limit is ${String(request.limits.max_response_bytes)}`,
         );
       }
-      try {
-        const parsed: unknown = JSON.parse(reply.content);
-        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          const record = parsed as Record<string, unknown>;
-          insights = record['insights'] ?? null;
-          const extra = Object.keys(record).filter((key) => key !== 'insights').length;
-          if (extra > 0) {
-            warnings.push(
-              `model reply carried ${String(extra)} top-level field(s) besides insights; ignored`,
-            );
-          }
-        } else {
-          warnings.push('model reply was JSON but not an object');
-        }
-      } catch {
-        warnings.push('model reply was not JSON');
-      }
+      const parsedReply = insightsFromReply(reply.content);
+      warnings.push(...parsedReply.warnings);
 
       const runtimeMs = Math.max(0, clock.nowMs() - started);
-      const response: LocalModelResponse = {
-        contract_version: request.contract_version,
-        request_id: request.request_id,
-        advisor_id: request.advisor_id,
-        advisor_version: request.advisor_version,
-        produced_at: clock.now().toISOString(),
-        diagnostics: { runtime_ms: runtimeMs, model: modelLabel, warnings: capWarnings(warnings) },
-        insights,
-      };
+      const response: LocalModelResponse = narratorResponse({
+        request,
+        insights: parsedReply.insights,
+        warnings,
+        runtimeMs,
+        model: modelLabel,
+        producedAt: clock.now().toISOString(),
+      });
 
       logger.info(
         {
@@ -362,7 +355,7 @@ export function createLocalModelAdapter(
           runtime_ms: runtimeMs,
           shape: requestShape(request),
           sanitiser: countFlags(rendered.flags),
-          reply_is_json: !warnings.includes('model reply was not JSON'),
+          reply_is_json: parsedReply.isJson,
         },
         'local model run',
       );
@@ -399,6 +392,7 @@ export function createLocalModelAdapter(
     promptRenderer: Object.freeze({
       templateHash: promptTemplateHash,
       model: `${config.name}@${digest}`,
+      provider: 'ollama' as const,
       render: (request: LocalModelRequest) => {
         const rendered = renderPrompt(request);
         return { text: rendered.text, hash: rendered.hash };
@@ -406,36 +400,4 @@ export function createLocalModelAdapter(
     }),
     policy,
   });
-}
-
-/** Scope names and top-level snapshot keys: the contract's vocabulary, never its contents. */
-function requestShape(request: LocalModelRequest): Record<string, unknown> {
-  return {
-    kind: request.kind,
-    contract_version: request.contract_version,
-    granted_scopes: [...request.granted_scopes].sort(),
-    snapshot_blocks: Object.keys(request.snapshot).sort(),
-    findings: Array.isArray(request.findings)
-      ? request.findings.length
-      : request.findings === undefined
-        ? 0
-        : 1,
-  };
-}
-
-function sanitiserWarnings(flags: readonly SanitiserFlag[]): string[] {
-  return flags.map(
-    (flag) =>
-      `sanitiser ${FLAG_ONLY_KINDS.has(flag.kind) ? 'flagged' : 'removed'} ${flag.kind} x${String(flag.count)} at ${flag.path}`,
-  );
-}
-
-function capWarnings(warnings: readonly string[]): string[] {
-  const clipped = warnings.map((warning) =>
-    warning.length > MAX_WARNING_CHARS ? `${warning.slice(0, MAX_WARNING_CHARS - 1)}…` : warning,
-  );
-  if (clipped.length <= MAX_WARNINGS) return clipped;
-  const kept = clipped.slice(0, MAX_WARNINGS - 1);
-  kept.push(`… and ${String(clipped.length - kept.length)} more warning(s)`);
-  return kept;
 }

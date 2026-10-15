@@ -334,7 +334,12 @@ describe.skipIf(NO_DATABASE)(
       );
       expect(model.promptRenderer.model).toBe(`${MODEL_NAME}@${PINNED_DIGEST}`);
       // Nothing else is reachable from it: no `run`, no `checkModel`, no endpoint.
-      expect(Object.keys(model.promptRenderer).sort()).toEqual(['model', 'render', 'templateHash']);
+      expect(Object.keys(model.promptRenderer).sort()).toEqual([
+        'model',
+        'provider',
+        'render',
+        'templateHash',
+      ]);
       expect(Object.keys(model).sort()).toEqual(['narrator', 'promptRenderer']);
       // No pin, no model.
       expect(createPreviewModel(undefined)).toBeUndefined();

@@ -273,6 +273,9 @@ export const advisorPayloadApprovals = pgTable(
     kind: text('kind').$type<Exclude<AdvisorKindValue, 'builtin'>>().notNull(),
     scopes: text('scopes').array().notNull(),
     promptTemplateHash: text('prompt_template_hash'),
+    /** WP 10.6 (0044): the provider and model the payload was approved for; NULL before 0044. */
+    llmProvider: text('llm_provider'),
+    llmModel: text('llm_model'),
     approvedAt: instantColumn('approved_at').notNull(),
     revokedAt: instantColumn('revoked_at'),
     createdAt: createdAtColumn(),

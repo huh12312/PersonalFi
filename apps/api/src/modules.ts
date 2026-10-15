@@ -39,7 +39,7 @@
  */
 import { type LocalModelTransport } from '@advisor/local-model';
 import type { LocalModelPin } from '@core/config';
-import { createNarratorWiring } from './narrator-wiring.ts';
+import { createNarratorWiring, type NarratorRuntime } from './narrator-wiring.ts';
 import {
   CATEGORIZATION_EVENTS,
   createCategorizationConsumer,
@@ -50,6 +50,7 @@ import {
 import {
   CONNECTIONS_EVENTS,
   createProviderCredentialsConsumer,
+  isLanguageModelKeyProvider,
   listSyncableConnections,
   syncAllJob,
   type ConnectionsDatabase,
@@ -63,6 +64,7 @@ import {
   createBuiltinRegistry,
   createInsightsConsumer,
   createNarratorAdvisor,
+  createNarratorSettingsConsumer,
   createRunLocalJob,
   createRunSwitches,
   evaluateDueOutcomes,
@@ -202,6 +204,19 @@ export interface ModuleWiringOptions {
    * neither: it never runs a local model (`POST /advisors/run` queues one).
    */
   readonly narratorModel?: NarratorModelPort;
+  /**
+   * WP 10.6 (D30): the holder's own narrator — the local model, a hosted
+   * provider with their key, or Off — resolved per run by
+   * `narrator-wiring.ts`'s `createNarratorRuntime` (30 s cache, dropped by the
+   * `insights.NarratorSettingsChanged` and `connections.ProviderCredentialsChanged`
+   * consumers below). When present it decides, per holder, whether
+   * `local.narrator` is registered for a run, which model it calls and which
+   * renderer keys the approval (`InsightsDependencies.narratorFor`), kill
+   * level 2's configured half, and whether a Brief enqueues narrations. Absent:
+   * `localModelConfigured` / `promptRenderer` / `narratorModel` decide, as
+   * before. The worker supplies it; the api does not run advisors.
+   */
+  readonly narratorRuntime?: Pick<NarratorRuntime, 'forUser' | 'invalidate'>;
   /**
    * The account holder these modules are being built for — the same id
    * `resolveModules(platform, userId, …)` is called with.
@@ -460,14 +475,18 @@ export function appModules(options: ModuleWiringOptions): readonly ModuleRegistr
       // provider credentials — the connector registry's (Plaid) and the
       // market-data runtime's (tiingo / fred / coingecko / openfigi) — so a
       // key changed in the product reaches this process without a restart.
+      // WP 10.6: and the narrator runtime's, for a language-model key.
       consumers:
-        options.connectorRegistry === undefined && options.marketData === undefined
+        options.connectorRegistry === undefined &&
+        options.marketData === undefined &&
+        options.narratorRuntime === undefined
           ? []
           : [
               createProviderCredentialsConsumer({
                 onChanged: (provider) => {
                   options.connectorRegistry?.invalidate(provider);
                   if (provider !== 'plaid') options.marketData?.runtime.invalidate();
+                  if (isLanguageModelKeyProvider(provider)) options.narratorRuntime?.invalidate();
                 },
               }),
             ],
@@ -871,8 +890,12 @@ function fredSourceOf(sources: readonly PriceSource[] | undefined): FredSource |
  */
 export function insightsRunSwitches(
   database: ModuleWiringOptions['database'],
-  options: Pick<ModuleWiringOptions, 'advisorsEnabled' | 'localModelConfigured'>,
+  options: Pick<
+    ModuleWiringOptions,
+    'advisorsEnabled' | 'localModelConfigured' | 'narratorRuntime'
+  >,
 ) {
+  const runtime = options.narratorRuntime;
   return createRunSwitches({
     advisorsEnabled: options.advisorsEnabled,
     flags: createFlagService({
@@ -883,6 +906,16 @@ export function insightsRunSwitches(
     configuredKinds: new Set<AdvisorKind>(
       options.localModelConfigured ? ['builtin', 'local_model'] : ['builtin'],
     ),
+    // WP 10.6 (D30): per holder — their chosen provider with a key and a
+    // consent, or the local model, configures `local_model`; Off does not.
+    ...(runtime === undefined
+      ? {}
+      : {
+          configuredKindsFor: async (userId: string) =>
+            new Set<AdvisorKind>(
+              (await runtime.forUser(userId)) === null ? ['builtin'] : ['builtin', 'local_model'],
+            ),
+        }),
   });
 }
 
@@ -978,6 +1011,10 @@ function insightsModule(
     registry,
     switches,
     ...(options.promptRenderer === undefined ? {} : { promptRenderer: options.promptRenderer }),
+    // WP 10.6: the holder's own narrator, per run (`@ctx/insights`' `holder.ts`).
+    ...(options.narratorRuntime === undefined
+      ? {}
+      : { narratorFor: options.narratorRuntime.forUser }),
     ports: {
       ledger: createInsightsLedgerPort(database, clock),
       budget: createInsightsBudgetPort(database),
@@ -1043,6 +1080,13 @@ function insightsModule(
     // than leave a Brief queue `insights.run_local` for an advisor nobody
     // registered.
     narratorConfigured,
+    // WP 10.6: per holder, when the runtime is bound — Off enqueues nothing.
+    ...(options.narratorRuntime === undefined
+      ? {}
+      : {
+          narratorConfiguredFor: async (userId: string) =>
+            (await options.narratorRuntime?.forUser(userId)) != null,
+        }),
   });
   // WP 5.9's outcome check (`evaluateDueOutcomes`) is exported as a plain
   // function, not a job step of its own (§4 W-C: "the outcome check ...
@@ -1068,7 +1112,17 @@ function insightsModule(
   return {
     flagKey: 'module.insights',
     events: INSIGHTS_EVENTS,
-    consumers: [createInsightsConsumer({ registry })],
+    consumers: [
+      createInsightsConsumer({ registry }),
+      // WP 10.6: a settings change drops the cached narrator at once.
+      ...(options.narratorRuntime === undefined
+        ? []
+        : [
+            createNarratorSettingsConsumer({
+              onChanged: () => options.narratorRuntime?.invalidate(),
+            }),
+          ]),
+    ],
     jobs: [
       ...insightsJobs({ database, dependencies, clock }),
       // WP 5.1's local-model lane: `insights.run_local`, concurrency 1, so a
@@ -1091,7 +1145,11 @@ function insightsModule(
       // loop) switched off, and a later release reaches an existing install.
       // Default off, matching kill level 3's own default (05 §3 WP 5.1's
       // ladder table).
-      if (narratorConfigured) {
+      if (
+        narratorConfigured ||
+        (options.narratorRuntime !== undefined &&
+          (await options.narratorRuntime.forUser(userId)) !== null)
+      ) {
         await registerAdvisor(
           database,
           { userId, clock, correlationId: newId() },

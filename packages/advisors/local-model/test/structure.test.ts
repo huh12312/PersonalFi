@@ -98,6 +98,25 @@ describe('structure', () => {
     );
   });
 
+  it('WP 10.6: the only absolute URLs in shipped code are the three hosted providers, each in one policy', () => {
+    const files = readdirSync(SRC).filter((name) => name.endsWith('.ts'));
+    const urls = new Set<string>();
+    for (const file of files) {
+      const code = stripComments(readFileSync(join(SRC, file), 'utf8'));
+      for (const match of code.matchAll(/https?:\/\/[A-Za-z0-9.-]+/gu)) urls.add(match[0]);
+    }
+    // `https://${host}` is built from HOSTED_MODEL_HOSTS; the one literal is
+    // OpenRouter's attribution Referer, a header value, never dialled.
+    expect([...urls].sort()).toEqual(['https://github.com']);
+    const hosted = stripComments(readFileSync(join(SRC, 'hosted.ts'), 'utf8'));
+    expect(hosted.match(/createEgressPolicy\(/gu)).toHaveLength(1);
+    expect(hosted).toMatch(/allowedHosts:\s*\[host\]/u);
+    expect(hosted).toMatch(/const host = HOSTED_MODEL_HOSTS\[provider\]/u);
+    expect(hosted).toMatch(
+      /const url = `https:\/\/\$\{host\}\$\{HOSTED_MODEL_PATHS\[provider\]\}`/u,
+    );
+  });
+
   it('the scanner is not vacuous: each planted violation is caught', () => {
     const planted: [string, string][] = [
       ["import http from 'node:http';", 'builtin node:http'],

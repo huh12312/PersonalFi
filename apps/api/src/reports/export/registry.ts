@@ -374,6 +374,20 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'unresolved_holdings',
     'a derived read model of positions the security resolver could not identify (WP 10.4), replaced on every investment sync; the first sync after a restore rebuilds it.',
   ],
+  // WP 10.6 (migration 0044, D30). Both reasoned deferrals of the consent
+  // kind: a consent to send the narrator's payload to a vendor is given on
+  // *this* install, against the text it showed, beside a key sealed under this
+  // install's KEK (which is not exported either). A restored install starts
+  // with the narrator on its operator's environment, and the holder chooses
+  // and consents again — an import never switches a hosted provider on.
+  [
+    'narrator_settings',
+    "which language model narrates for the holder (WP 10.6, D30): chosen on this install beside keys that are never exported; a restored install starts on its operator's environment and the holder chooses again.",
+  ],
+  [
+    'narrator_provider_consents',
+    'the holder’s consent to a hosted narrator provider (WP 10.6, D30), given on this install against the text it showed; never carried to another install by an import — the holder consents again there.',
+  ],
 ]);
 
 /**

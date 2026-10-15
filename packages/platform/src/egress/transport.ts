@@ -52,6 +52,12 @@ export interface TransportRequest {
    * `Destination.scheme` stays the closed, TLS-only set the schema enforces.
    */
   readonly secure: boolean;
+  /**
+   * WP 10.6: the caller's cancellation. Aborting destroys the socket, the way
+   * the local-endpoint transport's signal does — a hosted narrator call that a
+   * kill switch or the run's deadline stops must not keep a request open.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface TransportResponse {
@@ -98,6 +104,7 @@ export function createNodeTransport(): HttpTransport {
         headers: request.headers,
         ...(request.body === undefined ? {} : { body: request.body }),
         tls: request.secure,
+        ...(request.signal === undefined ? {} : { signal: request.signal }),
         maxResponseBytes: request.maxResponseBytes,
         // Idle: no bytes for `timeoutMs`. Deadline: three of those, because the
         // idle timer can be reset forever by a server sending a byte a second.

@@ -93,6 +93,14 @@ export {
   marketDataKeyHintOf,
   openMarketDataKeys,
   setMarketDataKey,
+  // WP 10.6: the narrator's language-model keys, the same shape.
+  OpenedLanguageModelKey,
+  isLanguageModelKeyProvider,
+  listLanguageModelKeyStatuses,
+  openLanguageModelKey,
+  setLanguageModelKey,
+  type LanguageModelKeyStatus,
+  type SingleKeyStatus,
   type MarketDataKeyStatus,
   type PairCredentialProvider,
   type CredentialField,
@@ -101,9 +109,12 @@ export {
   type SetProviderCredentialsResult,
 } from './provider-credentials.ts';
 export {
+  LANGUAGE_MODEL_KEY_PROVIDERS,
   MARKET_DATA_KEY_PROVIDERS,
   PROVIDER_CREDENTIAL_ENVS,
   PROVIDER_CREDENTIAL_PROVIDERS,
+  type LanguageModelKeyProvider,
+  type SingleKeyProvider,
   type MarketDataKeyProvider,
   type ProviderCredentialEnv,
   type ProviderCredentialProvider,

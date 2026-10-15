@@ -353,6 +353,11 @@ export async function approvePayload(
           manifest.kind === 'local_model'
             ? (dependencies.promptRenderer?.templateHash ?? null)
             : null,
+        // WP 10.6: what the payload was approved for, in words.
+        llmProvider:
+          manifest.kind === 'local_model' ? (dependencies.promptRenderer?.provider ?? null) : null,
+        llmModel:
+          manifest.kind === 'local_model' ? (dependencies.promptRenderer?.model ?? null) : null,
         approvedAt: now,
         revokedAt: null,
         createdAt: now,
@@ -364,7 +369,17 @@ export async function approvePayload(
           advisorPayloadApprovals.advisorId,
           advisorPayloadApprovals.queryShape,
         ],
-        set: { approvedAt: now, revokedAt: null, updatedAt: now },
+        set: {
+          approvedAt: now,
+          revokedAt: null,
+          updatedAt: now,
+          llmProvider:
+            manifest.kind === 'local_model'
+              ? (dependencies.promptRenderer?.provider ?? null)
+              : null,
+          llmModel:
+            manifest.kind === 'local_model' ? (dependencies.promptRenderer?.model ?? null) : null,
+        },
       })
       .returning({ id: advisorPayloadApprovals.id });
     return { approvalId: rows[0]?.id ?? id, queryShape: shape };

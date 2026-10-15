@@ -4,7 +4,25 @@ import { useState } from 'react';
 
 import { Badge } from '../../components/ui/badge.tsx';
 import { cn } from '../../lib/cn.ts';
-import type { BriefItemNarration } from './types.ts';
+import type { BriefItemNarration, NarratedBy } from './types.ts';
+
+const PROVIDER_NAMES: Readonly<Record<NarratedBy['provider'], string>> = {
+  ollama: 'Ollama',
+  openai: 'OpenAI',
+  openrouter: 'OpenRouter',
+  anthropic: 'Anthropic',
+};
+
+/**
+ * The badge's words (WP 10.6): the provider and model that wrote the wording - "Narrated by Anthropic
+ * claude-sonnet-5-5", "Narrated by the local model qwen2.5:7b-instruct-q4_K_M" - or, when the response does not
+ * say, "AI-assisted wording".
+ */
+export function narrationBadgeLabel(narratedBy: NarratedBy | null | undefined): string {
+  if (narratedBy === null || narratedBy === undefined) return 'AI-assisted wording';
+  if (narratedBy.provider === 'ollama') return `Narrated by the local model ${narratedBy.model}`;
+  return `Narrated by ${PROVIDER_NAMES[narratedBy.provider]} ${narratedBy.model}`;
+}
 
 export interface NarratedSummaryProps {
   /** The builtin's own deterministic wording — always present, always what every figure on the card is traced to. */
@@ -24,12 +42,17 @@ export interface NarratedSummaryProps {
  *
  * While the text is withheld the badge still says a wording exists, in words —
  * nothing about the withholding is hidden from the holder.
+ *
+ * WP 10.6: both badges name the provider and model from `narration.narratedBy`
+ * (`narrationBadgeLabel`), so the holder can tell a local model's wording from a
+ * hosted provider's.
  */
 export function NarratedSummary({ templateSummaryMd, narration }: NarratedSummaryProps) {
   const [showTemplate, setShowTemplate] = useState(false);
 
   const status = narration?.status ?? 'none';
   const text = narration?.summaryMd ?? null;
+  const badge = narrationBadgeLabel(narration?.narratedBy);
 
   if (status === 'narrated' && text !== null) {
     return (
@@ -37,7 +60,7 @@ export function NarratedSummary({ templateSummaryMd, narration }: NarratedSummar
         <p className="text-small text-text-secondary">{text}</p>
         <div className="mt-1 flex items-center gap-2">
           <Badge variant="accent" icon={<Bot size={12} aria-hidden="true" />}>
-            AI-assisted wording
+            {badge}
           </Badge>
           <button
             type="button"
@@ -74,7 +97,7 @@ export function NarratedSummary({ templateSummaryMd, narration }: NarratedSummar
           data-testid="narration-withheld"
         >
           <Badge variant="accent" icon={<Bot size={12} aria-hidden="true" />}>
-            AI-assisted wording
+            {badge}
           </Badge>
           An AI-assisted wording of this item exists and is not shown yet.
         </p>

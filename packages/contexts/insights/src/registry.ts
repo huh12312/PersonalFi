@@ -159,6 +159,28 @@ export class AdvisorRegistry {
     return this.#byId.get(advisorId);
   }
 
+  /**
+   * WP 10.6: a copy of this registry with one advisor id replaced by
+   * `advisor`, or removed when `advisor` is `undefined` — how a holder's own
+   * narrator (their provider, their model, or none) is laid over the
+   * process's registry for one run (`holder.ts`). The other entries are the
+   * same objects, already validated; only the new one is checked, and a
+   * refusal throws (a wiring bug). This registry is not changed.
+   */
+  withAdvisor(advisorId: string, advisor: Advisor | undefined): AdvisorRegistry {
+    const copy = new AdvisorRegistry();
+    for (const [id, entry] of this.#byId) {
+      if (id !== advisorId) copy.#byId.set(id, entry);
+    }
+    if (advisor !== undefined) {
+      if (advisor.manifest.advisor_id !== advisorId) {
+        throw new Error(`withAdvisor: ${advisor.manifest.advisor_id} is not ${advisorId}`);
+      }
+      copy.assertRegistered(advisor);
+    }
+    return copy;
+  }
+
   /** Every advisor, in id order, so a run's ordering is reproducible. */
   list(): readonly RegisteredAdvisor[] {
     return [...this.#byId.values()].sort((left, right) =>

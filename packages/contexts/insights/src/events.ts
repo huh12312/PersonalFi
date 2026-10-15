@@ -237,6 +237,30 @@ export const BriefPublished = defineEvent({
 });
 
 /**
+ * WP 10.6 (D30). A holder changed which language model narrates for them —
+ * the active provider, a model id, the local endpoint, or a consent. A fact
+ * with no secret in it: never a key, never an endpoint's credentials. Its job
+ * is to wake every process that caches a narrator built from those settings
+ * (the worker's consumer drops its 30 s cache), so the next run uses the
+ * holder's choice without a restart. The settings are re-read from
+ * `narrator_settings`, never from this payload.
+ */
+export const NarratorSettingsChanged = defineEvent({
+  type: 'insights.NarratorSettingsChanged',
+  aggregateType: 'narrator_settings',
+  description:
+    'A holder changed which language model narrates for them (WP 10.6): the active provider, a ' +
+    'model id, the local endpoint, or a consent. Carries the provider and model only. The worker ' +
+    'drops its cached narrator so the next run uses the change without a restart.',
+  schema: z.object({
+    activeProvider: z.enum(['ollama', 'openai', 'openrouter', 'anthropic', 'off']),
+    model: z.string().max(200).nullable(),
+    change: z.enum(['provider', 'model', 'endpoint', 'consent_given', 'consent_withdrawn']),
+    approvalsRevoked: z.int().nonnegative(),
+  }),
+});
+
+/**
  * Registered at the composition root. Exported as a list so `apps/api` cannot
  * forget one: an event type that is appended but not registered is invisible to
  * the pump's upcasting, and the failure surfaces as a silent consumer rather
@@ -252,4 +276,5 @@ export const INSIGHTS_EVENTS: readonly EventDefinition[] = Object.freeze([
   InsightDismissed,
   InsightReviewed,
   BriefPublished,
+  NarratorSettingsChanged,
 ]);

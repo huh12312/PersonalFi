@@ -9,6 +9,7 @@ import {
   type MarketDataKeysMockState,
   type MarketDataRefreshMockState,
 } from './mock-market-data-keys.ts';
+import { createNarratorState, handleNarrator, type NarratorMockState } from './mock-narrator.ts';
 
 /**
  * Mocks every REST/SSE call the walkthrough spec's screens make, entirely
@@ -267,6 +268,8 @@ export interface MockApiState {
   marketDataKeys: MarketDataKeysMockState;
   /** WP 10.5: `POST /market-data/refresh` ("Refresh prices"), `mock-market-data-keys.ts`. */
   marketDataRefresh: MarketDataRefreshMockState;
+  /** WP 10.6: Settings › Language model (`mock-narrator.ts`). */
+  narrator: NarratorMockState;
 }
 
 function json(body: unknown, status = 200) {
@@ -293,6 +296,7 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     lastNotificationTestChannelId: null,
     marketDataKeys: createMarketDataKeysState(),
     marketDataRefresh: createMarketDataRefreshState(),
+    narrator: createNarratorState(),
   };
 
   const transactions = new Map<string, MockTransaction>([
@@ -444,6 +448,9 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
 
     // WP 10.5: Refresh prices (accepted once, then the api's ten-minute 409).
     if (await handleMarketDataRefresh(route, path, method, state.marketDataRefresh)) return;
+
+    // WP 10.6: Settings › Language model (GET; every write but Test behind the step-up).
+    if (await handleNarrator(route, path, method, state.narrator, () => state.steppedUp)) return;
 
     if (path === '/api/auth/session') {
       if (!state.authenticated) {

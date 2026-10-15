@@ -54,6 +54,7 @@
  * per attempt, which is the honest record — "it failed four times tonight" and
  * "it failed once" are different facts and the breaker counts them differently.
  */
+import { dependenciesForHolder } from './holder.ts';
 import { systemClock, type Clock } from '@core/kernel';
 import {
   defineJob,
@@ -120,7 +121,10 @@ export function createRunJob(input: JobDependencies): JobHandlerRegistration {
     RUN_JOB_KIND,
     async (payload: RunJobPayload, context: JobContext) => {
       const clock = input.clock ?? systemClock;
-      const registered = input.dependencies.registry.get(payload.advisorId);
+      // WP 10.6: the holder's own narrator decides which lane local.narrator is in.
+      const registered = (
+        await dependenciesForHolder(input.dependencies, context.userId)
+      ).registry.get(payload.advisorId);
       if (registered !== undefined && laneOf(registered.manifest.kind) !== 'builtin') {
         // Not this lane's to run. Re-queue it where it belongs and return: the
         // built-in lane never waits on a model call.

@@ -239,6 +239,16 @@ secrets:
     file: ./secrets/coingecko_api_key
   openfigi_api_key:
     file: ./secrets/openfigi_api_key
+  # WP 10.6 (D30): the holder's own key for a hosted narrator — OpenAI,
+  # OpenRouter, Anthropic. Optional, empty placeholders like the four above; a
+  # non-empty file wins over a key stored in Settings, Language model. On api
+  # (the Settings screen's Test) and worker (the narration), nowhere else.
+  openai_api_key:
+    file: ./secrets/openai_api_key
+  openrouter_api_key:
+    file: ./secrets/openrouter_api_key
+  anthropic_api_key:
+    file: ./secrets/anthropic_api_key
   # ------------------------------------------------------------------ coinbase
   #
   # WP 3.5's CDP credential pair (docs/evidence/phase-3/wp3.5-coinbase.md §8.1).
@@ -437,6 +447,9 @@ services:
         fred_api_key,
         coingecko_api_key,
         openfigi_api_key,
+        openai_api_key,
+        openrouter_api_key,
+        anthropic_api_key,
         coinbase_key_name,
         coinbase_private_key,
         etherscan_api_key,
@@ -566,6 +579,9 @@ services:
         fred_api_key,
         coingecko_api_key,
         openfigi_api_key,
+        openai_api_key,
+        openrouter_api_key,
+        anthropic_api_key,
         coinbase_key_name,
         coinbase_private_key,
         etherscan_api_key,

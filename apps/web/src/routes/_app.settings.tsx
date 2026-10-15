@@ -4,6 +4,7 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { CryptoConnectScreen } from '../features/crypto/CryptoConnectScreen.tsx';
 import { MarketDataKeysSection } from '../features/market-data/MarketDataKeysSection.tsx';
 import { MarketDataSettingsScreen } from '../features/market-data/MarketDataSettingsScreen.tsx';
+import { NarratorSettingsSection } from '../features/narrator/NarratorSettingsSection.tsx';
 import { NotificationSettingsScreen } from '../features/notifications/NotificationSettingsScreen.tsx';
 import { RulesListScreen } from '../features/rules/RulesListScreen.tsx';
 import { SecurityScreen } from '../features/security/SecurityScreen.tsx';
@@ -30,6 +31,10 @@ export const Route = createFileRoute('/_app/settings')({
  * WP 10.4 puts the market-data API key cards (`MarketDataKeysSection`) at the
  * top of the "Market data" tab, beside the provider list they configure.
  *
+ * WP 10.6 adds "Language model" (`features/narrator/`): which language model
+ * words the Brief (Ollama, OpenAI, OpenRouter, Anthropic or Off), and each
+ * provider's key, model, consent and Test.
+ *
  * "Advisor management" (WP 5.12) is a separate route rather than a tab here:
  * `routes/_app.settings_.advisors.tsx` escapes this file's layout (that
  * file's own header says why), so it is reached by the one link line below,
@@ -43,6 +48,7 @@ function SettingsRoute() {
           <TabsTab value="rules">Rules</TabsTab>
           <TabsTab value="notifications">Notifications</TabsTab>
           <TabsTab value="market-data">Market data</TabsTab>
+          <TabsTab value="language-model">Language model</TabsTab>
           <TabsTab value="crypto">Crypto</TabsTab>
           <TabsTab value="security">Security</TabsTab>
           <TabsIndicator />
@@ -58,6 +64,9 @@ function SettingsRoute() {
             <MarketDataKeysSection />
             <MarketDataSettingsScreen />
           </div>
+        </TabsPanel>
+        <TabsPanel value="language-model">
+          <NarratorSettingsSection />
         </TabsPanel>
         <TabsPanel value="crypto">
           <CryptoConnectScreen />

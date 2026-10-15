@@ -87,6 +87,13 @@ export interface BriefJobDependencies {
    */
   readonly narratorConfigured?: boolean;
   /**
+   * WP 10.6 (D30): the same question per holder — does this holder have a
+   * narrator (their chosen provider, or the local model), or Off? When bound
+   * it replaces `narratorConfigured`. Off enqueues nothing: the Brief keeps
+   * its own wording, as with no model at all.
+   */
+  readonly narratorConfiguredFor?: (userId: string) => Promise<boolean>;
+  /**
    * WP 5.8 folded into the weekly job (05 §4 W-C: "the health score … folded
    * into the weekly job"; wp5.8-health.md §6): the same `SnapshotPorts` the
    * advisor-run path builds its snapshot from, and the token secret
@@ -233,7 +240,11 @@ export function createBriefJob(input: BriefJobDependencies): JobHandlerRegistrat
       // registered (`insightsModule`), and enqueueing for it anyway would be
       // a job nothing claims — bounded, but a named failure every week on
       // every install with the local model off, which is the default.
-      if (input.narratorConfigured ?? false) {
+      const narratorConfigured =
+        input.narratorConfiguredFor === undefined
+          ? (input.narratorConfigured ?? false)
+          : await input.narratorConfiguredFor(context.userId);
+      if (narratorConfigured) {
         // WP 9.5 (Phase 5 gate C5-2; G5-7, G5-15): the Brief narrates **its own
         // items**, one finding per job — `narrateInsightIds: [id]`, so the
         // narrator is sent the finding this Brief chose and not the feed's top

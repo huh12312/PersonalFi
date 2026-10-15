@@ -60,6 +60,7 @@
  * advisor found nothing" and "the advisor found six things you have already
  * refused" are different situations and only one of them is worth acting on.
  */
+import { dependenciesForHolder, type HolderNarrator } from './holder.ts';
 import type { Clock } from '@core/kernel';
 import { appendEvent, canonicalJson } from '@core/platform';
 import type { AdvisorKind, AdvisorScope } from './contract/scopes.ts';
@@ -172,6 +173,14 @@ export interface InsightsDependencies {
    * `local_model` advisor has no approvable shape and never runs.
    */
   readonly promptRenderer?: PromptRenderer;
+  /**
+   * WP 10.6 (D30): the holder's own narrator — the local model, a hosted
+   * provider with their key, or `null` for Off / nothing configured —
+   * resolved per run by the composition root's cached runtime
+   * (`apps/api/src/narrator-wiring.ts`). Absent ⇒ `registry` and
+   * `promptRenderer` as bound: the behaviour before WP 10.6. See `holder.ts`.
+   */
+  readonly narratorFor?: (userId: string) => Promise<HolderNarrator | null>;
   /** The run watcher's interval. Tests only; production is `RUN_WATCH_POLL_MS`. */
   readonly runWatchPollMs?: number;
 }
@@ -354,9 +363,13 @@ async function invoke(
 export async function runAdvisor(
   database: InsightsDatabase,
   context: InsightsContext,
-  dependencies: InsightsDependencies,
+  boundDependencies: InsightsDependencies,
   input: RunAdvisorInput,
 ): Promise<RunAdvisorResult> {
+  // WP 10.6: the holder's narrator, resolved once, before anything else — the
+  // renderer that records the model, the model this run calls and the shape
+  // its approval is checked against all come from this one answer.
+  const dependencies = await dependenciesForHolder(boundDependencies, context.userId);
   const registered = dependencies.registry.get(input.advisorId);
   if (registered === undefined) {
     // Not a refusal: a refusal is an answer about a known advisor. Being asked

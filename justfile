@@ -870,6 +870,7 @@ harden-secrets:
     # before anyone noticed this list had not grown with them.
     for f in database_url migrator_database_url master_key plaid_client_id plaid_secret plaid_env advisor_token_secret \
              tiingo_api_key fred_api_key coingecko_api_key openfigi_api_key \
+             openai_api_key openrouter_api_key anthropic_api_key \
              coinbase_key_name coinbase_private_key etherscan_api_key; do
       [[ -e "$f" ]] || continue
       sudo chown 10001:10001 "$f" && sudo chmod 0400 "$f"

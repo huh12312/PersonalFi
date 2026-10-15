@@ -39,9 +39,12 @@ import { appendEvent } from '@core/platform';
 import { isSecretBoxError, type ColumnRef, type SecretBox } from '@core/secretbox';
 import { and, eq } from 'drizzle-orm';
 import {
+  LANGUAGE_MODEL_KEY_PROVIDERS,
   MARKET_DATA_KEY_PROVIDERS,
   providerCredentials,
+  type LanguageModelKeyProvider,
   type MarketDataKeyProvider,
+  type SingleKeyProvider,
   type ProviderCredentialEnv,
   type ProviderCredentialProvider,
 } from '../schema/index.ts';
@@ -55,7 +58,7 @@ const SECRET_COLUMN = 'secret_sealed';
 export type CredentialField = 'client_id' | 'secret';
 
 /** The providers whose credentials are a client id, a secret and an environment: Plaid. */
-export type PairCredentialProvider = Exclude<ProviderCredentialProvider, MarketDataKeyProvider>;
+export type PairCredentialProvider = Exclude<ProviderCredentialProvider, SingleKeyProvider>;
 
 /**
  * A Plaid row always carries an environment (0043's `provider_credentials_env_by_provider`
@@ -371,6 +374,34 @@ export async function setMarketDataKey(
   },
   context: ConnectionsContext,
 ): Promise<{ readonly rotated: boolean; readonly status: MarketDataKeyStatus }> {
+  const result = await setSingleKey(executor, input, context);
+  return { rotated: result.rotated, status: { ...result.status, provider: input.provider } };
+}
+
+/** A single sealed key's status, whichever family it belongs to. */
+export interface SingleKeyStatus<P extends SingleKeyProvider = SingleKeyProvider> {
+  readonly provider: P;
+  /** The last four characters of the stored key. Display only. */
+  readonly keyHint: string;
+  readonly createdAt: Date;
+  /** `null` until the first replacement. */
+  readonly rotatedAt: Date | null;
+}
+
+/**
+ * The one writer of a single-value key (WP 10.4's shape; WP 10.6 adds the
+ * language-model keys). Seals, upserts and announces
+ * (`connections.ProviderCredentialsChanged`, env null, never a value).
+ */
+async function setSingleKey(
+  executor: ConnectionsExecutor,
+  input: {
+    readonly provider: SingleKeyProvider;
+    readonly key: string;
+    readonly secretBox: SecretBox;
+  },
+  context: ConnectionsContext,
+): Promise<{ readonly rotated: boolean; readonly status: SingleKeyStatus }> {
   const now = context.clock.now();
   const keyHint = marketDataKeyHintOf(input.key);
   const [existing] = await executor
@@ -521,4 +552,111 @@ export async function openMarketDataKeys(
     }
   }
   return { keys, unopenable };
+}
+
+// ---------------------------------------------------------------------------
+// WP 10.6: the narrator's language-model keys
+// ---------------------------------------------------------------------------
+//
+// openai, openrouter and anthropic: the holder's own API key for a hosted
+// provider; ollama: an optional bearer token for an endpoint behind a proxy.
+// Exactly 0043's single-value shape, under the same AAD and DEK scope; the
+// hint is the last four characters of a key at least 16 characters long.
+
+export function isLanguageModelKeyProvider(value: string): value is LanguageModelKeyProvider {
+  return (LANGUAGE_MODEL_KEY_PROVIDERS as readonly string[]).includes(value);
+}
+
+export type LanguageModelKeyStatus = SingleKeyStatus<LanguageModelKeyProvider>;
+
+/** Seal and store a holder's language-model key, replacing any they had, and announce it. In a transaction. */
+export async function setLanguageModelKey(
+  executor: ConnectionsExecutor,
+  input: {
+    readonly provider: LanguageModelKeyProvider;
+    readonly key: string;
+    readonly secretBox: SecretBox;
+  },
+  context: ConnectionsContext,
+): Promise<{ readonly rotated: boolean; readonly status: LanguageModelKeyStatus }> {
+  const result = await setSingleKey(executor, input, context);
+  return { rotated: result.rotated, status: { ...result.status, provider: input.provider } };
+}
+
+/** Every language-model key a holder has stored, as status only. One query. */
+export async function listLanguageModelKeyStatuses(
+  executor: ConnectionsExecutor,
+  userId: string,
+): Promise<ReadonlyMap<LanguageModelKeyProvider, LanguageModelKeyStatus>> {
+  const rows = await executor
+    .select({
+      provider: providerCredentials.provider,
+      clientIdHint: providerCredentials.clientIdHint,
+      createdAt: providerCredentials.createdAt,
+      rotatedAt: providerCredentials.rotatedAt,
+    })
+    .from(providerCredentials)
+    .where(eq(providerCredentials.userId, userId));
+  const statuses = new Map<LanguageModelKeyProvider, LanguageModelKeyStatus>();
+  for (const row of rows) {
+    if (!isLanguageModelKeyProvider(row.provider)) continue;
+    statuses.set(row.provider, {
+      provider: row.provider,
+      keyHint: row.clientIdHint,
+      createdAt: row.createdAt,
+      rotatedAt: row.rotatedAt,
+    });
+  }
+  return statuses;
+}
+
+/**
+ * One opened language-model key. The value sits in a `#private` field:
+ * `JSON.stringify` prints the provider only, and a logged object prints no key.
+ */
+export class OpenedLanguageModelKey {
+  readonly provider: LanguageModelKeyProvider;
+  readonly #key: string;
+
+  constructor(provider: LanguageModelKeyProvider, key: string) {
+    this.provider = provider;
+    this.#key = key;
+  }
+
+  key(): string {
+    return this.#key;
+  }
+
+  toJSON(): Record<string, unknown> {
+    return { provider: this.provider };
+  }
+}
+
+/**
+ * Open one holder's key for one language-model provider. `null` when none is
+ * stored; `'unopenable'` when the envelope will not open (a locked box, a row
+ * moved between holders) — the caller says so by provider name and never
+ * echoes the cause. Any other failure (the database) propagates.
+ */
+export async function openLanguageModelKey(
+  executor: ConnectionsExecutor,
+  secretBox: SecretBox,
+  userId: string,
+  provider: LanguageModelKeyProvider,
+): Promise<OpenedLanguageModelKey | 'unopenable' | null> {
+  const [row] = await executor
+    .select({ secretSealed: providerCredentials.secretSealed })
+    .from(providerCredentials)
+    .where(and(eq(providerCredentials.userId, userId), eq(providerCredentials.provider, provider)));
+  if (row === undefined) return null;
+  try {
+    const key = await secretBox.openText(
+      credentialRef(userId, provider, 'secret'),
+      row.secretSealed,
+    );
+    return new OpenedLanguageModelKey(provider, key);
+  } catch (error) {
+    if (!isSecretBoxError(error)) throw error;
+    return 'unopenable';
+  }
 }

@@ -14,6 +14,7 @@ import {
   scanBothThemes,
   waitForAnimationsToDrain,
 } from './support/axe.ts';
+import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import {
@@ -784,6 +785,63 @@ test.describe('WP 10.5 states are axe-clean in both themes', () => {
     await refresh.click();
     await expect(keys.getByRole('status').filter({ hasText: 'Try again after' })).toBeVisible();
     await scanBothThemes(page, '/settings › Market data › Refresh prices, refused as too soon');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7d. WP 10.6's states, pinned: Settings › Language model
+// ---------------------------------------------------------------------------
+
+/**
+ * `/api/narrator/*` is answered by `mock-narrator.ts` (through `mock-api.ts`). The route sweep reaches the tab's
+ * resting state; these walk the states it cannot: a Test result in its live region, the remove confirmation, a
+ * refused switch's alert, and the approval-withdrawn note after a switch.
+ */
+test.describe('WP 10.6 states are axe-clean in both themes', () => {
+  test('Settings › Language model: as found, a Test result, and the remove confirmation', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await installSweepMocks(page);
+    await visit(page, '/settings');
+    await page.getByRole('tab', { name: 'Language model' }).click();
+    const section = page.getByTestId('narrator-settings');
+    await expect(section.getByTestId('narrator-card-anthropic')).toBeVisible();
+    await scanBothThemes(page, '/settings › Language model');
+
+    const openai = section.getByTestId('narrator-card-openai');
+    await openai.getByRole('button', { name: 'Test OpenAI' }).click();
+    await expect(openai.getByTestId('narrator-test-openai')).toContainText('Test passed.');
+    await openai.getByRole('button', { name: 'Test OpenAI' }).click();
+    await expect(openai.getByTestId('narrator-test-openai')).toContainText('Tested a moment ago.');
+    await scanBothThemes(page, '/settings › Language model › a Test result, then the 20 s refusal');
+
+    await section
+      .getByTestId('narrator-card-openrouter')
+      .getByRole('button', { name: 'Remove' })
+      .click();
+    await expect(
+      page.getByRole('dialog', { name: 'Remove the stored OpenRouter key?' }),
+    ).toBeVisible();
+    await scanBothThemes(page, '/settings › Language model › confirm removing a key');
+  });
+
+  test('Settings › Language model: a switch to OpenAI, with the approval-withdrawn note', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    // The switch asks for the passkey step-up; the ceremony is answered in the page.
+    await installFakeWebAuthnAssertion(page);
+    await installSweepMocks(page);
+    await visit(page, '/settings');
+    await page.getByRole('tab', { name: 'Language model' }).click();
+    const section = page.getByTestId('narrator-settings');
+    await section.getByRole('radio', { name: /^OpenAI/ }).check();
+    await section.getByRole('button', { name: 'Use this provider' }).click();
+    await expect(section.getByTestId('narrator-approvals-withdrawn')).toBeVisible({
+      timeout: 15_000,
+    });
+    await scanBothThemes(page, '/settings › Language model › after a switch');
   });
 });
 

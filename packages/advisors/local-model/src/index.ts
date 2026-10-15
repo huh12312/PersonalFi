@@ -39,6 +39,46 @@ export {
   type LocalModelErrorCode,
 } from './errors.ts';
 export { NARRATION_FORMAT } from './format.ts';
+// WP 10.6 (D30): the narrator on a hosted provider with the holder's own key.
+export {
+  ANTHROPIC_VERSION,
+  createHostedBudget,
+  createHostedModelAdapter,
+  HOSTED_DEFAULT_MODELS,
+  HOSTED_DISPLAY_NAMES,
+  HOSTED_MAX_OUTPUT_TOKENS,
+  HOSTED_MAX_RESPONSE_BYTES,
+  HOSTED_MODEL_ERROR_CODES,
+  HOSTED_MODEL_HOSTS,
+  HOSTED_MODEL_ID_PATTERN,
+  HOSTED_MODEL_PATHS,
+  HOSTED_PROVIDERS,
+  HOSTED_RATE_WINDOW,
+  HOSTED_TIMEOUT_CEILING_MS,
+  HostedModelError,
+  hostedRequestBody,
+  hostedRequestHeaders,
+  isHostedModelError,
+  OPENROUTER_ATTRIBUTION,
+  parseVendorReply,
+  PROBE_MESSAGES,
+  redactProviderText,
+  type HostedBudget,
+  type HostedModelAdapter,
+  type HostedModelConfig,
+  type HostedModelDeps,
+  type HostedModelErrorCode,
+  type HostedModelKey,
+  type HostedProbeResult,
+  type HostedProvider,
+} from './hosted.ts';
+export { EMPTY_ARRAY_ITEMS, hostedNarrationFormat, STRIPPED_KEYWORDS } from './hosted-format.ts';
+export {
+  capWarnings,
+  insightsFromReply,
+  narratorResponse,
+  type NarratorReplyResponse,
+} from './reply.ts';
 export {
   createOllamaClient,
   DEFAULT_GENERATION_OPTIONS,
