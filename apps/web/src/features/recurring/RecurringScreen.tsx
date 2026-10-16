@@ -9,13 +9,9 @@ import {
   listRecurringSeriesOptions,
 } from '../../api/generated/@tanstack/react-query.gen.ts';
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
-import { Card, CardDescription } from '../../components/ui/card.tsx';
 import { Tabs, TabsIndicator, TabsList, TabsPanel, TabsTab } from '../../components/ui/tabs.tsx';
-import { Money } from '../../components/finance/Money.tsx';
-import { StatTile } from '../../components/finance/StatTile.tsx';
 import { CandidatesQueue } from './CandidatesQueue.tsx';
-import { buildForecastBand } from './forecast-series.ts';
-import { ForecastBandChart } from './ForecastBandChart.tsx';
+import { ForwardCashFlowCard } from './ForwardCashFlowCard.tsx';
 import { SeriesList } from './SeriesList.tsx';
 import { UpcomingCalendar } from './UpcomingCalendar.tsx';
 import { useMerchantNames } from './useMerchantNames.ts';
@@ -37,6 +33,7 @@ export function RecurringScreen() {
     ...(candidatesQuery.data?.candidates.map((c) => c.merchantId) ?? []),
     ...(seriesQuery.data?.series.map((s) => s.merchantId) ?? []),
     ...(upcomingQuery.data?.days.flatMap((d) => d.charges.map((c) => c.merchantId)) ?? []),
+    ...(forecastQuery.data?.charges.map((c) => c.merchantId) ?? []),
   ];
   const { nameOf } = useMerchantNames(merchantIds);
 
@@ -66,45 +63,12 @@ export function RecurringScreen() {
         </section>
       )}
 
-      <Card padding="default">
-        {/* A raw `<h2>` rather than `CardTitle` (which renders an `<h3>`):
-            when there are no candidates, "Needs your confirmation" above
-            does not render, and this would be the first heading under the
-            route's own `<h1>` — an h3 there would skip a level. */}
-        <h2 className="text-h2 text-text-primary">Forward cash flow</h2>
-        <CardDescription className="mb-4">
-          The next 30 days, projected from your confirmed and detected streams. The shaded band is
-          the detector's own uncertainty, not a guess drawn for effect.
-        </CardDescription>
-        {forecast === undefined ? (
-          <SkeletonText lines={3} />
-        ) : (
-          <>
-            <div className="flex flex-wrap gap-6">
-              <StatTile
-                label="Safe to spend"
-                value={
-                  safeToSpend === undefined ? (
-                    <SkeletonText lines={1} />
-                  ) : (
-                    <Money value={safeToSpend.safe} colorBySign />
-                  )
-                }
-                size="hero"
-              />
-              <StatTile label="Expected net (30 days)" value={<Money value={forecast.net} />} />
-              <StatTile
-                label="Worst case"
-                value={<Money value={forecast.netLow} colorBySign={false} />}
-              />
-            </div>
-            <ForecastBandChart
-              data={buildForecastBand(forecast.from, forecast.to, forecast.charges)}
-              className="mt-4"
-            />
-          </>
-        )}
-      </Card>
+      <ForwardCashFlowCard
+        forecast={forecast}
+        safeToSpend={safeToSpend}
+        series={series}
+        nameOf={nameOf}
+      />
 
       <Tabs defaultValue="series">
         <TabsList aria-label="Recurring sections">

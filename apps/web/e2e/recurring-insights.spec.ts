@@ -2,8 +2,12 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-import { expectNoAxeViolations } from './support/axe.ts';
+import { expectNoAxeViolations, setTheme } from './support/axe.ts';
 import { installRecurringInsightsMocks } from './support/mock-recurring-insights.ts';
+import { installPlanMocks } from './support/mock-plan.ts';
+import { installSweepMocks } from './support/mock-sweep.ts';
+import { screenshotDir } from './support/screenshot-dir.ts';
+import { hideDevtools, visit } from './support/sweep.ts';
 
 /**
  * WP 2.10 exit tests (02-phase-2-dispatch.md §3): the recurring candidate
@@ -241,4 +245,499 @@ test('dismissing an insight captures a reason and shows the cooldown notice', as
   await expect(notice).toContainText('Dismissed');
   await expect(priceCard).toHaveCount(0);
   await expectNoAxeViolations(page, 'insights (after dismissal)');
+});
+
+// ---------------------------------------------------------------------------
+// WP 10.7: the Forward cash flow card (docs/evidence/phase-10/wp10.7-recurring-forecast-view.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Layout is the bug this package fixes (three StatTiles drawn on top of one another; an x label cut off at the
+ * chart's edge), and happy-dom/jsdom do not lay anything out — every box there is 0 × 0, so a unit test of
+ * "these do not overlap" would pass on the broken tile too. These assertions therefore live here, on
+ * `boundingBox()` in a real Chromium.
+ */
+type Box = { x: number; y: number; width: number; height: number };
+
+function overlap(a: Box, b: Box): boolean {
+  const e = 0.5;
+  return (
+    a.x < b.x + b.width - e &&
+    b.x < a.x + a.width - e &&
+    a.y < b.y + b.height - e &&
+    b.y < a.y + a.height - e
+  );
+}
+
+/** Every pair of tiles (and every pair of their labels and figures) is disjoint; no figure overflows its tile. */
+async function tileProblems(page: Page, scope: ReturnType<Page['locator']>): Promise<string[]> {
+  const tiles = scope.locator('[data-stat-tile]');
+  const count = await tiles.count();
+  const problems: string[] = [];
+  const boxes: Array<{ tile: Box; label: Box; figure: Box; name: string }> = [];
+  for (let n = 0; n < count; n += 1) {
+    const tile = tiles.nth(n);
+    // Not `isVisible()`: Playwright counts a 0 × 0 box as hidden, and a tile collapsed to 0 px is exactly the
+    // failure under test. Only a tile that is not rendered at all (display:none, a closed tab) is skipped.
+    const rendered = await tile.evaluate((el) =>
+      el.checkVisibility({ visibilityProperty: true, opacityProperty: false }),
+    );
+    if (!rendered) continue;
+    const tileBox = await tile.boundingBox();
+    const labelBox = await tile.locator('span').first().boundingBox();
+    const figure = tile.locator('[data-stat-figure]');
+    const figureBox = await figure.boundingBox();
+    const name = (await tile.locator('span').first().innerText()).trim();
+    if (tileBox === null || labelBox === null || figureBox === null) {
+      problems.push(`${name}: not laid out`);
+      continue;
+    }
+    if (tileBox.width < 100) problems.push(`${name}: ${tileBox.width.toFixed(0)} px wide`);
+    // The figure's own content (the `<Money>` span), not the figure block, which is as wide as the tile.
+    const overflow = await figure.evaluate((el) => {
+      const content = el.firstElementChild ?? el;
+      return content.getBoundingClientRect().right - el.getBoundingClientRect().right;
+    });
+    if (overflow > 1)
+      problems.push(`${name}: the figure overflows its tile by ${overflow.toFixed(0)} px`);
+    boxes.push({ tile: tileBox, label: labelBox, figure: figureBox, name });
+  }
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const a = boxes[i]!;
+      const b = boxes[j]!;
+      for (const part of ['tile', 'label', 'figure'] as const) {
+        if (overlap(a[part], b[part]))
+          problems.push(`"${a.name}" and "${b.name}" overlap (${part})`);
+      }
+    }
+  }
+  return problems;
+}
+
+/** Straight to the screen: at 390 px the primary navigation is the bottom tab bar, not the sidebar `goToRecurring` clicks. */
+async function openRecurring(page: Page): Promise<void> {
+  await page.goto('/recurring');
+  await expect(page.getByRole('tablist', { name: 'Recurring sections' })).toBeVisible();
+}
+
+function forwardCashFlow(page: Page) {
+  return page.getByTestId('forward-cash-flow');
+}
+
+function forecastChart(page: Page) {
+  return forwardCashFlow(page).getByRole('img', { name: /^Projected cash flow/ });
+}
+
+async function routeForecast(page: Page, body: unknown): Promise<void> {
+  await page.route('**/api/recurring/forecast*', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }),
+  );
+}
+
+const usd = (minor: number) => ({ minor: String(minor), currency: 'USD' });
+
+function charge(
+  seriesId: string,
+  merchantId: string,
+  date: string,
+  expected: number,
+  low = expected,
+  high = expected,
+) {
+  return {
+    seriesId,
+    streamKey: `${merchantId}:OUTFLOW:USD:0:2026-01-01`,
+    merchantId,
+    type: 'SUBSCRIPTION',
+    cadence: 'MONTHLY',
+    sign: expected < 0 ? 'OUTFLOW' : 'INFLOW',
+    status: 'ACTIVE',
+    userConfirmed: true,
+    confidence: 0.95,
+    slot: 0,
+    date,
+    earliest: date,
+    latest: date,
+    uncertaintyDays: 1,
+    expected: usd(expected),
+    low: usd(low),
+    high: usd(high),
+  };
+}
+
+/** The screenshot's sandbox: one yearly Uber charge, next due months away, so nothing falls in the window. */
+async function routeUberOnly(page: Page): Promise<void> {
+  await page.route('**/api/recurring/series*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        series: [
+          {
+            id: 'series_uber',
+            streamKey: 'merch_uber:OUTFLOW:USD:0:2025-03-02',
+            merchantId: 'merch_uber',
+            state: 'ACTIVE',
+            status: 'ACTIVE',
+            userConfirmed: true,
+            cadence: 'ANNUAL',
+            type: 'SUBSCRIPTION',
+            sign: 'OUTFLOW',
+            confidence: 0.9,
+            typicalAmount: usd(-586),
+            observedMin: usd(-586),
+            observedMax: usd(-586),
+            nextDueDate: '2027-03-02',
+            firstSeen: '2025-03-02',
+            lastSeen: '2026-03-02',
+            duplicateNode: null,
+            priceChangeEvents: [],
+          },
+        ],
+      }),
+    }),
+  );
+}
+
+test.describe('WP 10.7: the Forward cash flow card', () => {
+  for (const width of [1280, 390]) {
+    test(`the stat strip's three figures do not overlap at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await installRecurringInsightsMocks(page);
+      await login(page);
+      await openRecurring(page);
+      const strip = page.getByTestId('forecast-stat-strip');
+      await expect(strip.locator('[data-stat-tile]')).toHaveCount(3);
+      await expect(strip).toContainText('+$815.01');
+      expect(await tileProblems(page, strip)).toEqual([]);
+    });
+
+    test(`StatTiles in an unsized flex row keep their width at ${String(width)} px (kitchen sink)`, async ({
+      page,
+    }) => {
+      // The Recurring strip is a grid now, which sizes its tiles whatever the tile does; this fixture is the
+      // original failure — three tiles in `flex flex-wrap`, the screenshot's +$67,498.00 and two $0.00 — so the
+      // StatTile fix itself is what is under test.
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('/dev/kitchen-sink');
+      const row = page.getByTestId('stat-tile-flex-row').first();
+      await expect(row.locator('[data-stat-tile]')).toHaveCount(3);
+      await row.scrollIntoViewIfNeeded();
+      expect(await tileProblems(page, row)).toEqual([]);
+    });
+
+    test(`every axis label sits inside the chart, the last x tick too, at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await installRecurringInsightsMocks(page);
+      await login(page);
+      await openRecurring(page);
+      const svg = forecastChart(page);
+      await expect(svg).toBeVisible();
+      const frame = (await svg.boundingBox())!;
+      const labels = svg.locator('text[data-axis]');
+      const count = await labels.count();
+      expect(count).toBeGreaterThanOrEqual(4);
+      const xLabels = svg.locator('text[data-axis="x"]');
+      await expect(xLabels.last()).toHaveText('Jul 1');
+      const clipped: string[] = [];
+      for (let n = 0; n < count; n += 1) {
+        const box = (await labels.nth(n).boundingBox())!;
+        const text = await labels.nth(n).textContent();
+        if (
+          box.x < frame.x - 0.5 ||
+          box.y < frame.y - 0.5 ||
+          box.x + box.width > frame.x + frame.width + 0.5 ||
+          box.y + box.height > frame.y + frame.height + 0.5
+        ) {
+          clipped.push(
+            `"${text ?? ''}" at ${box.x.toFixed(0)}..${(box.x + box.width).toFixed(0)} (chart ${frame.x.toFixed(0)}..${(frame.x + frame.width).toFixed(0)})`,
+          );
+        }
+      }
+      expect(clipped).toEqual([]);
+      // The $0 baseline is labelled.
+      await expect(svg.locator('text[data-axis="y"]', { hasText: /^\$0$/ })).toHaveCount(1);
+    });
+  }
+
+  test('a mark per expected charge: on its due date, in the readout and in the table', async ({
+    page,
+  }) => {
+    await installRecurringInsightsMocks(page);
+    await login(page);
+    await openRecurring(page);
+    const card = forwardCashFlow(page);
+    const svg = forecastChart(page);
+    await expect(svg).toHaveAttribute(
+      'aria-label',
+      'Projected cash flow from Jun 1 to Jul 1: 6 expected charges, expected net −$1,626.99, worst case −$1,664.99.',
+    );
+    await svg.scrollIntoViewIfNeeded();
+    const marks = svg.locator('[data-charge-mark]');
+    await expect(marks).toHaveCount(6);
+    await expect(svg.locator('[data-charge-mark="in"]')).toHaveCount(1);
+    await expect(card.getByTestId('forecast-band')).toHaveCount(1);
+
+    // Two charges on Jun 15: two marks, stacked in the lane at the same x.
+    const phone = (await marks.nth(2).boundingBox())!;
+    const water = (await marks.nth(3).boundingBox())!;
+    expect(Math.abs(phone.x - water.x)).toBeLessThan(1);
+    expect(water.y).toBeGreaterThan(phone.y + 4);
+
+    await page.mouse.move(phone.x + phone.width / 2, phone.y + phone.height / 2);
+    const readout = page.locator('[data-chart-readout]');
+    await expect(readout).toBeVisible();
+    await expect(readout).toContainText('Mon, Jun 15');
+    await expect(readout).toContainText('−$65.00 Fernwave Mobile');
+    await expect(readout).toContainText('−$42.00 Metro Water');
+    await page.keyboard.press('Escape');
+
+    await card.getByRole('button', { name: /^View as table/ }).click();
+    const table = card.getByRole('table');
+    await expect(table.getByRole('row', { name: /^Jun 15 / })).toContainText(
+      'Fernwave Mobile −$65.00; Metro Water −$42.00 (−$50.00 to −$36.00)',
+    );
+    for (const name of [
+      'Maple Court Rent −$1,450.00',
+      'City Power −$85.00',
+      'Card Cashback +$25.00',
+      'Spotify −$9.99',
+    ]) {
+      await expect(table).toContainText(name);
+    }
+    await expectNoAxeViolations(page, 'recurring (forward cash flow, table open)');
+  });
+
+  test('no charge in the window: no line, a statement naming the stream, the strip still populated', async ({
+    page,
+  }) => {
+    await installRecurringInsightsMocks(page);
+    await routeForecast(page, {
+      from: '2026-10-16',
+      to: '2026-11-15',
+      currency: 'USD',
+      outflow: usd(0),
+      inflow: usd(0),
+      net: usd(0),
+      netLow: usd(0),
+      netHigh: usd(0),
+      chargeCount: 0,
+      charges: [],
+    });
+    await routeUberOnly(page);
+    await login(page);
+    await openRecurring(page);
+    const card = forwardCashFlow(page);
+    await expect(card.getByTestId('forecast-empty')).toContainText(
+      'No charges expected in the next 30 days — 1 stream (Uber, yearly) has no due date in this window.',
+    );
+    // No projection drawn: no chart, no line, no readout to hover.
+    await expect(card.locator('svg[role="img"]')).toHaveCount(0);
+    await expect(card.locator('[data-charge-mark]')).toHaveCount(0);
+    // The strip still says what it knows.
+    const strip = page.getByTestId('forecast-stat-strip');
+    await expect(strip).toContainText('Safe to spend');
+    await expect(strip).toContainText('+$815.01');
+    await expect(strip).toContainText('$0.00');
+    expect(await tileProblems(page, strip)).toEqual([]);
+    await expectNoAxeViolations(page, 'recurring (forward cash flow, empty window)');
+  });
+
+  test('every charge fixed: the line is drawn, the band is not, and the card says why', async ({
+    page,
+  }) => {
+    await installRecurringInsightsMocks(page);
+    await routeForecast(page, {
+      from: '2026-06-01',
+      to: '2026-07-01',
+      currency: 'USD',
+      outflow: usd(-145999),
+      inflow: usd(0),
+      net: usd(-145999),
+      netLow: usd(-145999),
+      netHigh: usd(-145999),
+      chargeCount: 2,
+      charges: [
+        charge('series_rent', 'merch_rent', '2026-06-01', -145000),
+        charge('series_spotify', 'merch_spotify', '2026-07-01', -999),
+      ],
+    });
+    await login(page);
+    await openRecurring(page);
+    const card = forwardCashFlow(page);
+    await expect(forecastChart(page)).toBeVisible();
+    await expect(card.locator('[data-charge-mark]')).toHaveCount(2);
+    await expect(card.getByTestId('forecast-band')).toHaveCount(0);
+    await expect(card.getByTestId('forecast-band-note')).toHaveText(
+      'No band is shaded: every charge in this window has a fixed amount, so nothing is uncertain.',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WP 10.7 evidence: the card, and every StatTile caller, in both themes at 1280 and 390 px
+// ---------------------------------------------------------------------------
+
+/**
+ * `evidenceDir` is `playwright.config.ts`'s `PLAYWRIGHT_EVIDENCE_DIR` (C-16, O-3): unset, these write to the
+ * gitignored `test-results/evidence-screenshots/`; set to `docs/evidence/phase-10` to write the committed
+ * `wp10.7-*.png` on purpose. Each caller is also held to the strip's own rule (no two tiles overlap, no figure
+ * overflows its tile), so the pictures are not the only check that the StatTile fix did no harm elsewhere.
+ */
+const evidenceTest = test.extend<{ evidenceDir: string | undefined }>({
+  evidenceDir: [undefined, { option: true }],
+});
+
+const THEMES = ['light', 'dark'] as const;
+
+evidenceTest.describe('WP 10.7 evidence', () => {
+  for (const width of [1280, 390]) {
+    evidenceTest(
+      `the Forward cash flow card at ${String(width)} px, both themes`,
+      async ({ page, evidenceDir }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await installRecurringInsightsMocks(page);
+        await login(page);
+        await openRecurring(page);
+        await hideDevtools(page);
+        const card = forwardCashFlow(page);
+        await expect(forecastChart(page)).toBeVisible();
+        for (const theme of THEMES) {
+          await setTheme(page, theme);
+          await card.screenshot({
+            path: `${screenshotDir(evidenceDir)}wp10.7-forecast-${String(width)}-${theme}.png`,
+            animations: 'disabled',
+          });
+        }
+        if (width === 1280) {
+          // The readout on the busiest day.
+          const marks = forecastChart(page).locator('[data-charge-mark]');
+          await marks.nth(2).scrollIntoViewIfNeeded();
+          const box = (await marks.nth(2).boundingBox())!;
+          await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+          await expect(page.locator('[data-chart-readout]')).toBeVisible();
+          for (const theme of THEMES) {
+            await setTheme(page, theme);
+            await card.screenshot({
+              path: `${screenshotDir(evidenceDir)}wp10.7-forecast-readout-${theme}.png`,
+              animations: 'disabled',
+            });
+          }
+        }
+      },
+    );
+  }
+
+  evidenceTest('the empty window, both themes', async ({ page, evidenceDir }) => {
+    await installRecurringInsightsMocks(page);
+    await routeForecast(page, {
+      from: '2026-10-16',
+      to: '2026-11-15',
+      currency: 'USD',
+      outflow: usd(0),
+      inflow: usd(0),
+      net: usd(0),
+      netLow: usd(0),
+      netHigh: usd(0),
+      chargeCount: 0,
+      charges: [],
+    });
+    await routeUberOnly(page);
+    await login(page);
+    await openRecurring(page);
+    await hideDevtools(page);
+    const card = forwardCashFlow(page);
+    await expect(card.getByTestId('forecast-empty')).toBeVisible();
+    for (const theme of THEMES) {
+      await setTheme(page, theme);
+      await card.screenshot({
+        path: `${screenshotDir(evidenceDir)}wp10.7-forecast-empty-${theme}.png`,
+        animations: 'disabled',
+      });
+    }
+  });
+
+  const callers: ReadonlyArray<{
+    readonly slug: string;
+    readonly path: string;
+    readonly ready: (page: Page) => Promise<void>;
+  }> = [
+    { slug: 'dashboard', path: '/', ready: async () => {} },
+    { slug: 'accounts', path: '/accounts', ready: async () => {} },
+    { slug: 'investments', path: '/investments', ready: async () => {} },
+    {
+      slug: 'plan-compare',
+      path: '/plan',
+      ready: async (page) => {
+        await page.getByLabel('Scenario A').selectOption('scenario-baseline');
+        await page.getByLabel('Scenario B').selectOption('scenario-fork-retire-early');
+        await expect(page.getByTestId('compare-delta')).toBeVisible();
+      },
+    },
+    { slug: 'kitchen-sink', path: '/dev/kitchen-sink', ready: async () => {} },
+  ];
+
+  for (const caller of callers) {
+    for (const width of [1280, 390]) {
+      evidenceTest(
+        `StatTile caller ${caller.slug} at ${String(width)} px, both themes`,
+        async ({ page, evidenceDir }) => {
+          evidenceTest.setTimeout(90_000);
+          await page.setViewportSize({ width, height: 900 });
+          if (caller.slug === 'plan-compare') {
+            // The layered sweep mocks answer `/api/plan/scenarios` with the goals fixture's baseline alone; the
+            // compare needs the plan fixture's fork too, so the plan screen gets its own spec's mocks.
+            await installPlanMocks(page);
+            await page.goto('/login');
+            await page.getByRole('button', { name: 'Use an authenticator code instead' }).click();
+            await page.getByLabel('6-digit authenticator code').fill('123456');
+            await page.getByRole('button', { name: 'Verify code' }).click();
+            await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+            await page.goto(caller.path);
+            await expect(page.getByLabel('Scenario A')).toBeVisible();
+          } else {
+            await installSweepMocks(page);
+            await visit(page, caller.path);
+          }
+          await hideDevtools(page);
+          await caller.ready(page);
+          const tiles = page.locator('#app-content [data-stat-tile]');
+          await expect(tiles.first()).toBeVisible();
+          // The kitchen sink draws every section twice (a light and a dark panel); one panel is enough.
+          const scope =
+            caller.slug === 'kitchen-sink'
+              ? page.getByTestId('stat-tile-flex-row').first()
+              : page.locator('#app-content');
+          if (caller.slug === 'plan-compare') {
+            expect(await tileProblems(page, page.getByTestId('compare-a'))).toEqual([]);
+            expect(await tileProblems(page, page.getByTestId('compare-b'))).toEqual([]);
+          } else {
+            expect(await tileProblems(page, scope)).toEqual([]);
+          }
+          const target =
+            caller.slug === 'plan-compare'
+              ? page.getByTestId('compare-a').locator('xpath=..')
+              : caller.slug === 'kitchen-sink'
+                ? scope
+                : tiles.first().locator('xpath=..');
+          await target.scrollIntoViewIfNeeded();
+          for (const theme of THEMES) {
+            await setTheme(page, theme);
+            // The plan compare and the kitchen-sink row as elements; a screen's tiles with the viewport around them.
+            const shot =
+              caller.slug === 'plan-compare' || caller.slug === 'kitchen-sink' ? target : page;
+            await shot.screenshot({
+              path: `${screenshotDir(evidenceDir)}wp10.7-tiles-${caller.slug}-${String(width)}-${theme}.png`,
+              animations: 'disabled',
+            });
+          }
+        },
+      );
+    }
+  }
 });

@@ -2,6 +2,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { ACCENT_HEX, SURFACE_HEX } from '../features/plan/palette.ts';
+import {
+  FORECAST_CHART_TOKENS,
+  FORECAST_MARK_ROLES,
+  FORECAST_TEXT_ROLES,
+} from '../features/recurring/forecast-chart-tokens.ts';
 import themeCss from './theme.css?raw';
 
 /**
@@ -505,4 +510,54 @@ describe('no colour outside the tokens', () => {
       expect(found, `${file} no longer contains ${literal}`).toBe(true);
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// 5. The forward cash-flow chart's colour roles (WP 10.7)
+// ---------------------------------------------------------------------------
+
+/**
+ * `ForecastBandChart.tsx` draws only with `forecast-chart-tokens.ts`'s roles (`chartVar(role)`), so measuring
+ * the roles measures the chart. Its marks (the running total, ▼ money out, ▲ money in, the $0 baseline) are
+ * 1.4.11 non-text marks, 3:1 on every chart surface; its tick labels are text, 4.5:1. The dataviz skill's
+ * `validate_palette.js` run on the same three mark colours is recorded in the tokens file and in
+ * docs/evidence/phase-10/wp10.7-recurring-forecast-view.md; this is the part of it that a token edit must keep
+ * passing.
+ */
+describe('the forward cash-flow chart (WP 10.7)', () => {
+  it('draws only with roles this file can measure', () => {
+    const chart = Object.entries(sources).find(([path]) =>
+      path.endsWith('features/recurring/ForecastBandChart.tsx'),
+    )?.[1];
+    expect(chart).toBeDefined();
+    // Every colour in the chart is `chartVar(...)` or one of the shared readout-surface tokens.
+    const raw = [...(chart ?? '').matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]);
+    const readout = [
+      '--bg-surface-raised',
+      '--text-primary',
+      '--shadow-elev-2',
+      '--border-hairline',
+    ];
+    expect(raw.filter((token) => !readout.includes(token as string))).toEqual([]);
+    expect((chart ?? '').match(/chartVar\('/g)?.length ?? 0).toBeGreaterThan(8);
+  });
+
+  for (const theme of THEMES) {
+    it(`every mark role clears 3:1 and every text role 4.5:1 on each chart surface in the ${theme} theme`, () => {
+      const failing: string[] = [];
+      for (const bg of CHART_SURFACES) {
+        for (const role of FORECAST_MARK_ROLES) {
+          const token = FORECAST_CHART_TOKENS[role];
+          const r = ratio(colorOf(theme, token), colorOf(theme, bg));
+          if (r < 3) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
+        }
+        for (const role of FORECAST_TEXT_ROLES) {
+          const token = FORECAST_CHART_TOKENS[role];
+          const r = ratio(colorOf(theme, token), colorOf(theme, bg));
+          if (r < 4.5) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
+        }
+      }
+      expect(failing).toEqual([]);
+    });
+  }
 });

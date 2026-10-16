@@ -845,6 +845,77 @@ test.describe('WP 10.6 states are axe-clean in both themes', () => {
   });
 });
 
+/**
+ * The route sweep reaches the Forward cash flow card as the recurring fixture draws it (six charges, a band). These
+ * walk the two states it cannot: a window with no charge in it (the statement in place of a chart) and a window
+ * whose every charge is fixed (the line without a band, and the note saying why), each in both themes and at
+ * 320 px. The card adds no interactive element (the readout is the chart's existing pointer surface; the table
+ * toggle is `ChartDataTable`'s), so axe's target-size rule has nothing new to measure beyond what it already does.
+ */
+test.describe('WP 10.7 states are axe-clean in both themes', () => {
+  const usd = (minor: number) => ({ minor: String(minor), currency: 'USD' });
+  const forecastWindow = (charges: unknown[], net: number) => ({
+    from: '2026-06-01',
+    to: '2026-07-01',
+    currency: 'USD',
+    outflow: usd(net),
+    inflow: usd(0),
+    net: usd(net),
+    netLow: usd(net),
+    netHigh: usd(net),
+    chargeCount: charges.length,
+    charges,
+  });
+  const fixed = (merchantId: string, date: string, minor: number) => ({
+    seriesId: `series_${merchantId}`,
+    streamKey: `${merchantId}:OUTFLOW:USD:0:2026-01-01`,
+    merchantId,
+    type: 'SUBSCRIPTION',
+    cadence: 'MONTHLY',
+    sign: 'OUTFLOW',
+    status: 'ACTIVE',
+    userConfirmed: true,
+    confidence: 0.95,
+    slot: 0,
+    date,
+    earliest: date,
+    latest: date,
+    uncertaintyDays: 1,
+    expected: usd(minor),
+    low: usd(minor),
+    high: usd(minor),
+  });
+
+  for (const [name, body] of [
+    ['no charge in the window', forecastWindow([], 0)],
+    [
+      'every charge fixed',
+      forecastWindow(
+        [fixed('merch_rent', '2026-06-01', -145000), fixed('merch_spotify', '2026-07-01', -999)],
+        -145999,
+      ),
+    ],
+  ] as const) {
+    test(`Recurring › Forward cash flow: ${name}`, async ({ page }) => {
+      test.setTimeout(120_000);
+      await installSweepMocks(page);
+      await page.route('**/api/recurring/forecast*', (route) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }),
+      );
+      await visit(page, '/recurring');
+      const card = page.getByTestId('forward-cash-flow');
+      await expect(
+        card.getByTestId(name === 'every charge fixed' ? 'forecast-band-note' : 'forecast-empty'),
+      ).toBeVisible();
+      await scanBothThemes(page, `/recurring › Forward cash flow: ${name}`);
+      await page.setViewportSize(REFLOW);
+      await hideDevtools(page);
+      expect(await horizontalProblems(page), `${name}: horizontal overflow at 320 px`).toEqual([]);
+      await scanBothThemes(page, `/recurring › Forward cash flow: ${name} at 320 px`);
+    });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // 8. A picture of every route, in both themes (evidence, written deliberately)
 // ---------------------------------------------------------------------------

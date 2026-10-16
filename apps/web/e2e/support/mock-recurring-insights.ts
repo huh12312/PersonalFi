@@ -140,8 +140,76 @@ interface MockTransaction {
   updatedAt: string;
 }
 
+/** Display names for the forecast's payees (WP 10.7), answered only to a `merchantIds` lookup. */
+const RECURRING_PAYEES: ReadonlyArray<readonly [string, string]> = [
+  ['merch_rent', 'Maple Court Rent'],
+  ['merch_power', 'City Power'],
+  ['merch_phone', 'Fernwave Mobile'],
+  ['merch_water', 'Metro Water'],
+  ['merch_cashback', 'Card Cashback'],
+  ['merch_spotify', 'Spotify'],
+  ['merch_uber', 'Uber'],
+];
+
+function payeeTransaction(merchantId: string, name: string): MockTransaction {
+  return {
+    id: `txn_${merchantId}`,
+    accountId: 'acct_1',
+    factId: `fact_${merchantId}`,
+    date: '2026-05-01',
+    amount: { minor: '-1000', currency: 'USD' },
+    name,
+    merchantId,
+    merchantName: name,
+    pending: false,
+    excluded: false,
+    categoryId: null,
+    note: null,
+    isTransfer: false,
+    transferLinkId: null,
+    refundOfId: null,
+    refundConfidence: null,
+    supersededById: null,
+    supersededReason: null,
+    createdAt: '2026-05-01T00:00:00.000Z',
+    updatedAt: '2026-05-01T00:00:00.000Z',
+  };
+}
+
 function json(body: unknown, status = 200) {
   return { status, contentType: 'application/json', body: JSON.stringify(body) };
+}
+
+/** One `RecurringProjectedCharge`, signed as the route sends it (an outflow is negative). */
+function projected(
+  seriesId: string,
+  merchantId: string,
+  sign: 'OUTFLOW' | 'INFLOW',
+  date: string,
+  expected: number,
+  low: number,
+  high: number,
+) {
+  const usd = (minor: number) => ({ minor: String(minor), currency: 'USD' });
+  return {
+    seriesId,
+    streamKey: `${merchantId}:${sign}:USD:0:2026-01-01`,
+    merchantId,
+    type: 'SUBSCRIPTION',
+    cadence: 'MONTHLY',
+    sign,
+    status: 'ACTIVE',
+    userConfirmed: true,
+    confidence: 0.9,
+    slot: 0,
+    date,
+    earliest: date,
+    latest: date,
+    uncertaintyDays: 1,
+    expected: usd(expected),
+    low: usd(low),
+    high: usd(high),
+  };
 }
 
 export interface MockRecurringInsightsState {
@@ -360,6 +428,30 @@ export async function installRecurringInsightsMocks(
     ],
   ]);
 
+  // WP 10.7: the forward cash flow as `GET /recurring/forecast` really sends it, signed by house convention (an
+  // outflow is negative, `low` its pessimistic end), so the card draws a line, a band, and a mark per charge: a
+  // fixed rent on the 1st, an uncertain power bill, two charges on the 15th (stacked in the lane), a small inflow,
+  // and the confirmed Spotify on the window's last day. `net`/`netLow`/`netHigh` are the sums the route computes.
+  const forecast = {
+    from: '2026-06-01',
+    to: '2026-07-01',
+    currency: 'USD',
+    outflow: { minor: '-165199', currency: 'USD' },
+    inflow: { minor: '2500', currency: 'USD' },
+    net: { minor: '-162699', currency: 'USD' },
+    netLow: { minor: '-166499', currency: 'USD' },
+    netHigh: { minor: '-160099', currency: 'USD' },
+    chargeCount: 6,
+    charges: [
+      projected('series_rent', 'merch_rent', 'OUTFLOW', '2026-06-01', -145000, -145000, -145000),
+      projected('series_power', 'merch_power', 'OUTFLOW', '2026-06-08', -8500, -11000, -7000),
+      projected('series_phone', 'merch_phone', 'OUTFLOW', '2026-06-15', -6500, -6500, -6500),
+      projected('series_water', 'merch_water', 'OUTFLOW', '2026-06-15', -4200, -5000, -3600),
+      projected('series_cashback', 'merch_cashback', 'INFLOW', '2026-06-20', 2500, 2000, 3000),
+      projected('series_spotify', 'merch_spotify', 'OUTFLOW', '2026-07-01', -999, -999, -999),
+    ],
+  };
+
   await page.route('**/*', async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -410,6 +502,11 @@ export async function installRecurringInsightsMocks(
       }
       if (merchantIds.length > 0) {
         items = items.filter((t) => t.merchantId !== null && merchantIds.includes(t.merchantId));
+        // WP 10.7: the forecast's payees are named the way the screen names any merchant, by a transaction
+        // (`useMerchantNames`); only for that lookup, so no other screen's list gains rows.
+        for (const [merchantId, name] of RECURRING_PAYEES) {
+          if (merchantIds.includes(merchantId)) items.push(payeeTransaction(merchantId, name));
+        }
       }
       return route.fulfill(
         json({ items, nextCursor: null, summary: { count: items.length, totals: [] } }),
@@ -488,34 +585,21 @@ export async function installRecurringInsightsMocks(
     }
 
     if (path === '/api/recurring/forecast' && method === 'GET') {
-      return route.fulfill(
-        json({
-          from: '2026-06-01',
-          to: '2026-06-30',
-          currency: 'USD',
-          outflow: { minor: '-999', currency: 'USD' },
-          inflow: { minor: '0', currency: 'USD' },
-          net: { minor: '-999', currency: 'USD' },
-          netLow: { minor: '-1200', currency: 'USD' },
-          netHigh: { minor: '-800', currency: 'USD' },
-          chargeCount: 0,
-          charges: [],
-        }),
-      );
+      return route.fulfill(json(forecast));
     }
 
     if (path === '/api/recurring/safe-to-spend' && method === 'GET') {
       return route.fulfill(
         json({
           from: '2026-06-01',
-          to: '2026-06-30',
+          to: '2026-07-01',
           currency: 'USD',
           availableCash: { minor: '250000', currency: 'USD' },
-          committed: { minor: '-999', currency: 'USD' },
-          committedWorstCase: { minor: '-1200', currency: 'USD' },
-          expectedIncome: { minor: '0', currency: 'USD' },
-          safe: { minor: '248800', currency: 'USD' },
-          committedCount: 1,
+          committed: { minor: '-165199', currency: 'USD' },
+          committedWorstCase: { minor: '-168499', currency: 'USD' },
+          expectedIncome: { minor: '2500', currency: 'USD' },
+          safe: { minor: '81501', currency: 'USD' },
+          committedCount: 5,
         }),
       );
     }

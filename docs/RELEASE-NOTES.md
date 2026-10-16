@@ -9,6 +9,43 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.6: the Recurring screen's Forward cash flow, redrawn
+
+**Status:** a patch release on v0.9.5. The tag `v0.9.6` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.6
+
+```bash
+git pull
+just upgrade
+```
+
+No migration. A web-only change.
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **The three figures no longer overlap.** Safe to spend, Expected net and Worst case were drawn on
+  top of one another (a stat tile in a row that gave it no width collapsed to nothing). Every stat
+  tile now keeps its own width wherever it is placed, and on Recurring they sit in a strip: Safe to
+  spend as the one large figure, the other two smaller beside it, each with a line saying what it
+  means. On a phone they stack.
+- **A chart that shows when money leaves.** The running total is a step that drops on the day a
+  charge is due, with the detector's uncertainty band around it, a labelled $0 line, a light money
+  axis, and a mark for every expected charge on its due date (money out and money in drawn
+  differently). Hovering a day lists that day's charges by name and amount; **View as table** lists
+  them too. The last date label is no longer cut off.
+- **Honest when there is nothing to draw.** A month with no charge due says so and names the streams
+  that fall outside it ("1 stream (Uber, yearly) has no due date in this window") instead of drawing
+  a flat line at $0. A month whose charges are all fixed says the band is empty because nothing is
+  uncertain.
+- **Fixed: an outflow sent with its sign could have plotted as money in.** The chart read the
+  forecast's amounts as unsigned and negated an outflow a second time; it now signs every amount by
+  its direction, so the chart's last day equals the Expected net and Worst case figures above it.
+
 ## v0.9.5: the language model in Settings — local, or your own key
 
 **Status:** a patch release on v0.9.4. The tag `v0.9.5` is pushed by the maintainer once CI is green.

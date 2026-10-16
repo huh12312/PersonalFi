@@ -262,6 +262,37 @@ function Theme({ label, value }: { label: string; value: 'light' | 'dark' }) {
                 />
               </CardContent>
             </Card>
+            <Card className="sm:col-span-2">
+              <CardHeader>
+                <CardTitle>Stat tiles in a flex row</CardTitle>
+                <CardDescription>
+                  Three tiles in a row that gives them no width (WP 10.7): each keeps its own and
+                  the row wraps.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap gap-6" data-testid="stat-tile-flex-row">
+                  <StatTile
+                    label="Safe to spend"
+                    size="hero"
+                    value={<Money value={{ minor: '6749800', currency: 'USD' }} colorBySign />}
+                    hint="Cash on hand, less the worst case of every charge due"
+                  />
+                  <StatTile
+                    label="Expected net (30 days)"
+                    size="standard"
+                    value={<Money value={{ minor: '0', currency: 'USD' }} />}
+                    hint="After every expected charge"
+                  />
+                  <StatTile
+                    label="Worst case"
+                    size="standard"
+                    value={<Money value={{ minor: '0', currency: 'USD' }} colorBySign={false} />}
+                    hint="If every uncertain charge lands at its worst"
+                  />
+                </div>
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader>
                 <CardTitle>Budget ring</CardTitle>
