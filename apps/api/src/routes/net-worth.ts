@@ -42,14 +42,22 @@
  * them there rather than growing a fifth copy.
  */
 import { newId } from '@core/kernel';
+import { listAccounts } from '@ctx/ledger';
 import {
   InterpolationRefused,
+  NET_WORTH_BUCKETINGS,
+  NET_WORTH_SEGMENT_KINDS,
   SealedRowImmutable,
   SNAPSHOT_JOB_KIND,
   correctDay,
+  dismissMilestones,
   isFxRateUnavailable,
+  listUndismissedMilestones,
+  readNetWorthBuckets,
   readSeries,
+  type NetWorthBucketing,
   type PlanningExecutor,
+  type SegmentAccountLookup,
 } from '@ctx/planning';
 import { sql } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
@@ -212,6 +220,45 @@ const seriesPointWire = z
   })
   .meta({ id: 'NetWorthSeriesPoint' });
 
+/**
+ * WP 10.13 (V6): one bucket of the stacked chart — the closing snapshot day's figure and its segments by
+ * account type (`@ctx/planning`'s `buckets.ts` states the rule). Σ `segments[].amount` = `netWorth`, and
+ * `netWorth` equals `points[]`' value on `asOfDate`, for every bucket (asserted in the api-db test).
+ */
+const bucketWire = z
+  .object({
+    /** First and last calendar day of the bucket, cut at the window's edges. */
+    start: dateOnly,
+    end: dateOnly,
+    /** The closing snapshot day; `null` when the bucket has no snapshot (a gap, never a zero). */
+    asOfDate: dateOnly.nullable(),
+    netWorth: moneyWire.nullable(),
+    segments: z.array(
+      z.object({
+        kind: z.enum(NET_WORTH_SEGMENT_KINDS),
+        /** Signed: liabilities are negative and drawn below the zero line. */
+        amount: moneyWire,
+        accounts: z.int().nonnegative(),
+      }),
+    ),
+    /** The closing day's seal: `false` is today's live row, which may still change. */
+    sealed: z.boolean(),
+    source: z.string().nullable(),
+  })
+  .meta({ id: 'NetWorthBucket' });
+
+const milestoneWire = z
+  .object({
+    id: z.uuid(),
+    /** The round figure crossed; zero is the zero line. */
+    milestone: moneyWire,
+    direction: z.enum(['up', 'down']),
+    crossedOn: dateOnly,
+    previous: moneyWire,
+    latest: moneyWire,
+  })
+  .meta({ id: 'NetWorthMilestone' });
+
 export const netWorthRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
 
@@ -221,6 +268,24 @@ export const netWorthRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       `SELECT display_timezone FROM users ORDER BY created_at, id LIMIT 1`,
     );
     return rows.rows[0]?.display_timezone ?? 'UTC';
+  };
+
+  /**
+   * The bucketed segments (WP 10.13): one read of `net_worth_daily` in `@ctx/planning`, with the ledger's
+   * account type and subtype handed in so crypto and property can be told apart from the breakdown's
+   * valuation class. The ledger read is the accounts list, not the snapshots.
+   */
+  const readBucketsFor = async (
+    userId: string,
+    from: string,
+    to: string,
+    bucketing: NetWorthBucketing,
+  ) => {
+    const accounts = await listAccounts(database, { userId, includeClosed: true });
+    const lookup: SegmentAccountLookup = new Map(
+      accounts.map((account) => [account.id, { type: account.type, subtype: account.subtype }]),
+    );
+    return readNetWorthBuckets(database, { userId, from, to, bucketing, accounts: lookup });
   };
 
   return async (app) => {
@@ -239,7 +304,15 @@ export const netWorthRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             'snapshot attempt failed on a missing FX rate — 08 §6.6’s manual-entry affordance is ' +
             '`POST /net-worth/fx-rates`.',
           tags: ['planning'],
-          querystring: z.object({ from: dateOnly.optional(), to: dateOnly.optional() }),
+          querystring: z.object({
+            from: dateOnly.optional(),
+            to: dateOnly.optional(),
+            /**
+             * WP 10.13: also return `buckets` — the window cut into days, ISO weeks (Monday–Sunday) or
+             * calendar months, each with its closing day's figure and segments by account type.
+             */
+            bucket: z.enum(NET_WORTH_BUCKETINGS).optional(),
+          }),
           response: {
             200: z.object({
               from: dateOnly,
@@ -247,6 +320,10 @@ export const netWorthRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               baseCurrency: z.string().length(3),
               points: z.array(seriesPointWire),
               lastSnapshotFailure: snapshotFxFailureWire.nullable(),
+              /** The bucketing asked for, or `null` when `bucket` was not given. */
+              bucketing: z.enum(NET_WORTH_BUCKETINGS).nullable(),
+              /** `null` when `bucket` was not given; otherwise every bucket in the window, oldest first. */
+              buckets: z.array(bucketWire).nullable(),
             }),
             ...problems(400, 401, 503),
           },
@@ -283,10 +360,14 @@ export const netWorthRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           });
         }
 
-        const [spine, detail, lastSnapshotFailure] = await Promise.all([
+        const bucketing: NetWorthBucketing | null = request.query.bucket ?? null;
+        const [spine, detail, lastSnapshotFailure, buckets] = await Promise.all([
           readSeries(database, { userId: session.userId, from, to }),
           readDetail(database, session.userId, from, to),
           readLastSnapshotFxFailure(deps.pool, session.userId),
+          bucketing === null
+            ? Promise.resolve(null)
+            : readBucketsFor(session.userId, from, to, bucketing),
         ]);
 
         // `base_currency` is per row. The window's currency is whatever the
@@ -334,7 +415,92 @@ export const netWorthRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             };
           }),
           lastSnapshotFailure,
+          bucketing,
+          buckets:
+            buckets === null
+              ? null
+              : buckets.map((bucket) => {
+                  const row = bucket.asOfDate === null ? undefined : detail.get(bucket.asOfDate);
+                  const code = bucket.currency ?? baseCurrency ?? 'USD';
+                  return {
+                    start: bucket.start,
+                    end: bucket.end,
+                    asOfDate: bucket.asOfDate,
+                    netWorth:
+                      bucket.netWorthMinor === null
+                        ? null
+                        : { minor: bucket.netWorthMinor.toString(), currency: code },
+                    segments: bucket.segments.map((segment) => ({
+                      kind: segment.kind,
+                      amount: { minor: segment.amountMinor.toString(), currency: code },
+                      accounts: segment.accounts,
+                    })),
+                    sealed: row?.sealed_at != null,
+                    source: row?.source ?? null,
+                  };
+                }),
         };
+      },
+    );
+
+    app.get(
+      '/net-worth/milestones',
+      {
+        schema: {
+          operationId: 'listNetWorthMilestones',
+          summary: 'Round net-worth figures crossed and not yet dismissed, newest first',
+          description:
+            'WP 10.13: written by the snapshotter when the latest net worth crosses $10k, $25k, $50k, ' +
+            '$100k or a further $100k going up, or the zero line either way — once per holder per ' +
+            'milestone, ever. The dashboard shows the newest as a one-line notice until dismissed.',
+          tags: ['planning'],
+          response: {
+            200: z.object({ milestones: z.array(milestoneWire) }),
+            ...problems(401, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const milestones = await listUndismissedMilestones(database, session.userId);
+        return {
+          milestones: milestones.map((milestone) => ({
+            id: milestone.id,
+            milestone: {
+              minor: milestone.milestoneMinor.toString(),
+              currency: milestone.currency,
+            },
+            direction: milestone.direction,
+            crossedOn: milestone.crossedOn,
+            previous: { minor: milestone.previousMinor.toString(), currency: milestone.currency },
+            latest: { minor: milestone.latestMinor.toString(), currency: milestone.currency },
+          })),
+        };
+      },
+    );
+
+    app.post(
+      '/net-worth/milestones/dismiss',
+      {
+        schema: {
+          operationId: 'dismissNetWorthMilestones',
+          summary: 'Dismiss milestone notices; a dismissed milestone is never shown again',
+          tags: ['planning'],
+          body: z.object({ ids: z.array(z.uuid()).min(1).max(100) }),
+          response: {
+            200: z.object({ dismissed: z.int().nonnegative() }),
+            ...problems(400, 401, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const dismissed = await dismissMilestones(database, {
+          userId: session.userId,
+          ids: request.body.ids,
+          clock,
+        });
+        return { dismissed };
       },
     );
 

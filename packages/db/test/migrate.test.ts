@@ -549,6 +549,12 @@ describeWithDb('runMigrations', () => {
       //   --, pillars JSONB of exactly six -- health_score_snapshots_six_pillars --, computed_at; unique per
       //   (user_id, as_of_date)). Written by the 04:10 insights.health_snapshot job or on demand by GET
       //   /insights/health; never backfilled. Expand-only; references only users. Not exported (derived).
+      // 0049_net_worth_milestones (WP 10.13): one new @ctx/planning table, net_worth_milestones (a round
+      //   net-worth figure crossed: milestone_minor >= 0, direction up|down -- down only for the zero line,
+      //   net_worth_milestones_down_is_zero_only --, currency, crossed_on, previous_minor and latest_minor
+      //   straddling it -- net_worth_milestones_figures_cross --, dismissed_at; unique per (user_id,
+      //   milestone_minor, direction)). Written by the snapshotter beside planning.NetWorthMilestoneCrossed.
+      //   Expand-only; references only users. Not exported (derived from net_worth_daily).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -617,6 +623,7 @@ describeWithDb('runMigrations', () => {
         'narrator_provider_consents',
         'narrator_settings',
         'net_worth_daily',
+        'net_worth_milestones',
         'notification_channels',
         'notification_outbox',
         'notification_rules',

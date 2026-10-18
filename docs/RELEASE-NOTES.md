@@ -9,6 +9,49 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.12: net worth by account type, scrubbable, and milestones
+
+**Status:** a patch release on v0.9.11. The tag `v0.9.12` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.12
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0049_net_worth_milestones` (expand-only: one new table recording each round net-worth
+figure you cross, once). Nothing is backfilled: milestones are noticed from the first snapshot after
+you upgrade.
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **Net worth is drawn by account type.** The dashboard's Net worth card and the full history show
+  one bar per period, split into property, cash, crypto, investments and other above the line and
+  liabilities below it, each in its own fixed colour, with your net worth as a line over the bars.
+  1M shows a bar per day, 3M and 6M a bar per week (Monday to Sunday) and 1Y and All a bar per
+  month; a week's or month's bar is the last recorded day in it. "View as table" lists every bar,
+  every account type and the net, and says which of those rules applies.
+- **Scrub it.** Move the pointer over the chart, or focus it and use ← → Home End: the bar is
+  picked out, the date, net worth and the change since the bar before and since the start of the
+  period (in money and as a percent) are shown above it, and the big figure at the top follows. A
+  percent is not shown when the starting figure is zero or negative; it says so instead. Leaving the
+  chart, Escape or moving focus away returns everything to today.
+- **The legend** names each account type you have, with its total at the bar you are looking at.
+- **The full history** now uses the same 1M 3M 6M 1Y All chips as the card (old links with
+  `netWorthRange=p30d`, `p90d`, `p1y` or `all` still work) and has its own figure at the top that
+  follows its own scrub.
+- **Milestones.** When your net worth crosses $10,000, $25,000, $50,000, $100,000 or any further
+  $100,000 — or rises above or falls below zero — the dashboard says so in one line the next time
+  you open it ("You crossed $50,000 in net worth on Oct 3"). Dismiss it and it does not come back.
+  Each milestone is noticed once, however often the figure moves back and forth.
+- Several currencies are still never added together: each is drawn as its own chart, and a currency
+  that no bar at the chosen scale ends on is named rather than silently missing.
+
 ## v0.9.11: financial health as a gauge, six pillars and a daily history
 
 **Status:** a patch release on v0.9.10. The tag `v0.9.11` is pushed by the maintainer once CI is green.

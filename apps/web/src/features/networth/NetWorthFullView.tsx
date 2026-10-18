@@ -3,7 +3,6 @@ import { useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 
 import type { SnapshotFxFailure } from '../../api/generated/types.gen.ts';
-import { NetWorthAreaChart } from '../../charts/NetWorthAreaChart.tsx';
 import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Label } from '../../components/ui/label.tsx';
@@ -13,11 +12,18 @@ import { formatDateOnly } from '../../lib/date.ts';
 import { useStepUpRetry } from '../../lib/step-up.ts';
 import { UnvaluedAccountsNotice } from '../accounts/UnvaluedAccountsNotice.tsx';
 import { useNetWorthSeriesQuery, useSetManualFxRateMutation } from './api.ts';
-import { groupByCurrency, interpolatedCount, missingCount, type RawSeriesPoint } from './series.ts';
+import { NetWorthHero } from './NetWorthHero.tsx';
+import {
+  heroSelectionOf,
+  NetWorthStackedCharts,
+  type NetWorthSelection,
+} from './NetWorthStackedCharts.tsx';
+import { PeriodChips } from './PeriodChips.tsx';
+import { interpolatedCount, missingCount, type RawSeriesPoint } from './series.ts';
 import {
   DEFAULT_NET_WORTH_RANGE,
-  NET_WORTH_RANGES,
-  NET_WORTH_RANGE_LABELS,
+  PERIOD_FOR_RANGE,
+  RANGE_FOR_PERIOD,
   type NetWorthRange,
 } from './search.ts';
 
@@ -41,11 +47,12 @@ export function NetWorthFullView({ range, onRangeChange }: NetWorthFullViewProps
   // `?? []` mints a fresh array reference every render, which would defeat
   // this memo entirely (`react-hooks/exhaustive-deps` flags exactly that).
   const points = useMemo(() => seriesQuery.data?.points ?? [], [seriesQuery.data]);
-  const currencySeries = useMemo(() => groupByCurrency(points), [points]);
   const interpolated = interpolatedCount(points);
   const missing = missingCount(points);
-  const hasMultipleCurrencies = currencySeries.length > 1;
   const snapshotFailure = seriesQuery.data?.lastSnapshotFailure ?? null;
+  const period = PERIOD_FOR_RANGE[effectiveRange];
+  // WP 10.13: the scrub here drives this view's own hero, as on the widget.
+  const [selection, setSelection] = useState<NetWorthSelection | null>(null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -64,21 +71,21 @@ export function NetWorthFullView({ range, onRangeChange }: NetWorthFullViewProps
 
       <UnvaluedAccountsNotice />
 
+      <NetWorthHero
+        period={period}
+        selection={heroSelectionOf(seriesQuery.data, period, selection)}
+      />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div role="group" aria-label="Date range" className="flex gap-1">
-          {NET_WORTH_RANGES.map((option) => (
-            <Button
-              key={option}
-              type="button"
-              variant={option === effectiveRange ? 'secondary' : 'ghost'}
-              size="sm"
-              aria-pressed={option === effectiveRange}
-              onClick={() => onRangeChange?.(option)}
-            >
-              {NET_WORTH_RANGE_LABELS[option]}
-            </Button>
-          ))}
-        </div>
+        {/* V2's chips (WP 10.13); the URL keeps its range values (`PERIOD_FOR_RANGE`). */}
+        <PeriodChips
+          label="Date range"
+          value={period}
+          onChange={(next) => {
+            setSelection(null);
+            onRangeChange?.(RANGE_FOR_PERIOD[next]);
+          }}
+        />
         <Button
           type="button"
           variant="ghost"
@@ -90,13 +97,6 @@ export function NetWorthFullView({ range, onRangeChange }: NetWorthFullViewProps
         </Button>
       </div>
 
-      {hasMultipleCurrencies && (
-        <p className="text-caption text-text-muted">
-          This window spans more than one currency. Each currency is drawn as its own line — never
-          summed into one total, because no FX rate has been recorded to combine them.
-        </p>
-      )}
-
       {snapshotFailure !== null && <SnapshotFxFailureBanner failure={snapshotFailure} />}
 
       {seriesQuery.isLoading && <Skeleton height={280} variant="block" />}
@@ -105,21 +105,15 @@ export function NetWorthFullView({ range, onRangeChange }: NetWorthFullViewProps
         <p className="text-small text-text-muted">Net worth history isn't available right now.</p>
       )}
 
-      {seriesQuery.isSuccess && currencySeries.length === 0 && (
-        <p className="text-small text-text-muted">No net worth history in this window yet.</p>
+      {seriesQuery.isSuccess && (
+        <NetWorthStackedCharts
+          data={seriesQuery.data}
+          period={period}
+          selection={selection}
+          onSelectionChange={setSelection}
+          height={280}
+        />
       )}
-
-      {seriesQuery.isSuccess &&
-        currencySeries.map((series) => (
-          <NetWorthAreaChart
-            key={series.currency}
-            data={series.points}
-            color={series.color}
-            seriesLabel={hasMultipleCurrencies ? series.currency : undefined}
-            height={280}
-            showSealedLegend
-          />
-        ))}
 
       {seriesQuery.isSuccess && (
         <p className="text-caption text-text-muted">

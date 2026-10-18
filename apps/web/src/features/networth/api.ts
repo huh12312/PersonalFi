@@ -2,14 +2,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
+  dismissNetWorthMilestonesMutation,
   getNetWorthSeriesOptions,
+  listNetWorthMilestonesOptions,
   setManualFxRateMutation,
 } from '../../api/generated/@tanstack/react-query.gen.ts';
+import { BUCKETING_FOR_PERIOD } from './stacked.ts';
 import {
+  PERIOD_FOR_RANGE,
   type DashboardPeriod,
   type NetWorthRange,
   windowForPeriod,
-  windowForRange,
 } from './search.ts';
 
 /** Today, UTC, date-only — matches `apps/api/src/routes/investments.ts`'s `todayFor` shape closely enough for a client-side default window. */
@@ -18,24 +21,40 @@ function todayIso(): string {
 }
 
 /**
- * `GET /net-worth/series` for one named range. `staleTime` is short: a
- * "Refresh" action (the re-sync affordance in `NetWorthFullView`) should be
- * able to pull a genuinely new response rather than serve a cached one.
+ * `GET /net-worth/series` for the full view's URL range — the same request as the dashboard period it maps to
+ * (`PERIOD_FOR_RANGE`), buckets included. `staleTime` is short: a "Refresh" action (the re-sync affordance in
+ * `NetWorthFullView`) should be able to pull a genuinely new response rather than serve a cached one.
  */
 export function useNetWorthSeriesQuery(range: NetWorthRange) {
-  const { from, to } = windowForRange(range, todayIso());
+  return useNetWorthSeriesPeriodQuery(PERIOD_FOR_RANGE[range]);
+}
+
+/**
+ * `GET /net-worth/series` for one dashboard period (WP 10.9), with the period's buckets by account type
+ * (WP 10.13: by day for 1M, by week for 3M and 6M, by month for 1Y and All). The widget's hero, its chart and
+ * the full view at the same period are one request.
+ */
+export function useNetWorthSeriesPeriodQuery(period: DashboardPeriod) {
+  const { from, to } = windowForPeriod(period, todayIso());
   return useQuery({
-    ...getNetWorthSeriesOptions({ query: { from, to } }),
+    ...getNetWorthSeriesOptions({ query: { from, to, bucket: BUCKETING_FOR_PERIOD[period] } }),
     staleTime: 10_000,
   });
 }
 
-/** `GET /net-worth/series` for one dashboard period (WP 10.9). `3M` is the same request as `p90d`. */
-export function useNetWorthSeriesPeriodQuery(period: DashboardPeriod) {
-  const { from, to } = windowForPeriod(period, todayIso());
-  return useQuery({
-    ...getNetWorthSeriesOptions({ query: { from, to } }),
-    staleTime: 10_000,
+/** `GET /net-worth/milestones` (WP 10.13): round figures crossed and not yet dismissed, newest first. */
+export function useNetWorthMilestonesQuery() {
+  return useQuery({ ...listNetWorthMilestonesOptions(), staleTime: 60_000 });
+}
+
+/** `POST /net-worth/milestones/dismiss` — remembered on the server; the notice never returns. */
+export function useDismissNetWorthMilestonesMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    ...dismissNetWorthMilestonesMutation(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: listNetWorthMilestonesOptions().queryKey });
+    },
   });
 }
 

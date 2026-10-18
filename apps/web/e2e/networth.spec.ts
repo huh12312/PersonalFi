@@ -5,7 +5,9 @@ import type { Page } from '@playwright/test';
 import { expectNoAxeViolations, setTheme } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installNetworthMocks } from './support/mock-networth.ts';
+import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
+import { hideDevtools, visit } from './support/sweep.ts';
 
 /**
  * `evidenceDir` arrives as a test option set in `playwright.config.ts`'s
@@ -100,6 +102,13 @@ test('two currencies render as two series and never one sum', async ({ page }) =
   // without weakening what either screen has to prove.
   const dialog = page.getByRole('dialog', { name: 'Net worth over time' });
 
+  // WP 10.13: at the default 3M the bars are weekly and the fixture's five days are one week that closes on a
+  // USD day — the CAD day is left out *and named*. By day (1M) each currency is its own chart.
+  await expect(dialog.getByTestId('net-worth-currency-note')).toContainText(
+    'Not drawn at this scale: CAD',
+  );
+  await dialog.getByRole('button', { name: /^1M/ }).click();
+
   await expect(dialog.getByTestId('net-worth-series-label-USD')).toBeVisible();
   await expect(dialog.getByTestId('net-worth-series-label-CAD')).toBeVisible();
   await expect(dialog.getByText(/never summed into one total, because no FX rate/)).toBeVisible();
@@ -119,17 +128,17 @@ test('the range control round-trips through the URL and survives a reload', asyn
   await login(page);
   await openFullHistory(page);
 
-  await page.getByRole('button', { name: '1 year' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Net worth over time' });
+  await dialog.getByRole('button', { name: /^1Y/ }).click();
   await expect(page).toHaveURL(/netWorthRange=p1y/);
 
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
   await openFullHistory(page);
 
-  await expect(page.getByRole('button', { name: '1 year' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
+  await expect(
+    page.getByRole('dialog', { name: 'Net worth over time' }).getByRole('button', { name: /^1Y/ }),
+  ).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('the net-worth screens are axe clean in both themes', async ({ page, evidenceDir }) => {
@@ -202,4 +211,194 @@ test('a watch-only wallet links from the add-connection dialog and the private-k
     .poll(() => state.lastConnectionBody)
     .toEqual({ provider: 'wallet_rpc', input: { chain: 'ethereum', value: address } });
   expect(state.connectionRequiredStepUp).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// WP 10.13 (V6): net worth stacked by account type, the scrub, the milestone notice
+// ---------------------------------------------------------------------------
+
+/**
+ * Against the whole app's mocks with the stacked holder (`installSweepMocks`'s default net-worth layer: every
+ * account type, two years of days up to today, today live, one undismissed $200,000 milestone). Arithmetic is
+ * the unit tests'; these prove the screen: the chips switch the bucketing, the keyboard scrub drives the hero
+ * and returns it, and the milestone notice stays dismissed across a reload.
+ */
+test.describe('WP 10.13 net worth stacked', () => {
+  const widget = (page: Page) => page.locator('[data-widget="net-worth"]');
+
+  async function openDashboard(page: Page) {
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    const mocks = await installSweepMocks(page);
+    await visit(page, '/');
+    await expect(widget(page).getByTestId('net-worth-slider')).toBeVisible();
+    return mocks;
+  }
+
+  test('the period chips switch the bucketing, and the table says which', async ({ page }) => {
+    await openDashboard(page);
+    const card = widget(page);
+    const caption = async () => {
+      await card.getByRole('button', { name: /^View as table/ }).click();
+      const name = (await card.locator('table caption').textContent()) ?? '';
+      const rows = await card.getByRole('table').getByRole('row').count();
+      await card.getByRole('button', { name: /^Hide table/ }).click();
+      return { name, rows };
+    };
+    // 3M (the default): weekly bars, liabilities below the line.
+    expect((await caption()).name).toMatch(/One bar per week \(Monday to Sunday\)/);
+    await expect(card.locator('path[data-kind="liabilities"]').first()).toHaveAttribute(
+      'data-side',
+      'down',
+    );
+    await expect(card.locator('path[data-kind="property"]').first()).toHaveAttribute(
+      'data-side',
+      'up',
+    );
+    await card.getByRole('button', { name: /^1M/ }).click();
+    const daily = await caption();
+    expect(daily.name).toMatch(/One bar per day\./);
+    expect(daily.rows).toBe(31); // header + 30 days
+    await card.getByRole('button', { name: /^1Y/ }).click();
+    const monthly = await caption();
+    expect(monthly.name).toMatch(/One bar per month/);
+    expect(monthly.rows).toBeGreaterThanOrEqual(13);
+    // The legend names every account type present, with its total.
+    for (const kind of ['Property', 'Cash', 'Crypto', 'Investments', 'Other', 'Liabilities']) {
+      await expect(card.getByTestId('net-worth-legend')).toContainText(kind);
+    }
+  });
+
+  test('scrub with the keyboard: the hero follows the selection and returns to the latest on release', async ({
+    page,
+  }) => {
+    await openDashboard(page);
+    const card = widget(page);
+    const slider = card.getByTestId('net-worth-slider');
+    const tile = card.locator('[data-stat-tile]').first();
+    const latestHero = (await tile.textContent()) ?? '';
+    await slider.focus();
+    await page.keyboard.press('ArrowLeft');
+    const selection = card.getByTestId('net-worth-hero-selection');
+    await expect(selection).toBeVisible();
+    const readoutNet = await card.getByTestId('net-worth-readout-net').innerText();
+    await expect(tile).toContainText(readoutNet);
+    await expect(tile).not.toHaveText(latestHero);
+    await expect(card.getByTestId('net-worth-announcement')).toContainText('net worth');
+    await expect(card.locator('g[data-dimmed="true"]').first()).toBeAttached();
+
+    await page.keyboard.press('Home');
+    await expect(slider).toHaveAttribute('aria-valuenow', '1');
+    await expect(card.getByTestId('net-worth-readout-first')).toHaveCount(0);
+    await page.keyboard.press('End');
+    const last = await slider.getAttribute('aria-valuemax');
+    await expect(slider).toHaveAttribute('aria-valuenow', last ?? '');
+
+    await page.keyboard.press('Escape');
+    await expect(selection).toHaveCount(0);
+    await expect(tile).toHaveText(latestHero);
+    await expect(tile).toContainText('live, may still change');
+
+    // The pointer too: hovering selects, leaving releases.
+    const surface = card.getByTestId('net-worth-scrub-surface');
+    const box = await surface.boundingBox();
+    await page.mouse.move((box?.x ?? 0) + 40, (box?.y ?? 0) + 40);
+    await expect(selection).toBeVisible();
+    await page.mouse.move(5, 5);
+    await expect(selection).toHaveCount(0);
+  });
+
+  test('the full history draws the same chart, with its own hero following its own scrub', async ({
+    page,
+  }) => {
+    await openDashboard(page);
+    await page.getByRole('button', { name: 'View full history' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Net worth over time' });
+    await expect(dialog.getByTestId('net-worth-slider')).toBeVisible();
+    await dialog.getByRole('button', { name: /^6M/ }).click();
+    await expect(page).toHaveURL(/netWorthRange=p182d/);
+    await dialog.getByTestId('net-worth-slider').focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(dialog.getByTestId('net-worth-hero-selection')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog.getByTestId('net-worth-hero-selection')).toHaveCount(0);
+  });
+
+  test('the milestone notice appears once, and stays dismissed after a reload', async ({
+    page,
+  }) => {
+    const mocks = await openDashboard(page);
+    const notice = page.getByTestId('net-worth-milestone');
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveText(/You crossed \$200,000 in net worth on [A-Z][a-z]{2} \d{1,2}/);
+    await expect(notice).toHaveAttribute('role', 'status');
+    await notice.getByRole('button', { name: /^Dismiss/ }).click();
+    await expect(notice).toHaveCount(0);
+    expect(mocks.networth.dismissedMilestones).toEqual(['01920000-0000-7000-8000-00000000d013']);
+    await page.reload();
+    await expect(widget(page).getByTestId('net-worth-slider')).toBeVisible();
+    await expect(page.getByTestId('net-worth-milestone')).toHaveCount(0);
+  });
+
+  test('axe-clean in both themes with a bucket selected, on the dashboard and in the full history', async ({
+    page,
+  }) => {
+    await openDashboard(page);
+    await hideDevtools(page);
+    await widget(page).getByTestId('net-worth-slider').focus();
+    await page.keyboard.press('ArrowLeft');
+    for (const theme of ['light', 'dark'] as const) {
+      await setTheme(page, theme);
+      await expectNoAxeViolations(page, `WP 10.13 dashboard, a bucket selected (${theme})`);
+    }
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'View full history' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Net worth over time' });
+    await dialog.getByTestId('net-worth-slider').focus();
+    await page.keyboard.press('ArrowLeft');
+    for (const theme of ['light', 'dark'] as const) {
+      await setTheme(page, theme);
+      await expectNoAxeViolations(page, `WP 10.13 full history, a bucket selected (${theme})`);
+    }
+  });
+
+  test('WP 10.13 evidence: the chart with a selection and the dashboard widget, light and dark, at 1280 and 390', async ({
+    page,
+    evidenceDir,
+  }) => {
+    test.setTimeout(180_000);
+    for (const [width, height] of [
+      [1280, 1100],
+      [390, 2400],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await installSweepMocks(page);
+      await visit(page, '/');
+      await hideDevtools(page);
+      const card = widget(page);
+      await expect(card.getByTestId('net-worth-slider')).toBeVisible();
+      for (const theme of ['light', 'dark'] as const) {
+        await setTheme(page, theme);
+        await page.waitForTimeout(400);
+        await card.screenshot({
+          path: `${screenshotDir(evidenceDir)}wp10.13-widget-${theme}-${String(width)}.png`,
+          animations: 'disabled',
+        });
+      }
+      await page.getByRole('button', { name: 'View full history' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Net worth over time' });
+      await dialog.getByTestId('net-worth-slider').focus();
+      for (let n = 0; n < 4; n += 1) await page.keyboard.press('ArrowLeft');
+      await expect(dialog.getByTestId('net-worth-hero-selection')).toBeVisible();
+      for (const theme of ['light', 'dark'] as const) {
+        await setTheme(page, theme);
+        await page.waitForTimeout(400);
+        await dialog.screenshot({
+          path: `${screenshotDir(evidenceDir)}wp10.13-chart-selected-${theme}-${String(width)}.png`,
+          animations: 'disabled',
+        });
+      }
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('Escape');
+    }
+  });
 });

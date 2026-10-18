@@ -1016,6 +1016,85 @@ test.describe('WP 10.12 health gauge with reduced motion', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 7e. WP 10.13: net worth stacked by account type, with a bucket selected, and the full history
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep walks `/` as it opens (the stacked chart at 3M with no selection, the milestone notice, every
+ * reachable dialog including the full history). These walk the states it never reaches: a bucket **selected** by
+ * keyboard (the dimmed bars, the crosshair, the readout, the hero following) on the dashboard and inside the full
+ * history — both themes at 1280 and 320 px, 200 % zoom with 1.4.12 text spacing, and reduced motion. The
+ * keyboard journey is in `a11y-keyboard.spec.ts`.
+ */
+test.describe('WP 10.13 net worth stacked, a bucket selected', () => {
+  async function open(page: Page, where: 'dashboard' | 'full history'): Promise<void> {
+    await installSweepMocks(page);
+    await visit(page, '/');
+    await hideDevtools(page);
+    const card = page.locator('[data-widget="net-worth"]');
+    await expect(card.getByTestId('net-worth-slider')).toBeVisible();
+    if (where === 'full history') {
+      await card.getByRole('button', { name: 'View full history' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Net worth over time' });
+      await dialog.getByTestId('net-worth-slider').focus();
+    } else {
+      await card.getByTestId('net-worth-slider').focus();
+    }
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.getByTestId('net-worth-hero-selection').first()).toBeVisible();
+  }
+
+  for (const where of ['dashboard', 'full history'] as const) {
+    test(`${where}: axe-clean in both themes, at 1280 and at 320 px`, async ({ page }) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await open(page, where);
+      await scanBothThemes(page, `/ net worth ${where}, a bucket selected`);
+      await page.setViewportSize(REFLOW);
+      // The chart re-measures its parent through visx's `ParentSize`, debounced 300 ms; a page opened at 320 px
+      // (the route sweep) never sees the wide frame at all. Wait out the debounce, then judge.
+      await page.waitForTimeout(600);
+      expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+      await scanBothThemes(page, `/ net worth ${where}, a bucket selected, at 320 px`);
+    });
+  }
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    for (const where of ['dashboard', 'full history'] as const) {
+      test(`${where}: nothing is lost`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, where);
+        expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+        await scanBothThemes(page, `/ net worth ${where} at 200 %`);
+        const before = new Set(await clippedTextElements(page));
+        await page.addStyleTag({ content: TEXT_SPACING });
+        await page.waitForTimeout(100);
+        const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+        expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+      });
+    }
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+    test('nothing animates while scrubbing', async ({ page }) => {
+      test.setTimeout(120_000);
+      await open(page, 'dashboard');
+      expect(await motionOffenders(page)).toEqual([]);
+      const durations = await page
+        .locator(
+          '[data-widget="net-worth"] [data-bucket], [data-widget="net-worth"] [data-net-dot]',
+        )
+        .evaluateAll((nodes) => nodes.map((n) => getComputedStyle(n).transitionDuration));
+      expect(durations.length).toBeGreaterThan(0);
+      expect(new Set(durations)).toEqual(new Set(['0s']));
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 8. A picture of every route, in both themes (evidence, written deliberately)
 // ---------------------------------------------------------------------------
 

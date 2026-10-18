@@ -18,6 +18,11 @@ import {
   CASH_FLOW_MARK_ROLES,
   CASH_FLOW_TEXT_ROLES,
 } from '../features/cash-flow/charts/cash-flow-chart-tokens.ts';
+import {
+  NET_WORTH_CHART_TOKENS,
+  NET_WORTH_MARK_ROLES,
+  NET_WORTH_TEXT_ROLES,
+} from '../features/networth/net-worth-chart-tokens.ts';
 import { HEALTH_CHART_TOKENS } from '../features/health/health-chart-tokens.ts';
 import { CHART_HUES } from '@core/kernel';
 
@@ -732,6 +737,50 @@ describe('the cash flow bars chart (WP 10.10)', () => {
         }
         for (const role of CASH_FLOW_TEXT_ROLES) {
           const token = CASH_FLOW_CHART_TOKENS[role];
+          const r = ratio(colorOf(theme, token), surface);
+          if (r < 4.5) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
+        }
+      }
+      expect(failing).toEqual([]);
+    });
+  }
+});
+
+/**
+ * `NetWorthStackedChart.tsx` (WP 10.13) draws only with `net-worth-chart-tokens.ts`'s roles (`netWorthVar(role)`)
+ * and the account-type fills (`kindFillVar` → `--chart-fill-<hue>`): the net line, the zero line, the crosshair
+ * and the six account fills at 3:1 on every chart surface, the tick text at 4.5:1. (A selected-bucket band on
+ * `--bg-secondary` was tried first and refused here: the orange fill falls to 2.93:1 on it in the light theme.)
+ */
+describe('the stacked net worth chart (WP 10.13)', () => {
+  it('draws only with roles this file can measure', () => {
+    const chart = Object.entries(sources).find(([path]) =>
+      path.endsWith('features/networth/NetWorthStackedChart.tsx'),
+    )?.[1];
+    expect(chart).toBeDefined();
+    const raw = [...(chart ?? '').matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]);
+    expect(raw).toEqual([]);
+    expect((chart ?? '').match(/netWorthVar\(/g)?.length ?? 0).toBeGreaterThan(8);
+  });
+
+  for (const theme of THEMES) {
+    it(`every mark role clears 3:1 and every text role 4.5:1 on each chart surface and the selected band in the ${theme} theme`, () => {
+      const failing: string[] = [];
+      for (const bg of CHART_SURFACES) {
+        const surface = colorOf(theme, bg);
+        for (const role of NET_WORTH_MARK_ROLES) {
+          const token = NET_WORTH_CHART_TOKENS[role];
+          const r = ratio(colorOf(theme, token), surface);
+          if (r < 3) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
+        }
+        // The six account-type fills (V1's fixed mapping) sit on the same surfaces and on the selected band.
+        for (const hue of ['teal', 'indigo', 'orange', 'brown', 'red', 'neutral']) {
+          const token = `--chart-fill-${hue}`;
+          const r = ratio(colorOf(theme, token), surface);
+          if (r < 3) failing.push(`account fill ${token} on ${bg}: ${r.toFixed(2)}:1`);
+        }
+        for (const role of NET_WORTH_TEXT_ROLES) {
+          const token = NET_WORTH_CHART_TOKENS[role];
           const r = ratio(colorOf(theme, token), surface);
           if (r < 4.5) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
         }

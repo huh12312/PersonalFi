@@ -338,6 +338,10 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'health_score_snapshots',
     'insights: the daily health score (WP 10.12), derived from the snapshot like health_scores above, not data the holder entered; a restore recomputes from the next day on and never backfills.',
   ],
+  [
+    'net_worth_milestones',
+    'planning: a round net-worth figure crossed (WP 10.13), derived from net_worth_daily by the snapshotter, not data the holder entered; a restore detects from the next crossing on and never backfills.',
+  ],
   ['notification_channels', "notifications (WP 2.4); not named in this WP's export scope."],
   ['notification_rules', "notifications (WP 2.4); not named in this WP's export scope."],
   ['notification_outbox', "notifications (WP 2.4); not named in this WP's export scope."],

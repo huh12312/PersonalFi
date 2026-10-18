@@ -33,6 +33,7 @@
 import { appendEvent } from '@core/platform';
 import type { Clock } from '@core/kernel';
 import { NetWorthSnapshotTaken } from './events.ts';
+import { recordMilestoneCrossings } from './milestones.ts';
 import { computeNetWorth, type NetWorthSnapshot } from './net-worth.ts';
 import type { SnapshotPorts } from './ports.ts';
 import { isSealable, openDateIn, SealedRowImmutable } from './seal.ts';
@@ -103,6 +104,15 @@ export async function runSnapshot(
   await emitSnapshotTaken(executor, context, snapshot, {
     revision: row.revision,
     sealed: row.sealedAt !== null,
+  });
+
+  // 3. WP 10.13: the open day is the latest day there is, so this is where a round figure is crossed.
+  //    Same transaction — a milestone announced for a day that rolled back would be a notice about a
+  //    figure nobody stored. Once per holder per milestone (`milestones.ts`); a correction never calls it.
+  await recordMilestoneCrossings(executor, context, {
+    asOfDate: row.asOfDate,
+    baseCurrency: row.baseCurrency,
+    netWorthMinor: row.netWorthMinor,
   });
 
   return {

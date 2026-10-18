@@ -163,6 +163,31 @@ export {
 // --- the snapshotter -------------------------------------------------------
 export { correctDay, runSnapshot, type SnapshotContext, type SnapshotResult } from './snapshot.ts';
 
+// --- WP 10.13: net worth by account type, bucketed; milestones (0049) -------
+export {
+  dismissMilestones,
+  listUndismissedMilestones,
+  milestonesCrossed,
+  recordMilestoneCrossings,
+  type MilestoneCrossing,
+  type MilestoneDirection,
+  type RecordedMilestone,
+} from './milestones.ts';
+export { NetWorthMilestoneCrossed } from './events.ts';
+export {
+  NET_WORTH_BUCKETINGS,
+  NET_WORTH_SEGMENT_KINDS,
+  bucketSpine,
+  bucketStartOf,
+  readNetWorthBuckets,
+  segmentKindOf,
+  type NetWorthBucket,
+  type NetWorthBucketing,
+  type NetWorthSegment,
+  type NetWorthSegmentKind,
+  type SegmentAccountLookup,
+} from './buckets.ts';
+
 // --- wiring: the consumer, the job, the schedule ---------------------------
 export {
   CONSUMED_EVENT_TYPES as NET_WORTH_CONSUMED_EVENT_TYPES,

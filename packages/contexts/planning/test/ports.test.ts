@@ -335,7 +335,7 @@ describe('the names the composition root registers', () => {
     // The registry list `apps/api` iterates; an appended-but-unregistered event
     // is invisible to the pump's upcasting and fails silently.
     // WP 4.1 appended GoalCreated and RiskProfileAnswered; WP 4.2, AssumptionsOverridden;
-    // WP 4.6, ProjectionCompleted and GoalOffTrack.
+    // WP 4.6, ProjectionCompleted and GoalOffTrack; WP 10.13, NetWorthMilestoneCrossed.
     expect(PLANNING_EVENTS.map((event) => event.type)).toEqual([
       'planning.NetWorthSnapshotTaken',
       'planning.GoalCreated',
@@ -343,6 +343,7 @@ describe('the names the composition root registers', () => {
       'planning.AssumptionsOverridden',
       'planning.ProjectionCompleted',
       'planning.GoalOffTrack',
+      'planning.NetWorthMilestoneCrossed',
     ]);
     // 0003_platform.sql's `domain_events.event_type` CHECK, read out of the file.
     for (const definition of PLANNING_EVENTS) {

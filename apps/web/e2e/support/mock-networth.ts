@@ -2,6 +2,7 @@
 import type { Page, Route } from '@playwright/test';
 
 import { createMarketDataKeysState, handleMarketDataKeys } from './mock-market-data-keys.ts';
+import { bucketsFor, pointsFor, splitDay, stackedDays } from './networth-buckets.ts';
 
 /**
  * WP 3.12's own mock module, entirely separate from `mock-api.ts` — the
@@ -116,7 +117,7 @@ function money(minor: string, currency: string) {
   return { minor, currency };
 }
 
-function seriesResponse(callCount: number) {
+function seriesResponse(callCount: number, bucket: string | null) {
   const liveMinor = String(105000 + callCount * 100); // changes every call — proves a real re-fetch happened
   return {
     from: SERIES_DAYS[0]!.asOfDate,
@@ -145,6 +146,64 @@ function seriesResponse(callCount: number) {
         correctionReason: null,
       };
     }),
+    // WP 10.13: the same five days as buckets (each split into cash, investments and liabilities that sum to it).
+    bucketing: bucket,
+    buckets:
+      bucket === null
+        ? null
+        : bucketsFor(
+            SERIES_DAYS.flatMap((day) => {
+              const isLive = day.asOfDate === '2026-09-05';
+              const minor = isLive ? liveMinor : day.minor;
+              const currency = isLive ? 'USD' : day.currency;
+              return minor === null || currency === null
+                ? []
+                : [
+                    splitDay(
+                      day.asOfDate,
+                      Number(minor),
+                      currency,
+                      day.sealed,
+                      day.source ?? 'observed',
+                    ),
+                  ];
+            }),
+            SERIES_DAYS[0]!.asOfDate,
+            SERIES_DAYS.at(-1)!.asOfDate,
+            bucket,
+          ),
+  };
+}
+
+/** WP 10.13: the stacked holder (`networth-buckets.ts`) over the requested window; `to` is today and live. */
+function stackedSeriesResponse(url: URL) {
+  const to = url.searchParams.get('to') ?? new Date().toISOString().slice(0, 10);
+  const from =
+    url.searchParams.get('from') ??
+    new Date(Date.parse(`${to}T00:00:00Z`) - 89 * 86_400_000).toISOString().slice(0, 10);
+  const bucket = url.searchParams.get('bucket');
+  const days = stackedDays(from, to, to);
+  return {
+    from,
+    to,
+    baseCurrency: 'USD',
+    points: pointsFor(days, from, to),
+    lastSnapshotFailure: null,
+    bucketing: bucket,
+    buckets: bucket === null ? null : bucketsFor(days, from, to, bucket),
+  };
+}
+
+/** The stacked holder's one milestone: $200,000, crossed three days ago. */
+function stackedMilestone() {
+  const crossedOn = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10);
+  return {
+    id: '01920000-0000-7000-8000-00000000d013',
+    milestone: { minor: '20000000', currency: 'USD' },
+    direction: 'up',
+    crossedOn,
+    previous: { minor: '19990000', currency: 'USD' },
+    latest: { minor: '20010000', currency: 'USD' },
   };
 }
 
@@ -233,15 +292,29 @@ export interface MockNetworthState {
   lastConnectionBody: unknown;
   /** Whether that call arrived only after a step-up assertion, same shape as `mock-investments.ts`'s basis-method state. */
   connectionRequiredStepUp: boolean;
+  /** WP 10.13: every `POST /net-worth/milestones/dismiss` body's ids, in order. */
+  dismissedMilestones: string[];
 }
 
-export async function installNetworthMocks(page: Page): Promise<MockNetworthState> {
+export interface NetworthMockOptions {
+  /**
+   * WP 10.13: serve the stacked holder (every account type, two years of days up to the requested `to`) and one
+   * undismissed milestone, instead of WP 3.12's five-day fixture. Dismissal is remembered for the page's life.
+   */
+  readonly stacked?: boolean;
+}
+
+export async function installNetworthMocks(
+  page: Page,
+  options: NetworthMockOptions = {},
+): Promise<MockNetworthState> {
   const state: MockNetworthState = {
     seriesCallCount: 0,
     lastPriorityBody: null,
     lastTestFetchBody: null,
     lastConnectionBody: null,
     connectionRequiredStepUp: false,
+    dismissedMilestones: [],
   };
   let authenticated = false;
   let steppedUp = false;
@@ -295,7 +368,28 @@ export async function installNetworthMocks(page: Page): Promise<MockNetworthStat
 
     if (path === '/api/net-worth/series' && method === 'GET') {
       state.seriesCallCount += 1;
-      return route.fulfill(json(seriesResponse(state.seriesCallCount)));
+      return route.fulfill(
+        json(
+          options.stacked === true
+            ? stackedSeriesResponse(url)
+            : seriesResponse(state.seriesCallCount, url.searchParams.get('bucket')),
+        ),
+      );
+    }
+
+    if (path === '/api/net-worth/milestones' && method === 'GET') {
+      const milestone = stackedMilestone();
+      const listed =
+        options.stacked === true && !state.dismissedMilestones.includes(milestone.id)
+          ? [milestone]
+          : [];
+      return route.fulfill(json({ milestones: listed }));
+    }
+
+    if (path === '/api/net-worth/milestones/dismiss' && method === 'POST') {
+      const body = request.postDataJSON() as { ids: string[] };
+      state.dismissedMilestones.push(...body.ids);
+      return route.fulfill(json({ dismissed: body.ids.length }));
     }
 
     // WP 10.4: Settings › Market data now opens with the key cards; answered here so this

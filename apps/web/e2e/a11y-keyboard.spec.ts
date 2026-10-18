@@ -817,3 +817,49 @@ test('dashboard (WP 10.9): Customize by keyboard — hide a widget with Space, m
   await expect(dialog).toBeHidden();
   await journey.expectFocus(/^Customize$/, 'focus returns to Customize when the dialog closes');
 });
+
+// ---------------------------------------------------------------------------
+// WP 10.13: the net-worth chart and the milestone notice, by keyboard
+// ---------------------------------------------------------------------------
+
+test('dashboard (WP 10.13): dismiss the milestone notice, Tab to the net-worth chart, scrub with arrows, Home, End and Escape; the hero follows; open the full history and close it', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const journey = await begin(page, 'net worth', '/');
+  const card = page.locator('[data-widget="net-worth"]');
+  const tile = card.locator('[data-stat-tile]').first();
+
+  await journey.tabTo(/^Dismiss/, { max: 40 });
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('net-worth-milestone')).toHaveCount(0);
+
+  const slider = await journey.tabTo(/^Net worth by account type: choose a week/, { max: 40 });
+  expect(slider.name).toMatch(/choose a week/);
+  const latest = (await tile.textContent()) ?? '';
+  await journey.press('ArrowLeft', 'ArrowLeft selects the week before the latest');
+  await expect(card.getByTestId('net-worth-hero-selection')).toBeVisible();
+  await expect(tile).not.toHaveText(latest);
+  await expect(card.getByTestId('net-worth-announcement')).toContainText('net worth');
+  await journey.press('Home', 'Home selects the first week');
+  await expect(card.getByTestId('net-worth-slider')).toHaveAttribute('aria-valuenow', '1');
+  await journey.press('End', 'End selects the latest week');
+  await journey.press('Escape', 'Escape releases the selection');
+  await expect(card.getByTestId('net-worth-hero-selection')).toHaveCount(0);
+  await expect(tile).toHaveText(latest);
+
+  await journey.tabTo(/^View full history$/, { max: 10 });
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Net worth over time' });
+  await expect(dialog).toBeVisible();
+  await journey.tabTo(/^Net worth by account type: choose a week/, { max: 30 });
+  await journey.press('ArrowLeft', 'ArrowLeft in the full history');
+  await expect(dialog.getByTestId('net-worth-hero-selection')).toBeVisible();
+  await page.keyboard.press('Escape'); // releases the selection
+  await page.keyboard.press('Escape'); // closes the dialog
+  await expect(dialog).toBeHidden();
+  await journey.expectFocus(
+    /^View full history$/,
+    'focus returns to the trigger when the dialog closes',
+  );
+});

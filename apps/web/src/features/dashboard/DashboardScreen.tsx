@@ -10,6 +10,7 @@ import { defaultLayout, normaliseLayout, visibleWidgets, WIDE_WIDGETS } from './
 import { renderWidget, type WidgetContext } from './widgets/registry.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
 import { cn } from '../../lib/cn.ts';
+import { MilestoneNotice } from '../networth/MilestoneNotice.tsx';
 
 /**
  * The dashboard as a widget grid (WP 10.9; docs/research/10-visual-design-notes.md §3 V2).
@@ -51,6 +52,8 @@ export function DashboardScreen(context: WidgetContext) {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* WP 10.13: a round net-worth figure crossed since the last visit, until dismissed. */}
+      <MilestoneNotice />
       <div className="flex items-center justify-end gap-2">
         <CustomizeDashboardSheet
           layout={layout}

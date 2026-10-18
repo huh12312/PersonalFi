@@ -66,6 +66,24 @@ export const netWorthDaily = pgTable('net_worth_daily', {
 export const NET_WORTH_SOURCES = ['observed', 'interpolated', 'corrected'] as const;
 export type NetWorthSource = (typeof NET_WORTH_SOURCES)[number];
 
+/**
+ * A round net-worth figure crossed, once per holder per milestone per direction (WP 10.13, migration 0049).
+ * The CHECKs (zero-only downwards, the figures straddle the milestone) and the unique index live in the
+ * migration.
+ */
+export const netWorthMilestones = pgTable('net_worth_milestones', {
+  id: idColumn(),
+  userId: userIdColumn(),
+  milestoneMinor: amountMinorColumn('milestone_minor').notNull(),
+  direction: text('direction').notNull(),
+  currency: currencyColumn('currency').notNull(),
+  crossedOn: dateColumn('crossed_on').notNull(),
+  previousMinor: amountMinorColumn('previous_minor').notNull(),
+  latestMinor: amountMinorColumn('latest_minor').notNull(),
+  dismissedAt: instantColumn('dismissed_at'),
+  createdAt: createdAtColumn(),
+});
+
 export * from './goals.ts';
 export * from './assumptions.ts';
 export * from './projections.ts';

@@ -35,6 +35,8 @@ const series = (points: Point[], baseCurrency = 'USD'): GetNetWorthSeriesRespons
   baseCurrency,
   points,
   lastSnapshotFailure: null,
+  bucketing: null,
+  buckets: null,
 });
 
 describe('pickSealedStart', () => {

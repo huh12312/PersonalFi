@@ -7,7 +7,7 @@ import { z } from 'zod';
  * because that is the one piece of state the dispatch names explicitly:
  * "URL state (range) round-trips."
  */
-export const NET_WORTH_RANGES = ['p30d', 'p90d', 'p1y', 'all'] as const;
+export const NET_WORTH_RANGES = ['p30d', 'p90d', 'p182d', 'p1y', 'all'] as const;
 
 export type NetWorthRange = (typeof NET_WORTH_RANGES)[number];
 
@@ -22,6 +22,7 @@ export type NetWorthSearch = z.infer<typeof netWorthSearchSchema>;
 export const NET_WORTH_RANGE_LABELS: Record<NetWorthRange, string> = {
   p30d: '30 days',
   p90d: '90 days',
+  p182d: '6 months',
   p1y: '1 year',
   all: 'All time',
 };
@@ -32,6 +33,7 @@ const MAX_SERIES_DAYS = 3653;
 const RANGE_DAYS: Record<NetWorthRange, number> = {
   p30d: 30,
   p90d: 90,
+  p182d: 182,
   p1y: 365,
   all: MAX_SERIES_DAYS,
 };
@@ -88,3 +90,24 @@ export function windowForPeriod(
     .slice(0, 10);
   return { from, to };
 }
+
+/**
+ * WP 10.13: the full view draws V2's chips (1M 3M 6M 1Y All) but keeps its URL values (`netWorthRange=p1y`
+ * still means a year), plus `p182d` for the six-month chip. Same windows, so the full view and the widget at
+ * the same period share one request.
+ */
+export const PERIOD_FOR_RANGE: Readonly<Record<NetWorthRange, DashboardPeriod>> = {
+  p30d: '1M',
+  p90d: '3M',
+  p182d: '6M',
+  p1y: '1Y',
+  all: 'ALL',
+};
+
+export const RANGE_FOR_PERIOD: Readonly<Record<DashboardPeriod, NetWorthRange>> = {
+  '1M': 'p30d',
+  '3M': 'p90d',
+  '6M': 'p182d',
+  '1Y': 'p1y',
+  ALL: 'all',
+};

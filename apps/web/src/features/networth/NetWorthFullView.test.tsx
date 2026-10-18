@@ -45,6 +45,27 @@ function seriesResponse(
       correctionReason: p.correctionReason ?? null,
     })),
     lastSnapshotFailure,
+    // WP 10.13: the stacked chart's buckets — one per valued day here (a fixture; the real route buckets by
+    // the period), each a single cash segment equal to its net.
+    bucketing: 'day',
+    buckets: points.map((p) => ({
+      start: p.asOfDate,
+      end: p.asOfDate,
+      asOfDate: p.minor === undefined ? null : p.asOfDate,
+      netWorth: p.minor === undefined ? null : { minor: p.minor, currency: p.currency ?? 'USD' },
+      segments:
+        p.minor === undefined
+          ? []
+          : [
+              {
+                kind: 'cash',
+                amount: { minor: p.minor, currency: p.currency ?? 'USD' },
+                accounts: 1,
+              },
+            ],
+      sealed: p.sealed ?? true,
+      source: p.minor === undefined ? null : (p.source ?? 'observed'),
+    })),
   };
 }
 
@@ -222,7 +243,7 @@ describe('NetWorthFullView', () => {
     const user = userEvent.setup();
 
     await screen.findByRole('group', { name: 'Date range' });
-    await user.click(screen.getByRole('button', { name: '1 year' }));
+    await user.click(screen.getByRole('button', { name: /^1Y/ }));
 
     expect(onRangeChange).toHaveBeenCalledWith('p1y');
   });

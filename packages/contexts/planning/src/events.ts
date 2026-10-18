@@ -202,6 +202,38 @@ export const GoalOffTrack = defineEvent({
   }),
 });
 
+/**
+ * The latest net worth crossed a round figure since the previous snapshot day (WP 10.13, V6).
+ *
+ * **Once per holder per milestone per direction, ever** — `net_worth_milestones`' unique index is the
+ * idempotency boundary, and the event is appended only for a row the snapshotter's insert actually wrote
+ * (a recomputed open day, a dip and a recovery, a replayed job all find the row taken and say nothing).
+ * A jump across two milestones is two rows and two events. The milestone and the two figures travel as
+ * minor units in strings, in `currency`: the consumer this exists for is the dashboard's one-line notice
+ * ("You crossed $50,000 in net worth on Oct 3"), and the figure *is* the fact — the same exception
+ * `NetWorthSnapshotTaken` makes for `netWorthMinor`. (The dispatch named it `networth.MilestoneCrossed`;
+ * every Planning event is `planning.`-prefixed, which `phase3-registration.test.ts` asserts.)
+ */
+export const NetWorthMilestoneCrossed = defineEvent({
+  type: 'planning.NetWorthMilestoneCrossed',
+  aggregateType: 'net_worth_milestone',
+  description:
+    'The latest net worth crossed a round figure since the previous snapshot day: 10k, 25k, 50k, ' +
+    '100k and every 100k after going up, or the zero line in either direction. Emitted at most once ' +
+    'per holder per milestone per direction (net_worth_milestones is the boundary); a jump across ' +
+    'two milestones emits two. Carries the milestone id, the milestone, the direction, the day and ' +
+    'the two figures compared, as minor units in strings in `currency`.',
+  schema: z.object({
+    milestoneId: z.uuid(),
+    milestoneMinor: minorUnits,
+    direction: z.enum(['up', 'down']),
+    currency: z.string().length(3),
+    crossedOn: isoDate,
+    previousMinor: minorUnits,
+    latestMinor: minorUnits,
+  }),
+});
+
 export const PLANNING_EVENTS: readonly EventDefinition[] = Object.freeze([
   NetWorthSnapshotTaken,
   GoalCreated,
@@ -209,4 +241,5 @@ export const PLANNING_EVENTS: readonly EventDefinition[] = Object.freeze([
   AssumptionsOverridden,
   ProjectionCompleted,
   GoalOffTrack,
+  NetWorthMilestoneCrossed,
 ]);

@@ -10,7 +10,13 @@ import { installCashFlowMocks } from './mock-cash-flow.ts';
 import { installDashboardMocks } from './mock-dashboard.ts';
 import { installGoalsMocks } from './mock-goals.ts';
 import { installInvestmentsMocks } from './mock-investments.ts';
-import { COINBASE_CONNECTOR, installNetworthMocks, WALLETRPC_CONNECTOR } from './mock-networth.ts';
+import {
+  COINBASE_CONNECTOR,
+  installNetworthMocks,
+  WALLETRPC_CONNECTOR,
+  type MockNetworthState,
+  type NetworthMockOptions,
+} from './mock-networth.ts';
 import { installPlanMocks } from './mock-plan.ts';
 import { installRecurringInsightsMocks } from './mock-recurring-insights.ts';
 
@@ -30,6 +36,8 @@ import { installRecurringInsightsMocks } from './mock-recurring-insights.ts';
 export interface SweepMocks {
   /** `METHOD /path` of every API call no layer answered. */
   readonly unmocked: string[];
+  /** WP 10.13: the net-worth layer's state (the milestone dismissals it has seen). */
+  readonly networth: MockNetworthState;
 }
 
 export interface SweepOptions {
@@ -39,6 +47,12 @@ export interface SweepOptions {
    * account it is about; the list screens need the general fixture. Default `false`.
    */
   readonly accountSettings?: boolean;
+  /**
+   * WP 10.13: the net-worth layer. Default `{ stacked: true }` — a holder with every account type and two years
+   * of days, so the dashboard and the full history draw the stacked chart with real bars, and one undismissed
+   * milestone. `{}` is WP 3.12's five-day fixture.
+   */
+  readonly networth?: NetworthMockOptions;
 }
 
 export async function installSweepMocks(
@@ -69,7 +83,7 @@ export async function installSweepMocks(
   // every screen shares (`/api/accounts`, `/api/transactions`, `/api/connections`, the session), the
   // feature fixtures before it for the paths only they know.
   await installBudgetMocks(page);
-  await installNetworthMocks(page);
+  const networth = await installNetworthMocks(page, options.networth ?? { stacked: true });
   await installInvestmentsMocks(page);
   await installRecurringInsightsMocks(page);
   await installPlanMocks(page);
@@ -97,7 +111,7 @@ export async function installSweepMocks(
     });
   });
 
-  return { unmocked };
+  return { unmocked, networth };
 }
 
 /** Signs the mocks in (they all accept the TOTP path), from a page already on the app origin. */
