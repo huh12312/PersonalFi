@@ -3,6 +3,7 @@ import { Group } from '@visx/group';
 import { Pie } from '@visx/shape';
 import { useId } from 'react';
 
+import { chartFillVar, seriesHue } from '../../components/finance/chart-hue.ts';
 import { Money } from '../../components/finance/Money.tsx';
 import { Percent } from '../../components/finance/Percent.tsx';
 import type { AllocationReport } from '../../api/generated/types.gen.ts';
@@ -12,27 +13,39 @@ import type { AllocationDimension } from './search.ts';
 const SIZE = 240;
 const THICKNESS = 34;
 
-/**
- * Eight CVD-validated hues (`--series-1..8`, `src/styles/theme.css`) **paired
- * one-to-one with eight distinct SVG textures**, so two adjacent slices
- * differ by fill pattern as well as by hue and the chart survives any colour
- * vision deficiency — D20's rule as WP 3.11's brief restates it: "the
- * CVD-safe colour pair PLUS pattern or label". Every slice additionally
- * carries its label and its own percentage in the legend, which is the
- * belt-and-braces third channel.
- */
-const SLICE_STYLES = [
-  { color: 'var(--series-1)', texture: 'diagonal' },
-  { color: 'var(--series-2)', texture: 'dots' },
-  { color: 'var(--series-3)', texture: 'horizontal' },
-  { color: 'var(--series-4)', texture: 'grid' },
-  { color: 'var(--series-5)', texture: 'back-diagonal' },
-  { color: 'var(--series-6)', texture: 'vertical' },
-  { color: 'var(--series-7)', texture: 'dense-dots' },
-  { color: 'var(--series-8)', texture: 'chevron' },
+const TEXTURES = [
+  'diagonal',
+  'dots',
+  'horizontal',
+  'grid',
+  'back-diagonal',
+  'vertical',
+  'dense-dots',
+  'chevron',
 ] as const;
 
-type Texture = (typeof SLICE_STYLES)[number]['texture'];
+/**
+ * The thirteen chart fills in their validated order (WP 10.8: `CHART_FILL_ORDER`, whose *adjacent* pairs clear
+ * the dataviz CVD and normal-vision floors — and donut slices touch exactly their neighbours), **paired with
+ * eight distinct SVG textures**, so two adjacent slices differ by fill pattern as well as by hue and the chart
+ * survives any colour vision deficiency — D20's rule as WP 3.11's brief restates it: "the CVD-safe colour pair
+ * PLUS pattern or label". Every slice additionally carries its label and its own percentage in the legend.
+ * Past the thirteenth slice a slice is the neutral fill (never a cycled hue). Was `--series-1..8` cycled.
+ */
+const SLICE_STYLES: ReadonlyArray<{ readonly color: string; readonly texture: Texture }> = [
+  ...Array.from({ length: 13 }, (_, i) => ({
+    color: chartFillVar(seriesHue(i)),
+    texture: TEXTURES[i % TEXTURES.length] as Texture,
+  })),
+  { color: chartFillVar('neutral'), texture: 'diagonal' as Texture },
+];
+
+/** A slice's style: its own up to thirteen, then the neutral one for every slice after (never cycled). */
+function styleIndex(index: number): number {
+  return Math.min(index, SLICE_STYLES.length - 1);
+}
+
+type Texture = (typeof TEXTURES)[number];
 
 function texturePath(texture: Texture): string {
   switch (texture) {
@@ -104,7 +117,7 @@ export function AllocationDonut({ dimension, report }: AllocationDonutProps) {
           <defs>
             {SLICE_STYLES.map((style, index) => (
               <pattern
-                key={style.texture}
+                key={String(index)}
                 id={`${patternPrefix}-${String(index)}`}
                 width={6}
                 height={6}
@@ -113,7 +126,7 @@ export function AllocationDonut({ dimension, report }: AllocationDonutProps) {
                 <rect width={6} height={6} fill={style.color} />
                 <path
                   d={texturePath(style.texture)}
-                  stroke="var(--bg-surface)"
+                  stroke="var(--bg-primary)"
                   strokeWidth={1.1}
                   strokeLinecap="round"
                   fill="none"
@@ -136,8 +149,8 @@ export function AllocationDonut({ dimension, report }: AllocationDonutProps) {
                   <path
                     key={arc.data.key}
                     d={pie.path(arc) ?? undefined}
-                    fill={`url(#${patternPrefix}-${String(index % SLICE_STYLES.length)})`}
-                    stroke="var(--bg-surface)"
+                    fill={`url(#${patternPrefix}-${String(styleIndex(index))})`}
+                    stroke="var(--bg-primary)"
                     strokeWidth={1}
                   />
                 ))
@@ -158,7 +171,10 @@ export function AllocationDonut({ dimension, report }: AllocationDonutProps) {
 
       <ul className="min-w-0 flex-1 space-y-1.5" data-testid="allocation-legend">
         {slices.map((slice, index) => {
-          const style = SLICE_STYLES[index % SLICE_STYLES.length] ?? SLICE_STYLES[0];
+          const style = SLICE_STYLES[styleIndex(index)] ?? {
+            color: chartFillVar('neutral'),
+            texture: 'diagonal',
+          };
           return (
             <li
               key={slice.key}
@@ -170,7 +186,7 @@ export function AllocationDonut({ dimension, report }: AllocationDonutProps) {
                   width={14}
                   height={14}
                   rx={3}
-                  fill={`url(#${patternPrefix}-${String(index % SLICE_STYLES.length)})`}
+                  fill={`url(#${patternPrefix}-${String(styleIndex(index))})`}
                   stroke={style.color}
                 />
               </svg>

@@ -4,262 +4,29 @@
  * Design tokens — CSS-first Tailwind v4 config (no tailwind.config.js).
  *
  * Two layers, per docs/research/05-frontend-architecture.md §2.1:
- *   1. This file's `:root` / `[data-theme]` blocks hold the *runtime* values
- *      (they flip with light/dark and are what a component or an inline
- *      visx `fill="var(--money-pos)"` actually reads).
+ *   1. `tokens.css` (generated, WP 10.8) holds the *runtime* colour values in
+ *      its `:root` / `[data-theme]` blocks (they flip with light/dark and are
+ *      what a component or an inline visx `fill="var(--chart-line)"` reads).
  *   2. The `@theme` block maps Tailwind utility names (`bg-page`, `text-primary`,
  *      `rounded-lg`, `duration-base`, ...) onto those same custom properties,
  *      so a Tailwind class and a raw CSS var are always the same source of
  *      truth. Never hard-code a hex value in a component — reference the
  *      token.
  *
- * The full token table (with contrast ratios and validator output) is
- * documented in `src/styles/tokens.md`. Keep the two in sync by hand; there
- * are few enough tokens that a generator would be more code than it saves.
+ * How to pick a role: docs/design/tokens.md. The pre-WP 10.8 table is
+ * `src/styles/tokens.md`.
  */
 
 /* ---------------------------------------------------------------------- */
-/* 1. Runtime values                                                       */
+/* 1. Runtime colour values: generated, in tokens.css (WP 10.8)            */
 /* ---------------------------------------------------------------------- */
 
-:root {
-  color-scheme: light;
-
-  /* Surfaces */
-  --bg-page: #f7f7f5;
-  --bg-surface: #ffffff;
-  --bg-surface-raised: #ffffff;
-  --bg-subtle: #f1f1ee;
-  --bg-inset: #eaeae6;
-  --border-hairline: rgba(11, 11, 11, 0.1);
-  --border-strong: #85847d;
-
-  /* Text */
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #6b6a64;
-  --focus-ring: #1f5fb0;
-
-  /* Accent (exactly one). `--accent` was `#2a78d6` — 4.41:1 against
-     `--accent-contrast` white, just under WCAG AA's 4.5:1 for normal text
-     (found by axe against the primary "Sign in with a passkey" button,
-     apps/web/e2e/app-walkthrough.spec.ts). Darkened to `#2563eb`
-     (5.17:1) — same hue, same dark-theme pairing (already 5.4:1, untouched)
-     — rather than lightening `--accent-contrast`, which every dark-mode
-     surface using `--accent-wash`/`--accent-text` also reads against. */
-  --accent: #2563eb;
-  --accent-text: #1f5fb0;
-  --accent-contrast: #ffffff;
-  --accent-wash: #eaf2fd;
-  /* Hover for a filled accent surface: a step darker, never an opacity
-     blend — blending the fill and its text over the page drops the pair
-     under AA on the dark theme (CI's axe caught 4.29:1 on the Brief's
-     primary button mid-hover, 2026-10-04). #1d4ed8 on white: 6.7:1. */
-  --accent-hover: #1d4ed8;
-
-  /* Money semantics — CVD-safe teal/vermilion, never green/red (§2.2) */
-  --money-pos: #0f8a68;
-  --money-pos-text: #0a6f54;
-  --money-neg: #d2452f;
-  --money-neg-text: #b8391f;
-  --money-neutral: #6b6a64;
-
-  /* Destructive actions. Separate from `--money-neg`: that token is a *money*
-     colour (a chart mark, a negative-balance fill) and was also the
-     destructive button's fill, so its tuning for money broke the button
-     (CF-9: white on dark's #e8604a measured 3.38:1) and hovering it blended
-     fill and text with `opacity-90`. The button reads these three, and
-     `contrast.test.ts` holds each pair to 4.5:1 at rest and on hover. */
-  --danger: #c23a25;
-  --on-danger: #ffffff;
-  --danger-hover: #a8321d;
-  /* Text on a `--status-warning` *fill* (the credit-overspend badge). The
-     badge used `--text-primary`, which is near-black on light's dark amber
-     (3.77:1) and white on dark's bright amber (1.83:1). */
-  --on-status-warning: #ffffff;
-
-  /* Status (fixed, never themed) — except immediately below: axe
-     (apps/web/e2e/app-walkthrough.spec.ts) found `#0ca30c` on `--bg-subtle`
-     (a "Connected" badge, `Badge` variant `good`) at 2.96:1, against WCAG
-     AA's 4.5:1 — `--bg-subtle` is `#f1f1ee` in light mode but `#202326` in
-     dark mode, and the original green already cleared 4.5:1 against *that*
-     (4.71:1), so a single fixed value can't satisfy both. Darkened here for
-     light mode only; the original value is restored for dark mode below and
-     under `prefers-color-scheme: dark`. */
-  --status-good: #0c7a0c;
-  /* `warning`/`serious`/`critical` got the same treatment when
-     apps/web/e2e/recurring-insights.spec.ts (WP 2.10) was the first suite to
-     axe-scan a real page using the `Badge` variants that read these against
-     `--bg-subtle`: `warning` measured 1.62:1, `serious` 2.33:1 and
-     `critical` 4.24:1 in light mode — none clearing 4.5:1. `critical` also
-     failed in *dark* mode (3.29:1 against dark's `--bg-subtle`, unlike
-     `good`, whose original value happened to already clear dark mode), so
-     it gets its own dark-mode-only value below rather than a restored
-     original. `warning`/`serious` keep their original (already-compliant)
-     dark-mode values, restored the same way `good` is. */
-  --status-warning: #8e650e;
-  --status-serious: #a35a3e;
-  --status-critical: #c83939;
-
-  /* Categorical series — fixed order, never cycled (§2.2) */
-  --series-1: #2a78d6;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #b07300;
-  --series-5: #d55181;
-  --series-6: #008300;
-  --series-7: #4a3aa7;
-  --series-8: #e34948;
-
-  /* Sequential ramp (heatmaps, Monte Carlo bands), light -> dark */
-  --seq-1: #cde2fb;
-  --seq-2: #b7d3f6;
-  --seq-3: #9ec5f4;
-  --seq-4: #86b6ef;
-  --seq-5: #6da7ec;
-  --seq-6: #5598e7;
-  --seq-7: #3987e5;
-  --seq-8: #2a78d6;
-  --seq-9: #256abf;
-  --seq-10: #1c5cab;
-  --seq-11: #184f95;
-  --seq-12: #104281;
-  --seq-13: #0d366b;
-
-  /* Diverging midpoint (month-over-month change) */
-  --diverging-mid: #f0efec;
-
-  /* Chart chrome */
-  --chart-gridline: #e1e0d9;
-  --chart-axis-ink: #6b6a64;
-
-  /* Elevation (shadow layer; dark mode overrides to near-transparent, §2.4) */
-  --shadow-elev-1: 0 1px 2px rgba(11, 11, 11, 0.04);
-  --shadow-elev-2: 0 4px 12px rgba(11, 11, 11, 0.06);
-  --shadow-elev-3: 0 16px 40px rgba(11, 11, 11, 0.12);
-}
-
-[data-theme='dark'] {
-  color-scheme: dark;
-
-  --bg-page: #0e1012;
-  --bg-surface: #16181a;
-  --bg-surface-raised: #1c1f22;
-  --bg-subtle: #202326;
-  --bg-inset: #0a0c0d;
-  --border-hairline: rgba(255, 255, 255, 0.1);
-  --border-strong: #70767c;
-
-  --text-primary: #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted: #9a9a92;
-  --focus-ring: #6da7ec;
-
-  --accent: #3987e5;
-  /* Dark `--accent-text` was #3987e5 — 4.28:1 on `--accent-wash` and 4.34:1
-     on `--bg-subtle`, so the active nav pill, the shared accent Badge, the
-     combobox highlight and the sync pill all failed AA in dark (CF-8; 9.6 worked
-     around it in `NarrationBadge`). #6da7ec is 6.2:1 on the wash. `--accent`
-     itself stays #3987e5: it is a *fill* (with `--accent-contrast` text, 5.4:1)
-     and a UI boundary (4.3:1+ against every surface). */
-  --accent-text: #6da7ec;
-  --accent-contrast: #0b0b0b;
-  --accent-wash: #132537;
-  /* Dark: a step lighter keeps the dark text readable — #5a9cea on #0b0b0b: 6.9:1. */
-  --accent-hover: #5a9cea;
-
-  /* The light-mode-only darkening above (`:root`'s `--status-good`/
-     `--status-warning`/`--status-serious`) would fail contrast against this
-     theme's much darker `--bg-subtle` — restored to the original,
-     dark-mode-passing values. `--status-critical`'s *original* value also
-     failed here (3.29:1), so it gets a brighter, dark-mode-only value
-     instead of a restoration. */
-  --status-good: #0ca30c;
-  --status-warning: #fab219;
-  --status-serious: #ec835a;
-  --status-critical: #e06c6c;
-
-  --money-pos: #1ba277;
-  --money-pos-text: #3ec49a;
-  --money-neg: #e8604a;
-  --money-neg-text: #ff8a6e;
-  --money-neutral: #9a9a92;
-  /* Dark destructive: a bright fill with dark text, the same pairing as the
-     dark primary button; hover is a step lighter, never an opacity blend. */
-  --danger: #e8604a;
-  --on-danger: #0b0b0b;
-  --danger-hover: #ef7a66;
-  --on-status-warning: #0b0b0b;
-
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #c98500;
-  --series-5: #d55181;
-  --series-6: #008300;
-  --series-7: #9085e9;
-  --series-8: #e66767;
-
-  --diverging-mid: #383835;
-  --chart-gridline: #2c2c2a;
-  --chart-axis-ink: #9a9a92;
-
-  /* Dark mode expresses elevation via surface + hairline, not shadow (§2.4) */
-  --shadow-elev-1: none;
-  --shadow-elev-2: none;
-  --shadow-elev-3: 0 16px 40px rgba(0, 0, 0, 0.5);
-}
-
-/* System preference is the default until the user picks explicitly (data-theme
-   is then 'light' | 'dark', written by src/lib/theme.ts + persisted). */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    color-scheme: dark;
-    --bg-page: #0e1012;
-    --bg-surface: #16181a;
-    --bg-surface-raised: #1c1f22;
-    --bg-subtle: #202326;
-    --bg-inset: #0a0c0d;
-    --border-hairline: rgba(255, 255, 255, 0.1);
-    --border-strong: #70767c;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #9a9a92;
-    --focus-ring: #6da7ec;
-    --accent: #3987e5;
-    --accent-text: #6da7ec;
-    --accent-contrast: #0b0b0b;
-    --accent-wash: #132537;
-    --accent-hover: #5a9cea;
-    --status-good: #0ca30c;
-    --status-warning: #fab219;
-    --status-serious: #ec835a;
-    --status-critical: #e06c6c;
-    --money-pos: #1ba277;
-    --money-pos-text: #3ec49a;
-    --money-neg: #e8604a;
-    --money-neg-text: #ff8a6e;
-    --money-neutral: #9a9a92;
-    --danger: #e8604a;
-    --on-danger: #0b0b0b;
-    --danger-hover: #ef7a66;
-    --on-status-warning: #0b0b0b;
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
-    --series-5: #d55181;
-    --series-6: #008300;
-    --series-7: #9085e9;
-    --series-8: #e66767;
-    --diverging-mid: #383835;
-    --chart-gridline: #2c2c2a;
-    --chart-axis-ink: #9a9a92;
-    --shadow-elev-1: none;
-    --shadow-elev-2: none;
-    --shadow-elev-3: 0 16px 40px rgba(0, 0, 0, 0.5);
-  }
-}
+/*
+ * Every colour custom property — the Radix scales, the semantic roles, the
+ * house values and the legacy names — is declared in `tokens.css`, generated
+ * by `node scripts/gen-tokens.ts` from `src/styles/tokens/roles.ts`. Edit the
+ * source, never the output. `base.css` imports it before this file.
+ */
 
 /* ---------------------------------------------------------------------- */
 /* 2. Motion — collapses under prefers-reduced-motion, once, globally      */
@@ -333,6 +100,35 @@
   --color-series-6: var(--series-6);
   --color-series-7: var(--series-7);
   --color-series-8: var(--series-8);
+
+  /* WP 10.8 semantic roles (tokens.css). The legacy names above are aliases of these. */
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-tertiary: var(--bg-tertiary);
+  --color-bg-overlay: var(--bg-overlay);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-disabled: var(--text-disabled);
+  --color-text-on-brand: var(--text-on-brand);
+  --color-border-primary: var(--border-primary);
+  --color-border-secondary: var(--border-secondary);
+  --color-border-divider: var(--border-divider);
+  --color-status-success-bg: var(--status-success-bg);
+  --color-status-success-border: var(--status-success-border);
+  --color-status-success-text: var(--status-success-text);
+  --color-status-success-bold: var(--status-success-bold);
+  --color-status-danger-bg: var(--status-danger-bg);
+  --color-status-danger-border: var(--status-danger-border);
+  --color-status-danger-text: var(--status-danger-text);
+  --color-status-danger-bold: var(--status-danger-bold);
+  --color-status-warning-bg: var(--status-warning-bg);
+  --color-status-warning-border: var(--status-warning-border);
+  --color-status-warning-text: var(--status-warning-text);
+  --color-status-warning-bold: var(--status-warning-bold);
+  --color-status-info-bg: var(--status-info-bg);
+  --color-status-info-border: var(--status-info-border);
+  --color-status-info-text: var(--status-info-text);
+  --color-status-info-bold: var(--status-info-bold);
+  --color-chart-label: var(--chart-label);
 }
 
 @theme {

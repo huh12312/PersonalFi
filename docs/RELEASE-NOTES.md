@@ -9,6 +9,43 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.7: one colour system, and a colour of its own for every category
+
+**Status:** a patch release on v0.9.6. The tag `v0.9.7` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.7
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0045_category_hue` (expand-only: one nullable column on `categories`, with a CHECK over
+thirteen colour names). Nothing is backfilled by the migration: each category gets its colour the
+first time the categories list is read after the upgrade, and keeps it.
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **One colour system underneath every screen.** Colours now come from a single generated set of
+  tokens built on the open-source Radix Colors scales (MIT): neutrals from its warm grey, and
+  thirteen chart hues. Screens look the same: backgrounds and chart lines moved by less than a
+  just-noticeable difference, and text, the blue accent and the money colours are unchanged.
+- **Every category has its own colour, everywhere.** A category is given one of thirteen colours
+  the first time it is seen and keeps it, so it is the same colour in the spending chart, the cash
+  flow diagram and every chart that comes later. The colour is stored with the category, can be
+  changed through the API (a picker arrives with the category screen), and is included in an
+  export and restored by an import.
+- **Charts draw in a palette checked for colour-blind readers.** The spending chart, the cash flow
+  diagram and the allocation donut use the thirteen hues in an order where every pair of
+  neighbours stays distinguishable with and without colour-vision deficiency. Labels, the legend
+  and **View as table** still carry every value, so no chart relies on colour alone.
+- **Fixed: one badge colour fell just under the contrast minimum** on the new grey surface; it is
+  a shade darker now.
+
 ## v0.9.6: the Recurring screen's Forward cash flow, redrawn
 
 **Status:** a patch release on v0.9.5. The tag `v0.9.6` is pushed by the maintainer once CI is green.

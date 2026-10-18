@@ -110,11 +110,13 @@ describe('groupByCurrency', () => {
 });
 
 describe('colorForIndex', () => {
-  it('gives distinct colours for the first few series and cycles rather than throwing past the end', () => {
-    const first = colorForIndex(0);
-    const second = colorForIndex(1);
-    expect(first).not.toBe(second);
-    expect(colorForIndex(100)).toBe(colorForIndex(100 % 4));
+  it('draws the first series in the line role and the rest in the validated fill order, never cycling', () => {
+    expect(colorForIndex(0)).toBe('var(--chart-line)');
+    const next = Array.from({ length: 13 }, (_, i) => colorForIndex(i + 1));
+    expect(new Set(next).size).toBe(13);
+    expect(next[0]).toBe('var(--chart-fill-green)');
+    expect(colorForIndex(14)).toBe('var(--chart-fill-neutral)');
+    expect(colorForIndex(100)).toBe('var(--chart-fill-neutral)');
   });
 });
 

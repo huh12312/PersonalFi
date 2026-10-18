@@ -27,6 +27,12 @@ Project Authors (https://github.com/vercel/geist-font), SIL Open Font License 1.
 served from `apps/web/public/fonts/`, which also holds the licence text (`OFL-Geist.txt`) and a
 README with the source URLs and sha256 of each file.
 
+The web app also vendors the colour values of Radix Colors 3.0.0 (`@radix-ui/colors`,
+https://github.com/radix-ui/colors), MIT License, Copyright (c) 2021 Radix: the sRGB steps of the
+`sand` scale and thirteen hue scales, in `apps/web/src/styles/tokens/radix-colors.ts` (which
+reproduces the licence) and the generated `apps/web/src/styles/tokens.css` / `tokens.ts`. It is
+not an npm dependency, so it is not in the tree below.
+
 ## 0BSD
 
 - `tslib`@1.14.1, 2.8.1 — https://www.typescriptlang.org/

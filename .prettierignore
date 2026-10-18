@@ -7,3 +7,6 @@ docs/plan
 packages/contracts/openapi/openapi.json
 apps/web/src/api/generated
 apps/web/src/routeTree.gen.ts
+apps/web/src/styles/tokens.css
+apps/web/src/styles/tokens.ts
+apps/web/src/styles/tokens/radix-colors.ts

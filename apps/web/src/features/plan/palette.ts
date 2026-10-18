@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+import { TOKENS } from '../../styles/tokens.ts';
+
 /**
  * The Monte Carlo fan chart's band ramp (`docs/plan/04-phase-4-dispatch.md`
  * §3 "WP 4.10"; `docs/research/05-frontend-architecture.md` §3.4: "5 bands
@@ -40,18 +42,21 @@ export const BAND_STROKE_OPACITY = 0.75;
 export const MEDIAN_OPACITY = 1;
 
 /**
- * `--accent`'s two theme values, duplicated here only so
- * `scripts/validate_palette.js`'s evidence run and this module's own unit
- * test can compute the *effective* flattened colour (surface + opacity ×
- * accent) without a DOM — `getComputedStyle` is not available to a Vitest
- * (jsdom) unit test the way it is in a browser, and the effective colour,
- * not the CSS variable, is what a contrast check needs. The chart itself
- * never reads these constants — it reads `var(--accent)` directly, per
- * `05-frontend-architecture.md` §3.3 item 2 ("total control, reads CSS
- * custom properties directly").
+ * `--accent`'s and `--bg-primary`'s two theme values, read from the generated token object (WP 10.8; they used
+ * to be duplicated here as hex literals) so `scripts/validate_palette.js`'s evidence run and this module's own
+ * unit test can compute the *effective* flattened colour (surface + opacity × accent) without a DOM —
+ * `getComputedStyle` is not available to a Vitest (jsdom) unit test the way it is in a browser, and the
+ * effective colour, not the CSS variable, is what a contrast check needs. The chart itself never reads these
+ * constants — it reads `var(--chart-line)` directly, per `05-frontend-architecture.md` §3.3 item 2.
  */
-export const ACCENT_HEX = { light: '#2563eb', dark: '#3987e5' } as const;
-export const SURFACE_HEX = { light: '#ffffff', dark: '#16181a' } as const;
+export const ACCENT_HEX = {
+  light: TOKENS.light['--accent'],
+  dark: TOKENS.dark['--accent'],
+} as const;
+export const SURFACE_HEX = {
+  light: TOKENS.light['--bg-primary'],
+  dark: TOKENS.dark['--bg-primary'],
+} as const;
 
 interface Rgb {
   readonly r: number;

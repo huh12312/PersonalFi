@@ -30,7 +30,13 @@
  *
  * `assignable` is computed by the read model from the table (a row with children
  * is a heading, not a destination), so the client never has to know that rule.
+ *
+ * `hue` (WP 10.8, migration 0045) is the chart hue a category is drawn in — one of
+ * the kernel's thirteen `CHART_HUES`. The read model assigns `hueForId(id)` on the
+ * first read and persists it; every later read returns the stored value, which
+ * `PATCH` may change.
  */
+import { CHART_HUES } from '@core/kernel';
 import {
   archiveCategory,
   createCategory,
@@ -44,6 +50,15 @@ import { problems } from '../problem.ts';
 import { booleanQuery, instantOrNull } from '../wire.ts';
 import { mapDomainErrors } from './domain-errors.ts';
 import type { RouteDeps } from './deps.ts';
+
+const chartHueSchema = z
+  .enum(CHART_HUES)
+  .describe(
+    'The chart hue this category is drawn in: one of thirteen named hues (the web reads ' +
+      '`--chart-fill-<hue>`). Assigned once, on first read, from a hash of the id; stable after ' +
+      'that, and editable by `PATCH /categories/{id}`.',
+  )
+  .meta({ id: 'ChartHue' });
 
 const categorySchema = z
   .object({
@@ -59,6 +74,7 @@ const categorySchema = z
     description: z.string(),
     kind: z.enum(['income', 'expense', 'transfer', 'investment', 'other']),
     icon: z.string().describe('A Lucide icon name (decision D20). A key, never markup.'),
+    hue: chartHueSchema,
     sort: z.number().int(),
     isSystem: z.boolean().describe('true for a row the shipped taxonomy installed.'),
     archivedAt: z
@@ -86,6 +102,7 @@ function serialiseCategory(category: UserCategory): z.infer<typeof categorySchem
     description: category.description,
     kind: category.kind,
     icon: category.icon,
+    hue: category.hue,
     sort: category.sort,
     isSystem: category.isSystem,
     archivedAt: instantOrNull(category.archivedAt),
@@ -167,6 +184,9 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               .enum(['income', 'expense', 'transfer', 'investment', 'other'])
               .optional()
               .describe("Only used when `parentId` is null. A leaf inherits its parent's."),
+            hue: chartHueSchema
+              .optional()
+              .describe('Omitted: seeded from the new id, as a first read would.'),
           }),
           response: {
             201: z.object({ category: categorySchema }),
@@ -188,6 +208,7 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
                 : { description: request.body.description }),
               ...(request.body.icon === undefined ? {} : { icon: request.body.icon }),
               ...(request.body.kind === undefined ? {} : { kind: request.body.kind }),
+              ...(request.body.hue === undefined ? {} : { hue: request.body.hue }),
             },
             { clock },
           ),
@@ -201,9 +222,9 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       {
         schema: {
           operationId: 'renameCategory',
-          summary: 'Rename or re-describe a category',
+          summary: 'Rename, re-describe or recolour a category',
           description:
-            'Deliberately narrow: `label`, `description` and `icon` only. `kind` and the ' +
+            'Deliberately narrow: `label`, `description`, `icon` and `hue` only. `kind` and the ' +
             'parent/child structure are not editable here — both are structural (the seeding ' +
             "pass's own rule for why a re-seed never touches them) and changing either after " +
             'transactions have been filed under a category is how a report silently moves ' +
@@ -216,12 +237,14 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               label: z.string().min(1).max(120).optional(),
               description: z.string().max(2_000).optional(),
               icon: z.string().min(1).max(64).optional(),
+              hue: chartHueSchema.optional(),
             })
             .refine(
               (body) =>
                 body.label !== undefined ||
                 body.description !== undefined ||
-                body.icon !== undefined,
+                body.icon !== undefined ||
+                body.hue !== undefined,
               'a PATCH with no fields changes nothing; say what to change',
             ),
           response: {
@@ -243,6 +266,7 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
                 ? {}
                 : { description: request.body.description }),
               ...(request.body.icon === undefined ? {} : { icon: request.body.icon }),
+              ...(request.body.hue === undefined ? {} : { hue: request.body.hue }),
             },
             { clock },
           ),

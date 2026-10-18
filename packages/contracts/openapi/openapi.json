@@ -7710,6 +7710,25 @@
           "dirty"
         ]
       },
+      "ChartHueInput": {
+        "type": "string",
+        "enum": [
+          "teal",
+          "green",
+          "red",
+          "orange",
+          "yellow",
+          "cyan",
+          "purple",
+          "indigo",
+          "lime",
+          "mint",
+          "pink",
+          "brown",
+          "sky"
+        ],
+        "description": "The chart hue this category is drawn in: one of thirteen named hues (the web reads `--chart-fill-<hue>`). Assigned once, on first read, from a hash of the id; stable after that, and editable by `PATCH /categories/{id}`."
+      },
       "CategoryInput": {
         "type": "object",
         "properties": {
@@ -7756,6 +7775,9 @@
             "type": "string",
             "description": "A Lucide icon name (decision D20). A key, never markup."
           },
+          "hue": {
+            "$ref": "#/components/schemas/ChartHueInput"
+          },
           "sort": {
             "type": "integer",
             "minimum": -9007199254740991,
@@ -7785,6 +7807,7 @@
           "description",
           "kind",
           "icon",
+          "hue",
           "sort",
           "isSystem",
           "archivedAt",
@@ -21238,6 +21261,25 @@
         ],
         "additionalProperties": false
       },
+      "ChartHue": {
+        "type": "string",
+        "enum": [
+          "teal",
+          "green",
+          "red",
+          "orange",
+          "yellow",
+          "cyan",
+          "purple",
+          "indigo",
+          "lime",
+          "mint",
+          "pink",
+          "brown",
+          "sky"
+        ],
+        "description": "The chart hue this category is drawn in: one of thirteen named hues (the web reads `--chart-fill-<hue>`). Assigned once, on first read, from a hash of the id; stable after that, and editable by `PATCH /categories/{id}`."
+      },
       "Category": {
         "type": "object",
         "properties": {
@@ -21284,6 +21326,9 @@
             "type": "string",
             "description": "A Lucide icon name (decision D20). A key, never markup."
           },
+          "hue": {
+            "$ref": "#/components/schemas/ChartHue"
+          },
           "sort": {
             "type": "integer",
             "minimum": -9007199254740991,
@@ -21313,6 +21358,7 @@
           "description",
           "kind",
           "icon",
+          "hue",
           "sort",
           "isSystem",
           "archivedAt",
@@ -31840,6 +31886,9 @@
                       "investment",
                       "other"
                     ]
+                  },
+                  "hue": {
+                    "$ref": "#/components/schemas/ChartHueInput"
                   }
                 },
                 "required": [
@@ -31926,11 +31975,11 @@
     "/categories/{categoryId}": {
       "patch": {
         "operationId": "renameCategory",
-        "summary": "Rename or re-describe a category",
+        "summary": "Rename, re-describe or recolour a category",
         "tags": [
           "categories"
         ],
-        "description": "Deliberately narrow: `label`, `description` and `icon` only. `kind` and the parent/child structure are not editable here — both are structural (the seeding pass's own rule for why a re-seed never touches them) and changing either after transactions have been filed under a category is how a report silently moves money between totals. Works on a system category as well as a custom one: a user renaming \"Dining & Drinks\" to \"Eating Out\" is exactly what this is for.",
+        "description": "Deliberately narrow: `label`, `description`, `icon` and `hue` only. `kind` and the parent/child structure are not editable here — both are structural (the seeding pass's own rule for why a re-seed never touches them) and changing either after transactions have been filed under a category is how a report silently moves money between totals. Works on a system category as well as a custom one: a user renaming \"Dining & Drinks\" to \"Eating Out\" is exactly what this is for.",
         "requestBody": {
           "required": true,
           "content": {
@@ -31951,6 +32000,9 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 64
+                  },
+                  "hue": {
+                    "$ref": "#/components/schemas/ChartHueInput"
                   }
                 }
               }

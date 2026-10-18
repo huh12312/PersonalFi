@@ -26,6 +26,9 @@
     "openapi-ts.shared.mjs",
     "scripts/**/*.mjs",
     "scripts/**/*.ts",
-    "e2e/**/*.ts"
+    "e2e/**/*.ts",
+    // WP 10.8: e2e/tokens.spec.ts compares the browser's computed colours to the generated token object.
+    "src/styles/tokens.ts",
+    "src/styles/tokens/fills.ts"
   ]
 }

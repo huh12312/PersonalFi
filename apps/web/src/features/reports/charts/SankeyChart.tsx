@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import type { SankeyLink, SankeyNode } from '../../../api/generated/types.gen.ts';
-import { categorySeriesVar } from '../../../components/finance/category-color.ts';
+import { categoryHue, chartFillVar, type FillHue } from '../../../components/finance/chart-hue.ts';
 import { toTransactionsSearch } from '../drill-through.ts';
 import { layoutSankey, type LaidOutLink, type LaidOutNode } from './sankey-layout.ts';
 import { ChartDataTable } from '../../../components/patterns/ChartDataTable.tsx';
@@ -61,6 +61,11 @@ export interface SankeyChartProps {
   height?: number;
   /** Resolves a node's `refId` to a display label (category name / merchant name) — the chart itself only knows ids. */
   labelFor?: (node: SankeyNode) => string | undefined;
+  /**
+   * A node's hue (WP 10.8): the caller passes the persisted category hue; the default is the server's seed for
+   * the id, so the same category is the same colour here as on every other chart.
+   */
+  hueFor?: (refId: string | null) => FillHue;
 }
 
 const MARGIN = { top: 16, right: 100, bottom: 16, left: 100 };
@@ -79,6 +84,7 @@ export function SankeyChart({
   width = 640,
   height = 360,
   labelFor,
+  hueFor = (refId) => categoryHue(refId),
 }: SankeyChartProps) {
   const navigate = useNavigate();
   const innerWidth = Math.max(0, width - MARGIN.left - MARGIN.right);
@@ -118,8 +124,8 @@ export function SankeyChart({
               const sourceNode = nodeById.get(l.source);
               const color =
                 sourceNode !== undefined
-                  ? categorySeriesVar(sourceNode.refId)
-                  : 'var(--money-neutral)';
+                  ? chartFillVar(hueFor(sourceNode.refId))
+                  : chartFillVar('neutral');
               return (
                 <path
                   // Links carry no stable id of their own on the wire; the index
@@ -156,7 +162,7 @@ export function SankeyChart({
                     y={node.y}
                     width={14}
                     height={node.height}
-                    fill={categorySeriesVar(node.refId)}
+                    fill={chartFillVar(hueFor(node.refId))}
                     rx={2}
                   />
                   <text

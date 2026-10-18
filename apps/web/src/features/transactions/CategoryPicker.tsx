@@ -30,6 +30,8 @@ const CLEAR_ITEM: Category = {
   isSystem: true,
   archivedAt: null,
   assignable: true,
+  // The wire type requires a hue (WP 10.8); this pseudo-row is never charted — uncategorised draws neutral.
+  hue: 'teal',
 };
 
 /**

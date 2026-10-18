@@ -7,6 +7,7 @@ import {
   updatedAtColumn,
   userIdColumn,
 } from '@core/db';
+import type { ChartHue } from '@core/kernel';
 import { index, integer, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 /** What a category does to an aggregate. Mirrors `src/taxonomy.ts`'s `CategoryKind`. */
@@ -50,6 +51,11 @@ export const categories = pgTable(
     /** A Lucide icon name (decision D20). A key, never markup. */
     icon: text('icon').notNull().default('circle'),
     sort: integer('sort').notNull().default(0),
+    /**
+     * The chart hue (WP 10.8, migration 0045): one of `CHART_HUES`, CHECKed by `categories_hue_check`.
+     * NULL until the first read assigns `hueForId(id)`; never re-derived after that.
+     */
+    hue: text('hue').$type<ChartHue>(),
     /** Seeded by us. A user may rename it; they may not delete it. */
     isSystem: flagColumn('is_system').notNull().default(false),
     archivedAt: instantColumn('archived_at'),

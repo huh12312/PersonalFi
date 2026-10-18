@@ -1,6 +1,12 @@
 # Design tokens
 
-The source of truth is `src/styles/theme.css` — this file documents it for
+> **WP 10.8:** colours are now generated. The source is `src/styles/tokens/roles.ts` (on the vendored
+> Radix Colors scales), the output `src/styles/tokens.css` / `tokens.ts`, and the guide
+> `docs/design/tokens.md`. The colour tables below are the pre-WP 10.8 record; the old → new mapping
+> is in `docs/evidence/phase-10/wp10.8-visual-tokens.md` §1.2. Type, spacing, radii and motion below
+> are current.
+
+The source of truth was `src/styles/theme.css` — this file documents it for
 humans (and the `/dev/kitchen-sink` route renders every swatch live, in both
 themes). Never hard-code a hex value in a component; reference the token
 through its Tailwind utility (`bg-page`, `text-money-neg-text`, ...) or the raw

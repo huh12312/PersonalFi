@@ -249,7 +249,7 @@ function ChartInner({ width, height, data, color, showSealedLegend }: ChartInner
                 cx={xScale(point.date)}
                 cy={yScale(point.netWorthMinor)}
                 r={3}
-                fill="var(--bg-surface)"
+                fill="var(--bg-primary)"
                 stroke={color}
                 strokeWidth={1.5}
               />
@@ -261,7 +261,7 @@ function ChartInner({ width, height, data, color, showSealedLegend }: ChartInner
               x={xScale(tick)}
               y={innerHeight + 18}
               fontSize={11}
-              fill="var(--chart-axis-ink)"
+              fill="var(--chart-label)"
               textAnchor="middle"
             >
               {formatTick(tick)}
@@ -302,10 +302,10 @@ function ChartInner({ width, height, data, color, showSealedLegend }: ChartInner
             style={{
               ...defaultStyles,
               pointerEvents: 'auto',
-              background: 'var(--bg-surface-raised)',
+              background: 'var(--bg-overlay)',
               color: 'var(--text-primary)',
               boxShadow: 'var(--shadow-elev-2)',
-              border: '1px solid var(--border-hairline)',
+              border: '1px solid var(--border-divider)',
               borderRadius: 8,
               fontSize: 12,
             }}
@@ -336,7 +336,7 @@ function ChartInner({ width, height, data, color, showSealedLegend }: ChartInner
             <span className="inline-flex items-center gap-1.5">
               <span
                 className="inline-block h-2 w-2 rounded-full border"
-                style={{ borderColor: color, backgroundColor: 'var(--bg-surface)' }}
+                style={{ borderColor: color, backgroundColor: 'var(--bg-primary)' }}
               />
               Interpolated day (no observation; filled from neighbours)
             </span>
@@ -400,7 +400,7 @@ export function NetWorthAreaChart({
   data = MOCK_SERIES,
   height = 220,
   className,
-  color = 'var(--accent)',
+  color = 'var(--chart-line)',
   seriesLabel,
   showSealedLegend = false,
 }: NetWorthAreaChartProps) {

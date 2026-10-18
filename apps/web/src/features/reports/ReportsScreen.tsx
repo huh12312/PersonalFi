@@ -7,6 +7,7 @@ import { useCurrentBudgetPeriodQuery } from '../budget/api.ts';
 import { Button } from '../../components/ui/button.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
 import { Tabs, TabsIndicator, TabsList, TabsPanel, TabsTab } from '../../components/ui/tabs.tsx';
+import { categoryHue, type FillHue } from '../../components/finance/chart-hue.ts';
 import { useCategories } from '../categories/useCategories.ts';
 import {
   useBudgetVsActualReportQuery,
@@ -47,6 +48,9 @@ export function ReportsScreen() {
   const { byId: categoriesById } = useCategories();
   const labelFor = (categoryId: string | null): string =>
     categoryId !== null ? (categoriesById.get(categoryId)?.label ?? categoryId) : 'Uncategorised';
+  // A category's persisted hue (WP 10.8), the same on every chart; the server's seed until the list arrives.
+  const hueFor = (categoryId: string | null): FillHue =>
+    categoryHue(categoryId, categoryId !== null ? categoriesById.get(categoryId)?.hue : null);
 
   const spendingQuery = useSpendingReportQuery(window);
   const incomeQuery = useIncomeReportQuery(window);
@@ -118,6 +122,7 @@ export function ReportsScreen() {
             <CategoryMonthBarChart
               cells={spendingQuery.data?.cells ?? []}
               labelFor={labelFor}
+              hueFor={hueFor}
               ariaLabel="Spending by category and month"
             />
           )}
@@ -130,6 +135,7 @@ export function ReportsScreen() {
             <CategoryMonthBarChart
               cells={incomeQuery.data?.cells ?? []}
               labelFor={labelFor}
+              hueFor={hueFor}
               ariaLabel="Income by category and month"
             />
           )}
@@ -144,6 +150,7 @@ export function ReportsScreen() {
               links={sankeyQuery.data?.links ?? []}
               currency={sankeyQuery.data?.currency ?? 'USD'}
               labelFor={(node) => (node.refId !== null ? labelFor(node.refId) : undefined)}
+              hueFor={hueFor}
             />
           )}
         </TabsPanel>

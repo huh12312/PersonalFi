@@ -534,6 +534,11 @@ describeWithDb('runMigrations', () => {
       //   sha256, consented_at, withdrawn_at; one standing consent per provider). provider_credentials'
       //   provider CHECK re-declared wider (+ openai, openrouter, anthropic, ollama). advisor_payload_approvals
       //   gains nullable llm_provider and llm_model. Expand-only; references only 0002, 0028 and 0041/0043.
+      // 0045_category_hue (WP 10.8): no new table. categories gains nullable hue, one of the thirteen
+      //   CHART_HUES names (categories_hue_check; NULL = not yet assigned). No SQL backfill: the seed is
+      //   hueForId(id) in packages/kernel/src/hue.ts, written by @ctx/categorization on first read
+      //   (`AND hue IS NULL`) and never re-derived. Expand-only; references only 0006's categories.
+      //   Exported with the row (the export reads every column).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called

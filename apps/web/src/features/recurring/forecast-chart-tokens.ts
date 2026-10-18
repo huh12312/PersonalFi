@@ -14,16 +14,21 @@
  *    shape (▼ out, ▲ in), so the sign never rests on hue alone.
  *  - `baseline`: the labelled $0 line; `axisInk`: tick labels (text, so 4.5:1); `gridline`: recessive hairlines
  *    (decorative, exempt from 1.4.11); `ring`: the 2 px surface ring around a mark.
+ *
+ * WP 10.8 moved every role onto the semantic chart roles of `src/styles/tokens.css` (was `--accent`,
+ * `--money-neg`, `--money-pos`, `--chart-axis-ink`, `--bg-surface`). Same values: `--chart-line` is the accent,
+ * `--chart-expenses`/`--chart-income` the money pair, `--chart-axis`/`--chart-label` the old axis ink; the ring
+ * moved from #ffffff to sand-1 #fdfdfc (ΔE 0.6).
  */
 export const FORECAST_CHART_TOKENS = {
-  line: '--accent',
-  band: '--accent',
-  outflow: '--money-neg',
-  inflow: '--money-pos',
-  baseline: '--chart-axis-ink',
-  axisInk: '--chart-axis-ink',
+  line: '--chart-line',
+  band: '--chart-line',
+  outflow: '--chart-expenses',
+  inflow: '--chart-income',
+  baseline: '--chart-axis',
+  axisInk: '--chart-label',
   gridline: '--chart-gridline',
-  ring: '--bg-surface',
+  ring: '--bg-primary',
 } as const;
 
 /** Roles that are marks a reader must see: ≥ 3:1 against the chart surface (WCAG 1.4.11). */

@@ -116,7 +116,7 @@ export function DriftPanel({ data, isLoading, onUseExampleTargets, hasTargets }:
               <rect width={6} height={6} fill="var(--money-neg)" />
               <path
                 d="M0,6 l6,-6 M-1.5,1.5 l3,-3 M4.5,7.5 l3,-3"
-                stroke="var(--bg-surface)"
+                stroke="var(--bg-primary)"
                 strokeWidth={1.2}
                 fill="none"
                 opacity={0.8}
@@ -130,8 +130,8 @@ export function DriftPanel({ data, isLoading, onUseExampleTargets, hasTargets }:
               y={-14}
               width={bandRight - bandLeft}
               height={innerHeight + 14}
-              fill="var(--bg-subtle)"
-              stroke="var(--border-strong)"
+              fill="var(--bg-secondary)"
+              stroke="var(--border-primary)"
               strokeDasharray="4,3"
               data-testid="drift-band"
             />
@@ -140,7 +140,7 @@ export function DriftPanel({ data, isLoading, onUseExampleTargets, hasTargets }:
               y={-18}
               textAnchor="middle"
               fontSize={10}
-              fill="var(--chart-axis-ink)"
+              fill="var(--chart-label)"
             >
               ±{data.bandPoints} pts
             </text>
@@ -157,7 +157,7 @@ export function DriftPanel({ data, isLoading, onUseExampleTargets, hasTargets }:
                     y={y + BAR_HEIGHT - 2}
                     textAnchor="end"
                     fontSize={11}
-                    fill="var(--chart-axis-ink)"
+                    fill="var(--chart-label)"
                   >
                     {assetClassLabel(row.assetClass)}
                   </text>

@@ -32,7 +32,7 @@
  * every boot is what makes a category added in v0.3 appear for a user created in
  * v0.1, and it costs one pass over ~130 rows that almost always writes nothing.
  */
-import { newId, type Clock } from '@core/kernel';
+import { hueForId, isChartHue, newId, type ChartHue, type Clock } from '@core/kernel';
 import { sql } from 'drizzle-orm';
 import type { CategorizationExecutor } from './db.ts';
 import { CategorizationError } from './errors.ts';
@@ -50,6 +50,12 @@ export interface UserCategory {
   readonly kind: CategoryKind;
   /** A Lucide icon name (decision D20). A key, never markup. */
   readonly icon: string;
+  /**
+   * The chart hue this category is drawn in (WP 10.8, migration 0045): one of the thirteen `CHART_HUES`.
+   * Seeded once with `hueForId(id)` on the first read that finds the column NULL, and persisted then;
+   * after that it is the stored value, which the holder may change, and nothing re-derives it.
+   */
+  readonly hue: ChartHue;
   readonly sort: number;
   /**
    * `true` for a row this taxonomy installed, `false` for one the user created.
@@ -97,6 +103,7 @@ export async function listCategories(
     description: string;
     kind: CategoryKind;
     icon: string;
+    hue: string | null;
     sort: number;
     is_system: boolean;
     /**
@@ -120,6 +127,7 @@ export async function listCategories(
            c.description,
            c.kind,
            c.icon,
+           c.hue,
            c.sort,
            c.is_system,
            c.archived_at,
@@ -130,6 +138,12 @@ export async function listCategories(
      ORDER BY c.sort, c.key
   `);
 
+  const hues = await assignMissingHues(
+    executor,
+    userId,
+    result.rows.filter((row) => row.hue === null).map((row) => row.id),
+  );
+
   return result.rows.map((row) => ({
     id: row.id,
     key: row.key,
@@ -138,6 +152,7 @@ export async function listCategories(
     description: row.description,
     kind: row.kind,
     icon: row.icon,
+    hue: storedHue(row.id, row.hue ?? hues.get(row.id) ?? null),
     sort: row.sort,
     isSystem: row.is_system,
     archivedAt: row.archived_at === null ? null : new Date(row.archived_at),
@@ -148,6 +163,66 @@ export async function listCategories(
     // which `TAXONOMY` has never heard of — is answered correctly.
     assignable: Number(row.child_count) === 0,
   }));
+}
+
+/**
+ * A hue as the table holds it. `categories_hue_check` (0045) admits only `CHART_HUES` or NULL, and every NULL
+ * the read saw has been assigned by `assignMissingHues` before this is called, so either failure here means
+ * the CHECK and the vocabulary disagree — a bug to surface, never a value to paper over with a recomputed
+ * hash (which would be a second, unstored answer).
+ */
+function storedHue(categoryId: string, hue: string | null): ChartHue {
+  if (!isChartHue(hue)) {
+    throw new Error(`category ${categoryId} has no valid stored hue (${String(hue)})`);
+  }
+  return hue;
+}
+
+/**
+ * Assign on first read (WP 10.8). For each category the read found with `hue IS NULL`, persist
+ * `hueForId(id)` — the same hash the web computes for a category it has no stored hue for, so the colour a
+ * holder saw before the first read is the colour that gets stored — and return what is stored now.
+ *
+ * `AND hue IS NULL` is the whole concurrency story: two first reads racing write the same value, and a
+ * holder's own `PATCH` that lands between this read's SELECT and its UPDATE is never overwritten. A row the
+ * UPDATE did not touch (someone else got there first) is read back, so the answer is always the stored value.
+ * `updated_at` is left alone: assigning a default is not an edit.
+ */
+async function assignMissingHues(
+  executor: CategorizationExecutor,
+  userId: string,
+  categoryIds: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  const hues = new Map<string, string>();
+  if (categoryIds.length === 0) return hues;
+
+  const seeds = sql.join(
+    categoryIds.map((id) => sql`(${id}::uuid, ${hueForId(id)}::text)`),
+    sql`, `,
+  );
+  const written = await executor.execute<{ id: string; hue: string }>(sql`
+    UPDATE categories AS c SET hue = seed.hue
+      FROM (VALUES ${seeds}) AS seed (id, hue)
+     WHERE c.id = seed.id AND c.user_id = ${userId} AND c.hue IS NULL
+    RETURNING c.id, c.hue
+  `);
+  for (const row of written.rows) hues.set(row.id, row.hue);
+
+  const raced = categoryIds.filter((id) => !hues.has(id));
+  if (raced.length > 0) {
+    const stored = await executor.execute<{ id: string; hue: string | null }>(sql`
+      SELECT id, hue FROM categories
+       WHERE user_id = ${userId}
+         AND id IN (${sql.join(
+           raced.map((id) => sql`${id}::uuid`),
+           sql`, `,
+         )})
+    `);
+    for (const row of stored.rows) {
+      if (row.hue !== null) hues.set(row.id, row.hue);
+    }
+  }
+  return hues;
 }
 
 export interface EnsureTaxonomyInput {
@@ -283,6 +358,19 @@ export interface CreateCategoryInput {
   readonly icon?: string;
   /** Only used for a top-level heading. A leaf always inherits its parent's. */
   readonly kind?: CategoryKind;
+  /** WP 10.8. Omitted: seeded with `hueForId(id)`, the value a first read would assign. */
+  readonly hue?: ChartHue;
+}
+
+function requireChartHue(hue: unknown): ChartHue {
+  if (!isChartHue(hue)) {
+    throw new CategorizationError(
+      'categorization.rule_invalid',
+      'a category hue must be one of the chart hues',
+      { hue },
+    );
+  }
+  return hue;
 }
 
 /**
@@ -311,6 +399,7 @@ export async function createCategory(
       { label: input.label },
     );
   }
+  const requestedHue = input.hue === undefined ? undefined : requireChartHue(input.hue);
 
   let parentKey: string | null = null;
   let kind: CategoryKind;
@@ -355,13 +444,14 @@ export async function createCategory(
   const now = context.clock.now();
   const description = input.description ?? '';
   const icon = input.icon ?? 'circle';
+  const hue = requestedHue ?? hueForId(id);
   await executor.execute(sql`
     INSERT INTO categories
-      (id, user_id, parent_id, key, label, description, kind, icon, sort, is_system,
+      (id, user_id, parent_id, key, label, description, kind, icon, hue, sort, is_system,
        created_at, updated_at)
     VALUES (
       ${id}, ${input.userId}, ${input.parentId}, ${key}, ${label}, ${description}, ${kind},
-      ${icon}, 0, FALSE, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz
+      ${icon}, ${hue}, 0, FALSE, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz
     )
   `);
 
@@ -373,6 +463,7 @@ export async function createCategory(
     description,
     kind,
     icon,
+    hue,
     sort: 0,
     isSystem: false,
     archivedAt: null,
@@ -388,10 +479,12 @@ export interface RenameCategoryInput {
   readonly label?: string;
   readonly description?: string;
   readonly icon?: string;
+  /** WP 10.8. One of `CHART_HUES`; anything else is refused (`categorization.rule_invalid`). */
+  readonly hue?: ChartHue;
 }
 
 /**
- * `PATCH /categories/{id}` — rename or re-describe. Deliberately narrow:
+ * `PATCH /categories/{id}` — rename or re-describe, or (WP 10.8) recolour. Deliberately narrow:
  * `kind` and `parent_id` are structural (`seed-taxonomy.ts`'s own rule for why
  * a re-seed never touches them) and changing either after transactions have
  * been filed under a category is how a spend report silently moves money
@@ -413,12 +506,14 @@ export async function renameCategory(
       { label: input.label },
     );
   }
+  const hue = input.hue === undefined ? null : requireChartHue(input.hue);
 
   await executor.execute(sql`
     UPDATE categories SET
       label       = COALESCE(${label ?? null}, label),
       description = COALESCE(${input.description ?? null}, description),
       icon        = COALESCE(${input.icon ?? null}, icon),
+      hue         = COALESCE(${hue}, hue),
       updated_at  = ${context.clock.now().toISOString()}::timestamptz
      WHERE id = ${input.categoryId} AND user_id = ${input.userId}
   `);

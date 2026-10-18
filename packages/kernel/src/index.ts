@@ -55,3 +55,4 @@ export {
   medianNumber,
   madNumber,
 } from './stats.ts';
+export { CHART_HUES, isChartHue, hueForId, type ChartHue } from './hue.ts';

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import type { NetWorthPoint } from '../../charts/NetWorthAreaChart.tsx';
+import { chartFillVar, seriesHue } from '../../components/finance/chart-hue.ts';
 import type { GetNetWorthSeriesResponse } from '../../api/generated/types.gen.ts';
 
 export type RawSeriesPoint = GetNetWorthSeriesResponse['points'][number];
@@ -11,21 +12,13 @@ export interface CurrencySeries {
 }
 
 /**
- * Reuses existing theme tokens rather than declaring new CSS — a second,
- * third currency is rare, and this codebase has no categorical chart
- * palette yet (`dataviz`'s brand-neutral palette is a separate concern this
- * work package does not introduce). Cycles if a user somehow has more
- * currencies than colours.
+ * One colour per currency series (WP 10.8). The first series is the single-series line role (`--chart-line`, the
+ * brand accent — what a one-currency household sees, unchanged); a second, third… currency takes the chart fills
+ * in their validated order, so neighbours stay distinguishable. Never cycled: past the fourteenth series the
+ * neutral fill. (Was four borrowed tokens — the accent, two status colours and the axis ink — cycled.)
  */
-const SERIES_COLORS = [
-  'var(--accent)',
-  'var(--status-good)',
-  'var(--status-critical)',
-  'var(--chart-axis-ink)',
-] as const;
-
 export function colorForIndex(index: number): string {
-  return SERIES_COLORS[index % SERIES_COLORS.length] ?? SERIES_COLORS[0];
+  return index === 0 ? 'var(--chart-line)' : chartFillVar(seriesHue(index - 1));
 }
 
 /**

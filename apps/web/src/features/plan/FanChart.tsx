@@ -241,7 +241,7 @@ export function ChartInner({
               }}
               defined={(d) => d[lowKey] !== null && d[highKey] !== null}
               curve={curveMonotoneX}
-              fill="var(--accent)"
+              fill="var(--chart-line)"
               fillOpacity={opacity}
               stroke="none"
             />
@@ -254,7 +254,7 @@ export function ChartInner({
               y={(d) => yScale((d[key] as number | null) ?? d.p50)}
               defined={(d) => d[key] !== null}
               curve={curveMonotoneX}
-              stroke="var(--accent)"
+              stroke="var(--chart-line)"
               strokeOpacity={BAND_STROKE_OPACITY}
               strokeWidth={1}
             />
@@ -265,7 +265,7 @@ export function ChartInner({
             x={(d) => xScale(d.year)}
             y={(d) => yScale(d.p50)}
             curve={curveMonotoneX}
-            stroke="var(--accent)"
+            stroke="var(--chart-line)"
             strokeWidth={2}
           />
           <text
@@ -274,7 +274,7 @@ export function ChartInner({
             textAnchor="end"
             fontSize={11}
             fontWeight={600}
-            fill="var(--accent)"
+            fill="var(--chart-line)"
           >
             {rowsHaveBands(rows) ? 'median' : 'projected path'}
           </text>
@@ -286,7 +286,7 @@ export function ChartInner({
                 x2={innerWidth}
                 y1={goalY}
                 y2={goalY}
-                stroke="var(--money-neutral)"
+                stroke="var(--chart-axis)"
                 strokeDasharray="6,4"
                 strokeWidth={1.5}
               />
@@ -296,8 +296,8 @@ export function ChartInner({
                     cx={xScale(goalCrossYear)}
                     cy={goalY}
                     r={4}
-                    fill="var(--bg-surface)"
-                    stroke="var(--money-neutral)"
+                    fill="var(--bg-primary)"
+                    stroke="var(--chart-axis)"
                     strokeWidth={1.5}
                   />
                   <text
@@ -319,7 +319,7 @@ export function ChartInner({
               x={xScale(year)}
               y={innerHeight + 18}
               fontSize={11}
-              fill="var(--chart-axis-ink)"
+              fill="var(--chart-label)"
               textAnchor="middle"
             >
               {Math.round(year)}
@@ -362,10 +362,10 @@ export function ChartInner({
             style={{
               ...defaultStyles,
               pointerEvents: 'auto',
-              background: 'var(--bg-surface-raised)',
+              background: 'var(--bg-overlay)',
               color: 'var(--text-primary)',
               boxShadow: 'var(--shadow-elev-2)',
-              border: '1px solid var(--border-hairline)',
+              border: '1px solid var(--border-divider)',
               borderRadius: 8,
               fontSize: 12,
             }}
@@ -398,7 +398,7 @@ export function ChartInner({
             <span
               aria-hidden="true"
               className="h-full"
-              style={{ width: 0, borderLeft: '2px dotted var(--money-neutral)' }}
+              style={{ width: 0, borderLeft: '2px dotted var(--chart-axis)' }}
             />
           </button>
         )}
@@ -443,7 +443,10 @@ export function FanChart({
 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-caption text-text-muted">
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-0.5 w-4" style={{ backgroundColor: 'var(--accent)' }} />
+          <span
+            className="inline-block h-0.5 w-4"
+            style={{ backgroundColor: 'var(--chart-line)' }}
+          />
           {hasBands ? 'median' : 'projected path'}
         </span>
         {hasBands && (
@@ -451,21 +454,21 @@ export function FanChart({
             <span className="inline-flex items-center gap-1.5">
               <span
                 className="inline-block h-3 w-4"
-                style={{ backgroundColor: 'var(--accent)', opacity: BAND_FILL_OPACITY[2] }}
+                style={{ backgroundColor: 'var(--chart-line)', opacity: BAND_FILL_OPACITY[2] }}
               />
               p25–p75
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span
                 className="inline-block h-3 w-4"
-                style={{ backgroundColor: 'var(--accent)', opacity: BAND_FILL_OPACITY[1] }}
+                style={{ backgroundColor: 'var(--chart-line)', opacity: BAND_FILL_OPACITY[1] }}
               />
               p10–p90
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span
                 className="inline-block h-3 w-4"
-                style={{ backgroundColor: 'var(--accent)', opacity: BAND_FILL_OPACITY[0] }}
+                style={{ backgroundColor: 'var(--chart-line)', opacity: BAND_FILL_OPACITY[0] }}
               />
               p5–p95
             </span>
@@ -477,7 +480,7 @@ export function FanChart({
               className="inline-block h-0.5 w-4"
               style={{
                 backgroundImage:
-                  'repeating-linear-gradient(to right, var(--money-neutral) 0 4px, transparent 4px 8px)',
+                  'repeating-linear-gradient(to right, var(--chart-axis) 0 4px, transparent 4px 8px)',
               }}
             />
             Goal

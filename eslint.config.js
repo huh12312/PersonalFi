@@ -73,6 +73,29 @@ const WEB_HTML_SINKS = [
  * G-28 (browser storage stays clean, ASVS V14.3.3): the only writers are `lib/persisted-store.ts` (UI
  * preferences) and the sidebar's collapse flag; nothing from the API belongs in storage.
  */
+/**
+ * WP 10.8: a feature component never writes a colour; it reads a role (`var(--chart-fill-teal)`, a Tailwind
+ * utility) from `apps/web/src/styles/tokens.css`. A six-digit hex literal in a `.tsx` under `apps/web/src/features` is a
+ * chart that will not follow the theme, the category's hue or a contrast fix. `contrast.test.ts` refuses the same
+ * thing across `src/` at test time; this is the edit-time half. `CHART_COLOUR_ALLOWLIST` (below) is the only
+ * way past it, one file per entry with the reason beside it.
+ */
+const WEB_CHART_COLOURS = [
+  {
+    selector: 'Literal[value=/#[0-9a-fA-F]{6}/]',
+    message:
+      'No colour literal in a feature component: read a role from src/styles/tokens.css (var(--chart-…), a Tailwind utility) — WP 10.8, docs/design/tokens.md.',
+  },
+  {
+    selector: 'TemplateElement[value.raw=/#[0-9a-fA-F]{6}/]',
+    message:
+      'No colour literal in a feature component: read a role from src/styles/tokens.css (var(--chart-…), a Tailwind utility) — WP 10.8, docs/design/tokens.md.',
+  },
+];
+
+/** Feature files allowed a hex literal, each with its reason. Empty: none needs one. */
+const CHART_COLOUR_ALLOWLIST = [];
+
 const WEB_STORAGE_WRITES = [
   {
     selector:
@@ -368,6 +391,20 @@ export default tseslint.config(
       // review catch. A real need (sanitised, trusted-types-wrapped markup) is an eslint-disable with the
       // reason beside it, which is visible in the diff.
       'no-restricted-syntax': ['error', ...WEB_HTML_SINKS, ...WEB_STORAGE_WRITES],
+    },
+  },
+
+  // Feature components: no colour literals (WEB_CHART_COLOURS), on top of the web-wide bans.
+  {
+    files: ['apps/web/src/features/**/*.tsx'],
+    ignores: ['**/*.test.tsx', ...CHART_COLOUR_ALLOWLIST],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...WEB_HTML_SINKS,
+        ...WEB_STORAGE_WRITES,
+        ...WEB_CHART_COLOURS,
+      ],
     },
   },
 

@@ -402,10 +402,10 @@ export function ChartInner({ width, height, data, marks, currency, banded }: Cha
             style={{
               ...defaultStyles,
               pointerEvents: 'auto',
-              background: 'var(--bg-surface-raised)',
+              background: 'var(--bg-overlay)',
               color: 'var(--text-primary)',
               boxShadow: 'var(--shadow-elev-2)',
-              border: '1px solid var(--border-hairline)',
+              border: '1px solid var(--border-divider)',
               borderRadius: 8,
               fontSize: 12,
               lineHeight: '18px',

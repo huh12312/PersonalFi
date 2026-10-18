@@ -7,7 +7,10 @@ import {
   FORECAST_MARK_ROLES,
   FORECAST_TEXT_ROLES,
 } from '../features/recurring/forecast-chart-tokens.ts';
+import { CHART_HUES } from '@core/kernel';
+
 import themeCss from './theme.css?raw';
+import tokensCss from './tokens.css?raw';
 
 /**
  * WP 9.8 (09 §3 "WP 9.8" (4); CF-8, CF-9, CF-10). The contrast of every
@@ -143,14 +146,20 @@ function declarations(body: string): Palette {
   return out;
 }
 
-const css = stripComments(themeCss);
-const rules = parseRules(css);
+// The runtime values live in the generated tokens.css (WP 10.8); theme.css keeps the Tailwind `@theme` map.
+const css = stripComments(`${tokensCss}\n${themeCss}`);
+const rules = parseRules(css).map((rule) => ({
+  ...rule,
+  selector: rule.selector.replace(/\s+/g, ' '),
+}));
 
 function merged(predicate: (rule: Rule) => boolean): Palette {
   return Object.assign({}, ...rules.filter(predicate).map((rule) => declarations(rule.body)));
 }
 
-const lightDeclared = merged((r) => r.selector === ':root' && r.media === null);
+const lightDeclared = merged(
+  (r) => r.selector === ":root, [data-theme='light']" && r.media === null,
+);
 const darkDeclared = merged((r) => r.selector === "[data-theme='dark']" && r.media === null);
 const darkMediaDeclared = merged(
   (r) =>
@@ -230,6 +239,81 @@ const UI_PAIRS: ReadonlyArray<readonly [string, string]> = [
     CHART_SURFACES.map((bg) => [fg, bg] as const),
   ),
 ];
+
+// ---------------------------------------------------------------------------
+// 2b. Every WP 10.8 role pair (tokens.css)
+// ---------------------------------------------------------------------------
+
+/** Surfaces text and controls sit on, by role name. */
+const ROLE_SURFACES = ['--bg-page', '--bg-primary', '--bg-secondary', '--bg-overlay'] as const;
+/** Surfaces a chart is drawn on, by role name. */
+const ROLE_CHART_SURFACES = ['--bg-page', '--bg-primary', '--bg-overlay'] as const;
+const STATUSES = ['success', 'danger', 'warning', 'info'] as const;
+
+/**
+ * [foreground, background, floor]. Text 4.5:1, marks and control boundaries 3:1. Exempt, by design and
+ * named here so the exemption is a decision: `--text-disabled` (an inactive control, 1.4.3's own exception),
+ * `--border-secondary`, `--border-divider`, `--status-*-border`, `--chart-event-border-*` (decorative edges
+ * beside a surface change or a label), `--chart-gridline` and `--chart-negative-area` (recessive chart chrome
+ * whose values are carried by the axis, the readout and the table). Washes (`--status-*-bg`,
+ * `--chart-event-bg-*`) are backgrounds: their inks are measured on them. `--bg-tertiary` and `--bg-inset` are
+ * fills (tracks, pressed states, skeleton bases), not text surfaces — `docs/design/tokens.md` says so, and the
+ * component scan above would catch a `text-*` on them.
+ */
+const ROLE_PAIRS: ReadonlyArray<readonly [string, string, number]> = [
+  ...(['--text-primary', '--text-secondary', '--text-tertiary', '--text-muted'] as const).flatMap(
+    (fg) => ROLE_SURFACES.map((bg) => [fg, bg, 4.5] as const),
+  ),
+  ['--text-on-brand', '--accent', 4.5],
+  ['--text-on-brand', '--accent-hover', 4.5],
+  ...ROLE_SURFACES.map((bg) => ['--border-primary', bg, 3] as const),
+  ...STATUSES.flatMap((s) => [
+    [`--status-${s}-text`, `--status-${s}-bg`, 4.5] as const,
+    ...ROLE_SURFACES.map((bg) => [`--status-${s}-text`, bg, 4.5] as const),
+    ...ROLE_CHART_SURFACES.map((bg) => [`--status-${s}-bold`, bg, 3] as const),
+  ]),
+  ...ROLE_CHART_SURFACES.flatMap((bg) => [
+    ['--chart-label', bg, 4.5] as const,
+    ['--chart-axis', bg, 3] as const,
+    ['--chart-line', bg, 3] as const,
+    ['--chart-income', bg, 3] as const,
+    ['--chart-expenses', bg, 3] as const,
+    ['--chart-fill-neutral', bg, 3] as const,
+  ]),
+  ...CHART_HUES.flatMap((hue) => [
+    ...ROLE_CHART_SURFACES.map((bg) => [`--chart-fill-${hue}`, bg, 3] as const),
+    ...ROLE_CHART_SURFACES.map((bg) => [`--chart-event-dot-${hue}`, bg, 3] as const),
+    [`--chart-event-fg-${hue}`, `--chart-event-bg-${hue}`, 4.5] as const,
+    ...ROLE_CHART_SURFACES.map((bg) => [`--chart-event-fg-${hue}`, bg, 4.5] as const),
+  ]),
+];
+
+describe('WP 10.8 role pairs', () => {
+  it('covers every role a foreground can be (the list is not stale)', () => {
+    const foregrounds = new Set(ROLE_PAIRS.map(([fg]) => fg));
+    const exempt =
+      /^--(text-disabled|border-(secondary|divider)|status-\w+-(border|bg)|chart-event-(border|bg)-\w+|chart-gridline|chart-negative-area)$/;
+    // Legacy names are measured through the pairs above that name them, and through their role.
+    const legacy = new Set(['--border-hairline', '--border-strong', '--chart-axis-ink']);
+    const roleNames = Object.keys(palettes.light).filter(
+      (name) =>
+        /^--(text|border|status-(success|danger|warning|info)|chart)-/.test(name) &&
+        !legacy.has(name),
+    );
+    const uncovered = roleNames.filter((name) => !foregrounds.has(name) && !exempt.test(name));
+    expect(uncovered).toEqual([]);
+  });
+
+  for (const theme of THEMES) {
+    it(`every role pair clears its floor in the ${theme} theme`, () => {
+      const failing = ROLE_PAIRS.flatMap(([fg, bg, floor]) => {
+        const r = ratio(colorOf(theme, fg), colorOf(theme, bg));
+        return r >= floor ? [] : [`${fg} on ${bg}: ${r.toFixed(2)}:1 (< ${String(floor)})`];
+      });
+      expect(failing).toEqual([]);
+    });
+  }
+});
 
 describe('theme.css palettes', () => {
   it('the two dark palettes are identical', () => {
@@ -461,10 +545,6 @@ const OFF_TOKEN_ALLOWED: ReadonlyArray<readonly [file: string, literal: string, 
     'bg-white',
     "the switch thumb: always on the accent or inset track, which has a bordered boundary (UI pair '--border-strong')",
   ],
-  ['features/plan/palette.ts', '#2563eb', 'ACCENT_HEX — asserted equal to --accent above'],
-  ['features/plan/palette.ts', '#3987e5', 'ACCENT_HEX — asserted equal to --accent above'],
-  ['features/plan/palette.ts', '#ffffff', 'SURFACE_HEX — asserted equal to --bg-surface above'],
-  ['features/plan/palette.ts', '#16181a', 'SURFACE_HEX — asserted equal to --bg-surface above'],
 ];
 
 const OFF_TOKEN_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
@@ -484,6 +564,8 @@ describe('no colour outside the tokens', () => {
   it('no component writes a colour that this file cannot see', () => {
     const offences: string[] = [];
     for (const [file, source] of Object.entries(sources)) {
+      // The token sources and the generated TS object ARE the tokens (WP 10.8); tokens.test.ts holds them.
+      if (file === './tokens.ts' || file.startsWith('./tokens/')) continue;
       // Comments may quote a colour; only code may not.
       const code = source
         .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -532,12 +614,7 @@ describe('the forward cash-flow chart (WP 10.7)', () => {
     expect(chart).toBeDefined();
     // Every colour in the chart is `chartVar(...)` or one of the shared readout-surface tokens.
     const raw = [...(chart ?? '').matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]);
-    const readout = [
-      '--bg-surface-raised',
-      '--text-primary',
-      '--shadow-elev-2',
-      '--border-hairline',
-    ];
+    const readout = ['--bg-overlay', '--text-primary', '--shadow-elev-2', '--border-divider'];
     expect(raw.filter((token) => !readout.includes(token as string))).toEqual([]);
     expect((chart ?? '').match(/chartVar\('/g)?.length ?? 0).toBeGreaterThan(8);
   });

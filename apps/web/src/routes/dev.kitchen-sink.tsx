@@ -4,6 +4,7 @@ import { AlertTriangle, Sparkles, Wallet } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 
+import { TokenGallery } from '../components/dev/TokenGallery.tsx';
 import { DateOnlyText } from '../components/finance/DateOnlyText.tsx';
 import { InlineInsight } from '../components/finance/InlineInsight.tsx';
 import { Money } from '../components/finance/Money.tsx';
@@ -130,6 +131,10 @@ function Theme({ label, value }: { label: string; value: 'light' | 'dark' }) {
             <div className="h-8 rounded-sm bg-[var(--seq-12)]" />
             <div className="h-8 rounded-sm bg-[var(--seq-13)]" />
           </div>
+        </Section>
+
+        <Section title="Tokens">
+          <TokenGallery />
         </Section>
 
         <Section title="Typography">

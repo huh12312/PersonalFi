@@ -80,8 +80,13 @@ describe('AllocationDonut', () => {
     for (const arc of arcs) {
       expect(arc.getAttribute('fill')).toMatch(/^url\(#alloc-[A-Za-z0-9-]+-\d+\)$/);
     }
+    // WP 10.8: thirteen fills in the validated order plus the neutral one past the thirteenth (never cycled).
     const patterns = container.querySelectorAll('pattern');
-    expect(patterns.length).toBe(8);
+    expect(patterns.length).toBe(14);
+    const fills = [...patterns].map((p) => p.querySelector('rect')?.getAttribute('fill'));
+    expect(fills[0]).toBe('var(--chart-fill-green)');
+    expect(fills[13]).toBe('var(--chart-fill-neutral)');
+    expect(new Set(fills).size).toBe(14);
   });
 
   it('labels every slice in the legend, so the chart reads without colour at all', () => {

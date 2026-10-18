@@ -7,7 +7,7 @@ import { useMemo } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import type { ReportCategoryMonthCell } from '../../../api/generated/types.gen.ts';
-import { categorySeriesVar } from '../../../components/finance/category-color.ts';
+import { categoryHue, chartFillVar, type FillHue } from '../../../components/finance/chart-hue.ts';
 import { toTransactionsSearch } from '../drill-through.ts';
 import { ChartDataTable } from '../../../components/patterns/ChartDataTable.tsx';
 import { Money } from '../../../components/finance/Money.tsx';
@@ -18,6 +18,8 @@ export interface CategoryMonthBarChartProps {
   height?: number;
   className?: string;
   labelFor?: (categoryId: string | null) => string;
+  /** A category's hue (WP 10.8): the persisted one when the caller has it, else the server's seed for the id. */
+  hueFor?: (categoryId: string | null) => FillHue;
   ariaLabel: string;
 }
 
@@ -50,6 +52,7 @@ export function CategoryMonthBarChart({
   height = 280,
   className,
   labelFor,
+  hueFor = (categoryId) => categoryHue(categoryId),
   ariaLabel,
 }: CategoryMonthBarChartProps) {
   const navigate = useNavigate();
@@ -136,7 +139,7 @@ export function CategoryMonthBarChart({
                         y={segmentTop}
                         width={barWidth}
                         height={Math.max(0, segmentHeight)}
-                        fill={categorySeriesVar(segment.categoryId)}
+                        fill={chartFillVar(hueFor(segment.categoryId))}
                         rx={2}
                         role="button"
                         tabIndex={0}
@@ -162,7 +165,7 @@ export function CategoryMonthBarChart({
                 y={innerHeight + 16}
                 textAnchor="middle"
                 fontSize={11}
-                fill="var(--text-muted)"
+                fill="var(--chart-label)"
               >
                 {bar.month}
               </text>
