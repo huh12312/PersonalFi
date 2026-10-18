@@ -3,6 +3,12 @@ import { describe, expect, it } from 'vitest';
 
 import { ACCENT_HEX, SURFACE_HEX } from '../features/plan/palette.ts';
 import {
+  PACE_CHART_TOKENS,
+  PACE_LAST_MONTH_OPACITY,
+  PACE_MARK_ROLES,
+  PACE_TEXT_ROLES,
+} from '../features/dashboard/widgets/pace-chart-tokens.ts';
+import {
   FORECAST_CHART_TOKENS,
   FORECAST_MARK_ROLES,
   FORECAST_TEXT_ROLES,
@@ -631,6 +637,48 @@ describe('the forward cash-flow chart (WP 10.7)', () => {
         for (const role of FORECAST_TEXT_ROLES) {
           const token = FORECAST_CHART_TOKENS[role];
           const r = ratio(colorOf(theme, token), colorOf(theme, bg));
+          if (r < 4.5) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
+        }
+      }
+      expect(failing).toEqual([]);
+    });
+  }
+});
+
+/**
+ * `SpendingPaceChart.tsx` (WP 10.9) draws only with `pace-chart-tokens.ts`'s roles (`paceVar(role)`), so measuring
+ * the roles measures the chart: its four marks (this month, last month — measured **blended** at the opacity it is
+ * drawn at — the average hairline and today's rule) at 3:1 on every chart surface, its tick labels at 4.5:1.
+ */
+describe('the spending pace chart (WP 10.9)', () => {
+  it('draws only with roles this file can measure', () => {
+    const chart = Object.entries(sources).find(([path]) =>
+      path.endsWith('features/dashboard/widgets/SpendingPaceChart.tsx'),
+    )?.[1];
+    expect(chart).toBeDefined();
+    const raw = [...(chart ?? '').matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]);
+    const readout = ['--bg-overlay', '--text-primary', '--shadow-elev-2', '--border-divider'];
+    expect(raw.filter((token) => !readout.includes(token as string))).toEqual([]);
+    expect((chart ?? '').match(/paceVar\('/g)?.length ?? 0).toBeGreaterThan(8);
+  });
+
+  for (const theme of THEMES) {
+    it(`every mark role clears 3:1 and every text role 4.5:1 on each chart surface in the ${theme} theme`, () => {
+      const failing: string[] = [];
+      for (const bg of CHART_SURFACES) {
+        const surface = colorOf(theme, bg);
+        for (const role of PACE_MARK_ROLES) {
+          const token = PACE_CHART_TOKENS[role];
+          const drawn =
+            role === 'lastMonth'
+              ? composite({ ...colorOf(theme, token), a: PACE_LAST_MONTH_OPACITY }, surface)
+              : colorOf(theme, token);
+          const r = ratio(drawn, surface);
+          if (r < 3) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
+        }
+        for (const role of PACE_TEXT_ROLES) {
+          const token = PACE_CHART_TOKENS[role];
+          const r = ratio(colorOf(theme, token), surface);
           if (r < 4.5) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
         }
       }

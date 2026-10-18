@@ -539,6 +539,10 @@ describeWithDb('runMigrations', () => {
       //   hueForId(id) in packages/kernel/src/hue.ts, written by @ctx/categorization on first read
       //   (`AND hue IS NULL`) and never re-derived. Expand-only; references only 0006's categories.
       //   Exported with the row (the export reads every column).
+      // 0046_dashboard_layout (WP 10.9): no new table. users gains nullable dashboard_layout JSONB (the
+      //   dashboard's widget order and visibility; users_dashboard_layout_is_array: NULL or an array of at
+      //   most 32 entries; NULL = the default layout). Ids are the route's zod enum, not a CHECK. Expand-only;
+      //   references only users. Not exported (registry.ts exempts users).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called

@@ -35,6 +35,11 @@ export interface ReportRow {
   readonly transferLinkId: string | null;
   readonly refundOfId: string | null;
   readonly excluded: boolean;
+  /**
+   * The ledger's resolved `effective.pending`. Reports count a pending row like any other (`computeActuals`
+   * never reads this); `spending-pace.ts` (WP 10.9) drops pending rows by default and says how many.
+   */
+  readonly pending: boolean;
 }
 
 export interface ReportAccount {

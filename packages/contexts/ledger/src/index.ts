@@ -169,6 +169,8 @@ export {
   listMerchants,
   listRemovedTransactions,
   listTransactions,
+  listAggregateRowsInWindow,
+  type LedgerAggregateRow,
   scanForProjectionCheck,
   sumTransactions,
   type CategorizationFeedFilters,

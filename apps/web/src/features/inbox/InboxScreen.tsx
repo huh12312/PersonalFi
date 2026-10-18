@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MIT
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftRight, CheckCircle2, X } from 'lucide-react';
-import { useEffect, useMemo, useReducer, useRef } from 'react';
+import { useEffect, useReducer, useRef } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import {
-  listTransactionsOptions,
   pairTransferMutation,
   rejectTransferMutation,
 } from '../../api/generated/@tanstack/react-query.gen.ts';
@@ -21,17 +20,8 @@ import {
   invalidateTransactionQueries,
   useTransactionOverlayMutation,
 } from '../transactions/useTransactionOverlay.ts';
-import {
-  EMPTY_INBOX_STATE,
-  inboxReducer,
-  transferItem,
-  uncategorizedItem,
-  type InboxItem,
-} from './inbox-reducer.ts';
-import { findTransferSuggestions } from './transfer-suggestions.ts';
-
-const TRANSFER_POOL_LIMIT = 200;
-const UNCATEGORIZED_LIMIT = 50;
+import { EMPTY_INBOX_STATE, inboxReducer } from './inbox-reducer.ts';
+import { useInboxQueue } from './useInboxQueue.ts';
 
 /**
  * The review inbox (wp1.6-ui.md §7's carried-over item; rung v0.3's "clears
@@ -60,26 +50,7 @@ export function InboxScreen() {
   const [state, dispatch] = useReducer(inboxReducer, EMPTY_INBOX_STATE);
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
 
-  const uncategorizedQuery = useQuery(
-    listTransactionsOptions({ query: { uncategorized: 'true', limit: UNCATEGORIZED_LIMIT } }),
-  );
-  const poolQuery = useQuery(
-    listTransactionsOptions({ query: { transfers: 'exclude', limit: TRANSFER_POOL_LIMIT } }),
-  );
-
-  const items = useMemo<InboxItem[]>(() => {
-    const rawSuggestions = findTransferSuggestions(poolQuery.data?.items ?? []);
-    const suggestions = rawSuggestions.map((s) => transferItem(s.outflow, s.inflow));
-    // A transaction offered as one leg of a transfer suggestion is not also
-    // offered as a plain "needs a category" row — a transfer is not spend,
-    // and showing both would ask the user to resolve the same two rows
-    // twice in two different ways.
-    const suggestedIds = new Set(rawSuggestions.flatMap((s) => [s.outflow.id, s.inflow.id]));
-    const uncategorized = (uncategorizedQuery.data?.items ?? [])
-      .filter((t) => !suggestedIds.has(t.id))
-      .map(uncategorizedItem);
-    return [...suggestions, ...uncategorized];
-  }, [poolQuery.data, uncategorizedQuery.data]);
+  const { items, isLoading } = useInboxQueue();
 
   useEffect(() => {
     dispatch({ type: 'set-items', items });
@@ -119,8 +90,6 @@ export function InboxScreen() {
       dispatch({ type: 'focus', id });
     }
   }
-
-  const isLoading = uncategorizedQuery.isLoading || poolQuery.isLoading;
 
   if (isLoading) return <SkeletonText lines={6} />;
 

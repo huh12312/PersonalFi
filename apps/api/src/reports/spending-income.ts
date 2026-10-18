@@ -31,29 +31,32 @@ import {
   toBudgetTransactions,
   type ReportWindow,
 } from './ledger-source.ts';
-import type { CategoryMonthActivity, ReportRow } from './types.ts';
+import type { CategoryMonthActivity, ReportAccount, ReportRow } from './types.ts';
 
 function monthOf(date: string): string {
   return date.slice(0, 7);
 }
 
+/** One calendar month of one currency, split by `computeActuals` into per-envelope activity. */
+export interface MonthActuals {
+  readonly month: string;
+  readonly currency: string;
+  readonly byCategory: ReturnType<typeof computeActuals>['byCategory'];
+}
+
 /**
- * Every `(month, category, currency)` cell in the window, transfers excluded,
- * refunds netted. Callers split this into a spending report and an income
- * report by joining `categoryId` against `@ctx/categorization`'s `kind` — this
- * function does not import that context (an `apps/` file may, but doing the
- * join here would make this the one place both call, and a caller that wants
- * only spending would still pay for loading every category to find out).
+ * The month-by-month `computeActuals` split every report in this directory starts from: rows grouped by
+ * currency, then by `effective.date`'s `YYYY-MM`, each month run through `@ctx/budgeting`'s own
+ * `computeActuals` with `categoryOfPurchase` built once over **every** row handed in (so a refund that posts a
+ * month after its purchase still nets against the purchase's category). `computeCategoryMonthActivity` sums
+ * each line; `spending-pace.ts` (WP 10.9) accumulates each line's transactions day by day. One split, two
+ * readers: neither re-derives which rows count.
  */
-export async function computeCategoryMonthActivity(
-  database: LedgerDatabase,
-  window: ReportWindow,
-): Promise<CategoryMonthActivity[]> {
-  const [rows, accounts] = await Promise.all([
-    loadReportRows(database, window),
-    loadReportAccounts(database, window.userId),
-  ]);
-  const results: CategoryMonthActivity[] = [];
+export function monthActualsOf(
+  rows: readonly ReportRow[],
+  accounts: readonly ReportAccount[],
+): MonthActuals[] {
+  const results: MonthActuals[] = [];
 
   for (const [currency, currencyRows] of groupByCurrency(rows)) {
     const currencyAccounts = accounts.filter((account) => account.currency === currency);
@@ -78,20 +81,45 @@ export async function computeCategoryMonthActivity(
         categoryOfPurchase,
         currency,
       });
-      for (const activity of byCategory.values()) {
-        results.push({
-          month,
-          categoryId: activity.categoryId,
+      results.push({ month, currency, byCategory });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Every `(month, category, currency)` cell in the window, transfers excluded,
+ * refunds netted. Callers split this into a spending report and an income
+ * report by joining `categoryId` against `@ctx/categorization`'s `kind` — this
+ * function does not import that context (an `apps/` file may, but doing the
+ * join here would make this the one place both call, and a caller that wants
+ * only spending would still pay for loading every category to find out).
+ */
+export async function computeCategoryMonthActivity(
+  database: LedgerDatabase,
+  window: ReportWindow,
+): Promise<CategoryMonthActivity[]> {
+  const [rows, accounts] = await Promise.all([
+    loadReportRows(database, window),
+    loadReportAccounts(database, window.userId),
+  ]);
+  const results: CategoryMonthActivity[] = [];
+
+  for (const { month, currency, byCategory } of monthActualsOf(rows, accounts)) {
+    for (const activity of byCategory.values()) {
+      results.push({
+        month,
+        categoryId: activity.categoryId,
+        currency,
+        amount: Money.sum(
+          activity.transactions.map((transaction) => transaction.amount),
           currency,
-          amount: Money.sum(
-            activity.transactions.map((transaction) => transaction.amount),
-            currency,
-          ),
-          transactionCount: activity.transactionCount,
-          transferExcludedCount: activity.transferExcludedCount,
-          refundNettedCount: activity.refundNettedCount,
-        });
-      }
+        ),
+        transactionCount: activity.transactionCount,
+        transferExcludedCount: activity.transferExcludedCount,
+        refundNettedCount: activity.refundNettedCount,
+      });
     }
   }
 

@@ -95,8 +95,8 @@ export default defineConfig<ColdStartOptions & EvidenceDirOptions>({
         process.env['PW_SUITE'] === 'a11y'
           ? /(a11y-sweep|a11y-keyboard)\.spec\.ts/
           : process.env['PW_SUITE'] === 'functional'
-            ? /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan|plan-sliders|brief|advisors|accounts-overrides|goals|security|connections-plaid-setup|market-data-keys|price-refresh|narrator-settings|tokens)\.spec\.ts/
-            : /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan|plan-sliders|brief|advisors|accounts-overrides|goals|security|connections-plaid-setup|market-data-keys|price-refresh|narrator-settings|tokens|a11y-sweep|a11y-keyboard)\.spec\.ts/,
+            ? /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan|plan-sliders|brief|advisors|accounts-overrides|goals|security|connections-plaid-setup|market-data-keys|price-refresh|narrator-settings|tokens|dashboard)\.spec\.ts/
+            : /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan|plan-sliders|brief|advisors|accounts-overrides|goals|security|connections-plaid-setup|market-data-keys|price-refresh|narrator-settings|tokens|dashboard|a11y-sweep|a11y-keyboard)\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         baseURL: 'http://localhost:5183',

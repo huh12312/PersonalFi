@@ -31,6 +31,12 @@ export interface Stop {
   readonly left: number;
   readonly height: number;
   readonly width: number;
+  /**
+   * The grid cell the stop sits in (WP 10.9), when its container marks itself `data-reading-cell`: a card in a
+   * multi-column grid is one unit of reading, and the cells — not the stops inside two different cells — are what
+   * must go down the page. `null` outside such a grid.
+   */
+  readonly cell?: { readonly id: string; readonly top: number; readonly height: number } | null;
 }
 
 interface FocusReport extends Stop {
@@ -186,7 +192,19 @@ async function readFocus(page: Page): Promise<FocusReport | null> {
                 ? 'nav'
                 : 'page';
 
+    const cellNode = subject.closest('[data-reading-cell]');
+    const cellRect = cellNode?.getBoundingClientRect();
+    const cell =
+      cellNode === null || cellRect === undefined
+        ? null
+        : {
+            id: cellNode.getAttribute('data-reading-cell') ?? '',
+            top: cellRect.top + scrolledBy(cellNode, 'scrollTop') + window.scrollY,
+            height: cellRect.height,
+          };
+
     return {
+      cell,
       name: labelOf(subject).slice(0, 80),
       role: subject.getAttribute('role') ?? '',
       tag: subject.tagName.toLowerCase(),
@@ -343,6 +361,17 @@ export function assertReadingOrder(journeyName: string, stops: readonly Stop[]):
       continue;
     }
     if (prev.region === 'dialog') continue; // a dialog's stops are its own order; they are checked by name in the journeys
+    // Two cells of a reading grid (WP 10.9's dashboard: `data-reading-cell`): the grid reads row by row, so moving
+    // from the last stop of one card to the first of the card beside it is not a jump up — but the next *cell* may
+    // still not lie wholly above the previous cell's top (a card ordered back into an earlier row fails).
+    if (prev.cell != null && next.cell != null && prev.cell.id !== next.cell.id) {
+      const cellBottom = next.cell.top + next.cell.height;
+      expect(
+        cellBottom >= prev.cell.top - SLACK,
+        `${journeyName}: focus jumped up to an earlier row of the grid ("${prev.name}" in ${prev.cell.id} → "${next.name}" in ${next.cell.id}) — 2.4.3`,
+      ).toBe(true);
+      continue;
+    }
     // "Up" means the next stop lies wholly above the previous one's top edge: a stop beside it, or one whose box
     // overlaps it (a panel and the scroll region inside it, two sliders in a row whose labels differ in height),
     // is the same line of the page.

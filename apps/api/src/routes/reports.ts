@@ -13,7 +13,7 @@
  * see `reports/drill-through.ts`'s header for why this is a reuse, not a
  * second filter language.
  */
-import { DateOnly } from '@core/kernel';
+import { DateOnly, todayIn } from '@core/kernel';
 import { listCategories } from '@ctx/categorization';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -25,8 +25,9 @@ import {
   spendingRowsOf,
 } from '../reports/spending-income.ts';
 import { computeSankey } from '../reports/sankey.ts';
+import { computeSpendingPace, parseMonth, type PaceDay } from '../reports/spending-pace.ts';
 import { AppError, problems } from '../problem.ts';
-import { dateOnlyQuery, idList, money, moneySchema } from '../wire.ts';
+import { booleanQuery, dateOnlyQuery, idList, money, moneySchema } from '../wire.ts';
 import type { RouteDeps } from './deps.ts';
 
 const drillThroughSchema = z
@@ -88,8 +89,33 @@ const budgetVsActualLineSchema = z
   })
   .meta({ id: 'BudgetVsActualLine' });
 
+const paceDaySchema = z
+  .object({
+    day: z.int().min(1).max(31),
+    cumulativeMinor: z
+      .string()
+      .regex(/^-?\d+$/u)
+      .describe('Spent from the 1st through this day, minor units, as a positive amount.'),
+  })
+  .meta({ id: 'SpendingPaceDay' });
+
+function paceDays(days: readonly PaceDay[]): z.infer<typeof paceDaySchema>[] {
+  return days.map((point) => ({
+    day: point.day,
+    cumulativeMinor: point.cumulative.minor.toString(),
+  }));
+}
+
 export const reportRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
-  const { guards, database, pool } = deps;
+  const { guards, database, pool, clock } = deps;
+
+  async function timezoneOf(userId: string): Promise<string> {
+    const rows = await pool.query<{ display_timezone: string }>(
+      'SELECT display_timezone FROM users WHERE id = $1',
+      [userId],
+    );
+    return rows.rows[0]?.display_timezone ?? 'UTC';
+  }
 
   return async (app) => {
     app.get(
@@ -260,6 +286,104 @@ export const reportRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
                   : drillThroughForWindow(request.query.from, request.query.to, categoryId),
             };
           }),
+        };
+      },
+    );
+
+    app.get(
+      '/reports/spending-pace',
+      {
+        schema: {
+          operationId: 'getSpendingPace',
+          summary:
+            "This month's cumulative spend by day, against last month and the 3-month average",
+          description:
+            "Every day present (a day with no spend repeats the day before). Spend is `GET /reports/spending`'s " +
+            'own definition (transfers excluded, refunds netted, income categories and a net-positive ' +
+            "uncategorised bucket left out): the last point of a month is that month's spending report total. " +
+            'Pending rows are left out unless `includePending=true`; `pendingExcludedCount` says how many. A ' +
+            'month with no ledger row at all is returned empty, never as zeros. One currency (the one with the ' +
+            'most rows); the others are named in `otherCurrencies`, never summed.',
+          tags: ['reports'],
+          querystring: z.object({
+            month: z
+              .string()
+              .regex(/^\d{4}-\d{2}$/u)
+              .refine((value) => parseMonth(value) !== null, 'not a calendar month')
+              .optional()
+              .describe("`YYYY-MM`. Defaults to the current month in the holder's time zone."),
+            includePending: booleanQuery,
+          }),
+          response: {
+            200: z
+              .object({
+                month: z.string(),
+                currency: z.string().length(3).nullable(),
+                otherCurrencies: z.array(z.string()),
+                daysInMonth: z.int().min(28).max(31),
+                today: z
+                  .int()
+                  .min(1)
+                  .max(31)
+                  .nullable()
+                  .describe('Day of month of today when `month` is the current month, else null.'),
+                days: z.array(paceDaySchema),
+                lastMonthKey: z.string(),
+                lastMonth: z.array(paceDaySchema),
+                trailingMonths: z.array(z.string()),
+                trailingAverage: z.array(paceDaySchema),
+                includePending: z.boolean(),
+                pendingExcludedCount: z.int().nonnegative(),
+                asOf: z.string().describe('When this was computed.'),
+                lastSyncedAt: z
+                  .string()
+                  .nullable()
+                  .describe('The most recent sync of any connection; null when none has synced.'),
+              })
+              .meta({ id: 'SpendingPace' }),
+            ...problems(400, 401, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const timezone = await timezoneOf(session.userId);
+        const today = todayIn(clock, timezone);
+        const categories = await listCategories(database, session.userId, {});
+        const incomeIds = new Set(
+          categories
+            .filter((category) => category.kind === 'income')
+            .map((category) => category.id),
+        );
+        const [pace, synced] = await Promise.all([
+          computeSpendingPace(database, {
+            userId: session.userId,
+            month: request.query.month ?? today.slice(0, 7),
+            today,
+            includePending: request.query.includePending ?? false,
+            incomeCategoryIds: incomeIds,
+          }),
+          pool.query<{ last: Date | null }>(
+            'SELECT max(last_synced_at) AS last FROM connections WHERE user_id = $1',
+            [session.userId],
+          ),
+        ]);
+        const lastSynced = synced.rows[0]?.last ?? null;
+        return {
+          month: pace.month,
+          currency: pace.currency,
+          otherCurrencies: [...pace.otherCurrencies],
+          daysInMonth: pace.daysInMonth,
+          today: pace.today,
+          days: paceDays(pace.days),
+          lastMonthKey: pace.lastMonthKey,
+          lastMonth: paceDays(pace.lastMonth),
+          trailingMonths: [...pace.trailingMonths],
+          trailingAverage: paceDays(pace.trailingAverage),
+          includePending: pace.includePending,
+          pendingExcludedCount: pace.pendingExcludedCount,
+          asOf: clock.now().toISOString(),
+          lastSyncedAt: lastSynced === null ? null : lastSynced.toISOString(),
         };
       },
     );

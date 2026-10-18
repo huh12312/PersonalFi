@@ -5,7 +5,12 @@ import {
   getNetWorthSeriesOptions,
   setManualFxRateMutation,
 } from '../../api/generated/@tanstack/react-query.gen.ts';
-import { type NetWorthRange, windowForRange } from './search.ts';
+import {
+  type DashboardPeriod,
+  type NetWorthRange,
+  windowForPeriod,
+  windowForRange,
+} from './search.ts';
 
 /** Today, UTC, date-only — matches `apps/api/src/routes/investments.ts`'s `todayFor` shape closely enough for a client-side default window. */
 function todayIso(): string {
@@ -19,6 +24,15 @@ function todayIso(): string {
  */
 export function useNetWorthSeriesQuery(range: NetWorthRange) {
   const { from, to } = windowForRange(range, todayIso());
+  return useQuery({
+    ...getNetWorthSeriesOptions({ query: { from, to } }),
+    staleTime: 10_000,
+  });
+}
+
+/** `GET /net-worth/series` for one dashboard period (WP 10.9). `3M` is the same request as `p90d`. */
+export function useNetWorthSeriesPeriodQuery(period: DashboardPeriod) {
+  const { from, to } = windowForPeriod(period, todayIso());
   return useQuery({
     ...getNetWorthSeriesOptions({ query: { from, to } }),
     staleTime: 10_000,

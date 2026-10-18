@@ -70,6 +70,7 @@ import { planRoutes } from './routes/plan.ts';
 import { priceRoutes } from './routes/prices.ts';
 import { recurringRoutes } from './routes/recurring.ts';
 import { reportRoutes } from './routes/reports.ts';
+import { dashboardRoutes } from './routes/dashboard.ts';
 import { ruleRoutes } from './routes/rules.ts';
 import { securityRoutes } from './routes/securities.ts';
 import { transactionRoutes } from './routes/transactions.ts';
@@ -304,7 +305,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
           description:
             'Spending, income, the Sankey and budget-vs-actual — pure aggregation over the ' +
             "contexts' own read models. Transfers excluded and refunds netted, reusing " +
-            "`@ctx/budgeting`'s rule rather than re-deriving it.",
+            "`@ctx/budgeting`'s rule rather than re-deriving it. The spending pace (WP 10.9) is the " +
+            'same definition, day by day.',
+        },
+        {
+          name: 'dashboard',
+          description:
+            "The dashboard's widget order and visibility, per holder (WP 10.9). A session is enough.",
         },
         {
           name: 'export',
@@ -623,6 +630,8 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(providerCredentialRoutes(deps, storedPlaid));
   await app.register(eventRoutes(deps));
   await app.register(reportRoutes(deps));
+  // WP 10.9. The dashboard's widget order and visibility, on the holder's users row (0046).
+  await app.register(dashboardRoutes(deps));
   await app.register(exportRoutes(deps, { secretsDir: config.env.SECRETS_DIR }));
   await app.register(budgetRoutes(deps));
   await app.register(recurringRoutes(deps));

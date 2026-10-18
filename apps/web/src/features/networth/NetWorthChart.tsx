@@ -5,16 +5,23 @@ import { NetWorthAreaChart } from '../../charts/NetWorthAreaChart.tsx';
 import { Button } from '../../components/ui/button.tsx';
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '../../components/ui/dialog.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
-import { useNetWorthSeriesQuery } from './api.ts';
+import { useNetWorthSeriesPeriodQuery } from './api.ts';
 import { NetWorthFullView } from './NetWorthFullView.tsx';
 import { groupByCurrency } from './series.ts';
-import { DEFAULT_NET_WORTH_RANGE, type NetWorthRange } from './search.ts';
-
-/** The dashboard's fixed compact window — independent of the full view's range control. */
-const COMPACT_RANGE: NetWorthRange = 'p90d';
+import {
+  DEFAULT_DASHBOARD_PERIOD,
+  DEFAULT_NET_WORTH_RANGE,
+  type DashboardPeriod,
+  type NetWorthRange,
+} from './search.ts';
 
 export interface NetWorthDashboardSectionProps {
   className?: string;
+  /**
+   * The compact chart's window (WP 10.9: the dashboard widget's period chips). Independent of the full view's
+   * range control. Default 3M, the 90-day window this section always drew.
+   */
+  period?: DashboardPeriod;
   /** URL-synced range for the full view (`_app.index.tsx`'s `netWorthRange` search param). */
   range?: NetWorthRange;
   onRangeChange?: (range: NetWorthRange) => void;
@@ -32,10 +39,11 @@ export interface NetWorthDashboardSectionProps {
  */
 export function NetWorthDashboardSection({
   className,
+  period = DEFAULT_DASHBOARD_PERIOD,
   range,
   onRangeChange,
 }: NetWorthDashboardSectionProps) {
-  const seriesQuery = useNetWorthSeriesQuery(COMPACT_RANGE);
+  const seriesQuery = useNetWorthSeriesPeriodQuery(period);
   const [dialogOpen, setDialogOpen] = useState(false);
   const effectiveRange = range ?? DEFAULT_NET_WORTH_RANGE;
 

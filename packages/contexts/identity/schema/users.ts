@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { createdAtColumn, idColumn } from '@core/db/columns';
-import { pgTable, text } from 'drizzle-orm/pg-core';
+import { jsonb, pgTable, text } from 'drizzle-orm/pg-core';
 
 /**
  * The account holder.
@@ -19,6 +19,12 @@ export const users = pgTable('users', {
    * migration `0002_identity` adds it with a default of `UTC`.
    */
   displayTimezone: text('display_timezone').notNull().default('UTC'),
+  /**
+   * The dashboard's widget order and visibility (WP 10.9, migration `0046_dashboard_layout`): a JSON array of
+   * `{ id, visible }` in display order, read and written only by `apps/api/src/routes/dashboard.ts`. NULL is the
+   * default layout. The CHECK `users_dashboard_layout_is_array` holds the array shape; the route holds the ids.
+   */
+  dashboardLayout: jsonb('dashboard_layout').$type<readonly { id: string; visible: boolean }[]>(),
   createdAt: createdAtColumn(),
 });
 

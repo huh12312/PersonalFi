@@ -9,6 +9,51 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.8: the dashboard as widgets, with your spending pace
+
+**Status:** a patch release on v0.9.7. The tag `v0.9.8` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.8
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0046_dashboard_layout` (expand-only: one nullable column on `users` holding the
+dashboard's widget order, with a CHECK that it is a list). Nothing is backfilled: every install
+starts with the default layout.
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **The dashboard is a grid of widgets.** Net worth, Spending pace, Budgets, Upcoming, To review,
+  Goals, Investments and Top insights each sit in their own card with a title and a link to the
+  screen that owns the data. One column on a phone, two on a tablet, three on a desktop.
+- **Spending pace.** A line of what you have spent so far this month, day by day, against last
+  month (dotted) and your three-month average (a thin line), with today marked, and a sentence that
+  says it in words: "You've spent $X this month. By this day last month you had spent $Y." Spending
+  is counted exactly as the spending report counts it: transfers between your accounts and income
+  are left out, refunds are netted, and anything you excluded stays excluded. Pending charges are
+  counted once they post, and the widget says how many are waiting. **View as table** shows every
+  day.
+- **Net worth** gains period buttons (1M, 3M, 6M, 1Y, All) and shows its change over the period,
+  in money and as a percentage, once there are two real days to compare.
+- **Budgets** shows Left to budget (your budget's Ready to Assign) and the three categories closest
+  to or over their budget as small bars, each saying in words whether it is on budget, nearly
+  spent or over.
+- **Upcoming** lists the charges expected in the next seven days with Safe to spend, and warns in
+  words when your projected balance would fall below zero, naming how low and when.
+- **Customize** lets you hide widgets and change their order with buttons (no dragging needed);
+  your choice is saved, and **Reset to default** brings the original layout back. The layout is not
+  part of an export (like your time zone, it lives with your account on this install).
+- **No widget draws a zero it does not have.** A widget with nothing to show says what is missing
+  and links to where you can fix it ("No budget yet: set one"), and a source that has not synced in
+  over a day says when it last did.
+
 ## v0.9.7: one colour system, and a colour of its own for every category
 
 **Status:** a patch release on v0.9.6. The tag `v0.9.7` is pushed by the maintainer once CI is green.

@@ -48,6 +48,7 @@ import {
   type TransferMatchKind,
 } from '../schema/index.ts';
 import { dateOnlyOf, moneyOf, transactionOf, type LedgerExecutor } from './db.ts';
+import { resolveCategoryId } from './effective.ts';
 import { LedgerError } from './errors.ts';
 import type { LedgerTransaction, TransactionSplit } from './types.ts';
 
@@ -133,6 +134,91 @@ export async function listTransactions(
     nextCursor:
       rows.length > limit && last !== undefined ? encodeCursor(last.effectiveDate, last.id) : null,
   };
+}
+
+/**
+ * The fields an aggregate over the ledger reads — the reports' `ReportRow` shape — and nothing else (WP 10.9).
+ * Every field is what `listTransactions` returns for the same row (`effective.date`, `effective.amount`,
+ * `effective.categoryId` by `resolveCategoryId`, `effective.excluded`, `effective.pending`, …), asserted field
+ * for field by `test/read.test.ts`.
+ */
+export interface LedgerAggregateRow {
+  readonly id: string;
+  readonly accountId: string;
+  readonly date: DateOnlyType;
+  readonly amount: Money;
+  readonly categoryId: string | null;
+  readonly merchantId: string | null;
+  readonly isTransfer: boolean;
+  readonly transferLinkId: string | null;
+  readonly refundOfId: string | null;
+  readonly excluded: boolean;
+  readonly pending: boolean;
+}
+
+/**
+ * Every row matching `filters` inside a **bounded** date window, in one statement, as `LedgerAggregateRow`s
+ * (WP 10.9).
+ *
+ * For an aggregate a server computes and never ships row by row — the spending pace reads four months to draw
+ * four curves — a keyset page sequence is N sequential round trips for one answer, and a full row (forty-odd
+ * columns, mapped into a `LedgerTransaction`) is most of the cost: on a busy ledger, 6,300 full rows took ~75 ms
+ * to read and map (`apps/api/test/db/spending-pace-http-perf.test.ts`'s dense corpus). The conditions are
+ * `listTransactions`' own (`filterConditions`), over the same feed index `(user_id, effective_date, id)`; the
+ * projection is the eleven columns an aggregate needs, and the `LIMIT` is gone, which is why both ends of the
+ * window are required.
+ */
+export async function listAggregateRowsInWindow(
+  executor: LedgerExecutor,
+  input: {
+    readonly userId: string;
+    readonly filters: TransactionFilters & {
+      readonly dateFrom: DateOnlyType;
+      readonly dateTo: DateOnlyType;
+    };
+  },
+): Promise<LedgerAggregateRow[]> {
+  const rows = await executor
+    .select({
+      id: transactions.id,
+      accountId: transactions.accountId,
+      effectiveDate: transactions.effectiveDate,
+      effectiveAmountMinor: transactions.effectiveAmountMinor,
+      effectiveCurrency: transactions.effectiveCurrency,
+      userCategoryId: transactions.userCategoryId,
+      ruleCategoryId: transactions.ruleCategoryId,
+      effectiveMerchantId: transactions.effectiveMerchantId,
+      isTransfer: transactions.isTransfer,
+      transferLinkId: transactions.transferLinkId,
+      refundOfId: transactions.refundOfId,
+      userExcluded: transactions.userExcluded,
+      pending: transactions.pending,
+    })
+    .from(transactions)
+    .where(and(...filterConditions(input.userId, input.filters)))
+    .orderBy(desc(transactions.effectiveDate), desc(transactions.id));
+  return rows.map((row) => ({
+    id: row.id,
+    accountId: row.accountId,
+    date: dateOnlyOf(row.effectiveDate),
+    amount: moneyOf(row.effectiveAmountMinor, row.effectiveCurrency),
+    // `effectiveOf`'s own rule: the overlay's category, else the rule tier's (only `userCategoryId` is read).
+    categoryId: resolveCategoryId(
+      {
+        userNote: null,
+        userExcluded: row.userExcluded,
+        userCategoryId: row.userCategoryId,
+        userMerchantName: null,
+      },
+      { ruleCategoryId: row.ruleCategoryId },
+    ),
+    merchantId: row.effectiveMerchantId,
+    isTransfer: row.isTransfer,
+    transferLinkId: row.transferLinkId,
+    refundOfId: row.refundOfId,
+    excluded: row.userExcluded,
+    pending: row.pending,
+  }));
 }
 
 /** Count matching rows. Separate from the page on purpose: it is the slow half. */

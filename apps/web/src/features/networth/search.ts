@@ -48,3 +48,43 @@ export function windowForRange(
     .slice(0, 10);
   return { from, to };
 }
+
+/**
+ * The dashboard widget's period chips (WP 10.9; Monarch's equivalent): 1M 3M 6M 1Y All.
+ * Separate from `NET_WORTH_RANGES` (the full view's URL state, which is unchanged) because the widget has a six-month
+ * window the full view never offered. 3M is 90 days — the same window as `p90d`, so the hero figure and the chart
+ * at the default share one request.
+ */
+export const DASHBOARD_PERIODS = ['1M', '3M', '6M', '1Y', 'ALL'] as const;
+
+export type DashboardPeriod = (typeof DASHBOARD_PERIODS)[number];
+
+export const DEFAULT_DASHBOARD_PERIOD: DashboardPeriod = '3M';
+
+export const DASHBOARD_PERIOD_LABELS: Record<DashboardPeriod, { short: string; long: string }> = {
+  '1M': { short: '1M', long: 'the last month' },
+  '3M': { short: '3M', long: 'the last 3 months' },
+  '6M': { short: '6M', long: 'the last 6 months' },
+  '1Y': { short: '1Y', long: 'the last year' },
+  ALL: { short: 'All', long: 'all time' },
+};
+
+const PERIOD_DAYS: Record<DashboardPeriod, number> = {
+  '1M': 30,
+  '3M': 90,
+  '6M': 182,
+  '1Y': 365,
+  ALL: MAX_SERIES_DAYS,
+};
+
+/** `{from, to}` for a dashboard period, by the same arithmetic as `windowForRange`. */
+export function windowForPeriod(
+  period: DashboardPeriod,
+  todayIso: string,
+): { from: string; to: string } {
+  const to = todayIso;
+  const from = new Date(Date.parse(`${to}T00:00:00Z`) - (PERIOD_DAYS[period] - 1) * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  return { from, to };
+}

@@ -11593,6 +11593,69 @@
           "drillThrough"
         ]
       },
+      "SpendingPaceDayInput": {
+        "type": "object",
+        "properties": {
+          "day": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 31
+          },
+          "cumulativeMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "description": "Spent from the 1st through this day, minor units, as a positive amount."
+          }
+        },
+        "required": [
+          "day",
+          "cumulativeMinor"
+        ]
+      },
+      "DashboardLayoutEntryInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "net-worth",
+              "spending-pace",
+              "budgets",
+              "upcoming",
+              "to-review",
+              "goals",
+              "investments",
+              "top-insights"
+            ]
+          },
+          "visible": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "visible"
+        ]
+      },
+      "DashboardLayoutInput": {
+        "type": "object",
+        "properties": {
+          "widgets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardLayoutEntryInput"
+            }
+          },
+          "customised": {
+            "type": "boolean",
+            "description": "false when this is the default layout (nothing stored, or after a reset)."
+          }
+        },
+        "required": [
+          "widgets",
+          "customised"
+        ]
+      },
       "RuleInput": {
         "type": "object",
         "properties": {
@@ -13355,6 +13418,112 @@
           "lastSeenAt",
           "familyExpiresAt",
           "current"
+        ]
+      },
+      "SpendingPaceInput": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "otherCurrencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "daysInMonth": {
+            "type": "integer",
+            "minimum": 28,
+            "maximum": 31
+          },
+          "today": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 31
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Day of month of today when `month` is the current month, else null."
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpendingPaceDayInput"
+            }
+          },
+          "lastMonthKey": {
+            "type": "string"
+          },
+          "lastMonth": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpendingPaceDayInput"
+            }
+          },
+          "trailingMonths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trailingAverage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpendingPaceDayInput"
+            }
+          },
+          "includePending": {
+            "type": "boolean"
+          },
+          "pendingExcludedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "asOf": {
+            "type": "string",
+            "description": "When this was computed."
+          },
+          "lastSyncedAt": {
+            "description": "The most recent sync of any connection; null when none has synced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "month",
+          "currency",
+          "otherCurrencies",
+          "daysInMonth",
+          "today",
+          "days",
+          "lastMonthKey",
+          "lastMonth",
+          "trailingMonths",
+          "trailingAverage",
+          "includePending",
+          "pendingExcludedCount",
+          "asOf",
+          "lastSyncedAt"
         ]
       },
       "ManagementPerformanceRowInput": {
@@ -25236,6 +25405,72 @@
         ],
         "additionalProperties": false
       },
+      "SpendingPaceDay": {
+        "type": "object",
+        "properties": {
+          "day": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 31
+          },
+          "cumulativeMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "description": "Spent from the 1st through this day, minor units, as a positive amount."
+          }
+        },
+        "required": [
+          "day",
+          "cumulativeMinor"
+        ],
+        "additionalProperties": false
+      },
+      "DashboardLayoutEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "net-worth",
+              "spending-pace",
+              "budgets",
+              "upcoming",
+              "to-review",
+              "goals",
+              "investments",
+              "top-insights"
+            ]
+          },
+          "visible": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "visible"
+        ],
+        "additionalProperties": false
+      },
+      "DashboardLayout": {
+        "type": "object",
+        "properties": {
+          "widgets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardLayoutEntry"
+            }
+          },
+          "customised": {
+            "type": "boolean",
+            "description": "false when this is the default layout (nothing stored, or after a reset)."
+          }
+        },
+        "required": [
+          "widgets",
+          "customised"
+        ],
+        "additionalProperties": false
+      },
       "Rule": {
         "type": "object",
         "properties": {
@@ -27047,6 +27282,113 @@
           "lastSeenAt",
           "familyExpiresAt",
           "current"
+        ],
+        "additionalProperties": false
+      },
+      "SpendingPace": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "otherCurrencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "daysInMonth": {
+            "type": "integer",
+            "minimum": 28,
+            "maximum": 31
+          },
+          "today": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 31
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Day of month of today when `month` is the current month, else null."
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpendingPaceDay"
+            }
+          },
+          "lastMonthKey": {
+            "type": "string"
+          },
+          "lastMonth": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpendingPaceDay"
+            }
+          },
+          "trailingMonths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trailingAverage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpendingPaceDay"
+            }
+          },
+          "includePending": {
+            "type": "boolean"
+          },
+          "pendingExcludedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "asOf": {
+            "type": "string",
+            "description": "When this was computed."
+          },
+          "lastSyncedAt": {
+            "description": "The most recent sync of any connection; null when none has synced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "month",
+          "currency",
+          "otherCurrencies",
+          "daysInMonth",
+          "today",
+          "days",
+          "lastMonthKey",
+          "lastMonth",
+          "trailingMonths",
+          "trailingAverage",
+          "includePending",
+          "pendingExcludedCount",
+          "asOf",
+          "lastSyncedAt"
         ],
         "additionalProperties": false
       },
@@ -35078,6 +35420,84 @@
         }
       }
     },
+    "/reports/spending-pace": {
+      "get": {
+        "operationId": "getSpendingPace",
+        "summary": "This month's cumulative spend by day, against last month and the 3-month average",
+        "tags": [
+          "reports"
+        ],
+        "description": "Every day present (a day with no spend repeats the day before). Spend is `GET /reports/spending`'s own definition (transfers excluded, refunds netted, income categories and a net-positive uncategorised bucket left out): the last point of a month is that month's spending report total. Pending rows are left out unless `includePending=true`; `pendingExcludedCount` says how many. A month with no ledger row at all is returned empty, never as zeros. One currency (the one with the most rows); the others are named in `otherCurrencies`, never summed.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "description": "`YYYY-MM`. Defaults to the current month in the holder's time zone."
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ]
+            },
+            "in": "query",
+            "name": "includePending",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpendingPace"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/reports/budget-vs-actual": {
       "get": {
         "operationId": "getBudgetVsActualReport",
@@ -35174,6 +35594,159 @@
             }
           },
           "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/layout": {
+      "get": {
+        "operationId": "getDashboardLayout",
+        "summary": "The dashboard's widget order and which widgets are shown",
+        "tags": [
+          "dashboard"
+        ],
+        "description": "Every widget the product draws, in display order, each shown or hidden. A widget the stored layout does not name (added by a later release) is appended, shown.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardLayout"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putDashboardLayout",
+        "summary": "Save the dashboard's widget order and visibility",
+        "tags": [
+          "dashboard"
+        ],
+        "description": "The widgets in display order. Each id at most once (400 otherwise); a widget left out is appended, shown, on the next read.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "widgets": {
+                    "maxItems": 8,
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/DashboardLayoutEntryInput"
+                    }
+                  }
+                },
+                "required": [
+                  "widgets"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardLayout"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "resetDashboardLayout",
+        "summary": "Restore the default dashboard layout",
+        "tags": [
+          "dashboard"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardLayout"
+                }
+              }
+            }
+          },
+          "401": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -50424,7 +50997,11 @@
     },
     {
       "name": "reports",
-      "description": "Spending, income, the Sankey and budget-vs-actual — pure aggregation over the contexts' own read models. Transfers excluded and refunds netted, reusing `@ctx/budgeting`'s rule rather than re-deriving it."
+      "description": "Spending, income, the Sankey and budget-vs-actual — pure aggregation over the contexts' own read models. Transfers excluded and refunds netted, reusing `@ctx/budgeting`'s rule rather than re-deriving it. The spending pace (WP 10.9) is the same definition, day by day."
+    },
+    {
+      "name": "dashboard",
+      "description": "The dashboard's widget order and visibility, per holder (WP 10.9). A session is enough."
     },
     {
       "name": "export",

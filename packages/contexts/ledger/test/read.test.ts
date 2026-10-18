@@ -8,8 +8,13 @@ import { DateOnly, money } from '@core/kernel';
 import fc from 'fast-check';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { applyProviderTransactions } from '../src/apply.ts';
-import { getTransaction, listTransactions, sumTransactions } from '../src/read.ts';
-import { setTransactionOverlay } from '../src/overlay.ts';
+import {
+  getTransaction,
+  listAggregateRowsInWindow,
+  listTransactions,
+  sumTransactions,
+} from '../src/read.ts';
+import { setRuleCategory, setTransactionOverlay } from '../src/overlay.ts';
 import {
   CORRELATION_ID,
   NO_DATABASE,
@@ -293,6 +298,86 @@ describe.skipIf(NO_DATABASE)('listTransactions', () => {
       filters: { excluded: false },
     });
     expect(included.items.map((row) => row.id)).not.toContain(id);
+  });
+
+  const CAT_USER = '01900000-0000-7000-8000-000000000001';
+  const CAT_RULE = '01900000-0000-7000-8000-000000000002';
+  const CAT_LOSES = '01900000-0000-7000-8000-000000000003';
+
+  it('listAggregateRowsInWindow (WP 10.9) agrees with listTransactions field for field, in one read', async () => {
+    const all = await listTransactions(database.db, { userId: database.userId, limit: 200 });
+    const [first, second, third] = all.items;
+    if (first === undefined || second === undefined || third === undefined)
+      throw new Error('fixture');
+    // Every tier the aggregate row resolves: a user category, a rule category under none, an exclusion.
+    await database.db.transaction(async (tx) => {
+      await setTransactionOverlay(
+        tx,
+        { userId: database.userId, transactionId: first.id, patch: { userCategoryId: CAT_USER } },
+        writeContext(clock),
+      );
+      await setRuleCategory(
+        tx,
+        { userId: database.userId, transactionId: second.id, ruleCategoryId: CAT_RULE },
+        writeContext(clock),
+      );
+      await setRuleCategory(
+        tx,
+        { userId: database.userId, transactionId: first.id, ruleCategoryId: CAT_LOSES },
+        writeContext(clock),
+      );
+      await setTransactionOverlay(
+        tx,
+        { userId: database.userId, transactionId: third.id, patch: { userExcluded: true } },
+        writeContext(clock),
+      );
+    });
+
+    const window = {
+      dateFrom: DateOnly.parse('2026-05-01'),
+      dateTo: DateOnly.parse('2026-05-31'),
+      transfers: 'include' as const,
+      includeDuplicates: false,
+    };
+    const paged = await listTransactions(database.db, {
+      userId: database.userId,
+      filters: window,
+      limit: 200,
+    });
+    const aggregate = await listAggregateRowsInWindow(database.db, {
+      userId: database.userId,
+      filters: window,
+    });
+    expect(aggregate).toEqual(
+      paged.items.map((row) => ({
+        id: row.id,
+        accountId: row.accountId,
+        date: row.effective.date,
+        amount: row.effective.amount,
+        categoryId: row.effective.categoryId,
+        merchantId: row.merchantId,
+        isTransfer: row.isTransfer,
+        transferLinkId: row.transferLinkId,
+        refundOfId: row.refundOfId,
+        excluded: row.effective.excluded,
+        pending: row.effective.pending,
+      })),
+    );
+    expect(aggregate).toHaveLength(5);
+    expect(aggregate.find((row) => row.id === first.id)?.categoryId).toBe(CAT_USER);
+    expect(aggregate.find((row) => row.id === second.id)?.categoryId).toBe(CAT_RULE);
+    expect(aggregate.find((row) => row.id === third.id)?.excluded).toBe(true);
+    expect(aggregate.filter((row) => row.pending)).toHaveLength(1);
+
+    const narrow = await listAggregateRowsInWindow(database.db, {
+      userId: database.userId,
+      filters: {
+        ...window,
+        dateFrom: DateOnly.parse('2026-05-19'),
+        dateTo: DateOnly.parse('2026-05-20'),
+      },
+    });
+    expect(narrow.map((row) => row.date).sort()).toEqual(['2026-05-19', '2026-05-20']);
   });
 
   it('sums what a filter selects, by currency', async () => {

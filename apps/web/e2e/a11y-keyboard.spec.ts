@@ -720,3 +720,37 @@ test('add wallet: Crypto tab, chain by arrow keys, Etherscan note, address, step
   await expect(page.getByText(/Wallet added/)).toBeVisible({ timeout: 15_000 });
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
+
+test('dashboard (WP 10.9): Customize by keyboard — hide a widget with Space, move one with Enter, focus kept, Escape returns to the button', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const journey = await begin(page, 'dashboard customize', '/');
+  const order = () =>
+    page
+      .getByTestId('dashboard-grid')
+      .locator('[data-grid-widget]')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-grid-widget') ?? ''));
+
+  await journey.tabTo(/^Customize$/, { max: 40 });
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Customize the dashboard' });
+  await expect(dialog).toBeVisible();
+  await journey.settle();
+  await journey.check('the dialog has focus');
+
+  await journey.tabTo(/^Show Goals$/, { max: 30 });
+  await page.keyboard.press('Space');
+  await expect(dialog.getByRole('switch', { name: 'Show Goals' })).not.toBeChecked();
+  await expect.poll(order).not.toContain('goals');
+
+  await journey.tabTo(/^Move Spending pace up$/, { max: 30 });
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await order())[0]).toBe('spending-pace');
+  // At the top the up button is disabled; focus moves to its sibling rather than falling to the page.
+  await journey.expectFocus(/^Move Spending pace down$/, 'focus stays on the moved widget’s row');
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await journey.expectFocus(/^Customize$/, 'focus returns to Customize when the dialog closes');
+});

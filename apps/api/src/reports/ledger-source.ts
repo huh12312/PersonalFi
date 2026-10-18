@@ -20,7 +20,13 @@
  */
 import type { DateOnly, Money } from '@core/kernel';
 import type { BudgetAccount, BudgetTransaction } from '@ctx/budgeting';
-import { listAccounts, listTransactions, type LedgerDatabase } from '@ctx/ledger';
+import {
+  listAccounts,
+  listTransactions,
+  listAggregateRowsInWindow,
+  type LedgerDatabase,
+  type LedgerTransaction,
+} from '@ctx/ledger';
 import type { AccountType } from '@ctx/ledger/schema';
 import type { ReportAccount, ReportAccountRole, ReportRow } from './types.ts';
 
@@ -60,6 +66,18 @@ export interface ReportWindow {
   readonly accountIds?: readonly string[];
 }
 
+/** The ledger filters every report read uses: the window, transfers and excluded rows in, duplicates out. */
+function reportFilters(window: ReportWindow) {
+  return {
+    dateFrom: window.dateFrom,
+    dateTo: window.dateTo,
+    transfers: 'include' as const,
+    includeDuplicates: false,
+    ...(window.categoryIds === undefined ? {} : { categoryIds: window.categoryIds }),
+    ...(window.accountIds === undefined ? {} : { accountIds: window.accountIds }),
+  };
+}
+
 /**
  * Every row in `[dateFrom, dateTo]`, transfers and excluded rows **included** —
  * exactly `@ctx/budgeting`'s `LedgerPort` contract: the exclusion and the
@@ -75,35 +93,49 @@ export async function loadReportRows(
   for (;;) {
     const page = await listTransactions(database, {
       userId: window.userId,
-      filters: {
-        dateFrom: window.dateFrom,
-        dateTo: window.dateTo,
-        transfers: 'include',
-        includeDuplicates: false,
-        ...(window.categoryIds === undefined ? {} : { categoryIds: window.categoryIds }),
-        ...(window.accountIds === undefined ? {} : { accountIds: window.accountIds }),
-      },
+      filters: reportFilters(window),
       limit: PAGE_SIZE,
       ...(cursor === null ? {} : { cursor }),
     });
-    for (const row of page.items) {
-      rows.push({
-        id: row.id,
-        accountId: row.accountId,
-        date: row.effective.date,
-        amount: row.effective.amount,
-        categoryId: row.effective.categoryId,
-        merchantId: row.merchantId,
-        isTransfer: row.isTransfer,
-        transferLinkId: row.transferLinkId,
-        refundOfId: row.refundOfId,
-        excluded: row.effective.excluded,
-      });
-    }
+    for (const row of page.items) rows.push(reportRowOf(row));
     if (page.nextCursor === null) break;
     cursor = page.nextCursor;
   }
   return rows;
+}
+
+function reportRowOf(row: LedgerTransaction): ReportRow {
+  return {
+    id: row.id,
+    accountId: row.accountId,
+    date: row.effective.date,
+    amount: row.effective.amount,
+    categoryId: row.effective.categoryId,
+    merchantId: row.merchantId,
+    isTransfer: row.isTransfer,
+    transferLinkId: row.transferLinkId,
+    refundOfId: row.refundOfId,
+    excluded: row.effective.excluded,
+    pending: row.effective.pending,
+  };
+}
+
+/**
+ * `loadReportRows`' rows, read in **one** statement (`listAggregateRowsInWindow`: the same filters, only the
+ * eleven columns a `ReportRow` has) rather than a keyset page sequence of full rows. For the spending pace
+ * (WP 10.9), whose four months on a busy ledger were forty round trips and ~75 ms of row mapping
+ * (`spending-pace-http-perf.test.ts`). `LedgerAggregateRow` *is* `ReportRow`'s shape, field for field, and the
+ * ledger's `read.test.ts` asserts it agrees with `listTransactions` for every row. The window must be bounded,
+ * which `ReportWindow` already requires.
+ */
+export async function loadReportRowsInOneRead(
+  database: LedgerDatabase,
+  window: ReportWindow,
+): Promise<ReportRow[]> {
+  return listAggregateRowsInWindow(database, {
+    userId: window.userId,
+    filters: reportFilters(window),
+  });
 }
 
 /** Every account this user has, reduced to what `computeActuals` needs to see. */
