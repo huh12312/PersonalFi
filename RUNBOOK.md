@@ -245,6 +245,14 @@ CoinGecko key"), naming every holding it could not price and why. Both spend aga
 per-provider budgets (`market_data_runs`). Before v0.9.4 the nightly job priced nothing on any
 install: it was never given the list of holdings.
 
+**When the health score is recorded (v0.9.11).** Every day at about 04:10 (your time zone, with up
+to two minutes' jitter) the worker records that day's financial health score, after the 03:45 price
+refresh and the 04:00 net-worth snapshot and before the 04:15 advisor pass. One row per day: a
+second run the same day, or opening the Financial health screen, writes nothing new, and opening the
+screen before 04:10 records the day then instead. A day the worker was down is left empty and is
+never filled in afterwards. It needs `advisor_token_secret`, like the advisors; without one the
+screen shows the newest score already recorded, or says none has been computed.
+
 **What OpenFIGI does and does not fix.** It turns an ISIN, a CUSIP or an exchange-qualified ticker
 into a FIGI, so the same security reported two ways by two institutions becomes one row. A **bare
 ticker** with no exchange never identifies a security on its own (`BHP` is three companies), with

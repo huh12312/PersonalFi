@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,15 +10,12 @@ import {
   type FetchRoute,
 } from '../../test-support/api-test-utils.ts';
 import type { AdvisoryBrief, BriefItem } from '../../api/generated/types.gen.ts';
+import { renderWidget } from '../dashboard/test-utils.tsx';
 import { BriefScreen } from './BriefScreen.tsx';
 
+/** Inside a router since WP 10.12: the health section is a `<Link>` to `/health`. */
 function renderScreen() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={queryClient}>
-      <BriefScreen />
-    </QueryClientProvider>,
-  );
+  renderWidget(<BriefScreen />);
 }
 
 const COMPUTED_EFFECT = {

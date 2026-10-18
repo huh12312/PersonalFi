@@ -55,6 +55,7 @@ import { eventRoutes } from './routes/events.ts';
 import { exportRoutes } from './routes/export.ts';
 import { goalRoutes } from './routes/goals.ts';
 import { healthRoutes } from './routes/health.ts';
+import { healthScoreRoutes } from './routes/health-score.ts';
 import { insightRoutes } from './routes/insights.ts';
 import { investmentActivityRoutes } from './routes/investment-activity.ts';
 import { investmentRoutes } from './routes/investments.ts';
@@ -721,6 +722,8 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     }),
   );
   await app.register(briefRoutes(deps, { narrator: narratorPreview }));
+  // WP 10.12: `GET /insights/health` — the Health screen (daily snapshot, pillars, history).
+  await app.register(healthScoreRoutes(deps));
   // WP 9.6 (CF-1, C5-1, Phase 5 gate R-4): when a model is configured the api
   // binds the pure, preview-only `PromptRenderer` and registers
   // `local.narrator`'s manifest (never its executor, never an endpoint — the

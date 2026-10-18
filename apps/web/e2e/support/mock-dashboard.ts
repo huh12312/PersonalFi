@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 import type { Page, Route } from '@playwright/test';
 
+import { installHealthMocks } from './mock-health.ts';
+
 /**
  * The dashboard's own routes (WP 10.9), as a layerable mock: `GET|PUT|DELETE /dashboard/layout` against an
  * in-memory layout (it lives in the test's closure, so it survives a page reload — which is what lets
@@ -21,6 +23,7 @@ export const WIDGET_IDS = [
   'goals',
   'investments',
   'top-insights',
+  'financial-health',
 ] as const;
 
 export interface LayoutEntry {
@@ -98,5 +101,7 @@ export async function installDashboardMocks(page: Page): Promise<DashboardMockSt
     if (route.request().method() !== 'GET') return route.fallback();
     return json(route, PACE);
   });
+  // WP 10.12: the Financial health widget's source (and the /health screens', through the sweep's layering).
+  await installHealthMocks(page);
   return state;
 }

@@ -123,3 +123,10 @@ export {
 
 // WP 5.8 — the health score with breakdown (migration 0033_health_scores.sql).
 export { healthScores, type HealthScoreRow, type NewHealthScoreRow } from './health.ts';
+
+// WP 10.12 — the health score once a day, with its pillars (migration 0048_health_score_snapshots.sql).
+export {
+  healthScoreSnapshots,
+  type HealthScoreSnapshotRow,
+  type NewHealthScoreSnapshotRow,
+} from './health-snapshots.ts';

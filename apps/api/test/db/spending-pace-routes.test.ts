@@ -328,6 +328,7 @@ describeWithDb('[slow] spending pace and dashboard layout (WP 10.9)', () => {
     'goals',
     'investments',
     'top-insights',
+    'financial-health',
   ];
 
   it('the layout is the default until one is saved; a save persists order and visibility; a reset restores it', async () => {

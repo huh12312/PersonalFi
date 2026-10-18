@@ -307,6 +307,30 @@ test('budget: the view toggle and the classify control by keyboard; focus follow
 });
 
 // ---------------------------------------------------------------------------
+// 4c. Financial health (WP 10.12): from the hero to a pillar's detail and back
+// ---------------------------------------------------------------------------
+
+test('health: Tab from the hero to a pillar’s See detail, Enter, the detail’s heading; back by keyboard', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const journey = await begin(page, 'health', '/health');
+  await expect(page.getByTestId('health-hero')).toBeVisible();
+
+  // The hero's table toggle comes first, then the pillars in reading order: Emergency fund's See detail.
+  await journey.tabTo(/^View as table/, { max: 40 });
+  await journey.tabTo(/^See detail — Emergency fund$/, { max: 40 });
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/health\/emergency-fund$/);
+  await expect(page.getByRole('heading', { name: 'Emergency fund', level: 2 })).toBeVisible();
+
+  await journey.tabTo(/^Financial health$/, { max: 40 });
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/health$/);
+  await expect(page.getByTestId('health-hero')).toBeVisible();
+});
+
+// ---------------------------------------------------------------------------
 // 5. Brief: accept one item, dismiss another with a reason
 // ---------------------------------------------------------------------------
 

@@ -49,7 +49,9 @@ describe('the dashboard layout (WP 10.9)', () => {
         .slice(0, 2),
     ).toEqual(['spending-pace', 'net-worth']);
     expect(moveWidget(layout, 'net-worth', -1)).toEqual(layout);
-    expect(moveWidget(layout, 'top-insights', 1)).toEqual(layout);
+    // The last widget (WP 10.12: Financial health, after Top insights) cannot move further down.
+    expect(moveWidget(layout, 'financial-health', 1)).toEqual(layout);
+    expect(WIDGET_IDS.slice(-2)).toEqual(['top-insights', 'financial-health']);
   });
 
   it('a hidden widget is not among the visible', () => {

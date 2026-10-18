@@ -28,6 +28,8 @@ export const DASHBOARD_WIDGETS = [
   'goals',
   'investments',
   'top-insights',
+  // WP 10.12: the health gauge, after Top insights.
+  'financial-health',
 ] as const;
 
 export type DashboardWidgetId = (typeof DASHBOARD_WIDGETS)[number];

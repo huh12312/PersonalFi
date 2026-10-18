@@ -62,7 +62,7 @@ test.describe('WP 10.9 dashboard', () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await installSweepMocks(page);
     await visit(page, '/');
-    await expect.poll(() => gridOrder(page)).toHaveLength(8);
+    await expect.poll(() => gridOrder(page)).toHaveLength(9);
     expect((await gridOrder(page))[0]).toBe('net-worth');
 
     await page.getByRole('button', { name: 'Customize' }).click();
@@ -75,7 +75,7 @@ test.describe('WP 10.9 dashboard', () => {
 
     await expect.poll(() => gridOrder(page)).not.toContain('investments');
     await page.reload();
-    await expect.poll(() => gridOrder(page)).toHaveLength(7);
+    await expect.poll(() => gridOrder(page)).toHaveLength(8);
     const reloaded = await gridOrder(page);
     expect(reloaded.slice(0, 2)).toEqual(['spending-pace', 'net-worth']);
     expect(reloaded).not.toContain('investments');
@@ -97,6 +97,7 @@ test.describe('WP 10.9 dashboard', () => {
         'goals',
         'investments',
         'top-insights',
+        'financial-health',
       ]);
   });
 

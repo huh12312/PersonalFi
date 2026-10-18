@@ -21,6 +21,7 @@ const TARGETS = [
   '/accounts/connections',
   '/budget',
   '/goals',
+  '/health',
   '/inbox',
   '/insights',
   '/investments',

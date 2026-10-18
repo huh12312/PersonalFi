@@ -93,21 +93,26 @@ describe('DashboardScreen (WP 10.9)', () => {
   }, 20_000);
 
   it('a hidden widget is not rendered at all, and asks its source for nothing', async () => {
-    const server = serve(
-      WIDGET_IDS.map((id) => ({ id, visible: id !== 'investments' && id !== 'goals' })),
-    );
+    const hidden = new Set(['investments', 'goals', 'financial-health']);
+    const server = serve(WIDGET_IDS.map((id) => ({ id, visible: !hidden.has(id) })));
     renderWidget(<DashboardScreen />);
-    await waitFor(() => expect(gridOrder()).toHaveLength(WIDGET_IDS.length - 2), {
+    await waitFor(() => expect(gridOrder()).toHaveLength(WIDGET_IDS.length - hidden.size), {
       timeout: 10_000,
     });
     expect(gridOrder()).not.toContain('goals');
     expect(document.querySelector('[data-widget="investments"]')).toBeNull();
+    // WP 10.12: the health gauge hidden mounts nothing and asks `/insights/health` for nothing.
+    expect(document.querySelector('[data-widget="financial-health"]')).toBeNull();
+    expect(document.querySelector('[data-score-gauge]')).toBeNull();
     // Give every mounted widget's request time to go out.
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(
-      server.requests.filter((path) => path === '/api/holdings' || path === '/api/goals'),
+      server.requests.filter(
+        (path) =>
+          path === '/api/holdings' || path === '/api/goals' || path === '/api/insights/health',
+      ),
     ).toEqual([]);
     expect(server.requests).toContain('/api/budgets/current');
   }, 20_000);

@@ -9,6 +9,54 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.11: financial health as a gauge, six pillars and a daily history
+
+**Status:** a patch release on v0.9.10. The tag `v0.9.11` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.11
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0048_health_score_snapshots` (expand-only: one new table holding your financial health
+score once a day, with its six parts and the figures each was built from). Nothing is backfilled:
+the history starts on the day you upgrade.
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **A Financial health screen** (under Overview, after Insights). Your score is the same score as
+  before, worked out the same way; it is now drawn as a **gauge** with three bands — **Building**
+  (under 50), **Steady** (50 to 79) and **Strong** (80 and over) — with the band in words, one
+  sentence on the single thing to do next (from your lowest-scoring part), the date it is as of, a
+  line of your score over the last 90 days and how it has moved since 30 days ago, in points and in
+  words. "View as table" lists every day.
+- **Six cards, one per part of the score** (emergency fund, savings rate, debt-to-income,
+  subscriptions, diversification, fees): its score out of 100, its band in words and colour, what it
+  measures, your figure, how much it counts towards the total, and **the figures it was built from**.
+  A part there is not yet enough data for says so, says why, and says what would let it be scored —
+  it is never shown as a zero.
+- **Each part has its own page**: your figure plotted against coloured zones whose edges are the
+  scoring rules' own (for example under 1 month, 1 to 3, 3 to 6 and 6 months or more of cover), how
+  it has moved, the part's score over time, and the scoring rules in words.
+- **Living expenses from your budget.** Once you have marked categories **Fixed** or **Non-monthly**
+  on the Budget screen (v0.9.10), the emergency-fund card also shows how many months of living
+  expenses your cash covers: the average of your fixed categories over the last three full months,
+  plus a twelfth of your non-monthly categories over the last twelve. Flexible and unclassified
+  categories are never counted. It is shown beside the score, not part of it. Until a category is
+  classified it says "Classify your categories on the Budget screen."
+- **The score is recorded every day at about 04:10** (your time zone), and on the spot when you open
+  the screen and today's is missing. A day nothing ran stays empty; nothing is filled in afterwards.
+- **A Financial health card on the dashboard** (after Top insights): the gauge, the band and the
+  change over 30 days. Hide it under Customize like any other card.
+- The Brief's health section is now a short card linking to the new screen.
+- With reduced motion turned on, the gauge does not sweep.
+
 ## v0.9.10: budget meters, the pace mark, and fixed, flexible or non-monthly
 
 **Status:** a patch release on v0.9.9. The tag `v0.9.10` is pushed by the maintainer once CI is green.

@@ -13,6 +13,7 @@ export function titleForPath(pathname: string): string {
   if (pathname === '/settings/advisors') return 'Advisor management';
   if (pathname === '/reports') return 'Reports';
   if (pathname.startsWith('/accounts/')) return 'Account';
+  if (pathname.startsWith('/health/')) return 'Financial health';
   return 'PersonalFi';
 }
 

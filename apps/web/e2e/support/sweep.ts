@@ -37,6 +37,8 @@ export function routePatternsInTree(): string[] {
  */
 const PARAM_VALUES: Readonly<Record<string, string>> = {
   accountId: 'acct_ira',
+  // WP 10.12: a pillar of the health score.
+  pillar: 'emergency-fund',
 };
 
 export function concretePath(pattern: string): string {

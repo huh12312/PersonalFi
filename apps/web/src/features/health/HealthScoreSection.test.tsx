@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, within } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -9,17 +8,9 @@ import {
   stubFetchRoutes,
   type FetchRoute,
 } from '../../test-support/api-test-utils.ts';
-import { HealthScoreSection } from './HealthScoreSection.tsx';
 import type { HealthScore as HealthScoreResult } from '../../api/generated/types.gen.ts';
-
-function renderSection() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={queryClient}>
-      <HealthScoreSection />
-    </QueryClientProvider>,
-  );
-}
+import { renderWidget } from '../dashboard/test-utils.tsx';
+import { HealthScoreSection } from './HealthScoreSection.tsx';
 
 function buildResult(overrides: Partial<HealthScoreResult> = {}): HealthScoreResult {
   return {
@@ -31,49 +22,9 @@ function buildResult(overrides: Partial<HealthScoreResult> = {}): HealthScoreRes
         component: 'emergency_fund_months',
         value: '4.50',
         band: 'good',
-        weight: '0.230000',
+        weight: '1.000000',
         score: 75,
         direction: 'improved',
-      },
-      {
-        component: 'savings_rate',
-        value: '0.120000',
-        band: 'fair',
-        weight: '0.230000',
-        score: 50,
-        direction: 'worsened',
-      },
-      {
-        component: 'debt_to_income',
-        value: '0.180000',
-        band: 'excellent',
-        weight: '0.230000',
-        score: 100,
-        direction: 'unchanged',
-      },
-      {
-        component: 'subscription_load',
-        value: '0.070000',
-        band: 'good',
-        weight: '0.150000',
-        score: 75,
-        direction: 'no_previous_data',
-      },
-      {
-        component: 'diversification',
-        value: '0.080000',
-        band: 'good',
-        weight: '0.080000',
-        score: 75,
-        direction: 'improved',
-      },
-      {
-        component: 'fee_drag',
-        value: { minor: '12000', currency: 'USD' },
-        band: 'poor',
-        weight: '0.090000',
-        score: 25,
-        direction: 'worsened',
       },
     ],
     excluded: [],
@@ -105,88 +56,40 @@ function notComputedRoute(): FetchRoute {
   };
 }
 
-describe('HealthScoreSection', () => {
-  beforeEach(() => {
-    ensureApiClient();
-  });
-
+/** WP 10.12: the Brief's health section is a link to `/health`, with the week's stored score beside it. */
+describe('HealthScoreSection (a link to /health since WP 10.12)', () => {
+  beforeEach(() => ensureApiClient());
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
-  it('a 404 health_score_not_computed renders as "not computed yet", not as an error', async () => {
-    stubFetchRoutes([notComputedRoute()]);
-
-    renderSection();
-
-    expect(await screen.findByTestId('health-score-not-computed')).toHaveTextContent(
-      'Not computed yet',
+  it("names the week's stored score and links to the Financial health screen", async () => {
+    stubFetchRoutes([healthScoreRoute(buildResult())]);
+    renderWidget(<HealthScoreSection />);
+    expect(await screen.findByTestId('health-score-overall')).toHaveTextContent(
+      'This week’s score: 72.5 / 100.',
     );
-    expect(screen.queryByTestId('health-score-error')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open Financial health/u })).toHaveAttribute(
+      'href',
+      '/health',
+    );
+    // The six rows moved to /health: nothing component-by-component is drawn here any more.
+    expect(screen.queryByTestId('health-component-row')).not.toBeInTheDocument();
   });
 
-  it('every health component shows value, weight and direction in words', async () => {
-    stubFetchRoutes([healthScoreRoute(buildResult())]);
-
-    renderSection();
-
-    const rows = await screen.findAllByTestId('health-component-row');
-    expect(rows).toHaveLength(6);
-
-    const emergencyFund = rows.find((row) => row.textContent?.includes('Emergency fund'));
-    expect(emergencyFund).toBeDefined();
-    expect(within(emergencyFund!).getByText('4.50 months')).toBeInTheDocument();
-    expect(within(emergencyFund!).getByText('Weight: 23.0%')).toBeInTheDocument();
-    // The direction word, in words — "Improved" — not merely a glyph or a colour.
-    expect(within(emergencyFund!).getByText('Improved')).toBeInTheDocument();
-    expect(within(emergencyFund!).getByText('Good')).toBeInTheDocument();
-
-    const savingsRate = rows.find((row) => row.textContent?.includes('Savings rate'));
-    expect(within(savingsRate!).getByText('12.0%')).toBeInTheDocument();
-    expect(within(savingsRate!).getByText('Worsened')).toBeInTheDocument();
-
-    const feeDrag = rows.find((row) => row.textContent?.includes('Fee drag'));
-    // `fee_drag`'s value is MoneyJson — rendered through the real `<Money>`
-    // component, never a parsed-to-number ratio.
-    expect(within(feeDrag!).getByText('+$120.00')).toBeInTheDocument();
-    expect(within(feeDrag!).getByText('Poor')).toBeInTheDocument();
-
-    const subscriptionLoad = rows.find((row) => row.textContent?.includes('Subscription load'));
-    expect(within(subscriptionLoad!).getByText('No previous week to compare')).toBeInTheDocument();
-
-    // The overall figure never appears without its six-row breakdown — this
-    // same render always shows both.
-    expect(screen.getByTestId('health-score-overall')).toHaveTextContent('72.5 / 100');
+  it('a 404 health_score_not_computed reads as "not computed yet", not as an error, and still links', async () => {
+    stubFetchRoutes([notComputedRoute()]);
+    renderWidget(<HealthScoreSection />);
+    expect(await screen.findByTestId('health-score-overall')).toHaveTextContent('not computed yet');
+    expect(screen.getByRole('link', { name: /Open Financial health/u })).toBeInTheDocument();
   });
 
-  it('an excluded component is named, with its reason, never scored as zero', async () => {
-    const result = buildResult({
-      overall: null,
-      components: buildResult().components.slice(0, 5),
-      excluded: [{ component: 'fee_drag', reason: 'fees.summary was not granted' }],
-    });
-    stubFetchRoutes([healthScoreRoute(result)]);
-
-    renderSection();
-
-    const excluded = await screen.findByTestId('health-excluded');
-    expect(excluded).toHaveTextContent('Fee drag');
-    expect(excluded).toHaveTextContent('fees.summary was not granted');
-    // Not present among the six scored rows.
-    expect(screen.getAllByTestId('health-component-row')).toHaveLength(5);
-    expect(screen.getByTestId('health-score-overall')).toHaveTextContent('not enough data');
-  });
-
-  it('a direction word is present beside its glyph — the test the "glyph without its word" sabotage is run against', async () => {
-    stubFetchRoutes([healthScoreRoute(buildResult())]);
-
-    renderSection();
-
-    const rows = await screen.findAllByTestId('health-component-row');
-    const debtToIncome = rows.find((row) => row.textContent?.includes('Debt-to-income'));
-    // The glyph alone ('→') is `aria-hidden` and never the only signal; the
-    // word "Unchanged" must also be literally present in the DOM text.
-    expect(within(debtToIncome!).getByText('Unchanged')).toBeInTheDocument();
+  it('a week with every component excluded says so — never "0 / 100"', async () => {
+    stubFetchRoutes([healthScoreRoute(buildResult({ overall: null, components: [] }))]);
+    renderWidget(<HealthScoreSection />);
+    const line = await screen.findByTestId('health-score-overall');
+    expect(line).toHaveTextContent('not enough data');
+    expect(line).not.toHaveTextContent('0 / 100');
   });
 });

@@ -14,6 +14,7 @@ export type WidgetLinkTarget =
   | '/accounts/connections'
   | '/budget'
   | '/goals'
+  | '/health'
   | '/inbox'
   | '/insights'
   | '/investments'

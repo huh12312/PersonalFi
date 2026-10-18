@@ -731,3 +731,50 @@ export {
   createNarratorSettingsConsumer,
   NARRATOR_SETTINGS_CONSUMER,
 } from './narrator-settings-consumer.ts';
+
+// WP 10.12 — the health score once a day, as pillars (V5; migration 0048). The score is
+// `computeHealthScore`, unchanged; this block adds the daily snapshot, the pillar inputs, the
+// living-expenses rule (from the budget's variability) and the 04:10 job.
+export {
+  CLASSIFY_UNLOCK,
+  LIVING_EXPENSES_FIXED_MONTHS,
+  LIVING_EXPENSES_NON_MONTHLY_MONTHS,
+  completeMonthsBefore,
+  computeLivingExpenses,
+  livingExpensesReadWindow,
+  type CategoryVariabilityValue,
+  type LivingExpenses,
+  type LivingExpensesCategory,
+  type LivingExpensesCell,
+  type LivingExpensesPort,
+  type LivingExpensesSource,
+} from './health/living-expenses.ts';
+export {
+  PILLAR_UNLOCK,
+  healthSnapshotRecordOf,
+  livingCoverOf,
+  pillarsOf,
+  type HealthPillar,
+  type HealthSnapshotRecord,
+  type LivingCover,
+  type PillarInput,
+  type PillarInputKind,
+} from './health/pillars.ts';
+export {
+  computeAndStoreHealthSnapshot,
+  ensureHealthSnapshotForToday,
+  findHealthSnapshot,
+  listHealthSnapshots,
+  type HealthSnapshotDependencies,
+  type StoreHealthSnapshotInput,
+  type StoredHealthSnapshot,
+} from './health/snapshots.ts';
+export {
+  DEFAULT_HEALTH_SNAPSHOT_CRON,
+  HEALTH_SNAPSHOT_JOB_KIND,
+  HEALTH_SNAPSHOT_SCHEDULE_NAME,
+  createHealthSnapshotJob,
+  registerHealthSnapshotSchedule,
+  type HealthSnapshotJobDependencies,
+} from './health/job.ts';
+export { HEALTH_SNAPSHOT_SCOPES } from './health/store.ts';

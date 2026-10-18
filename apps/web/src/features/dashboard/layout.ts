@@ -15,6 +15,8 @@ export const WIDGET_IDS = [
   'goals',
   'investments',
   'top-insights',
+  // WP 10.12: the health gauge, after Top insights.
+  'financial-health',
 ] as const satisfies readonly DashboardLayoutEntry['id'][];
 
 export type WidgetId = (typeof WIDGET_IDS)[number];
@@ -34,6 +36,7 @@ export const WIDGET_TITLES: Record<WidgetId, string> = {
   goals: 'Goals',
   investments: 'Investments',
   'top-insights': 'Top insights',
+  'financial-health': 'Financial health',
 };
 
 /** Widgets that span two columns of the grid where there are two or more. */

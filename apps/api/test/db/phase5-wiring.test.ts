@@ -583,7 +583,14 @@ describe.skipIf(NO_DATABASE)('Phase 5 W-C wiring (apps/api/src/{modules,worker}.
     // kind wired in and the narrator registered.
     expect(insightsModule?.consumers ?? []).toHaveLength(1);
     expect((insightsModule?.jobs ?? []).map((job) => job.kind).sort()).toEqual(
-      ['insights.brief', 'insights.run', 'insights.run_all', 'insights.run_local'].sort(),
+      [
+        'insights.brief',
+        // WP 10.12: the daily health snapshot (04:10 local).
+        'insights.health_snapshot',
+        'insights.run',
+        'insights.run_all',
+        'insights.run_local',
+      ].sort(),
     );
 
     // The worst case `WORKER_PINNED_CONNECTIONS` itself is derived from

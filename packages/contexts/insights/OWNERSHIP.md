@@ -47,3 +47,4 @@ data the advisor never received would _resolve_.
 - `snapshot_grant_events`
 - `narrator_settings`
 - `narrator_provider_consents`
+- `health_score_snapshots`

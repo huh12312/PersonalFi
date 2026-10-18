@@ -980,6 +980,42 @@ test.describe('WP 10.11 budget by variability', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 7d. WP 10.12: the Health screen's gauge under reduced motion
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep walks `/health` and `/health/$pillar` (the fixture's `emergency-fund`) in every dimension above:
+ * axe in both themes with every overlay and table open, 320 px, 200 % zoom with 1.4.12, reduced motion, and the
+ * chart readouts (1.4.13). The gauge's sweep is a Web Animations API animation, not a CSS transition — the global
+ * reduced-motion rule cannot reach it — so this block asserts the gauge's own guard: under `prefers-reduced-motion`
+ * no gauge swept (`data-gauge-swept="false"` on every gauge, on the screen and on the dashboard widget), nothing
+ * is running, and every fill's transition is 0 s.
+ */
+test.describe('WP 10.12 health gauge with reduced motion', () => {
+  test.use({ contextOptions: { reducedMotion: 'reduce' } });
+  for (const path of ['/health', '/']) {
+    test(`no gauge sweeps on ${path}`, async ({ page }) => {
+      test.setTimeout(120_000);
+      await installSweepMocks(page);
+      await visit(page, path);
+      const gauges = page.locator('[data-score-gauge]');
+      await expect(gauges.first()).toBeVisible();
+      expect(await motionOffenders(page)).toEqual([]);
+      const swept = await gauges.evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute('data-gauge-swept')),
+      );
+      expect(swept.length).toBeGreaterThan(0);
+      expect(new Set(swept)).toEqual(new Set(['false']));
+      const durations = await page
+        .locator('[data-gauge-fill]')
+        .evaluateAll((fills) => fills.map((f) => getComputedStyle(f).transitionDuration));
+      expect(durations.length).toBeGreaterThan(0);
+      expect(new Set(durations)).toEqual(new Set(['0s']));
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 8. A picture of every route, in both themes (evidence, written deliberately)
 // ---------------------------------------------------------------------------
 

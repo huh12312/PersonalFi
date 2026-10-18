@@ -224,7 +224,9 @@ test.describe('Brief screen (WP 5.11)', () => {
     await shoot(page, evidenceDir, 'nothing-material');
   });
 
-  test('every health component shows value, weight and direction in words', async ({
+  // WP 10.12: the health section is a link to /health (the gauge, the pillars and the history live there); here,
+  // the week's stored score and the way there.
+  test("the health section names the week's score and links to Financial health", async ({
     page,
     evidenceDir,
   }) => {
@@ -232,23 +234,14 @@ test.describe('Brief screen (WP 5.11)', () => {
     await installBriefMocks(page, { healthScoreStatus: 200, healthScore: HEALTH_SCORE_RESULT });
     await loginAndReachBrief(page);
 
-    const rows = page.getByTestId('health-component-row');
-    await expect(rows).toHaveCount(6);
-
-    const emergencyFund = page
-      .getByTestId('health-component-row')
-      .filter({ hasText: 'Emergency fund' });
-    await expect(emergencyFund).toContainText('4.50 months');
-    await expect(emergencyFund).toContainText('Weight: 23.0%');
-    await expect(emergencyFund).toContainText('Improved');
-    await expect(emergencyFund).toContainText('Good');
-
-    const feeDrag = page.getByTestId('health-component-row').filter({ hasText: 'Fee drag' });
-    await expect(feeDrag).toContainText('$120.00');
-    await expect(feeDrag).toContainText('Poor');
-    await expect(feeDrag).toContainText('Worsened');
-
-    await expect(page.getByTestId('health-score-overall')).toContainText('72.5 / 100');
+    await expect(page.getByTestId('health-score-overall')).toContainText(
+      'This week’s score: 72.5 / 100.',
+    );
+    await expect(page.getByRole('link', { name: 'Open Financial health' })).toHaveAttribute(
+      'href',
+      '/health',
+    );
+    await expect(page.getByTestId('health-component-row')).toHaveCount(0);
 
     await shoot(page, evidenceDir, 'health-score');
   });
@@ -260,7 +253,8 @@ test.describe('Brief screen (WP 5.11)', () => {
     await installBriefMocks(page, { healthScoreStatus: 404 });
     await loginAndReachBrief(page);
 
-    await expect(page.getByTestId('health-score-not-computed')).toContainText('Not computed yet');
+    await expect(page.getByTestId('health-score-overall')).toContainText('not computed yet');
+    await expect(page.getByRole('link', { name: 'Open Financial health' })).toBeVisible();
   });
 
   test('dismissing asks for one of seven reasons and the code reaches the API', async ({

@@ -61,6 +61,7 @@ import {
 import { BUDGETING_EVENTS, createBudgetingConsumer, type BudgetingDatabase } from '@ctx/budgeting';
 import {
   createBriefJob,
+  createHealthSnapshotJob,
   createBuiltinRegistry,
   createInsightsConsumer,
   createNarratorAdvisor,
@@ -69,6 +70,7 @@ import {
   createRunSwitches,
   evaluateDueOutcomes,
   insightsJobs,
+  registerHealthSnapshotSchedule,
   registerWeeklyBriefSchedule,
   type Advisor,
   type AdvisorKind,
@@ -151,6 +153,7 @@ import {
 } from './domain.ts';
 import type { InvestmentSyncPort } from '@ctx/investments';
 import { ADVISOR_KIND_FLAGS, MODULE_FLAGS, type ModuleRegistration } from './platform.ts';
+import { createLivingExpensesPort } from './reports/living-expenses.ts';
 
 export interface ModuleWiringOptions {
   /**
@@ -1131,6 +1134,17 @@ function insightsModule(
       createRunLocalJob({ database, dependencies, clock }),
       // WP 5.6's `insights.brief`, WP 5.9's outcome check folded in (above).
       weeklyJob,
+      // WP 10.12: the daily health snapshot (04:10 local), the same snapshot ports the Brief's weekly
+      // score reads, plus the budget's variability for the living-expenses cover.
+      createHealthSnapshotJob({
+        database,
+        snapshotPorts: dependencies.ports,
+        tokenSecret: options.advisorTokenSecret,
+        currencyCode: 'USD',
+        timeZone: options.timezone,
+        livingExpenses: createLivingExpensesPort(database),
+        clock,
+      }),
     ],
     schedules: async (userId: string): Promise<void> => {
       await registerInsightsNightlySchedule(
@@ -1159,6 +1173,9 @@ function insightsModule(
       // WP 5.6's Sunday 06:00 local schedule, after the 04:15 advisor pass
       // and the 04:30 projection refresh.
       await registerWeeklyBriefSchedule(database, { userId, timezone: options.timezone }, clock);
+      // WP 10.12: 04:10 local, every day — after the 03:45 price refresh and the 04:00 net-worth
+      // snapshot, before the 04:15 advisor pass.
+      await registerHealthSnapshotSchedule(database, { userId, timezone: options.timezone }, clock);
     },
   };
 }

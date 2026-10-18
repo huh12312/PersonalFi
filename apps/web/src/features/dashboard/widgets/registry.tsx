@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import type { NetWorthRange } from '../../networth/search.ts';
 import type { WidgetId } from '../layout.ts';
 import { BudgetsWidget } from './BudgetsWidget.tsx';
+import { FinancialHealthWidget } from './FinancialHealthWidget.tsx';
 import { GoalsWidget } from './GoalsWidget.tsx';
 import { InvestmentsWidget } from './InvestmentsWidget.tsx';
 import { NetWorthWidget } from './NetWorthWidget.tsx';
@@ -43,5 +44,7 @@ export function renderWidget(id: WidgetId, context: WidgetContext): ReactNode {
       return <InvestmentsWidget />;
     case 'top-insights':
       return <TopInsightsDashboardWidget />;
+    case 'financial-health':
+      return <FinancialHealthWidget />;
   }
 }

@@ -18,6 +18,7 @@ import {
   CASH_FLOW_MARK_ROLES,
   CASH_FLOW_TEXT_ROLES,
 } from '../features/cash-flow/charts/cash-flow-chart-tokens.ts';
+import { HEALTH_CHART_TOKENS } from '../features/health/health-chart-tokens.ts';
 import { CHART_HUES } from '@core/kernel';
 
 import themeCss from './theme.css?raw';
@@ -734,6 +735,52 @@ describe('the cash flow bars chart (WP 10.10)', () => {
           const r = ratio(colorOf(theme, token), surface);
           if (r < 4.5) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
         }
+      }
+      expect(failing).toEqual([]);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 5d. The Health screen's gauge, sparkline and zone chart (WP 10.12)
+// ---------------------------------------------------------------------------
+
+/**
+ * `ScoreGauge.tsx`, `Sparkline.tsx` and `HealthZoneChart.tsx` draw only with `health-chart-tokens.ts`'s roles
+ * (`healthVar(role)`) and the status quartets (`statusVar(status, member)`), so measuring those measures the three:
+ * the series line at 3:1 and the tick text at 4.5:1 on every chart surface, the "Now" label's ink at 4.5:1 on its
+ * surface plate, each zone's band word (the quartet's `-text`) at 4.5:1 on its own wash, and the gauge's fill (the
+ * quartet's `-bold`) at 3:1 on the card it sits on.
+ */
+describe('the Health charts (WP 10.12)', () => {
+  const readout = ['--bg-overlay', '--text-primary', '--shadow-elev-2', '--border-divider'];
+  for (const file of ['ScoreGauge.tsx', 'Sparkline.tsx', 'HealthZoneChart.tsx']) {
+    it(`${file} draws only with roles this file can measure`, () => {
+      const chart = Object.entries(sources).find(([path]) =>
+        path.endsWith(`features/health/${file}`),
+      )?.[1];
+      expect(chart).toBeDefined();
+      const raw = [...(chart ?? '').matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]);
+      expect(raw.filter((token) => !readout.includes(token as string))).toEqual([]);
+      expect((chart ?? '').match(/(healthVar|statusVar)\(/g)?.length ?? 0).toBeGreaterThan(2);
+    });
+  }
+
+  for (const theme of THEMES) {
+    it(`every Health mark clears 3:1 and every text 4.5:1 in the ${theme} theme`, () => {
+      const failing: string[] = [];
+      const check = (fg: string, bg: string, floor: number) => {
+        const r = ratio(colorOf(theme, fg), colorOf(theme, bg));
+        if (r < floor) failing.push(`${fg} on ${bg}: ${r.toFixed(2)}:1 (< ${String(floor)})`);
+      };
+      for (const bg of [...CHART_SURFACES, '--bg-primary']) {
+        check(HEALTH_CHART_TOKENS.line, bg, 3);
+        check(HEALTH_CHART_TOKENS.axisInk, bg, 4.5);
+      }
+      check(HEALTH_CHART_TOKENS.nowInk, HEALTH_CHART_TOKENS.ring, 4.5);
+      for (const status of STATUSES) {
+        check(`--status-${status}-text`, `--status-${status}-bg`, 4.5);
+        check(`--status-${status}-bold`, '--bg-primary', 3);
       }
       expect(failing).toEqual([]);
     });

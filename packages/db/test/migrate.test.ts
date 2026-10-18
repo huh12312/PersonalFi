@@ -543,6 +543,12 @@ describeWithDb('runMigrations', () => {
       //   dashboard's widget order and visibility; users_dashboard_layout_is_array: NULL or an array of at
       //   most 32 entries; NULL = the default layout). Ids are the route's zod enum, not a CHECK. Expand-only;
       //   references only users. Not exported (registry.ts exempts users).
+      // 0048_health_score_snapshots (WP 10.12): one new @ctx/insights table, health_score_snapshots (the
+      //   health score once a day: user_id, as_of_date in the holder's zone, score NUMERIC(5,2) NULL exactly
+      //   when every pillar is withheld -- health_score_snapshots_score_requires_pillar via jsonb_path_exists
+      //   --, pillars JSONB of exactly six -- health_score_snapshots_six_pillars --, computed_at; unique per
+      //   (user_id, as_of_date)). Written by the 04:10 insights.health_snapshot job or on demand by GET
+      //   /insights/health; never backfilled. Expand-only; references only users. Not exported (derived).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -590,6 +596,7 @@ describeWithDb('runMigrations', () => {
         'fx_rates',
         'goal_contributions',
         'goals',
+        'health_score_snapshots',
         'health_scores',
         'holdings',
         'holdings_snapshots',

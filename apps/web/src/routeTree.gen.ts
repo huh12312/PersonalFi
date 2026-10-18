@@ -20,6 +20,7 @@ import { Route as AppBriefRouteImport } from './routes/_app.brief'
 import { Route as AppBudgetRouteImport } from './routes/_app.budget'
 import { Route as AppCashFlowRouteImport } from './routes/_app.cash-flow'
 import { Route as AppGoalsRouteImport } from './routes/_app.goals'
+import { Route as AppHealthRouteImport } from './routes/_app.health'
 import { Route as AppInboxRouteImport } from './routes/_app.inbox'
 import { Route as AppInsightsRouteImport } from './routes/_app.insights'
 import { Route as AppInvestmentsRouteImport } from './routes/_app.investments'
@@ -32,6 +33,8 @@ import { Route as DevKitchenSinkRouteImport } from './routes/dev.kitchen-sink'
 import { Route as AppAccountsIndexRouteImport } from './routes/_app.accounts.index'
 import { Route as AppAccountsAccountIdRouteImport } from './routes/_app.accounts.$accountId'
 import { Route as AppAccountsConnectionsRouteImport } from './routes/_app.accounts.connections'
+import { Route as AppHealthIndexRouteImport } from './routes/_app.health.index'
+import { Route as AppHealthPillarRouteImport } from './routes/_app.health.$pillar'
 import { Route as AppSettingsAdvisorsRouteImport } from './routes/_app.settings_.advisors'
 
 const AppRoute = AppRouteImport.update({
@@ -86,6 +89,11 @@ const AppCashFlowRoute = AppCashFlowRouteImport.update({
 const AppGoalsRoute = AppGoalsRouteImport.update({
   id: '/goals',
   path: '/goals',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppHealthRoute = AppHealthRouteImport.update({
+  id: '/health',
+  path: '/health',
   getParentRoute: () => AppRoute,
 } as any)
 const AppInboxRoute = AppInboxRouteImport.update({
@@ -148,6 +156,16 @@ const AppAccountsConnectionsRoute = AppAccountsConnectionsRouteImport.update({
   path: '/connections',
   getParentRoute: () => AppAccountsRoute,
 } as any)
+const AppHealthIndexRoute = AppHealthIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppHealthRoute,
+} as any)
+const AppHealthPillarRoute = AppHealthPillarRouteImport.update({
+  id: '/$pillar',
+  path: '/$pillar',
+  getParentRoute: () => AppHealthRoute,
+} as any)
 const AppSettingsAdvisorsRoute = AppSettingsAdvisorsRouteImport.update({
   id: '/settings_/advisors',
   path: '/settings/advisors',
@@ -165,6 +183,7 @@ export interface FileRoutesByFullPath {
   '/budget': typeof AppBudgetRoute
   '/cash-flow': typeof AppCashFlowRoute
   '/goals': typeof AppGoalsRoute
+  '/health': typeof AppHealthRouteWithChildren
   '/inbox': typeof AppInboxRoute
   '/insights': typeof AppInsightsRoute
   '/investments': typeof AppInvestmentsRoute
@@ -176,8 +195,10 @@ export interface FileRoutesByFullPath {
   '/dev/kitchen-sink': typeof DevKitchenSinkRoute
   '/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/health/$pillar': typeof AppHealthPillarRoute
   '/settings/advisors': typeof AppSettingsAdvisorsRoute
   '/accounts/': typeof AppAccountsIndexRoute
+  '/health/': typeof AppHealthIndexRoute
 }
 export interface FileRoutesByTo {
   '/lock': typeof LockRoute
@@ -200,8 +221,10 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/health/$pillar': typeof AppHealthPillarRoute
   '/settings/advisors': typeof AppSettingsAdvisorsRoute
   '/accounts': typeof AppAccountsIndexRoute
+  '/health': typeof AppHealthIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -215,6 +238,7 @@ export interface FileRoutesById {
   '/_app/budget': typeof AppBudgetRoute
   '/_app/cash-flow': typeof AppCashFlowRoute
   '/_app/goals': typeof AppGoalsRoute
+  '/_app/health': typeof AppHealthRouteWithChildren
   '/_app/inbox': typeof AppInboxRoute
   '/_app/insights': typeof AppInsightsRoute
   '/_app/investments': typeof AppInvestmentsRoute
@@ -227,8 +251,10 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_app/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/_app/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/_app/health/$pillar': typeof AppHealthPillarRoute
   '/_app/settings_/advisors': typeof AppSettingsAdvisorsRoute
   '/_app/accounts/': typeof AppAccountsIndexRoute
+  '/_app/health/': typeof AppHealthIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -243,6 +269,7 @@ export interface FileRouteTypes {
     | '/budget'
     | '/cash-flow'
     | '/goals'
+    | '/health'
     | '/inbox'
     | '/insights'
     | '/investments'
@@ -254,8 +281,10 @@ export interface FileRouteTypes {
     | '/dev/kitchen-sink'
     | '/accounts/$accountId'
     | '/accounts/connections'
+    | '/health/$pillar'
     | '/settings/advisors'
     | '/accounts/'
+    | '/health/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/lock'
@@ -278,8 +307,10 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts/$accountId'
     | '/accounts/connections'
+    | '/health/$pillar'
     | '/settings/advisors'
     | '/accounts'
+    | '/health'
   id:
     | '__root__'
     | '/_app'
@@ -292,6 +323,7 @@ export interface FileRouteTypes {
     | '/_app/budget'
     | '/_app/cash-flow'
     | '/_app/goals'
+    | '/_app/health'
     | '/_app/inbox'
     | '/_app/insights'
     | '/_app/investments'
@@ -304,8 +336,10 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/accounts/$accountId'
     | '/_app/accounts/connections'
+    | '/_app/health/$pillar'
     | '/_app/settings_/advisors'
     | '/_app/accounts/'
+    | '/_app/health/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -396,6 +430,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppGoalsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/health': {
+      id: '/_app/health'
+      path: '/health'
+      fullPath: '/health'
+      preLoaderRoute: typeof AppHealthRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/inbox': {
       id: '/_app/inbox'
       path: '/inbox'
@@ -480,6 +521,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAccountsConnectionsRouteImport
       parentRoute: typeof AppAccountsRoute
     }
+    '/_app/health/': {
+      id: '/_app/health/'
+      path: '/'
+      fullPath: '/health/'
+      preLoaderRoute: typeof AppHealthIndexRouteImport
+      parentRoute: typeof AppHealthRoute
+    }
+    '/_app/health/$pillar': {
+      id: '/_app/health/$pillar'
+      path: '/$pillar'
+      fullPath: '/health/$pillar'
+      preLoaderRoute: typeof AppHealthPillarRouteImport
+      parentRoute: typeof AppHealthRoute
+    }
     '/_app/settings_/advisors': {
       id: '/_app/settings_/advisors'
       path: '/settings/advisors'
@@ -506,12 +561,27 @@ const AppAccountsRouteWithChildren = AppAccountsRoute._addFileChildren(
   AppAccountsRouteChildren,
 )
 
+interface AppHealthRouteChildren {
+  AppHealthPillarRoute: typeof AppHealthPillarRoute
+  AppHealthIndexRoute: typeof AppHealthIndexRoute
+}
+
+const AppHealthRouteChildren: AppHealthRouteChildren = {
+  AppHealthPillarRoute: AppHealthPillarRoute,
+  AppHealthIndexRoute: AppHealthIndexRoute,
+}
+
+const AppHealthRouteWithChildren = AppHealthRoute._addFileChildren(
+  AppHealthRouteChildren,
+)
+
 interface AppRouteChildren {
   AppAccountsRoute: typeof AppAccountsRouteWithChildren
   AppBriefRoute: typeof AppBriefRoute
   AppBudgetRoute: typeof AppBudgetRoute
   AppCashFlowRoute: typeof AppCashFlowRoute
   AppGoalsRoute: typeof AppGoalsRoute
+  AppHealthRoute: typeof AppHealthRouteWithChildren
   AppInboxRoute: typeof AppInboxRoute
   AppInsightsRoute: typeof AppInsightsRoute
   AppInvestmentsRoute: typeof AppInvestmentsRoute
@@ -530,6 +600,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppBudgetRoute: AppBudgetRoute,
   AppCashFlowRoute: AppCashFlowRoute,
   AppGoalsRoute: AppGoalsRoute,
+  AppHealthRoute: AppHealthRouteWithChildren,
   AppInboxRoute: AppInboxRoute,
   AppInsightsRoute: AppInsightsRoute,
   AppInvestmentsRoute: AppInvestmentsRoute,

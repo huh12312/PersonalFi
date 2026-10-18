@@ -8407,6 +8407,433 @@
           "migrations"
         ]
       },
+      "HealthPillarDatumInput": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "money",
+              "months",
+              "ratio",
+              "count",
+              "text"
+            ]
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MoneyInput"
+              }
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "kind",
+          "value"
+        ]
+      },
+      "HealthLivingCoverInput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "computed"
+              },
+              "months": {
+                "type": "string",
+                "description": "Cash ÷ living expenses per month, one decimal."
+              },
+              "band": {
+                "type": "string",
+                "enum": [
+                  "poor",
+                  "fair",
+                  "good",
+                  "excellent"
+                ]
+              },
+              "livingExpenses": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "computed"
+                  },
+                  "monthly": {
+                    "$ref": "#/components/schemas/MoneyInput"
+                  },
+                  "fixedMonthlyAverage": {
+                    "$ref": "#/components/schemas/MoneyInput"
+                  },
+                  "nonMonthlyMonthlyShare": {
+                    "$ref": "#/components/schemas/MoneyInput"
+                  },
+                  "fixedCategoryCount": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "nonMonthlyCategoryCount": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "fixedWindow": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "type": "string"
+                      },
+                      "to": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "from",
+                      "to"
+                    ]
+                  },
+                  "nonMonthlyWindow": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "type": "string"
+                      },
+                      "to": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "from",
+                      "to"
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "monthly",
+                  "fixedMonthlyAverage",
+                  "nonMonthlyMonthlyShare",
+                  "fixedCategoryCount",
+                  "nonMonthlyCategoryCount",
+                  "fixedWindow",
+                  "nonMonthlyWindow"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "months",
+              "band",
+              "livingExpenses"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "withheld"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "unlock": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reason",
+              "unlock"
+            ]
+          }
+        ]
+      },
+      "HealthPillarInput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "emergency_fund_months",
+                  "savings_rate",
+                  "debt_to_income",
+                  "subscription_load",
+                  "diversification",
+                  "fee_drag"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "const": "scored"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MoneyInput"
+                  }
+                ]
+              },
+              "band": {
+                "type": "string",
+                "enum": [
+                  "poor",
+                  "fair",
+                  "good",
+                  "excellent"
+                ]
+              },
+              "weight": {
+                "type": "string"
+              },
+              "score": {
+                "type": "number"
+              },
+              "inputs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/HealthPillarDatumInput"
+                }
+              },
+              "livingCover": {
+                "$ref": "#/components/schemas/HealthLivingCoverInput"
+              }
+            },
+            "required": [
+              "component",
+              "status",
+              "value",
+              "band",
+              "weight",
+              "score",
+              "inputs"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "emergency_fund_months",
+                  "savings_rate",
+                  "debt_to_income",
+                  "subscription_load",
+                  "diversification",
+                  "fee_drag"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "const": "withheld"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "unlock": {
+                "type": "string"
+              },
+              "inputs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/HealthPillarDatumInput"
+                }
+              },
+              "livingCover": {
+                "$ref": "#/components/schemas/HealthLivingCoverInput"
+              }
+            },
+            "required": [
+              "component",
+              "status",
+              "reason",
+              "unlock",
+              "inputs"
+            ]
+          }
+        ]
+      },
+      "HealthHistoryEntryInput": {
+        "type": "object",
+        "properties": {
+          "asOfDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "pillars": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "component": {
+                  "type": "string",
+                  "enum": [
+                    "emergency_fund_months",
+                    "savings_rate",
+                    "debt_to_income",
+                    "subscription_load",
+                    "diversification",
+                    "fee_drag"
+                  ]
+                },
+                "score": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "$ref": "#/components/schemas/MoneyInput"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "component",
+                "score",
+                "value"
+              ]
+            }
+          }
+        },
+        "required": [
+          "asOfDate",
+          "score",
+          "pillars"
+        ]
+      },
+      "HealthThresholdInput": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string",
+            "enum": [
+              "emergency_fund_months",
+              "savings_rate",
+              "debt_to_income",
+              "subscription_load",
+              "diversification",
+              "fee_drag"
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "months",
+              "ratio",
+              "usd_per_year"
+            ]
+          },
+          "higherIsBetter": {
+            "type": "boolean"
+          },
+          "boundaries": {
+            "minItems": 3,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "component",
+          "unit",
+          "higherIsBetter",
+          "boundaries"
+        ]
+      },
+      "HealthOverviewInput": {
+        "type": "object",
+        "properties": {
+          "asOfDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "today": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "computedAt": {
+            "type": "string"
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "pillars": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthPillarInput"
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthHistoryEntryInput"
+            }
+          },
+          "thresholds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthThresholdInput"
+            }
+          },
+          "writtenNow": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asOfDate",
+          "today",
+          "computedAt",
+          "score",
+          "pillars",
+          "history",
+          "thresholds",
+          "writtenNow"
+        ]
+      },
       "InsightInput": {
         "type": "object",
         "properties": {
@@ -11883,7 +12310,8 @@
               "to-review",
               "goals",
               "investments",
-              "top-insights"
+              "top-insights",
+              "financial-health"
             ]
           },
           "visible": {
@@ -22621,6 +23049,445 @@
         ],
         "additionalProperties": false
       },
+      "HealthPillarDatum": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "money",
+              "months",
+              "ratio",
+              "count",
+              "text"
+            ]
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/Money"
+              }
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "kind",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "HealthLivingCover": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "computed"
+              },
+              "months": {
+                "type": "string",
+                "description": "Cash ÷ living expenses per month, one decimal."
+              },
+              "band": {
+                "type": "string",
+                "enum": [
+                  "poor",
+                  "fair",
+                  "good",
+                  "excellent"
+                ]
+              },
+              "livingExpenses": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "computed"
+                  },
+                  "monthly": {
+                    "$ref": "#/components/schemas/Money"
+                  },
+                  "fixedMonthlyAverage": {
+                    "$ref": "#/components/schemas/Money"
+                  },
+                  "nonMonthlyMonthlyShare": {
+                    "$ref": "#/components/schemas/Money"
+                  },
+                  "fixedCategoryCount": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "nonMonthlyCategoryCount": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "fixedWindow": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "type": "string"
+                      },
+                      "to": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "from",
+                      "to"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "nonMonthlyWindow": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "type": "string"
+                      },
+                      "to": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "from",
+                      "to"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "status",
+                  "monthly",
+                  "fixedMonthlyAverage",
+                  "nonMonthlyMonthlyShare",
+                  "fixedCategoryCount",
+                  "nonMonthlyCategoryCount",
+                  "fixedWindow",
+                  "nonMonthlyWindow"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "status",
+              "months",
+              "band",
+              "livingExpenses"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "withheld"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "unlock": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reason",
+              "unlock"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "HealthPillar": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "emergency_fund_months",
+                  "savings_rate",
+                  "debt_to_income",
+                  "subscription_load",
+                  "diversification",
+                  "fee_drag"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "const": "scored"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Money"
+                  }
+                ]
+              },
+              "band": {
+                "type": "string",
+                "enum": [
+                  "poor",
+                  "fair",
+                  "good",
+                  "excellent"
+                ]
+              },
+              "weight": {
+                "type": "string"
+              },
+              "score": {
+                "type": "number"
+              },
+              "inputs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/HealthPillarDatum"
+                }
+              },
+              "livingCover": {
+                "$ref": "#/components/schemas/HealthLivingCover"
+              }
+            },
+            "required": [
+              "component",
+              "status",
+              "value",
+              "band",
+              "weight",
+              "score",
+              "inputs"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "emergency_fund_months",
+                  "savings_rate",
+                  "debt_to_income",
+                  "subscription_load",
+                  "diversification",
+                  "fee_drag"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "const": "withheld"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "unlock": {
+                "type": "string"
+              },
+              "inputs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/HealthPillarDatum"
+                }
+              },
+              "livingCover": {
+                "$ref": "#/components/schemas/HealthLivingCover"
+              }
+            },
+            "required": [
+              "component",
+              "status",
+              "reason",
+              "unlock",
+              "inputs"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "HealthHistoryEntry": {
+        "type": "object",
+        "properties": {
+          "asOfDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "pillars": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "component": {
+                  "type": "string",
+                  "enum": [
+                    "emergency_fund_months",
+                    "savings_rate",
+                    "debt_to_income",
+                    "subscription_load",
+                    "diversification",
+                    "fee_drag"
+                  ]
+                },
+                "score": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "$ref": "#/components/schemas/Money"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "component",
+                "score",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "asOfDate",
+          "score",
+          "pillars"
+        ],
+        "additionalProperties": false
+      },
+      "HealthThreshold": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string",
+            "enum": [
+              "emergency_fund_months",
+              "savings_rate",
+              "debt_to_income",
+              "subscription_load",
+              "diversification",
+              "fee_drag"
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "months",
+              "ratio",
+              "usd_per_year"
+            ]
+          },
+          "higherIsBetter": {
+            "type": "boolean"
+          },
+          "boundaries": {
+            "minItems": 3,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "component",
+          "unit",
+          "higherIsBetter",
+          "boundaries"
+        ],
+        "additionalProperties": false
+      },
+      "HealthOverview": {
+        "type": "object",
+        "properties": {
+          "asOfDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "today": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "computedAt": {
+            "type": "string"
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "pillars": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthPillar"
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthHistoryEntry"
+            }
+          },
+          "thresholds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthThreshold"
+            }
+          },
+          "writtenNow": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asOfDate",
+          "today",
+          "computedAt",
+          "score",
+          "pillars",
+          "history",
+          "thresholds",
+          "writtenNow"
+        ],
+        "additionalProperties": false
+      },
       "Insight": {
         "type": "object",
         "properties": {
@@ -26182,7 +27049,8 @@
               "to-review",
               "goals",
               "investments",
-              "top-insights"
+              "top-insights",
+              "financial-health"
             ]
           },
           "visible": {
@@ -36824,7 +37692,7 @@
                 "type": "object",
                 "properties": {
                   "widgets": {
-                    "maxItems": 8,
+                    "maxItems": 9,
                     "type": "array",
                     "items": {
                       "$ref": "#/components/schemas/DashboardLayoutEntryInput"
@@ -51360,6 +52228,57 @@
                   },
                   "required": [
                     "healthScore"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/health": {
+      "get": {
+        "operationId": "getHealthOverview",
+        "summary": "The financial health score today, as pillars, with 90 days of history",
+        "tags": [
+          "insights"
+        ],
+        "description": "Today's daily health snapshot (computed once on demand when the 04:10 job has not written it yet), its six pillars — each scored with the inputs it was built from, or withheld with the reason and what would unlock it, never a zero — the last 90 days of snapshots, and each component's band ladder from the scoring rules.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "health": {
+                      "$ref": "#/components/schemas/HealthOverview"
+                    }
+                  },
+                  "required": [
+                    "health"
                   ],
                   "additionalProperties": false
                 }
