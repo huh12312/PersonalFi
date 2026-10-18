@@ -42,13 +42,7 @@ function ProviderRow({ provider }: { provider: Provider }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-medium text-text-primary">{provider.provider}</p>
         <div className="flex items-center gap-2">
-          {/* `bg-status-good/10` (10%-opacity tint) measures 4.46:1 for
-              `text-status-good` — under WCAG AA's 4.5:1 by a hair. `Badge`'s
-              `good` variant pairs the same ink against `--bg-subtle` instead,
-              the exact combination `src/styles/theme.css`'s own comment
-              records as tuned to clear 4.5:1 in both themes
-              (`app-walkthrough.spec.ts`'s original finding). */}
-          <Badge variant={provider.keyPresent ? 'good' : 'neutral'}>
+          <Badge variant={provider.keyPresent ? 'success' : 'neutral'}>
             {provider.keyPresent ? 'Key configured' : 'No key configured'}
           </Badge>
           {/* WP 10.4: where the key in force comes from (the "API keys" cards above change it). */}
@@ -58,7 +52,7 @@ function ProviderRow({ provider }: { provider: Provider }) {
           {provider.keyPresent && provider.keySource === 'stored' && (
             <span className="text-caption text-text-muted">stored in this install</span>
           )}
-          <Badge variant={provider.registered ? 'good' : 'neutral'}>
+          <Badge variant={provider.registered ? 'success' : 'neutral'}>
             {provider.registered ? 'Registered' : 'Not registered'}
           </Badge>
         </div>
@@ -268,7 +262,7 @@ export function MarketDataSettingsScreen() {
           passkey check — this ladder decides what every position in that class is worth.
         </p>
         {(priorityError !== null || stepUp.error !== null) && (
-          <p className="mt-2 text-small text-status-critical">{priorityError ?? stepUp.error}</p>
+          <p className="mt-2 text-small text-status-danger-text">{priorityError ?? stepUp.error}</p>
         )}
         <ul className="mt-3 flex flex-col gap-2">
           {(settingsQuery.data?.ladders ?? []).map((ladder) => (
@@ -324,10 +318,10 @@ export function MarketDataSettingsScreen() {
         </form>
 
         {testFetchStepUp.error !== null && (
-          <p className="mt-2 text-small text-status-critical">{testFetchStepUp.error}</p>
+          <p className="mt-2 text-small text-status-danger-text">{testFetchStepUp.error}</p>
         )}
         {testFetch.isError && (
-          <p className="mt-2 text-small text-status-critical" role="alert">
+          <p className="mt-2 text-small text-status-danger-text" role="alert">
             {problemDetail(testFetch.error, 'The test fetch failed.')}
           </p>
         )}

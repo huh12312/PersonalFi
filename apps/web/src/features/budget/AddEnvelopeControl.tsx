@@ -40,7 +40,7 @@ export function AddEnvelopeControl({ periodId }: AddEnvelopeControlProps) {
         className="w-56"
       />
       {create.isError && (
-        <span role="alert" className="text-caption text-status-critical">
+        <span role="alert" className="text-caption text-status-danger-text">
           Could not add that category.
         </span>
       )}

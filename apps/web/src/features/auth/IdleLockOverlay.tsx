@@ -134,7 +134,7 @@ export function IdleLockOverlay() {
           You’ve been away for a while. Unlock with your passkey to continue.
         </p>
         {error !== null && (
-          <p role="alert" className="mt-3 text-small text-status-critical">
+          <p role="alert" className="mt-3 text-small text-status-danger-text">
             {error}
           </p>
         )}

@@ -101,7 +101,7 @@ export function ReportsScreen() {
       </header>
 
       {exportBundle.stepUpError !== null && (
-        <p role="alert" className="text-small text-status-critical">
+        <p role="alert" className="text-small text-status-danger-text">
           {exportBundle.stepUpError}
         </p>
       )}

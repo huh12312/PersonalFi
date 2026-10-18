@@ -64,6 +64,9 @@ export function budgetPeriod(lines: BudgetLine[], readyToAssign = 25_000): Budge
     toStayOnTrack: usd(0),
     totalCategoryAvailable: usd(0),
     totalCreditCardPaymentAvailable: usd(0),
+    budgetedExpenses: usd(0),
+    plannedSavings: usd(0),
+    rolledOver: usd(0),
     lines,
   };
 }

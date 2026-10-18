@@ -15,6 +15,14 @@ export const CATEGORY_KINDS = ['income', 'expense', 'transfer', 'investment', 'o
 export type CategoryKind = (typeof CATEGORY_KINDS)[number];
 
 /**
+ * How a category's spending behaves (WP 10.11, migration 0047; Monarch's equivalent). Only the holder
+ * sets it; NULL is "unclassified". The migration's CHECK lists the same three values, asserted equal by
+ * `apps/api/test/db/category-variability-routes.test.ts`.
+ */
+export const CATEGORY_VARIABILITIES = ['fixed', 'flexible', 'non_monthly'] as const;
+export type CategoryVariability = (typeof CATEGORY_VARIABILITIES)[number];
+
+/**
  * The chart of categories, per user.
  *
  * **Per user, even for the system taxonomy**, and that is a deliberate cost. A
@@ -56,6 +64,11 @@ export const categories = pgTable(
      * NULL until the first read assigns `hueForId(id)`; never re-derived after that.
      */
     hue: text('hue').$type<ChartHue>(),
+    /**
+     * Fixed / flexible / non-monthly (WP 10.11, migration 0047), CHECKed by `categories_variability_check`.
+     * NULL = unclassified. Never derived: a recurring stream only *suggests* `fixed`.
+     */
+    variability: text('variability').$type<CategoryVariability>(),
     /** Seeded by us. A user may rename it; they may not delete it. */
     isSystem: flagColumn('is_system').notNull().default(false),
     archivedAt: instantColumn('archived_at'),

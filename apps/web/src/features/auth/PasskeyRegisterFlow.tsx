@@ -99,7 +99,7 @@ export function PasskeyRegisterFlow({ registrationToken }: PasskeyRegisterFlowPr
   if (step === 'done') {
     return (
       <AuthCard>
-        <IconCircle tone="good">
+        <IconCircle tone="success">
           <CheckCircle2 size={22} aria-hidden="true" />
         </IconCircle>
         <h1 className="mt-3 text-h2 text-text-primary">You’re all set</h1>
@@ -142,7 +142,7 @@ export function PasskeyRegisterFlow({ registrationToken }: PasskeyRegisterFlowPr
           maxLength={64}
         />
         {error !== null && (
-          <p role="alert" className="mt-1.5 text-small text-status-critical">
+          <p role="alert" className="mt-1.5 text-small text-status-danger-text">
             {error}
           </p>
         )}

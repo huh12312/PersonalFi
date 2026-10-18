@@ -15,6 +15,7 @@ import {
   waitForAnimationsToDrain,
 } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
+import { installBudgetCategoryMocks } from './support/mock-budget.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import {
@@ -914,6 +915,68 @@ test.describe('WP 10.7 states are axe-clean in both themes', () => {
       await scanBothThemes(page, `/recurring › Forward cash flow: ${name} at 320 px`);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// 7c. WP 10.11: /budget's By-variability view (a URL state the route sweep does not reach)
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep walks `/budget` as it opens — By group, with the group and row meters and their pace tick — in
+ * every dimension above. The By-variability view is `?view=variability`, which the sweep never visits, and it adds
+ * the one new kind of control (the classify segmented group) and the "Suggested" chip. These walk it with the
+ * budget's own categories (`installBudgetCategoryMocks`): both themes at 1280 and at 320 px, 200 % zoom with 1.4.12
+ * text spacing, and reduced motion. The keyboard journey through the classify control is in
+ * `a11y-keyboard.spec.ts`.
+ */
+test.describe('WP 10.11 budget by variability', () => {
+  async function open(page: Page): Promise<void> {
+    await installSweepMocks(page);
+    await installBudgetCategoryMocks(page);
+    await visit(page, '/budget?view=variability');
+    await expect(page.getByRole('region', { name: 'Unclassified' })).toBeVisible();
+    await expect(page.getByTestId('variability-suggested').first()).toBeVisible();
+    await hideDevtools(page);
+  }
+
+  test('axe-clean in both themes, at 1280 and at 320 px', async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page);
+    await scanBothThemes(page, '/budget?view=variability');
+    await page.setViewportSize(REFLOW);
+    expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+    await scanBothThemes(page, '/budget?view=variability at 320 px');
+  });
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    test('nothing is lost', async ({ page }) => {
+      test.setTimeout(120_000);
+      await open(page);
+      expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+      await scanBothThemes(page, '/budget?view=variability at 200 %');
+      const before = new Set(await clippedTextElements(page));
+      await page.addStyleTag({ content: TEXT_SPACING });
+      await page.waitForTimeout(100);
+      const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+      expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+    });
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+    test('nothing animates, and the meter fills do not transition', async ({ page }) => {
+      test.setTimeout(120_000);
+      await open(page);
+      expect(await motionOffenders(page)).toEqual([]);
+      const durations = await page
+        .locator('[data-meter-fill]')
+        .evaluateAll((fills) => fills.map((f) => getComputedStyle(f).transitionDuration));
+      expect(durations.length).toBeGreaterThan(0);
+      expect(new Set(durations)).toEqual(new Set(['0s']));
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

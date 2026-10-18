@@ -243,7 +243,7 @@ function AddContributionForm({ goal }: { readonly goal: Goal }) {
         </div>
       </div>
       {formError !== null && (
-        <p role="alert" className="text-small text-status-critical">
+        <p role="alert" className="text-small text-status-danger-text">
           {formError}
         </p>
       )}

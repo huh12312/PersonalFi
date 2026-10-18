@@ -154,6 +154,7 @@ export {
   cardIdentityTermsOf,
   getPeriod,
   identityTermsOf,
+  isPlannedSavings,
   listBudgets,
   listPeriods,
   type BudgetLineView,

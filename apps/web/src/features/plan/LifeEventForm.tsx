@@ -103,7 +103,7 @@ export function LifeEventForm({ onSubmit, pending }: LifeEventFormProps) {
         {pending ? 'Adding…' : 'Add event'}
       </Button>
       {error !== null && (
-        <p role="alert" className="w-full text-small text-status-critical">
+        <p role="alert" className="w-full text-small text-status-danger-text">
           {error}
         </p>
       )}

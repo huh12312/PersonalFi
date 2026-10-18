@@ -162,7 +162,7 @@ export function GoalPolicyEditor({ line }: GoalPolicyEditorProps) {
           </div>
 
           {update.isError && (
-            <p role="alert" className="text-caption text-status-critical">
+            <p role="alert" className="text-caption text-status-danger-text">
               Could not save — try again.
             </p>
           )}

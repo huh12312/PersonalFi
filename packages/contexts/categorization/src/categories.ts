@@ -37,6 +37,7 @@ import { sql } from 'drizzle-orm';
 import type { CategorizationExecutor } from './db.ts';
 import { CategorizationError } from './errors.ts';
 import { categoryIdsByKey, seedSystemTaxonomy } from './seed-taxonomy.ts';
+import { CATEGORY_VARIABILITIES, type CategoryVariability } from '../schema/index.ts';
 import type { CategoryKind } from './taxonomy.ts';
 
 /** One row of the chart, as a user sees it. */
@@ -56,6 +57,12 @@ export interface UserCategory {
    * after that it is the stored value, which the holder may change, and nothing re-derives it.
    */
   readonly hue: ChartHue;
+  /**
+   * Fixed / flexible / non-monthly (WP 10.11, migration 0047), or `null` while the holder has not classified it.
+   * Never derived here: a recurring stream only *suggests* `fixed` (`apps/api`'s
+   * `GET /categories/variability-suggestions`), and only `PATCH /categories/{id}` writes it.
+   */
+  readonly variability: CategoryVariability | null;
   readonly sort: number;
   /**
    * `true` for a row this taxonomy installed, `false` for one the user created.
@@ -104,6 +111,7 @@ export async function listCategories(
     kind: CategoryKind;
     icon: string;
     hue: string | null;
+    variability: string | null;
     sort: number;
     is_system: boolean;
     /**
@@ -128,6 +136,7 @@ export async function listCategories(
            c.kind,
            c.icon,
            c.hue,
+           c.variability,
            c.sort,
            c.is_system,
            c.archived_at,
@@ -153,6 +162,7 @@ export async function listCategories(
     kind: row.kind,
     icon: row.icon,
     hue: storedHue(row.id, row.hue ?? hues.get(row.id) ?? null),
+    variability: storedVariability(row.id, row.variability),
     sort: row.sort,
     isSystem: row.is_system,
     archivedAt: row.archived_at === null ? null : new Date(row.archived_at),
@@ -176,6 +186,31 @@ function storedHue(categoryId: string, hue: string | null): ChartHue {
     throw new Error(`category ${categoryId} has no valid stored hue (${String(hue)})`);
   }
   return hue;
+}
+
+/** A variability as the table holds it: `categories_variability_check` (0047) admits the three values or NULL. */
+function storedVariability(categoryId: string, value: string | null): CategoryVariability | null {
+  if (value === null) return null;
+  if (!isCategoryVariability(value)) {
+    throw new Error(`category ${categoryId} has an invalid stored variability (${value})`);
+  }
+  return value;
+}
+
+export function isCategoryVariability(value: unknown): value is CategoryVariability {
+  return typeof value === 'string' && (CATEGORY_VARIABILITIES as readonly string[]).includes(value);
+}
+
+function requireVariability(value: unknown): CategoryVariability | null {
+  if (value === null) return null;
+  if (!isCategoryVariability(value)) {
+    throw new CategorizationError(
+      'categorization.rule_invalid',
+      'a category variability must be fixed, flexible or non_monthly',
+      { variability: value },
+    );
+  }
+  return value;
 }
 
 /**
@@ -360,6 +395,8 @@ export interface CreateCategoryInput {
   readonly kind?: CategoryKind;
   /** WP 10.8. Omitted: seeded with `hueForId(id)`, the value a first read would assign. */
   readonly hue?: ChartHue;
+  /** WP 10.11. Omitted or `null`: unclassified. */
+  readonly variability?: CategoryVariability | null;
 }
 
 function requireChartHue(hue: unknown): ChartHue {
@@ -400,6 +437,8 @@ export async function createCategory(
     );
   }
   const requestedHue = input.hue === undefined ? undefined : requireChartHue(input.hue);
+  const variability =
+    input.variability === undefined ? null : requireVariability(input.variability);
 
   let parentKey: string | null = null;
   let kind: CategoryKind;
@@ -447,11 +486,11 @@ export async function createCategory(
   const hue = requestedHue ?? hueForId(id);
   await executor.execute(sql`
     INSERT INTO categories
-      (id, user_id, parent_id, key, label, description, kind, icon, hue, sort, is_system,
-       created_at, updated_at)
+      (id, user_id, parent_id, key, label, description, kind, icon, hue, variability, sort,
+       is_system, created_at, updated_at)
     VALUES (
       ${id}, ${input.userId}, ${input.parentId}, ${key}, ${label}, ${description}, ${kind},
-      ${icon}, ${hue}, 0, FALSE, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz
+      ${icon}, ${hue}, ${variability}, 0, FALSE, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz
     )
   `);
 
@@ -464,6 +503,7 @@ export async function createCategory(
     kind,
     icon,
     hue,
+    variability,
     sort: 0,
     isSystem: false,
     archivedAt: null,
@@ -481,6 +521,11 @@ export interface RenameCategoryInput {
   readonly icon?: string;
   /** WP 10.8. One of `CHART_HUES`; anything else is refused (`categorization.rule_invalid`). */
   readonly hue?: ChartHue;
+  /**
+   * WP 10.11. `undefined` leaves it; `null` clears it back to unclassified; one of the three sets it. Anything
+   * else is refused (`categorization.rule_invalid`).
+   */
+  readonly variability?: CategoryVariability | null;
 }
 
 /**
@@ -507,6 +552,10 @@ export async function renameCategory(
     );
   }
   const hue = input.hue === undefined ? null : requireChartHue(input.hue);
+  // `COALESCE` cannot say "set to NULL", and clearing a classification is a real edit, so variability carries an
+  // explicit "was it named" flag beside its value.
+  const setVariability = input.variability !== undefined;
+  const variability = setVariability ? requireVariability(input.variability) : null;
 
   await executor.execute(sql`
     UPDATE categories SET
@@ -514,6 +563,7 @@ export async function renameCategory(
       description = COALESCE(${input.description ?? null}, description),
       icon        = COALESCE(${input.icon ?? null}, icon),
       hue         = COALESCE(${hue}, hue),
+      variability = CASE WHEN ${setVariability} THEN ${variability}::text ELSE variability END,
       updated_at  = ${context.clock.now().toISOString()}::timestamptz
      WHERE id = ${input.categoryId} AND user_id = ${input.userId}
   `);

@@ -81,9 +81,9 @@ export function ReconnectDialog({ connection, onOpenChange }: ReconnectDialogPro
           )}
           {connection.capabilities.reconnectFlow === 'provider_hosted' && (
             <div className="flex flex-col gap-3">
-              {error !== null && <p className="text-small text-status-critical">{error}</p>}
+              {error !== null && <p className="text-small text-status-danger-text">{error}</p>}
               {stepUp.error !== null && (
-                <p className="text-small text-status-critical">{stepUp.error}</p>
+                <p className="text-small text-status-danger-text">{stepUp.error}</p>
               )}
               <Button onClick={() => void handlePlaidReconnect()} disabled={busy || stepUp.busy}>
                 {busy ? 'Connecting…' : 'Reconnect'}

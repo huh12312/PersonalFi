@@ -74,6 +74,31 @@ export interface BudgetPeriodView {
   readonly totalCategoryAvailable: MoneyType;
   /** Σ of every CCP line's available. Deliberately *not* in identity I. */
   readonly totalCreditCardPaymentAvailable: MoneyType;
+  /**
+   * WP 10.11's "Left to budget" card: Σ `assigned` over the category lines that are **not** planned savings
+   * (`isPlannedSavings`). With `plannedSavings` it partitions Σ assigned of every category line exactly.
+   */
+  readonly budgetedExpenses: MoneyType;
+  /** Σ `assigned` over the category lines `isPlannedSavings` names. */
+  readonly plannedSavings: MoneyType;
+  /**
+   * Σ `carryover` over the category lines: what the previous period's rollover policies brought into this one
+   * (07 §1.2's `rollover_fn`, applied at the roll). Negative only under `ROLLOVER_ALLOW_NEGATIVE`.
+   */
+  readonly rolledOver: MoneyType;
+}
+
+/**
+ * A category line whose assignment is money **set aside** rather than budgeted to spend (WP 10.11): the holder's
+ * 50/30/20 class says `SAVINGS`, or — with no class — the line saves toward a dated target (`TARGET_BY_DATE`,
+ * 07 §1.8's sinking fund). An explicit `NEED`/`WANT` class always wins over the goal type. CCP lines are neither.
+ */
+export function isPlannedSavings(
+  line: Pick<BudgetLineView, 'kind' | 'class' | 'goalType'>,
+): boolean {
+  if (line.kind !== 'category') return false;
+  if (line.class !== null) return line.class === 'SAVINGS';
+  return line.goalType === 'TARGET_BY_DATE';
 }
 
 /**
@@ -193,6 +218,20 @@ export async function getPeriod(
     ),
     totalCreditCardPaymentAvailable: Money.sum(
       lines.filter((line) => line.kind === 'credit_card_payment').map((line) => line.available),
+      code,
+    ),
+    budgetedExpenses: Money.sum(
+      lines
+        .filter((line) => line.kind === 'category' && !isPlannedSavings(line))
+        .map((line) => line.assigned),
+      code,
+    ),
+    plannedSavings: Money.sum(
+      lines.filter((line) => isPlannedSavings(line)).map((line) => line.assigned),
+      code,
+    ),
+    rolledOver: Money.sum(
+      lines.filter((line) => line.kind === 'category').map((line) => line.carryover),
       code,
     ),
   };

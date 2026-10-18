@@ -129,7 +129,7 @@ export function CreateCategoryDialog({
             </div>
           )}
 
-          {error !== null && <p className="text-small text-status-critical">{error}</p>}
+          {error !== null && <p className="text-small text-status-danger-text">{error}</p>}
 
           <Button type="submit" disabled={createCategory.isPending || label.trim() === ''}>
             {createCategory.isPending ? 'Creating…' : 'Create category'}

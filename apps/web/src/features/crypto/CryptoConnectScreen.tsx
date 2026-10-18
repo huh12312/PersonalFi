@@ -38,7 +38,7 @@ export function CryptoConnectScreen() {
         <h2 className="text-h3 text-text-primary">Coinbase (read-only)</h2>
         {coinbaseRegistered ? (
           coinbaseDone ? (
-            <p className="mt-2 text-small text-status-good" role="status">
+            <p className="mt-2 text-small text-status-success-text" role="status">
               Coinbase connected. It appears in your connections list.
             </p>
           ) : (
@@ -55,7 +55,7 @@ export function CryptoConnectScreen() {
         <h2 className="text-h3 text-text-primary">Bitcoin / Ethereum wallet (watch-only)</h2>
         {walletRegistered ? (
           walletDone ? (
-            <p className="mt-2 text-small text-status-good" role="status">
+            <p className="mt-2 text-small text-status-success-text" role="status">
               Wallet added. It appears in your connections list.
             </p>
           ) : (

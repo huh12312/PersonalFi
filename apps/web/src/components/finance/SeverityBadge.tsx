@@ -13,7 +13,7 @@ const SEVERITY_META: Record<
   info: { label: 'Info', variant: 'neutral', icon: Info },
   notable: { label: 'Notable', variant: 'accent', icon: Sparkles },
   warning: { label: 'Warning', variant: 'warning', icon: AlertTriangle },
-  urgent: { label: 'Urgent', variant: 'critical', icon: AlertOctagon },
+  urgent: { label: 'Urgent', variant: 'danger', icon: AlertOctagon },
 };
 
 function metaOf(severity: string) {

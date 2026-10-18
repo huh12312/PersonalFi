@@ -99,7 +99,9 @@ export function AdvisorManagementScreen() {
 
       {hasLocalModelAdvisor && <KindSwitch kind="local_model" />}
 
-      {stepUp.error !== null && <p className="text-small text-status-critical">{stepUp.error}</p>}
+      {stepUp.error !== null && (
+        <p className="text-small text-status-danger-text">{stepUp.error}</p>
+      )}
 
       <section>
         <h2 className="text-h3 text-text-primary">Advisors</h2>
@@ -127,7 +129,7 @@ export function AdvisorManagementScreen() {
                         {advisor.advisorId} · v{advisor.version} · {advisor.kind}
                       </p>
                       {advisor.quarantinedAt !== null && (
-                        <p className="mt-1 text-caption text-status-critical">
+                        <p className="mt-1 text-caption text-status-danger-text">
                           Quarantined: {advisor.quarantineReason ?? 'unknown reason'}
                         </p>
                       )}

@@ -149,7 +149,7 @@ export function SecurityScreen() {
             <p className="text-small text-text-primary">{notice}</p>
           )}
           {(problem ?? stepUpMessage) !== null && (
-            <p className="text-small text-status-critical">{problem ?? stepUpMessage}</p>
+            <p className="text-small text-status-danger-text">{problem ?? stepUpMessage}</p>
           )}
         </div>
       )}
@@ -247,7 +247,7 @@ export function SecurityScreen() {
         <div className="flex flex-col gap-2 rounded-lg border border-border-hairline bg-bg-surface p-3">
           <p className="flex flex-wrap items-center gap-2 text-body font-medium text-text-primary">
             Authenticator code
-            <Badge variant={totpEnrolled ? 'good' : 'neutral'}>
+            <Badge variant={totpEnrolled ? 'success' : 'neutral'}>
               {totpEnrolled ? 'Set up' : 'Not set up'}
             </Badge>
           </p>

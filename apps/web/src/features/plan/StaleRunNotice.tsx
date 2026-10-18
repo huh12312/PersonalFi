@@ -81,7 +81,7 @@ export function StaleRunNotice({ status, staleness, run }: StaleRunNoticeProps) 
       role="status"
       data-testid="plan-run-stale"
       data-staleness={staleness?.reason ?? 'unspecified'}
-      className="flex flex-col gap-1 rounded-md border border-status-warning bg-bg-subtle p-3 text-small text-text-primary"
+      className="flex flex-col gap-1 rounded-md border border-status-warning-border bg-bg-subtle p-3 text-small text-text-primary"
     >
       <p className="font-semibold">{words.headline}</p>
       <p>{words.body}</p>

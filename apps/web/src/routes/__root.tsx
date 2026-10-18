@@ -32,7 +32,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
   errorComponent: ({ error, reset }) => (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg-page px-4 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-bg-subtle text-status-critical">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-bg-subtle text-status-danger-text">
         <AlertTriangle size={22} aria-hidden="true" />
       </div>
       <h1 className="text-h2 text-text-primary">Something went wrong</h1>

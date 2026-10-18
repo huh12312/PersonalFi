@@ -67,7 +67,7 @@ export function ProjectionOverridesNotice({
     <div
       role="status"
       data-testid="projection-stale-notice"
-      className="flex flex-col gap-2 rounded-md border border-status-warning bg-bg-subtle p-3 text-small text-text-primary"
+      className="flex flex-col gap-2 rounded-md border border-status-warning-border bg-bg-subtle p-3 text-small text-text-primary"
     >
       <p>
         <strong className="font-semibold">This projection is out of date.</strong> You changed
@@ -102,7 +102,7 @@ export function ProjectionOverridesNotice({
         </Button>
       </div>
       {recompute.isError && (
-        <p className="text-status-critical" role="alert">
+        <p className="text-status-danger-text" role="alert">
           Could not recompute. Try again.
         </p>
       )}

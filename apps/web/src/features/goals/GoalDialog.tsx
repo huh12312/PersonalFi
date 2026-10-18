@@ -205,7 +205,7 @@ function GoalForm({ goal, onDone }: { readonly goal?: Goal; readonly onDone: () 
       </div>
 
       {formError !== null && (
-        <p role="alert" className="text-small text-status-critical">
+        <p role="alert" className="text-small text-status-danger-text">
           {formError}
         </p>
       )}

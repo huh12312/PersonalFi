@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 import { useEffect, useId, useReducer, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 
 import type { BudgetLine } from '../../api/generated/types.gen.ts';
+import { BudgetMeterRow } from '../../components/finance/BudgetMeter.tsx';
+import { meterFiguresOf, type PaceStatus } from '../../components/finance/budget-meter.ts';
 import { Money } from '../../components/finance/Money.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { cn } from '../../lib/cn.ts';
@@ -25,6 +27,13 @@ import { GoalPolicyEditor } from './GoalPolicyEditor.tsx';
 export interface EnvelopeLineRowProps {
   line: BudgetLine;
   categoryLabel: string;
+  /**
+   * WP 10.11: the period's pace, for the row's `xs` meter. Omitted (income lines, card payments): no meter — an
+   * income envelope is not spent from, and a card payment is funded by rule, not by a budget.
+   */
+  pace?: PaceStatus;
+  /** Extra controls under the label (the "By variability" view's classify control). */
+  children?: ReactNode;
 }
 
 const AVAILABLE_TONE_CLASS: Record<string, string> = {
@@ -34,8 +43,14 @@ const AVAILABLE_TONE_CLASS: Record<string, string> = {
 };
 
 const OVERSPEND_BADGE: Record<'cash' | 'credit', { label: string; className: string }> = {
-  cash: { label: 'Cash overspend', className: 'bg-danger text-on-danger' },
-  credit: { label: 'Credit overspend', className: 'bg-status-warning text-on-status-warning' },
+  cash: {
+    label: 'Cash overspend',
+    className: 'border border-status-danger-border bg-status-danger-bg text-status-danger-text',
+  },
+  credit: {
+    label: 'Credit overspend',
+    className: 'border border-status-warning-border bg-status-warning-bg text-status-warning-text',
+  },
 };
 
 /**
@@ -56,7 +71,7 @@ const OVERSPEND_BADGE: Record<'cash' | 'credit', { label: string; className: str
  * not an API contract; recorded as an open item in
  * `docs/evidence/phase-2/wp2.9-budget-ui.md`.
  */
-export function EnvelopeLineRow({ line, categoryLabel }: EnvelopeLineRowProps) {
+export function EnvelopeLineRow({ line, categoryLabel, pace, children }: EnvelopeLineRowProps) {
   const [editor, dispatch] = useReducer(assignEditorReducer, CLOSED_ASSIGN_EDITOR);
   const update = useUpdateBudgetLineMutation();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -131,14 +146,16 @@ export function EnvelopeLineRow({ line, categoryLabel }: EnvelopeLineRowProps) {
   }
 
   return (
-    <li className="grid grid-cols-[1fr_repeat(3,minmax(0,7rem))_auto] items-center gap-3 rounded-md border border-border-hairline bg-bg-surface p-3">
-      <div className="min-w-0">
+    // Below `sm` the label (and its meter and controls) takes the whole first line and the three amounts and the
+    // editor share the second: at 390 px a fixed-width amount grid crushed the label to one character a line.
+    <li className="grid grid-cols-[repeat(3,minmax(0,1fr))_auto] items-center gap-3 rounded-md border border-border-hairline bg-bg-surface p-3 sm:grid-cols-[1fr_repeat(3,minmax(0,7rem))_auto]">
+      <div className="col-span-full min-w-0 sm:col-span-1">
         <p className="break-words text-body font-medium text-text-primary">{categoryLabel}</p>
         {readOnly && (
           <p className="text-caption text-text-muted">Card payment — funded automatically</p>
         )}
         {hint !== null && !readOnly && (
-          <p className="text-caption text-status-warning">
+          <p className="text-caption text-status-warning-text">
             Assign <Money value={{ minor: hint.amount.minor.toString(), currency }} /> more to stay
             on track
           </p>
@@ -151,6 +168,17 @@ export function EnvelopeLineRow({ line, categoryLabel }: EnvelopeLineRowProps) {
             aria-label={`Goal progress for ${categoryLabel}`}
           />
         )}
+        {pace !== undefined && !readOnly && (
+          <BudgetMeterRow
+            figures={meterFiguresOf([line], currency)}
+            pace={pace}
+            label={categoryLabel}
+            size="xs"
+            shape="squared"
+            className="mt-1.5 max-w-72"
+          />
+        )}
+        {children}
       </div>
 
       <div className="text-right">
@@ -188,7 +216,7 @@ export function EnvelopeLineRow({ line, categoryLabel }: EnvelopeLineRowProps) {
           />
         )}
         {editor.draft !== null && rejected && (
-          <p id={errorId} role="alert" className="mt-1 text-caption text-status-critical">
+          <p id={errorId} role="alert" className="mt-1 text-caption text-status-danger-text">
             Enter an amount such as 50.00.
           </p>
         )}

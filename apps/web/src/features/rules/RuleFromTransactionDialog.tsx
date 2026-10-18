@@ -127,7 +127,7 @@ export function RuleFromTransactionDialog({
           </p>
         )}
 
-        {error !== null && <p className="mt-2 text-small text-status-critical">{error}</p>}
+        {error !== null && <p className="mt-2 text-small text-status-danger-text">{error}</p>}
 
         <div className="mt-4 flex flex-col gap-2">
           {stage.kind === 'draft' && (

@@ -90,7 +90,7 @@ export function RecordBalanceDialog({ account, open, onOpenChange }: RecordBalan
             />
           </div>
           {(error !== null || stepUp.error !== null) && (
-            <p className="text-small text-status-critical">{error ?? stepUp.error}</p>
+            <p className="text-small text-status-danger-text">{error ?? stepUp.error}</p>
           )}
           <Button type="submit" disabled={busy || amountText.trim() === ''}>
             {busy ? 'Saving…' : 'Save balance'}

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+import { installBudgetCategoryMocks } from './support/mock-budget.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { assertReadingOrder, Journey } from './support/keyboard.ts';
 import { installVirtualPasskey } from './support/virtual-passkey.ts';
@@ -265,6 +266,44 @@ test('budget: an envelope is edited, committed and left by keyboard', async ({ p
   await page.keyboard.press('Escape');
   await expect(readyToAssign).toHaveText(committed ?? '');
   await journey.check('after Escape');
+});
+
+// ---------------------------------------------------------------------------
+// 4b. Budget (WP 10.11): switch to By variability and classify a category
+// ---------------------------------------------------------------------------
+
+test('budget: the view toggle and the classify control by keyboard; focus follows the row', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await installSweepMocks(page);
+  const categories = await installBudgetCategoryMocks(page);
+  await visit(page, '/budget');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'budget-classify');
+
+  await journey.tabTo(/^By variability$/, { max: 40 });
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/view=variability/);
+  await journey.expectFocus(/^By variability$/, 'focus stays on the toggle after the view changes');
+
+  // Fixed buttons in reading order: Rent (Fixed), Groceries (Flexible), Dining and Utilities (Unclassified).
+  const groupOfFocus = () =>
+    page.evaluate(() => ({
+      group: document.activeElement?.closest('[role="group"]')?.getAttribute('aria-label') ?? null,
+      section:
+        document.activeElement
+          ?.closest('[data-variability-section]')
+          ?.getAttribute('data-variability-section') ?? null,
+    }));
+  for (let n = 0; n < 4; n += 1) await journey.tabTo(/^Fixed$/, { max: 40 });
+  expect(await groupOfFocus()).toEqual({ group: 'Classify Utilities', section: 'unclassified' });
+
+  await page.keyboard.press('Space');
+  await expect.poll(() => categories.patches).toEqual([{ variability: 'fixed' }]);
+  await expect.poll(groupOfFocus).toEqual({ group: 'Classify Utilities', section: 'fixed' });
+  await journey.expectFocus(/^Fixed$/, 'focus follows the classified row into its new section');
+  await expect(page.getByTestId('variability-suggested')).toHaveCount(0);
 });
 
 // ---------------------------------------------------------------------------

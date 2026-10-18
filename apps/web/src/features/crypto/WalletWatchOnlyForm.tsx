@@ -72,7 +72,7 @@ export function WalletWatchOnlyForm({ onDone }: WalletWatchOnlyFormProps) {
 
   return (
     <form className="flex flex-col gap-4" onSubmit={(event) => void handleSubmit(event)}>
-      <div className="flex items-start gap-2 rounded-md border border-status-good/40 bg-status-good/10 p-3 text-small text-text-primary">
+      <div className="flex items-start gap-2 rounded-md border border-status-success-border bg-status-success-bg p-3 text-small text-text-primary">
         <ShieldCheck size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
         <p>
           This is <strong>watch-only</strong>: paste a public address or extended public key.{' '}
@@ -102,7 +102,7 @@ export function WalletWatchOnlyForm({ onDone }: WalletWatchOnlyFormProps) {
         // every time, silently, until a key is added — stated here in words
         // rather than left for the connections screen to explain after the
         // fact.
-        <div className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-small text-text-primary">
+        <div className="flex items-start gap-2 rounded-md border border-status-warning-border bg-status-warning-bg p-3 text-small text-text-primary">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
           <p>
             Syncing an Ethereum balance needs an <strong>Etherscan API key</strong> configured on
@@ -138,7 +138,7 @@ export function WalletWatchOnlyForm({ onDone }: WalletWatchOnlyFormProps) {
       </div>
 
       {(error !== null || stepUp.error !== null) && (
-        <p className="text-small text-status-critical" role="alert">
+        <p className="text-small text-status-danger-text" role="alert">
           {error ?? stepUp.error}
         </p>
       )}

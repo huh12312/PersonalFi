@@ -262,7 +262,7 @@ export function AccountOverridesPanel({ account }: AccountOverridesPanelProps) {
           </p>
         )}
         {error !== null && (
-          <p className="text-small text-status-critical" role="alert">
+          <p className="text-small text-status-danger-text" role="alert">
             {error}
           </p>
         )}

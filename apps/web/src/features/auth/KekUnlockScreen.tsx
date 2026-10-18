@@ -43,7 +43,7 @@ export function KekUnlockScreen() {
   if (isError || data === undefined) {
     return (
       <AuthCard>
-        <IconCircle tone="critical">
+        <IconCircle tone="danger">
           <AlertTriangle size={22} aria-hidden="true" />
         </IconCircle>
         <h1 className="mt-3 text-h3 text-text-primary">Can’t reach PersonalFi</h1>
@@ -77,7 +77,7 @@ export function KekUnlockScreen() {
 
   return (
     <AuthCard>
-      <IconCircle tone="good">
+      <IconCircle tone="success">
         <ShieldCheck size={22} aria-hidden="true" />
       </IconCircle>
       <h1 className="mt-3 text-h3 text-text-primary">Unlocked</h1>

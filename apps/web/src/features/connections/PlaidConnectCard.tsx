@@ -53,7 +53,7 @@ export function PlaidConnectCard({ connector, onDone }: PlaidConnectCardProps) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-small text-text-secondary">{connector.description}</p>
-      {error !== null && <p className="text-small text-status-critical">{error}</p>}
+      {error !== null && <p className="text-small text-status-danger-text">{error}</p>}
       <Button onClick={() => void handleConnect()} disabled={busy}>
         {busy ? 'Connecting…' : `Connect with ${connector.displayName}`}
       </Button>

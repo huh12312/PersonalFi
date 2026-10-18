@@ -6,14 +6,14 @@ import type { ReactNode } from 'react';
  * `bg-bg-subtle`: the tone is carried by the icon, so the shape stays constant
  * as a screen moves between states and only the meaning changes.
  */
-export type IconCircleTone = 'accent' | 'muted' | 'good' | 'warning' | 'critical';
+export type IconCircleTone = 'accent' | 'muted' | 'success' | 'warning' | 'danger';
 
 const TONE_CLASS: Record<IconCircleTone, string> = {
   accent: 'text-accent-text',
   muted: 'text-text-secondary',
-  good: 'text-status-good',
-  warning: 'text-status-warning',
-  critical: 'text-status-critical',
+  success: 'text-status-success-text',
+  warning: 'text-status-warning-text',
+  danger: 'text-status-danger-text',
 };
 
 /**

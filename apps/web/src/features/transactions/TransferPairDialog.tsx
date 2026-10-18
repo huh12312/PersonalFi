@@ -130,7 +130,7 @@ export function TransferPairDialog({
         )}
 
         {pair.isError && (
-          <p className="mt-3 text-small text-status-critical">
+          <p className="mt-3 text-small text-status-danger-text">
             {pair.error instanceof Error
               ? pair.error.message
               : 'Could not pair these transactions.'}

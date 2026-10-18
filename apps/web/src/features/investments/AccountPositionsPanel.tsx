@@ -157,7 +157,7 @@ export function AccountPositionsPanel({
                   </div>
                 </dl>
                 {position.unrealized.warning !== null && (
-                  <p className="mt-1 text-caption text-status-warning">
+                  <p className="mt-1 text-caption text-status-warning-text">
                     {position.unrealized.warning}
                   </p>
                 )}
@@ -211,7 +211,7 @@ export function AccountPositionsPanel({
                             <td className="py-1">
                               {lot.longTerm ? 'long term' : 'short term'} · {lot.ageDays} days
                               {lot.basisWarning !== null && (
-                                <span className="block text-status-warning">
+                                <span className="block text-status-warning-text">
                                   {lot.basisWarning}
                                 </span>
                               )}

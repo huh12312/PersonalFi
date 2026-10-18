@@ -155,6 +155,16 @@ const budgetPeriodSchema = z
     toStayOnTrack: moneySchema,
     totalCategoryAvailable: moneySchema,
     totalCreditCardPaymentAvailable: moneySchema,
+    budgetedExpenses: moneySchema.describe(
+      'Σ assigned over the category lines that are not planned savings (WP 10.11, "Left to budget" card).',
+    ),
+    plannedSavings: moneySchema.describe(
+      'Σ assigned over the category lines set aside rather than budgeted to spend: class SAVINGS, or no ' +
+        'class and a TARGET_BY_DATE goal. budgetedExpenses + plannedSavings = Σ assigned of every category line.',
+    ),
+    rolledOver: moneySchema.describe(
+      'Σ carryover over the category lines: what the previous period rolled into this one.',
+    ),
     lines: z.array(budgetLineSchema),
   })
   .meta({ id: 'BudgetPeriod' });
@@ -174,6 +184,9 @@ function serialisePeriod(period: BudgetPeriodView): z.infer<typeof budgetPeriodS
     toStayOnTrack: money(period.toStayOnTrack),
     totalCategoryAvailable: money(period.totalCategoryAvailable),
     totalCreditCardPaymentAvailable: money(period.totalCreditCardPaymentAvailable),
+    budgetedExpenses: money(period.budgetedExpenses),
+    plannedSavings: money(period.plannedSavings),
+    rolledOver: money(period.rolledOver),
     lines: period.lines.map(serialiseLine),
   };
 }
@@ -282,6 +295,10 @@ export const budgetRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             200: z.object({
               budgetId: z.uuid(),
               currency: z.string().length(3),
+              today: dateOnly.describe(
+                "Today in the holder's own time zone (WP 10.11): what the budget meters' pace tick is measured " +
+                  "against, so the browser's clock and zone never decide where the tick falls.",
+              ),
               period: budgetPeriodSchema,
             }),
             ...problems(401, 409, 503),
@@ -295,7 +312,12 @@ export const budgetRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
         const { budgetId, period } = await currentPeriodOf(context, timezone);
         const budgets = await listBudgets(database, { userId: session.userId });
         const currency = budgets.find((b) => b.id === budgetId)?.currency ?? 'USD';
-        return { budgetId, currency, period: serialisePeriod(period) };
+        return {
+          budgetId,
+          currency,
+          today: todayIn(deps.clock, timezone),
+          period: serialisePeriod(period),
+        };
       },
     );
 

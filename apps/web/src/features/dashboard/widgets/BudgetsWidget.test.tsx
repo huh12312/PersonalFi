@@ -9,6 +9,7 @@ import {
   TEST_CATEGORIES,
 } from '../../../test-support/api-test-utils.ts';
 import { renderWidget } from '../test-utils.tsx';
+import type { PaceStatus } from '../../../components/finance/budget-meter.ts';
 import { closestToBudget } from './budget-meters.ts';
 import { BudgetsWidget } from './BudgetsWidget.tsx';
 import { budgetLine, budgetPeriod, envelope, usd } from './fixtures.ts';
@@ -21,7 +22,7 @@ function serve(period: ReturnType<typeof budgetPeriod> | null) {
       handle: () =>
         period === null
           ? jsonResponse({ code: 'budgeting.balance_unreported' }, 409)
-          : jsonResponse({ budgetId: 'budget_1', currency: 'USD', period }),
+          : jsonResponse({ budgetId: 'budget_1', currency: 'USD', today: '2026-03-15', period }),
     },
     {
       match: '/api/categories',
@@ -31,25 +32,27 @@ function serve(period: ReturnType<typeof budgetPeriod> | null) {
   ]);
 }
 
-describe('closestToBudget (WP 10.9)', () => {
+describe('closestToBudget (WP 10.9, on the shared meter since WP 10.11)', () => {
   const none = () => false;
+  const mid: PaceStatus = { kind: 'running', day: 15, days: 30, fraction: 0.5 };
 
   it('over first (by how far over), then by share spent; three at most', () => {
     const meters = closestToBudget(
       [
         envelope('a', 'Groceries', 40_000, 20_000), // 50 %
         envelope('b', 'Dining', 10_000, 12_500), // over by 25.00
-        envelope('c', 'Fuel', 8_000, 7_600), // 95 %: near
+        envelope('c', 'Fuel', 8_000, 7_600), // 95 % at a 50 % pace: ahead
         envelope('d', 'Gifts', 5_000, 9_000), // over by 40.00
         envelope('e', 'Books', 5_000, 1_000), // 20 %
       ],
       none,
+      mid,
     );
     expect(meters.map((meter) => meter.lineId)).toEqual(['d', 'b', 'c']);
-    expect(meters.map((meter) => meter.state)).toEqual(['over', 'over', 'near']);
+    expect(meters.map((meter) => meter.state)).toEqual(['over', 'over', 'ahead']);
   });
 
-  it('uses the server figures: funded = carryover + assigned, spent = −activity, over = available < 0', () => {
+  it('uses the server figures: budgeted = carryover + assigned, spent = −activity, remaining = available', () => {
     const [meter] = closestToBudget(
       [
         budgetLine({
@@ -61,11 +64,13 @@ describe('closestToBudget (WP 10.9)', () => {
         }),
       ],
       none,
+      mid,
     );
-    expect(meter?.funded.minor).toBe(15_000n);
-    expect(meter?.spent.minor).toBe(12_000n);
-    expect(meter?.state).toBe('under');
-    expect(meter?.ratio).toBeCloseTo(0.8);
+    expect(meter?.figures.budgeted.minor).toBe(15_000n);
+    expect(meter?.figures.spent.minor).toBe(12_000n);
+    expect(meter?.figures.remaining.minor).toBe(3_000n);
+    expect(meter?.figures.rolledOver.minor).toBe(5_000n);
+    expect(meter?.state).toBe('ahead');
   });
 
   it('skips a line with nothing funded and nothing spent, income categories, and card-payment lines', () => {
@@ -76,17 +81,26 @@ describe('closestToBudget (WP 10.9)', () => {
         budgetLine({ id: 'ccp', kind: 'credit_card_payment', assigned: usd(1), activity: usd(-1) }),
       ],
       (id) => id === 'cat_salary',
+      mid,
     );
     expect(meters).toEqual([]);
   });
 
-  it('spent with nothing funded is over, with no ratio to draw a share from', () => {
-    const [meter] = closestToBudget(
-      [budgetLine({ id: 'u', activity: usd(-3_000), available: usd(-3_000) })],
+  it('spent with nothing budgeted is withheld ("no amount set"), ranked after over and before the rest', () => {
+    const meters = closestToBudget(
+      [
+        envelope('a', 'Groceries', 40_000, 20_000),
+        budgetLine({ id: 'u', activity: usd(-3_000), available: usd(-3_000) }),
+        envelope('b', 'Dining', 10_000, 12_500),
+      ],
       none,
+      mid,
     );
-    expect(meter?.state).toBe('over');
-    expect(meter?.ratio).toBeNull();
+    expect(meters.map((m) => [m.lineId, m.state])).toEqual([
+      ['b', 'over'],
+      ['u', 'no_budget'],
+      ['a', 'on_pace'],
+    ]);
   });
 });
 
@@ -117,8 +131,13 @@ describe('BudgetsWidget (WP 10.9)', () => {
     expect(items[0]!.textContent).toContain('Dining');
     expect(items[0]!.textContent).toContain('Over budget');
     expect(items[0]!.textContent).toMatch(/\$25\.00.* over/u);
-    expect(items[1]!.textContent).toContain('Nearly spent');
+    expect(items[1]!.textContent).toContain('Ahead of pace');
     expect(within(items[0]!).getByRole('meter')).toHaveAttribute('aria-valuenow', '100');
+    // The pace tick sits at the server's today: day 15 of the fixture's 30-day period.
+    expect(within(items[1]!).getByRole('meter').querySelector('[data-meter-tick]')).toHaveAttribute(
+      'data-meter-tick',
+      (15 / 30).toFixed(4),
+    );
   });
 
   it('empty: no category lines is "no budget yet" with the link that sets one — never $0 meters', async () => {

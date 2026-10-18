@@ -30,7 +30,7 @@ export function ProjectionProblem({ error, onRetry, className }: ProjectionProbl
       {...(problem.code === null ? {} : { 'data-problem-code': problem.code })}
       className={
         className ??
-        'flex flex-col gap-2 rounded-md border border-status-critical bg-bg-subtle p-4 text-small text-text-primary'
+        'flex flex-col gap-2 rounded-md border border-status-danger-border bg-bg-subtle p-4 text-small text-text-primary'
       }
     >
       <p className="font-semibold">{problem.headline}</p>

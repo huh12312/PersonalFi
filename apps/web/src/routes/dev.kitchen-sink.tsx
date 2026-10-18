@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { createFileRoute, redirect } from '@tanstack/react-router';
-import { AlertTriangle, Sparkles, Wallet } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, CheckCircle2, Info, Wallet } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 
@@ -104,14 +104,10 @@ function Theme({ label, value }: { label: string; value: 'light' | 'dark' }) {
             <Swatch label="series-7" className="bg-series-7" />
             <Swatch label="series-8" className="bg-series-8" />
           </div>
-          <div className="mt-3 grid grid-cols-4 gap-3 sm:grid-cols-6">
+          <div className="mt-3 grid grid-cols-3 gap-3">
             <Swatch label="money-pos" className="bg-money-pos" />
             <Swatch label="money-neg" className="bg-money-neg" />
             <Swatch label="accent" className="bg-accent" />
-            <Swatch label="status-good" className="bg-status-good" />
-            <Swatch label="status-warning" className="bg-status-warning" />
-            <Swatch label="status-serious" className="bg-status-serious" />
-            <Swatch label="status-critical" className="bg-status-critical" />
           </div>
           {/* `--seq-*` are raw CSS custom properties, not mapped into the Tailwind
               `@theme` colour namespace (theme.css only maps the ones actually used
@@ -164,14 +160,18 @@ function Theme({ label, value }: { label: string; value: 'light' | 'dark' }) {
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="neutral">Neutral</Badge>
             <Badge variant="accent">Accent</Badge>
-            <Badge variant="good" icon={<Sparkles size={12} aria-hidden="true" />}>
-              Good
+            <Badge variant="success" icon={<CheckCircle2 size={12} aria-hidden="true" />}>
+              Success
             </Badge>
             <Badge variant="warning" icon={<AlertTriangle size={12} aria-hidden="true" />}>
               Warning
             </Badge>
-            <Badge variant="serious">Serious</Badge>
-            <Badge variant="critical">Critical</Badge>
+            <Badge variant="danger" icon={<AlertOctagon size={12} aria-hidden="true" />}>
+              Danger
+            </Badge>
+            <Badge variant="info" icon={<Info size={12} aria-hidden="true" />}>
+              Info
+            </Badge>
           </div>
         </Section>
 

@@ -70,7 +70,7 @@ export function CoinbaseKeyForm({ onDone }: CoinbaseKeyFormProps) {
 
   return (
     <form className="flex flex-col gap-4" onSubmit={(event) => void handleSubmit(event)}>
-      <div className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-small text-text-primary">
+      <div className="flex items-start gap-2 rounded-md border border-status-warning-border bg-status-warning-bg p-3 text-small text-text-primary">
         <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
         <p>
           Use a <strong>view-only</strong> CDP key (<code>can_view</code> only). Coinbase will
@@ -120,7 +120,7 @@ export function CoinbaseKeyForm({ onDone }: CoinbaseKeyFormProps) {
       </div>
 
       {(error !== null || stepUp.error !== null) && (
-        <p className="text-small text-status-critical" role="alert">
+        <p className="text-small text-status-danger-text" role="alert">
           {error ?? stepUp.error}
         </p>
       )}

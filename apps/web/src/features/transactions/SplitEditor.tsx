@@ -216,7 +216,7 @@ export function SplitEditor({ transaction, open, onOpenChange }: SplitEditorProp
           className={
             balanced
               ? 'mt-3 text-small font-medium text-money-neutral'
-              : 'mt-3 text-small font-medium text-status-warning'
+              : 'mt-3 text-small font-medium text-status-warning-text'
           }
         >
           {remainderLabel}
@@ -253,7 +253,7 @@ export function SplitEditor({ transaction, open, onOpenChange }: SplitEditorProp
             <Button
               variant="ghost"
               size="sm"
-              className="ml-auto text-status-critical"
+              className="ml-auto text-status-danger-text"
               disabled={clear.isPending}
               onClick={() => clear.mutate({ path: { transactionId: transaction.id } })}
             >
@@ -262,9 +262,9 @@ export function SplitEditor({ transaction, open, onOpenChange }: SplitEditorProp
           )}
         </div>
 
-        {error !== null && <p className="mt-2 text-small text-status-critical">{error}</p>}
+        {error !== null && <p className="mt-2 text-small text-status-danger-text">{error}</p>}
         {save.isError && (
-          <p className="mt-2 text-small text-status-critical">
+          <p className="mt-2 text-small text-status-danger-text">
             {save.error instanceof Error ? save.error.message : 'Could not save these splits.'}
           </p>
         )}

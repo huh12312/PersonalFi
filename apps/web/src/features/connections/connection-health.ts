@@ -3,7 +3,7 @@ import { formatDistanceToNowStrict } from 'date-fns';
 
 import type { ConnectionSummary } from '../../api/generated/types.gen.ts';
 
-export type HealthTone = 'good' | 'warning' | 'critical' | 'neutral';
+export type HealthTone = 'success' | 'warning' | 'danger' | 'neutral';
 
 export interface ConnectionHealth {
   readonly label: string;
@@ -19,14 +19,14 @@ export interface ConnectionHealth {
 export function describeConnectionHealth(connection: ConnectionSummary): ConnectionHealth {
   switch (connection.status) {
     case 'active':
-      return { label: 'Connected', tone: 'good' };
+      return { label: 'Connected', tone: 'success' };
     case 'reauth_required':
       return { label: 'Needs reconnection', tone: 'warning' };
     case 'error':
       return {
         label:
           connection.lastErrorKind !== null ? describeErrorKind(connection.lastErrorKind) : 'Error',
-        tone: 'critical',
+        tone: 'danger',
       };
     case 'disconnected':
       return { label: 'Disconnected', tone: 'neutral' };

@@ -113,7 +113,7 @@ export function TransactionDetailSheet({
 
             <div className="mt-2 flex flex-wrap gap-2">
               {transaction.pending && <Badge variant="neutral">Pending</Badge>}
-              {!transaction.pending && <Badge variant="good">Posted</Badge>}
+              {!transaction.pending && <Badge variant="success">Posted</Badge>}
               {transaction.excluded && <Badge variant="warning">Excluded from totals</Badge>}
               {transaction.isTransfer && (
                 <Badge variant="accent" icon={<ArrowLeftRight size={11} aria-hidden="true" />}>

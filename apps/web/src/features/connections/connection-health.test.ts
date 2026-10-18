@@ -36,10 +36,10 @@ function connection(overrides: Partial<ConnectionSummary> = {}): ConnectionSumma
 }
 
 describe('describeConnectionHealth', () => {
-  it('labels an active connection as connected, good tone', () => {
+  it('labels an active connection as connected, success tone', () => {
     expect(describeConnectionHealth(connection({ status: 'active' }))).toEqual({
       label: 'Connected',
-      tone: 'good',
+      tone: 'success',
     });
   });
 
@@ -50,16 +50,16 @@ describe('describeConnectionHealth', () => {
     });
   });
 
-  it('surfaces the specific error kind when present, critical tone', () => {
+  it('surfaces the specific error kind when present, danger tone', () => {
     expect(
       describeConnectionHealth(connection({ status: 'error', lastErrorKind: 'rate_limited' })),
-    ).toEqual({ label: 'Rate limited', tone: 'critical' });
+    ).toEqual({ label: 'Rate limited', tone: 'danger' });
   });
 
   it('falls back to a bare "Error" when the kind is unknown', () => {
     expect(describeConnectionHealth(connection({ status: 'error', lastErrorKind: null }))).toEqual({
       label: 'Error',
-      tone: 'critical',
+      tone: 'danger',
     });
   });
 

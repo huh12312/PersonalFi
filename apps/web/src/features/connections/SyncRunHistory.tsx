@@ -6,11 +6,11 @@ import { describeErrorKind } from './connection-health.ts';
 import { useSyncRunsQuery } from './useConnections.ts';
 import type { SyncRun } from '../../api/generated/types.gen.ts';
 
-const STATUS_VARIANT: Record<SyncRun['status'], 'good' | 'warning' | 'critical' | 'neutral'> = {
+const STATUS_VARIANT: Record<SyncRun['status'], 'success' | 'warning' | 'danger' | 'neutral'> = {
   running: 'neutral',
-  success: 'good',
+  success: 'success',
   partial: 'warning',
-  failed: 'critical',
+  failed: 'danger',
 };
 
 /** `GET /connections/{id}/sync-runs` — every attempt, including ones that failed before page one (wp1.5-api.md §1). */

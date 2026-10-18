@@ -9,6 +9,48 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.10: budget meters, the pace mark, and fixed, flexible or non-monthly
+
+**Status:** a patch release on v0.9.9. The tag `v0.9.10` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.10
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0047_category_variability` (expand-only: one nullable column on `categories` saying
+whether its spending is fixed, flexible or non-monthly, with a CHECK on the three values). Nothing is
+backfilled: every category starts unclassified until you choose.
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **Left to budget** leads the Budget screen: the money not yet given to a category (the same
+  figure as before, now large, green when there is some and red with "fix this first" when you have
+  assigned more than you have), with your income this period, your budgeted expenses and your
+  planned savings and goals beneath it, and what rolled over from last month.
+- **A bar on every spending group and category** showing how much of its budget is spent, with a
+  **mark for where you would be at an even pace** (day 15 of a 30-day month is halfway). Each bar
+  says its state in words as well as colour: _under pace_, _on pace_ (within 5 points of the mark),
+  _ahead of pace_ or _over budget_, with "$spent of $budgeted · $left". A category with no amount set
+  says "no amount set" instead of an empty bar; when the month is over the mark goes and the bar says
+  so. With reduced motion turned on, the bars do not animate. "Show the bars as a table" lists every
+  group with its pace.
+- **By variability**: a second view of the same budget sorted into **Fixed**, **Flexible** and
+  **Non-monthly**, each with its own bar and total ("Budgeted fixed expenses"), and an
+  **Unclassified** list where one click sorts a category. A category a recurring charge lands in is
+  marked **Suggested: Fixed** — only a suggestion; nothing changes until you press a button. Your
+  choices are kept in your export and restored by an import.
+- **The dashboard's Budgets card** uses the same bars, with the pace mark.
+- **Status colours are now one set** (success, warning, danger, information) everywhere a badge or a
+  status message appears, so badges read a little differently: a tinted background with matching
+  text and edge. Every status still carries a word and an icon, never colour alone.
+
 ## v0.9.9: Cash flow, month by month
 
 **Status:** a patch release on v0.9.8. The tag `v0.9.9` is pushed by the maintainer once CI is green.

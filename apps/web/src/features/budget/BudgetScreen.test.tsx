@@ -71,6 +71,9 @@ function buildPeriod(overrides: Partial<BudgetPeriod> = {}): BudgetPeriod {
     toStayOnTrack: usd('0'),
     totalCategoryAvailable: usd('0'),
     totalCreditCardPaymentAvailable: usd('0'),
+    budgetedExpenses: usd('0'),
+    plannedSavings: usd('0'),
+    rolledOver: usd('0'),
     lines: [],
     ...overrides,
   };
@@ -108,7 +111,12 @@ describe('BudgetScreen', () => {
       {
         match: '/api/budgets/current',
         handle: () =>
-          jsonResponse({ budgetId: 'budget_1', currency: 'USD', period: buildPeriod() }),
+          jsonResponse({
+            budgetId: 'budget_1',
+            currency: 'USD',
+            today: '2026-09-15',
+            period: buildPeriod(),
+          }),
       },
       { match: '/api/budgets/periods', handle: () => jsonResponse({ periods: [] }) },
     ]);
@@ -132,6 +140,7 @@ describe('BudgetScreen', () => {
           jsonResponse({
             budgetId: 'budget_1',
             currency: 'USD',
+            today: '2026-09-15',
             period: buildPeriod({
               readyToAssign: usd((100000 - Number(assignedMinor)).toString()),
               lines: [
@@ -185,6 +194,7 @@ describe('BudgetScreen', () => {
           jsonResponse({
             budgetId: 'budget_1',
             currency: 'USD',
+            today: '2026-09-15',
             period: buildPeriod({
               lines: [
                 buildLine({

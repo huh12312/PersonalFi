@@ -78,7 +78,7 @@ export function RecoveryCodes({ generateLabel, onSaved, savedLabel }: RecoveryCo
           </Button>
         </div>
         {failure !== null && (
-          <p role="alert" className="text-small text-status-critical">
+          <p role="alert" className="text-small text-status-danger-text">
             {failure}
           </p>
         )}
@@ -122,7 +122,7 @@ export function RecoveryCodes({ generateLabel, onSaved, savedLabel }: RecoveryCo
         </Button>
       </div>
       {failure !== null && (
-        <p role="alert" className="text-small text-status-critical">
+        <p role="alert" className="text-small text-status-danger-text">
           {failure}
         </p>
       )}

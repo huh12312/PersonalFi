@@ -36,17 +36,25 @@
  * first read and persists it; every later read returns the stored value, which
  * `PATCH` may change.
  */
-import { CHART_HUES } from '@core/kernel';
+import { CHART_HUES, todayIn } from '@core/kernel';
 import {
   archiveCategory,
+  CATEGORY_VARIABILITIES,
   createCategory,
   listCategories,
   renameCategory,
   type UserCategory,
 } from '@ctx/categorization';
+import { listAggregateRowsInWindow } from '@ctx/ledger';
+import { listSeries } from '@ctx/recurring';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { problems } from '../problem.ts';
+import {
+  isSuggestingSeries,
+  suggestFixedCategories,
+  suggestionWindow,
+} from '../reports/variability-suggestions.ts';
 import { booleanQuery, instantOrNull } from '../wire.ts';
 import { mapDomainErrors } from './domain-errors.ts';
 import type { RouteDeps } from './deps.ts';
@@ -59,6 +67,15 @@ const chartHueSchema = z
       'that, and editable by `PATCH /categories/{id}`.',
   )
   .meta({ id: 'ChartHue' });
+
+const variabilitySchema = z
+  .enum(CATEGORY_VARIABILITIES)
+  .describe(
+    "How this category's spending behaves: `fixed` (the same most periods), `flexible` (varies with choices " +
+      'made inside the period) or `non_monthly` (irregular or annual). Set only by the holder (WP 10.11, ' +
+      'migration 0047); a recurring stream only suggests `fixed` (`GET /categories/variability-suggestions`).',
+  )
+  .meta({ id: 'CategoryVariability' });
 
 const categorySchema = z
   .object({
@@ -75,6 +92,7 @@ const categorySchema = z
     kind: z.enum(['income', 'expense', 'transfer', 'investment', 'other']),
     icon: z.string().describe('A Lucide icon name (decision D20). A key, never markup.'),
     hue: chartHueSchema,
+    variability: variabilitySchema.nullable().describe('null = not yet classified by the holder.'),
     sort: z.number().int(),
     isSystem: z.boolean().describe('true for a row the shipped taxonomy installed.'),
     archivedAt: z
@@ -103,6 +121,7 @@ function serialiseCategory(category: UserCategory): z.infer<typeof categorySchem
     kind: category.kind,
     icon: category.icon,
     hue: category.hue,
+    variability: category.variability,
     sort: category.sort,
     isSystem: category.isSystem,
     archivedAt: instantOrNull(category.archivedAt),
@@ -187,6 +206,10 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             hue: chartHueSchema
               .optional()
               .describe('Omitted: seeded from the new id, as a first read would.'),
+            variability: variabilitySchema
+              .nullable()
+              .optional()
+              .describe('Omitted or null: unclassified.'),
           }),
           response: {
             201: z.object({ category: categorySchema }),
@@ -209,6 +232,9 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               ...(request.body.icon === undefined ? {} : { icon: request.body.icon }),
               ...(request.body.kind === undefined ? {} : { kind: request.body.kind }),
               ...(request.body.hue === undefined ? {} : { hue: request.body.hue }),
+              ...(request.body.variability === undefined
+                ? {}
+                : { variability: request.body.variability }),
             },
             { clock },
           ),
@@ -217,14 +243,71 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
     );
 
+    app.get(
+      '/categories/variability-suggestions',
+      {
+        schema: {
+          operationId: 'listCategoryVariabilitySuggestions',
+          summary: 'Unclassified expense categories a recurring stream suggests are fixed',
+          description:
+            'A suggestion, computed on read and never written (WP 10.11): an expense category with no ' +
+            "`variability`, into which an active outflow recurring stream's merchant mostly spends, is " +
+            'suggested `fixed`. The budget screen shows it as a "Suggested" chip until the holder confirms ' +
+            'it with `PATCH /categories/{id}`. A classified category is never suggested. The rules are in ' +
+            '`apps/api/src/reports/variability-suggestions.ts`.',
+          tags: ['categories'],
+          response: {
+            200: z.object({
+              suggestions: z.array(
+                z.object({
+                  categoryId: z.uuid(),
+                  variability: z.literal('fixed'),
+                  seriesIds: z
+                    .array(z.uuid())
+                    .describe('The active outflow streams behind the suggestion.'),
+                }),
+              ),
+            }),
+            ...problems(401, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const series = (
+          await listSeries(database, { userId: session.userId, states: ['ACTIVE'] })
+        ).filter(isSuggestingSeries);
+        const timezone = await deps.pool.query<{ display_timezone: string }>(
+          `SELECT display_timezone FROM users WHERE id = $1`,
+          [session.userId],
+        );
+        const today = todayIn(clock, timezone.rows[0]?.display_timezone ?? 'UTC');
+        const window = suggestionWindow(series, today);
+        if (window === null) return { suggestions: [] };
+        const [rows, categories] = await Promise.all([
+          listAggregateRowsInWindow(database, {
+            userId: session.userId,
+            filters: {
+              dateFrom: window.from,
+              dateTo: window.to,
+              merchantIds: [...new Set(series.map((s) => s.merchantId))],
+            },
+          }),
+          listCategories(database, session.userId),
+        ]);
+        return { suggestions: suggestFixedCategories({ series, rows, categories }) };
+      },
+    );
+
     app.patch(
       '/categories/:categoryId',
       {
         schema: {
           operationId: 'renameCategory',
-          summary: 'Rename, re-describe or recolour a category',
+          summary: 'Rename, re-describe, recolour or classify a category',
           description:
-            'Deliberately narrow: `label`, `description`, `icon` and `hue` only. `kind` and the ' +
+            'Deliberately narrow: `label`, `description`, `icon`, `hue` and `variability` only ' +
+            '(`variability: null` returns a category to unclassified). `kind` and the ' +
             'parent/child structure are not editable here — both are structural (the seeding ' +
             "pass's own rule for why a re-seed never touches them) and changing either after " +
             'transactions have been filed under a category is how a report silently moves ' +
@@ -238,13 +321,15 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               description: z.string().max(2_000).optional(),
               icon: z.string().min(1).max(64).optional(),
               hue: chartHueSchema.optional(),
+              variability: variabilitySchema.nullable().optional(),
             })
             .refine(
               (body) =>
                 body.label !== undefined ||
                 body.description !== undefined ||
                 body.icon !== undefined ||
-                body.hue !== undefined,
+                body.hue !== undefined ||
+                body.variability !== undefined,
               'a PATCH with no fields changes nothing; say what to change',
             ),
           response: {
@@ -267,6 +352,9 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
                 : { description: request.body.description }),
               ...(request.body.icon === undefined ? {} : { icon: request.body.icon }),
               ...(request.body.hue === undefined ? {} : { hue: request.body.hue }),
+              ...(request.body.variability === undefined
+                ? {}
+                : { variability: request.body.variability }),
             },
             { clock },
           ),

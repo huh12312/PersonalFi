@@ -30,7 +30,7 @@ export function ActiveSentence({ settings }: { settings: NarratorSettings }) {
       <Icon
         size={16}
         aria-hidden="true"
-        className={ready ? 'mt-0.5 shrink-0 text-status-good' : 'mt-0.5 shrink-0'}
+        className={ready ? 'mt-0.5 shrink-0 text-status-success-text' : 'mt-0.5 shrink-0'}
       />
       {activeSentence(settings)}
     </p>
@@ -158,7 +158,7 @@ export function ActiveProviderForm({ settings }: { settings: NarratorSettings })
         <span className="text-caption text-text-muted">Changing it asks for your passkey.</span>
       </div>
       {failure !== null && (
-        <p className="text-small text-status-critical" role="alert">
+        <p className="text-small text-status-danger-text" role="alert">
           {failure}
         </p>
       )}

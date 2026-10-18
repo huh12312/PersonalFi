@@ -105,7 +105,7 @@ export function GoalControls({ value, onApply }: GoalControlsProps) {
         Set goal
       </Button>
       {error !== null && (
-        <p role="alert" className="w-full text-small text-status-critical">
+        <p role="alert" className="w-full text-small text-status-danger-text">
           {error}
         </p>
       )}

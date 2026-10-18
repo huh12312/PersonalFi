@@ -55,9 +55,9 @@ const pillClassName = (status: SyncStatus, className: string | undefined) =>
     'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-caption font-medium',
     status.kind === 'synced' && 'bg-bg-subtle text-text-secondary',
     status.kind === 'syncing' && 'bg-accent-wash text-accent-text',
-    status.kind === 'stale' && 'bg-bg-subtle text-status-warning',
+    status.kind === 'stale' && 'bg-bg-subtle text-status-warning-text',
     status.kind === 'error' &&
-      'bg-bg-subtle text-status-serious hover:bg-bg-surface hover:underline',
+      'bg-bg-subtle text-status-warning-text hover:bg-bg-surface hover:underline',
     className,
   );
 

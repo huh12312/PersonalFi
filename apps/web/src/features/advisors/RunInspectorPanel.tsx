@@ -88,7 +88,7 @@ export function RunInspectorPanel({ advisorId }: RunInspectorPanelProps) {
 
   if (runsQuery.isError) {
     return (
-      <p className="text-small text-status-critical">
+      <p className="text-small text-status-danger-text">
         {problemMessage(runsQuery.error, 'Runs could not be loaded.')}
       </p>
     );
@@ -130,7 +130,7 @@ export function RunInspectorPanel({ advisorId }: RunInspectorPanelProps) {
         >
           {runQuery.isLoading && <SkeletonText lines={4} />}
           {runQuery.isError && (
-            <p className="text-small text-status-critical">
+            <p className="text-small text-status-danger-text">
               {problemMessage(runQuery.error, 'Run detail could not be loaded.')}
             </p>
           )}
@@ -182,11 +182,11 @@ export function RunInspectorPanel({ advisorId }: RunInspectorPanelProps) {
                         30-day retention window has passed).
                       </p>
                     ) : payload.digestVerified ? (
-                      <Badge variant="good" data-testid="verified-mark">
+                      <Badge variant="success" data-testid="verified-mark">
                         Verified — the retained bytes re-digest to this run&apos;s input_digest
                       </Badge>
                     ) : (
-                      <Badge variant="critical" data-testid="verified-mark">
+                      <Badge variant="danger" data-testid="verified-mark">
                         Not verified — the retained bytes do not match this run&apos;s input_digest
                       </Badge>
                     )}
@@ -223,10 +223,10 @@ export function RunInspectorPanel({ advisorId }: RunInspectorPanelProps) {
                     </div>
                   )}
                   {cancelError !== null && (
-                    <p className="text-small text-status-critical">{cancelError}</p>
+                    <p className="text-small text-status-danger-text">{cancelError}</p>
                   )}
                   {stepUp.error !== null && (
-                    <p className="text-small text-status-critical">{stepUp.error}</p>
+                    <p className="text-small text-status-danger-text">{stepUp.error}</p>
                   )}
                 </div>
               );

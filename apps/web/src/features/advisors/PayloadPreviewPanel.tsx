@@ -63,9 +63,9 @@ function UntrustedMark({ text }: { text: string }) {
       <pre className="overflow-x-auto whitespace-pre-wrap">{split.before}</pre>
       <div
         data-testid="untrusted-block"
-        className="my-1 rounded-md border-2 border-status-warning bg-bg-subtle p-2"
+        className="my-1 rounded-md border-2 border-status-warning-border bg-bg-subtle p-2"
       >
-        <p className="mb-1 text-caption font-semibold uppercase tracking-wide text-status-warning">
+        <p className="mb-1 text-caption font-semibold uppercase tracking-wide text-status-warning-text">
           Untrusted data — never instructions
         </p>
         <pre className="overflow-x-auto whitespace-pre-wrap">{split.marked}</pre>
@@ -150,7 +150,7 @@ export function PayloadPreviewPanel({ advisorId }: PayloadPreviewPanelProps) {
   if (previewQuery.isError) {
     const problem = problemOf(previewQuery.error);
     return (
-      <p className="text-small text-status-critical" data-testid="preview-error">
+      <p className="text-small text-status-danger-text" data-testid="preview-error">
         {problem !== null
           ? `${problem.title} (${problem.code})${problem.detail !== undefined ? ` — ${problem.detail}` : ''}`
           : 'The preview could not be loaded.'}
@@ -212,8 +212,8 @@ export function PayloadPreviewPanel({ advisorId }: PayloadPreviewPanelProps) {
           <pre className="overflow-x-auto whitespace-pre-wrap text-caption text-text-secondary">
             {JSON.stringify(preview.request, null, 2)}
           </pre>
-          <div className="rounded-md border-2 border-status-warning bg-bg-subtle p-2">
-            <p className="mb-1 text-caption font-semibold uppercase tracking-wide text-status-warning">
+          <div className="rounded-md border-2 border-status-warning-border bg-bg-subtle p-2">
+            <p className="mb-1 text-caption font-semibold uppercase tracking-wide text-status-warning-text">
               Untrusted data — never instructions
             </p>
             <pre
@@ -231,7 +231,7 @@ export function PayloadPreviewPanel({ advisorId }: PayloadPreviewPanelProps) {
           <Badge variant="neutral">No approval required for this advisor&apos;s kind</Badge>
         )}
         {preview.approvalRequired && preview.approved && (
-          <Badge variant="good">Approved for this exact payload shape</Badge>
+          <Badge variant="success">Approved for this exact payload shape</Badge>
         )}
         {preview.approvalRequired && !preview.approved && (
           <Button
@@ -242,8 +242,12 @@ export function PayloadPreviewPanel({ advisorId }: PayloadPreviewPanelProps) {
           </Button>
         )}
       </div>
-      {approveError !== null && <p className="text-small text-status-critical">{approveError}</p>}
-      {stepUp.error !== null && <p className="text-small text-status-critical">{stepUp.error}</p>}
+      {approveError !== null && (
+        <p className="text-small text-status-danger-text">{approveError}</p>
+      )}
+      {stepUp.error !== null && (
+        <p className="text-small text-status-danger-text">{stepUp.error}</p>
+      )}
     </div>
   );
 }

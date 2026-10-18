@@ -62,7 +62,7 @@ export function ModuleSwitch() {
     >
       <p>{MODULE_LEVEL_WORDS}</p>
       {state === undefined ? (
-        <p className="text-status-critical" data-testid="module-state-error">
+        <p className="text-status-danger-text" data-testid="module-state-error">
           {problemMessage(query.error, 'Level 1’s state could not be read.')}
         </p>
       ) : (
@@ -85,8 +85,10 @@ export function ModuleSwitch() {
           </div>
         </>
       )}
-      {error !== null && <p className="text-small text-status-critical">{error}</p>}
-      {stepUp.error !== null && <p className="text-small text-status-critical">{stepUp.error}</p>}
+      {error !== null && <p className="text-small text-status-danger-text">{error}</p>}
+      {stepUp.error !== null && (
+        <p className="text-small text-status-danger-text">{stepUp.error}</p>
+      )}
     </section>
   );
 }

@@ -217,10 +217,11 @@ const TEXT_PAIRS: ReadonlyArray<readonly [string, string]> = [
       '--accent-text',
       '--money-pos-text',
       '--money-neg-text',
-      '--status-good',
-      '--status-warning',
-      '--status-serious',
-      '--status-critical',
+      // WP 10.11: the status quartets' inks on the legacy surfaces the old `--status-*` were tested on.
+      '--status-success-text',
+      '--status-danger-text',
+      '--status-warning-text',
+      '--status-info-text',
     ] as const
   ).flatMap((fg) => [...SURFACES, '--accent-wash'].map((bg) => [fg, bg] as const)),
   // Chart tick labels are SVG text on a chart surface.
@@ -230,7 +231,6 @@ const TEXT_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['--accent-contrast', '--accent-hover'],
   ['--on-danger', '--danger'],
   ['--on-danger', '--danger-hover'],
-  ['--on-status-warning', '--status-warning'],
 ];
 
 /** [non-text token, surface token] — all ≥ 3:1 (1.4.11). */
@@ -244,6 +244,10 @@ const UI_PAIRS: ReadonlyArray<readonly [string, string]> = [
   // Marks that carry money meaning, and status glyphs.
   ...(['--money-pos', '--money-neg'] as const).flatMap((fg) =>
     SURFACES.map((bg) => [fg, bg] as const),
+  ),
+  // WP 10.11: a status mark (a meter fill) on its own ramp's wash, which is the track it sits in.
+  ...(['success', 'danger', 'warning', 'info'] as const).map(
+    (s) => [`--status-${s}-bold`, `--status-${s}-bg`] as const,
   ),
   // Categorical chart series (fixed order, drawn on a chart surface).
   ...Array.from({ length: 8 }, (_, i) => `--series-${String(i + 1)}`).flatMap((fg) =>
@@ -734,4 +738,90 @@ describe('the cash flow bars chart (WP 10.10)', () => {
       expect(failing).toEqual([]);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// 6. The status roles (WP 10.11)
+// ---------------------------------------------------------------------------
+
+/**
+ * WP 10.11 moved `Badge` and every legacy status consumer onto the `--status-{success,danger,warning,info}-*`
+ * quartets. The legacy `--status-good|warning|serious|critical` and `--on-status-warning` stay defined in the
+ * token sources (history, and `tokens.test.ts` names them) but nothing else may read them: this scan fails,
+ * naming file:line, on any consumer. A bare `status-warning` is the legacy token; `status-warning-bg|border|text|bold`
+ * is a quartet role and is not matched.
+ */
+describe('WP 10.11 status roles', () => {
+  const allSources = import.meta.glob(
+    [
+      '../**/*.ts',
+      '../**/*.tsx',
+      '../**/*.css',
+      '!../**/*.test.ts',
+      '!../**/*.test.tsx',
+      '!../routeTree.gen.ts',
+      '!../styles/tokens.css',
+      '!../styles/theme.css',
+      '!../styles/tokens.ts',
+      '!../styles/tokens/**',
+    ],
+    { query: '?raw', import: 'default', eager: true },
+  ) as Record<string, string>;
+
+  const LEGACY =
+    /status-(?:good|serious|critical)|on-status-warning|status-warning(?![\w-])|var\(--status-(?:good|warning|serious|critical)\)/g;
+
+  it('scans the source tree (the guard is not blind)', () => {
+    const files = Object.keys(allSources);
+    expect(files.length).toBeGreaterThan(200);
+    expect(files.some((f) => f.endsWith('components/ui/badge.tsx'))).toBe(true);
+    expect(files.some((f) => f.endsWith('.css'))).toBe(true);
+    expect(files.some((f) => f.includes('styles/theme.css'))).toBe(false);
+  });
+
+  it('nothing outside the token sources reads a legacy status token', () => {
+    const offences: string[] = [];
+    for (const [file, source] of Object.entries(allSources)) {
+      source.split('\n').forEach((line, index) => {
+        for (const match of line.matchAll(LEGACY)) {
+          offences.push(`${file.replace('../', 'src/')}:${String(index + 1)} ${match[0]}`);
+        }
+      });
+    }
+    expect(offences).toEqual([]);
+  });
+
+  it('the guard pattern matches the legacy names and not the quartet roles', () => {
+    const hits = (text: string): number => [...text.matchAll(LEGACY)].length;
+    for (const legacy of [
+      'text-status-good',
+      'bg-status-serious',
+      'border-status-critical/40',
+      'text-on-status-warning',
+      'bg-status-warning/10',
+      'stroke-status-warning',
+      'var(--status-warning)',
+    ]) {
+      expect(hits(legacy), legacy).toBeGreaterThan(0);
+    }
+    for (const role of [
+      'text-status-warning-text',
+      'bg-status-warning-bg',
+      'border-status-warning-border',
+      'stroke-status-warning-bold',
+      'text-status-success-text',
+      'var(--status-danger-bold)',
+    ]) {
+      expect(hits(role), role).toBe(0);
+    }
+  });
+
+  it('Badge reads the quartets for every status variant', () => {
+    const badge = Object.entries(sources).find(([f]) => f.endsWith('components/ui/badge.tsx'))?.[1];
+    for (const s of ['success', 'danger', 'warning', 'info']) {
+      expect(badge).toContain(`bg-status-${s}-bg`);
+      expect(badge).toContain(`text-status-${s}-text`);
+      expect(badge).toContain(`border-status-${s}-border`);
+    }
+  });
 });

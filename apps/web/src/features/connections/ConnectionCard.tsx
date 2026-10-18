@@ -22,9 +22,9 @@ import {
 import type { ConnectionSummary } from '../../api/generated/types.gen.ts';
 
 const HEALTH_BADGE_VARIANT = {
-  good: 'good',
+  success: 'success',
   warning: 'warning',
-  critical: 'critical',
+  danger: 'danger',
   neutral: 'neutral',
 } as const;
 
@@ -94,7 +94,7 @@ export function ConnectionCard({ connection, onReconnect }: ConnectionCardProps)
           <Button
             variant="ghost"
             size="sm"
-            className="gap-1.5 text-status-critical"
+            className="gap-1.5 text-status-danger-text"
             onClick={() => setConfirmingDisconnect(true)}
           >
             <Unplug size={14} aria-hidden="true" />
@@ -117,7 +117,7 @@ export function ConnectionCard({ connection, onReconnect }: ConnectionCardProps)
       </div>
 
       {(stepUp.error !== null || disconnect.isError) && (
-        <p className="mt-2 text-small text-status-critical">
+        <p className="mt-2 text-small text-status-danger-text">
           {stepUp.error ?? 'Could not disconnect this connection.'}
         </p>
       )}

@@ -5,6 +5,9 @@ import {
   createBudgetLineMutation,
   getCurrentBudgetPeriodOptions,
   listBudgetPeriodsOptions,
+  listCategoriesOptions,
+  listCategoryVariabilitySuggestionsOptions,
+  renameCategoryMutation,
   rollBudgetPeriodMutation,
   updateBudgetLineMutation,
 } from '../../api/generated/@tanstack/react-query.gen.ts';
@@ -72,5 +75,35 @@ export function useRollBudgetPeriodMutation() {
   return useMutation({
     ...rollBudgetPeriodMutation(),
     onSuccess: () => invalidateBudget(queryClient),
+  });
+}
+
+/**
+ * `GET /categories/variability-suggestions` (WP 10.11) — unclassified expense categories an active recurring stream
+ * suggests are fixed. A suggestion only: the screen shows a "Suggested" chip and writes nothing until the holder
+ * presses a classify button.
+ */
+export function useVariabilitySuggestionsQuery(enabled: boolean) {
+  return useQuery({
+    ...listCategoryVariabilitySuggestionsOptions(),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * `PATCH /categories/{id}` with `variability` (WP 10.11) — the holder classifying a category. Invalidates the chart
+ * of categories (every screen's `useCategories`) and the suggestions (a classified category is never suggested).
+ */
+export function useClassifyCategoryMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    ...renameCategoryMutation(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: listCategoriesOptions().queryKey });
+      void queryClient.invalidateQueries({
+        queryKey: listCategoryVariabilitySuggestionsOptions().queryKey,
+      });
+    },
   });
 }

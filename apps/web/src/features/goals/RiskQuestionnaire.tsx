@@ -229,7 +229,7 @@ export function RiskQuestionnaire() {
           </div>
 
           {formError !== null && (
-            <p role="alert" className="text-small text-status-critical">
+            <p role="alert" className="text-small text-status-danger-text">
               {formError}
             </p>
           )}

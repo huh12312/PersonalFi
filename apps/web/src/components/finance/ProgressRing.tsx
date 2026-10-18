@@ -19,7 +19,7 @@ const TONE_TRACK = 'stroke-bg-inset';
 
 function toneForValue(value: number): string {
   if (value > 1) return 'stroke-money-neg';
-  if (value >= 0.9) return 'stroke-status-warning';
+  if (value >= 0.9) return 'stroke-status-warning-bold';
   return 'stroke-accent';
 }
 

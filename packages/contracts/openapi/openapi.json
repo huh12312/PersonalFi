@@ -7639,6 +7639,18 @@
           "totalCreditCardPaymentAvailable": {
             "$ref": "#/components/schemas/MoneyInput"
           },
+          "budgetedExpenses": {
+            "description": "Σ assigned over the category lines that are not planned savings (WP 10.11, \"Left to budget\" card).",
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "plannedSavings": {
+            "description": "Σ assigned over the category lines set aside rather than budgeted to spend: class SAVINGS, or no class and a TARGET_BY_DATE goal. budgetedExpenses + plannedSavings = Σ assigned of every category line.",
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "rolledOver": {
+            "description": "Σ carryover over the category lines: what the previous period rolled into this one.",
+            "$ref": "#/components/schemas/MoneyInput"
+          },
           "lines": {
             "type": "array",
             "items": {
@@ -7660,6 +7672,9 @@
           "toStayOnTrack",
           "totalCategoryAvailable",
           "totalCreditCardPaymentAvailable",
+          "budgetedExpenses",
+          "plannedSavings",
+          "rolledOver",
           "lines"
         ]
       },
@@ -7729,6 +7744,15 @@
         ],
         "description": "The chart hue this category is drawn in: one of thirteen named hues (the web reads `--chart-fill-<hue>`). Assigned once, on first read, from a hash of the id; stable after that, and editable by `PATCH /categories/{id}`."
       },
+      "CategoryVariabilityInput": {
+        "type": "string",
+        "enum": [
+          "fixed",
+          "flexible",
+          "non_monthly"
+        ],
+        "description": "How this category's spending behaves: `fixed` (the same most periods), `flexible` (varies with choices made inside the period) or `non_monthly` (irregular or annual). Set only by the holder (WP 10.11, migration 0047); a recurring stream only suggests `fixed` (`GET /categories/variability-suggestions`)."
+      },
       "CategoryInput": {
         "type": "object",
         "properties": {
@@ -7778,6 +7802,17 @@
           "hue": {
             "$ref": "#/components/schemas/ChartHueInput"
           },
+          "variability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CategoryVariabilityInput"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null = not yet classified by the holder."
+          },
           "sort": {
             "type": "integer",
             "minimum": -9007199254740991,
@@ -7808,6 +7843,7 @@
           "kind",
           "icon",
           "hue",
+          "variability",
           "sort",
           "isSystem",
           "archivedAt",
@@ -21803,6 +21839,18 @@
           "totalCreditCardPaymentAvailable": {
             "$ref": "#/components/schemas/Money"
           },
+          "budgetedExpenses": {
+            "description": "Σ assigned over the category lines that are not planned savings (WP 10.11, \"Left to budget\" card).",
+            "$ref": "#/components/schemas/Money"
+          },
+          "plannedSavings": {
+            "description": "Σ assigned over the category lines set aside rather than budgeted to spend: class SAVINGS, or no class and a TARGET_BY_DATE goal. budgetedExpenses + plannedSavings = Σ assigned of every category line.",
+            "$ref": "#/components/schemas/Money"
+          },
+          "rolledOver": {
+            "description": "Σ carryover over the category lines: what the previous period rolled into this one.",
+            "$ref": "#/components/schemas/Money"
+          },
           "lines": {
             "type": "array",
             "items": {
@@ -21824,6 +21872,9 @@
           "toStayOnTrack",
           "totalCategoryAvailable",
           "totalCreditCardPaymentAvailable",
+          "budgetedExpenses",
+          "plannedSavings",
+          "rolledOver",
           "lines"
         ],
         "additionalProperties": false
@@ -21895,6 +21946,15 @@
         ],
         "description": "The chart hue this category is drawn in: one of thirteen named hues (the web reads `--chart-fill-<hue>`). Assigned once, on first read, from a hash of the id; stable after that, and editable by `PATCH /categories/{id}`."
       },
+      "CategoryVariability": {
+        "type": "string",
+        "enum": [
+          "fixed",
+          "flexible",
+          "non_monthly"
+        ],
+        "description": "How this category's spending behaves: `fixed` (the same most periods), `flexible` (varies with choices made inside the period) or `non_monthly` (irregular or annual). Set only by the holder (WP 10.11, migration 0047); a recurring stream only suggests `fixed` (`GET /categories/variability-suggestions`)."
+      },
       "Category": {
         "type": "object",
         "properties": {
@@ -21944,6 +22004,17 @@
           "hue": {
             "$ref": "#/components/schemas/ChartHue"
           },
+          "variability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CategoryVariability"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null = not yet classified by the holder."
+          },
           "sort": {
             "type": "integer",
             "minimum": -9007199254740991,
@@ -21974,6 +22045,7 @@
           "kind",
           "icon",
           "hue",
+          "variability",
           "sort",
           "isSystem",
           "archivedAt",
@@ -33131,6 +33203,17 @@
                   },
                   "hue": {
                     "$ref": "#/components/schemas/ChartHueInput"
+                  },
+                  "variability": {
+                    "description": "Omitted or null: unclassified.",
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/CategoryVariabilityInput"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -33214,14 +33297,96 @@
         }
       }
     },
-    "/categories/{categoryId}": {
-      "patch": {
-        "operationId": "renameCategory",
-        "summary": "Rename, re-describe or recolour a category",
+    "/categories/variability-suggestions": {
+      "get": {
+        "operationId": "listCategoryVariabilitySuggestions",
+        "summary": "Unclassified expense categories a recurring stream suggests are fixed",
         "tags": [
           "categories"
         ],
-        "description": "Deliberately narrow: `label`, `description`, `icon` and `hue` only. `kind` and the parent/child structure are not editable here — both are structural (the seeding pass's own rule for why a re-seed never touches them) and changing either after transactions have been filed under a category is how a report silently moves money between totals. Works on a system category as well as a custom one: a user renaming \"Dining & Drinks\" to \"Eating Out\" is exactly what this is for.",
+        "description": "A suggestion, computed on read and never written (WP 10.11): an expense category with no `variability`, into which an active outflow recurring stream's merchant mostly spends, is suggested `fixed`. The budget screen shows it as a \"Suggested\" chip until the holder confirms it with `PATCH /categories/{id}`. A classified category is never suggested. The rules are in `apps/api/src/reports/variability-suggestions.ts`.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "suggestions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "categoryId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "variability": {
+                            "type": "string",
+                            "enum": [
+                              "fixed"
+                            ]
+                          },
+                          "seriesIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "description": "The active outflow streams behind the suggestion."
+                          }
+                        },
+                        "required": [
+                          "categoryId",
+                          "variability",
+                          "seriesIds"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "suggestions"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categories/{categoryId}": {
+      "patch": {
+        "operationId": "renameCategory",
+        "summary": "Rename, re-describe, recolour or classify a category",
+        "tags": [
+          "categories"
+        ],
+        "description": "Deliberately narrow: `label`, `description`, `icon`, `hue` and `variability` only (`variability: null` returns a category to unclassified). `kind` and the parent/child structure are not editable here — both are structural (the seeding pass's own rule for why a re-seed never touches them) and changing either after transactions have been filed under a category is how a report silently moves money between totals. Works on a system category as well as a custom one: a user renaming \"Dining & Drinks\" to \"Eating Out\" is exactly what this is for.",
         "requestBody": {
           "required": true,
           "content": {
@@ -33245,6 +33410,16 @@
                   },
                   "hue": {
                     "$ref": "#/components/schemas/ChartHueInput"
+                  },
+                  "variability": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/CategoryVariabilityInput"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -37007,6 +37182,11 @@
                       "minLength": 3,
                       "maxLength": 3
                     },
+                    "today": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "description": "Today in the holder's own time zone (WP 10.11): what the budget meters' pace tick is measured against, so the browser's clock and zone never decide where the tick falls."
+                    },
                     "period": {
                       "$ref": "#/components/schemas/BudgetPeriod"
                     }
@@ -37014,6 +37194,7 @@
                   "required": [
                     "budgetId",
                     "currency",
+                    "today",
                     "period"
                   ],
                   "additionalProperties": false

@@ -198,7 +198,7 @@ export function NarratorKeyField({ state }: { state: NarratorProviderState }) {
               : `Stored encrypted in this install and never shown again (only its last four characters). Saving asks for your passkey.`}
           </p>
           {saveFailure !== null && (
-            <p id={errorId} className="text-small text-status-critical" role="alert">
+            <p id={errorId} className="text-small text-status-danger-text" role="alert">
               {saveFailure}
             </p>
           )}
@@ -230,7 +230,7 @@ export function NarratorKeyField({ state }: { state: NarratorProviderState }) {
             This does not revoke the {what} at {name}. Removing asks for your passkey.
           </DialogDescription>
           {removeFailure !== null && (
-            <p className="mt-3 text-small text-status-critical" role="alert">
+            <p className="mt-3 text-small text-status-danger-text" role="alert">
               {removeFailure}
             </p>
           )}

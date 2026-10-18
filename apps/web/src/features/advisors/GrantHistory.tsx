@@ -35,7 +35,7 @@ export function GrantHistory({ advisorId }: GrantHistoryProps) {
   if (query.isLoading) return <SkeletonText lines={2} />;
   if (query.isError) {
     return (
-      <p className="text-small text-status-critical" data-testid="grant-history-error">
+      <p className="text-small text-status-danger-text" data-testid="grant-history-error">
         The consent history could not be loaded.
       </p>
     );

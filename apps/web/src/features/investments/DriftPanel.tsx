@@ -92,7 +92,7 @@ export function DriftPanel({ data, isLoading, onUseExampleTargets, hasTargets }:
       </div>
 
       {data.noisy && (
-        <p role="status" className="text-small text-status-warning" data-testid="drift-noisy">
+        <p role="status" className="text-small text-status-warning-text" data-testid="drift-noisy">
           {ratioToNumber(data.unclassifiedPct) > 0 ? (
             <>
               <Percent value={ratioToNumber(data.unclassifiedPct)} /> of this portfolio is

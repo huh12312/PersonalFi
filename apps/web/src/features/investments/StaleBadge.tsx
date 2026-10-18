@@ -28,7 +28,7 @@ export function StaleBadge({ price }: StaleBadgeProps) {
   const observed = `Price last observed ${price.priceDate}`;
   return (
     <Badge
-      variant="serious"
+      variant="warning"
       icon={<Clock size={12} aria-hidden="true" />}
       title={observed}
       data-testid="stale-badge"

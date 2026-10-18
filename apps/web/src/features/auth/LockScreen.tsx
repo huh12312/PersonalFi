@@ -25,7 +25,7 @@ export function LockScreen() {
       <h1 className="mt-3 text-h2 text-text-primary">PersonalFi is locked</h1>
       <p className="mt-1 text-small text-text-muted">Unlock with your passkey to continue.</p>
       {error !== null && (
-        <p role="alert" className="mt-3 text-small text-status-critical">
+        <p role="alert" className="mt-3 text-small text-status-danger-text">
           {error}
         </p>
       )}

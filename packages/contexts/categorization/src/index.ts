@@ -202,6 +202,7 @@ export {
   archiveCategory,
   createCategory,
   ensureTaxonomy,
+  isCategoryVariability,
   listCategories,
   renameCategory,
   type ArchiveCategoryResult,
@@ -212,6 +213,7 @@ export {
   type RenameCategoryInput,
   type UserCategory,
 } from './categories.ts';
+export { CATEGORY_VARIABILITIES, type CategoryVariability } from '../schema/index.ts';
 
 // --- seeding and service ---------------------------------------------------
 export {

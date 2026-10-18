@@ -63,7 +63,7 @@ export function TransactionsScreen({ search, onSearchChange }: TransactionsScree
         </Button>
       </div>
 
-      {stepUpError !== null && <p className="text-small text-status-critical">{stepUpError}</p>}
+      {stepUpError !== null && <p className="text-small text-status-danger-text">{stepUpError}</p>}
 
       <BulkActionBar selectedIds={[...selected]} onClear={() => setSelected(new Set())} />
 

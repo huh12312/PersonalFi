@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { useState } from 'react';
-import { ArrowRight, TrendingDown, TrendingUp } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 
 import type { BudgetPeriod, BudgetPeriodSummary } from '../../api/generated/types.gen.ts';
 import { Money } from '../../components/finance/Money.tsx';
@@ -8,7 +8,7 @@ import { Button } from '../../components/ui/button.tsx';
 import { ConfirmDialog } from '../../components/patterns/ConfirmDialog.tsx';
 import { formatDateOnly } from '../../lib/date.ts';
 import { useRollBudgetPeriodMutation } from './api.ts';
-import { periodCategoryTotals, readyToAssignToneOf } from './envelope-display.ts';
+import { periodCategoryTotals } from './envelope-display.ts';
 import { PeriodPicker } from './PeriodPicker.tsx';
 
 export interface PeriodHeaderProps {
@@ -18,20 +18,10 @@ export interface PeriodHeaderProps {
   onSelectPeriod: (period: BudgetPeriodSummary) => void;
 }
 
-const RTA_COPY: Record<'opportunity' | 'alert' | 'settled', { label: string; className: string }> =
-  {
-    opportunity: { label: 'Ready to Assign', className: 'text-money-pos-text' },
-    alert: {
-      label: 'Ready to Assign is negative — fix this first',
-      className: 'text-money-neg-text',
-    },
-    settled: { label: 'Ready to Assign', className: 'text-text-secondary' },
-  };
-
 /**
- * Period header: date range + picker, Ready-to-Assign as "the one opportunity
- * or the one hard alert" (`envelope-display.ts#readyToAssignToneOf`), the
- * category totals row, and the roll-forward action.
+ * Period header: date range + picker, the category totals row, and the roll-forward action. Ready to Assign
+ * moved to `LeftToBudgetCard` (WP 10.11), which keeps "the one opportunity or the one hard alert"
+ * (`envelope-display.ts#readyToAssignToneOf`).
  */
 export function PeriodHeader({
   budgetId,
@@ -41,7 +31,6 @@ export function PeriodHeader({
 }: PeriodHeaderProps) {
   const [confirmRollOpen, setConfirmRollOpen] = useState(false);
   const roll = useRollBudgetPeriodMutation();
-  const rtaTone = readyToAssignToneOf(period);
   const totals = periodCategoryTotals(period);
   const isViewingCurrent = selectedPeriodId === period.id;
 
@@ -71,22 +60,6 @@ export function PeriodHeader({
       </div>
 
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p
-            className={`flex items-center gap-1.5 text-small font-medium ${RTA_COPY[rtaTone].className}`}
-          >
-            {rtaTone === 'opportunity' && <TrendingUp size={16} aria-hidden="true" />}
-            {rtaTone === 'alert' && <TrendingDown size={16} aria-hidden="true" />}
-            {RTA_COPY[rtaTone].label}
-          </p>
-          <p
-            data-testid="ready-to-assign-amount"
-            className={`text-h1 font-semibold ${RTA_COPY[rtaTone].className}`}
-          >
-            <Money value={period.readyToAssign} colorBySign={false} />
-          </p>
-        </div>
-
         <dl className="flex gap-6 text-right">
           <div>
             <dt className="text-caption text-text-muted">Assigned</dt>

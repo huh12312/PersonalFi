@@ -71,7 +71,7 @@ export function KindSwitch({ kind }: KindSwitchProps) {
           {kindStateWords(query.data)}
         </p>
       ) : query.isLoading ? null : (
-        <p className="text-small text-status-critical" data-testid="kind-state-error">
+        <p className="text-small text-status-danger-text" data-testid="kind-state-error">
           {problemMessage(query.error, 'This level’s state could not be read.')}
         </p>
       )}
@@ -91,8 +91,10 @@ export function KindSwitch({ kind }: KindSwitchProps) {
           Disable {kind}
         </Button>
       </div>
-      {error !== null && <p className="text-small text-status-critical">{error}</p>}
-      {stepUp.error !== null && <p className="text-small text-status-critical">{stepUp.error}</p>}
+      {error !== null && <p className="text-small text-status-danger-text">{error}</p>}
+      {stepUp.error !== null && (
+        <p className="text-small text-status-danger-text">{stepUp.error}</p>
+      )}
     </div>
   );
 }

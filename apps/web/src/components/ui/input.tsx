@@ -13,7 +13,7 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
         'placeholder:text-text-muted',
         'focus-visible:outline-none', // ring supplied by the global :focus-visible rule
         'disabled:cursor-not-allowed disabled:opacity-50',
-        'aria-[invalid=true]:border-status-critical',
+        'aria-[invalid=true]:border-status-danger-border',
         className,
       )}
       {...props}

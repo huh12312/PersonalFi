@@ -63,7 +63,7 @@ export function RefreshPricesResult({
         {words}
       </p>
       {outcome.kind === 'error' && (
-        <p role="alert" className="text-small text-status-critical">
+        <p role="alert" className="text-small text-status-danger-text">
           {outcome.text}
         </p>
       )}

@@ -244,7 +244,7 @@ function SnapshotFxFailureBanner({ failure }: { failure: SnapshotFxFailure }) {
   const [saved, setSaved] = useState(false);
 
   return (
-    <div className="rounded-md border border-status-warning/40 bg-status-warning/10 p-3">
+    <div className="rounded-md border border-status-warning-border bg-status-warning-bg p-3">
       <p className="text-small text-text-primary">{fxFailureSentence(failure, parsed)}</p>
       {saved ? (
         // O-7 (iii): without this the banner stayed exactly as it was after a successful save, so the entry looked
@@ -388,7 +388,7 @@ function ManualFxRateForm({
         {busy ? 'Saving…' : 'Save rate'}
       </Button>
       {error !== null && (
-        <p className="w-full text-small text-status-critical" role="alert">
+        <p className="w-full text-small text-status-danger-text" role="alert">
           {error}
         </p>
       )}

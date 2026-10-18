@@ -95,7 +95,7 @@ export function SeriesList({ series, nameOf }: SeriesListProps) {
             </div>
             <Money value={row.typicalAmount} className="shrink-0" />
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              {row.userConfirmed && <Badge variant="good">Confirmed</Badge>}
+              {row.userConfirmed && <Badge variant="success">Confirmed</Badge>}
               <Badge variant={statusBadgeVariant(row.status)}>
                 {formatStatusLabel(row.status)}
               </Badge>

@@ -86,6 +86,8 @@ const CATEGORIES = [
     description: 'Food at home.',
     kind: 'expense',
     icon: 'shopping-cart',
+    hue: 'green',
+    variability: 'flexible' as string | null,
     sort: 100,
     isSystem: true,
     archivedAt: null,
@@ -99,10 +101,55 @@ const CATEGORIES = [
     description: 'Eating out.',
     kind: 'expense',
     icon: 'utensils',
+    hue: 'orange',
+    variability: null as string | null,
     sort: 200,
     isSystem: true,
     archivedAt: null,
     assignable: true,
+  },
+  // WP 10.11: a fixed pair, so the meters and the By-variability view have something to show.
+  {
+    id: 'cat_rent',
+    key: 'rent',
+    parentId: null,
+    label: 'Rent',
+    description: 'Housing.',
+    kind: 'expense',
+    icon: 'home',
+    hue: 'indigo',
+    variability: 'fixed' as string | null,
+    sort: 300,
+    isSystem: true,
+    archivedAt: null,
+    assignable: true,
+  },
+  {
+    id: 'cat_utilities',
+    key: 'utilities',
+    parentId: null,
+    label: 'Utilities',
+    description: 'Power, water, internet.',
+    kind: 'expense',
+    icon: 'plug',
+    hue: 'cyan',
+    variability: null as string | null,
+    sort: 400,
+    isSystem: true,
+    archivedAt: null,
+    assignable: true,
+  },
+];
+
+/**
+ * WP 10.11: `GET /categories/variability-suggestions` — Utilities has an active recurring stream, so it is
+ * suggested fixed (and stays unclassified until the holder presses a button).
+ */
+const VARIABILITY_SUGGESTIONS = [
+  {
+    categoryId: 'cat_utilities',
+    variability: 'fixed',
+    seriesIds: ['00000000-0000-4000-8000-0000000000aa'],
   },
 ];
 
@@ -112,6 +159,7 @@ function usd(minor: string): { minor: string; currency: string } {
 
 interface BudgetLineState {
   id: string;
+  carryover?: string;
   kind: 'category' | 'credit_card_payment';
   categoryId: string | null;
   creditAccountId: string | null;
@@ -137,14 +185,15 @@ function lineResponse(line: BudgetLineState) {
   const activity = BigInt(line.activity);
   const cashOver = BigInt(line.cashOverspend);
   const creditOver = BigInt(line.creditOverspend);
-  const available = assigned + activity;
+  const carryover = BigInt(line.carryover ?? '0');
+  const available = carryover + assigned + activity;
   return {
     id: line.id,
     kind: line.kind,
     categoryId: line.categoryId,
     creditAccountId: line.creditAccountId,
     name: line.name,
-    carryover: usd('0'),
+    carryover: usd(carryover.toString()),
     assigned: usd(line.assigned),
     activity: usd(line.activity),
     available: usd(available.toString()),
@@ -167,6 +216,8 @@ function json(body: unknown, status = 200) {
 
 export interface MockBudgetState {
   lastAssignBody: unknown;
+  /** WP 10.11: the last `PATCH /categories/{id}` body (classify). */
+  lastCategoryPatchBody: unknown;
   lastRollBody: unknown;
   lastExportDownloaded: boolean;
 }
@@ -174,12 +225,15 @@ export interface MockBudgetState {
 export async function installBudgetMocks(page: Page): Promise<MockBudgetState> {
   const state: MockBudgetState = {
     lastAssignBody: null,
+    lastCategoryPatchBody: null,
     lastRollBody: null,
     lastExportDownloaded: false,
   };
   let authenticated = false;
   let steppedUp = false;
 
+  // A copy per page: a classify PATCH mutates it, and must not leak into the next test.
+  const categories = CATEGORIES.map((category) => ({ ...category }));
   const budgetId = 'budget_1';
   let periodId = 'period_1';
   let periodSequence = 1;
@@ -225,6 +279,43 @@ export async function installBudgetMocks(page: Page): Promise<MockBudgetState> {
       },
     ],
     [
+      'line_rent',
+      {
+        id: 'line_rent',
+        kind: 'category',
+        categoryId: 'cat_rent',
+        creditAccountId: null,
+        name: null,
+        assigned: '150000',
+        activity: '-150000',
+        cashOverspend: '0',
+        creditOverspend: '0',
+        rolloverPolicy: 'ROLLOVER',
+        goalType: 'NONE',
+        priority: 0,
+        class: null,
+      },
+    ],
+    [
+      'line_utilities',
+      {
+        id: 'line_utilities',
+        kind: 'category',
+        categoryId: 'cat_utilities',
+        creditAccountId: null,
+        name: null,
+        carryover: '2500',
+        assigned: '20000',
+        activity: '-9000',
+        cashOverspend: '0',
+        creditOverspend: '0',
+        rolloverPolicy: 'ROLLOVER',
+        goalType: 'NONE',
+        priority: 0,
+        class: null,
+      },
+    ],
+    [
       'line_ccp',
       {
         id: 'line_ccp',
@@ -249,9 +340,13 @@ export async function installBudgetMocks(page: Page): Promise<MockBudgetState> {
   ];
 
   function currentPeriodResponse() {
+    const categoryLines = [...lines.values()].filter((line) => line.kind === 'category');
+    const sum = (values: readonly bigint[]) => values.reduce((acc, v) => acc + v, 0n).toString();
     return {
       budgetId,
       currency: 'USD',
+      // WP 10.11: the server's today in the holder's zone — mid-period, so the pace tick is at 15/30.
+      today: '2026-09-15',
       period: {
         id: periodId,
         budgetId,
@@ -266,6 +361,13 @@ export async function installBudgetMocks(page: Page): Promise<MockBudgetState> {
         toStayOnTrack: usd('0'),
         totalCategoryAvailable: usd('0'),
         totalCreditCardPaymentAvailable: usd('0'),
+        budgetedExpenses: usd(
+          sum(categoryLines.filter((l) => l.class !== 'SAVINGS').map((l) => BigInt(l.assigned))),
+        ),
+        plannedSavings: usd(
+          sum(categoryLines.filter((l) => l.class === 'SAVINGS').map((l) => BigInt(l.assigned))),
+        ),
+        rolledOver: usd(sum(categoryLines.map((l) => BigInt(l.carryover ?? '0')))),
         lines: [...lines.values()].map(lineResponse),
       },
     };
@@ -343,7 +445,28 @@ export async function installBudgetMocks(page: Page): Promise<MockBudgetState> {
     }
 
     if (path === '/api/categories' && method === 'GET') {
-      return route.fulfill(json({ categories: CATEGORIES }));
+      return route.fulfill(json({ categories }));
+    }
+
+    if (path === '/api/categories/variability-suggestions' && method === 'GET') {
+      // A classified category is never suggested (the server's rule, mirrored).
+      return route.fulfill(
+        json({
+          suggestions: VARIABILITY_SUGGESTIONS.filter(
+            (s) => categories.find((c) => c.id === s.categoryId)?.variability === null,
+          ),
+        }),
+      );
+    }
+
+    const categoryPatch = /^\/api\/categories\/([^/]+)$/.exec(path);
+    if (categoryPatch !== null && method === 'PATCH') {
+      const target = categories.find((c) => c.id === categoryPatch[1]);
+      if (target === undefined) return route.fulfill(json({ code: 'not_found' }, 404));
+      const body = request.postDataJSON() as { variability?: string | null };
+      state.lastCategoryPatchBody = body;
+      if (body.variability !== undefined) target.variability = body.variability;
+      return route.fulfill(json({ category: target }));
     }
 
     if (path === '/api/accounts' && method === 'GET') {
@@ -553,4 +676,45 @@ export async function installBudgetMocks(page: Page): Promise<MockBudgetState> {
   });
 
   return state;
+}
+
+/**
+ * WP 10.11: the budget's own chart of categories (with `variability`), the suggestion and the classify `PATCH`, laid
+ * over whatever answered `/api/categories` before — for a sweep or a keyboard journey that runs on the whole app's
+ * mocks (`installSweepMocks`, whose general fixture answers `/api/categories` with categories the budget's lines do
+ * not name). Install it after `installSweepMocks`: the later route wins.
+ */
+export async function installBudgetCategoryMocks(
+  page: Page,
+): Promise<{ readonly patches: unknown[] }> {
+  const categories = CATEGORIES.map((category) => ({ ...category }));
+  const patches: unknown[] = [];
+  await page.route('**/api/categories**', async (route: Route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    if (path === '/api/categories' && method === 'GET') {
+      return route.fulfill(json({ categories }));
+    }
+    if (path === '/api/categories/variability-suggestions' && method === 'GET') {
+      return route.fulfill(
+        json({
+          suggestions: VARIABILITY_SUGGESTIONS.filter(
+            (s) => categories.find((c) => c.id === s.categoryId)?.variability === null,
+          ),
+        }),
+      );
+    }
+    const match = /^\/api\/categories\/([^/]+)$/.exec(path);
+    if (match !== null && method === 'PATCH') {
+      const target = categories.find((c) => c.id === match[1]);
+      if (target === undefined) return route.fulfill(json({ code: 'not_found' }, 404));
+      const body = request.postDataJSON() as { variability?: string | null };
+      patches.push(body);
+      if (body.variability !== undefined) target.variability = body.variability;
+      return route.fulfill(json({ category: target }));
+    }
+    return route.fallback();
+  });
+  return { patches };
 }

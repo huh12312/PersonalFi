@@ -174,7 +174,7 @@ export function MarketDataKeyCard({ status }: MarketDataKeyCardProps) {
       <div data-testid={`market-data-key-${provider}-status`}>
         <KeyStatus status={status} name={name} />
         {status.narrowedOut && (
-          <p className="mt-1 text-small text-status-warning">
+          <p className="mt-1 text-small text-status-warning-text">
             This install&apos;s allowed hosts leave {name} out, so no key for it can be checked or
             used.
           </p>
@@ -234,7 +234,7 @@ export function MarketDataKeyCard({ status }: MarketDataKeyCardProps) {
               : `${name} checks the key first; it is stored encrypted in this install and never shown again (only its last four characters).`}
           </p>
           {saveFailure !== null && (
-            <p id={errorId} className="text-small text-status-critical" role="alert">
+            <p id={errorId} className="text-small text-status-danger-text" role="alert">
               {saveFailure}
             </p>
           )}
@@ -264,7 +264,7 @@ export function MarketDataKeyCard({ status }: MarketDataKeyCardProps) {
             This does not revoke the key at {name}. Removing asks for your passkey.
           </DialogDescription>
           {removeFailure !== null && (
-            <p className="mt-3 text-small text-status-critical" role="alert">
+            <p className="mt-3 text-small text-status-danger-text" role="alert">
               {removeFailure}
             </p>
           )}

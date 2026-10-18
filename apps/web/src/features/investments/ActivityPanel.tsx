@@ -180,7 +180,11 @@ export function ActivityPanel({
         </p>
       )}
       {failed.length > 0 && (
-        <p className="text-small text-status-warning" role="status" data-testid="activity-failed">
+        <p
+          className="text-small text-status-warning-text"
+          role="status"
+          data-testid="activity-failed"
+        >
           The last attempt to sync investment activity for{' '}
           {failed.map((state) => state.name).join(', ')} did not complete; what is shown may be
           incomplete.

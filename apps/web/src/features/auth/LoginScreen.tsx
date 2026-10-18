@@ -105,7 +105,7 @@ export function LoginScreen() {
             tabIndex={-1}
           />
           {error !== null && (
-            <p role="alert" className="mt-3 text-small text-status-critical">
+            <p role="alert" className="mt-3 text-small text-status-danger-text">
               {error}
             </p>
           )}
@@ -212,7 +212,7 @@ function TotpForm({
         aria-invalid={error !== null}
       />
       {error !== null && (
-        <p id="totp-error" role="alert" className="mt-1.5 text-small text-status-critical">
+        <p id="totp-error" role="alert" className="mt-1.5 text-small text-status-danger-text">
           {error}
         </p>
       )}
@@ -270,7 +270,7 @@ function RecoveryCodeForm({
         aria-invalid={error !== null}
       />
       {error !== null && (
-        <p id="recovery-error" role="alert" className="mt-1.5 text-small text-status-critical">
+        <p id="recovery-error" role="alert" className="mt-1.5 text-small text-status-danger-text">
           {error}
         </p>
       )}

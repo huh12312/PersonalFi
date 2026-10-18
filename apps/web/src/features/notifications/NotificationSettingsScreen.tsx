@@ -94,8 +94,8 @@ export function NotificationSettingsScreen() {
                     role="status"
                     className={
                       testResultByChannel[channel.id]?.ok
-                        ? 'text-small text-status-good'
-                        : 'text-small text-status-critical'
+                        ? 'text-small text-status-success-text'
+                        : 'text-small text-status-danger-text'
                     }
                   >
                     {testResultByChannel[channel.id]?.message}

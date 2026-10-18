@@ -107,21 +107,21 @@ export function BasisMethodControl({
         {isPending ? 'Saving…' : 'Save election'}
       </Button>
       {choice === 'AVERAGE_COST' && (
-        <p className="w-full text-caption text-status-warning">
+        <p className="w-full text-caption text-status-warning-text">
           Average cost is permanent for this account and security once saved.
         </p>
       )}
       {refusal !== null && (
         <p
           role="alert"
-          className="w-full text-caption text-status-critical"
+          className="w-full text-caption text-status-danger-text"
           data-testid="basis-method-refusal"
         >
           {refusal}
         </p>
       )}
       {election.stepUpError !== null && election.attemptedSecurityId === securityId && (
-        <p role="alert" className="w-full text-caption text-status-critical">
+        <p role="alert" className="w-full text-caption text-status-danger-text">
           {election.stepUpError}
         </p>
       )}

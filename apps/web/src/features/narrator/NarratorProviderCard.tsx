@@ -125,7 +125,7 @@ function ConsentField({
         Ticking or unticking asks for your passkey.
       </p>
       {failure !== null && (
-        <p className="ml-6 text-small text-status-critical" role="alert">
+        <p className="ml-6 text-small text-status-danger-text" role="alert">
           {failure}
         </p>
       )}
@@ -229,7 +229,7 @@ function HostedModelField({
         default, <span className="font-mono">{model.default}</span>. Saving asks for your passkey.
       </p>
       {(error ?? stepUp.error) !== null && (
-        <p className="text-small text-status-critical" role="alert">
+        <p className="text-small text-status-danger-text" role="alert">
           {error ?? stepUp.error}
         </p>
       )}
@@ -395,7 +395,7 @@ function OllamaModelField({
         )}
       </div>
       {(error ?? stepUp.error) !== null && (
-        <p className="text-small text-status-critical" role="alert">
+        <p className="text-small text-status-danger-text" role="alert">
           {error ?? stepUp.error}
         </p>
       )}
@@ -481,7 +481,7 @@ function TestProvider({ state }: { state: NarratorProviderState }) {
               <CircleCheck
                 size={14}
                 aria-hidden="true"
-                className="mt-0.5 shrink-0 text-status-good"
+                className="mt-0.5 shrink-0 text-status-success-text"
               />
             ) : (
               <TriangleAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
@@ -551,7 +551,7 @@ export function NarratorProviderCard({ settings, state }: NarratorProviderCardPr
             <CircleCheck
               size={14}
               aria-hidden="true"
-              className="mt-0.5 shrink-0 text-status-good"
+              className="mt-0.5 shrink-0 text-status-success-text"
             />
           ) : (
             <TriangleAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0" />

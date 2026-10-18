@@ -240,7 +240,7 @@ function Exclusions({ summary }: { summary: PeriodSummary }) {
   const unresolvedMovements = summary.exclusions.unresolvedMovements ?? [];
   return (
     <ul
-      className="mt-2 space-y-0.5 text-caption text-status-warning"
+      className="mt-2 space-y-0.5 text-caption text-status-warning-text"
       data-testid="health-exclusions"
     >
       {unpricedSecurities.length > 0 && (
@@ -399,7 +399,7 @@ function ScopedPerformance({ data }: { data: GetPerformanceResponse }) {
             Strips out the effect of your deposits and withdrawals — comparable to a benchmark.
           </p>
           {timeWeighted.warnings.length > 0 && (
-            <ul className="mt-2 space-y-0.5 text-caption text-status-warning">
+            <ul className="mt-2 space-y-0.5 text-caption text-status-warning-text">
               {timeWeighted.warnings.map((warning) => (
                 <li key={warning.code}>{warning.detail}</li>
               ))}
@@ -505,7 +505,7 @@ function ScopedPerformance({ data }: { data: GetPerformanceResponse }) {
       </section>
 
       {data.unvaluedTransfers > 0 && (
-        <p className="text-small text-status-warning" data-testid="unvalued-transfers">
+        <p className="text-small text-status-warning-text" data-testid="unvalued-transfers">
           {data.unvaluedTransfers} transfer(s) in this window could not be valued and were not
           counted as zero flows.
         </p>
@@ -703,7 +703,7 @@ function ManagementComparison({ data }: { data: GetPerformanceByManagementRespon
                   <th scope="row" className="py-2 pr-3 text-left font-normal">
                     {managementLabel(row.management)}
                     {!row.summary.complete && (
-                      <span className="block text-caption text-status-warning">
+                      <span className="block text-caption text-status-warning-text">
                         incomplete — see exclusions
                       </span>
                     )}

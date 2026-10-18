@@ -58,6 +58,7 @@ function commonRoutes() {
         jsonResponse({
           budgetId: 'budget_1',
           currency: 'USD',
+          today: '2026-09-15',
           period: {
             id: 'period_1',
             budgetId: 'budget_1',
@@ -72,6 +73,9 @@ function commonRoutes() {
             toStayOnTrack: usd('0'),
             totalCategoryAvailable: usd('0'),
             totalCreditCardPaymentAvailable: usd('0'),
+            budgetedExpenses: usd('0'),
+            plannedSavings: usd('0'),
+            rolledOver: usd('0'),
             lines: [],
           },
         }),

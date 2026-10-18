@@ -56,6 +56,12 @@ Every `<Money>`/`<Percent>` render also carries an explicit `+`/`−` sign
 
 ## Status (fixed, never themed — every entry below has a light/dark split)
 
+> **Legacy since WP 10.11.** Nothing under `src/` reads these four any more: `Badge` and every status
+> message use the V1 quartets `--status-{success,warning,danger,info}-{bg,border,text,bold}`
+> (`docs/design/tokens.md`, "Status: the quartets and the legacy mapping"), and
+> `src/styles/contrast.test.ts` ("WP 10.11 status roles") fails on a new consumer. They stay defined
+> for history; the table below is what they were.
+
 | Token               | Value                            | Meaning                                   |
 | ------------------- | -------------------------------- | ----------------------------------------- |
 | `--status-good`     | `#0c7a0c` light / `#0ca30c` dark | On track                                  |

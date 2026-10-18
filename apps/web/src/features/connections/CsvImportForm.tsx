@@ -193,7 +193,7 @@ export function CsvImportForm({ connectionId, onDone }: CsvImportFormProps) {
         </>
       )}
 
-      {error !== null && <p className="text-small text-status-critical">{error}</p>}
+      {error !== null && <p className="text-small text-status-danger-text">{error}</p>}
 
       <Button onClick={() => void handleSubmit()} disabled={importFiles.isPending || file === null}>
         {importFiles.isPending ? 'Importing…' : 'Import'}

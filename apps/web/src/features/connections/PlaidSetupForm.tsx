@@ -173,7 +173,7 @@ export function PlaidSetupForm({
       )}
 
       {(error !== null || stepUp.error !== null) && (
-        <p id="plaid-setup-error" className="text-small text-status-critical" role="alert">
+        <p id="plaid-setup-error" className="text-small text-status-danger-text" role="alert">
           {error ?? stepUp.error}
         </p>
       )}

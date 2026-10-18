@@ -34,8 +34,10 @@ Pick by **job**, never by how a colour looks.
 - **A border:** `--border-primary` for a control's boundary (3:1); `--border-secondary` and
   `--border-divider` are decorative.
 - **A state:** `--status-{success,danger,warning,info}-{bg,border,text,bold}` — always with an icon
-  and a label, never colour alone. (The older `--status-good|warning|serious|critical` still drive
-  `Badge` until V4 moves it.)
+  and a label, never colour alone. Wash (`-bg`) behind its own text (`-text`) and edge (`-border`);
+  `-bold` for a mark (a meter's fill, a stroke). A meter's track is the same quartet's `-bg`, so the
+  state reads across the whole bar (the dataviz skill's meter). The older
+  `--status-good|warning|serious|critical` are legacy (below).
 - **A chart:** `--chart-line` for a single series; `--chart-income` / `--chart-expenses` for money
   in and out (the CVD-safe teal/vermilion pair, never green/red); `--chart-axis` for an axis or
   baseline line, `--chart-label` for tick text, `--chart-gridline` for recessive grid;
@@ -49,6 +51,31 @@ Pick by **job**, never by how a colour looks.
 Never write a hex value in a component: ESLint refuses a six-digit hex literal in any `.tsx` under
 `apps/web/src/features`, and `contrast.test.ts` refuses one anywhere under `src/` outside the token
 sources. Text wears a text role, never a series colour.
+
+## Status: the quartets and the legacy mapping
+
+WP 10.11 (V4) moved `Badge` and every consumer of the legacy status tokens onto the quartets; the
+legacy names stay defined but nothing under `apps/web/src` may read them (`contrast.test.ts`, "WP
+10.11 status roles", names any new consumer by file and line). The repaint is intended; its size per
+role, OKLab ×100, is in `docs/evidence/phase-10/wp10.11-budget-meters.md` §1.4.
+
+| Legacy                                              | Quartet                                                       |
+| --------------------------------------------------- | ------------------------------------------------------------- |
+| `Badge` `good` / `warning` / `serious` / `critical` | `success` / `warning` / `warning` / `danger` (and new `info`) |
+| `text-status-good`                                  | `text-status-success-text`                                    |
+| `text-status-warning`, `text-status-serious`        | `text-status-warning-text`                                    |
+| `text-status-critical`                              | `text-status-danger-text`                                     |
+| `border-status-{good,warning,serious,critical}`     | `border-status-{success,warning,warning,danger}-border`       |
+| `bg-status-good/10`, `bg-status-warning/10`         | `bg-status-success-bg`, `bg-status-warning-bg`                |
+| `bg-status-warning text-on-status-warning` (solid)  | `bg-status-warning-bg text-status-warning-text` + its border  |
+| `bg-danger text-on-danger` used as a status badge   | `bg-status-danger-bg text-status-danger-text` + its border    |
+| `stroke-status-warning`                             | `stroke-status-warning-bold`                                  |
+
+`--danger` / `--on-danger` remain the **destructive button**'s colours; they are not a status.
+
+The budget meter's states (`components/finance/budget-meter.ts`): _under pace_ and _within budget_
+→ success, _on pace_ → info, _ahead of pace_ → warning, _over budget_ → danger; a budget of zero
+draws no meter at all.
 
 ## A hue is assigned once
 

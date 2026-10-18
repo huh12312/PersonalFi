@@ -71,7 +71,7 @@ export function PlaidCredentialsPanel({ status }: PlaidCredentialsPanelProps) {
         )}
       </p>
       {!status.configured && (
-        <p className="text-small text-status-warning" role="status">
+        <p className="text-small text-status-warning-text" role="status">
           These stored credentials cannot be used right now
           {status.env === 'production' && !status.productionAllowed
             ? ': Production is off for this install.'
@@ -107,7 +107,7 @@ export function PlaidCredentialsPanel({ status }: PlaidCredentialsPanelProps) {
             dashboard if you want them dead.
           </p>
           {(error !== null || stepUp.error !== null) && (
-            <p className="text-small text-status-critical" role="alert">
+            <p className="text-small text-status-danger-text" role="alert">
               {error ?? stepUp.error}
             </p>
           )}

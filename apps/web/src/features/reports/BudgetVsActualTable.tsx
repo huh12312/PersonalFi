@@ -70,12 +70,12 @@ export function BudgetVsActualTable({ lines }: BudgetVsActualTableProps) {
                 </td>
                 <td className="py-2 text-right">
                   {cashOver && (
-                    <span className="inline-block rounded bg-danger px-1.5 py-0.5 text-caption text-on-danger">
+                    <span className="inline-block rounded border border-status-danger-border bg-status-danger-bg px-1.5 py-0.5 text-caption text-status-danger-text">
                       Cash
                     </span>
                   )}
                   {creditOver && (
-                    <span className="ml-1 inline-block rounded bg-status-warning px-1.5 py-0.5 text-caption text-on-status-warning">
+                    <span className="ml-1 inline-block rounded bg-status-warning-bg px-1.5 py-0.5 text-caption text-status-warning-text border border-status-warning-border">
                       Credit
                     </span>
                   )}

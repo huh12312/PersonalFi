@@ -21,6 +21,11 @@ export function parseWireMoney(value: MoneyJson): MoneyKernel {
   return MoneyKernel.fromJSON(value);
 }
 
+/** The other direction: the kernel's `Money` back to the wire shape `Money.tsx` renders (`Money.toJSON`). */
+export function wireOf(value: MoneyKernel): MoneyJson {
+  return MoneyKernel.toJSON(value);
+}
+
 type MoneySign = 'positive' | 'negative' | 'zero';
 
 export function signOf(value: MoneyKernel): MoneySign {

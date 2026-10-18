@@ -50,7 +50,7 @@ export function BackupStatusLine() {
       <p
         data-testid="backup-status-line"
         data-tone="warning"
-        className="flex flex-wrap items-center gap-x-2 text-small text-status-warning"
+        className="flex flex-wrap items-center gap-x-2 text-small text-status-warning-text"
       >
         <AlertTriangle size={14} aria-hidden="true" />
         <span className="font-medium">Warning:</span>

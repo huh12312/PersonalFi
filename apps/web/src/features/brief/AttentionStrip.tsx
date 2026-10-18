@@ -14,7 +14,7 @@ export interface AttentionStripProps {
 function AttentionStripRow({ item }: { item: BriefItemWithNarration }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <li className="rounded-md border border-status-serious/40 bg-bg-surface p-3">
+    <li className="rounded-md border border-status-warning-border bg-bg-surface p-3">
       <div className="flex flex-wrap items-center gap-2">
         <SeverityBadge severity={item.severity} />
         <h3 className="text-body font-medium text-text-primary">{item.title}</h3>
@@ -51,7 +51,7 @@ export function AttentionStrip({ items }: AttentionStripProps) {
         id="attention-strip-heading"
         className="mb-2 flex items-center gap-2 text-h3 text-text-primary"
       >
-        <AlertTriangle size={18} aria-hidden="true" className="text-status-serious" />
+        <AlertTriangle size={18} aria-hidden="true" className="text-status-warning-text" />
         Needs attention
       </h2>
       <ul className="flex flex-col gap-2">

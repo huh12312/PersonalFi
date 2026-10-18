@@ -140,7 +140,7 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
 
   if (scopesQuery.isError) {
     return (
-      <p className="text-small text-status-critical">
+      <p className="text-small text-status-danger-text">
         {problemDetail(scopesQuery.error) ?? 'Scopes could not be loaded.'}
       </p>
     );
@@ -179,7 +179,7 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
                 <span>
                   <span className="font-mono text-small text-text-primary">{scope.scope}</span>
                   {scope.granted && (
-                    <Badge variant="good" className="ml-2">
+                    <Badge variant="success" className="ml-2">
                       Currently granted
                     </Badge>
                   )}
@@ -216,8 +216,10 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
         ))}
       </ul>
 
-      {saveError !== null && <p className="text-small text-status-critical">{saveError}</p>}
-      {stepUp.error !== null && <p className="text-small text-status-critical">{stepUp.error}</p>}
+      {saveError !== null && <p className="text-small text-status-danger-text">{saveError}</p>}
+      {stepUp.error !== null && (
+        <p className="text-small text-status-danger-text">{stepUp.error}</p>
+      )}
       {lastResult !== null && (
         <p className="text-small text-text-secondary" role="status">
           Granted: {lastResult.granted.length === 0 ? 'none' : lastResult.granted.join(', ')}.
