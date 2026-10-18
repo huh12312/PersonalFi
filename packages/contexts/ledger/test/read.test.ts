@@ -11,10 +11,13 @@ import { applyProviderTransactions } from '../src/apply.ts';
 import {
   getTransaction,
   listAggregateRowsInWindow,
+  listAggregateSumsInWindow,
+  listRefundLinkedRowsInWindow,
   listTransactions,
   sumTransactions,
 } from '../src/read.ts';
 import { setRuleCategory, setTransactionOverlay } from '../src/overlay.ts';
+import { detectRefundHints } from '../src/refunds.ts';
 import {
   CORRELATION_ID,
   NO_DATABASE,
@@ -303,6 +306,102 @@ describe.skipIf(NO_DATABASE)('listTransactions', () => {
   const CAT_USER = '01900000-0000-7000-8000-000000000001';
   const CAT_RULE = '01900000-0000-7000-8000-000000000002';
   const CAT_LOSES = '01900000-0000-7000-8000-000000000003';
+
+  it('listAggregateSumsInWindow + listRefundLinkedRowsInWindow (WP 10.10) partition the window rows exactly', async () => {
+    await add(checkingId, [
+      providerTransaction({
+        providerTransactionId: 't-coffee-2',
+        postedDate: DateOnly.parse('2026-05-10'),
+        amount: money(-766n, 'USD'),
+        name: 'SQ *BLUE BOTTLE 4471',
+      }),
+    ]);
+    await add(cardId, [
+      providerTransaction({
+        providerTransactionId: 't-books-2',
+        postedDate: DateOnly.parse('2026-05-22'),
+        amount: money(-8_999n, 'USD'),
+        name: 'POWELLS BOOKS PORTLAND OR',
+        merchantName: 'Powells Books',
+      }),
+    ]);
+    await add(cardId, [
+      providerTransaction({
+        providerTransactionId: 't-books-refund',
+        postedDate: DateOnly.parse('2026-05-25'),
+        amount: money(8_999n, 'USD'),
+        name: 'REFUND POWELLS BOOKS',
+        merchantName: 'Powells Books',
+      }),
+    ]);
+    await database.db.transaction(async (tx) =>
+      detectRefundHints(tx, { userId: database.userId }, writeContext(clock)),
+    );
+    const window = {
+      dateFrom: DateOnly.parse('2026-05-01'),
+      dateTo: DateOnly.parse('2026-05-31'),
+      transfers: 'include' as const,
+      includeDuplicates: false,
+    };
+    const rows = await listAggregateRowsInWindow(database.db, {
+      userId: database.userId,
+      filters: window,
+    });
+    const linked = await listRefundLinkedRowsInWindow(database.db, {
+      userId: database.userId,
+      filters: window,
+    });
+    expect(linked.length).toBeGreaterThanOrEqual(2); // the refund and the purchase it names
+    expect(linked.some((row) => row.refundOfId !== null)).toBe(true);
+    const linkedIds = new Set(linked.map((row) => row.id));
+    const cut = DateOnly.parse('2026-05-15');
+    const sums = await listAggregateSumsInWindow(database.db, {
+      userId: database.userId,
+      filters: window,
+      cuts: [cut],
+    });
+    // Every row is in exactly one of the two reads.
+    expect(sums.reduce((n, sum) => n + sum.count, 0) + linked.length).toBe(rows.length);
+    // And the sums are the rows' own, grouped by segment (split at the cut) and by every field computeActuals reads.
+    const key = (
+      r: {
+        accountId: string;
+        categoryId: string | null;
+        merchantId: string | null;
+        isTransfer: boolean;
+        excluded: boolean;
+      },
+      end: string,
+      linkedFlag: boolean,
+    ) =>
+      [r.accountId, end, r.categoryId, r.merchantId, r.isTransfer, linkedFlag, r.excluded].join(
+        '|',
+      );
+    const expected = new Map<string, bigint>();
+    for (const row of rows) {
+      if (linkedIds.has(row.id)) continue;
+      const end = row.date <= cut ? cut : '2026-05-31';
+      const k = key(row, end, row.transferLinkId !== null);
+      expected.set(k, (expected.get(k) ?? 0n) + row.amount.minor);
+    }
+    expect(new Map(sums.map((sum) => [key(sum, sum.date, sum.linked), sum.amount.minor]))).toEqual(
+      expected,
+    );
+    expect(new Set(sums.map((sum) => sum.date))).toEqual(new Set(['2026-05-15', '2026-05-31']));
+    // Two cuts in one month take the CASE path; the segments still partition the month.
+    const twoCuts = await listAggregateSumsInWindow(database.db, {
+      userId: database.userId,
+      filters: window,
+      cuts: [DateOnly.parse('2026-05-15'), DateOnly.parse('2026-05-20')],
+    });
+    expect(twoCuts.reduce((n, sum) => n + sum.count, 0)).toBe(rows.length - linked.length);
+    expect(new Set(twoCuts.map((sum) => sum.date))).toEqual(
+      new Set(['2026-05-15', '2026-05-20', '2026-05-31']),
+    );
+    const total = (list: readonly { amount: { minor: bigint } }[]) =>
+      list.reduce((n, x) => n + x.amount.minor, 0n);
+    expect(total(twoCuts)).toBe(total(sums));
+  });
 
   it('listAggregateRowsInWindow (WP 10.9) agrees with listTransactions field for field, in one read', async () => {
     const all = await listTransactions(database.db, { userId: database.userId, limit: 200 });

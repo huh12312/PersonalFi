@@ -98,20 +98,15 @@ test.describe('budget screen and reports (WP 2.9)', () => {
     await expectNoAxeViolations(page, 'reports screen (spending tab)');
 
     await page.getByRole('tab', { name: 'Cash flow' }).click();
-    const link = page.getByRole('link', { name: /Flow from income to groceries/ });
-    await expect(link).toHaveCount(1);
-    // `force: true`: with a single income→category link, both ends land at
-    // the same y (the only node in each column), so `linkHorizontal`'s
-    // geometric path is a perfectly flat line — a real, on-screen, thickly
-    // *stroked* ribbon (`stroke-width` carries the value, per
-    // `sankey-layout.ts`), but `getBoundingClientRect()` measures the vector
-    // path itself, not the stroke's painted extent, so its geometric height
-    // is exactly 0 and Playwright's actionability check reports "hidden"
-    // even though the ribbon is visibly on screen. `force: true` skips that
-    // check and clicks the element directly — the assertion that matters
-    // (`toHaveURL`, right below) still proves the click actually did
-    // something.
-    await link.click({ force: true });
+    // WP 10.10: a band is a filled ribbon (its box is the band, so no `force: true` is needed any more) and a
+    // pointer target; the keyboard reaches the same drill-through through the chart's table, one link per flow.
+    await page.getByRole('button', { name: /View as table.*Cash flow/ }).click();
+    await expect(page.getByRole('link', { name: /groceries.*, view transactions/i })).toHaveCount(
+      1,
+    );
+    const band = page.locator('[data-flow="income->groceries"]');
+    await expect(band).toHaveCount(1);
+    await band.click();
 
     // Drill-through lands on the filtered `/transactions` list, and the one
     // seeded transaction in that category is actually visible there.

@@ -69,6 +69,8 @@ export interface CategoryMonthActivity {
 export interface DrillThroughFilter {
   categoryIds?: string[];
   merchantIds?: string[];
+  /** Only rows with no category (WP 10.10: the hub's "Uncategorised" row). `GET /transactions`' own flag. */
+  readonly uncategorized?: boolean;
   readonly from: string;
   readonly to: string;
 }

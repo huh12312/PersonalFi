@@ -11415,6 +11415,9 @@
               "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             }
           },
+          "uncategorized": {
+            "type": "boolean"
+          },
           "from": {
             "type": "string"
           },
@@ -11610,6 +11613,225 @@
         "required": [
           "day",
           "cumulativeMinor"
+        ]
+      },
+      "CashFlowFiguresInput": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "hasData": {
+            "type": "boolean",
+            "description": "Any ledger row in the currency in the whole period. False is no data, never a zero."
+          },
+          "incomeMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$"
+          },
+          "expensesMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "description": "Money out, as a positive amount (Reports spending, negated)."
+          },
+          "netMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$"
+          },
+          "transactionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "hasData",
+          "incomeMinor",
+          "expensesMinor",
+          "netMinor",
+          "transactionCount"
+        ]
+      },
+      "CashFlowBreakdownRowInput": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "hue": {
+            "type": "string"
+          },
+          "sumMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$"
+          },
+          "share": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "drillThrough": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportDrillThroughInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "hue",
+          "sumMinor",
+          "share",
+          "count",
+          "drillThrough"
+        ]
+      },
+      "CashFlowBreakdownsInput": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CashFlowBreakdownRowInput"
+            }
+          },
+          "group": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CashFlowBreakdownRowInput"
+            }
+          },
+          "merchant": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CashFlowBreakdownRowInput"
+            }
+          }
+        },
+        "required": [
+          "category",
+          "group",
+          "merchant"
+        ]
+      },
+      "CashFlowComparisonInput": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "previous",
+              "average",
+              "year_ago"
+            ]
+          },
+          "periods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "withheld": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_data",
+                  "no_history"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "periodsAveraged": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "throughOffsetDays": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For the current period: each counterpart is read this many days past its start, capped at its end."
+          },
+          "incomeMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expensesMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "netMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "periods",
+          "available",
+          "withheld",
+          "periodsAveraged",
+          "throughOffsetDays",
+          "incomeMinor",
+          "expensesMinor",
+          "netMinor"
         ]
       },
       "DashboardLayoutEntryInput": {
@@ -13522,6 +13744,230 @@
           "trailingAverage",
           "includePending",
           "pendingExcludedCount",
+          "asOf",
+          "lastSyncedAt"
+        ]
+      },
+      "CashFlowInput": {
+        "type": "object",
+        "properties": {
+          "timeframe": {
+            "type": "string",
+            "enum": [
+              "month",
+              "quarter",
+              "year"
+            ]
+          },
+          "period": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "currentPeriod": {
+            "type": "string"
+          },
+          "isCurrent": {
+            "type": "boolean"
+          },
+          "isFuture": {
+            "type": "boolean"
+          },
+          "through": {
+            "description": "Today, when the period is the current one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "otherCurrencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "hasData": {
+                "type": "boolean",
+                "description": "Any ledger row in the currency in the whole period. False is no data, never a zero."
+              },
+              "incomeMinor": {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              "expensesMinor": {
+                "type": "string",
+                "pattern": "^-?\\d+$",
+                "description": "Money out, as a positive amount (Reports spending, negated)."
+              },
+              "netMinor": {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              "transactionCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "savingsRate": {
+                "description": "net ÷ income; null when withheld.",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "savingsRateWithheld": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "no_data",
+                      "no_income",
+                      "incomplete",
+                      "not_started"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "hasData",
+              "incomeMinor",
+              "expensesMinor",
+              "netMinor",
+              "transactionCount",
+              "savingsRate",
+              "savingsRateWithheld"
+            ]
+          },
+          "comparisons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CashFlowComparisonInput"
+            }
+          },
+          "bars": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "hasData": {
+                  "type": "boolean",
+                  "description": "Any ledger row in the currency in the whole period. False is no data, never a zero."
+                },
+                "incomeMinor": {
+                  "type": "string",
+                  "pattern": "^-?\\d+$"
+                },
+                "expensesMinor": {
+                  "type": "string",
+                  "pattern": "^-?\\d+$",
+                  "description": "Money out, as a positive amount (Reports spending, negated)."
+                },
+                "netMinor": {
+                  "type": "string",
+                  "pattern": "^-?\\d+$"
+                },
+                "transactionCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "period": {
+                  "type": "string"
+                },
+                "complete": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "hasData",
+                "incomeMinor",
+                "expensesMinor",
+                "netMinor",
+                "transactionCount",
+                "period",
+                "complete"
+              ]
+            }
+          },
+          "breakdowns": {
+            "type": "object",
+            "properties": {
+              "income": {
+                "$ref": "#/components/schemas/CashFlowBreakdownsInput"
+              },
+              "expenses": {
+                "$ref": "#/components/schemas/CashFlowBreakdownsInput"
+              }
+            },
+            "required": [
+              "income",
+              "expenses"
+            ]
+          },
+          "asOf": {
+            "type": "string"
+          },
+          "lastSyncedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "timeframe",
+          "period",
+          "start",
+          "end",
+          "currentPeriod",
+          "isCurrent",
+          "isFuture",
+          "through",
+          "currency",
+          "otherCurrencies",
+          "summary",
+          "comparisons",
+          "bars",
+          "breakdowns",
           "asOf",
           "lastSyncedAt"
         ]
@@ -25222,6 +25668,9 @@
               "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             }
           },
+          "uncategorized": {
+            "type": "boolean"
+          },
           "from": {
             "type": "string"
           },
@@ -25422,6 +25871,229 @@
         "required": [
           "day",
           "cumulativeMinor"
+        ],
+        "additionalProperties": false
+      },
+      "CashFlowFigures": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "hasData": {
+            "type": "boolean",
+            "description": "Any ledger row in the currency in the whole period. False is no data, never a zero."
+          },
+          "incomeMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$"
+          },
+          "expensesMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "description": "Money out, as a positive amount (Reports spending, negated)."
+          },
+          "netMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$"
+          },
+          "transactionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "hasData",
+          "incomeMinor",
+          "expensesMinor",
+          "netMinor",
+          "transactionCount"
+        ],
+        "additionalProperties": false
+      },
+      "CashFlowBreakdownRow": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "hue": {
+            "type": "string"
+          },
+          "sumMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$"
+          },
+          "share": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "drillThrough": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportDrillThrough"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "hue",
+          "sumMinor",
+          "share",
+          "count",
+          "drillThrough"
+        ],
+        "additionalProperties": false
+      },
+      "CashFlowBreakdowns": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CashFlowBreakdownRow"
+            }
+          },
+          "group": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CashFlowBreakdownRow"
+            }
+          },
+          "merchant": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CashFlowBreakdownRow"
+            }
+          }
+        },
+        "required": [
+          "category",
+          "group",
+          "merchant"
+        ],
+        "additionalProperties": false
+      },
+      "CashFlowComparison": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "previous",
+              "average",
+              "year_ago"
+            ]
+          },
+          "periods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "withheld": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_data",
+                  "no_history"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "periodsAveraged": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "throughOffsetDays": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For the current period: each counterpart is read this many days past its start, capped at its end."
+          },
+          "incomeMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expensesMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "netMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "periods",
+          "available",
+          "withheld",
+          "periodsAveraged",
+          "throughOffsetDays",
+          "incomeMinor",
+          "expensesMinor",
+          "netMinor"
         ],
         "additionalProperties": false
       },
@@ -27387,6 +28059,234 @@
           "trailingAverage",
           "includePending",
           "pendingExcludedCount",
+          "asOf",
+          "lastSyncedAt"
+        ],
+        "additionalProperties": false
+      },
+      "CashFlow": {
+        "type": "object",
+        "properties": {
+          "timeframe": {
+            "type": "string",
+            "enum": [
+              "month",
+              "quarter",
+              "year"
+            ]
+          },
+          "period": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "currentPeriod": {
+            "type": "string"
+          },
+          "isCurrent": {
+            "type": "boolean"
+          },
+          "isFuture": {
+            "type": "boolean"
+          },
+          "through": {
+            "description": "Today, when the period is the current one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "otherCurrencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "hasData": {
+                "type": "boolean",
+                "description": "Any ledger row in the currency in the whole period. False is no data, never a zero."
+              },
+              "incomeMinor": {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              "expensesMinor": {
+                "type": "string",
+                "pattern": "^-?\\d+$",
+                "description": "Money out, as a positive amount (Reports spending, negated)."
+              },
+              "netMinor": {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              "transactionCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "savingsRate": {
+                "description": "net ÷ income; null when withheld.",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "savingsRateWithheld": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "no_data",
+                      "no_income",
+                      "incomplete",
+                      "not_started"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "hasData",
+              "incomeMinor",
+              "expensesMinor",
+              "netMinor",
+              "transactionCount",
+              "savingsRate",
+              "savingsRateWithheld"
+            ],
+            "additionalProperties": false
+          },
+          "comparisons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CashFlowComparison"
+            }
+          },
+          "bars": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "hasData": {
+                  "type": "boolean",
+                  "description": "Any ledger row in the currency in the whole period. False is no data, never a zero."
+                },
+                "incomeMinor": {
+                  "type": "string",
+                  "pattern": "^-?\\d+$"
+                },
+                "expensesMinor": {
+                  "type": "string",
+                  "pattern": "^-?\\d+$",
+                  "description": "Money out, as a positive amount (Reports spending, negated)."
+                },
+                "netMinor": {
+                  "type": "string",
+                  "pattern": "^-?\\d+$"
+                },
+                "transactionCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "period": {
+                  "type": "string"
+                },
+                "complete": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "hasData",
+                "incomeMinor",
+                "expensesMinor",
+                "netMinor",
+                "transactionCount",
+                "period",
+                "complete"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "breakdowns": {
+            "type": "object",
+            "properties": {
+              "income": {
+                "$ref": "#/components/schemas/CashFlowBreakdowns"
+              },
+              "expenses": {
+                "$ref": "#/components/schemas/CashFlowBreakdowns"
+              }
+            },
+            "required": [
+              "income",
+              "expenses"
+            ],
+            "additionalProperties": false
+          },
+          "asOf": {
+            "type": "string"
+          },
+          "lastSyncedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "timeframe",
+          "period",
+          "start",
+          "end",
+          "currentPeriod",
+          "isCurrent",
+          "isFuture",
+          "through",
+          "currency",
+          "otherCurrencies",
+          "summary",
+          "comparisons",
+          "bars",
+          "breakdowns",
           "asOf",
           "lastSyncedAt"
         ],
@@ -35461,6 +36361,83 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SpendingPace"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/cash-flow": {
+      "get": {
+        "operationId": "getCashFlow",
+        "summary": "One period of cash flow: income, expenses, net, savings rate, comparisons, bars, breakdowns",
+        "tags": [
+          "reports"
+        ],
+        "description": "Every figure is `GET /reports/spending` / `GET /reports/income` over that figure's own window (transfers excluded, refunds netted, pending counted, income categories and a net-positive uncategorised bucket as income). `period` is `YYYY-MM`, `YYYY-Qn` or `YYYY` for the timeframe, defaulting to the one today is in (the holder's zone). The current period's figures are so far: its savings rate is withheld and each comparison reads its counterpart through the same point. A comparison whose counterpart has no ledger row is withheld. `bars` are the twelve periods ending with the selected one. One currency (the one with the most rows); the others are named in `otherCurrencies`, never summed (decision D4).",
+        "parameters": [
+          {
+            "schema": {
+              "default": "month",
+              "type": "string",
+              "enum": [
+                "month",
+                "quarter",
+                "year"
+              ]
+            },
+            "in": "query",
+            "name": "timeframe",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 10
+            },
+            "in": "query",
+            "name": "period",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashFlow"
                 }
               }
             }

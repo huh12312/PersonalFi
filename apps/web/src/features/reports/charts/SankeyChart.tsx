@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { pathHorizontalDiagonal } from '@visx/shape';
 import { useMemo } from 'react';
-import type { KeyboardEvent } from 'react';
 
 import type { SankeyLink, SankeyNode } from '../../../api/generated/types.gen.ts';
 import { categoryHue, chartFillVar, type FillHue } from '../../../components/finance/chart-hue.ts';
@@ -31,6 +30,12 @@ const sankeyLinkPath = pathHorizontalDiagonal<LinkEndpoints, [number, number]>({
   y: (node) => node[1],
 });
 
+/**
+ * A band as a filled ribbon: the top edge from source to target, down the target end, the bottom edge back, closed.
+ * Drawn as an area rather than a thick stroke (WP 10.10) so its box *is* the band: a level band drawn as a stroke has
+ * a zero-height geometry box, which a focus check (and a scroll-into-view) reads as nowhere on screen — the
+ * keyboard sweep found exactly that on the Cash Flow hub, where this chart is on screen by default.
+ */
 function linkPath(
   l: LaidOutLink,
   nodeById: Map<string, LaidOutNode>,
@@ -39,12 +44,15 @@ function linkPath(
   const source = nodeById.get(l.source);
   const target = nodeById.get(l.target);
   if (source === undefined || target === undefined) return '';
-  return (
-    sankeyLinkPath({
-      source: [nodeRight(source), l.sourceY],
-      target: [target.x, l.targetY],
-    }) ?? ''
-  );
+  const x0 = nodeRight(source);
+  const x1 = target.x;
+  const half = Math.max(l.width, 1) / 2;
+  const top =
+    sankeyLinkPath({ source: [x0, l.sourceY - half], target: [x1, l.targetY - half] }) ?? '';
+  const bottom =
+    sankeyLinkPath({ source: [x1, l.targetY + half], target: [x0, l.sourceY + half] }) ?? '';
+  // `bottom` starts with its own move-to; continue the outline with a line-to instead.
+  return `${top}L${bottom.replace(/^M/u, '')}Z`;
 }
 
 function nodeLabel(node: LaidOutNode): string {
@@ -132,21 +140,16 @@ export function SankeyChart({
                   // disambiguates two links that happen to share source+target.
                   key={`${l.source}->${l.target}-${String(index)}`}
                   d={linkPath(l, nodeById, nodeRight)}
-                  fill="none"
-                  stroke={color}
-                  strokeOpacity={0.45}
-                  strokeWidth={l.width}
-                  role="link"
-                  tabIndex={0}
-                  aria-label={`Flow from ${l.source} to ${l.target}, view transactions`}
-                  className="cursor-pointer outline-none focus-visible:stroke-opacity-100 hover:stroke-opacity-80"
+                  fill={color}
+                  fillOpacity={0.45}
+                  stroke="none"
+                  // Pointer only (WP 10.10): bands overlap by nature, so a focused band is always partly covered
+                  // by its neighbour (2.4.11, found by the keyboard sweep on the Cash Flow hub). The keyboard and
+                  // screen-reader route to the same drill-through is the table below, one link per flow.
+                  aria-hidden="true"
+                  data-flow={`${l.source}->${l.target}`}
+                  className="cursor-pointer hover:fill-opacity-80"
                   onClick={() => goToDrillThrough(l.drillThrough)}
-                  onKeyDown={(event: KeyboardEvent<SVGPathElement>) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      goToDrillThrough(l.drillThrough);
-                    }
-                  }}
                 />
               );
             })}
@@ -181,14 +184,23 @@ export function SankeyChart({
           </g>
         </svg>
       </ScrollRegion>
-      {/* 09 §5.6: the diagram's ribbons are colour and width; these are the same flows as figures. */}
+      {/* 09 §5.6: the diagram's ribbons are colour and width; these are the same flows as figures, each a link to its
+          transactions — the keyboard's way into the drill-through the ribbons give a pointer. */}
       <ChartDataTable
         className="mt-1"
         caption={`Cash flow, ${currency}: where each amount came from and went`}
         columns={['From', 'To', 'Amount']}
         rows={links.map((l) => [
           labelOfId(l.source),
-          labelOfId(l.target),
+          <Link
+            key={`to-${l.source}-${l.target}`}
+            to="/transactions"
+            search={toTransactionsSearch(l.drillThrough)}
+            className="text-accent-text underline-offset-4 hover:underline"
+          >
+            {labelOfId(l.target)}
+            <span className="sr-only">, view transactions</span>
+          </Link>,
           <Money
             key={`${l.source}-${l.target}`}
             value={l.amount}

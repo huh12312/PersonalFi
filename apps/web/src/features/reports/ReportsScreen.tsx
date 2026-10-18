@@ -142,6 +142,19 @@ export function ReportsScreen() {
         </TabsPanel>
 
         <TabsPanel value="sankey">
+          <p className="mb-2 text-small">
+            <Link
+              to="/cash-flow"
+              className="text-accent-text underline-offset-4 hover:underline"
+              data-testid="open-in-cash-flow"
+            >
+              Open in Cash Flow →
+            </Link>{' '}
+            <span className="text-text-secondary">
+              — the same flow by month, quarter or year, with income, expenses, savings rate and
+              comparisons.
+            </span>
+          </p>
           {sankeyQuery.isLoading ? (
             <Skeleton variant="block" height={360} />
           ) : (

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * `GET /reports/{spending,income,sankey,budget-vs-actual}` — read models only.
+ * `GET /reports/{spending,income,sankey,spending-pace,cash-flow,budget-vs-actual}` — read models only.
  *
  * Every number here is aggregated server-side in `apps/api/src/reports/**`;
  * this file's only job is querystring → aggregator input, and aggregator
@@ -25,6 +25,16 @@ import {
   spendingRowsOf,
 } from '../reports/spending-income.ts';
 import { computeSankey } from '../reports/sankey.ts';
+import {
+  CASH_FLOW_TIMEFRAMES,
+  computeCashFlow,
+  parsePeriodKey,
+  type BreakdownRow,
+  type Breakdowns,
+  type CashFlowComparison,
+  type WindowFigures,
+} from '../reports/cash-flow.ts';
+import { merchantDisplayNames } from '@ctx/ledger';
 import { computeSpendingPace, parseMonth, type PaceDay } from '../reports/spending-pace.ts';
 import { AppError, problems } from '../problem.ts';
 import { booleanQuery, dateOnlyQuery, idList, money, moneySchema } from '../wire.ts';
@@ -34,6 +44,7 @@ const drillThroughSchema = z
   .object({
     categoryIds: z.array(z.uuid()).optional(),
     merchantIds: z.array(z.uuid()).optional(),
+    uncategorized: z.boolean().optional(),
     from: z.string(),
     to: z.string(),
   })
@@ -104,6 +115,123 @@ function paceDays(days: readonly PaceDay[]): z.infer<typeof paceDaySchema>[] {
     day: point.day,
     cumulativeMinor: point.cumulative.minor.toString(),
   }));
+}
+
+const minorString = z.string().regex(/^-?\d+$/u);
+
+const cashFlowFiguresSchema = z
+  .object({
+    from: z.string(),
+    to: z.string(),
+    hasData: z
+      .boolean()
+      .describe(
+        'Any ledger row in the currency in the whole period. False is no data, never a zero.',
+      ),
+    incomeMinor: minorString,
+    expensesMinor: minorString.describe(
+      'Money out, as a positive amount (Reports spending, negated).',
+    ),
+    netMinor: minorString,
+    transactionCount: z.int().nonnegative(),
+  })
+  .meta({ id: 'CashFlowFigures' });
+
+const cashFlowBreakdownRowSchema = z
+  .object({
+    key: z.string().nullable(),
+    label: z.string(),
+    hue: z.string(),
+    sumMinor: minorString,
+    share: z.number().nullable(),
+    count: z.int().nonnegative(),
+    drillThrough: drillThroughSchema.nullable(),
+  })
+  .meta({ id: 'CashFlowBreakdownRow' });
+
+const cashFlowBreakdownsSchema = z
+  .object({
+    category: z.array(cashFlowBreakdownRowSchema),
+    group: z.array(cashFlowBreakdownRowSchema),
+    merchant: z.array(cashFlowBreakdownRowSchema),
+  })
+  .meta({ id: 'CashFlowBreakdowns' });
+
+const cashFlowComparisonSchema = z
+  .object({
+    kind: z.enum(['previous', 'average', 'year_ago']),
+    periods: z.array(z.string()),
+    available: z.boolean(),
+    withheld: z.enum(['no_data', 'no_history']).nullable(),
+    periodsAveraged: z.int().nonnegative(),
+    throughOffsetDays: z
+      .int()
+      .nonnegative()
+      .nullable()
+      .describe(
+        'For the current period: each counterpart is read this many days past its start, capped at its end.',
+      ),
+    incomeMinor: minorString.nullable(),
+    expensesMinor: minorString.nullable(),
+    netMinor: minorString.nullable(),
+  })
+  .meta({ id: 'CashFlowComparison' });
+
+function figuresWire(figures: WindowFigures): z.infer<typeof cashFlowFiguresSchema> {
+  return {
+    from: figures.from,
+    to: figures.to,
+    hasData: figures.hasData,
+    incomeMinor: figures.income.toString(),
+    expensesMinor: figures.expenses.toString(),
+    netMinor: figures.net.toString(),
+    transactionCount: figures.transactionCount,
+  };
+}
+
+function breakdownRowWire(row: BreakdownRow): z.infer<typeof cashFlowBreakdownRowSchema> {
+  return {
+    key: row.key,
+    label: row.label,
+    hue: row.hue,
+    sumMinor: row.sum.toString(),
+    share: row.share,
+    count: row.count,
+    drillThrough:
+      row.drillThrough === null
+        ? null
+        : {
+            ...row.drillThrough,
+            ...(row.drillThrough.categoryIds === undefined
+              ? {}
+              : { categoryIds: [...row.drillThrough.categoryIds] }),
+            ...(row.drillThrough.merchantIds === undefined
+              ? {}
+              : { merchantIds: [...row.drillThrough.merchantIds] }),
+          },
+  };
+}
+
+function breakdownsWire(breakdowns: Breakdowns): z.infer<typeof cashFlowBreakdownsSchema> {
+  return {
+    category: breakdowns.category.map(breakdownRowWire),
+    group: breakdowns.group.map(breakdownRowWire),
+    merchant: breakdowns.merchant.map(breakdownRowWire),
+  };
+}
+
+function comparisonWire(comparison: CashFlowComparison): z.infer<typeof cashFlowComparisonSchema> {
+  return {
+    kind: comparison.kind,
+    periods: [...comparison.periods],
+    available: comparison.available,
+    withheld: comparison.withheld,
+    periodsAveraged: comparison.periodsAveraged,
+    throughOffsetDays: comparison.throughOffsetDays,
+    incomeMinor: comparison.income?.toString() ?? null,
+    expensesMinor: comparison.expenses?.toString() ?? null,
+    netMinor: comparison.net?.toString() ?? null,
+  };
 }
 
 export const reportRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
@@ -382,6 +510,135 @@ export const reportRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           trailingAverage: paceDays(pace.trailingAverage),
           includePending: pace.includePending,
           pendingExcludedCount: pace.pendingExcludedCount,
+          asOf: clock.now().toISOString(),
+          lastSyncedAt: lastSynced === null ? null : lastSynced.toISOString(),
+        };
+      },
+    );
+
+    app.get(
+      '/reports/cash-flow',
+      {
+        schema: {
+          operationId: 'getCashFlow',
+          summary:
+            'One period of cash flow: income, expenses, net, savings rate, comparisons, bars, breakdowns',
+          description:
+            "Every figure is `GET /reports/spending` / `GET /reports/income` over that figure's own window (transfers " +
+            'excluded, refunds netted, pending counted, income categories and a net-positive uncategorised bucket as ' +
+            'income). `period` is `YYYY-MM`, `YYYY-Qn` or `YYYY` for the timeframe, defaulting to the one today is in ' +
+            "(the holder's zone). The current period's figures are so far: its savings rate is withheld and each " +
+            'comparison reads its counterpart through the same point. A comparison whose counterpart has no ledger row ' +
+            'is withheld. `bars` are the twelve periods ending with the selected one. One currency (the one with the ' +
+            'most rows); the others are named in `otherCurrencies`, never summed (decision D4).',
+          tags: ['reports'],
+          querystring: z
+            .object({
+              timeframe: z.enum(CASH_FLOW_TIMEFRAMES).default('month'),
+              period: z.string().max(10).optional(),
+            })
+            .refine(
+              (query) =>
+                query.period === undefined ||
+                parsePeriodKey(query.timeframe, query.period) !== null,
+              {
+                message: "period is not one of the timeframe's (YYYY-MM, YYYY-Qn or YYYY)",
+                path: ['period'],
+              },
+            ),
+          response: {
+            200: z
+              .object({
+                timeframe: z.enum(CASH_FLOW_TIMEFRAMES),
+                period: z.string(),
+                start: z.string(),
+                end: z.string(),
+                currentPeriod: z.string(),
+                isCurrent: z.boolean(),
+                isFuture: z.boolean(),
+                through: z
+                  .string()
+                  .nullable()
+                  .describe('Today, when the period is the current one.'),
+                currency: z.string().length(3).nullable(),
+                otherCurrencies: z.array(z.string()),
+                summary: cashFlowFiguresSchema.extend({
+                  savingsRate: z.number().nullable().describe('net ÷ income; null when withheld.'),
+                  savingsRateWithheld: z
+                    .enum(['no_data', 'no_income', 'incomplete', 'not_started'])
+                    .nullable(),
+                }),
+                comparisons: z.array(cashFlowComparisonSchema),
+                bars: z.array(
+                  cashFlowFiguresSchema.extend({ period: z.string(), complete: z.boolean() }),
+                ),
+                breakdowns: z.object({
+                  income: cashFlowBreakdownsSchema,
+                  expenses: cashFlowBreakdownsSchema,
+                }),
+                asOf: z.string(),
+                lastSyncedAt: z.string().nullable(),
+              })
+              .meta({ id: 'CashFlow' }),
+            ...problems(400, 401, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        // Started before the time zone is known: it does not depend on it, and the ledger read does.
+        const categories = listCategories(database, session.userId, { includeArchived: true });
+        const timezone = await timezoneOf(session.userId);
+        const today = todayIn(clock, timezone);
+        const [result, synced] = await Promise.all([
+          computeCashFlow(database, {
+            userId: session.userId,
+            timeframe: request.query.timeframe,
+            periodKey: request.query.period ?? null,
+            today,
+            categories: categories.then((categories) =>
+              categories.map((category) => ({
+                id: category.id,
+                label: category.label,
+                parentId: category.parentId,
+                hue: category.hue,
+                kind: category.kind,
+              })),
+            ),
+            merchantNames: (ids) => merchantDisplayNames(database, { userId: session.userId, ids }),
+          }),
+          pool.query<{ last: Date | null }>(
+            'SELECT max(last_synced_at) AS last FROM connections WHERE user_id = $1',
+            [session.userId],
+          ),
+        ]);
+        const lastSynced = synced.rows[0]?.last ?? null;
+        return {
+          timeframe: result.timeframe,
+          period: result.period.key,
+          start: result.period.start,
+          end: result.period.end,
+          currentPeriod: result.currentPeriod,
+          isCurrent: result.isCurrent,
+          isFuture: result.isFuture,
+          through: result.through,
+          currency: result.currency,
+          otherCurrencies: [...result.otherCurrencies],
+          summary: {
+            ...figuresWire(result.summary),
+            savingsRate: result.summary.savingsRate,
+            savingsRateWithheld: result.summary.savingsRateWithheld,
+          },
+          comparisons: result.comparisons.map(comparisonWire),
+          bars: result.bars.map((bar) => ({
+            ...figuresWire(bar),
+            period: bar.period,
+            complete: bar.complete,
+          })),
+          breakdowns: {
+            income: breakdownsWire(result.breakdowns.income),
+            expenses: breakdownsWire(result.breakdowns.expenses),
+          },
           asOf: clock.now().toISOString(),
           lastSyncedAt: lastSynced === null ? null : lastSynced.toISOString(),
         };

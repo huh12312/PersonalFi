@@ -6,6 +6,7 @@ import type { Account } from '../../api/generated/types.gen.ts';
 import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Label } from '../../components/ui/label.tsx';
+import { useMerchantNames } from '../recurring/useMerchantNames.ts';
 import { CategoryFilterControl } from './CategoryFilterControl.tsx';
 import { hasActiveFilters, type TransactionsSearch } from './filters.ts';
 
@@ -176,12 +177,45 @@ export function TransactionsFilterBar({
         </label>
       </div>
 
+      {(search.merchantIds?.length ?? 0) > 0 && (
+        <MerchantFilterChip
+          merchantIds={search.merchantIds ?? []}
+          onRemove={() => onChange({ merchantIds: undefined })}
+        />
+      )}
+
       {hasActiveFilters(search) && (
         <Button variant="ghost" size="sm" onClick={onClear} className="gap-1.5">
           <X size={14} aria-hidden="true" />
           Clear filters
         </Button>
       )}
+    </div>
+  );
+}
+
+/**
+ * The merchant filter a Cash Flow merchant row (or a Sankey merchant band) drills in with (WP 10.10). There is no
+ * merchant picker on this bar; the chip says which merchant the list is narrowed to and takes it off.
+ */
+function MerchantFilterChip({
+  merchantIds,
+  onRemove,
+}: {
+  readonly merchantIds: readonly string[];
+  readonly onRemove: () => void;
+}) {
+  const { nameOf } = useMerchantNames(merchantIds);
+  const names = merchantIds.map(nameOf).join(', ');
+  return (
+    <div className="flex items-center gap-1.5 pb-2 text-small text-text-secondary">
+      <span>
+        Merchant: <span className="font-medium text-text-primary">{names}</span>
+      </span>
+      <Button variant="ghost" size="sm" onClick={onRemove} className="gap-1">
+        <X size={14} aria-hidden="true" />
+        Remove merchant filter
+      </Button>
     </div>
   );
 }

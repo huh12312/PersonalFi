@@ -22,12 +22,12 @@ import type { LedgerDatabase } from '@ctx/ledger';
 import {
   groupByCurrency,
   loadReportAccounts,
-  loadReportRows,
+  loadReportRowsInOneRead,
   toBudgetAccounts,
   toBudgetTransactions,
   type ReportWindow,
 } from './ledger-source.ts';
-import type { ReportRow } from './types.ts';
+import type { ReportAccount, ReportRow } from './types.ts';
 
 export const SANKEY_INCOME_NODE = 'income';
 export const SANKEY_OTHER_SUFFIX = ':other';
@@ -61,13 +61,29 @@ export interface SankeyResult {
 export async function computeSankey(
   database: LedgerDatabase,
   window: ReportWindow,
-  options: { readonly currency?: string; readonly topMerchants?: number } = {},
+  options: SankeyOptions = {},
 ): Promise<SankeyResult> {
-  const topN = options.topMerchants ?? 8;
+  // One statement (WP 10.10), the same rows as the paged `loadReportRows`; `cash-flow-routes.test.ts` asserts the
+  // diagram is unchanged against it.
   const [rows, accounts] = await Promise.all([
-    loadReportRows(database, window),
+    loadReportRowsInOneRead(database, window),
     loadReportAccounts(database, window.userId),
   ]);
+  return sankeyOf(rows, accounts, options);
+}
+
+export interface SankeyOptions {
+  readonly currency?: string;
+  readonly topMerchants?: number;
+}
+
+/** The diagram over rows already read — pure, so a test can hand it the paged reader's rows and compare. */
+export function sankeyOf(
+  rows: readonly ReportRow[],
+  accounts: readonly ReportAccount[],
+  options: SankeyOptions = {},
+): SankeyResult {
+  const topN = options.topMerchants ?? 8;
   const byCurrency = groupByCurrency(rows);
 
   const currency = options.currency ?? largestCurrency(byCurrency);

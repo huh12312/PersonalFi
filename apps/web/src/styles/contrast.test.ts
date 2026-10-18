@@ -13,6 +13,11 @@ import {
   FORECAST_MARK_ROLES,
   FORECAST_TEXT_ROLES,
 } from '../features/recurring/forecast-chart-tokens.ts';
+import {
+  CASH_FLOW_CHART_TOKENS,
+  CASH_FLOW_MARK_ROLES,
+  CASH_FLOW_TEXT_ROLES,
+} from '../features/cash-flow/charts/cash-flow-chart-tokens.ts';
 import { CHART_HUES } from '@core/kernel';
 
 import themeCss from './theme.css?raw';
@@ -678,6 +683,50 @@ describe('the spending pace chart (WP 10.9)', () => {
         }
         for (const role of PACE_TEXT_ROLES) {
           const token = PACE_CHART_TOKENS[role];
+          const r = ratio(colorOf(theme, token), surface);
+          if (r < 4.5) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
+        }
+      }
+      expect(failing).toEqual([]);
+    });
+  }
+});
+
+/**
+ * `CashFlowBarsChart.tsx` (WP 10.10) draws only with `cash-flow-chart-tokens.ts`'s roles (`cashFlowVar(role)`):
+ * income and expense columns, the net line and the zero line at 3:1 on every chart surface **and on the selected
+ * period's band** (a column of the selected period sits on it), the tick text at 4.5:1 on both.
+ */
+describe('the cash flow bars chart (WP 10.10)', () => {
+  it('draws only with roles this file can measure', () => {
+    const chart = Object.entries(sources).find(([path]) =>
+      path.endsWith('features/cash-flow/charts/CashFlowBarsChart.tsx'),
+    )?.[1];
+    expect(chart).toBeDefined();
+    const raw = [...(chart ?? '').matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]);
+    const readout = [
+      '--bg-overlay',
+      '--text-primary',
+      '--shadow-elev-2',
+      '--border-divider',
+      '--focus-ring',
+    ];
+    expect(raw.filter((token) => !readout.includes(token as string))).toEqual([]);
+    expect((chart ?? '').match(/cashFlowVar\(/g)?.length ?? 0).toBeGreaterThan(10);
+  });
+
+  for (const theme of THEMES) {
+    it(`every mark role clears 3:1 and every text role 4.5:1 on each chart surface and the selected band in the ${theme} theme`, () => {
+      const failing: string[] = [];
+      for (const bg of [...CHART_SURFACES, CASH_FLOW_CHART_TOKENS.selectedBand]) {
+        const surface = colorOf(theme, bg);
+        for (const role of CASH_FLOW_MARK_ROLES) {
+          const token = CASH_FLOW_CHART_TOKENS[role];
+          const r = ratio(colorOf(theme, token), surface);
+          if (r < 3) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
+        }
+        for (const role of CASH_FLOW_TEXT_ROLES) {
+          const token = CASH_FLOW_CHART_TOKENS[role];
           const r = ratio(colorOf(theme, token), surface);
           if (r < 4.5) failing.push(`${role} (${token}) on ${bg}: ${r.toFixed(2)}:1`);
         }

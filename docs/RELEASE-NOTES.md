@@ -9,6 +9,51 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.9: Cash flow, month by month
+
+**Status:** a patch release on v0.9.8. The tag `v0.9.9` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.9
+
+```bash
+git pull
+just upgrade
+```
+
+No migration.
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **A Cash flow screen** (under Money, between Transactions and Budget) with three tabs: **Cash
+  flow**, **Income** and **Spending**. Pick how it is drawn (**Flow**, the diagram from Reports;
+  **Bars**, income and expenses side by side for each month, quarter or year with your net cash
+  flow as a line over them; or, on Income and Spending, **Categories**) and the timeframe (Month,
+  Quarter, Year), and step back and forward with the arrows; **This month** brings you back.
+- **Income, Expenses, Net cash flow and Savings rate** at the top. The current month says "so far";
+  its savings rate waits until the month is over (pay lands unevenly, so a rate part-way through
+  would mislead), and a month with no income says so instead of showing a rate.
+- **Comparisons in money**: against last month, your 12-month average, or the same month last year —
+  "Expenses: $40.00 less than last month at this point ($1,500.00 against $1,540.00)". Part-way
+  through a month, the other month is read to the same day. A comparison with nothing to compare
+  against says what is missing instead.
+- **Breakdowns by category, by category group and by merchant**, each a row with a bar for its share,
+  the amount and the share; past twelve rows the rest are gathered into "Other" with how many it
+  holds. Every row opens the transactions behind it.
+- **Every figure is the spending and income report's own**: transfers between your accounts are left
+  out, refunds are netted, anything you excluded stays excluded. Activity in a second currency is
+  named, never converted or added in.
+- **Links you can share inside the app**: the screen's address carries the tab, view, timeframe,
+  period, breakdown and comparison.
+- **Transactions** can now be filtered to one merchant (from a merchant row here, or a merchant band
+  in the Reports flow diagram); the filter shows above the list with a button to remove it.
+- **Reports** keeps saved reports and Budget vs. actual, links to Cash flow from its flow diagram,
+  and its flow diagram's table now lists every flow as a link to its transactions (the keyboard's
+  way in; the bands themselves are for a pointer). Reports also reads faster on a busy ledger.
+
 ## v0.9.8: the dashboard as widgets, with your spending pace
 
 **Status:** a patch release on v0.9.7. The tag `v0.9.8` is pushed by the maintainer once CI is green.

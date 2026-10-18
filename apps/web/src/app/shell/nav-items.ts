@@ -12,11 +12,12 @@ import {
   Repeat,
   Settings,
   Target,
+  Waves,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 /**
- * The nine authenticated-shell routes, as a literal union rather than
+ * The authenticated-shell routes, as a literal union rather than
  * `string` — `<Link to>` is type-checked against the registered route tree
  * (src/app/router.tsx), and a widened `string` would defeat that. Keeping the
  * union here means adding a route is a compiler error at every nav surface
@@ -26,6 +27,7 @@ export type NavPath =
   | '/'
   | '/inbox'
   | '/transactions'
+  | '/cash-flow'
   | '/budget'
   | '/recurring'
   | '/accounts'
@@ -62,6 +64,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/inbox', label: 'Inbox', icon: Inbox },
       { to: '/transactions', label: 'Transactions', icon: Receipt },
+      { to: '/cash-flow', label: 'Cash flow', icon: Waves },
       { to: '/budget', label: 'Budget', icon: PiggyBank },
       { to: '/recurring', label: 'Recurring', icon: Repeat },
     ],
@@ -92,6 +95,7 @@ export const BOTTOM_TABS: NavItem[] = [
 /** Everything not on the bottom bar, surfaced from the "More" sheet. */
 export const MORE_NAV_ITEMS: NavItem[] = [
   { to: '/inbox', label: 'Inbox', icon: Inbox },
+  { to: '/cash-flow', label: 'Cash flow', icon: Waves },
   { to: '/accounts', label: 'Accounts', icon: Landmark },
   { to: '/investments', label: 'Investments', icon: LineChart },
   { to: '/plan', label: 'Plan', icon: Target },

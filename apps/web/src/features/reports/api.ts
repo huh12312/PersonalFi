@@ -18,18 +18,20 @@ export interface ReportWindow {
 }
 
 /** `GET /reports/spending` — category × month cells for the requested window. */
-export function useSpendingReportQuery(window: ReportWindow) {
+export function useSpendingReportQuery(window: ReportWindow, enabled = true) {
   return useQuery({
     ...getSpendingReportOptions({ query: { from: window.from, to: window.to } }),
     staleTime: 30_000,
+    enabled,
   });
 }
 
 /** `GET /reports/income` — same shape as spending, income-side categories. */
-export function useIncomeReportQuery(window: ReportWindow) {
+export function useIncomeReportQuery(window: ReportWindow, enabled = true) {
   return useQuery({
     ...getIncomeReportOptions({ query: { from: window.from, to: window.to } }),
     staleTime: 30_000,
+    enabled,
   });
 }
 

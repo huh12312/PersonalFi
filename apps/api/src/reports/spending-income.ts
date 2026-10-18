@@ -21,12 +21,12 @@
  * multi-period caller does.
  */
 import { Money } from '@core/kernel';
-import { computeActuals } from '@ctx/budgeting';
+import { computeActuals, type EnvelopeTransaction } from '@ctx/budgeting';
 import type { LedgerDatabase } from '@ctx/ledger';
 import {
   groupByCurrency,
   loadReportAccounts,
-  loadReportRows,
+  loadReportRowsInOneRead,
   toBudgetAccounts,
   toBudgetTransactions,
   type ReportWindow,
@@ -55,16 +55,19 @@ export interface MonthActuals {
 export function monthActualsOf(
   rows: readonly ReportRow[],
   accounts: readonly ReportAccount[],
+  purchases?: ReadonlyMap<string, string | null>,
 ): MonthActuals[] {
   const results: MonthActuals[] = [];
 
   for (const [currency, currencyRows] of groupByCurrency(rows)) {
     const currencyAccounts = accounts.filter((account) => account.currency === currency);
 
-    // Built once, over the whole window, per `actuals.ts`'s cross-period rule.
-    const categoryOfPurchase = new Map(
-      currencyRows.map((row) => [row.id, row.categoryId] as const),
-    );
+    // Built once, over the whole window, per `actuals.ts`'s cross-period rule. `purchases` (WP 10.10) lets a caller
+    // that has already read a wider window hand in exactly the entries this window's map would have for the
+    // purchases its refunds name — `computeActuals` reads the map only at `get(row.refundOfId)` — so a month can be
+    // computed once and reused by every window that contains it with the same refunds resolved the same way.
+    const categoryOfPurchase =
+      purchases ?? new Map(currencyRows.map((row) => [row.id, row.categoryId] as const));
 
     const byMonth = new Map<string, ReportRow[]>();
     for (const row of currencyRows) {
@@ -88,25 +91,29 @@ export function monthActualsOf(
   return results;
 }
 
-/**
- * Every `(month, category, currency)` cell in the window, transfers excluded,
- * refunds netted. Callers split this into a spending report and an income
- * report by joining `categoryId` against `@ctx/categorization`'s `kind` — this
- * function does not import that context (an `apps/` file may, but doing the
- * join here would make this the one place both call, and a caller that wants
- * only spending would still pay for loading every category to find out).
- */
-export async function computeCategoryMonthActivity(
-  database: LedgerDatabase,
-  window: ReportWindow,
-): Promise<CategoryMonthActivity[]> {
-  const [rows, accounts] = await Promise.all([
-    loadReportRows(database, window),
-    loadReportAccounts(database, window.userId),
-  ]);
-  const results: CategoryMonthActivity[] = [];
+/** One `(month, category, currency)` cell, with the post-netting transactions it was summed from. */
+export interface CategoryMonthCellWithLines extends CategoryMonthActivity {
+  /**
+   * `LineActivity.transactions` for the cell: transfers already out, refunds already in the purchase's category.
+   * Summing these **is** `amount`; bucketing them by merchant (`rowsById`) is how the Cash Flow hub's merchant
+   * breakdown (WP 10.10) and the Sankey's merchant split agree with the category figure for free.
+   */
+  readonly lines: readonly EnvelopeTransaction[];
+}
 
-  for (const { month, currency, byCategory } of monthActualsOf(rows, accounts)) {
+/**
+ * The cells of `rows` — `monthActualsOf`'s split, each line summed. Pure: the window is whatever rows the caller
+ * read (`categoryOfPurchase` spans exactly them, so a figure is always "Reports over the window these rows are").
+ * `computeCategoryMonthActivity` is this over `loadReportRowsInOneRead`; the Cash Flow hub (`cash-flow.ts`) calls it
+ * once per period window over rows it has already read.
+ */
+export function categoryMonthCellsOf(
+  rows: readonly ReportRow[],
+  accounts: readonly ReportAccount[],
+  purchases?: ReadonlyMap<string, string | null>,
+): CategoryMonthCellWithLines[] {
+  const results: CategoryMonthCellWithLines[] = [];
+  for (const { month, currency, byCategory } of monthActualsOf(rows, accounts, purchases)) {
     for (const activity of byCategory.values()) {
       results.push({
         month,
@@ -119,18 +126,41 @@ export async function computeCategoryMonthActivity(
         transactionCount: activity.transactionCount,
         transferExcludedCount: activity.transferExcludedCount,
         refundNettedCount: activity.refundNettedCount,
+        lines: activity.transactions,
       });
     }
   }
-
   return results;
 }
 
+/**
+ * Every `(month, category, currency)` cell in the window, transfers excluded,
+ * refunds netted. Callers split this into a spending report and an income
+ * report by joining `categoryId` against `@ctx/categorization`'s `kind` — this
+ * function does not import that context (an `apps/` file may, but doing the
+ * join here would make this the one place both call, and a caller that wants
+ * only spending would still pay for loading every category to find out).
+ *
+ * Reads through `loadReportRowsInOneRead` (WP 10.10; V2 measured the pace's dense p95 217 → 100 ms on the switch):
+ * the same filters and the same rows as the paged `loadReportRows`, one statement.
+ * `apps/api/test/db/cash-flow-routes.test.ts` asserts every cell is unchanged against the paged reader.
+ */
+export async function computeCategoryMonthActivity(
+  database: LedgerDatabase,
+  window: ReportWindow,
+): Promise<CategoryMonthActivity[]> {
+  const [rows, accounts] = await Promise.all([
+    loadReportRowsInOneRead(database, window),
+    loadReportAccounts(database, window.userId),
+  ]);
+  return categoryMonthCellsOf(rows, accounts).map(({ lines: _lines, ...cell }) => cell);
+}
+
 /** `computeCategoryMonthActivity` restricted to categories that spend money. */
-export function spendingRowsOf(
-  cells: readonly CategoryMonthActivity[],
+export function spendingRowsOf<T extends CategoryMonthActivity>(
+  cells: readonly T[],
   incomeCategoryIds: ReadonlySet<string>,
-): CategoryMonthActivity[] {
+): T[] {
   return cells.filter((cell) => {
     if (cell.categoryId === null) return !Money.isPositive(cell.amount);
     return !incomeCategoryIds.has(cell.categoryId);
@@ -138,10 +168,10 @@ export function spendingRowsOf(
 }
 
 /** `computeCategoryMonthActivity` restricted to categories that bring money in. */
-export function incomeRowsOf(
-  cells: readonly CategoryMonthActivity[],
+export function incomeRowsOf<T extends CategoryMonthActivity>(
+  cells: readonly T[],
   incomeCategoryIds: ReadonlySet<string>,
-): CategoryMonthActivity[] {
+): T[] {
   return cells.filter((cell) => {
     if (cell.categoryId === null) return Money.isPositive(cell.amount);
     return incomeCategoryIds.has(cell.categoryId);

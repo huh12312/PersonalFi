@@ -31,12 +31,15 @@ describe('toTransactionsSearch', () => {
     );
   });
 
-  it('drops merchantIds — transactionsSearchSchema has no field for it (documented open item)', () => {
-    const result = toTransactionsSearch({
-      merchantIds: ['merch_1'],
-      from: '2026-08-01',
-      to: '2026-09-01',
-    });
-    expect(result).not.toHaveProperty('merchantIds');
+  it('carries merchantIds and uncategorized through (WP 10.10 closed the open item)', () => {
+    expect(
+      toTransactionsSearch({ merchantIds: ['merch_1'], from: '2026-08-01', to: '2026-09-01' }),
+    ).toEqual({ merchantIds: ['merch_1'], from: '2026-08-01', to: '2026-09-01' });
+    expect(
+      toTransactionsSearch({ uncategorized: true, from: '2026-08-01', to: '2026-09-01' }),
+    ).toEqual({ uncategorized: true, from: '2026-08-01', to: '2026-09-01' });
+    expect(
+      toTransactionsSearch({ uncategorized: false, from: '2026-08-01', to: '2026-09-01' }),
+    ).toEqual({ from: '2026-08-01', to: '2026-09-01' });
   });
 });

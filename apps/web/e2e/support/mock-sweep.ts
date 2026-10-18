@@ -6,6 +6,7 @@ import { installAdvisorMocks } from './mock-advisors.ts';
 import { installApiMocks, MANUAL_CONNECTOR } from './mock-api.ts';
 import { installBriefMocks } from './mock-brief.ts';
 import { installBudgetMocks } from './mock-budget.ts';
+import { installCashFlowMocks } from './mock-cash-flow.ts';
 import { installDashboardMocks } from './mock-dashboard.ts';
 import { installGoalsMocks } from './mock-goals.ts';
 import { installInvestmentsMocks } from './mock-investments.ts';
@@ -75,6 +76,8 @@ export async function installSweepMocks(
   await installGoalsMocks(page);
   // WP 10.9: the dashboard's layout and spending pace (its other widgets read the layers above and below).
   await installDashboardMocks(page);
+  // WP 10.10: the Cash Flow hub (its Flow and Categories displays read the budget layer's reports mocks).
+  await installCashFlowMocks(page);
   const base = await installApiMocks(page);
   await installAdvisorMocks(page, base);
   await installBriefMocks(page, { standalone: false });

@@ -18,6 +18,8 @@ import type { ListTransactionsData } from '../../api/generated/types.gen.ts';
 export const transactionsSearchSchema = z.object({
   accounts: z.array(z.string()).optional(),
   categoryIds: z.array(z.string()).optional(),
+  /** WP 10.10: a Cash Flow merchant row (or a Sankey merchant band) drills to exactly that merchant. */
+  merchantIds: z.array(z.string()).optional(),
   from: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -50,6 +52,7 @@ export function hasActiveFilters(search: TransactionsSearch): boolean {
   return (
     (search.accounts?.length ?? 0) > 0 ||
     (search.categoryIds?.length ?? 0) > 0 ||
+    (search.merchantIds?.length ?? 0) > 0 ||
     search.from !== undefined ||
     search.to !== undefined ||
     search.amountMin !== undefined ||
@@ -77,6 +80,9 @@ export function toTransactionsQuery(
       : {}),
     ...(search.categoryIds !== undefined && search.categoryIds.length > 0
       ? { categoryIds: search.categoryIds }
+      : {}),
+    ...(search.merchantIds !== undefined && search.merchantIds.length > 0
+      ? { merchantIds: search.merchantIds }
       : {}),
     ...(search.from !== undefined ? { from: search.from } : {}),
     ...(search.to !== undefined ? { to: search.to } : {}),

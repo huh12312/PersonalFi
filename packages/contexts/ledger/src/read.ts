@@ -178,47 +178,249 @@ export async function listAggregateRowsInWindow(
     };
   },
 ): Promise<LedgerAggregateRow[]> {
-  const rows = await executor
-    .select({
-      id: transactions.id,
-      accountId: transactions.accountId,
-      effectiveDate: transactions.effectiveDate,
-      effectiveAmountMinor: transactions.effectiveAmountMinor,
-      effectiveCurrency: transactions.effectiveCurrency,
-      userCategoryId: transactions.userCategoryId,
-      ruleCategoryId: transactions.ruleCategoryId,
-      effectiveMerchantId: transactions.effectiveMerchantId,
-      isTransfer: transactions.isTransfer,
-      transferLinkId: transactions.transferLinkId,
-      refundOfId: transactions.refundOfId,
-      userExcluded: transactions.userExcluded,
-      pending: transactions.pending,
-    })
-    .from(transactions)
-    .where(and(...filterConditions(input.userId, input.filters)))
-    .orderBy(desc(transactions.effectiveDate), desc(transactions.id));
-  return rows.map((row) => ({
-    id: row.id,
-    accountId: row.accountId,
-    date: dateOnlyOf(row.effectiveDate),
-    amount: moneyOf(row.effectiveAmountMinor, row.effectiveCurrency),
-    // `effectiveOf`'s own rule: the overlay's category, else the rule tier's (only `userCategoryId` is read).
-    categoryId: resolveCategoryId(
-      {
-        userNote: null,
-        userExcluded: row.userExcluded,
-        userCategoryId: row.userCategoryId,
-        userMerchantName: null,
-      },
-      { ruleCategoryId: row.ruleCategoryId },
-    ),
-    merchantId: row.effectiveMerchantId,
-    isTransfer: row.isTransfer,
-    transferLinkId: row.transferLinkId,
-    refundOfId: row.refundOfId,
-    excluded: row.userExcluded,
-    pending: row.pending,
-  }));
+  return selectAggregateRows(executor, input);
+}
+
+async function selectAggregateRows(
+  executor: LedgerExecutor,
+  input: {
+    readonly userId: string;
+    readonly filters: TransactionFilters & {
+      readonly dateFrom: DateOnlyType;
+      readonly dateTo: DateOnlyType;
+    };
+  },
+  extra?: SQL,
+): Promise<LedgerAggregateRow[]> {
+  // A plain statement through `execute` (WP 10.10), not the query builder: on 31,000 rows the builder's own result
+  // mapping was ~70 of ~195 ms (`apps/api/test/db/cash-flow-http-perf.test.ts`'s dense year). Same columns, same
+  // conditions (`filterConditions`), same order; the `@core/db` type parsers still make `int8` a `bigint` and `DATE`
+  // the `YYYY-MM-DD` text, so the mapping below is the builder path's, field for field (`test/read.test.ts`).
+  const result = await executor.execute<{
+    id: string;
+    account_id: string;
+    effective_date: string;
+    effective_amount_minor: bigint;
+    effective_currency: string;
+    user_category_id: string | null;
+    rule_category_id: string | null;
+    effective_merchant_id: string | null;
+    is_transfer: boolean;
+    transfer_link_id: string | null;
+    refund_of_id: string | null;
+    user_excluded: boolean;
+    pending: boolean;
+  }>(sql`
+    SELECT ${transactions.id} AS id,
+           ${transactions.accountId} AS account_id,
+           ${transactions.effectiveDate} AS effective_date,
+           ${transactions.effectiveAmountMinor} AS effective_amount_minor,
+           ${transactions.effectiveCurrency} AS effective_currency,
+           ${transactions.userCategoryId} AS user_category_id,
+           ${transactions.ruleCategoryId} AS rule_category_id,
+           ${transactions.effectiveMerchantId} AS effective_merchant_id,
+           ${transactions.isTransfer} AS is_transfer,
+           ${transactions.transferLinkId} AS transfer_link_id,
+           ${transactions.refundOfId} AS refund_of_id,
+           ${transactions.userExcluded} AS user_excluded,
+           ${transactions.pending} AS pending
+      FROM ${transactions}
+     WHERE ${and(...filterConditions(input.userId, input.filters), extra)}
+     ORDER BY ${transactions.effectiveDate} DESC, ${transactions.id} DESC
+  `);
+  // `CHAR(3)` arrives padded; a ledger holds a handful of currencies, so each is validated once, not per row.
+  const currencies = new Map<string, Money['currency']>();
+  return result.rows.map((row) => {
+    let code = currencies.get(row.effective_currency);
+    if (code === undefined) {
+      code = moneyOf(0n, row.effective_currency).currency;
+      currencies.set(row.effective_currency, code);
+    }
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      // The `DATE` parser hands over the column's own ISO text, which is a DateOnly by construction.
+      date: row.effective_date as DateOnlyType,
+      amount: moneyOf(row.effective_amount_minor, code),
+      // `effectiveOf`'s own rule: the overlay's category, else the rule tier's (only `userCategoryId` is read).
+      categoryId: resolveCategoryId(
+        {
+          userNote: null,
+          userExcluded: row.user_excluded,
+          userCategoryId: row.user_category_id,
+          userMerchantName: null,
+        },
+        { ruleCategoryId: row.rule_category_id },
+      ),
+      merchantId: row.effective_merchant_id,
+      isTransfer: row.is_transfer,
+      transferLinkId: row.transfer_link_id,
+      refundOfId: row.refund_of_id,
+      excluded: row.user_excluded,
+      pending: row.pending,
+    };
+  });
+}
+
+/**
+ * Rows `computeActuals` treats identically, summed (WP 10.10): same account, currency, category tiers, merchant,
+ * transfer flag, transfer-link presence and exclusion, in the same **segment** of the same month — a month is split at each date in
+ * `cuts` that falls inside it, so a window ending on a cut or on a month end contains whole segments only. `date` is
+ * the segment's last day; `count` is how many rows it sums.
+ *
+ * Refunds, and every row a refund names (`refund_of_id`), are **left out** — they are the rows whose treatment
+ * depends on another row — and come back one by one from `listRefundLinkedRowsInWindow` over the same window: the two
+ * reads partition `listAggregateRowsInWindow`'s rows exactly (`test/read.test.ts`). For an aggregate over a long
+ * window whose rows need no identity of their own (the Cash Flow hub's history: 50,000 dense rows read and parsed in
+ * ~200 ms, summed in Postgres to a few thousand).
+ */
+export interface LedgerAggregateSum {
+  readonly accountId: string;
+  readonly date: DateOnlyType;
+  readonly amount: Money;
+  readonly categoryId: string | null;
+  readonly merchantId: string | null;
+  readonly isTransfer: boolean;
+  readonly linked: boolean;
+  readonly excluded: boolean;
+  readonly count: number;
+}
+
+/**
+ * "A refund, or a row some refund names": the rows whose treatment depends on another row. The named rows are one
+ * hashed sub-plan over the refund index, not a probe per row.
+ */
+function refundLinked(userId: string): SQL {
+  return sql`(${transactions.refundOfId} IS NOT NULL OR ${transactions.id} IN (
+    SELECT refund.refund_of_id FROM ${transactions} AS refund
+     WHERE refund.user_id = ${userId} AND refund.refund_of_id IS NOT NULL))`;
+}
+
+/**
+ * The segment a row's date falls in: the first cut on or after it in its month, else its month. Returned as the cut
+ * itself, or as the month's **first** day (`date - (day - 1)`: integer date arithmetic — `date_trunc` would go through
+ * `timestamptz` for every row) with `is_cut` false; the caller turns a month into its last day.
+ */
+function segmentOf(cuts: readonly DateOnlyType[]): {
+  readonly key: SQL;
+  readonly isCut: SQL;
+  readonly join: SQL;
+} {
+  const sorted = [...new Set(cuts)].sort();
+  const monthStart = sql`(${transactions.effectiveDate} - (EXTRACT(DAY FROM ${transactions.effectiveDate})::int - 1))`;
+  if (sorted.length === 0) return { key: monthStart, isCut: sql`false`, join: sql`` };
+  const months = sorted.map((cut) => DateOnly.startOfMonth(cut));
+  if (new Set(months).size === months.length) {
+    // One cut per month (the hub's counterparts never share a month): a hashed join on the month, not a CASE
+    // branch per cut evaluated for every row.
+    const values = sorted.map((cut) => sql`(${DateOnly.startOfMonth(cut)}::date, ${cut}::date)`);
+    return {
+      key: sql`COALESCE(segment_cut.day, ${monthStart})`,
+      isCut: sql`(segment_cut.day IS NOT NULL)`,
+      join: sql`LEFT JOIN (VALUES ${sql.join(values, sql`, `)}) AS segment_cut(month_start, day)
+                  ON segment_cut.month_start = ${monthStart} AND ${transactions.effectiveDate} <= segment_cut.day`,
+    };
+  }
+  const range = (cut: DateOnlyType) =>
+    sql`${transactions.effectiveDate} BETWEEN ${DateOnly.startOfMonth(cut)}::date AND ${cut}::date`;
+  const keys = sorted.map((cut) => sql`WHEN ${range(cut)} THEN ${cut}::date`);
+  const flags = sorted.map((cut) => sql`WHEN ${range(cut)} THEN true`);
+  return {
+    key: sql`CASE ${sql.join(keys, sql` `)} ELSE ${monthStart} END`,
+    isCut: sql`CASE ${sql.join(flags, sql` `)} ELSE false END`,
+    join: sql``,
+  };
+}
+
+export async function listAggregateSumsInWindow(
+  executor: LedgerExecutor,
+  input: {
+    readonly userId: string;
+    readonly filters: TransactionFilters & {
+      readonly dateFrom: DateOnlyType;
+      readonly dateTo: DateOnlyType;
+    };
+    readonly cuts: readonly DateOnlyType[];
+  },
+): Promise<LedgerAggregateSum[]> {
+  const segment = segmentOf(input.cuts);
+  const result = await executor.execute<{
+    account_id: string;
+    segment: string;
+    is_cut: boolean;
+    effective_currency: string;
+    user_category_id: string | null;
+    rule_category_id: string | null;
+    effective_merchant_id: string | null;
+    is_transfer: boolean;
+    linked: boolean;
+    user_excluded: boolean;
+    sum_minor: bigint;
+    n: bigint;
+  }>(sql`
+    SELECT ${transactions.accountId} AS account_id,
+           ${segment.key} AS segment,
+           ${segment.isCut} AS is_cut,
+           ${transactions.effectiveCurrency} AS effective_currency,
+           ${transactions.userCategoryId} AS user_category_id,
+           ${transactions.ruleCategoryId} AS rule_category_id,
+           ${transactions.effectiveMerchantId} AS effective_merchant_id,
+           ${transactions.isTransfer} AS is_transfer,
+           (${transactions.transferLinkId} IS NOT NULL) AS linked,
+           ${transactions.userExcluded} AS user_excluded,
+           sum(${transactions.effectiveAmountMinor})::bigint AS sum_minor,
+           count(*)::bigint AS n
+      FROM ${transactions}
+      ${segment.join}
+     WHERE ${and(...filterConditions(input.userId, input.filters))}
+       AND NOT ${refundLinked(input.userId)}
+     GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+  `);
+  // No ORDER BY: it turned a hash aggregate into a sort of every row (68 → 33 ms on 25,000 dense rows), and a sum's
+  // order means nothing — the amounts are exact and a sum has no identity.
+  const currencies = new Map<string, Money['currency']>();
+  return result.rows.map((row) => {
+    let code = currencies.get(row.effective_currency);
+    if (code === undefined) {
+      code = moneyOf(0n, row.effective_currency).currency;
+      currencies.set(row.effective_currency, code);
+    }
+    return {
+      accountId: row.account_id,
+      date: row.is_cut
+        ? (row.segment as DateOnlyType)
+        : DateOnly.endOfMonth(row.segment as DateOnlyType),
+      amount: moneyOf(BigInt(row.sum_minor), code),
+      categoryId: resolveCategoryId(
+        {
+          userNote: null,
+          userExcluded: row.user_excluded,
+          userCategoryId: row.user_category_id,
+          userMerchantName: null,
+        },
+        { ruleCategoryId: row.rule_category_id },
+      ),
+      merchantId: row.effective_merchant_id,
+      isTransfer: row.is_transfer,
+      linked: row.linked,
+      excluded: row.user_excluded,
+      count: Number(row.n),
+    };
+  });
+}
+
+/** The complement of `listAggregateSumsInWindow`: refunds and the rows refunds name, one by one. */
+export async function listRefundLinkedRowsInWindow(
+  executor: LedgerExecutor,
+  input: {
+    readonly userId: string;
+    readonly filters: TransactionFilters & {
+      readonly dateFrom: DateOnlyType;
+      readonly dateTo: DateOnlyType;
+    };
+  },
+): Promise<LedgerAggregateRow[]> {
+  return selectAggregateRows(executor, input, refundLinked(input.userId));
 }
 
 /** Count matching rows. Separate from the page on purpose: it is the slow half. */
@@ -576,6 +778,23 @@ export async function listForCategorization(
         ? encodeCursor(last.transaction.effectiveDate, last.transaction.id)
         : null,
   };
+}
+
+/**
+ * The display name of each named merchant, this holder's only (WP 10.10: the Cash Flow hub's merchant breakdown
+ * labels the merchant ids its rows carry). An id that is not this holder's, or no longer exists, is simply absent
+ * from the map: the caller says "Unknown merchant", never another holder's name.
+ */
+export async function merchantDisplayNames(
+  executor: LedgerExecutor,
+  input: { readonly userId: string; readonly ids: readonly string[] },
+): Promise<Map<string, string>> {
+  if (input.ids.length === 0) return new Map();
+  const rows = await executor
+    .select({ id: merchants.id, displayName: merchants.displayName })
+    .from(merchants)
+    .where(and(eq(merchants.userId, input.userId), inArray(merchants.id, [...new Set(input.ids)])));
+  return new Map(rows.map((row) => [row.id, row.displayName] as const));
 }
 
 /**

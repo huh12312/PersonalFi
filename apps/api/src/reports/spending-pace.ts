@@ -108,7 +108,7 @@ function lengthOf(first: DateOnlyType): number {
 }
 
 /** Half-even division of exact integers; `denominator > 0`. */
-function divideHalfEven(numerator: bigint, denominator: bigint): bigint {
+export function divideHalfEven(numerator: bigint, denominator: bigint): bigint {
   const quotient = numerator / denominator;
   const remainder = numerator - quotient * denominator;
   if (remainder === 0n) return quotient;
@@ -162,13 +162,14 @@ export function cumulativeSpendByDay(
   return out;
 }
 
-function pickCurrency(
+export function pickCurrency(
   rows: readonly ReportRow[],
   accounts: readonly ReportAccount[],
+  weightOf: (id: string) => number = () => 1,
 ): { readonly currency: string | null; readonly others: string[] } {
   const counts = new Map<string, number>();
   for (const row of rows)
-    counts.set(row.amount.currency, (counts.get(row.amount.currency) ?? 0) + 1);
+    counts.set(row.amount.currency, (counts.get(row.amount.currency) ?? 0) + weightOf(row.id));
   if (counts.size === 0) {
     // No row anywhere in the window: name the currency the holder's budgeted accounts are in, if any, so the
     // empty response still says what it would have been in.

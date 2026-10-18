@@ -168,7 +168,7 @@ describe('ReportsScreen', () => {
     expect(rowLink.getAttribute('href')).toContain('/transactions');
   });
 
-  it('renders the Sankey diagram with a clickable, labelled flow', async () => {
+  it('renders the Sankey diagram, every flow a drill-through link in its table', async () => {
     stubFetchRoutes(commonRoutes());
     renderReports();
     const user = userEvent.setup();
@@ -176,8 +176,11 @@ describe('ReportsScreen', () => {
     await screen.findByRole('heading', { name: 'Reports', level: 1 });
     await user.click(screen.getByRole('tab', { name: 'Cash flow' }));
 
-    expect(
-      await screen.findByRole('link', { name: /Flow from income to coffee/ }),
-    ).toBeInTheDocument();
+    // WP 10.10: the bands are pointer targets (they overlap, so a focused one could never be unobscured); the
+    // keyboard's drill-through is the chart's table, one link per flow, named by the flow's destination.
+    await user.click(await screen.findByRole('button', { name: /View as table.*Cash flow/ }));
+    const link = await screen.findByRole('link', { name: /, view transactions$/ });
+    expect(link.getAttribute('href')).toContain('/transactions');
+    expect(document.querySelectorAll('[data-flow]').length).toBeGreaterThan(0);
   });
 });

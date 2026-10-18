@@ -24,6 +24,8 @@ import {
   listAccounts,
   listTransactions,
   listAggregateRowsInWindow,
+  listAggregateSumsInWindow,
+  listRefundLinkedRowsInWindow,
   type LedgerDatabase,
   type LedgerTransaction,
 } from '@ctx/ledger';
@@ -136,6 +138,58 @@ export async function loadReportRowsInOneRead(
     userId: window.userId,
     filters: reportFilters(window),
   });
+}
+
+/** A `ReportRow` that stands for `count` rows `computeActuals` treats identically (`listAggregateSumsInWindow`). */
+export interface ReportSum {
+  readonly row: ReportRow;
+  readonly count: number;
+}
+
+/**
+ * The rows of a window, for a caller that needs no row's identity except where a refund makes it matter (WP 10.10,
+ * the Cash Flow hub): refunds and the purchases they name one by one, everything else summed by account,
+ * currency, category, merchant, transfer flag, link presence and exclusion within each segment of each month (`cuts` split a
+ * month; a window may end only on a cut or a month end). Every summed row stands in a `ReportRow` with a synthetic
+ * id, the group's merchant and `transferLinkId` set exactly when the summed rows had one — `computeActuals` reads only that it
+ * is non-null — so `categoryMonthCellsOf` over these rows gives the same amounts as over the rows themselves
+ * (`apps/api/test/cash-flow.test.ts` asserts it for every window; `cash-flow-routes.test.ts` against Reports).
+ */
+export async function loadReportHistoryInOneRead(
+  database: LedgerDatabase,
+  window: ReportWindow,
+  cuts: readonly DateOnly[],
+): Promise<{ readonly rows: ReportRow[]; readonly sums: ReportSum[] }> {
+  const [rows, sums] = await Promise.all([
+    listRefundLinkedRowsInWindow(database, {
+      userId: window.userId,
+      filters: reportFilters(window),
+    }),
+    listAggregateSumsInWindow(database, {
+      userId: window.userId,
+      filters: reportFilters(window),
+      cuts,
+    }),
+  ]);
+  return {
+    rows,
+    sums: sums.map((sum, index) => ({
+      count: sum.count,
+      row: {
+        id: `sum:${String(index)}`,
+        accountId: sum.accountId,
+        date: sum.date,
+        amount: sum.amount,
+        categoryId: sum.categoryId,
+        merchantId: sum.merchantId,
+        isTransfer: sum.isTransfer,
+        transferLinkId: sum.linked ? 'linked' : null,
+        refundOfId: null,
+        excluded: sum.excluded,
+        pending: false,
+      },
+    })),
+  };
 }
 
 /** Every account this user has, reduced to what `computeActuals` needs to see. */
