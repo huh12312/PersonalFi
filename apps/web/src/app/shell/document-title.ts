@@ -14,6 +14,7 @@ export function titleForPath(pathname: string): string {
   if (pathname === '/reports') return 'Reports';
   if (pathname.startsWith('/accounts/')) return 'Account';
   if (pathname.startsWith('/health/')) return 'Financial health';
+  if (pathname.startsWith('/categories/')) return 'Category';
   return 'PersonalFi';
 }
 

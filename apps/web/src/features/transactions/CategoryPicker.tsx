@@ -14,6 +14,7 @@ import {
   ComboboxList,
   ComboboxPortal,
 } from '../../components/ui/combobox.tsx';
+import { CategoryIcon } from '../../components/finance/CategoryIcon.tsx';
 import { CreateCategoryDialog } from '../categories/CreateCategoryDialog.tsx';
 import { useCategories } from '../categories/useCategories.ts';
 
@@ -34,7 +35,14 @@ const CLEAR_ITEM: Category = {
   hue: 'teal',
   // WP 10.11: a pseudo-row is never classified.
   variability: null,
+  // WP 10.14: no emoji of its own; drawn with the uncategorised default (see `iconSourceOf`).
+  emoji: null,
 };
+
+/** The icon a picker row draws: the clear row borrows the uncategorised default (❔), every other row its own. */
+function iconSourceOf(category: Category) {
+  return category.key === '__clear__' ? { ...category, key: 'uncategorised' } : category;
+}
 
 /**
  * The group heading, with its `kind` when the kind is news.
@@ -164,7 +172,10 @@ export function CategoryPicker({ value, onChange, disabled, id, className }: Cat
                 <ComboboxCollection>
                   {(category: Category) => (
                     <ComboboxItem key={category.id} value={category}>
-                      {category.label}
+                      <span className="flex items-center gap-2">
+                        <CategoryIcon category={iconSourceOf(category)} size="xs" />
+                        {category.label}
+                      </span>
                     </ComboboxItem>
                   )}
                 </ComboboxCollection>

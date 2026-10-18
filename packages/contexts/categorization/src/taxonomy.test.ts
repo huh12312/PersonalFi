@@ -4,6 +4,7 @@
  * by hand. These are the tripwires for a hand edit that breaks an invariant the
  * engine relies on but does not check at runtime.
  */
+import { CATEGORY_DEFAULT_EMOJI, defaultEmojiForKey, isSingleEmoji } from '@core/kernel';
 import { describe, expect, it } from 'vitest';
 import {
   FLAT_TAXONOMY,
@@ -202,5 +203,30 @@ describe('the MCC table', () => {
     expect(lookupMcc('5912')?.categoryKey).toBe('health.pharmacy');
     expect(lookupMcc('7011')?.categoryKey).toBe('travel.lodging');
     expect(lookupMcc('3000')?.categoryKey).toBe('travel.flights');
+  });
+});
+
+describe('the default emoji (WP 10.14)', () => {
+  // `CATEGORY_DEFAULT_EMOJI` lives in @core/kernel (the web reads the same table) and is keyed by taxonomy key, so a
+  // key added to or renamed in `taxonomy.ts` without an emoji would quietly fall back to initials. A display
+  // fallback only: nothing writes it to `categories.emoji` (migration 0050).
+  it('has an entry for every key of the taxonomy', () => {
+    const missing = FLAT_TAXONOMY.map((entry) => entry.key).filter(
+      (key) => !Object.hasOwn(CATEGORY_DEFAULT_EMOJI, key),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('has no key the taxonomy lacks', () => {
+    const keys = new Set(FLAT_TAXONOMY.map((entry) => entry.key));
+    expect(Object.keys(CATEGORY_DEFAULT_EMOJI).filter((key) => !keys.has(key))).toEqual([]);
+  });
+
+  it('gives every key exactly one emoji', () => {
+    for (const [key, emoji] of Object.entries(CATEGORY_DEFAULT_EMOJI)) {
+      expect(isSingleEmoji(emoji), `${key}: ${emoji}`).toBe(true);
+      expect(defaultEmojiForKey(key)).toBe(emoji);
+    }
+    expect(defaultEmojiForKey('my_custom_category'), 'a custom key keeps its initials').toBeNull();
   });
 });

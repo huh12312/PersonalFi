@@ -160,7 +160,7 @@ describe('ReportsScreen', () => {
     expect(await screen.findByLabelText('Spending by category and month')).toBeInTheDocument();
   });
 
-  it('shows the budget-vs-actual table with a drill-through link per row', async () => {
+  it('shows the budget-vs-actual table with a category link and a drill-through link per row', async () => {
     stubFetchRoutes(commonRoutes());
     renderReports();
     const user = userEvent.setup();
@@ -168,8 +168,11 @@ describe('ReportsScreen', () => {
     await screen.findByRole('heading', { name: 'Reports', level: 1 });
     await user.click(screen.getByRole('tab', { name: 'Budget vs. actual' }));
 
+    // WP 10.14: the name opens the category's screen; the row's transactions are the link beside it.
     const rowLink = await screen.findByRole('link', { name: 'Coffee Shops' });
-    expect(rowLink.getAttribute('href')).toContain('/transactions');
+    expect(rowLink.getAttribute('href')).toContain('/categories/');
+    const drill = screen.getByRole('link', { name: 'transactions in Coffee Shops' });
+    expect(drill.getAttribute('href')).toContain('/transactions');
   });
 
   it('renders the Sankey diagram, every flow a drill-through link in its table', async () => {

@@ -10,6 +10,7 @@ import type { ReportCategoryMonthCell } from '../../../api/generated/types.gen.t
 import { categoryHue, chartFillVar, type FillHue } from '../../../components/finance/chart-hue.ts';
 import { toTransactionsSearch } from '../drill-through.ts';
 import { ChartDataTable } from '../../../components/patterns/ChartDataTable.tsx';
+import { CategoryNameLink } from '../../categories/CategoryNameLink.tsx';
 import { Money } from '../../../components/finance/Money.tsx';
 import { ScrollRegion } from '../../../components/patterns/ScrollRegion.tsx';
 
@@ -184,7 +185,12 @@ export function CategoryMonthBarChart({
           .sort((a, b) => a.month.localeCompare(b.month))
           .map((cell) => [
             cell.month,
-            labelFor?.(cell.categoryId) ?? cell.categoryId ?? 'Uncategorised',
+            // WP 10.14: the category's icon and a link to its screen.
+            <CategoryNameLink
+              key={`name-${cell.month}-${cell.categoryId ?? 'none'}`}
+              categoryId={cell.categoryId}
+              label={labelFor?.(cell.categoryId) ?? cell.categoryId ?? 'Uncategorised'}
+            />,
             <Money
               key={`${cell.month}-${cell.categoryId ?? 'none'}`}
               value={cell.amount}

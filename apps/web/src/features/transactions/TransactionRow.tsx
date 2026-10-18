@@ -3,6 +3,8 @@ import { ArrowLeftRight, EyeOff } from 'lucide-react';
 import { memo } from 'react';
 import type { CSSProperties } from 'react';
 
+import { CategoryIcon } from '../../components/finance/CategoryIcon.tsx';
+import type { CategoryIconSource } from '../../components/finance/category-icon.ts';
 import { Money } from '../../components/finance/Money.tsx';
 import { Badge } from '../../components/ui/badge.tsx';
 import { formatDateOnlyShort } from '../../lib/date.ts';
@@ -11,6 +13,8 @@ import type { Transaction } from '../../api/generated/types.gen.ts';
 export interface TransactionRowProps {
   transaction: Transaction;
   accountName: string;
+  /** WP 10.14: the row's category (icon + name); null = uncategorised. Undefined while the chart is loading. */
+  category?: CategoryIconSource | null;
   index: number;
   selected: boolean;
   isFocused: boolean;
@@ -37,6 +41,7 @@ export interface TransactionRowProps {
 function TransactionRowImpl({
   transaction,
   accountName,
+  category,
   index,
   selected,
   isFocused,
@@ -79,6 +84,17 @@ function TransactionRowImpl({
         {formatDateOnlyShort(transaction.date)}
       </div>
 
+      <div role="gridcell" className="shrink-0">
+        {category !== undefined && (
+          <CategoryIcon
+            category={
+              category ?? { id: null, key: 'uncategorised', label: 'Uncategorized', isSystem: true }
+            }
+            size="sm"
+          />
+        )}
+      </div>
+
       <div role="gridcell" className="min-w-0 flex-1">
         <div className="flex items-center gap-2 truncate text-body font-medium text-text-primary">
           <span className="truncate">{transaction.merchantName ?? transaction.name}</span>
@@ -106,7 +122,11 @@ function TransactionRowImpl({
             </Badge>
           )}
         </div>
-        <div className="truncate text-small text-text-muted">{accountName}</div>
+        <div className="truncate text-small text-text-muted">
+          {category === undefined
+            ? accountName
+            : `${category?.label ?? 'Uncategorized'} · ${accountName}`}
+        </div>
       </div>
 
       <div role="gridcell" className="shrink-0 text-right">

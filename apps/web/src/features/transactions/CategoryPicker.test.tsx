@@ -44,6 +44,13 @@ async function openCombobox(user: ReturnType<typeof userEvent.setup>): Promise<H
   return input;
 }
 
+/** An option's name as assistive tech hears it: its text without the aria-hidden category icon (WP 10.14). */
+function nameOf(option: HTMLElement): string | null {
+  const copy = option.cloneNode(true) as HTMLElement;
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
+  return copy.textContent;
+}
+
 describe('CategoryPicker', () => {
   beforeEach(() => {
     ensureApiClient();
@@ -70,22 +77,19 @@ describe('CategoryPicker', () => {
     // Every assignable category the server sent is reachable as an option,
     // plus the synthetic "Uncategorized" row standing in for `null`.
     const assignable = TEST_CATEGORIES.filter((category) => category.assignable);
-    const optionNames = screen.getAllByRole('option').map((option) => option.textContent);
+    const optionNames = screen.getAllByRole('option').map(nameOf);
     expect(optionNames).toEqual(['Uncategorized', ...assignable.map((category) => category.label)]);
 
     // Grouped parent → children, in the server's order.
     const diningGroup = screen.getByRole('group', { name: 'Dining' });
-    expect(
-      within(diningGroup)
-        .getAllByRole('option')
-        .map((o) => o.textContent),
-    ).toEqual(['Restaurants', 'Coffee Shops']);
+    expect(within(diningGroup).getAllByRole('option').map(nameOf)).toEqual([
+      'Restaurants',
+      'Coffee Shops',
+    ]);
     const transfersGroup = screen.getByRole('group', { name: 'Transfers · transfer' });
-    expect(
-      within(transfersGroup)
-        .getAllByRole('option')
-        .map((o) => o.textContent),
-    ).toEqual(['Internal Transfer']);
+    expect(within(transfersGroup).getAllByRole('option').map(nameOf)).toEqual([
+      'Internal Transfer',
+    ]);
 
     // `uncategorised` is top-level and childless in the real taxonomy, so it
     // sits in a headless group and must still be offered.

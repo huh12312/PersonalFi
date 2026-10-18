@@ -32,7 +32,14 @@
  * every boot is what makes a category added in v0.3 appear for a user created in
  * v0.1, and it costs one pass over ~130 rows that almost always writes nothing.
  */
-import { hueForId, isChartHue, newId, type ChartHue, type Clock } from '@core/kernel';
+import {
+  hueForId,
+  isChartHue,
+  isSingleEmoji,
+  newId,
+  type ChartHue,
+  type Clock,
+} from '@core/kernel';
 import { sql } from 'drizzle-orm';
 import type { CategorizationExecutor } from './db.ts';
 import { CategorizationError } from './errors.ts';
@@ -63,6 +70,13 @@ export interface UserCategory {
    * `GET /categories/variability-suggestions`), and only `PATCH /categories/{id}` writes it.
    */
   readonly variability: CategoryVariability | null;
+  /**
+   * One emoji the holder chose (WP 10.14, migration 0050), or `null` when none is set. The **stored** value only:
+   * a read never seeds it the way it seeds `hue`, so `null` here means the holder has not chosen one, and the web
+   * draws the shipped default for the key (`CATEGORY_DEFAULT_EMOJI`) or the initials. Written only by
+   * `createCategory`, `renameCategory` and an import, each through `isSingleEmoji`.
+   */
+  readonly emoji: string | null;
   readonly sort: number;
   /**
    * `true` for a row this taxonomy installed, `false` for one the user created.
@@ -112,6 +126,7 @@ export async function listCategories(
     icon: string;
     hue: string | null;
     variability: string | null;
+    emoji: string | null;
     sort: number;
     is_system: boolean;
     /**
@@ -137,6 +152,7 @@ export async function listCategories(
            c.icon,
            c.hue,
            c.variability,
+           c.emoji,
            c.sort,
            c.is_system,
            c.archived_at,
@@ -163,6 +179,8 @@ export async function listCategories(
     icon: row.icon,
     hue: storedHue(row.id, row.hue ?? hues.get(row.id) ?? null),
     variability: storedVariability(row.id, row.variability),
+    // As stored, NULL included: the default emoji is a display fallback and is never written (0050).
+    emoji: row.emoji,
     sort: row.sort,
     isSystem: row.is_system,
     archivedAt: row.archived_at === null ? null : new Date(row.archived_at),
@@ -199,6 +217,23 @@ function storedVariability(categoryId: string, value: string | null): CategoryVa
 
 export function isCategoryVariability(value: unknown): value is CategoryVariability {
   return typeof value === 'string' && (CATEGORY_VARIABILITIES as readonly string[]).includes(value);
+}
+
+/**
+ * An emoji as a write names it: `null` (none / clear) or exactly one emoji by `isSingleEmoji` — one extended
+ * grapheme cluster of emoji code points, at most `MAX_EMOJI_CODE_POINTS` long (0050's CHECK bounds the length;
+ * only this can count graphemes). Anything else is the holder's mistake, `categorization.rule_invalid` (400).
+ */
+function requireEmoji(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !isSingleEmoji(value)) {
+    throw new CategorizationError(
+      'categorization.rule_invalid',
+      'a category emoji must be exactly one emoji',
+      { emoji: value },
+    );
+  }
+  return value;
 }
 
 function requireVariability(value: unknown): CategoryVariability | null {
@@ -397,6 +432,8 @@ export interface CreateCategoryInput {
   readonly hue?: ChartHue;
   /** WP 10.11. Omitted or `null`: unclassified. */
   readonly variability?: CategoryVariability | null;
+  /** WP 10.14. Omitted or `null`: none set (the default is never written). Otherwise exactly one emoji. */
+  readonly emoji?: string | null;
 }
 
 function requireChartHue(hue: unknown): ChartHue {
@@ -439,6 +476,7 @@ export async function createCategory(
   const requestedHue = input.hue === undefined ? undefined : requireChartHue(input.hue);
   const variability =
     input.variability === undefined ? null : requireVariability(input.variability);
+  const emoji = input.emoji === undefined ? null : requireEmoji(input.emoji);
 
   let parentKey: string | null = null;
   let kind: CategoryKind;
@@ -486,11 +524,11 @@ export async function createCategory(
   const hue = requestedHue ?? hueForId(id);
   await executor.execute(sql`
     INSERT INTO categories
-      (id, user_id, parent_id, key, label, description, kind, icon, hue, variability, sort,
+      (id, user_id, parent_id, key, label, description, kind, icon, hue, variability, emoji, sort,
        is_system, created_at, updated_at)
     VALUES (
       ${id}, ${input.userId}, ${input.parentId}, ${key}, ${label}, ${description}, ${kind},
-      ${icon}, ${hue}, ${variability}, 0, FALSE, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz
+      ${icon}, ${hue}, ${variability}, ${emoji}, 0, FALSE, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz
     )
   `);
 
@@ -504,6 +542,7 @@ export async function createCategory(
     icon,
     hue,
     variability,
+    emoji,
     sort: 0,
     isSystem: false,
     archivedAt: null,
@@ -526,10 +565,15 @@ export interface RenameCategoryInput {
    * else is refused (`categorization.rule_invalid`).
    */
   readonly variability?: CategoryVariability | null;
+  /**
+   * WP 10.14. `undefined` leaves it; `null` clears it (the web falls back to the default again); a string must be
+   * exactly one emoji (`isSingleEmoji`), anything else is refused (`categorization.rule_invalid`).
+   */
+  readonly emoji?: string | null;
 }
 
 /**
- * `PATCH /categories/{id}` — rename or re-describe, or (WP 10.8) recolour. Deliberately narrow:
+ * `PATCH /categories/{id}` — rename or re-describe, or (WP 10.8) recolour, (WP 10.11) classify, (WP 10.14) re-icon. Deliberately narrow:
  * `kind` and `parent_id` are structural (`seed-taxonomy.ts`'s own rule for why
  * a re-seed never touches them) and changing either after transactions have
  * been filed under a category is how a spend report silently moves money
@@ -556,6 +600,9 @@ export async function renameCategory(
   // explicit "was it named" flag beside its value.
   const setVariability = input.variability !== undefined;
   const variability = setVariability ? requireVariability(input.variability) : null;
+  // The same for the emoji: `null` clears a holder's choice back to the display fallback.
+  const setEmoji = input.emoji !== undefined;
+  const emoji = setEmoji ? requireEmoji(input.emoji) : null;
 
   await executor.execute(sql`
     UPDATE categories SET
@@ -564,6 +611,7 @@ export async function renameCategory(
       icon        = COALESCE(${input.icon ?? null}, icon),
       hue         = COALESCE(${hue}, hue),
       variability = CASE WHEN ${setVariability} THEN ${variability}::text ELSE variability END,
+      emoji       = CASE WHEN ${setEmoji} THEN ${emoji}::text ELSE emoji END,
       updated_at  = ${context.clock.now().toISOString()}::timestamptz
      WHERE id = ${input.categoryId} AND user_id = ${input.userId}
   `);

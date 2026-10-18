@@ -69,6 +69,13 @@ export const categories = pgTable(
      * NULL = unclassified. Never derived: a recurring stream only *suggests* `fixed`.
      */
     variability: text('variability').$type<CategoryVariability>(),
+    /**
+     * One emoji the holder chose (WP 10.14, migration 0050), CHECKed by `categories_emoji_check` (1–8 code points);
+     * "exactly one grapheme" is `isSingleEmoji` (@core/kernel), applied before every write. NULL = none set. The
+     * display fallback (`CATEGORY_DEFAULT_EMOJI` for a shipped key, else initials) is never written here. Not the
+     * Lucide `icon` above.
+     */
+    emoji: text('emoji'),
     /** Seeded by us. A user may rename it; they may not delete it. */
     isSystem: flagColumn('is_system').notNull().default(false),
     archivedAt: instantColumn('archived_at'),

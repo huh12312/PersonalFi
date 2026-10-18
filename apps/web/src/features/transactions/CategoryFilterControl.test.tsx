@@ -43,7 +43,7 @@ describe('CategoryFilterControl', () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole('button', { name: 'Category' }));
-    await user.click(await screen.findByLabelText('Coffee Shops'));
+    await user.click(await screen.findByRole('checkbox', { name: 'Coffee Shops' }));
 
     expect(onChange).toHaveBeenCalledWith(['cat_dining_coffee']);
   });
@@ -70,7 +70,7 @@ describe('CategoryFilterControl', () => {
     await user.click(screen.getByRole('button', { name: 'Category' }));
     await user.type(await screen.findByLabelText('Search categories'), 'coffee');
 
-    expect(screen.getByLabelText('Coffee Shops')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Coffee Shops' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Restaurants')).not.toBeInTheDocument();
   });
 });

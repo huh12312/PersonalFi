@@ -56,3 +56,9 @@ export {
   madNumber,
 } from './stats.ts';
 export { CHART_HUES, isChartHue, hueForId, type ChartHue } from './hue.ts';
+export {
+  CATEGORY_DEFAULT_EMOJI,
+  MAX_EMOJI_CODE_POINTS,
+  defaultEmojiForKey,
+  isSingleEmoji,
+} from './emoji.ts';

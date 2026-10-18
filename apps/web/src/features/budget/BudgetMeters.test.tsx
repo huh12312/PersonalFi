@@ -51,6 +51,7 @@ function category(
     icon: 'circle',
     hue: 'teal',
     variability,
+    emoji: null,
     sort: 0,
     isSystem: false,
     archivedAt: null,

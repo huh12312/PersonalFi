@@ -2,9 +2,11 @@
 import { Link } from '@tanstack/react-router';
 
 import type { CashFlowBreakdownRow } from '../../api/generated/types.gen.ts';
+import { CategoryIcon } from '../../components/finance/CategoryIcon.tsx';
 import { chartEventVar, chartFillVar } from '../../components/finance/chart-hue.ts';
 import { Money } from '../../components/finance/Money.tsx';
 import { isChartHue } from '@core/kernel';
+import { useCategories } from '../categories/useCategories.ts';
 import { toTransactionsSearch } from '../reports/drill-through.ts';
 import { foldTail, initialsOf, type FoldedRow } from './figures.ts';
 
@@ -21,6 +23,11 @@ export interface BreakdownListProps {
   readonly noun: string;
   /** Said when the side has nothing in the period. */
   readonly emptyText: string;
+  /**
+   * WP 10.14: what a row's key is. A category or group row draws its category icon and opens `/categories/:id`;
+   * a merchant row keeps its initials and drills to `/transactions`. Default `merchant` (no category reading).
+   */
+  readonly dimension?: 'category' | 'group' | 'merchant';
 }
 
 /**
@@ -40,6 +47,7 @@ export function BreakdownList({
   side,
   noun,
   emptyText,
+  dimension = 'merchant',
 }: BreakdownListProps) {
   const folded = foldTail(rows, undefined, noun);
   if (folded.length === 0) {
@@ -56,7 +64,7 @@ export function BreakdownList({
       <ul className="mt-2 flex flex-col" data-testid="breakdown-rows">
         {folded.map((row) => (
           <li key={row.key ?? 'none'} className="border-t border-border-hairline first:border-t-0">
-            <BreakdownRow row={row} currency={currency} side={side} />
+            <BreakdownRow row={row} currency={currency} side={side} dimension={dimension} />
           </li>
         ))}
       </ul>
@@ -85,17 +93,33 @@ function BreakdownRow({
   row,
   currency,
   side,
+  dimension,
 }: {
   readonly row: FoldedRow;
   readonly currency: string;
   readonly side: 'income' | 'expenses';
+  readonly dimension: 'category' | 'group' | 'merchant';
 }) {
+  const { byId } = useCategories();
+  const category =
+    dimension !== 'merchant' && row.key !== null && row.folded === undefined
+      ? (byId.get(row.key) ?? null)
+      : null;
   const share = row.share === null ? null : Math.max(0, Math.min(1, row.share));
   const signed = side === 'expenses' ? -BigInt(row.sumMinor) : BigInt(row.sumMinor);
   const fill = isChartHue(row.hue) ? chartFillVar(row.hue) : chartFillVar('neutral');
   const body = (
     <div className="flex items-center gap-3 py-2.5">
-      <Avatar row={row} />
+      {category !== null ? (
+        <CategoryIcon category={{ ...category, label: row.label }} size="sm" />
+      ) : dimension !== 'merchant' && row.key === null && row.folded === undefined ? (
+        <CategoryIcon
+          category={{ id: null, key: 'uncategorised', label: row.label, isSystem: true }}
+          size="sm"
+        />
+      ) : (
+        <Avatar row={row} />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-3">
           <span className="truncate text-small font-medium text-text-primary">{row.label}</span>
@@ -128,6 +152,20 @@ function BreakdownRow({
       </div>
     </div>
   );
+  if (category !== null) {
+    // WP 10.14: a category or group row opens its category's screen; "See transactions" lives there.
+    return (
+      <Link
+        to="/categories/$categoryId"
+        params={{ categoryId: category.id }}
+        className="block rounded-md px-1 outline-none hover:bg-bg-subtle focus-visible:ring-2 focus-visible:ring-focus-ring"
+        data-category-link={category.id}
+      >
+        {body}
+        <span className="sr-only">, open category</span>
+      </Link>
+    );
+  }
   if (row.drillThrough === null) return <div className="px-1">{body}</div>;
   return (
     <Link

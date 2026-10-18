@@ -555,6 +555,11 @@ describeWithDb('runMigrations', () => {
       //   straddling it -- net_worth_milestones_figures_cross --, dismissed_at; unique per (user_id,
       //   milestone_minor, direction)). Written by the snapshotter beside planning.NetWorthMilestoneCrossed.
       //   Expand-only; references only users. Not exported (derived from net_worth_daily).
+      // 0050_category_icon (WP 10.14): no new table. categories gains nullable emoji, the one emoji the
+      //   holder chose (categories_emoji_check: NULL or 1..8 code points; "exactly one grapheme" is
+      //   isSingleEmoji in @core/kernel, applied by @ctx/categorization before every write). Never seeded:
+      //   CATEGORY_DEFAULT_EMOJI is a display fallback. Not `icon`, which is D20's Lucide name and unchanged.
+      //   Expand-only; references only 0006's categories. Exported with the row.
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called

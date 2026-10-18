@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 import { installBudgetCategoryMocks } from './support/mock-budget.ts';
+import { installCategoryMocks } from './support/mock-categories.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { assertReadingOrder, Journey } from './support/keyboard.ts';
 import { installVirtualPasskey } from './support/virtual-passkey.ts';
@@ -862,4 +863,54 @@ test('dashboard (WP 10.13): dismiss the milestone notice, Tab to the net-worth c
     /^View full history$/,
     'focus returns to the trigger when the dialog closes',
   );
+});
+
+// ---------------------------------------------------------------------------
+// WP 10.14: the category screen and its editor, by keyboard
+// ---------------------------------------------------------------------------
+
+test('category (WP 10.14): Tab to the month chart, select months with arrows, Home and End, the list follows; Edit, a swatch by arrows, an icon, Save; focus returns to Edit', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await installSweepMocks(page);
+  const mocks = await installCategoryMocks(page);
+  await visit(page, '/categories/cat_groceries');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'category');
+  const slider = await journey.tabTo(/^Groceries by month: choose a month$/, { max: 40 });
+  expect(slider.name).toMatch(/choose a month/);
+  await journey.press('ArrowLeft', 'ArrowLeft selects the month before this one');
+  await expect(page).toHaveURL(/month=2026-02/);
+  await expect(page.getByTestId('category-transactions-heading')).toHaveText(
+    'Transactions in February 2026',
+  );
+  await expect(page.getByTestId('category-history-announcement')).toContainText('February 2026');
+  await journey.press('Home', 'Home selects the oldest month');
+  await expect(page).toHaveURL(/month=2025-03/);
+  await journey.press('End', 'End selects this month');
+  await expect(page).toHaveURL(/month=2026-03/);
+
+  await journey.tabTo(/^Edit Groceries$/, { backwards: true, max: 10 });
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Edit Groceries' });
+  await expect(dialog).toBeVisible();
+  // The icon grid and the swatches are one Tab stop each (radio groups); arrows move and select.
+  const icon = await journey.tabTo(/^💰$/, { max: 20 });
+  expect(icon.name.length).toBeGreaterThan(0);
+  await journey.press('ArrowRight', 'ArrowRight picks the next icon');
+  await expect(
+    dialog.getByRole('radiogroup', { name: 'Icon' }).locator('[aria-checked="true"]'),
+  ).toHaveCount(1);
+  await journey.tabTo(
+    /^(Teal|Green|Red|Orange|Yellow|Cyan|Purple|Indigo|Lime|Mint|Pink|Brown|Sky)$/,
+    { max: 10 },
+  );
+  await journey.press('ArrowRight', 'ArrowRight picks the next hue');
+  await journey.tabTo(/^Save changes$/, { max: 15 });
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await journey.expectFocus(/^Edit Groceries$/, 'focus returns to Edit when the editor closes');
+  expect(mocks.patches).toHaveLength(1);
+  expect(Object.keys(mocks.patches[0]!).sort()).toEqual(['emoji', 'hue']);
 });

@@ -234,14 +234,5 @@ export function foldTail(
   ];
 }
 
-/** Two-letter initials for a row's avatar: "Corner Grocery" → "CG", "Rent" → "RE", "7-Eleven" → "7E". */
-export function initialsOf(label: string): string {
-  const words = label
-    .replace(/\(.*\)/u, '')
-    .split(/[\s\-/&]+/u)
-    .map((word) => word.replace(/[^\p{L}\p{N}]/gu, ''))
-    .filter((word) => word.length > 0);
-  if (words.length === 0) return '?';
-  if (words.length === 1) return (words[0] ?? '').slice(0, 2).toUpperCase();
-  return `${(words[0] ?? '').charAt(0)}${(words[1] ?? '').charAt(0)}`.toUpperCase();
-}
+/** Two-letter initials for a row's avatar — moved to `components/finance/category-icon.ts` (WP 10.14). */
+export { initialsOf } from '../../components/finance/category-icon.ts';

@@ -14,6 +14,8 @@ import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { Button } from '../../components/ui/button.tsx';
 import { Money } from '../../components/finance/Money.tsx';
 import { formatDateOnly } from '../../lib/date.ts';
+import { CategoryIcon } from '../../components/finance/CategoryIcon.tsx';
+import { useCategories } from '../categories/useCategories.ts';
 import { CategoryPicker } from '../transactions/CategoryPicker.tsx';
 import { orientPair } from '../transactions/transfer-candidates.ts';
 import {
@@ -163,6 +165,9 @@ interface UncategorizedRowProps {
 
 function UncategorizedRow({ transaction, onResolved }: UncategorizedRowProps) {
   const overlay = useTransactionOverlayMutation();
+  // WP 10.14: the row's current category as its icon (uncategorised: ❔), beside the picker that changes it.
+  const { byId } = useCategories();
+  const current = transaction.categoryId === null ? undefined : byId.get(transaction.categoryId);
 
   function handleCategoryChange(categoryId: string | null): void {
     if (categoryId === null) return;
@@ -174,11 +179,21 @@ function UncategorizedRow({ transaction, onResolved }: UncategorizedRowProps) {
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="min-w-0">
-        <p className="truncate text-body font-medium text-text-primary">
-          {transaction.merchantName ?? transaction.name}
-        </p>
-        <p className="text-small text-text-muted">{formatDateOnly(transaction.date)}</p>
+      <div className="flex min-w-0 items-center gap-3">
+        <CategoryIcon
+          category={
+            current ?? { id: null, key: 'uncategorised', label: 'Uncategorized', isSystem: true }
+          }
+          size="sm"
+        />
+        <div className="min-w-0">
+          <p className="truncate text-body font-medium text-text-primary">
+            {transaction.merchantName ?? transaction.name}
+          </p>
+          <p className="text-small text-text-muted">
+            {formatDateOnly(transaction.date)} · {current?.label ?? 'Uncategorized'}
+          </p>
+        </div>
       </div>
       <Money value={transaction.amount} className="shrink-0" />
       <CategoryPicker

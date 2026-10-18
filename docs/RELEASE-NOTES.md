@@ -9,6 +9,54 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.13: a screen for every category, and emoji icons
+
+**Status:** a patch release on v0.9.12. The tag `v0.9.13` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.13
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0050_category_icon` (expand-only: one new, empty column, `categories.emoji`, holding the
+emoji you choose for a category). Nothing is backfilled: every category keeps showing a default icon
+until you pick one, and the default is never written.
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **A screen for every category** at `/categories/…`, opened from any category name: the Cash Flow
+  breakdowns (by category and by group), the Budget rows, the Reports tables and the Transactions
+  category filter. It shows this month so far, and the sentence "This month vs. average month (last
+  12 months)" in money, such as "$146.67 less than your average month of $356.67". The average is
+  over the complete months in your ledger. Months with no spend count as zero, and the current
+  month is never included. With fewer than two complete months the average is withheld and the
+  screen says why.
+- **The months as bars.** The last twelve complete months and this one appear as bars in the
+  category's colour. This month is hatched and marked "so far", and the average is a dashed line
+  labelled with its amount. A month with no spend is drawn as zero and listed as "No spend" in
+  "View as table". Hover a month to read it. Press a month, or focus the chart and use ← → Home
+  End, to select it: its transactions are listed beneath, with the usual row actions, and "See
+  transactions" opens the same list on the Transactions screen. The bars grow in once, and never
+  with reduced motion.
+- **Emoji icons.** Every category shows an icon in a circle of its colour: the Transactions rows,
+  the category picker, the Inbox, Cash Flow, Budget and Reports. Built-in categories have a default
+  (🛒 Groceries, 🍽️ Dining, 🚗 Transportation, ✈️ Travel, ❔ Uncategorised and so on). Your own
+  categories show their initials until you choose an icon.
+- **Edit a category.** The Edit button on a category's screen lets you rename it, choose its icon
+  (from a grid, or type exactly one emoji) or go back to the default, choose its colour (thirteen
+  swatches, each named) and say whether its spending is fixed, flexible or non-monthly. The same
+  dialog creates a category from the picker. Only what you changed is saved.
+- **API.** `GET /reports/category-history?categoryId=…` returns the thirteen months, the average and
+  the comparison. `Category` gains `emoji` (null when none is set), and `POST /categories` and
+  `PATCH /categories/{id}` accept it (exactly one emoji, `null` clears it). Export and import carry
+  it.
+
 ## v0.9.12: net worth by account type, scrubbable, and milestones
 
 **Status:** a patch release on v0.9.11. The tag `v0.9.12` is pushed by the maintainer once CI is green.

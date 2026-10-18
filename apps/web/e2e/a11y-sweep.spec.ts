@@ -16,6 +16,7 @@ import {
 } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installBudgetCategoryMocks } from './support/mock-budget.ts';
+import { installCategoryMocks } from './support/mock-categories.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import {
@@ -1090,6 +1091,84 @@ test.describe('WP 10.13 net worth stacked, a bucket selected', () => {
         .evaluateAll((nodes) => nodes.map((n) => getComputedStyle(n).transitionDuration));
       expect(durations.length).toBeGreaterThan(0);
       expect(new Set(durations)).toEqual(new Set(['0s']));
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7f. WP 10.14: the category screen with a month selected, and the category editor
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep walks `/categories/$categoryId` (the fixture's Coffee Shops) in every dimension above. This block
+ * holds the two states the sweep does not reach: a month selected by keyboard (the readout, the bold tick and the
+ * filtered list), and the editor open with a swatch and an icon chosen and the emoji field refusing a value. Both
+ * themes, 320 px, 200 % zoom with 1.4.12 text spacing, and reduced motion (the columns grow by the Web Animations
+ * API, which the global reduced-motion rule cannot reach, so the guard itself is asserted).
+ */
+test.describe('WP 10.14 category detail, a month selected, and the editor', () => {
+  async function open(page: Page, editor: boolean): Promise<void> {
+    await installSweepMocks(page);
+    await installCategoryMocks(page);
+    await visit(page, '/categories/cat_groceries');
+    await hideDevtools(page);
+    await page.getByRole('slider', { name: 'Groceries by month: choose a month' }).focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.getByTestId('category-transactions-heading')).toHaveText(
+      'Transactions in February 2026',
+    );
+    if (!editor) return;
+    await page.getByRole('button', { name: 'Edit Groceries' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Edit Groceries' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('radio', { name: 'Pink' }).click();
+    await dialog.locator('[role="radio"][data-value="🍽️"]').click();
+    await dialog.getByLabel('Or type one emoji').fill('ab');
+    await expect(dialog.getByRole('alert')).toBeVisible();
+  }
+
+  for (const editor of [false, true]) {
+    const what = editor ? 'the editor' : 'a month selected';
+    test(`${what}: axe-clean in both themes, at 1280 and at 320 px`, async ({ page }) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await open(page, editor);
+      await scanBothThemes(page, `/categories/cat_groceries, ${what}`);
+      await page.setViewportSize(REFLOW);
+      await page.waitForTimeout(600);
+      expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+      await scanBothThemes(page, `/categories/cat_groceries, ${what}, at 320 px`);
+    });
+  }
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    for (const editor of [false, true]) {
+      const what = editor ? 'the editor' : 'a month selected';
+      test(`${what}: nothing is lost`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, editor);
+        expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+        await scanBothThemes(page, `/categories/cat_groceries, ${what}, at 200 %`);
+        const before = new Set(await clippedTextElements(page));
+        await page.addStyleTag({ content: TEXT_SPACING });
+        await page.waitForTimeout(100);
+        const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+        expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+      });
+    }
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+    test('no column grows, nothing animates, with the editor open too', async ({ page }) => {
+      test.setTimeout(120_000);
+      await open(page, false);
+      expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
+      expect(await motionOffenders(page)).toEqual([]);
+      await page.getByRole('button', { name: 'Edit Groceries' }).click();
+      await expect(page.getByRole('dialog', { name: 'Edit Groceries' })).toBeVisible();
+      expect(await motionOffenders(page)).toEqual([]);
     });
   });
 });

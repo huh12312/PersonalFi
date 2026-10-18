@@ -77,6 +77,18 @@ The budget meter's states (`components/finance/budget-meter.ts`): _under pace_ a
 → success, _on pace_ → info, _ahead of pace_ → warning, _over budget_ → danger; a budget of zero
 draws no meter at all.
 
+## CategoryIcon: the emoji in a tinted circle
+
+`components/finance/CategoryIcon.tsx` (WP 10.14) draws a category's icon wherever the category
+appears. The circle is `--chart-event-bg-<hue>` in the category's hue (`categoryHue(id, persisted)`).
+An emoji sits on it in its own colours. The initials fallback is set in `--chart-event-fg-<hue>`,
+the event roles' text-on-wash pair, which `contrast.test.ts` holds at 4.5:1. A row with no category
+uses `--bg-secondary` and `--text-secondary`. The icon is decorative (`aria-hidden`) and always sits
+beside the category's name, so hue and emoji are identity only and carry no meaning of their own.
+The glyph comes from `categoryGlyph`: the stored `emoji`, else the shipped default for a system
+category's key (`CATEGORY_DEFAULT_EMOJI`, `@core/kernel`, never written), else the initials. Sizes:
+`xs` 24 px, `sm` 32 px, `md` 48 px.
+
 ## A hue is assigned once
 
 A category's hue is chosen the first time the server reads it (`hueForId(id)` from `@core/kernel`, a

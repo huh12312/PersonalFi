@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover.tsx';
+import { CategoryIcon } from '../../components/finance/CategoryIcon.tsx';
 import { useCategories } from '../categories/useCategories.ts';
 
 export interface CategoryFilterControlProps {
@@ -98,6 +99,7 @@ export function CategoryFilterControl({ value, onChange }: CategoryFilterControl
                     onChange={() => toggle(category.id)}
                     className="h-4 w-4"
                   />
+                  <CategoryIcon category={category} size="xs" />
                   {category.label}
                 </label>
               ))}

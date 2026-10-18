@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/button.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { Label } from '../../components/ui/label.tsx';
 import { useMerchantNames } from '../recurring/useMerchantNames.ts';
+import { CategoryNameLink } from '../categories/CategoryNameLink.tsx';
 import { CategoryFilterControl } from './CategoryFilterControl.tsx';
 import { hasActiveFilters, type TransactionsSearch } from './filters.ts';
 
@@ -123,11 +124,18 @@ export function TransactionsFilterBar({
 
       <div>
         <Label id="transactions-category-label">Category</Label>
-        <div className="mt-1">
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
           <CategoryFilterControl
             value={search.categoryIds ?? []}
             onChange={(categoryIds) => onChange({ categoryIds })}
           />
+          {search.categoryIds?.length === 1 && search.categoryIds[0] !== undefined && (
+            // WP 10.14: the chip of a single category reaches its screen.
+            <CategoryNameLink
+              categoryId={search.categoryIds[0]}
+              className="text-small text-accent-text"
+            />
+          )}
         </div>
       </div>
 

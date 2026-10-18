@@ -35,8 +35,13 @@
  * the kernel's thirteen `CHART_HUES`. The read model assigns `hueForId(id)` on the
  * first read and persists it; every later read returns the stored value, which
  * `PATCH` may change.
+ *
+ * `emoji` (WP 10.14, migration 0050) is the one emoji the holder chose, or null. Unlike `hue` it is never seeded:
+ * the shipped default for a system key (`CATEGORY_DEFAULT_EMOJI`) and a custom category's initials are display
+ * fallbacks the web draws for a null, and nothing writes them. `isSingleEmoji` (@core/kernel) is the one rule for
+ * what may be stored, applied here on the body and again in `@ctx/categorization` before the write.
  */
-import { CHART_HUES, todayIn } from '@core/kernel';
+import { CHART_HUES, isSingleEmoji, todayIn } from '@core/kernel';
 import {
   archiveCategory,
   CATEGORY_VARIABILITIES,
@@ -77,6 +82,19 @@ const variabilitySchema = z
   )
   .meta({ id: 'CategoryVariability' });
 
+/** A write's `emoji`: exactly one emoji, or null to clear. The 32 is UTF-16 units, well above 8 code points. */
+const emojiInputSchema = z
+  .string()
+  .max(32)
+  .refine(isSingleEmoji, 'emoji must be exactly one emoji')
+  .nullable()
+  .optional()
+  .describe(
+    'Exactly one emoji (one extended grapheme cluster, at most 8 code points). null clears it, and the web ' +
+      'falls back to the shipped default for a system category or the initials. Omitted: unchanged on PATCH, ' +
+      'none on POST.',
+  );
+
 const categorySchema = z
   .object({
     id: z.uuid().describe('What `PATCH /transactions/{id}` accepts as `categoryId`.'),
@@ -93,6 +111,13 @@ const categorySchema = z
     icon: z.string().describe('A Lucide icon name (decision D20). A key, never markup.'),
     hue: chartHueSchema,
     variability: variabilitySchema.nullable().describe('null = not yet classified by the holder.'),
+    emoji: z
+      .string()
+      .nullable()
+      .describe(
+        'One emoji (one extended grapheme cluster), set by the holder. null = none set; the web then shows ' +
+          "the shipped default for a system category's key, or the initials — the default is never written.",
+      ),
     sort: z.number().int(),
     isSystem: z.boolean().describe('true for a row the shipped taxonomy installed.'),
     archivedAt: z
@@ -122,6 +147,7 @@ function serialiseCategory(category: UserCategory): z.infer<typeof categorySchem
     icon: category.icon,
     hue: category.hue,
     variability: category.variability,
+    emoji: category.emoji,
     sort: category.sort,
     isSystem: category.isSystem,
     archivedAt: instantOrNull(category.archivedAt),
@@ -210,6 +236,7 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               .nullable()
               .optional()
               .describe('Omitted or null: unclassified.'),
+            emoji: emojiInputSchema,
           }),
           response: {
             201: z.object({ category: categorySchema }),
@@ -235,6 +262,7 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               ...(request.body.variability === undefined
                 ? {}
                 : { variability: request.body.variability }),
+              ...(request.body.emoji === undefined ? {} : { emoji: request.body.emoji }),
             },
             { clock },
           ),
@@ -304,10 +332,11 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       {
         schema: {
           operationId: 'renameCategory',
-          summary: 'Rename, re-describe, recolour or classify a category',
+          summary: 'Rename, re-describe, recolour, re-icon or classify a category',
           description:
-            'Deliberately narrow: `label`, `description`, `icon`, `hue` and `variability` only ' +
-            '(`variability: null` returns a category to unclassified). `kind` and the ' +
+            'Deliberately narrow: `label`, `description`, `icon`, `hue`, `variability` and `emoji` only ' +
+            "(`variability: null` returns a category to unclassified; `emoji: null` clears the holder's " +
+            'emoji, and the web falls back to the default again). `kind` and the ' +
             'parent/child structure are not editable here — both are structural (the seeding ' +
             "pass's own rule for why a re-seed never touches them) and changing either after " +
             'transactions have been filed under a category is how a report silently moves ' +
@@ -322,6 +351,7 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               icon: z.string().min(1).max(64).optional(),
               hue: chartHueSchema.optional(),
               variability: variabilitySchema.nullable().optional(),
+              emoji: emojiInputSchema,
             })
             .refine(
               (body) =>
@@ -329,7 +359,8 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
                 body.description !== undefined ||
                 body.icon !== undefined ||
                 body.hue !== undefined ||
-                body.variability !== undefined,
+                body.variability !== undefined ||
+                body.emoji !== undefined,
               'a PATCH with no fields changes nothing; say what to change',
             ),
           response: {
@@ -355,6 +386,7 @@ export const categoryRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
               ...(request.body.variability === undefined
                 ? {}
                 : { variability: request.body.variability }),
+              ...(request.body.emoji === undefined ? {} : { emoji: request.body.emoji }),
             },
             { clock },
           ),

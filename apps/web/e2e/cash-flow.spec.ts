@@ -157,13 +157,17 @@ test.describe('WP 10.10 Cash Flow hub', () => {
     );
 
     await breakdowns.getByRole('button', { name: 'By category' }).click();
+    // WP 10.14: a category row opens its category's screen; its transactions are that screen's "See transactions".
     await list.getByRole('link', { name: /Groceries/ }).click();
+    await expect(page).toHaveURL(/\/categories\/cat_groceries$/);
+    await page.getByTestId('category-see-transactions').click();
     await expect(page).toHaveURL(/\/transactions\?/);
     const landed = search(page);
     expect(landed.get('from')).toBe('2026-03-01');
     expect(landed.get('to')).toBe('2026-03-31');
     expect(landed.get('categoryIds')).toContain('cat_groceries');
 
+    await page.goBack();
     await page.goBack();
     await expect(page).toHaveURL(/\/cash-flow\?tab=spending/);
     await page

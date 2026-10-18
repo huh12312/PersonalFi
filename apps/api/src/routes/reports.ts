@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * `GET /reports/{spending,income,sankey,spending-pace,cash-flow,budget-vs-actual}` — read models only.
+ * `GET /reports/{spending,income,sankey,spending-pace,cash-flow,category-history,budget-vs-actual}` — read models only.
  *
  * Every number here is aggregated server-side in `apps/api/src/reports/**`;
  * this file's only job is querystring → aggregator input, and aggregator
@@ -34,6 +34,11 @@ import {
   type CashFlowComparison,
   type WindowFigures,
 } from '../reports/cash-flow.ts';
+import {
+  computeCategoryHistory,
+  HISTORY_MONTHS,
+  type CategoryHistoryResult,
+} from '../reports/category-history.ts';
 import { merchantDisplayNames } from '@ctx/ledger';
 import { computeSpendingPace, parseMonth, type PaceDay } from '../reports/spending-pace.ts';
 import { AppError, problems } from '../problem.ts';
@@ -231,6 +236,154 @@ function comparisonWire(comparison: CashFlowComparison): z.infer<typeof cashFlow
     incomeMinor: comparison.income?.toString() ?? null,
     expensesMinor: comparison.expenses?.toString() ?? null,
     netMinor: comparison.net?.toString() ?? null,
+  };
+}
+
+const yearMonth = z.string().regex(/^\d{4}-\d{2}$/u);
+const historyWithheldSchema = z
+  .enum(['insufficient_history', 'no_data'])
+  .nullable()
+  .describe(
+    'Why a figure is withheld: fewer than two complete months in history (`insufficient_history`), or no ledger ' +
+      'row at all (`no_data`). null when shown.',
+  );
+
+const categoryHistoryMonthSchema = z
+  .object({
+    month: yearMonth,
+    start: z.string(),
+    end: z.string(),
+    amountMinor: minorString.describe(
+      "This side's amount in minor units of `currency`: money out as a positive amount for spending (a " +
+        "refund-heavy month can be negative), money in for income. Exactly the Cash Flow hub's category " +
+        'breakdown for the month (the heading: its group row). "0" with `hasActivity: false` is a real zero.',
+    ),
+    transactionCount: z.int().nonnegative(),
+    hasActivity: z
+      .boolean()
+      .describe('Any report cell for the category (or its children) this month.'),
+    complete: z.boolean().describe('False only for the current month, whose amount is so far.'),
+    isCurrent: z.boolean(),
+    inHistory: z
+      .boolean()
+      .describe(
+        "On or after the month of the holder's first ledger row (any category, any currency). A month " +
+          'before it is not a zero and is never averaged.',
+      ),
+  })
+  .meta({ id: 'CategoryHistoryMonth' });
+
+const categoryHistoryAverageSchema = z
+  .object({
+    available: z.boolean(),
+    withheld: historyWithheldSchema,
+    amountMinor: minorString
+      .nullable()
+      .describe(
+        'Σ amount ÷ months averaged, rounded half-even. Over every complete month in history — a zero month ' +
+          'counts as a zero, never dropped — and never the current month. null when withheld.',
+      ),
+    monthsAveraged: z.int().nonnegative(),
+    months: z.array(yearMonth).describe('The months averaged, oldest first.'),
+  })
+  .meta({ id: 'CategoryHistoryAverage' });
+
+const categoryHistoryComparisonSchema = z
+  .object({
+    available: z.boolean(),
+    withheld: historyWithheldSchema,
+    thisMonthMinor: minorString.describe('The current month so far. Always present.'),
+    averageMinor: minorString.nullable(),
+    differenceMinor: minorString
+      .nullable()
+      .describe('thisMonth − average, signed; null when the average is withheld.'),
+    direction: z.enum(['more', 'less', 'same']).nullable(),
+  })
+  .meta({ id: 'CategoryHistoryComparison' });
+
+const categoryHistorySchema = z
+  .object({
+    categoryId: z.uuid(),
+    side: z
+      .enum(['spending', 'income'])
+      .describe('`income` for an income category, else `spending` (as Reports splits them).'),
+    includesChildren: z
+      .boolean()
+      .describe('True for a heading: every figure sums it and its children, archived included.'),
+    currency: z.string().length(3).nullable(),
+    otherCurrencies: z
+      .array(z.string())
+      .describe('Currencies also present, never converted or summed (decision D4).'),
+    currentMonth: yearMonth,
+    through: z.string().describe("Today, in the holder's zone: the current month is so far."),
+    historyStart: yearMonth
+      .nullable()
+      .describe(
+        "The first window month in history: the month of the holder's first ledger row, or the window's first " +
+          'month when the ledger reaches back before it. null when there is no row at all.',
+      ),
+    months: z
+      .array(categoryHistoryMonthSchema)
+      .length(HISTORY_MONTHS)
+      .describe(
+        'Exactly thirteen: the twelve complete months before the current one, then it. Oldest first.',
+      ),
+    average: categoryHistoryAverageSchema,
+    comparison: categoryHistoryComparisonSchema,
+    drillThrough: drillThroughSchema,
+  })
+  .meta({
+    id: 'CategoryHistory',
+    description:
+      "One category's last thirteen months, its average and this month against it. Every month's amount is the " +
+      "Cash Flow hub's for that category and month (transfers out, refunds netted into the purchase's category, " +
+      "excluded rows dropped, pending counted). Nothing is invented: a month before the holder's first ledger row " +
+      'is not in history; the average is withheld below two complete months in history; the current month is ' +
+      'never averaged.',
+  });
+
+function categoryHistoryWire(result: CategoryHistoryResult): z.infer<typeof categoryHistorySchema> {
+  return {
+    categoryId: result.categoryId,
+    side: result.side,
+    includesChildren: result.includesChildren,
+    currency: result.currency,
+    otherCurrencies: [...result.otherCurrencies],
+    currentMonth: result.currentMonth,
+    through: result.through,
+    historyStart: result.historyStart,
+    months: result.months.map((month) => ({
+      month: month.month,
+      start: month.start,
+      end: month.end,
+      amountMinor: month.amount.toString(),
+      transactionCount: month.transactionCount,
+      hasActivity: month.hasActivity,
+      complete: month.complete,
+      isCurrent: month.isCurrent,
+      inHistory: month.inHistory,
+    })),
+    average: {
+      available: result.average.available,
+      withheld: result.average.withheld,
+      amountMinor: result.average.amount?.toString() ?? null,
+      monthsAveraged: result.average.monthsAveraged,
+      months: [...result.average.months],
+    },
+    comparison: {
+      available: result.comparison.available,
+      withheld: result.comparison.withheld,
+      thisMonthMinor: result.comparison.thisMonth.toString(),
+      averageMinor: result.comparison.average?.toString() ?? null,
+      differenceMinor: result.comparison.difference?.toString() ?? null,
+      direction: result.comparison.direction,
+    },
+    drillThrough: {
+      ...result.drillThrough,
+      ...(result.drillThrough.categoryIds === undefined
+        ? {}
+        : { categoryIds: [...result.drillThrough.categoryIds] }),
+    },
   };
 }
 
@@ -642,6 +795,59 @@ export const reportRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           asOf: clock.now().toISOString(),
           lastSyncedAt: lastSynced === null ? null : lastSynced.toISOString(),
         };
+      },
+    );
+
+    app.get(
+      '/reports/category-history',
+      {
+        schema: {
+          operationId: 'getCategoryHistory',
+          summary: "One category's last thirteen months, its average and this month against it",
+          description:
+            "The category detail screen's figures (WP 10.14). The window is the twelve complete months before the " +
+            "current one (the holder's zone) plus the current one. A heading sums its children. Each month's " +
+            "amount is the Cash Flow hub's category breakdown for that month. History starts at the holder's first " +
+            'ledger row: a month before it is not in history, a month in history with no spend is a zero. The ' +
+            'average is over the complete months in history (zeros included, the current month never), withheld ' +
+            'below two; the comparison is this month so far against it. One currency, the one the ' +
+            "category's rows are mostly in; others are named, never summed (decision D4).",
+          tags: ['reports'],
+          querystring: z.object({ categoryId: z.uuid() }),
+          response: {
+            200: categoryHistorySchema,
+            ...problems(400, 401, 404, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const categories = listCategories(database, session.userId, { includeArchived: true });
+        const timezone = await timezoneOf(session.userId);
+        const today = todayIn(clock, timezone);
+        const result = await computeCategoryHistory(database, {
+          userId: session.userId,
+          categoryId: request.query.categoryId,
+          today,
+          categories: (await categories).map((category) => ({
+            id: category.id,
+            label: category.label,
+            parentId: category.parentId,
+            hue: category.hue,
+            kind: category.kind,
+          })),
+        });
+        if (result === null) {
+          // Scoped to the session's user: another holder's category is indistinguishable from none at all.
+          throw new AppError({
+            status: 404,
+            code: 'categorization.category_not_found',
+            title: 'Not Found',
+            detail: 'No such category.',
+            family: 'user',
+          });
+        }
+        return categoryHistoryWire(result);
       },
     );
 

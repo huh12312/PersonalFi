@@ -39,6 +39,8 @@ const PARAM_VALUES: Readonly<Record<string, string>> = {
   accountId: 'acct_ira',
   // WP 10.12: a pillar of the health score.
   pillar: 'emergency-fund',
+  // WP 10.14: a category the general fixture's chart of categories has (`mock-api.ts`).
+  categoryId: 'cat_dining_coffee',
 };
 
 export function concretePath(pattern: string): string {

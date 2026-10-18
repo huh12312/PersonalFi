@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router';
 
 import type { BudgetVsActualLine } from '../../api/generated/types.gen.ts';
 import { Money } from '../../components/finance/Money.tsx';
+import { CategoryNameLink } from '../categories/CategoryNameLink.tsx';
 import { toTransactionsSearch } from './drill-through.ts';
 import { ScrollRegion } from '../../components/patterns/ScrollRegion.tsx';
 
@@ -51,12 +52,15 @@ export function BudgetVsActualTable({ lines }: BudgetVsActualTableProps) {
             return (
               <tr key={line.id} className="border-b border-border-hairline last:border-0">
                 <th scope="row" className="py-2 pr-2 text-left font-medium text-text-primary">
+                  {/* WP 10.14: the name opens the category's screen; its transactions stay one link away. */}
+                  <CategoryNameLink categoryId={line.categoryId} label={line.name ?? 'Category'} />{' '}
                   <Link
                     to="/transactions"
                     search={toTransactionsSearch(line.drillThrough)}
-                    className="hover:underline"
+                    className="text-caption font-normal text-accent-text underline-offset-4 hover:underline"
                   >
-                    {line.name ?? 'Category'}
+                    transactions
+                    <span className="sr-only"> in {line.name ?? 'this category'}</span>
                   </Link>
                 </th>
                 <td className="py-2 pr-2 text-right tabular-nums">

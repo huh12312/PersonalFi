@@ -23,8 +23,11 @@ test('the category filter survives a reload via the URL', async ({ page }) => {
   await expect(page).toHaveURL(/\/transactions$/);
   await expectNoAxeViolations(page, 'transactions (before filtering)');
 
-  await page.getByRole('button', { name: 'Category' }).click();
-  await page.getByLabel('Coffee Shops').check();
+  // `exact`: the dev-only router devtools list a route button, "Open match details for /_app/categories/$categoryId"
+  // (WP 10.14), whose name contains "category" too.
+  await page.getByRole('button', { name: 'Category', exact: true }).click();
+  // WP 10.14: the option carries its (aria-hidden) category icon; the checkbox's accessible name is the name alone.
+  await page.getByRole('checkbox', { name: 'Coffee Shops' }).check();
   // Base UI's popover closes on outside click; press Escape instead so the
   // assertion below is about the URL, not popover dismissal mechanics.
   await page.keyboard.press('Escape');

@@ -25,6 +25,7 @@ export function ClassifyControl({
   onClassified,
   focusPressed = false,
   onFocused,
+  onChoose,
 }: {
   readonly categoryId: string;
   readonly categoryLabel: string;
@@ -38,6 +39,11 @@ export function ClassifyControl({
    */
   readonly focusPressed?: boolean;
   readonly onFocused?: () => void;
+  /**
+   * WP 10.14, the category editor: a form value, not a write. When given, a press calls this instead of `PATCH`
+   * (the editor saves every field in one request), and pressing the pressed choice returns it to unclassified.
+   */
+  readonly onChoose?: (choice: CategoryVariability | null) => void;
 }) {
   const classify = useClassifyCategoryMutation();
   const pressedRef = useRef<HTMLButtonElement>(null);
@@ -64,6 +70,10 @@ export function ClassifyControl({
               // Not `disabled` while saving: disabling the focused button would drop focus to the document.
               aria-disabled={classify.isPending || undefined}
               onClick={() => {
+                if (onChoose !== undefined) {
+                  onChoose(pressed ? null : choice);
+                  return;
+                }
                 if (pressed || classify.isPending) return;
                 classify.mutate(
                   { path: { categoryId }, body: { variability: choice } },

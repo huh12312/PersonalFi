@@ -7,6 +7,7 @@ import type { KeyboardEvent } from 'react';
 import { EmptyState } from '../../components/patterns/EmptyState.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
 import type { Transaction } from '../../api/generated/types.gen.ts';
+import { useCategories } from '../categories/useCategories.ts';
 import { TransactionRow } from './TransactionRow.tsx';
 import { hasActiveFilters, type TransactionsSearch } from './filters.ts';
 import { useTransactionsList } from './useTransactionsList.ts';
@@ -51,6 +52,8 @@ export function TransactionsList({
     fetchNextPage,
     refetch,
   } = useTransactionsList(search);
+  // WP 10.14: each row shows its category's icon and name; the chart of categories is one cached query.
+  const { byId: categoriesById, isLoading: categoriesLoading } = useCategories();
   const parentRef = useRef<HTMLDivElement>(null);
   const [focusedIndex, setFocusedIndex] = useState(0);
 
@@ -151,6 +154,18 @@ export function TransactionsList({
               key={transaction.id}
               transaction={transaction}
               accountName={accountName(transaction.accountId)}
+              {...(categoriesLoading
+                ? {}
+                : {
+                    category:
+                      transaction.categoryId === null
+                        ? null
+                        : (categoriesById.get(transaction.categoryId) ?? {
+                            // Archived (the picker list omits it): its id still tints it, its name is unknown here.
+                            id: transaction.categoryId,
+                            label: 'Archived category',
+                          }),
+                  })}
               index={virtualRow.index}
               selected={selected.has(transaction.id)}
               isFocused={focusedIndex === virtualRow.index}

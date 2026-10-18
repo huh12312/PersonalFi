@@ -33,6 +33,7 @@ import { Route as DevKitchenSinkRouteImport } from './routes/dev.kitchen-sink'
 import { Route as AppAccountsIndexRouteImport } from './routes/_app.accounts.index'
 import { Route as AppAccountsAccountIdRouteImport } from './routes/_app.accounts.$accountId'
 import { Route as AppAccountsConnectionsRouteImport } from './routes/_app.accounts.connections'
+import { Route as AppCategoriesCategoryIdRouteImport } from './routes/_app.categories.$categoryId'
 import { Route as AppHealthIndexRouteImport } from './routes/_app.health.index'
 import { Route as AppHealthPillarRouteImport } from './routes/_app.health.$pillar'
 import { Route as AppSettingsAdvisorsRouteImport } from './routes/_app.settings_.advisors'
@@ -156,6 +157,11 @@ const AppAccountsConnectionsRoute = AppAccountsConnectionsRouteImport.update({
   path: '/connections',
   getParentRoute: () => AppAccountsRoute,
 } as any)
+const AppCategoriesCategoryIdRoute = AppCategoriesCategoryIdRouteImport.update({
+  id: '/categories/$categoryId',
+  path: '/categories/$categoryId',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppHealthIndexRoute = AppHealthIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -195,6 +201,7 @@ export interface FileRoutesByFullPath {
   '/dev/kitchen-sink': typeof DevKitchenSinkRoute
   '/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/categories/$categoryId': typeof AppCategoriesCategoryIdRoute
   '/health/$pillar': typeof AppHealthPillarRoute
   '/settings/advisors': typeof AppSettingsAdvisorsRoute
   '/accounts/': typeof AppAccountsIndexRoute
@@ -221,6 +228,7 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/categories/$categoryId': typeof AppCategoriesCategoryIdRoute
   '/health/$pillar': typeof AppHealthPillarRoute
   '/settings/advisors': typeof AppSettingsAdvisorsRoute
   '/accounts': typeof AppAccountsIndexRoute
@@ -251,6 +259,7 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_app/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/_app/accounts/connections': typeof AppAccountsConnectionsRoute
+  '/_app/categories/$categoryId': typeof AppCategoriesCategoryIdRoute
   '/_app/health/$pillar': typeof AppHealthPillarRoute
   '/_app/settings_/advisors': typeof AppSettingsAdvisorsRoute
   '/_app/accounts/': typeof AppAccountsIndexRoute
@@ -281,6 +290,7 @@ export interface FileRouteTypes {
     | '/dev/kitchen-sink'
     | '/accounts/$accountId'
     | '/accounts/connections'
+    | '/categories/$categoryId'
     | '/health/$pillar'
     | '/settings/advisors'
     | '/accounts/'
@@ -307,6 +317,7 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts/$accountId'
     | '/accounts/connections'
+    | '/categories/$categoryId'
     | '/health/$pillar'
     | '/settings/advisors'
     | '/accounts'
@@ -336,6 +347,7 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/accounts/$accountId'
     | '/_app/accounts/connections'
+    | '/_app/categories/$categoryId'
     | '/_app/health/$pillar'
     | '/_app/settings_/advisors'
     | '/_app/accounts/'
@@ -521,6 +533,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAccountsConnectionsRouteImport
       parentRoute: typeof AppAccountsRoute
     }
+    '/_app/categories/$categoryId': {
+      id: '/_app/categories/$categoryId'
+      path: '/categories/$categoryId'
+      fullPath: '/categories/$categoryId'
+      preLoaderRoute: typeof AppCategoriesCategoryIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/health/': {
       id: '/_app/health/'
       path: '/'
@@ -591,6 +610,7 @@ interface AppRouteChildren {
   AppSettingsRoute: typeof AppSettingsRoute
   AppTransactionsRoute: typeof AppTransactionsRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppCategoriesCategoryIdRoute: typeof AppCategoriesCategoryIdRoute
   AppSettingsAdvisorsRoute: typeof AppSettingsAdvisorsRoute
 }
 
@@ -610,6 +630,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSettingsRoute: AppSettingsRoute,
   AppTransactionsRoute: AppTransactionsRoute,
   AppIndexRoute: AppIndexRoute,
+  AppCategoriesCategoryIdRoute: AppCategoriesCategoryIdRoute,
   AppSettingsAdvisorsRoute: AppSettingsAdvisorsRoute,
 }
 

@@ -7813,6 +7813,13 @@
             ],
             "description": "null = not yet classified by the holder."
           },
+          "emoji": {
+            "description": "One emoji (one extended grapheme cluster), set by the holder. null = none set; the web then shows the shipped default for a system category's key, or the initials — the default is never written.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "sort": {
             "type": "integer",
             "minimum": -9007199254740991,
@@ -7844,6 +7851,7 @@
           "icon",
           "hue",
           "variability",
+          "emoji",
           "sort",
           "isSystem",
           "archivedAt",
@@ -12488,6 +12496,280 @@
           "expensesMinor",
           "netMinor"
         ]
+      },
+      "CategoryHistoryMonthInput": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}$"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "amountMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "description": "This side's amount in minor units of `currency`: money out as a positive amount for spending (a refund-heavy month can be negative), money in for income. Exactly the Cash Flow hub's category breakdown for the month (the heading: its group row). \"0\" with `hasActivity: false` is a real zero."
+          },
+          "transactionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "hasActivity": {
+            "type": "boolean",
+            "description": "Any report cell for the category (or its children) this month."
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "False only for the current month, whose amount is so far."
+          },
+          "isCurrent": {
+            "type": "boolean"
+          },
+          "inHistory": {
+            "type": "boolean",
+            "description": "On or after the month of the holder's first ledger row (any category, any currency). A month before it is not a zero and is never averaged."
+          }
+        },
+        "required": [
+          "month",
+          "start",
+          "end",
+          "amountMinor",
+          "transactionCount",
+          "hasActivity",
+          "complete",
+          "isCurrent",
+          "inHistory"
+        ]
+      },
+      "CategoryHistoryAverageInput": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "withheld": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "insufficient_history",
+                  "no_data"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why a figure is withheld: fewer than two complete months in history (`insufficient_history`), or no ledger row at all (`no_data`). null when shown."
+          },
+          "amountMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Σ amount ÷ months averaged, rounded half-even. Over every complete month in history — a zero month counts as a zero, never dropped — and never the current month. null when withheld."
+          },
+          "monthsAveraged": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "months": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}$"
+            },
+            "description": "The months averaged, oldest first."
+          }
+        },
+        "required": [
+          "available",
+          "withheld",
+          "amountMinor",
+          "monthsAveraged",
+          "months"
+        ]
+      },
+      "CategoryHistoryComparisonInput": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "withheld": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "insufficient_history",
+                  "no_data"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why a figure is withheld: fewer than two complete months in history (`insufficient_history`), or no ledger row at all (`no_data`). null when shown."
+          },
+          "thisMonthMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "description": "The current month so far. Always present."
+          },
+          "averageMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "differenceMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "thisMonth − average, signed; null when the average is withheld."
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "more",
+                  "less",
+                  "same"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "withheld",
+          "thisMonthMinor",
+          "averageMinor",
+          "differenceMinor",
+          "direction"
+        ]
+      },
+      "CategoryHistoryInput": {
+        "type": "object",
+        "properties": {
+          "categoryId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "spending",
+              "income"
+            ],
+            "description": "`income` for an income category, else `spending` (as Reports splits them)."
+          },
+          "includesChildren": {
+            "type": "boolean",
+            "description": "True for a heading: every figure sums it and its children, archived included."
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "otherCurrencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Currencies also present, never converted or summed (decision D4)."
+          },
+          "currentMonth": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}$"
+          },
+          "through": {
+            "type": "string",
+            "description": "Today, in the holder's zone: the current month is so far."
+          },
+          "historyStart": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first window month in history: the month of the holder's first ledger row, or the window's first month when the ledger reaches back before it. null when there is no row at all."
+          },
+          "months": {
+            "minItems": 13,
+            "maxItems": 13,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryHistoryMonthInput"
+            },
+            "description": "Exactly thirteen: the twelve complete months before the current one, then it. Oldest first."
+          },
+          "average": {
+            "$ref": "#/components/schemas/CategoryHistoryAverageInput"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/CategoryHistoryComparisonInput"
+          },
+          "drillThrough": {
+            "$ref": "#/components/schemas/ReportDrillThroughInput"
+          }
+        },
+        "required": [
+          "categoryId",
+          "side",
+          "includesChildren",
+          "currency",
+          "otherCurrencies",
+          "currentMonth",
+          "through",
+          "historyStart",
+          "months",
+          "average",
+          "comparison",
+          "drillThrough"
+        ],
+        "description": "One category's last thirteen months, its average and this month against it. Every month's amount is the Cash Flow hub's for that category and month (transfers out, refunds netted into the purchase's category, excluded rows dropped, pending counted). Nothing is invented: a month before the holder's first ledger row is not in history; the average is withheld below two complete months in history; the current month is never averaged."
       },
       "DashboardLayoutEntryInput": {
         "type": "object",
@@ -22635,6 +22917,13 @@
             ],
             "description": "null = not yet classified by the holder."
           },
+          "emoji": {
+            "description": "One emoji (one extended grapheme cluster), set by the holder. null = none set; the web then shows the shipped default for a system category's key, or the initials — the default is never written.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "sort": {
             "type": "integer",
             "minimum": -9007199254740991,
@@ -22666,6 +22955,7 @@
           "icon",
           "hue",
           "variability",
+          "emoji",
           "sort",
           "isSystem",
           "archivedAt",
@@ -27427,6 +27717,284 @@
           "netMinor"
         ],
         "additionalProperties": false
+      },
+      "CategoryHistoryMonth": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}$"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "amountMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "description": "This side's amount in minor units of `currency`: money out as a positive amount for spending (a refund-heavy month can be negative), money in for income. Exactly the Cash Flow hub's category breakdown for the month (the heading: its group row). \"0\" with `hasActivity: false` is a real zero."
+          },
+          "transactionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "hasActivity": {
+            "type": "boolean",
+            "description": "Any report cell for the category (or its children) this month."
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "False only for the current month, whose amount is so far."
+          },
+          "isCurrent": {
+            "type": "boolean"
+          },
+          "inHistory": {
+            "type": "boolean",
+            "description": "On or after the month of the holder's first ledger row (any category, any currency). A month before it is not a zero and is never averaged."
+          }
+        },
+        "required": [
+          "month",
+          "start",
+          "end",
+          "amountMinor",
+          "transactionCount",
+          "hasActivity",
+          "complete",
+          "isCurrent",
+          "inHistory"
+        ],
+        "additionalProperties": false
+      },
+      "CategoryHistoryAverage": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "withheld": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "insufficient_history",
+                  "no_data"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why a figure is withheld: fewer than two complete months in history (`insufficient_history`), or no ledger row at all (`no_data`). null when shown."
+          },
+          "amountMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Σ amount ÷ months averaged, rounded half-even. Over every complete month in history — a zero month counts as a zero, never dropped — and never the current month. null when withheld."
+          },
+          "monthsAveraged": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "months": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}$"
+            },
+            "description": "The months averaged, oldest first."
+          }
+        },
+        "required": [
+          "available",
+          "withheld",
+          "amountMinor",
+          "monthsAveraged",
+          "months"
+        ],
+        "additionalProperties": false
+      },
+      "CategoryHistoryComparison": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "withheld": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "insufficient_history",
+                  "no_data"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why a figure is withheld: fewer than two complete months in history (`insufficient_history`), or no ledger row at all (`no_data`). null when shown."
+          },
+          "thisMonthMinor": {
+            "type": "string",
+            "pattern": "^-?\\d+$",
+            "description": "The current month so far. Always present."
+          },
+          "averageMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "differenceMinor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "thisMonth − average, signed; null when the average is withheld."
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "more",
+                  "less",
+                  "same"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "withheld",
+          "thisMonthMinor",
+          "averageMinor",
+          "differenceMinor",
+          "direction"
+        ],
+        "additionalProperties": false
+      },
+      "CategoryHistory": {
+        "type": "object",
+        "properties": {
+          "categoryId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "spending",
+              "income"
+            ],
+            "description": "`income` for an income category, else `spending` (as Reports splits them)."
+          },
+          "includesChildren": {
+            "type": "boolean",
+            "description": "True for a heading: every figure sums it and its children, archived included."
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "otherCurrencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Currencies also present, never converted or summed (decision D4)."
+          },
+          "currentMonth": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}$"
+          },
+          "through": {
+            "type": "string",
+            "description": "Today, in the holder's zone: the current month is so far."
+          },
+          "historyStart": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first window month in history: the month of the holder's first ledger row, or the window's first month when the ledger reaches back before it. null when there is no row at all."
+          },
+          "months": {
+            "minItems": 13,
+            "maxItems": 13,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryHistoryMonth"
+            },
+            "description": "Exactly thirteen: the twelve complete months before the current one, then it. Oldest first."
+          },
+          "average": {
+            "$ref": "#/components/schemas/CategoryHistoryAverage"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/CategoryHistoryComparison"
+          },
+          "drillThrough": {
+            "$ref": "#/components/schemas/ReportDrillThrough"
+          }
+        },
+        "required": [
+          "categoryId",
+          "side",
+          "includesChildren",
+          "currency",
+          "otherCurrencies",
+          "currentMonth",
+          "through",
+          "historyStart",
+          "months",
+          "average",
+          "comparison",
+          "drillThrough"
+        ],
+        "additionalProperties": false,
+        "description": "One category's last thirteen months, its average and this month against it. Every month's amount is the Cash Flow hub's for that category and month (transfers out, refunds netted into the purchase's category, excluded rows dropped, pending counted). Nothing is invented: a month before the holder's first ledger row is not in history; the average is withheld below two complete months in history; the current month is never averaged."
       },
       "DashboardLayoutEntry": {
         "type": "object",
@@ -34474,6 +35042,18 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "emoji": {
+                    "description": "Exactly one emoji (one extended grapheme cluster, at most 8 code points). null clears it, and the web falls back to the shipped default for a system category or the initials. Omitted: unchanged on PATCH, none on POST.",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 32
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -34642,11 +35222,11 @@
     "/categories/{categoryId}": {
       "patch": {
         "operationId": "renameCategory",
-        "summary": "Rename, re-describe, recolour or classify a category",
+        "summary": "Rename, re-describe, recolour, re-icon or classify a category",
         "tags": [
           "categories"
         ],
-        "description": "Deliberately narrow: `label`, `description`, `icon`, `hue` and `variability` only (`variability: null` returns a category to unclassified). `kind` and the parent/child structure are not editable here — both are structural (the seeding pass's own rule for why a re-seed never touches them) and changing either after transactions have been filed under a category is how a report silently moves money between totals. Works on a system category as well as a custom one: a user renaming \"Dining & Drinks\" to \"Eating Out\" is exactly what this is for.",
+        "description": "Deliberately narrow: `label`, `description`, `icon`, `hue`, `variability` and `emoji` only (`variability: null` returns a category to unclassified; `emoji: null` clears the holder's emoji, and the web falls back to the default again). `kind` and the parent/child structure are not editable here — both are structural (the seeding pass's own rule for why a re-seed never touches them) and changing either after transactions have been filed under a category is how a report silently moves money between totals. Works on a system category as well as a custom one: a user renaming \"Dining & Drinks\" to \"Eating Out\" is exactly what this is for.",
         "requestBody": {
           "required": true,
           "content": {
@@ -34675,6 +35255,18 @@
                     "anyOf": [
                       {
                         "$ref": "#/components/schemas/CategoryVariabilityInput"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "emoji": {
+                    "description": "Exactly one emoji (one extended grapheme cluster, at most 8 code points). null clears it, and the web falls back to the shipped default for a system category or the initials. Omitted: unchanged on PATCH, none on POST.",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 32
                       },
                       {
                         "type": "null"
@@ -37888,6 +38480,80 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/category-history": {
+      "get": {
+        "operationId": "getCategoryHistory",
+        "summary": "One category's last thirteen months, its average and this month against it",
+        "tags": [
+          "reports"
+        ],
+        "description": "The category detail screen's figures (WP 10.14). The window is the twelve complete months before the current one (the holder's zone) plus the current one. A heading sums its children. Each month's amount is the Cash Flow hub's category breakdown for that month. History starts at the holder's first ledger row: a month before it is not in history, a month in history with no spend is a zero. The average is over the complete months in history (zeros included, the current month never), withheld below two; the comparison is this month so far against it. One currency, the one the category's rows are mostly in; others are named, never summed (decision D4).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "categoryId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryHistory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {

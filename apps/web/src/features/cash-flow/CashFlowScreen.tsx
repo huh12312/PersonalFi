@@ -365,6 +365,7 @@ function Breakdowns({
         currency={currency}
         side="income"
         noun={BREAKDOWN_NOUNS[key]}
+        dimension={key}
         emptyText={`No income in ${unitLabel}.`}
       />,
     );
@@ -378,6 +379,7 @@ function Breakdowns({
         currency={currency}
         side="expenses"
         noun={BREAKDOWN_NOUNS[key]}
+        dimension={key}
         emptyText={`No spending in ${unitLabel}.`}
       />,
     );

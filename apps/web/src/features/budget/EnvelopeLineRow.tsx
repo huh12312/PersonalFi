@@ -2,13 +2,17 @@
 import { useEffect, useId, useReducer, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 
+import { Link } from '@tanstack/react-router';
+
 import type { BudgetLine } from '../../api/generated/types.gen.ts';
+import { CategoryIcon } from '../../components/finance/CategoryIcon.tsx';
 import { BudgetMeterRow } from '../../components/finance/BudgetMeter.tsx';
 import { meterFiguresOf, type PaceStatus } from '../../components/finance/budget-meter.ts';
 import { Money } from '../../components/finance/Money.tsx';
 import { Input } from '../../components/ui/input.tsx';
 import { cn } from '../../lib/cn.ts';
 import { parseWireMoney } from '../../lib/money.ts';
+import { useCategories } from '../categories/useCategories.ts';
 import { useUpdateBudgetLineMutation } from './api.ts';
 import {
   assignEditorReducer,
@@ -74,6 +78,12 @@ const OVERSPEND_BADGE: Record<'cash' | 'credit', { label: string; className: str
 export function EnvelopeLineRow({ line, categoryLabel, pace, children }: EnvelopeLineRowProps) {
   const [editor, dispatch] = useReducer(assignEditorReducer, CLOSED_ASSIGN_EDITOR);
   const update = useUpdateBudgetLineMutation();
+  // WP 10.14: a category line shows its icon and opens the category's screen.
+  const { byId: categoriesById } = useCategories();
+  const category =
+    line.kind === 'category' && line.categoryId !== null
+      ? (categoriesById.get(line.categoryId) ?? null)
+      : null;
   const inputRef = useRef<HTMLInputElement>(null);
   const errorId = useId();
   // 3.3.1/3.3.3: pressing Enter on an amount that cannot be read says so, in text, and keeps the field open. It used
@@ -150,7 +160,21 @@ export function EnvelopeLineRow({ line, categoryLabel, pace, children }: Envelop
     // editor share the second: at 390 px a fixed-width amount grid crushed the label to one character a line.
     <li className="grid grid-cols-[repeat(3,minmax(0,1fr))_auto] items-center gap-3 rounded-md border border-border-hairline bg-bg-surface p-3 sm:grid-cols-[1fr_repeat(3,minmax(0,7rem))_auto]">
       <div className="col-span-full min-w-0 sm:col-span-1">
-        <p className="break-words text-body font-medium text-text-primary">{categoryLabel}</p>
+        {category === null ? (
+          <p className="break-words text-body font-medium text-text-primary">{categoryLabel}</p>
+        ) : (
+          <p className="flex min-w-0 items-center gap-2 text-body font-medium text-text-primary">
+            <CategoryIcon category={category} size="xs" />
+            <Link
+              to="/categories/$categoryId"
+              params={{ categoryId: category.id }}
+              className="min-w-0 break-words underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              data-category-link={category.id}
+            >
+              {categoryLabel}
+            </Link>
+          </p>
+        )}
         {readOnly && (
           <p className="text-caption text-text-muted">Card payment — funded automatically</p>
         )}
