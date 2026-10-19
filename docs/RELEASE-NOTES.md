@@ -9,6 +9,54 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.14: one block kit for the Brief and Reports, and insight cards with links
+
+**Status:** a patch release on v0.9.13. The tag `v0.9.14` is pushed by the maintainer once CI is green.
+This closes the eight-package visual programme that began with v0.9.7.
+
+### Upgrading to v0.9.14
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0051_insight_feedback` (expand-only: three new, empty columns on `insights` — when you
+bookmarked an insight, whether you found it helpful, and why not). Nothing is backfilled.
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **One way to draw a report.** The Brief and Reports are now drawn from a small, versioned set of
+  blocks the server builds: headings and text, labelled figures, money, bar lists, a donut, stacked
+  bars, sparklines, budget meters, the net-worth chart, a transaction list, tables, badges, links,
+  dividers and groups. Every chart block has its table. A block never carries a figure its own
+  report does not: a test checks every figure on the Reports screen against the report it comes
+  from. A figure that is withheld says why instead of showing a zero.
+- **Reports.** Spending and Income by category and month are stacked bars, and each segment still
+  opens its transactions. Budget vs. actual is a table whose category names open the category's
+  screen. The cash-flow Sankey is unchanged.
+- **The Brief.** Above the cards: the week, the ranked actions by dollar impact (yearly and one-time
+  figures are never drawn on one scale, and an action with no figure is named, not drawn as zero),
+  any net-worth milestones you have not dismissed, and the health score card. Each card's wording,
+  figure and "carried" badge are blocks too. A narrator's wording keeps its badge naming the
+  provider and model, and the rules for what reaches a model are unchanged: blocks are built by the
+  server and are never sent to one.
+- **Insight cards.** Names in an insight (a category, an account, a transaction) are links, but only
+  when the insight's own evidence cites that entity. A line under the title says what the insight is
+  about. A value line reads "Worth $X / year" (or "one-time") when the insight claims a figure.
+  Bookmark an insight, and filter the list to your bookmarks. Mark it Helpful or Not helpful; Not
+  helpful asks why with the same reasons as Dismiss. Your answer is kept on the insight and does not
+  change which insights you are shown.
+- **API.** `GET /reports/blocks/spending`, `GET /reports/blocks/income` and
+  `GET /reports/blocks/budget-vs-actual` return a `BlockDocument`. `AdvisoryBrief` and `BriefItem`
+  gain `blocks`. `Insight` gains `bookmarkedAt`, `feedback`, `feedbackReason`, `mentions`,
+  `titleSegments`, `bodySegments` and `contextLine`. New: `POST /insights/{insightId}/bookmark` and
+  `POST /insights/{insightId}/feedback`.
+
 ## v0.9.13: a screen for every category, and emoji icons
 
 **Status:** a patch release on v0.9.12. The tag `v0.9.13` is pushed by the maintainer once CI is green.

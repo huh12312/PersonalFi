@@ -56,13 +56,27 @@ import {
   requestAdvisorRuns,
   reviewInsight,
   setAdvisorEnabled,
+  contextLineOf,
+  mentionCandidatesOf,
+  segmentText,
+  setInsightBookmark,
+  setInsightFeedback,
+  MENTION_ENTITY_TYPES,
   type AdvisorKind,
+  type NamedMention,
   type InsightsContext,
   type InsightsDependencies,
   type InsightView,
   type RunSwitches,
 } from '@ctx/insights';
-import { INSIGHT_STATUSES, REASON_CODES, type InsightStatus } from '@ctx/insights/schema';
+import {
+  INSIGHT_HELPFULNESS_VALUES,
+  INSIGHT_STATUSES,
+  REASON_CODES,
+  type InsightStatus,
+} from '@ctx/insights/schema';
+import { listCategories } from '@ctx/categorization';
+import { listAccounts } from '@ctx/ledger';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
@@ -88,6 +102,16 @@ async function timezoneOf(deps: RouteDeps): Promise<string> {
 
 const FEEDBACK_ACTIONS = ['accept', 'dismiss', 'snooze', 'reopen'] as const;
 
+function insightNotFound(insightId: string): AppError {
+  return new AppError({
+    status: 404,
+    code: 'insights.insight_not_found',
+    title: 'Not Found',
+    detail: `no insight ${insightId}`,
+    family: 'user',
+  });
+}
+
 const evidenceSchema = z.object({
   position: z.int(),
   kind: z.string(),
@@ -105,6 +129,28 @@ const actionSchema = z.object({
   rationaleMd: z.string(),
   url: z.string().nullable(),
 });
+
+const insightTextSegmentSchema = z
+  .object({
+    text: z.string(),
+    entityType: z.enum(MENTION_ENTITY_TYPES).optional(),
+    entityId: z.uuid().optional(),
+  })
+  .meta({
+    id: 'InsightTextSegment',
+    description:
+      "A run of an insight's text; with `entityType`/`entityId` it names an entity and is a link.",
+  });
+
+const insightMentionSchema = z
+  .object({
+    text: z.string(),
+    entityType: z.enum(MENTION_ENTITY_TYPES),
+    entityId: z.uuid(),
+    /** The evidence row (by `position`) that cites the entity — the client re-resolves it against `evidence`. */
+    evidencePosition: z.int(),
+  })
+  .meta({ id: 'InsightMention' });
 
 const insightSchema = z
   .object({
@@ -142,10 +188,91 @@ const insightSchema = z
     expiresAt: isoInstant.nullable(),
     evidence: z.array(evidenceSchema),
     actions: z.array(actionSchema),
+    /** WP 10.15 (0051): when the holder bookmarked it; `null` = not bookmarked. */
+    bookmarkedAt: isoInstant.nullable(),
+    /** WP 10.15 (0051): "was this helpful?"; `null` = not answered. Persisted on the row; never moves policy. */
+    feedback: z.enum(INSIGHT_HELPFULNESS_VALUES).nullable(),
+    /** WP 10.15 (0051): the reason code given with `not_helpful`. */
+    feedbackReason: z.enum(REASON_CODES).nullable(),
+    /**
+     * WP 10.15: the entities this insight's own evidence names (`@ctx/insights`' `mentions.ts`): a category,
+     * account or transaction whose id an evidence row cites, named by its current label (a transaction by the
+     * evidence row's label). An id the holder no longer has is dropped, never invented. Merchants cross the
+     * advisor boundary as one-way pseudonyms (D22) and so never appear here.
+     */
+    mentions: z.array(insightMentionSchema),
+    /** `title` split on the mentions' names (the texts concatenate to `title`). */
+    titleSegments: z.array(insightTextSegmentSchema),
+    /** `summaryMd` split the same way. */
+    bodySegments: z.array(insightTextSegmentSchema),
+    /** "About Groceries, Checking · transaction 1 …", or `null` when the insight names no entity. */
+    contextLine: z.array(insightTextSegmentSchema).nullable(),
   })
   .meta({ id: 'Insight' });
 
-function serialiseInsight(view: InsightView): z.infer<typeof insightSchema> {
+/** Names for the entities an insight's evidence can mention: categories (archived included) and accounts (closed included). */
+interface MentionNames {
+  readonly category: ReadonlyMap<string, string>;
+  readonly account: ReadonlyMap<string, string>;
+}
+
+const NO_NAMES: MentionNames = { category: new Map(), account: new Map() };
+
+/** Read the names only when some insight's evidence cites an entity — most feeds cite none. */
+async function mentionNamesFor(
+  deps: RouteDeps,
+  userId: string,
+  views: readonly InsightView[],
+): Promise<MentionNames> {
+  const kinds = new Set(
+    views.flatMap((view) => mentionCandidatesOf(view.evidence).map((c) => c.entityType)),
+  );
+  if (!kinds.has('category') && !kinds.has('account')) return NO_NAMES;
+  const [categories, accounts] = await Promise.all([
+    kinds.has('category')
+      ? listCategories(deps.database, userId, { includeArchived: true })
+      : Promise.resolve([]),
+    kinds.has('account')
+      ? listAccounts(deps.database, { userId, includeClosed: true })
+      : Promise.resolve([]),
+  ]);
+  return {
+    category: new Map(categories.map((category) => [category.id.toLowerCase(), category.label])),
+    account: new Map(accounts.map((account) => [account.id.toLowerCase(), account.name])),
+  };
+}
+
+/** The evidence-backed mentions, named; an entity with no name in this holder's data is dropped. */
+function namedMentionsOf(
+  view: InsightView,
+  names: MentionNames,
+): (NamedMention & { readonly evidencePosition: number })[] {
+  return mentionCandidatesOf(view.evidence).flatMap((candidate) => {
+    const text =
+      candidate.entityType === 'transaction'
+        ? candidate.label
+        : (candidate.entityType === 'category' ? names.category : names.account).get(
+            candidate.entityId,
+          );
+    if (text === undefined || text.length === 0) return [];
+    return [
+      {
+        text,
+        entityType: candidate.entityType,
+        entityId: candidate.entityId,
+        evidencePosition: candidate.evidencePosition,
+      },
+    ];
+  });
+}
+
+function serialiseInsight(
+  view: InsightView,
+  names: MentionNames = NO_NAMES,
+): z.infer<typeof insightSchema> {
+  const mentions = namedMentionsOf(view, names);
+  // A transaction's "name" is its evidence label, which is not a word in the title or body.
+  const linkable = mentions.filter((mention) => mention.entityType !== 'transaction');
   return {
     id: view.id,
     advisorId: view.advisorId,
@@ -171,6 +298,13 @@ function serialiseInsight(view: InsightView): z.infer<typeof insightSchema> {
     expiresAt: view.expiresAt === null ? null : view.expiresAt.toISOString(),
     evidence: view.evidence.map((row) => ({ ...row })),
     actions: view.actions.map((row) => ({ ...row })),
+    bookmarkedAt: view.bookmarkedAt === null ? null : view.bookmarkedAt.toISOString(),
+    feedback: view.feedback,
+    feedbackReason: view.feedbackReason,
+    mentions: mentions.map((mention) => ({ ...mention })),
+    titleSegments: segmentText(view.title, linkable),
+    bodySegments: segmentText(view.summaryMd, linkable),
+    contextLine: contextLineOf(mentions),
   };
 }
 
@@ -357,11 +491,18 @@ export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           now: clock.now(),
           currency: 'USD',
         });
+        const names = await mentionNamesFor(deps, session.userId, [
+          ...feed.dashboard,
+          ...feed.list,
+          ...feed.overflow,
+          ...feed.belowFloor,
+        ]);
+        const wire = (view: InsightView) => serialiseInsight(view, names);
         return {
-          dashboard: feed.dashboard.map(serialiseInsight),
-          list: feed.list.map(serialiseInsight),
-          overflow: feed.overflow.map(serialiseInsight),
-          belowFloor: feed.belowFloor.map(serialiseInsight),
+          dashboard: feed.dashboard.map(wire),
+          list: feed.list.map(wire),
+          overflow: feed.overflow.map(wire),
+          belowFloor: feed.belowFloor.map(wire),
         };
       },
     );
@@ -397,7 +538,9 @@ export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             family: 'user',
           });
         }
-        return { insight: serialiseInsight(found) };
+        return {
+          insight: serialiseInsight(found, await mentionNamesFor(deps, session.userId, [found])),
+        };
       },
     );
 
@@ -465,6 +608,90 @@ export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           suppressedUntil:
             result.suppressedUntil === null ? null : result.suppressedUntil.toISOString(),
         };
+      },
+    );
+
+    app.post(
+      '/insights/:insightId/bookmark',
+      {
+        schema: {
+          operationId: 'bookmarkInsight',
+          summary: 'Bookmark or un-bookmark an insight',
+          description:
+            'WP 10.15 (migration 0051): state on the insight row, replaced when it changes. A bookmark is the ' +
+            "holder's own marker and moves no advisor policy. 404 for an insight the caller does not hold.",
+          tags: ['insights'],
+          params: z.object({ insightId: z.uuid() }),
+          body: z.object({ bookmarked: z.boolean() }),
+          response: {
+            200: z.object({ insightId: z.uuid(), bookmarkedAt: isoInstant.nullable() }),
+            ...problems(400, 401, 404, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const result = await setInsightBookmark(
+          database,
+          session.userId,
+          request.params.insightId,
+          request.body.bookmarked,
+          clock.now(),
+        );
+        if (result === null) throw insightNotFound(request.params.insightId);
+        return {
+          insightId: result.insightId,
+          bookmarkedAt: result.bookmarkedAt === null ? null : result.bookmarkedAt.toISOString(),
+        };
+      },
+    );
+
+    app.post(
+      '/insights/:insightId/feedback',
+      {
+        schema: {
+          operationId: 'setInsightFeedback',
+          summary: 'Say whether an insight was helpful',
+          description:
+            "WP 10.15 (migration 0051): `helpful`, `not_helpful` (optionally with one of 07 §8.3's reason " +
+            'codes) or `null` to clear the answer and its reason. Persisted on the insight row only: unlike a ' +
+            "dismissal's reason it never moves the cooldown ladder, the quarantine rate or rule health. A " +
+            'reason with anything but `not_helpful` is a 400. 404 for an insight the caller does not hold.',
+          tags: ['insights'],
+          params: z.object({ insightId: z.uuid() }),
+          body: z
+            .object({
+              feedback: z.enum(INSIGHT_HELPFULNESS_VALUES).nullable(),
+              reasonCode: z.enum(REASON_CODES).nullable().optional(),
+            })
+            .refine(
+              (body) =>
+                body.reasonCode === undefined ||
+                body.reasonCode === null ||
+                body.feedback === 'not_helpful',
+              'a reason is given only with "not_helpful"',
+            ),
+          response: {
+            200: z.object({
+              insightId: z.uuid(),
+              feedback: z.enum(INSIGHT_HELPFULNESS_VALUES).nullable(),
+              feedbackReason: z.enum(REASON_CODES).nullable(),
+            }),
+            ...problems(400, 401, 404, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const result = await setInsightFeedback(
+          database,
+          session.userId,
+          request.params.insightId,
+          request.body.feedback,
+          request.body.reasonCode ?? null,
+        );
+        if (result === null) throw insightNotFound(request.params.insightId);
+        return result;
       },
     );
 

@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router';
 import type { CashFlowBreakdownRow } from '../../api/generated/types.gen.ts';
 import { CategoryIcon } from '../../components/finance/CategoryIcon.tsx';
 import { chartEventVar, chartFillVar } from '../../components/finance/chart-hue.ts';
+import { HorizontalBarRow } from '../../components/finance/HorizontalBarRow.tsx';
 import { Money } from '../../components/finance/Money.tsx';
 import { isChartHue } from '@core/kernel';
 import { useCategories } from '../categories/useCategories.ts';
@@ -108,49 +109,41 @@ function BreakdownRow({
   const share = row.share === null ? null : Math.max(0, Math.min(1, row.share));
   const signed = side === 'expenses' ? -BigInt(row.sumMinor) : BigInt(row.sumMinor);
   const fill = isChartHue(row.hue) ? chartFillVar(row.hue) : chartFillVar('neutral');
+  const leading =
+    category !== null ? (
+      <CategoryIcon category={{ ...category, label: row.label }} size="sm" />
+    ) : dimension !== 'merchant' && row.key === null && row.folded === undefined ? (
+      <CategoryIcon
+        category={{ id: null, key: 'uncategorised', label: row.label, isSystem: true }}
+        size="sm"
+      />
+    ) : (
+      <Avatar row={row} />
+    );
   const body = (
-    <div className="flex items-center gap-3 py-2.5">
-      {category !== null ? (
-        <CategoryIcon category={{ ...category, label: row.label }} size="sm" />
-      ) : dimension !== 'merchant' && row.key === null && row.folded === undefined ? (
-        <CategoryIcon
-          category={{ id: null, key: 'uncategorised', label: row.label, isSystem: true }}
-          size="sm"
+    <HorizontalBarRow
+      leading={leading}
+      label={row.label}
+      right={
+        <Money
+          value={{ minor: signed.toString(), currency }}
+          signDisplay="auto"
+          colorBySign={false}
+          className="shrink-0 text-small font-medium text-text-primary"
         />
-      ) : (
-        <Avatar row={row} />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="truncate text-small font-medium text-text-primary">{row.label}</span>
-          <Money
-            value={{ minor: signed.toString(), currency }}
-            signDisplay="auto"
-            colorBySign={false}
-            className="shrink-0 text-small font-medium text-text-primary"
-          />
-        </div>
-        <div className="mt-1 flex items-center gap-3">
-          <div
-            className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg-tertiary"
-            aria-hidden="true"
-          >
-            <div
-              className="h-full rounded-full"
-              data-share-bar=""
-              style={{ width: `${String((share ?? 0) * 100)}%`, background: fill }}
-            />
-          </div>
-          <span className="w-24 shrink-0 text-right text-caption tabular-nums text-text-secondary">
-            {share === null ? '—' : SHARE.format(row.share ?? 0)}
-            <span className="text-text-muted">
-              {' · '}
-              {row.count} {row.count === 1 ? 'txn' : 'txns'}
-            </span>
+      }
+      fraction={share ?? 0}
+      fill={fill}
+      caption={
+        <>
+          {share === null ? '—' : SHARE.format(row.share ?? 0)}
+          <span className="text-text-muted">
+            {' · '}
+            {row.count} {row.count === 1 ? 'txn' : 'txns'}
           </span>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    />
   );
   if (category !== null) {
     // WP 10.14: a category or group row opens its category's screen; "See transactions" lives there.

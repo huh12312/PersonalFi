@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { KeyRound, Lightbulb } from 'lucide-react';
+import { Bookmark, KeyRound, Lightbulb } from 'lucide-react';
 import { useState } from 'react';
 
 import {
@@ -11,11 +11,14 @@ import {
 import type { AdvisorHealth } from '../../api/generated/types.gen.ts';
 import { EmptyState } from '../../components/patterns/EmptyState.tsx';
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
+import { Button } from '../../components/ui/button.tsx';
 import { InsightCard } from './InsightCard.tsx';
 
 /**
  * `/insights` (02-phase-2-dispatch.md §3 WP 2.10): the ranked feed with a
- * full evidence panel behind every card. The standing educational
+ * full evidence panel behind every card. WP 10.15: a "Bookmarked" filter
+ * (a pressed/unpressed toggle with the count) narrows it to the insights the
+ * holder bookmarked. The standing educational
  * disclaimer lives on each card (`EvidencePanel.tsx`'s closing line) rather
  * than once at the top, so it is visible at the exact moment someone is
  * deciding what to do with a number.
@@ -52,11 +55,19 @@ export function InsightsScreen() {
   const feedQuery = useQuery(listInsightsFeedOptions({ query: { statuses: ['pending_review'] } }));
   const advisorsQuery = useQuery(listAdvisorsOptions());
   const [cooldownNotice, setCooldownNotice] = useState<string | null>(null);
+  const [bookmarkedOnly, setBookmarkedOnly] = useState(false);
 
   if (feedQuery.isLoading) return <SkeletonText lines={6} />;
 
   const feed = feedQuery.data;
-  const insights = feed?.list ?? [];
+  const everyInsight = feed?.list ?? [];
+  const bookmarkedCount = everyInsight.filter(
+    (insight) => (insight.bookmarkedAt ?? null) !== null,
+  ).length;
+  // WP 10.15: the Bookmarked filter narrows this feed to what the holder bookmarked (persisted on the row).
+  const insights = bookmarkedOnly
+    ? everyInsight.filter((insight) => (insight.bookmarkedAt ?? null) !== null)
+    : everyInsight;
   const overflowCount = feed?.overflow.length ?? 0;
   const belowFloorCount = feed?.belowFloor.length ?? 0;
   const consent =
@@ -76,7 +87,29 @@ export function InsightsScreen() {
         </div>
       )}
 
-      {insights.length === 0 && consentIsWhy ? (
+      {everyInsight.length > 0 && (
+        <div className="flex items-center justify-end">
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-pressed={bookmarkedOnly}
+            onClick={() => setBookmarkedOnly((prev) => !prev)}
+            className="gap-1.5"
+            data-testid="insights-bookmarked-filter"
+          >
+            <Bookmark size={14} aria-hidden="true" />
+            Bookmarked ({String(bookmarkedCount)})
+          </Button>
+        </div>
+      )}
+
+      {bookmarkedOnly && insights.length === 0 ? (
+        <EmptyState
+          icon={Bookmark}
+          headline="No bookmarked insights"
+          description="Bookmark an insight to keep it here. Turn the Bookmarked filter off to see every insight."
+        />
+      ) : insights.length === 0 && consentIsWhy ? (
         <EmptyState
           icon={KeyRound}
           headline="No advisor has been given access to your data"

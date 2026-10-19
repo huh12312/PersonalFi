@@ -4,9 +4,12 @@ import { useState } from 'react';
 
 import { Sdk } from '../../api/generated/sdk.gen.ts';
 import {
+  getBudgetVsActualReportBlocksOptions,
   getBudgetVsActualReportOptions,
+  getIncomeReportBlocksOptions,
   getIncomeReportOptions,
   getSankeyReportOptions,
+  getSpendingReportBlocksOptions,
   getSpendingReportOptions,
 } from '../../api/generated/@tanstack/react-query.gen.ts';
 import { downloadTextFile } from '../../lib/download-file.ts';
@@ -48,6 +51,33 @@ export function useBudgetVsActualReportQuery(periodId: string | undefined) {
   return useQuery({
     ...getBudgetVsActualReportOptions({ query: periodId !== undefined ? { periodId } : {} }),
     staleTime: 10_000,
+  });
+}
+
+/**
+ * WP 10.15 (V8): the Spending / Income / Budget-vs-actual sections as blocks — the same figures as the three report
+ * routes above, arranged by the API (`apps/api/src/blocks/reports.ts`) and drawn by the block renderer.
+ */
+export function useSpendingReportBlocksQuery(window: ReportWindow) {
+  return useQuery({
+    ...getSpendingReportBlocksOptions({ query: { from: window.from, to: window.to } }),
+    staleTime: 30_000,
+  });
+}
+
+export function useIncomeReportBlocksQuery(window: ReportWindow) {
+  return useQuery({
+    ...getIncomeReportBlocksOptions({ query: { from: window.from, to: window.to } }),
+    staleTime: 30_000,
+  });
+}
+
+/** Waits for the current period's id, as the screen always has: no id, no request. */
+export function useBudgetVsActualReportBlocksQuery(periodId: string | undefined) {
+  return useQuery({
+    ...getBudgetVsActualReportBlocksOptions({ query: periodId !== undefined ? { periodId } : {} }),
+    staleTime: 10_000,
+    enabled: periodId !== undefined,
   });
 }
 

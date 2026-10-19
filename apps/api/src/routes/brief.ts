@@ -109,12 +109,20 @@ import {
   type NarrationView,
 } from '@ctx/insights';
 import { advisoryBriefItems, advisoryBriefs } from '@ctx/insights/schema';
+import { listUndismissedMilestones } from '@ctx/planning';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { ADVISOR_KIND_FLAGS, MODULE_FLAGS } from '../platform.ts';
 import { AppError, problems } from '../problem.ts';
 import { isoInstant, moneySchema } from '../wire.ts';
 import type { NarratorRuntime } from '../narrator-wiring.ts';
+import {
+  briefItemBlocks,
+  briefOverviewBlocks,
+  type HealthForBlocks,
+  type MilestoneForBlocks,
+} from '../blocks/brief.ts';
+import { blockDocument, blockDocumentSchema } from '../blocks/schema.ts';
 import type { RouteDeps } from './deps.ts';
 
 /** Mirrors `brief/iso-week.ts`'s `ISO_WEEK_PATTERN` — see this file's header. */
@@ -294,6 +302,12 @@ const briefItemSchema = z
     /** CF-24: the action as the Brief said it; null for a Brief published before 0038 ("no action recorded"). */
     primaryAction: primaryActionSchema.nullable(),
     narration: narrationSchema,
+    /**
+     * WP 10.15 (V8): the card's deterministic content as blocks — its wording (a `text` block with role
+     * `narration` under the badge whenever a narration exists or is expected), its headline figure or why there is
+     * none, the carried badge. Built from the fields above (`blocks/brief.ts`); never model output.
+     */
+    blocks: blockDocumentSchema,
   })
   .meta({ id: 'BriefItem' });
 
@@ -308,6 +322,11 @@ const briefSchema = z
     inputDigest: z.string(),
     publishedAt: isoInstant,
     items: z.array(briefItemSchema),
+    /**
+     * WP 10.15 (V8): the overview above the cards as blocks — the week, the ranked actions by dollar impact, net
+     * worth milestones if any, and the health link card (`blocks/brief.ts`). Deterministic server code.
+     */
+    blocks: blockDocumentSchema,
   })
   .meta({ id: 'AdvisoryBrief' });
 
@@ -519,7 +538,9 @@ function serialiseBrief(
   brief: typeof advisoryBriefs.$inferSelect,
   items: readonly (typeof advisoryBriefItems.$inferSelect)[],
   narrations: NarrationContext,
-): z.infer<typeof briefSchema> {
+): Omit<z.infer<typeof briefSchema>, 'blocks' | 'items'> & {
+  readonly items: Omit<z.infer<typeof briefItemSchema>, 'blocks'>[];
+} {
   const sorted = [...items].sort((a, b) =>
     a.section === b.section ? a.position - b.position : a.section.localeCompare(b.section),
   );
@@ -563,6 +584,52 @@ function serialiseBrief(
   };
 }
 
+/** WP 10.15: the served Brief plus its blocks — built from the served fields only, after they are final. */
+function withBlocks(
+  served: Omit<z.infer<typeof briefSchema>, 'blocks' | 'items'> & {
+    readonly items: readonly Omit<z.infer<typeof briefItemSchema>, 'blocks'>[];
+  },
+  overview: {
+    readonly health: HealthForBlocks;
+    readonly milestones: readonly MilestoneForBlocks[];
+  },
+): z.infer<typeof briefSchema> {
+  return {
+    ...served,
+    items: served.items.map((item) => ({ ...item, blocks: blockDocument(briefItemBlocks(item)) })),
+    blocks: blockDocument(briefOverviewBlocks(served, overview.health, overview.milestones)),
+  };
+}
+
+/** The two reads the Brief screen's overview stands on, as their own routes serve them. */
+async function overviewReadsFor(
+  deps: RouteDeps,
+  userId: string,
+): Promise<{
+  readonly health: HealthForBlocks;
+  readonly milestones: readonly MilestoneForBlocks[];
+}> {
+  const [score, milestones] = await Promise.all([
+    findLatestHealthScore(deps.database, userId),
+    listUndismissedMilestones(deps.database, userId),
+  ]);
+  const health: HealthForBlocks =
+    score === null
+      ? { kind: 'not_computed' }
+      : score.overall === null
+        ? { kind: 'unscored', isoWeek: score.isoWeek }
+        : { kind: 'scored', overall: score.overall, isoWeek: score.isoWeek };
+  return {
+    health,
+    milestones: milestones.map((milestone) => ({
+      id: milestone.id,
+      milestone: { minor: milestone.milestoneMinor.toString(), currency: milestone.currency },
+      direction: milestone.direction,
+      crossedOn: milestone.crossedOn,
+    })),
+  };
+}
+
 export interface BriefRouteOptions {
   /** WP 10.6: the holder's narrator (the api's preview-mode runtime). Absent: `LOCAL_MODEL_PIN_*`, as before. */
   readonly narrator?: Pick<NarratorRuntime, 'forUser'>;
@@ -598,8 +665,11 @@ export const briefRoutes = (
           throw briefNotFound('no Weekly Advisory Brief has been published for this holder yet');
         }
         const items = await loadItems(deps.database, session.userId, brief.id);
-        const narrations = await narrationContextFor(deps, options, session.userId, brief, items);
-        return { brief: serialiseBrief(brief, items, narrations) };
+        const [narrations, overview] = await Promise.all([
+          narrationContextFor(deps, options, session.userId, brief, items),
+          overviewReadsFor(deps, session.userId),
+        ]);
+        return { brief: withBlocks(serialiseBrief(brief, items, narrations), overview) };
       },
     );
 
@@ -624,8 +694,11 @@ export const briefRoutes = (
           throw briefNotFound(`no Weekly Advisory Brief for ${request.params.isoWeek}`);
         }
         const items = await loadItems(deps.database, session.userId, brief.id);
-        const narrations = await narrationContextFor(deps, options, session.userId, brief, items);
-        return { brief: serialiseBrief(brief, items, narrations) };
+        const [narrations, overview] = await Promise.all([
+          narrationContextFor(deps, options, session.userId, brief, items),
+          overviewReadsFor(deps, session.userId),
+        ]);
+        return { brief: withBlocks(serialiseBrief(brief, items, narrations), overview) };
       },
     );
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { Link } from '@tanstack/react-router';
+import type { BlockDocument } from '../../api/generated/types.gen.ts';
 import { Download } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
@@ -9,16 +10,15 @@ import { Skeleton } from '../../components/patterns/Skeleton.tsx';
 import { Tabs, TabsIndicator, TabsList, TabsPanel, TabsTab } from '../../components/ui/tabs.tsx';
 import { categoryHue, type FillHue } from '../../components/finance/chart-hue.ts';
 import { useCategories } from '../categories/useCategories.ts';
+import { BlockDocumentView } from '../../components/blocks/BlockRenderer.tsx';
 import {
-  useBudgetVsActualReportQuery,
+  useBudgetVsActualReportBlocksQuery,
   useExportBundle,
-  useIncomeReportQuery,
+  useIncomeReportBlocksQuery,
   useSankeyReportQuery,
-  useSpendingReportQuery,
+  useSpendingReportBlocksQuery,
   type ReportWindow,
 } from './api.ts';
-import { BudgetVsActualTable } from './BudgetVsActualTable.tsx';
-import { CategoryMonthBarChart } from './charts/CategoryMonthBarChart.tsx';
 import { SankeyChart } from './charts/SankeyChart.tsx';
 
 const WINDOW_OPTIONS = [
@@ -52,11 +52,15 @@ export function ReportsScreen() {
   const hueFor = (categoryId: string | null): FillHue =>
     categoryHue(categoryId, categoryId !== null ? categoriesById.get(categoryId)?.hue : null);
 
-  const spendingQuery = useSpendingReportQuery(window);
-  const incomeQuery = useIncomeReportQuery(window);
+  // WP 10.15 (V8): Spending, Income and Budget vs. actual arrive as blocks built by the API from the same report
+  // routes' figures; the Sankey stays its own component (no block).
+  const spendingQuery = useSpendingReportBlocksQuery(window);
+  const incomeQuery = useIncomeReportBlocksQuery(window);
   const sankeyQuery = useSankeyReportQuery(window);
   const currentPeriodQuery = useCurrentBudgetPeriodQuery();
-  const budgetVsActualQuery = useBudgetVsActualReportQuery(currentPeriodQuery.data?.period.id);
+  const budgetVsActualQuery = useBudgetVsActualReportBlocksQuery(
+    currentPeriodQuery.data?.period.id,
+  );
   const exportBundle = useExportBundle();
 
   return (
@@ -119,11 +123,10 @@ export function ReportsScreen() {
           {spendingQuery.isLoading ? (
             <Skeleton variant="block" height={280} />
           ) : (
-            <CategoryMonthBarChart
-              cells={spendingQuery.data?.cells ?? []}
-              labelFor={labelFor}
-              hueFor={hueFor}
-              ariaLabel="Spending by category and month"
+            <ReportBlocks
+              document={spendingQuery.data}
+              failed={spendingQuery.isError}
+              testId="report-blocks-spending"
             />
           )}
         </TabsPanel>
@@ -132,11 +135,10 @@ export function ReportsScreen() {
           {incomeQuery.isLoading ? (
             <Skeleton variant="block" height={280} />
           ) : (
-            <CategoryMonthBarChart
-              cells={incomeQuery.data?.cells ?? []}
-              labelFor={labelFor}
-              hueFor={hueFor}
-              ariaLabel="Income by category and month"
+            <ReportBlocks
+              document={incomeQuery.data}
+              failed={incomeQuery.isError}
+              testId="report-blocks-income"
             />
           )}
         </TabsPanel>
@@ -169,13 +171,40 @@ export function ReportsScreen() {
         </TabsPanel>
 
         <TabsPanel value="budget-vs-actual">
-          {budgetVsActualQuery.isLoading ? (
+          {budgetVsActualQuery.isLoading || currentPeriodQuery.isLoading ? (
             <Skeleton variant="block" height={280} />
+          ) : currentPeriodQuery.data === undefined ? (
+            <p className="text-small text-text-muted">No budget lines for this period.</p>
           ) : (
-            <BudgetVsActualTable lines={budgetVsActualQuery.data?.lines ?? []} />
+            <ReportBlocks
+              document={budgetVsActualQuery.data}
+              failed={budgetVsActualQuery.isError}
+              testId="report-blocks-budget-vs-actual"
+            />
           )}
         </TabsPanel>
       </Tabs>
     </div>
   );
+}
+
+/** One report section's blocks, or why there are none. */
+function ReportBlocks({
+  document,
+  failed,
+  testId,
+}: {
+  readonly document: BlockDocument | undefined;
+  readonly failed: boolean;
+  readonly testId: string;
+}) {
+  if (failed) {
+    return (
+      <p role="alert" className="text-small text-text-secondary">
+        This report could not be loaded.
+      </p>
+    );
+  }
+  if (document === undefined) return <Skeleton variant="block" height={280} />;
+  return <BlockDocumentView document={document} headingLevel={3} testId={testId} />;
 }

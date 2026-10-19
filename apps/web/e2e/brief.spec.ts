@@ -234,8 +234,9 @@ test.describe('Brief screen (WP 5.11)', () => {
     await installBriefMocks(page, { healthScoreStatus: 200, healthScore: HEALTH_SCORE_RESULT });
     await loginAndReachBrief(page);
 
-    await expect(page.getByTestId('health-score-overall')).toContainText(
-      'This week’s score: 72.5 / 100.',
+    // WP 10.15: the health card is the Brief's overview blocks' last group, its score an `info` block.
+    await expect(page.locator('[data-block-id="brief-health-score"]')).toContainText(
+      'This week’s score72.5 / 100',
     );
     await expect(page.getByRole('link', { name: 'Open Financial health' })).toHaveAttribute(
       'href',
@@ -253,7 +254,9 @@ test.describe('Brief screen (WP 5.11)', () => {
     await installBriefMocks(page, { healthScoreStatus: 404 });
     await loginAndReachBrief(page);
 
-    await expect(page.getByTestId('health-score-overall')).toContainText('not computed yet');
+    await expect(page.locator('[data-block-id="brief-health-score"]')).toContainText(
+      'Not computed yet',
+    );
     await expect(page.getByRole('link', { name: 'Open Financial health' })).toBeVisible();
   });
 

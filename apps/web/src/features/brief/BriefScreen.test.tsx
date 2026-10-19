@@ -12,6 +12,11 @@ import {
 import type { AdvisoryBrief, BriefItem } from '../../api/generated/types.gen.ts';
 import { renderWidget } from '../dashboard/test-utils.tsx';
 import { BriefScreen } from './BriefScreen.tsx';
+import {
+  blockDocumentOf,
+  briefItemBlocks,
+  briefOverviewBlocks,
+} from '../../test-support/block-fixtures.ts';
 
 /** Inside a router since WP 10.12: the health section is a `<Link>` to `/health`. */
 function renderScreen() {
@@ -47,7 +52,7 @@ const NOT_COMPUTABLE_EFFECT = {
 };
 
 function buildItem(overrides: Partial<BriefItem> & Pick<BriefItem, 'id'>): BriefItem {
-  return {
+  const base: Omit<BriefItem, 'blocks'> = {
     section: 'ranked',
     position: 0,
     insightId: `insight_${overrides.id}`,
@@ -85,10 +90,17 @@ function buildItem(overrides: Partial<BriefItem> & Pick<BriefItem, 'id'>): Brief
     },
     ...overrides,
   };
+  // WP 10.15: the card's blocks, built from the item's own fields the way the API builds them.
+  return { ...base, blocks: blockDocumentOf(briefItemBlocks(base)) };
+}
+
+/** An item whose fields a test changed after building it: its blocks rebuilt from the changed fields. */
+function withItemBlocks(item: BriefItem): BriefItem {
+  return { ...item, blocks: blockDocumentOf(briefItemBlocks(item)) };
 }
 
 function buildBrief(overrides: Partial<AdvisoryBrief> = {}): AdvisoryBrief {
-  return {
+  const base: Omit<AdvisoryBrief, 'blocks'> = {
     id: 'brief_1',
     isoWeek: '2026-W40',
     currency: 'USD',
@@ -99,6 +111,10 @@ function buildBrief(overrides: Partial<AdvisoryBrief> = {}): AdvisoryBrief {
     publishedAt: '2026-10-04T06:00:00.000Z',
     items: [buildItem({ id: '1' })],
     ...overrides,
+  };
+  return {
+    ...base,
+    blocks: blockDocumentOf(briefOverviewBlocks(base, { kind: 'not_computed' }, [])),
   };
 }
 
@@ -209,7 +225,7 @@ describe('BriefScreen', () => {
 
   it('a narrated item shows the AI-assisted badge and the template text is one click away', async () => {
     // The real response shape (WP 9.6 item 3): status, badge, textShown, text.
-    const narrated = {
+    const narrated = withItemBlocks({
       ...buildItem({ id: '1' }),
       narration: {
         status: 'narrated' as const,
@@ -218,7 +234,7 @@ describe('BriefScreen', () => {
         summaryMd: 'Fee hunter found $720 you could get back this year.',
         narratedBy: null,
       },
-    };
+    });
     stubFetchRoutes([briefRoute(buildBrief({ items: [narrated] })), healthScoreNotComputedRoute()]);
 
     renderScreen();
@@ -239,7 +255,7 @@ describe('BriefScreen', () => {
   });
 
   it('R-2: a narrated item whose text the deployment withholds shows the built-in wording and says so', async () => {
-    const withheld = {
+    const withheld = withItemBlocks({
       ...buildItem({ id: '1' }),
       narration: {
         status: 'narrated' as const,
@@ -248,7 +264,7 @@ describe('BriefScreen', () => {
         summaryMd: null,
         narratedBy: null,
       },
-    };
+    });
     stubFetchRoutes([briefRoute(buildBrief({ items: [withheld] })), healthScoreNotComputedRoute()]);
 
     renderScreen();
@@ -264,7 +280,7 @@ describe('BriefScreen', () => {
   });
 
   it('WP 10.6: the badge names the provider and model that wrote the wording, shown and withheld alike', async () => {
-    const shown = {
+    const shown = withItemBlocks({
       ...buildItem({ id: '1', title: 'Shown wording' }),
       narration: {
         status: 'narrated' as const,
@@ -273,8 +289,8 @@ describe('BriefScreen', () => {
         summaryMd: 'Fee hunter found $720 you could get back this year.',
         narratedBy: { provider: 'anthropic' as const, model: 'claude-sonnet-5-5' },
       },
-    };
-    const withheld = {
+    });
+    const withheld = withItemBlocks({
       ...buildItem({ id: '2', position: 1, title: 'Withheld wording' }),
       narration: {
         status: 'narrated' as const,
@@ -283,7 +299,7 @@ describe('BriefScreen', () => {
         summaryMd: null,
         narratedBy: { provider: 'ollama' as const, model: 'qwen2.5:7b-instruct-q4_K_M' },
       },
-    };
+    });
     stubFetchRoutes([
       briefRoute(buildBrief({ items: [shown, withheld] })),
       healthScoreNotComputedRoute(),
@@ -304,7 +320,7 @@ describe('BriefScreen', () => {
   });
 
   it('a narration that is expected but has not arrived says it may follow', async () => {
-    const pending = {
+    const pending = withItemBlocks({
       ...buildItem({ id: '1' }),
       narration: {
         status: 'pending' as const,
@@ -313,7 +329,7 @@ describe('BriefScreen', () => {
         summaryMd: null,
         narratedBy: null,
       },
-    };
+    });
     stubFetchRoutes([briefRoute(buildBrief({ items: [pending] })), healthScoreNotComputedRoute()]);
 
     renderScreen();
@@ -323,7 +339,7 @@ describe('BriefScreen', () => {
   });
 
   it("CF-24: the item shows the action the Brief recorded, and 'No action recorded' for an older Brief", async () => {
-    const recorded = {
+    const recorded = withItemBlocks({
       ...buildItem({ id: '1' }),
       primaryAction: {
         kind: 'open_url' as const,
@@ -331,7 +347,7 @@ describe('BriefScreen', () => {
         rationaleMd: 'Moves the fees away.',
         url: 'https://example.com/accounts',
       },
-    };
+    });
     const older = { ...buildItem({ id: '2' }), position: 1, primaryAction: null };
     stubFetchRoutes([
       briefRoute(buildBrief({ items: [recorded, older] })),
@@ -426,6 +442,44 @@ describe('BriefScreen', () => {
         /^Retire 4 years later/,
       );
     });
+  });
+
+  it("WP 10.15: the overview is drawn from the Brief's blocks — the week, the ranked bars, the health card", async () => {
+    const items = [
+      buildItem({ id: '1', title: 'Avoidable fees this year' }),
+      buildItem({
+        id: '2',
+        position: 1,
+        title: 'A one-off refund is due',
+        annualizedImpact: null,
+        oneTimeImpact: { minor: '15000', currency: 'USD' },
+      }),
+      buildItem({ id: '3', position: 2, title: 'No figure here', annualizedImpact: null }),
+    ];
+    stubFetchRoutes([briefRoute(buildBrief({ items })), healthScoreNotComputedRoute()]);
+    renderScreen();
+
+    const overview = await screen.findByTestId('brief-overview-blocks');
+    expect(
+      within(overview).getByRole('heading', { name: 'The week', level: 3 }),
+    ).toBeInTheDocument();
+    expect(within(overview).getByText('2026-W40')).toBeInTheDocument();
+    const perYear = within(overview).getByRole('group', { name: 'Ranked actions, per year' });
+    expect(within(perYear).getByText('$720.00')).toBeInTheDocument();
+    const oneTime = within(overview).getByRole('group', { name: 'Ranked actions, one-time' });
+    expect(within(oneTime).getByText('$150.00')).toBeInTheDocument();
+    // An item with no figure is named, not drawn as a zero-length bar.
+    expect(within(overview).getByText('No dollar figure: No figure here.')).toBeInTheDocument();
+    expect(within(overview).getByTestId('block-withheld')).toHaveTextContent('Not computed yet');
+    expect(within(overview).getByRole('link', { name: 'Open Financial health' })).toHaveAttribute(
+      'href',
+      '/health',
+    );
+    // The card without a figure says why, in its own right column.
+    const cards = screen.getAllByTestId('brief-item-card');
+    expect(within(cards[2]!).getByTestId('brief-item-impact')).toHaveTextContent(
+      'No dollar figure: this finding claims none.',
+    );
   });
 
   it('an item with no narration shows only the template wording and no badge', async () => {

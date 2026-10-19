@@ -13,10 +13,16 @@
  * see `reports/drill-through.ts`'s header for why this is a reuse, not a
  * second filter language.
  */
-import { DateOnly, todayIn } from '@core/kernel';
+import { DateOnly, hueForId, todayIn } from '@core/kernel';
 import { listCategories } from '@ctx/categorization';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import { blockDocument, blockDocumentSchema } from '../blocks/schema.ts';
+import {
+  budgetVsActualBlocks,
+  categoryMonthBlocks,
+  type CategoryLookup,
+} from '../blocks/reports.ts';
 import { loadBudgetVsActual } from '../reports/budget-vs-actual.ts';
 import { drillThroughForMonth, drillThroughForWindow } from '../reports/drill-through.ts';
 import {
@@ -104,6 +110,22 @@ const budgetVsActualLineSchema = z
     drillThrough: drillThroughSchema,
   })
   .meta({ id: 'BudgetVsActualLine' });
+
+const budgetVsActualQuery = z
+  .object({ periodId: z.uuid().optional(), budgetId: z.uuid().optional() })
+  .refine(
+    (query) => query.periodId !== undefined || query.budgetId !== undefined,
+    'pass periodId or budgetId',
+  );
+
+const budgetVsActualSchema = z.object({
+  periodId: z.uuid(),
+  startDate: z.string(),
+  endDate: z.string(),
+  readyToAssign: moneySchema,
+  income: moneySchema,
+  lines: z.array(budgetVsActualLineSchema),
+});
 
 const paceDaySchema = z
   .object({
@@ -398,6 +420,91 @@ export const reportRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
     return rows.rows[0]?.display_timezone ?? 'UTC';
   }
 
+  /**
+   * `GET /reports/spending|income`'s cells — one function, so the block routes below are built from exactly the
+   * figures the report routes return (`blocks/reports.ts`; `test/report-blocks.test.ts`).
+   */
+  async function categoryMonthCells(
+    userId: string,
+    query: z.infer<typeof reportWindowQuery>,
+    side: 'spending' | 'income',
+  ): Promise<z.infer<typeof categoryMonthCellSchema>[]> {
+    const categories = await listCategories(database, userId, {});
+    const incomeIds = new Set(
+      categories.filter((category) => category.kind === 'income').map((category) => category.id),
+    );
+    const cells = await computeCategoryMonthActivity(database, {
+      userId,
+      dateFrom: DateOnly.parse(query.from),
+      dateTo: DateOnly.parse(query.to),
+      ...(query.categoryIds === undefined ? {} : { categoryIds: query.categoryIds }),
+      ...(query.accountIds === undefined ? {} : { accountIds: query.accountIds }),
+    });
+    const rows =
+      side === 'spending' ? spendingRowsOf(cells, incomeIds) : incomeRowsOf(cells, incomeIds);
+    return rows.map((cell) => ({
+      month: cell.month,
+      categoryId: cell.categoryId,
+      amount: money(cell.amount),
+      transactionCount: cell.transactionCount,
+      transferExcludedCount: cell.transferExcludedCount,
+      refundNettedCount: cell.refundNettedCount,
+      drillThrough: drillThroughForMonth(cell.month, cell.categoryId),
+    }));
+  }
+
+  /** A category's label and persisted hue (archived included: a past month may name one); Uncategorised is neutral. */
+  async function categoryLookupFor(userId: string): Promise<CategoryLookup> {
+    const categories = await listCategories(database, userId, { includeArchived: true });
+    const byId = new Map(categories.map((category) => [category.id, category]));
+    return (categoryId) => {
+      if (categoryId === null) return { label: 'Uncategorised', hue: 'neutral' };
+      const category = byId.get(categoryId);
+      return category === undefined
+        ? { label: 'Category', hue: hueForId(categoryId) }
+        : { label: category.label, hue: category.hue };
+    };
+  }
+
+  /** `GET /reports/budget-vs-actual`'s body — shared with its block route for the reason above. */
+  async function budgetVsActualOf(
+    userId: string,
+    query: z.infer<typeof budgetVsActualQuery>,
+  ): Promise<z.infer<typeof budgetVsActualSchema>> {
+    const period = await loadBudgetVsActual(pool, {
+      userId,
+      ...(query.periodId === undefined ? {} : { periodId: query.periodId }),
+      ...(query.budgetId === undefined ? {} : { budgetId: query.budgetId }),
+    });
+    if (period === null) {
+      throw new AppError({
+        status: 404,
+        code: 'reports.budget_period_not_found',
+        title: 'Not Found',
+        detail: 'No matching budget period.',
+        family: 'user',
+      });
+    }
+    return {
+      periodId: period.id,
+      startDate: period.startDate,
+      endDate: period.endDate,
+      readyToAssign: money(period.readyToAssign),
+      income: money(period.income),
+      lines: period.lines.map((line) => ({
+        id: line.id,
+        categoryId: line.categoryId,
+        name: line.name,
+        assigned: money(line.assigned),
+        activity: money(line.activity),
+        available: money(line.available),
+        cashOverspend: money(line.cashOverspend),
+        creditOverspend: money(line.creditOverspend),
+        drillThrough: drillThroughForWindow(period.startDate, period.endDate, line.categoryId),
+      })),
+    };
+  }
+
   return async (app) => {
     app.get(
       '/reports/spending',
@@ -419,34 +526,7 @@ export const reportRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
       async (request) => {
         const session = await guards.requireSession(request);
-        const categories = await listCategories(database, session.userId, {});
-        const incomeIds = new Set(
-          categories
-            .filter((category) => category.kind === 'income')
-            .map((category) => category.id),
-        );
-        const cells = await computeCategoryMonthActivity(database, {
-          userId: session.userId,
-          dateFrom: DateOnly.parse(request.query.from),
-          dateTo: DateOnly.parse(request.query.to),
-          ...(request.query.categoryIds === undefined
-            ? {}
-            : { categoryIds: request.query.categoryIds }),
-          ...(request.query.accountIds === undefined
-            ? {}
-            : { accountIds: request.query.accountIds }),
-        });
-        return {
-          cells: spendingRowsOf(cells, incomeIds).map((cell) => ({
-            month: cell.month,
-            categoryId: cell.categoryId,
-            amount: money(cell.amount),
-            transactionCount: cell.transactionCount,
-            transferExcludedCount: cell.transferExcludedCount,
-            refundNettedCount: cell.refundNettedCount,
-            drillThrough: drillThroughForMonth(cell.month, cell.categoryId),
-          })),
-        };
+        return { cells: await categoryMonthCells(session.userId, request.query, 'spending') };
       },
     );
 
@@ -469,34 +549,7 @@ export const reportRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
       async (request) => {
         const session = await guards.requireSession(request);
-        const categories = await listCategories(database, session.userId, {});
-        const incomeIds = new Set(
-          categories
-            .filter((category) => category.kind === 'income')
-            .map((category) => category.id),
-        );
-        const cells = await computeCategoryMonthActivity(database, {
-          userId: session.userId,
-          dateFrom: DateOnly.parse(request.query.from),
-          dateTo: DateOnly.parse(request.query.to),
-          ...(request.query.categoryIds === undefined
-            ? {}
-            : { categoryIds: request.query.categoryIds }),
-          ...(request.query.accountIds === undefined
-            ? {}
-            : { accountIds: request.query.accountIds }),
-        });
-        return {
-          cells: incomeRowsOf(cells, incomeIds).map((cell) => ({
-            month: cell.month,
-            categoryId: cell.categoryId,
-            amount: money(cell.amount),
-            transactionCount: cell.transactionCount,
-            transferExcludedCount: cell.transferExcludedCount,
-            refundNettedCount: cell.refundNettedCount,
-            drillThrough: drillThroughForMonth(cell.month, cell.categoryId),
-          })),
-        };
+        return { cells: await categoryMonthCells(session.userId, request.query, 'income') };
       },
     );
 
@@ -861,59 +914,90 @@ export const reportRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             "A re-read of `@ctx/budgeting`'s own `getPeriod`, never a second computation of the " +
             'envelope math. Pass `periodId` directly, or `budgetId` for its most recent period.',
           tags: ['reports'],
-          querystring: z
-            .object({ periodId: z.uuid().optional(), budgetId: z.uuid().optional() })
-            .refine(
-              (query) => query.periodId !== undefined || query.budgetId !== undefined,
-              'pass periodId or budgetId',
-            ),
+          querystring: budgetVsActualQuery,
           response: {
-            200: z.object({
-              periodId: z.uuid(),
-              startDate: z.string(),
-              endDate: z.string(),
-              readyToAssign: moneySchema,
-              income: moneySchema,
-              lines: z.array(budgetVsActualLineSchema),
-            }),
+            200: budgetVsActualSchema,
             ...problems(400, 401, 404, 503),
           },
         },
       },
       async (request) => {
         const session = await guards.requireSession(request);
-        const period = await loadBudgetVsActual(pool, {
-          userId: session.userId,
-          ...(request.query.periodId === undefined ? {} : { periodId: request.query.periodId }),
-          ...(request.query.budgetId === undefined ? {} : { budgetId: request.query.budgetId }),
-        });
-        if (period === null) {
-          throw new AppError({
-            status: 404,
-            code: 'reports.budget_period_not_found',
-            title: 'Not Found',
-            detail: 'No matching budget period.',
-            family: 'user',
-          });
-        }
-        return {
-          periodId: period.id,
-          startDate: period.startDate,
-          endDate: period.endDate,
-          readyToAssign: money(period.readyToAssign),
-          income: money(period.income),
-          lines: period.lines.map((line) => ({
-            id: line.id,
-            categoryId: line.categoryId,
-            name: line.name,
-            assigned: money(line.assigned),
-            activity: money(line.activity),
-            available: money(line.available),
-            cashOverspend: money(line.cashOverspend),
-            creditOverspend: money(line.creditOverspend),
-            drillThrough: drillThroughForWindow(period.startDate, period.endDate, line.categoryId),
-          })),
-        };
+        return budgetVsActualOf(session.userId, request.query);
+      },
+    );
+
+    // ---------------------------------------------------------------------------------------------------------
+    // WP 10.15 (V8): the same three reports as blocks, built from the routes' own wire output above
+    // (`blocks/reports.ts`). The Sankey has no block.
+    // ---------------------------------------------------------------------------------------------------------
+
+    app.get(
+      '/reports/blocks/spending',
+      {
+        schema: {
+          operationId: 'getSpendingReportBlocks',
+          summary: 'Spending by category and month, as blocks',
+          description:
+            'The `GET /reports/spending` cells for the same window, as `stacked-bars` blocks (one per currency): a ' +
+            'bar per month, a segment per category in its hue, drill-through hrefs. No figure is added; a bar total ' +
+            'is the sum of its own segments (refused otherwise).',
+          tags: ['reports'],
+          querystring: reportWindowQuery,
+          response: { 200: blockDocumentSchema, ...problems(400, 401, 503) },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const [cells, lookup] = await Promise.all([
+          categoryMonthCells(session.userId, request.query, 'spending'),
+          categoryLookupFor(session.userId),
+        ]);
+        return blockDocument(categoryMonthBlocks(cells, lookup, 'Spending by category and month'));
+      },
+    );
+
+    app.get(
+      '/reports/blocks/income',
+      {
+        schema: {
+          operationId: 'getIncomeReportBlocks',
+          summary: 'Income by category and month, as blocks',
+          description: 'The mirror of `GET /reports/blocks/spending` over `GET /reports/income`.',
+          tags: ['reports'],
+          querystring: reportWindowQuery,
+          response: { 200: blockDocumentSchema, ...problems(400, 401, 503) },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const [cells, lookup] = await Promise.all([
+          categoryMonthCells(session.userId, request.query, 'income'),
+          categoryLookupFor(session.userId),
+        ]);
+        return blockDocument(categoryMonthBlocks(cells, lookup, 'Income by category and month'));
+      },
+    );
+
+    app.get(
+      '/reports/blocks/budget-vs-actual',
+      {
+        schema: {
+          operationId: 'getBudgetVsActualReportBlocks',
+          summary: 'Budget vs. actual for one period, as a table block',
+          description:
+            'The `GET /reports/budget-vs-actual` lines for the same period as one `table` block: the name linking ' +
+            'to its category screen, Assigned / Activity / Available as the route returns them, Cash/Credit ' +
+            'overspend badges and a transactions link.',
+          tags: ['reports'],
+          querystring: budgetVsActualQuery,
+          response: { 200: blockDocumentSchema, ...problems(400, 401, 404, 503) },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        const period = await budgetVsActualOf(session.userId, request.query);
+        return blockDocument(budgetVsActualBlocks(period.lines));
       },
     );
   };

@@ -130,6 +130,12 @@ interface AllowEntry {
  * was read at its declaration, not pattern-matched.
  */
 const ALLOW_LIST: readonly AllowEntry[] = [
+  // --- WP 10.15: the block vocabulary's refusal corpus.
+  {
+    file: 'packages/kernel/src/blocks.ts',
+    identifier: 'amountMinor',
+    why: 'The one `BLOCK_FIXTURES.invalid` entry ("a number amount") that proves both block schemas REFUSE a JSON number for money; it is test data for a rejection, never an amount any code reads.',
+  },
   // --- counters keyed by a name the scanner reads as a magnitude.
   {
     file: 'packages/contexts/insights/src/policy/rule-health.ts',

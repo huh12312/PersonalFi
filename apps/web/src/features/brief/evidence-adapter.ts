@@ -58,5 +58,14 @@ export function insightViewOf(item: BriefItem): Insight {
     expiresAt: null,
     evidence: item.evidence,
     actions: [],
+    // WP 10.15: the insight card's bookmark, helpfulness and mentions are not part of the Brief's snapshot and
+    // `EvidencePanel` reads none of them — empty, never borrowed from the live insight.
+    bookmarkedAt: null,
+    feedback: null,
+    feedbackReason: null,
+    mentions: [],
+    titleSegments: [{ text: item.title }],
+    bodySegments: [{ text: item.summaryMd }],
+    contextLine: null,
   };
 }

@@ -6812,6 +6812,1128 @@
           "detail"
         ]
       },
+      "BlockMoneyInput": {
+        "type": "object",
+        "properties": {
+          "amountMinor": {
+            "type": "string",
+            "pattern": "^-?\\d{1,19}$"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          }
+        },
+        "required": [
+          "amountMinor",
+          "currency"
+        ],
+        "additionalProperties": false,
+        "description": "Money inside a block: integer minor units + currency."
+      },
+      "BlockLabelInput": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          {
+            "$ref": "#/components/schemas/BlockMoneyInput"
+          }
+        ],
+        "description": "Words, or money (never pre-formatted)."
+      },
+      "BlockInput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "text"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "content": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "size": {
+                "type": "string",
+                "enum": [
+                  "body",
+                  "heading",
+                  "eyebrow",
+                  "caption"
+                ]
+              },
+              "weight": {
+                "type": "string",
+                "enum": [
+                  "regular",
+                  "medium",
+                  "semibold"
+                ]
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "muted",
+                  "narration"
+                ]
+              },
+              "narration": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "narrated",
+                      "withheld",
+                      "pending"
+                    ]
+                  },
+                  "narratedBy": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "ollama",
+                              "openai",
+                              "openrouter",
+                              "anthropic"
+                            ]
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "templateContent": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "status",
+                  "narratedBy",
+                  "templateContent"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "kind",
+              "content",
+              "size"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "info"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/BlockLabelInput"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "hint": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "withheld": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "money"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "amountMinor": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,19}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              "signColour": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "by-sign"
+                ]
+              },
+              "hint": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "withheld": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "amountMinor",
+              "currency"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "horizontal-bars"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "topRightLabel": {
+                "$ref": "#/components/schemas/BlockLabelInput"
+              },
+              "bars": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "hue": {
+                      "type": "string",
+                      "enum": [
+                        "teal",
+                        "green",
+                        "red",
+                        "orange",
+                        "yellow",
+                        "cyan",
+                        "purple",
+                        "indigo",
+                        "lime",
+                        "mint",
+                        "pink",
+                        "brown",
+                        "sky",
+                        "neutral"
+                      ]
+                    },
+                    "barPercent": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "leftLabel": {
+                      "$ref": "#/components/schemas/BlockLabelInput"
+                    },
+                    "rightLabel": {
+                      "$ref": "#/components/schemas/BlockLabelInput"
+                    },
+                    "href": {
+                      "type": "string",
+                      "maxLength": 2048,
+                      "pattern": "^\\/(?![/\\\\])[^\\s\\\\]*$"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "hue",
+                    "barPercent",
+                    "rightLabel"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "smallBarStyle": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "kind",
+              "bars"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "pie"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "currency": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "slices": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "value": {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,19}$"
+                    },
+                    "hue": {
+                      "type": "string",
+                      "enum": [
+                        "teal",
+                        "green",
+                        "red",
+                        "orange",
+                        "yellow",
+                        "cyan",
+                        "purple",
+                        "indigo",
+                        "lime",
+                        "mint",
+                        "pink",
+                        "brown",
+                        "sky",
+                        "neutral"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "value",
+                    "hue"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "currency",
+              "slices"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "stacked-bars"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "currency": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "total": {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,19}$"
+                    },
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "value": {
+                            "type": "string",
+                            "pattern": "^-?\\d{1,19}$"
+                          },
+                          "hue": {
+                            "type": "string",
+                            "enum": [
+                              "teal",
+                              "green",
+                              "red",
+                              "orange",
+                              "yellow",
+                              "cyan",
+                              "purple",
+                              "indigo",
+                              "lime",
+                              "mint",
+                              "pink",
+                              "brown",
+                              "sky",
+                              "neutral"
+                            ]
+                          },
+                          "href": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "pattern": "^\\/(?![/\\\\])[^\\s\\\\]*$"
+                          },
+                          "labelHref": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "pattern": "^\\/(?![/\\\\])[^\\s\\\\]*$"
+                          },
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "value",
+                          "hue"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "total",
+                    "groups"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "currency",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "sparkline-row"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "rightLabel": {
+                "$ref": "#/components/schemas/BlockLabelInput"
+              },
+              "hue": {
+                "type": "string",
+                "enum": [
+                  "teal",
+                  "green",
+                  "red",
+                  "orange",
+                  "yellow",
+                  "cyan",
+                  "purple",
+                  "indigo",
+                  "lime",
+                  "mint",
+                  "pink",
+                  "brown",
+                  "sky",
+                  "neutral"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^-?\\d{1,19}(\\.\\d{1,12})?$"
+                }
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              "hideValueChange": {
+                "type": "boolean"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "largeStyle": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "values"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "meter"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "spentMinor": {
+                "type": "string",
+                "pattern": "^-?\\d{1,19}$"
+              },
+              "budgetedMinor": {
+                "type": "string",
+                "pattern": "^-?\\d{1,19}$"
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              "tickPercent": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "under",
+                  "within",
+                  "on_pace",
+                  "ahead",
+                  "over",
+                  "no_budget"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "spentMinor",
+              "budgetedMinor",
+              "currency",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "net-worth"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              "bucketing": {
+                "type": "string",
+                "enum": [
+                  "day",
+                  "week",
+                  "month"
+                ]
+              },
+              "buckets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "end": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "asOfDate": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "netWorth": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "minor": {
+                              "type": "string",
+                              "pattern": "^-?\\d{1,19}$"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$"
+                            }
+                          },
+                          "required": [
+                            "minor",
+                            "currency"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "segments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "cash",
+                              "investments",
+                              "crypto",
+                              "property",
+                              "other",
+                              "liabilities"
+                            ]
+                          },
+                          "amount": {
+                            "type": "object",
+                            "properties": {
+                              "minor": {
+                                "type": "string",
+                                "pattern": "^-?\\d{1,19}$"
+                              },
+                              "currency": {
+                                "type": "string",
+                                "pattern": "^[A-Z]{3}$"
+                              }
+                            },
+                            "required": [
+                              "minor",
+                              "currency"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "accounts": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "amount",
+                          "accounts"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "sealed": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "start",
+                    "end",
+                    "asOfDate",
+                    "netWorth",
+                    "segments",
+                    "sealed",
+                    "source"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "currency",
+              "bucketing",
+              "buckets"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "transactions-list"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "transactionIds": {
+                "maxItems": 200,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "transactionIds"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "table"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "caption": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "columns": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "align": {
+                      "type": "string",
+                      "enum": [
+                        "start",
+                        "end"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "label"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "cells": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "anyOf": [
+                              {
+                                "$ref": "#/components/schemas/BlockLabelInput"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "href": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "pattern": "^\\/(?![/\\\\])[^\\s\\\\]*$"
+                          },
+                          "hrefLabel": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "badges": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "variant": {
+                                  "type": "string",
+                                  "enum": [
+                                    "neutral",
+                                    "accent",
+                                    "success",
+                                    "warning",
+                                    "danger",
+                                    "info"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "label",
+                                "variant"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "cells"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "caption",
+              "columns",
+              "rows"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "badge"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "variant": {
+                "type": "string",
+                "enum": [
+                  "neutral",
+                  "accent",
+                  "success",
+                  "warning",
+                  "danger",
+                  "info"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "variant"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "cta"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "href": {
+                "type": "string",
+                "maxLength": 2048,
+                "pattern": "^\\/(?![/\\\\])[^\\s\\\\]*$"
+              },
+              "variant": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "link"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "href",
+              "variant"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "divider"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "group"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "blocks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BlockInput"
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "blocks"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "One server-built block (docs/design/blocks.md). Money is minor units + currency; colours are hue or role names; hrefs are in-app paths; a withheld figure carries its reason."
+      },
+      "BlockDocumentInput": {
+        "type": "object",
+        "properties": {
+          "contractVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockInput"
+            }
+          }
+        },
+        "required": [
+          "contractVersion",
+          "blocks"
+        ],
+        "additionalProperties": false,
+        "description": "A versioned list of blocks (`contractVersion` 1)."
+      },
       "BriefItemInput": {
         "type": "object",
         "properties": {
@@ -7251,6 +8373,9 @@
               "summaryMd",
               "narratedBy"
             ]
+          },
+          "blocks": {
+            "$ref": "#/components/schemas/BlockDocumentInput"
           }
         },
         "required": [
@@ -7273,7 +8398,8 @@
           "score",
           "retirementEffect",
           "primaryAction",
-          "narration"
+          "narration",
+          "blocks"
         ]
       },
       "AdvisoryBriefInput": {
@@ -7315,6 +8441,9 @@
             "items": {
               "$ref": "#/components/schemas/BriefItemInput"
             }
+          },
+          "blocks": {
+            "$ref": "#/components/schemas/BlockDocumentInput"
           }
         },
         "required": [
@@ -7326,7 +8455,8 @@
           "coldStartNote",
           "inputDigest",
           "publishedAt",
-          "items"
+          "items",
+          "blocks"
         ]
       },
       "HealthScoreComponentInput": {
@@ -8842,6 +9972,65 @@
           "writtenNow"
         ]
       },
+      "InsightTextSegmentInput": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "entityType": {
+            "type": "string",
+            "enum": [
+              "category",
+              "merchant",
+              "account",
+              "transaction"
+            ]
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "description": "A run of an insight's text; with `entityType`/`entityId` it names an entity and is a link."
+      },
+      "InsightMentionInput": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "entityType": {
+            "type": "string",
+            "enum": [
+              "category",
+              "merchant",
+              "account",
+              "transaction"
+            ]
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "evidencePosition": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "text",
+          "entityType",
+          "entityId",
+          "evidencePosition"
+        ]
+      },
       "InsightInput": {
         "type": "object",
         "properties": {
@@ -9049,6 +10238,76 @@
                 "url"
               ]
             }
+          },
+          "bookmarkedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "helpful",
+                  "not_helpful"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feedbackReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "NOT_TRUE",
+                  "ALREADY_KNOW",
+                  "NOT_ACTIONABLE",
+                  "DONT_CARE",
+                  "WRONG_AMOUNT",
+                  "INTENTIONAL",
+                  "LATER"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mentions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InsightMentionInput"
+            }
+          },
+          "titleSegments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InsightTextSegmentInput"
+            }
+          },
+          "bodySegments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InsightTextSegmentInput"
+            }
+          },
+          "contextLine": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/InsightTextSegmentInput"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -9075,7 +10334,14 @@
           "lastProposedAt",
           "expiresAt",
           "evidence",
-          "actions"
+          "actions",
+          "bookmarkedAt",
+          "feedback",
+          "feedbackReason",
+          "mentions",
+          "titleSegments",
+          "bodySegments",
+          "contextLine"
         ]
       },
       "AdvisorHealthInput": {
@@ -21896,6 +23162,1128 @@
         ],
         "additionalProperties": false
       },
+      "BlockMoney": {
+        "type": "object",
+        "properties": {
+          "amountMinor": {
+            "type": "string",
+            "pattern": "^-?\\d{1,19}$"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          }
+        },
+        "required": [
+          "amountMinor",
+          "currency"
+        ],
+        "additionalProperties": false,
+        "description": "Money inside a block: integer minor units + currency."
+      },
+      "BlockLabel": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          {
+            "$ref": "#/components/schemas/BlockMoney"
+          }
+        ],
+        "description": "Words, or money (never pre-formatted)."
+      },
+      "Block": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "text"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "content": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "size": {
+                "type": "string",
+                "enum": [
+                  "body",
+                  "heading",
+                  "eyebrow",
+                  "caption"
+                ]
+              },
+              "weight": {
+                "type": "string",
+                "enum": [
+                  "regular",
+                  "medium",
+                  "semibold"
+                ]
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "muted",
+                  "narration"
+                ]
+              },
+              "narration": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "narrated",
+                      "withheld",
+                      "pending"
+                    ]
+                  },
+                  "narratedBy": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "ollama",
+                              "openai",
+                              "openrouter",
+                              "anthropic"
+                            ]
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "templateContent": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "status",
+                  "narratedBy",
+                  "templateContent"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "kind",
+              "content",
+              "size"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "info"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/BlockLabel"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "hint": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "withheld": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "money"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "amountMinor": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,19}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              "signColour": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "by-sign"
+                ]
+              },
+              "hint": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "withheld": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "amountMinor",
+              "currency"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "horizontal-bars"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "topRightLabel": {
+                "$ref": "#/components/schemas/BlockLabel"
+              },
+              "bars": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "hue": {
+                      "type": "string",
+                      "enum": [
+                        "teal",
+                        "green",
+                        "red",
+                        "orange",
+                        "yellow",
+                        "cyan",
+                        "purple",
+                        "indigo",
+                        "lime",
+                        "mint",
+                        "pink",
+                        "brown",
+                        "sky",
+                        "neutral"
+                      ]
+                    },
+                    "barPercent": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "leftLabel": {
+                      "$ref": "#/components/schemas/BlockLabel"
+                    },
+                    "rightLabel": {
+                      "$ref": "#/components/schemas/BlockLabel"
+                    },
+                    "href": {
+                      "type": "string",
+                      "maxLength": 2048,
+                      "pattern": "^\\/(?![/\\\\])[^\\s\\\\]*$"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "hue",
+                    "barPercent",
+                    "rightLabel"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "smallBarStyle": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "kind",
+              "bars"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "pie"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "currency": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "slices": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "value": {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,19}$"
+                    },
+                    "hue": {
+                      "type": "string",
+                      "enum": [
+                        "teal",
+                        "green",
+                        "red",
+                        "orange",
+                        "yellow",
+                        "cyan",
+                        "purple",
+                        "indigo",
+                        "lime",
+                        "mint",
+                        "pink",
+                        "brown",
+                        "sky",
+                        "neutral"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "value",
+                    "hue"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "currency",
+              "slices"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "stacked-bars"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "currency": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "total": {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,19}$"
+                    },
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "value": {
+                            "type": "string",
+                            "pattern": "^-?\\d{1,19}$"
+                          },
+                          "hue": {
+                            "type": "string",
+                            "enum": [
+                              "teal",
+                              "green",
+                              "red",
+                              "orange",
+                              "yellow",
+                              "cyan",
+                              "purple",
+                              "indigo",
+                              "lime",
+                              "mint",
+                              "pink",
+                              "brown",
+                              "sky",
+                              "neutral"
+                            ]
+                          },
+                          "href": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "pattern": "^\\/(?![/\\\\])[^\\s\\\\]*$"
+                          },
+                          "labelHref": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "pattern": "^\\/(?![/\\\\])[^\\s\\\\]*$"
+                          },
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "value",
+                          "hue"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "total",
+                    "groups"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "currency",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "sparkline-row"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "rightLabel": {
+                "$ref": "#/components/schemas/BlockLabel"
+              },
+              "hue": {
+                "type": "string",
+                "enum": [
+                  "teal",
+                  "green",
+                  "red",
+                  "orange",
+                  "yellow",
+                  "cyan",
+                  "purple",
+                  "indigo",
+                  "lime",
+                  "mint",
+                  "pink",
+                  "brown",
+                  "sky",
+                  "neutral"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^-?\\d{1,19}(\\.\\d{1,12})?$"
+                }
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              "hideValueChange": {
+                "type": "boolean"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "largeStyle": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "values"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "meter"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "spentMinor": {
+                "type": "string",
+                "pattern": "^-?\\d{1,19}$"
+              },
+              "budgetedMinor": {
+                "type": "string",
+                "pattern": "^-?\\d{1,19}$"
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              "tickPercent": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "under",
+                  "within",
+                  "on_pace",
+                  "ahead",
+                  "over",
+                  "no_budget"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "spentMinor",
+              "budgetedMinor",
+              "currency",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "net-worth"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              "bucketing": {
+                "type": "string",
+                "enum": [
+                  "day",
+                  "week",
+                  "month"
+                ]
+              },
+              "buckets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "end": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "asOfDate": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "netWorth": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "minor": {
+                              "type": "string",
+                              "pattern": "^-?\\d{1,19}$"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$"
+                            }
+                          },
+                          "required": [
+                            "minor",
+                            "currency"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "segments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "cash",
+                              "investments",
+                              "crypto",
+                              "property",
+                              "other",
+                              "liabilities"
+                            ]
+                          },
+                          "amount": {
+                            "type": "object",
+                            "properties": {
+                              "minor": {
+                                "type": "string",
+                                "pattern": "^-?\\d{1,19}$"
+                              },
+                              "currency": {
+                                "type": "string",
+                                "pattern": "^[A-Z]{3}$"
+                              }
+                            },
+                            "required": [
+                              "minor",
+                              "currency"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "accounts": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "amount",
+                          "accounts"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "sealed": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "start",
+                    "end",
+                    "asOfDate",
+                    "netWorth",
+                    "segments",
+                    "sealed",
+                    "source"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "currency",
+              "bucketing",
+              "buckets"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "transactions-list"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "transactionIds": {
+                "maxItems": 200,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "transactionIds"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "table"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "caption": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "columns": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "align": {
+                      "type": "string",
+                      "enum": [
+                        "start",
+                        "end"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "label"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "cells": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "anyOf": [
+                              {
+                                "$ref": "#/components/schemas/BlockLabel"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "href": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "pattern": "^\\/(?![/\\\\])[^\\s\\\\]*$"
+                          },
+                          "hrefLabel": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "badges": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "variant": {
+                                  "type": "string",
+                                  "enum": [
+                                    "neutral",
+                                    "accent",
+                                    "success",
+                                    "warning",
+                                    "danger",
+                                    "info"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "label",
+                                "variant"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "cells"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "caption",
+              "columns",
+              "rows"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "badge"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "variant": {
+                "type": "string",
+                "enum": [
+                  "neutral",
+                  "accent",
+                  "success",
+                  "warning",
+                  "danger",
+                  "info"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "variant"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "cta"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "href": {
+                "type": "string",
+                "maxLength": 2048,
+                "pattern": "^\\/(?![/\\\\])[^\\s\\\\]*$"
+              },
+              "variant": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "link"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "href",
+              "variant"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "divider"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "group"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "blocks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Block"
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "blocks"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "One server-built block (docs/design/blocks.md). Money is minor units + currency; colours are hue or role names; hrefs are in-app paths; a withheld figure carries its reason."
+      },
+      "BlockDocument": {
+        "type": "object",
+        "properties": {
+          "contractVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Block"
+            }
+          }
+        },
+        "required": [
+          "contractVersion",
+          "blocks"
+        ],
+        "additionalProperties": false,
+        "description": "A versioned list of blocks (`contractVersion` 1)."
+      },
       "BriefItem": {
         "type": "object",
         "properties": {
@@ -22347,6 +24735,9 @@
               "narratedBy"
             ],
             "additionalProperties": false
+          },
+          "blocks": {
+            "$ref": "#/components/schemas/BlockDocument"
           }
         },
         "required": [
@@ -22369,7 +24760,8 @@
           "score",
           "retirementEffect",
           "primaryAction",
-          "narration"
+          "narration",
+          "blocks"
         ],
         "additionalProperties": false
       },
@@ -22412,6 +24804,9 @@
             "items": {
               "$ref": "#/components/schemas/BriefItem"
             }
+          },
+          "blocks": {
+            "$ref": "#/components/schemas/BlockDocument"
           }
         },
         "required": [
@@ -22423,7 +24818,8 @@
           "coldStartNote",
           "inputDigest",
           "publishedAt",
-          "items"
+          "items",
+          "blocks"
         ],
         "additionalProperties": false
       },
@@ -23970,6 +26366,67 @@
         ],
         "additionalProperties": false
       },
+      "InsightTextSegment": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "entityType": {
+            "type": "string",
+            "enum": [
+              "category",
+              "merchant",
+              "account",
+              "transaction"
+            ]
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "description": "A run of an insight's text; with `entityType`/`entityId` it names an entity and is a link."
+      },
+      "InsightMention": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "entityType": {
+            "type": "string",
+            "enum": [
+              "category",
+              "merchant",
+              "account",
+              "transaction"
+            ]
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "evidencePosition": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "text",
+          "entityType",
+          "entityId",
+          "evidencePosition"
+        ],
+        "additionalProperties": false
+      },
       "Insight": {
         "type": "object",
         "properties": {
@@ -24181,6 +26638,76 @@
               ],
               "additionalProperties": false
             }
+          },
+          "bookmarkedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "helpful",
+                  "not_helpful"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feedbackReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "NOT_TRUE",
+                  "ALREADY_KNOW",
+                  "NOT_ACTIONABLE",
+                  "DONT_CARE",
+                  "WRONG_AMOUNT",
+                  "INTENTIONAL",
+                  "LATER"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mentions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InsightMention"
+            }
+          },
+          "titleSegments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InsightTextSegment"
+            }
+          },
+          "bodySegments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InsightTextSegment"
+            }
+          },
+          "contextLine": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/InsightTextSegment"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -24207,7 +26734,14 @@
           "lastProposedAt",
           "expiresAt",
           "evidence",
-          "actions"
+          "actions",
+          "bookmarkedAt",
+          "feedback",
+          "feedbackReason",
+          "mentions",
+          "titleSegments",
+          "bodySegments",
+          "contextLine"
         ],
         "additionalProperties": false
       },
@@ -38694,6 +41228,306 @@
         }
       }
     },
+    "/reports/blocks/spending": {
+      "get": {
+        "operationId": "getSpendingReportBlocks",
+        "summary": "Spending by category and month, as blocks",
+        "tags": [
+          "reports"
+        ],
+        "description": "The `GET /reports/spending` cells for the same window, as `stacked-bars` blocks (one per currency): a bar per month, a segment per category in its hue, drill-through hrefs. No figure is added; a bar total is the sum of its own segments (refused otherwise).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "categoryIds",
+            "required": false
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "accountIds",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/blocks/income": {
+      "get": {
+        "operationId": "getIncomeReportBlocks",
+        "summary": "Income by category and month, as blocks",
+        "tags": [
+          "reports"
+        ],
+        "description": "The mirror of `GET /reports/blocks/spending` over `GET /reports/income`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "categoryIds",
+            "required": false
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "accountIds",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/blocks/budget-vs-actual": {
+      "get": {
+        "operationId": "getBudgetVsActualReportBlocks",
+        "summary": "Budget vs. actual for one period, as a table block",
+        "tags": [
+          "reports"
+        ],
+        "description": "The `GET /reports/budget-vs-actual` lines for the same period as one `table` block: the name linking to its category screen, Assigned / Activity / Available as the route returns them, Cash/Credit overspend badges and a transactions link.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "periodId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "query",
+            "name": "budgetId",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/dashboard/layout": {
       "get": {
         "operationId": "getDashboardLayout",
@@ -40846,6 +43680,284 @@
                     "dismissCount",
                     "permanent",
                     "suppressedUntil"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/{insightId}/bookmark": {
+      "post": {
+        "operationId": "bookmarkInsight",
+        "summary": "Bookmark or un-bookmark an insight",
+        "tags": [
+          "insights"
+        ],
+        "description": "WP 10.15 (migration 0051): state on the insight row, replaced when it changes. A bookmark is the holder's own marker and moves no advisor policy. 404 for an insight the caller does not hold.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "bookmarked": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "bookmarked"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "insightId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "insightId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "bookmarkedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "insightId",
+                    "bookmarkedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/{insightId}/feedback": {
+      "post": {
+        "operationId": "setInsightFeedback",
+        "summary": "Say whether an insight was helpful",
+        "tags": [
+          "insights"
+        ],
+        "description": "WP 10.15 (migration 0051): `helpful`, `not_helpful` (optionally with one of 07 §8.3's reason codes) or `null` to clear the answer and its reason. Persisted on the insight row only: unlike a dismissal's reason it never moves the cooldown ladder, the quarantine rate or rule health. A reason with anything but `not_helpful` is a 400. 404 for an insight the caller does not hold.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "feedback": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "helpful",
+                          "not_helpful"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "reasonCode": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "NOT_TRUE",
+                          "ALREADY_KNOW",
+                          "NOT_ACTIONABLE",
+                          "DONT_CARE",
+                          "WRONG_AMOUNT",
+                          "INTENTIONAL",
+                          "LATER"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "feedback"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "insightId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "insightId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "feedback": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "helpful",
+                            "not_helpful"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "feedbackReason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "NOT_TRUE",
+                            "ALREADY_KNOW",
+                            "NOT_ACTIONABLE",
+                            "DONT_CARE",
+                            "WRONG_AMOUNT",
+                            "INTENTIONAL",
+                            "LATER"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "insightId",
+                    "feedback",
+                    "feedbackReason"
                   ],
                   "additionalProperties": false
                 }

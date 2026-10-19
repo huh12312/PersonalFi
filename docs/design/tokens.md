@@ -103,6 +103,14 @@ Positional series (donut slices, a second currency) take the fills in `CHART_FIL
 whose neighbours pass the CVD and normal-vision floors, and are never cycled: past the thirteenth they
 fold into the neutral fill.
 
+## Blocks pick colours by name too
+
+A server-built block (WP 10.15, [blocks.md](blocks.md)) names its colours. A mark takes a hue (one
+of the thirteen, or `neutral`), and a badge or button takes a role (`success`, `warning`, `danger`,
+`info`, `accent`, `neutral`). The block schemas accept nothing else, so a hex cannot reach a block.
+The renderer resolves the names through `chart-hue.ts` and the roles above, exactly as a hand-built
+chart does.
+
 ## Fixing a failing pair
 
 Move the **step** (lighter or darker within the same scale) and regenerate. Never hand-pick a hex

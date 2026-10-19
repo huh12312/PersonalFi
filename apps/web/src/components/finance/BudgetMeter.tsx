@@ -67,6 +67,13 @@ export interface BudgetMeterProps {
   readonly size?: BudgetMeterSize;
   readonly shape?: BudgetMeterShape;
   readonly className?: string;
+  /**
+   * WP 10.15: a state decided elsewhere (a `meter` block carries the server's), drawn as given instead of
+   * re-deciding it from `figures` and `pace`. Absent: `meterStateOf(figures, pace)`, as before.
+   */
+  readonly state?: MeterState;
+  /** WP 10.15: the pace in words when `pace` has no day count of its own (a block's `tickPercent`). */
+  readonly paceText?: string;
 }
 
 /**
@@ -82,17 +89,20 @@ export function BudgetMeter({
   size = 'sm',
   shape = 'squared',
   className,
+  state: givenState,
+  paceText,
 }: BudgetMeterProps) {
-  const state = meterStateOf(figures, pace);
+  const state = givenState ?? meterStateOf(figures, pace);
   if (state === 'no_budget') return null;
   const status = METER_STATE_STATUS[state];
   const fill = fillFractionOf(figures);
   const percent = spentPercentOf(figures) ?? 0;
   const tick = pace.kind === 'running' ? pace.fraction : null;
+  const paceWords = paceText ?? paceWordsOf(pace);
   const tickText =
     pace.kind === 'running'
-      ? `pace ${String(Math.round(pace.fraction * 100))}% (${paceWordsOf(pace)})`
-      : paceWordsOf(pace);
+      ? `pace ${String(Math.round(pace.fraction * 100))}% (${paceWords})`
+      : paceWords;
   const rolled = figures.rolledOver.minor !== 0n;
   return (
     <div className={cn('group/meter relative flex items-center gap-1.5', className)}>
@@ -162,8 +172,10 @@ export function BudgetMeterRow({
   size = 'sm',
   shape = 'squared',
   className,
+  state: givenState,
+  paceText,
 }: BudgetMeterRowProps) {
-  const state = meterStateOf(figures, pace);
+  const state = givenState ?? meterStateOf(figures, pace);
   const spent = <Money value={wireOf(figures.spent)} signDisplay="auto" colorBySign={false} />;
   if (state === 'no_budget') {
     return (
@@ -207,6 +219,8 @@ export function BudgetMeterRow({
         size={size}
         shape={shape}
         className="mt-1"
+        state={state}
+        {...(paceText === undefined ? {} : { paceText })}
       />
       <p className="mt-1 text-right text-caption text-text-secondary tabular-nums">
         {spent} of <Money value={wireOf(figures.budgeted)} signDisplay="auto" colorBySign={false} />{' '}

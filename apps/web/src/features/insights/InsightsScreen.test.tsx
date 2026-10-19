@@ -58,6 +58,13 @@ function buildInsight(overrides: Partial<Insight> = {}): Insight {
       },
     ],
     actions: [],
+    bookmarkedAt: null,
+    feedback: null,
+    feedbackReason: null,
+    mentions: [],
+    titleSegments: [],
+    bodySegments: [],
+    contextLine: null,
     ...overrides,
   };
 }

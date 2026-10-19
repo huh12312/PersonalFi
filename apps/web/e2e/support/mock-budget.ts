@@ -1,6 +1,22 @@
 // SPDX-License-Identifier: MIT
 import type { Page, Route } from '@playwright/test';
 
+import {
+  blockDocumentOf,
+  budgetVsActualBlocks,
+  categoryMonthBlocks,
+} from '../../src/test-support/block-fixtures.ts';
+
+/** The two categories the budget fixture spends in, with their labels and hues, for the report blocks. */
+function reportLookup(categoryId: string | null): {
+  label: string;
+  hue: 'green' | 'orange' | 'neutral';
+} {
+  if (categoryId === 'cat_groceries') return { label: 'Groceries', hue: 'green' };
+  if (categoryId === 'cat_dining') return { label: 'Dining', hue: 'orange' };
+  return { label: 'Uncategorised', hue: 'neutral' };
+}
+
 /**
  * WP 2.9's own mock module, entirely separate from `mock-api.ts` (owned by
  * WP 2.11/the transactions-and-inbox suites — this work package's rules
@@ -562,31 +578,69 @@ export async function installBudgetMocks(page: Page): Promise<MockBudgetState> {
       );
     }
 
+    const budgetVsActualLines = () =>
+      [...lines.values()]
+        .filter((l) => l.kind === 'category')
+        .map((l) => ({
+          id: l.id,
+          categoryId: l.categoryId,
+          name: l.categoryId === 'cat_groceries' ? 'Groceries' : 'Dining',
+          assigned: usd(l.assigned),
+          activity: usd(l.activity),
+          available: usd((BigInt(l.assigned) + BigInt(l.activity)).toString()),
+          cashOverspend: usd(l.cashOverspend),
+          creditOverspend: usd(l.creditOverspend),
+          drillThrough:
+            l.categoryId === 'cat_groceries'
+              ? drillThrough
+              : { categoryIds: ['cat_dining'], from: '2026-08-01', to: '2026-09-01' },
+        }));
+
+    const spendingCells = () => [
+      {
+        month: '2026-08',
+        categoryId: 'cat_groceries',
+        amount: usd('-6000'),
+        transactionCount: 1,
+        transferExcludedCount: 0,
+        refundNettedCount: 0,
+        drillThrough,
+      },
+      {
+        month: '2026-08',
+        categoryId: 'cat_dining',
+        amount: usd('-7500'),
+        transactionCount: 1,
+        transferExcludedCount: 0,
+        refundNettedCount: 0,
+        drillThrough: { categoryIds: ['cat_dining'], from: '2026-08-01', to: '2026-09-01' },
+      },
+    ];
+
     if (path === '/api/reports/spending' && method === 'GET') {
+      return route.fulfill(json({ cells: spendingCells() }));
+    }
+
+    // WP 10.15: the Reports screen's sections as blocks, built from the same cells and lines the way the API
+    // builds them (`src/test-support/block-fixtures.ts` mirrors `apps/api/src/blocks/reports.ts`).
+    if (path === '/api/reports/blocks/spending' && method === 'GET') {
       return route.fulfill(
-        json({
-          cells: [
-            {
-              month: '2026-08',
-              categoryId: 'cat_groceries',
-              amount: usd('-6000'),
-              transactionCount: 1,
-              transferExcludedCount: 0,
-              refundNettedCount: 0,
-              drillThrough,
-            },
-            {
-              month: '2026-08',
-              categoryId: 'cat_dining',
-              amount: usd('-7500'),
-              transactionCount: 1,
-              transferExcludedCount: 0,
-              refundNettedCount: 0,
-              drillThrough: { categoryIds: ['cat_dining'], from: '2026-08-01', to: '2026-09-01' },
-            },
-          ],
-        }),
+        json(
+          blockDocumentOf(
+            categoryMonthBlocks(spendingCells(), reportLookup, 'Spending by category and month'),
+          ),
+        ),
       );
+    }
+    if (path === '/api/reports/blocks/income' && method === 'GET') {
+      return route.fulfill(
+        json(
+          blockDocumentOf(categoryMonthBlocks([], reportLookup, 'Income by category and month')),
+        ),
+      );
+    }
+    if (path === '/api/reports/blocks/budget-vs-actual' && method === 'GET') {
+      return route.fulfill(json(blockDocumentOf(budgetVsActualBlocks(budgetVsActualLines()))));
     }
 
     if (path === '/api/reports/income' && method === 'GET') {
@@ -614,26 +668,7 @@ export async function installBudgetMocks(page: Page): Promise<MockBudgetState> {
     }
 
     if (path === '/api/reports/budget-vs-actual' && method === 'GET') {
-      return route.fulfill(
-        json({
-          lines: [...lines.values()]
-            .filter((l) => l.kind === 'category')
-            .map((l) => ({
-              id: l.id,
-              categoryId: l.categoryId,
-              name: l.categoryId === 'cat_groceries' ? 'Groceries' : 'Dining',
-              assigned: usd(l.assigned),
-              activity: usd(l.activity),
-              available: usd((BigInt(l.assigned) + BigInt(l.activity)).toString()),
-              cashOverspend: usd(l.cashOverspend),
-              creditOverspend: usd(l.creditOverspend),
-              drillThrough:
-                l.categoryId === 'cat_groceries'
-                  ? drillThrough
-                  : { categoryIds: ['cat_dining'], from: '2026-08-01', to: '2026-09-01' },
-            })),
-        }),
-      );
+      return route.fulfill(json({ lines: budgetVsActualLines() }));
     }
 
     if (path === '/api/export' && method === 'GET') {

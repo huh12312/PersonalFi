@@ -4,6 +4,7 @@ import { CalendarClock } from 'lucide-react';
 
 import { getCurrentBriefOptions } from '../../api/generated/@tanstack/react-query.gen.ts';
 import type { Problem } from '../../api/generated/types.gen.ts';
+import { BlockDocumentView } from '../../components/blocks/BlockRenderer.tsx';
 import { EmptyState } from '../../components/patterns/EmptyState.tsx';
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { HealthScoreSection } from '../health/HealthScoreSection.tsx';
@@ -27,7 +28,7 @@ const MAX_RANKED_CARDS = 5;
  * `/brief` (05-phase-5-dispatch.md §3 WP 5.11): the Weekly Advisory Brief —
  * at most five ranked actions, the attention strip above them, the
  * nothing-material and cold-start states, 07 §7.2's disclaimer, and the
- * health score beneath.
+ * overview beneath as blocks (WP 10.15: the week, impact bars, milestones, the health card).
  */
 export function BriefScreen() {
   const briefQuery = useQuery(getCurrentBriefOptions());
@@ -107,7 +108,19 @@ export function BriefScreen() {
         </ul>
       )}
 
-      <HealthScoreSection />
+      {/* WP 10.15: the overview the API builds as blocks — the week, the ranked actions by dollar impact, net worth
+          milestones if any, and the health link card (it replaced `HealthScoreSection` here; the empty state above
+          keeps it, because there is no Brief to carry blocks). */}
+      <section aria-labelledby="brief-overview-heading" data-testid="brief-overview">
+        <h2 id="brief-overview-heading" className="mb-2 text-h3 text-text-primary">
+          At a glance
+        </h2>
+        <BlockDocumentView
+          document={brief.blocks}
+          headingLevel={3}
+          testId="brief-overview-blocks"
+        />
+      </section>
     </div>
   );
 }

@@ -60,7 +60,9 @@ import {
   insightEvidence,
   insightFeedback,
   insights,
+  type InsightHelpfulness,
   type InsightStatus,
+  type ReasonCode,
   snapshotGrants,
 } from '../schema/index.ts';
 import type { Severity } from './contract/response.ts';
@@ -120,6 +122,12 @@ export interface InsightView {
   readonly expiresAt: Date | null;
   readonly evidence: readonly EvidenceView[];
   readonly actions: readonly ActionView[];
+  /** WP 10.15 (0051): when the holder bookmarked it; `null` = not bookmarked. */
+  readonly bookmarkedAt: Date | null;
+  /** WP 10.15 (0051): "was this helpful?"; `null` = not answered. Never read by policy. */
+  readonly feedback: InsightHelpfulness | null;
+  /** WP 10.15 (0051): the reason code given with `not_helpful`, else `null`. */
+  readonly feedbackReason: ReasonCode | null;
 }
 
 export interface FeedInput {
@@ -275,6 +283,9 @@ export async function listInsights(
       expiresAt: row.expiresAt,
       evidence: evidenceBy.get(row.id) ?? [],
       actions: actionsBy.get(row.id) ?? [],
+      bookmarkedAt: row.bookmarkedAt,
+      feedback: row.feedback,
+      feedbackReason: row.feedbackReason,
     });
   }
   return views;

@@ -218,6 +218,9 @@ describe('the feed applies the learned dismiss penalty (WP 5.9)', () => {
       expiresAt: null,
       evidence: [],
       actions: [],
+      bookmarkedAt: null,
+      feedback: null,
+      feedbackReason: null,
       ...overrides,
     };
   }

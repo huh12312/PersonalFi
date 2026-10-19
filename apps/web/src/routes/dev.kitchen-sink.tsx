@@ -4,6 +4,7 @@ import { AlertOctagon, AlertTriangle, CheckCircle2, Info, Wallet } from 'lucide-
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 
+import { BlocksGallery } from '../components/dev/BlocksGallery.tsx';
 import { TokenGallery } from '../components/dev/TokenGallery.tsx';
 import { DateOnlyText } from '../components/finance/DateOnlyText.tsx';
 import { InlineInsight } from '../components/finance/InlineInsight.tsx';
@@ -356,6 +357,10 @@ function Theme({ label, value }: { label: string; value: 'light' | 'dark' }) {
 
         <Section title="Chart pipeline (visx)">
           <NetWorthAreaChart />
+        </Section>
+
+        <Section title="Blocks">
+          <BlocksGallery theme={value} />
         </Section>
       </div>
     </div>

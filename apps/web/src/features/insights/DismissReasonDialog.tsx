@@ -50,6 +50,20 @@ export interface DismissReasonDialogProps {
   onOpenChange: (open: boolean) => void;
   busy?: boolean;
   onDismiss: (result: DismissResult) => void;
+  /**
+   * WP 10.15: the same reason capture reused for "Not helpful" (`InsightCard`'s feedback). Every prop below
+   * defaults to the dismissal's wording and behaviour, so a dismissal is unchanged.
+   */
+  title?: string;
+  description?: string;
+  confirmLabel?: string;
+  busyLabel?: string;
+  /** The reasons offered, in 07 §8.3's order. Defaults to all seven. */
+  reasonCodes?: readonly DismissReasonCode[];
+  /** Offer the free-text detail field (the dismissal's `reason` note). Default true. */
+  showNote?: boolean;
+  /** The confirm button's variant: destructive for a dismissal, primary for feedback. */
+  confirmVariant?: 'destructive' | 'primary';
 }
 
 /**
@@ -66,6 +80,13 @@ export function DismissReasonDialog({
   onOpenChange,
   busy = false,
   onDismiss,
+  title = 'Dismiss this insight?',
+  description = "You won't see this exact finding again for a while. Telling us why helps tune future advice — entirely optional.",
+  confirmLabel = 'Dismiss',
+  busyLabel = 'Dismissing…',
+  reasonCodes = DISMISS_REASON_CODES,
+  showNote = true,
+  confirmVariant = 'destructive',
 }: DismissReasonDialogProps) {
   const [reasonCode, setReasonCode] = useState<DismissReasonCode | null>(null);
   const [note, setNote] = useState('');
@@ -73,15 +94,12 @@ export function DismissReasonDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent showClose={false}>
-        <DialogTitle>Dismiss this insight?</DialogTitle>
-        <DialogDescription>
-          You won't see this exact finding again for a while. Telling us why helps tune future
-          advice — entirely optional.
-        </DialogDescription>
+        <DialogTitle>{title}</DialogTitle>
+        <DialogDescription>{description}</DialogDescription>
 
         <fieldset className="mt-4 flex flex-col gap-2">
           <legend className="sr-only">Reason (optional)</legend>
-          {DISMISS_REASON_CODES.map((code) => (
+          {reasonCodes.map((code) => (
             <label key={code} className="flex items-center gap-2 text-small text-text-secondary">
               <input
                 type="radio"
@@ -94,27 +112,34 @@ export function DismissReasonDialog({
           ))}
         </fieldset>
 
-        <label className="mt-3 block text-small text-text-secondary">
-          Add a detail (optional)
-          <input
-            type="text"
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            aria-label="Dismissal note"
-            className="mt-1 w-full rounded-md border border-border-hairline bg-bg-surface px-2 py-1 text-small text-text-primary"
-          />
-        </label>
+        {showNote && (
+          <label className="mt-3 block text-small text-text-secondary">
+            Add a detail (optional)
+            <input
+              type="text"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              aria-label="Dismissal note"
+              className="mt-1 w-full rounded-md border border-border-hairline bg-bg-surface px-2 py-1 text-small text-text-primary"
+            />
+          </label>
+        )}
 
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
           <Button
-            variant="destructive"
+            variant={confirmVariant}
             disabled={busy}
-            onClick={() => onDismiss({ reasonCode, note: note.trim() === '' ? null : note.trim() })}
+            onClick={() =>
+              onDismiss({
+                reasonCode,
+                note: !showNote || note.trim() === '' ? null : note.trim(),
+              })
+            }
           >
-            {busy ? 'Dismissing…' : 'Dismiss'}
+            {busy ? busyLabel : confirmLabel}
           </Button>
         </div>
       </DialogContent>

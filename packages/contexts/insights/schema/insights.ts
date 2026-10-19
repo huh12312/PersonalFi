@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 /**
  * `insights`, `insight_evidence`, `insight_actions`, `insight_feedback` and
- * `insight_dismissals` — migration `0012_insights.sql`.
+ * `insight_dismissals` — migration `0012_insights.sql` (`insights`' bookmark and
+ * helpfulness columns: `0051_insight_feedback.sql`).
  *
  * See that file's header for the design. Four things are worth repeating at the
  * query surface:
@@ -48,6 +49,10 @@ import {
 /** The four states a proposal can be in. `expired` is deliberately not one. */
 export const INSIGHT_STATUSES = ['pending_review', 'accepted', 'dismissed', 'snoozed'] as const;
 export type InsightStatus = (typeof INSIGHT_STATUSES)[number];
+
+/** `insights.feedback` (migration 0051): the holder's answer to "was this helpful?". */
+export const INSIGHT_HELPFULNESS_VALUES = ['helpful', 'not_helpful'] as const;
+export type InsightHelpfulness = (typeof INSIGHT_HELPFULNESS_VALUES)[number];
 
 export const CONFIDENCE_BASIS_VALUES = ['deterministic', 'heuristic', 'model'] as const;
 export type ConfidenceBasisValue = (typeof CONFIDENCE_BASIS_VALUES)[number];
@@ -112,6 +117,16 @@ export const insights = pgTable(
      * `read.ts`'s `listInsights` reads only rows where this is `null`.
      */
     narratesInsightId: uuid('narrates_insight_id'),
+
+    /**
+     * WP 10.15, migration `0051_insight_feedback.sql`: the holder's bookmark and their answer to "was this
+     * helpful?" (with a reason code, only for `not_helpful`). State on the row, replaced when it changes — never
+     * read by the cooldown ladder, the quarantine rate or rule health (those read `insight_feedback`, the
+     * review-action log), and never touched by a re-proposal (`upsertInsight`'s SET list omits them).
+     */
+    bookmarkedAt: instantColumn('bookmarked_at'),
+    feedback: text('feedback').$type<InsightHelpfulness | null>(),
+    feedbackReason: text('feedback_reason').$type<ReasonCode | null>(),
 
     /** What this insight stood on when it was last proposed. */
     inputDigest: text('input_digest').notNull(),

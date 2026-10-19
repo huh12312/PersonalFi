@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 import { expectNoAxeViolations, setTheme } from './support/axe.ts';
+import { installCategoryMocks } from './support/mock-categories.ts';
 import { installRecurringInsightsMocks } from './support/mock-recurring-insights.ts';
 import { installPlanMocks } from './support/mock-plan.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
@@ -740,4 +741,82 @@ evidenceTest.describe('WP 10.7 evidence', () => {
       );
     }
   }
+});
+
+/**
+ * WP 10.15 (V8): insight cards carry entity mentions, a value line, a bookmark and Helpful / Not helpful. The
+ * whole app's mocks (`installSweepMocks`) with the category layer over them, so a mention's category screen exists.
+ */
+test.describe('WP 10.15 insight cards', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await installSweepMocks(page);
+    await installCategoryMocks(page);
+  });
+
+  function groceriesCard(page: Page) {
+    return page
+      .getByRole('list', { name: 'Insights' })
+      .locator('> li')
+      .filter({ hasText: 'has been running higher than usual' });
+  }
+
+  test('a category mention in an insight card opens the category screen', async ({ page }) => {
+    await visit(page, '/insights');
+    const card = groceriesCard(page);
+    await expect(card.getByTestId('insight-value-line')).toContainText('Worth');
+    await expect(card.getByTestId('insight-context-line')).toHaveText('About Groceries');
+    await card.getByRole('heading', { level: 2 }).getByRole('link', { name: 'Groceries' }).click();
+    await expect(page).toHaveURL(/\/categories\/cat_groceries$/);
+    await expect(page.getByRole('heading', { name: 'Groceries', level: 2 })).toBeVisible();
+  });
+
+  test('a bookmark persists across a reload and the Bookmarked filter keeps only it', async ({
+    page,
+  }) => {
+    await visit(page, '/insights');
+    const card = groceriesCard(page);
+    const [request] = await Promise.all([
+      page.waitForRequest(
+        (r) =>
+          r.method() === 'POST' && /\/api\/insights\/insight_groceries\/bookmark$/.test(r.url()),
+      ),
+      card.getByRole('button', { name: 'Bookmark', exact: true }).click(),
+    ]);
+    expect(request.postDataJSON()).toEqual({ bookmarked: true });
+    await expect(card.getByRole('button', { name: 'Bookmarked' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await page.reload();
+    await expect(groceriesCard(page).getByRole('button', { name: 'Bookmarked' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await page.getByRole('button', { name: 'Bookmarked (1)' }).click();
+    await expect(page.getByRole('list', { name: 'Insights' }).locator('> li')).toHaveCount(1);
+    await expectNoAxeViolations(page, 'insights (bookmarked filter)');
+  });
+
+  test('Not helpful asks why with the reason dialog and the answer persists', async ({ page }) => {
+    await visit(page, '/insights');
+    const card = groceriesCard(page);
+    await card.getByRole('button', { name: 'Not helpful' }).click();
+    const dialog = page.getByRole('dialog', { name: "Why wasn't this helpful?" });
+    await expect(dialog).toBeVisible();
+    await expectNoAxeViolations(page, 'insights (not helpful dialog)');
+    await dialog.getByLabel('True, but I already knew').check();
+    const [request] = await Promise.all([
+      page.waitForRequest((r) => r.method() === 'POST' && /\/feedback$/.test(r.url())),
+      dialog.getByRole('button', { name: 'Send' }).click(),
+    ]);
+    expect(request.postDataJSON()).toEqual({ feedback: 'not_helpful', reasonCode: 'ALREADY_KNOW' });
+    await expect(dialog).toBeHidden();
+    await page.reload();
+    await expect(groceriesCard(page).getByRole('button', { name: 'Not helpful' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
 });

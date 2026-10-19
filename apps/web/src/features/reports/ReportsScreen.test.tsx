@@ -12,6 +12,11 @@ import {
   jsonResponse,
   stubFetchRoutes,
 } from '../../test-support/api-test-utils.ts';
+import {
+  blockDocumentOf,
+  budgetVsActualBlocks,
+  categoryMonthBlocks,
+} from '../../test-support/block-fixtures.ts';
 
 const SESSION = {
   userId: 'user_1',
@@ -32,6 +37,37 @@ function usd(minor: string) {
 }
 
 const DRILL_THROUGH = { categoryIds: ['cat_dining_coffee'], from: '2026-08-01', to: '2026-09-01' };
+
+const SPENDING_CELLS = [
+  {
+    month: '2026-08',
+    categoryId: 'cat_dining_coffee',
+    amount: usd('-4200'),
+    transactionCount: 3,
+    transferExcludedCount: 0,
+    refundNettedCount: 0,
+    drillThrough: DRILL_THROUGH,
+  },
+];
+
+const BVA_LINES = [
+  {
+    id: 'line_1',
+    categoryId: 'cat_dining_coffee',
+    name: 'Coffee Shops',
+    assigned: usd('5000'),
+    activity: usd('-4200'),
+    available: usd('800'),
+    cashOverspend: usd('0'),
+    creditOverspend: usd('0'),
+    drillThrough: DRILL_THROUGH,
+  },
+];
+
+const lookup = (categoryId: string | null) =>
+  categoryId === null
+    ? { label: 'Uncategorised', hue: 'neutral' as const }
+    : { label: 'Coffee Shops', hue: 'brown' as const };
 
 function renderReports() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -98,6 +134,27 @@ function commonRoutes() {
         }),
     },
     { match: '/api/reports/income', handle: () => jsonResponse({ cells: [] }) },
+    // WP 10.15: the three sections as blocks, built from the same figures the way the API builds them.
+    {
+      match: '/api/reports/blocks/spending',
+      handle: () =>
+        jsonResponse(
+          blockDocumentOf(
+            categoryMonthBlocks(SPENDING_CELLS, lookup, 'Spending by category and month'),
+          ),
+        ),
+    },
+    {
+      match: '/api/reports/blocks/income',
+      handle: () =>
+        jsonResponse(
+          blockDocumentOf(categoryMonthBlocks([], lookup, 'Income by category and month')),
+        ),
+    },
+    {
+      match: '/api/reports/blocks/budget-vs-actual',
+      handle: () => jsonResponse(blockDocumentOf(budgetVsActualBlocks(BVA_LINES))),
+    },
     {
       match: '/api/reports/sankey',
       handle: () =>
@@ -157,7 +214,26 @@ describe('ReportsScreen', () => {
     expect(screen.getByRole('link', { name: /Back to budget/ }).getAttribute('href')).toBe(
       '/budget',
     );
-    expect(await screen.findByLabelText('Spending by category and month')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('group', { name: 'Spending by category and month' }),
+    ).toBeInTheDocument();
+    // WP 10.15: drawn through the block renderer — a stacked-bars block, its segment a drill-through link.
+    const blocks = screen.getByTestId('report-blocks-spending');
+    expect(blocks.querySelector('[data-block-kind="stacked-bars"]')).not.toBeNull();
+    const segment = blocks.querySelector('[data-segment="cat_dining_coffee"]');
+    expect(segment?.getAttribute('role')).toBe('link');
+    expect(segment?.getAttribute('aria-label')).toBe(
+      'Coffee Shops, 2026-08, $42.00, view transactions',
+    );
+  });
+
+  it('the income tab says there was no activity, as a block', async () => {
+    stubFetchRoutes(commonRoutes());
+    renderReports();
+    const user = userEvent.setup();
+    await screen.findByRole('heading', { name: 'Reports', level: 1 });
+    await user.click(screen.getByRole('tab', { name: 'Income' }));
+    expect(await screen.findByText('No activity in this window.')).toBeInTheDocument();
   });
 
   it('shows the budget-vs-actual table with a category link and a drill-through link per row', async () => {

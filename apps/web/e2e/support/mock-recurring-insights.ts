@@ -115,6 +115,37 @@ interface MockInsight {
     rationaleMd: string;
     url: string | null;
   }>;
+  /** WP 10.15: the card's persisted state and its mentions. Absent = none; filled in by `wire()`. */
+  bookmarkedAt?: string | null;
+  feedback?: 'helpful' | 'not_helpful' | null;
+  feedbackReason?: string | null;
+  mentions?: Array<{
+    text: string;
+    entityType: string;
+    entityId: string;
+    evidencePosition: number;
+  }>;
+  titleSegments?: Array<{ text: string; entityType?: string; entityId?: string }>;
+  bodySegments?: Array<{ text: string; entityType?: string; entityId?: string }>;
+  contextLine?: Array<{ text: string; entityType?: string; entityId?: string }> | null;
+}
+
+/**
+ * WP 10.15: an insight as `GET /insights` serves it — the card fields default to "nothing bookmarked, nothing
+ * answered, no mentions" (title and body as one plain segment each), exactly what the api sends for an insight
+ * whose evidence cites no entity.
+ */
+function wire(insight: MockInsight): Required<MockInsight> {
+  return {
+    bookmarkedAt: null,
+    feedback: null,
+    feedbackReason: null,
+    mentions: [],
+    titleSegments: [{ text: insight.title }],
+    bodySegments: [{ text: insight.summaryMd }],
+    contextLine: null,
+    ...insight,
+  };
 }
 
 interface MockTransaction {
@@ -217,6 +248,8 @@ export interface MockRecurringInsightsState {
   lastConfirmBody: unknown;
   lastRejectBody: unknown;
   lastReviewBody: unknown;
+  /** WP 10.15: the last `POST /insights/{id}/feedback` body. */
+  lastFeedbackBody: unknown;
 }
 
 export async function installRecurringInsightsMocks(
@@ -227,6 +260,7 @@ export async function installRecurringInsightsMocks(
     lastConfirmBody: null,
     lastRejectBody: null,
     lastReviewBody: null,
+    lastFeedbackBody: null,
   };
 
   const candidates = new Map<string, MockCandidate>([
@@ -371,6 +405,76 @@ export async function installRecurringInsightsMocks(
           },
         ],
         actions: [],
+      },
+    ],
+    [
+      // WP 10.15: an insight whose evidence cites a category by id, so its card names the category and links to
+      // it (`cat_groceries`, the Cash Flow and categories mocks' Groceries).
+      'insight_groceries',
+      {
+        id: 'insight_groceries',
+        advisorId: 'builtin.spending.category_creep',
+        key: 'spending.category_creep.cat_groceries',
+        period: '2026-06',
+        type: 'spending.category_creep',
+        severity: 'notable',
+        severityClamped: false,
+        title: 'Groceries has been running higher than usual',
+        summaryMd: 'Groceries has run about $420.00 a month lately, against $350.00 before.',
+        confidence: 1,
+        confidenceBasis: 'deterministic',
+        horizon: 'this_year',
+        status: 'pending_review',
+        annualizedImpact: { minor: '84000', currency: 'USD' },
+        oneTimeImpact: null,
+        impactBasis:
+          'The gap between a three-month average and the six-month average before it, annualised.',
+        caveats: [],
+        inputDigest: 'sha256:mock3',
+        firstProposedAt: '2026-06-03T00:00:00.000Z',
+        lastProposedAt: '2026-06-03T00:00:00.000Z',
+        expiresAt: null,
+        evidence: [
+          {
+            position: 0,
+            kind: 'metric',
+            label: 'The category',
+            value: null,
+            sourceRef: 'snapshot:spending_summary.by_category_month[3].category_ref',
+            resolvedDisplay: 'cat_groceries',
+            href: null,
+          },
+          {
+            position: 1,
+            kind: 'metric',
+            label: 'A recent month',
+            value: '$420.00',
+            sourceRef: 'snapshot:spending_summary.by_category_month[3].amount.minor',
+            resolvedDisplay: '$420.00',
+            href: null,
+          },
+        ],
+        actions: [],
+        mentions: [
+          {
+            text: 'Groceries',
+            entityType: 'category',
+            entityId: 'cat_groceries',
+            evidencePosition: 0,
+          },
+        ],
+        titleSegments: [
+          { text: 'Groceries', entityType: 'category', entityId: 'cat_groceries' },
+          { text: ' has been running higher than usual' },
+        ],
+        bodySegments: [
+          { text: 'Groceries', entityType: 'category', entityId: 'cat_groceries' },
+          { text: ' has run about $420.00 a month lately, against $350.00 before.' },
+        ],
+        contextLine: [
+          { text: 'About ' },
+          { text: 'Groceries', entityType: 'category', entityId: 'cat_groceries' },
+        ],
       },
     ],
   ]);
@@ -605,7 +709,7 @@ export async function installRecurringInsightsMocks(
     }
 
     if (path === '/api/insights' && method === 'GET') {
-      const visible = [...insights.values()].filter((i) => i.status === 'pending_review');
+      const visible = [...insights.values()].filter((i) => i.status === 'pending_review').map(wire);
       return route.fulfill(
         json({ dashboard: visible, list: visible, overflow: [], belowFloor: [] }),
       );
@@ -615,7 +719,39 @@ export async function installRecurringInsightsMocks(
     if (insightMatch && method === 'GET') {
       const insight = insights.get(insightMatch[1]!);
       if (insight === undefined) return route.fulfill(json({ code: 'not_found' }, 404));
-      return route.fulfill(json({ insight }));
+      return route.fulfill(json({ insight: wire(insight) }));
+    }
+
+    // WP 10.15: bookmark and helpfulness persist on the mock's own insight, so a reload reads them back.
+    const bookmarkMatch = /^\/api\/insights\/([^/]+)\/bookmark$/.exec(path);
+    if (bookmarkMatch && method === 'POST') {
+      const insight = insights.get(bookmarkMatch[1]!);
+      if (insight === undefined)
+        return route.fulfill(json({ code: 'insights.insight_not_found' }, 404));
+      const body = request.postDataJSON() as { bookmarked: boolean };
+      insight.bookmarkedAt = body.bookmarked ? '2026-06-15T12:00:00.000Z' : null;
+      return route.fulfill(json({ insightId: insight.id, bookmarkedAt: insight.bookmarkedAt }));
+    }
+
+    const feedbackMatch = /^\/api\/insights\/([^/]+)\/feedback$/.exec(path);
+    if (feedbackMatch && method === 'POST') {
+      const insight = insights.get(feedbackMatch[1]!);
+      if (insight === undefined)
+        return route.fulfill(json({ code: 'insights.insight_not_found' }, 404));
+      const body = request.postDataJSON() as {
+        feedback: 'helpful' | 'not_helpful' | null;
+        reasonCode?: string | null;
+      };
+      insight.feedback = body.feedback;
+      insight.feedbackReason = body.feedback === 'not_helpful' ? (body.reasonCode ?? null) : null;
+      state.lastFeedbackBody = body;
+      return route.fulfill(
+        json({
+          insightId: insight.id,
+          feedback: insight.feedback,
+          feedbackReason: insight.feedbackReason,
+        }),
+      );
     }
 
     const reviewMatch = /^\/api\/insights\/([^/]+)\/review$/.exec(path);

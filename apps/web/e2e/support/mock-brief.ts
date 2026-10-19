@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 import type { Page, Route } from '@playwright/test';
 
+import {
+  blockDocumentOf,
+  briefItemBlocks,
+  briefOverviewBlocks,
+  type HealthForBlocks,
+} from '../../src/test-support/block-fixtures.ts';
+
 /**
  * The Brief and health-score routes (WP 5.11, extended by 9.6), as a layerable mock: moved out of
  * `brief.spec.ts` by WP 9.8 so `a11y-sweep.spec.ts` can visit `/brief` with the same bodies. By default it
@@ -167,6 +174,47 @@ export const HEALTH_SCORE_RESULT = {
   excluded: [],
 };
 
+type FixtureItem = Parameters<typeof briefItemBlocks>[0];
+
+/**
+ * WP 10.15: the blocks the API builds for a Brief (`apps/api/src/blocks/brief.ts`, mirrored in
+ * `src/test-support/block-fixtures.ts`), filled in from the served fields when a test's Brief does not carry its own
+ * — every item's card body and the overview (the health card from the mocked health score, no milestones).
+ */
+export function withServedBlocks(
+  brief: Record<string, unknown>,
+  healthScore: unknown = HEALTH_SCORE_RESULT,
+): Record<string, unknown> {
+  const items = (brief['items'] as Record<string, unknown>[]).map((raw) => {
+    const narration = (raw['narration'] ?? {
+      status: 'none',
+      aiAssisted: false,
+      textShown: false,
+      summaryMd: null,
+    }) as Record<string, unknown>;
+    const item = {
+      ...raw,
+      narration: { ...narration, narratedBy: narration['narratedBy'] ?? null },
+    } as unknown as FixtureItem & Record<string, unknown>;
+    return raw['blocks'] === undefined
+      ? { ...item, blocks: blockDocumentOf(briefItemBlocks(item)) }
+      : item;
+  });
+  const score = healthScore as { overall?: number | null; isoWeek?: string } | null | undefined;
+  const health: HealthForBlocks =
+    score === null || score === undefined || score.isoWeek === undefined
+      ? { kind: 'not_computed' }
+      : score.overall === null || score.overall === undefined
+        ? { kind: 'unscored', isoWeek: score.isoWeek }
+        : { kind: 'scored', overall: score.overall, isoWeek: score.isoWeek };
+  const served = { ...brief, items } as unknown as Parameters<typeof briefOverviewBlocks>[0];
+  return {
+    ...brief,
+    items,
+    blocks: brief['blocks'] ?? blockDocumentOf(briefOverviewBlocks(served, health, [])),
+  };
+}
+
 export interface MockState {
   readonly reviewedBodies: unknown[];
 }
@@ -226,7 +274,16 @@ export async function installBriefMocks(
           ),
         );
       }
-      return route.fulfill(json({ brief: options.brief ?? buildBrief() }));
+      return route.fulfill(
+        json({
+          brief: withServedBlocks(
+            options.brief ?? buildBrief(),
+            options.healthScoreStatus !== undefined && options.healthScoreStatus !== 200
+              ? null
+              : (options.healthScore ?? HEALTH_SCORE_RESULT),
+          ),
+        }),
+      );
     }
 
     if (path === '/api/insights/health-score' && method === 'GET') {

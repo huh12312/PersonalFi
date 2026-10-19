@@ -560,6 +560,11 @@ describeWithDb('runMigrations', () => {
       //   isSingleEmoji in @core/kernel, applied by @ctx/categorization before every write). Never seeded:
       //   CATEGORY_DEFAULT_EMOJI is a display fallback. Not `icon`, which is D20's Lucide name and unchanged.
       //   Expand-only; references only 0006's categories. Exported with the row.
+      // 0051_insight_feedback (WP 10.15): no new table. insights gains nullable bookmarked_at, feedback
+      //   (insights_feedback_check: helpful | not_helpful) and feedback_reason (insights_feedback_reason_check:
+      //   the seven 07 §8.3 codes), with insights_feedback_reason_requires_not_helpful. State on the row, not
+      //   events: insight_feedback stays the review-action log that drives policy, and these never do.
+      //   Expand-only; references only 0012's insights. Not exported (registry.ts exempts insights).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called

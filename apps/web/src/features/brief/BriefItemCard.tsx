@@ -7,18 +7,21 @@ import {
   getCurrentBriefQueryKey,
   reviewInsightMutation,
 } from '../../api/generated/@tanstack/react-query.gen.ts';
-import { Badge } from '../../components/ui/badge.tsx';
 import { Button } from '../../components/ui/button.tsx';
-import { Money } from '../../components/finance/Money.tsx';
 import { SeverityBadge } from '../../components/finance/SeverityBadge.tsx';
 import { cn } from '../../lib/cn.ts';
 import { DismissReasonDialog } from '../insights/DismissReasonDialog.tsx';
 import { EvidencePanel } from '../insights/EvidencePanel.tsx';
-import { headlineImpactOf } from '../insights/severity.ts';
 import { insightViewOf } from './evidence-adapter.ts';
-import { NarratedSummary } from './NarrationBadge.tsx';
+import { BlockRenderer } from '../../components/blocks/BlockRenderer.tsx';
 import { retirementEffectWording } from './retirement-effect.ts';
-import { narrationOf, primaryActionOf, type BriefItemWithNarration } from './types.ts';
+import { primaryActionOf, type BriefItemWithNarration } from './types.ts';
+
+function kindOf(block: unknown): string | null {
+  return block !== null && typeof block === 'object' && 'kind' in block
+    ? String((block as { readonly kind: unknown }).kind)
+    : null;
+}
 
 export interface BriefItemCardProps {
   item: BriefItemWithNarration;
@@ -58,11 +61,17 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
     },
   });
 
-  const impact = headlineImpactOf(item);
-  const narration = narrationOf(item);
   const effect = retirementEffectWording(item.retirementEffect);
   const action = primaryActionOf(item);
   const canReview = item.insightId !== null;
+  // WP 10.15: the card's deterministic content arrives as blocks (`item.blocks`, built by the API from this
+  // item's own fields): the wording — under the narration badge when there is one — on the left, the headline
+  // figure or the reason there is none on the right, the carried badge beside the title. The chrome around them
+  // (severity, title, retirement effect, action, review) stays the card's.
+  const blocks = item.blocks.blocks as readonly unknown[];
+  const badges = blocks.filter((block) => kindOf(block) === 'badge');
+  const figures = blocks.filter((block) => kindOf(block) === 'money');
+  const body = blocks.filter((block) => kindOf(block) !== 'badge' && kindOf(block) !== 'money');
 
   return (
     <li
@@ -74,29 +83,23 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <SeverityBadge severity={item.severity} />
-            {item.carried && <Badge variant="neutral">Carried from last week</Badge>}
+            {badges.length > 0 && (
+              <BlockRenderer blocks={badges} className="gap-1" testId="brief-item-badges" />
+            )}
             <h3 className="text-body font-medium text-text-primary">{item.title}</h3>
           </div>
-          <NarratedSummary templateSummaryMd={item.summaryMd} narration={narration} />
+          <BlockRenderer
+            blocks={body}
+            className="mt-1 gap-1"
+            testId="brief-item-body"
+            headingLevel={4}
+          />
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1" data-testid="brief-item-impact">
-          {impact !== null ? (
-            <Money
-              value={impact.money}
-              signDisplay="auto"
-              colorBySign={false}
-              className="text-body font-medium"
-            />
-          ) : (
-            <span className="text-caption text-text-muted">No dollar figure</span>
-          )}
-          <span className="text-caption text-text-muted">
-            {impact?.kind === 'annualized'
-              ? 'per year'
-              : impact?.kind === 'one_time'
-                ? 'one-time'
-                : ''}
-          </span>
+        <div
+          className="flex shrink-0 flex-col items-end gap-1 text-right"
+          data-testid="brief-item-impact"
+        >
+          <BlockRenderer blocks={figures} className="items-end gap-1" testId="brief-item-figures" />
         </div>
       </div>
 

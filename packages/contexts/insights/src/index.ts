@@ -513,6 +513,21 @@ export {
   type InsightView,
 } from './read.ts';
 
+// WP 10.15 (V8) — an insight's bookmark and helpfulness (migration 0051), and its entity mentions.
+export { InsightFeedbackReasonError, setInsightBookmark, setInsightFeedback } from './bookmarks.ts';
+export {
+  CONTEXT_LINE_TRANSACTIONS,
+  MENTION_ENTITY_TYPES,
+  contextLineOf,
+  mentionCandidatesOf,
+  segmentText,
+  type MentionCandidate,
+  type MentionEntityType,
+  type MentionEvidence,
+  type NamedMention,
+  type TextSegment,
+} from './mentions.ts';
+
 export {
   INSIGHTS_ADVISORY_LOCK_CLASS,
   RUN_PAYLOAD_RETENTION_DAYS,
