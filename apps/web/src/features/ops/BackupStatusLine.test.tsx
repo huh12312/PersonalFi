@@ -11,9 +11,12 @@ import {
 } from '../../test-support/api-test-utils.ts';
 import { BackupStatusLine } from './BackupStatusLine.tsx';
 import {
+  controlsStatusOf,
+  CONTROLS_UNKNOWN,
   describeBackupStatus,
   formatBackupAge,
   isOpsBackupStatus,
+  withControls,
   type OpsBackupStatus,
 } from './backup-status.ts';
 
@@ -141,5 +144,165 @@ describe('BackupStatusLine', () => {
     ]);
     renderLine();
     expect(await screen.findByText('Backup status unknown')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WP 10.16: when the GenAI controls were last proven
+// ---------------------------------------------------------------------------
+
+const LINE = describeBackupStatus(OK);
+const CHECKS = (lastProven: unknown) => ({
+  runs: [],
+  provider: 'ollama',
+  model: null,
+  cost: { modelCalls: 3, hosted: false, message: 'm' },
+  nextAllowedAt: null,
+  lastProven,
+});
+
+describe('the controls on the backup line (WP 10.16)', () => {
+  it('pass: "· controls proven 2026-10-19"', () => {
+    const line = withControls(
+      LINE,
+      controlsStatusOf(CHECKS({ at: '2026-10-19T14:22:09.000Z', overall: 'pass' })),
+    );
+    expect(line).toEqual({
+      tone: 'ok',
+      text: 'Last backup 4 h ago · restore drill passed 2026-10-13 · controls proven 2026-10-19',
+      warning: null,
+    });
+  });
+
+  it('partial: "· controls partly proven 2026-10-19"', () => {
+    const line = withControls(
+      LINE,
+      controlsStatusOf(CHECKS({ at: '2026-10-19T14:22:09.000Z', overall: 'partial' })),
+    );
+    expect(line.tone).toBe('ok');
+    expect(line.text).toBe(
+      'Last backup 4 h ago · restore drill passed 2026-10-13 · controls partly proven 2026-10-19',
+    );
+  });
+
+  it('fail: a warning in words, and "· controls check failed 2026-10-19"', () => {
+    const line = withControls(
+      LINE,
+      controlsStatusOf(CHECKS({ at: '2026-10-19T14:22:09.000Z', overall: 'fail' })),
+    );
+    expect(line).toEqual({
+      tone: 'warning',
+      text: 'Last backup 4 h ago · restore drill passed 2026-10-13 · controls check failed 2026-10-19',
+      warning: 'the last controls check failed',
+    });
+    // Beside a backup warning, both are said.
+    const both = withControls(
+      describeBackupStatus({ ...OK, backupOverdue: true }),
+      controlsStatusOf(CHECKS({ at: '2026-10-19T14:22:09.000Z', overall: 'fail' })),
+    );
+    expect(both.warning).toBe('backup is overdue; the last controls check failed');
+  });
+
+  it('never: "· controls never proven", and never the word "controls proven" without a row', () => {
+    const line = withControls(LINE, controlsStatusOf(CHECKS(null)));
+    expect(line.text).toBe(
+      'Last backup 4 h ago · restore drill passed 2026-10-13 · controls never proven',
+    );
+    expect(line.text).not.toMatch(/controls (partly )?proven/);
+    expect(line.tone).toBe('ok');
+  });
+
+  it('unknown: adds nothing about the controls (a failure, a page, a problem body, a malformed row)', () => {
+    for (const body of [
+      undefined,
+      null,
+      '<!doctype html>',
+      { code: 'internal' },
+      { runs: [] },
+      CHECKS({ at: 'yesterday', overall: 'pass' }),
+      CHECKS({ at: '2026-10-19T14:22:09.000Z', overall: 'great' }),
+      CHECKS('2026-10-19'),
+    ]) {
+      expect(controlsStatusOf(body), JSON.stringify(body)).toEqual(CONTROLS_UNKNOWN);
+      expect(withControls(LINE, controlsStatusOf(body))).toEqual(LINE);
+    }
+  });
+});
+
+describe('BackupStatusLine with the controls (WP 10.16)', () => {
+  beforeEach(() => {
+    ensureApiClient();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const backup = {
+    match: '/api/ops/backup-status',
+    method: 'GET',
+    handle: () => jsonResponse(OK),
+  } as const;
+
+  it('appends "controls proven <date>" from GET /narrator/control-checks', async () => {
+    stubFetchRoutes([
+      backup,
+      {
+        match: '/api/narrator/control-checks',
+        method: 'GET',
+        handle: () => jsonResponse(CHECKS({ at: '2026-10-19T14:22:09.000Z', overall: 'pass' })),
+      },
+    ]);
+    renderLine();
+    const line = await screen.findByText(
+      'Last backup 4 h ago · restore drill passed 2026-10-13 · controls proven 2026-10-19',
+    );
+    expect(line).toHaveAttribute('data-tone', 'ok');
+  });
+
+  it('says "controls never proven" with no run', async () => {
+    stubFetchRoutes([
+      backup,
+      {
+        match: '/api/narrator/control-checks',
+        method: 'GET',
+        handle: () => jsonResponse(CHECKS(null)),
+      },
+    ]);
+    renderLine();
+    const line = await screen.findByText(/controls never proven$/);
+    expect(line).not.toHaveTextContent(/controls proven/);
+  });
+
+  it('warns, in words, when the last controls check failed', async () => {
+    stubFetchRoutes([
+      backup,
+      {
+        match: '/api/narrator/control-checks',
+        method: 'GET',
+        handle: () => jsonResponse(CHECKS({ at: '2026-10-19T14:22:09.000Z', overall: 'fail' })),
+      },
+    ]);
+    renderLine();
+    const line = await screen.findByTestId('backup-status-line');
+    await vi.waitFor(() => expect(line).toHaveAttribute('data-tone', 'warning'));
+    expect(line).toHaveTextContent('Warning:');
+    expect(line).toHaveTextContent('the last controls check failed');
+    expect(line).toHaveTextContent('· controls check failed 2026-10-19');
+  });
+
+  it('adds nothing about the controls when that route fails or answers with a page', async () => {
+    stubFetchRoutes([
+      backup,
+      {
+        match: '/api/narrator/control-checks',
+        method: 'GET',
+        handle: () => textResponse('<!doctype html><title>app</title>', 200, 'text/html'),
+      },
+    ]);
+    renderLine();
+    const line = await screen.findByText('Last backup 4 h ago · restore drill passed 2026-10-13');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(line).not.toHaveTextContent(/controls/);
   });
 });

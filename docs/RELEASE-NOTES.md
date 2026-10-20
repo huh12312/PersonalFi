@@ -9,6 +9,42 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.15: prove the GenAI controls from the app
+
+**Status:** a patch release on v0.9.14. The tag `v0.9.15` is pushed by the maintainer once CI is green.
+
+### Upgrading to v0.9.15
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0052_ops_control_checks` (expand-only: one new, empty table for the self-test's dated
+results). Nothing is backfilled.
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **Run control checks.** Settings, Language model has a **Run control checks** button. With your
+  passkey it proves, against this install, that a payload you have not approved is refused, that a
+  cancel stops a run within 2 seconds and closes the connection to the model, that a reply carrying
+  a number the app did not write (or a reply outside the format) is refused, that the model's
+  egress policy refuses a host it does not list, that withdrawing a provider's consent turns the
+  narrator off, that the run inspector's digest verifies, that the hourly window counts every call,
+  that the Brief's badge names the right model, and, for the local model, that the pinned model is
+  the one served. The screen says what a run costs before you press it (with a hosted provider, up
+  to 3 calls with your key). Results are a table of facts in words; past runs are listed.
+- **The dashboard** adds "controls proven <date>" (or "controls never proven") to the backup line.
+- **From the host:** `just genai-selftest holder="<name>"` runs the same checks and prints the table.
+- **API.** New: `GET /narrator/control-checks` and `POST /narrator/control-checks` (step-up; 202,
+  one per 10 minutes). The hosted and local adapters gain fixed control probes, an abort counter,
+  and their egress policy as a classifier; nothing about how a narration is built, previewed,
+  approved or validated changed.
+
 ## v0.9.14: one block kit for the Brief and Reports, and insight cards with links
 
 **Status:** a patch release on v0.9.13. The tag `v0.9.14` is pushed by the maintainer once CI is green.

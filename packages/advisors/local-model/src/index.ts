@@ -39,6 +39,16 @@ export {
   type LocalModelErrorCode,
 } from './errors.ts';
 export { NARRATION_FORMAT } from './format.ts';
+// WP 10.16: the GenAI controls self-test's fixed probes.
+export {
+  CONTROL_PROBE_IDS,
+  CONTROL_PROBE_INSTRUCTIONS,
+  CONTROL_PROBE_NUMBER,
+  isControlProbeId,
+  withControlInstruction,
+  type ControlProbeId,
+  type EgressVerdict,
+} from './control.ts';
 // WP 10.6 (D30): the narrator on a hosted provider with the holder's own key.
 export {
   ANTHROPIC_VERSION,
@@ -52,6 +62,7 @@ export {
   HOSTED_MODEL_HOSTS,
   HOSTED_MODEL_ID_PATTERN,
   HOSTED_MODEL_PATHS,
+  HOSTED_PROBE_TIMEOUT_MS,
   HOSTED_PROVIDERS,
   HOSTED_RATE_WINDOW,
   HOSTED_TIMEOUT_CEILING_MS,

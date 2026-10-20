@@ -565,6 +565,10 @@ describeWithDb('runMigrations', () => {
       //   the seven 07 §8.3 codes), with insights_feedback_reason_requires_not_helpful. State on the row, not
       //   events: insight_feedback stays the review-action log that drives policy, and these never do.
       //   Expand-only; references only 0012's insights. Not exported (registry.ts exempts insights).
+      // 0052_ops_control_checks (WP 10.16): one new @ctx/insights table, ops_control_checks (the GenAI
+      //   controls self-test's dated evidence: user_id, started_at, finished_at and overall set together --
+      //   ops_control_checks_finished_has_overall --, provider, model, results JSONB array of per-check facts,
+      //   evidence_version). Expand-only; references only users. Not exported (install evidence, per holder).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -638,6 +642,7 @@ describeWithDb('runMigrations', () => {
         'notification_outbox',
         'notification_rules',
         'ops_backup_runs',
+        'ops_control_checks',
         'ops_restore_drills',
         'plan_assumptions',
         'plan_life_events',

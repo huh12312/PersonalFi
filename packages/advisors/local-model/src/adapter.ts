@@ -40,11 +40,13 @@
  */
 import { systemClock, type Clock } from '@core/kernel';
 import {
+  checkLocalEndpoint,
   configHash,
   createLocalEndpointPolicy,
   createLocalEndpointTransport,
   type LocalEndpointPolicy,
 } from '@core/platform';
+import { withControlInstruction, type ControlProbeId, type EgressVerdict } from './control.ts';
 import { LocalModelError } from './errors.ts';
 import { NARRATION_FORMAT } from './format.ts';
 import {
@@ -141,6 +143,36 @@ export interface LocalModelAdapter {
   };
   /** `null` when a transport was injected. */
   readonly policy: LocalEndpointPolicy | null;
+  /**
+   * WP 10.16, the controls self-test: `run` with one fixed control instruction
+   * (`control.ts`) appended to the rendered narration. Everything else — the
+   * digest pin, the warm-up, the format, the wrap — is `run`'s own path.
+   */
+  controlProbe(
+    id: ControlProbeId,
+    request: LocalModelRequest,
+    signal: AbortSignal,
+  ): Promise<unknown>;
+  /**
+   * How many calls this adapter has seen torn down by the caller's signal while
+   * a request to the model was in flight (the socket closed). A counter, never
+   * a payload: the self-test's level-4 check reads it before and after.
+   */
+  aborts(): number;
+  /** WP 10.16: the served digest for the pinned name (`null`: not served), and the pin. */
+  modelPin(
+    signal: AbortSignal,
+  ): Promise<{ readonly pinned: string; readonly served: string | null }>;
+  /**
+   * WP 10.16: the local-endpoint policy, as a classifier — syntactic, with this
+   * adapter's `allowRemote`; never a DNS lookup or a connect.
+   */
+  readonly egress: {
+    readonly kind: 'local';
+    classify(endpoint: string): EgressVerdict;
+    /** The configured endpoint's own verdict under the same policy. */
+    configured(): EgressVerdict;
+  };
 }
 
 /**
@@ -273,7 +305,26 @@ export function createLocalModelAdapter(
     }
   }
 
+  let abortsObserved = 0;
+
+  function classifyEndpoint(endpoint: string): EgressVerdict {
+    const decision = checkLocalEndpoint({
+      endpoint,
+      allowRemote: config.allowRemote,
+      timeoutMs: config.timeoutMs,
+    });
+    return decision.ok ? { allowed: true, code: null } : { allowed: false, code: decision.code };
+  }
+
   async function run(request: LocalModelRequest, signal: AbortSignal): Promise<unknown> {
+    return execute(request, signal, null);
+  }
+
+  async function execute(
+    request: LocalModelRequest,
+    signal: AbortSignal,
+    probe: ControlProbeId | null,
+  ): Promise<unknown> {
     const started = clock.nowMs();
     let stage = 'render';
     let rendered: RenderedPrompt | null = null;
@@ -302,7 +353,9 @@ export function createLocalModelAdapter(
       const timeoutMs = Math.min(config.timeoutMs, remaining);
       if (timeoutMs <= 0)
         throw new LocalModelError('model_timeout', 'the request deadline has already passed');
-      const reply = await client.chat({ messages: rendered.messages, format, signal, timeoutMs });
+      const messages =
+        probe === null ? rendered.messages : withControlInstruction(rendered.messages, probe);
+      const reply = await client.chat({ messages, format, signal, timeoutMs });
 
       stage = 'digest_recheck';
       await client.checkModelDigest(signal);
@@ -356,6 +409,7 @@ export function createLocalModelAdapter(
           shape: requestShape(request),
           sanitiser: countFlags(rendered.flags),
           reply_is_json: parsedReply.isJson,
+          ...(probe === null ? {} : { control_probe: probe }),
         },
         'local model run',
       );
@@ -365,6 +419,9 @@ export function createLocalModelAdapter(
         error instanceof LocalModelError
           ? error
           : new LocalModelError('model_unavailable', 'the run failed', { cause: error });
+      // A request to the model was in flight (past rendering) and the caller's
+      // signal tore it down: the socket was closed.
+      if (failure.code === 'aborted' && signal.aborted && stage !== 'render') abortsObserved += 1;
       logger.warn(
         {
           event: 'local_model.failed',
@@ -376,6 +433,7 @@ export function createLocalModelAdapter(
           stage,
           prompt_bytes: rendered?.bytes ?? null,
           runtime_ms: Math.max(0, clock.nowMs() - started),
+          ...(probe === null ? {} : { control_probe: probe }),
         },
         'local model run failed',
       );
@@ -385,6 +443,18 @@ export function createLocalModelAdapter(
 
   return Object.freeze({
     run,
+    controlProbe: (id: ControlProbeId, request: LocalModelRequest, signal: AbortSignal) =>
+      execute(request, signal, id),
+    aborts: () => abortsObserved,
+    modelPin: async (signal: AbortSignal) => ({
+      pinned: digest,
+      served: await client.servedDigest(signal),
+    }),
+    egress: Object.freeze({
+      kind: 'local' as const,
+      classify: classifyEndpoint,
+      configured: () => classifyEndpoint(config.endpoint),
+    }),
     renderPrompt,
     checkModel,
     model,

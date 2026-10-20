@@ -24,6 +24,7 @@ import type pg from 'pg';
 import type { CookiePolicy } from './auth/cookies.ts';
 import { assertCsrf, ensureCsrfCookie } from './auth/csrf.ts';
 import { createGuards } from './auth/guards.ts';
+import type { InsightsContext, WorkerHandoff } from '@ctx/insights';
 import { SecurityRuntime } from './auth/runtime.ts';
 import { seedUserState } from './bootstrap-seed.ts';
 import {
@@ -39,6 +40,7 @@ import { createPreviewModel } from './modules.ts';
 import { createNarratorStores } from './narrator-stores.ts';
 import { createNarratorRuntime } from './narrator-wiring.ts';
 import { narratorSettingsRoutes } from './routes/narrator-settings.ts';
+import { narratorControlCheckRoutes } from './routes/narrator-control-checks.ts';
 import { buildPlatform } from './platform.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
 import { accountRoutes } from './routes/accounts.ts';
@@ -134,6 +136,12 @@ export interface BuildAppOptions {
   readonly narratorTransport?: HttpTransport;
   /** WP 10.6. The DNS answer for that seam's egress guard. */
   readonly narratorResolve?: Resolver;
+  /**
+   * WP 10.16, tests only: how the controls self-test hands the worker its
+   * half (production: the job queue), and a shorter ceiling than 5 minutes.
+   */
+  readonly controlChecksHandoff?: (context: InsightsContext) => WorkerHandoff;
+  readonly controlChecksCeilingMs?: number;
 }
 
 /**
@@ -722,6 +730,22 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     }),
   );
   await app.register(briefRoutes(deps, { narrator: narratorPreview }));
+  // WP 10.16: the GenAI controls self-test — the api's half here (the database,
+  // the preview runtime), the worker's half (every check that needs a model)
+  // through the job queue. This process still never calls a model.
+  await app.register(
+    narratorControlCheckRoutes(deps, {
+      runtime: narratorPreview,
+      preview: createPreviewModel(config.localModelPin),
+      ...(options.controlChecksHandoff === undefined
+        ? {}
+        : { handoff: options.controlChecksHandoff }),
+      ...(options.controlChecksCeilingMs === undefined
+        ? {}
+        : { ceilingMs: options.controlChecksCeilingMs, pollMs: 50 }),
+    }),
+  );
+
   // WP 10.12: `GET /insights/health` — the Health screen (daily snapshot, pillars, history).
   await app.register(healthScoreRoutes(deps));
   // WP 9.6 (CF-1, C5-1, Phase 5 gate R-4): when a model is configured the api

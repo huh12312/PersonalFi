@@ -696,6 +696,56 @@ test('investments (WP 10.5): Tab to Refresh prices, press it, and the result is 
   await journey.expectFocus(/^Refresh prices$/, 'focus is back on Refresh prices after the 409');
 });
 
+test('settings › language model (WP 10.16): Tab to Run control checks, press it through a real passkey step-up, focus stays while the checks tick over in a live region, then the results table and a past run’s disclosure — by keyboard', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(150_000);
+  await installSweepMocks(page);
+  const passkey = await installVirtualPasskey(page, context);
+  await visit(page, '/settings');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'control checks');
+
+  // The tab list is one stop; arrows move along it and Enter chooses.
+  await journey.tabTo(/^(Rules|Notifications|Market data|Language model|Crypto|Security)$/, {
+    max: 40,
+  });
+  for (let n = 0; n < 6 && !/^Language model$/.test(await journey.focusedName()); n += 1) {
+    await journey.press('ArrowRight', 'ArrowRight along the tabs');
+  }
+  await page.keyboard.press('Enter');
+  const section = page.getByTestId('control-checks');
+  await expect(section.getByRole('heading', { name: 'Control checks' })).toBeVisible();
+
+  // The cost is read before the button is reached.
+  await expect(section.getByTestId('control-checks-cost')).toBeVisible();
+  const stop = await journey.tabTo(/^Run control checks$/, { max: 90 });
+  expect(stop.tag).toBe('button');
+  await passkey.respond(true);
+  await page.keyboard.press('Enter');
+  const live = section.getByTestId('control-checks-progress');
+  await expect(live).toContainText(/checks done\./, { timeout: 15_000 });
+  expect(passkey.assertions(), 'the run crossed the passkey step-up').toBeGreaterThan(0);
+  // aria-disabled, never disabled: focus stays on the button while the run goes (2.4.3).
+  await journey.expectFocus(/^Running control checks…$/, 'focus stays on the button while it runs');
+  await expect(live).toHaveText(
+    'Control checks finished. Result: Partial: some checks could not run.',
+    { timeout: 20_000 },
+  );
+  await journey.expectFocus(/^Run control checks$/, 'focus is still on the button once it is done');
+
+  // The results table is a scrollable region and a tab stop; then the history's disclosures.
+  await journey.tabTo(/^Control checks of .+, scrollable$/, { max: 4 });
+  await journey.tabTo(/\(latest\)/, { max: 4 });
+  await page.keyboard.press('Enter');
+  const history = section.getByTestId('control-checks-history');
+  await expect(history.getByRole('table')).toBeVisible();
+  await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(11);
+  await journey.expectFocus(/\(latest\)/, 'focus stays on the opened summary');
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
 // ---------------------------------------------------------------------------
 // 10. The soft-lock: its 60 s warning is operable from the keyboard (2.2.1)
 // ---------------------------------------------------------------------------

@@ -52,6 +52,7 @@
 import { systemClock, type Clock } from '@core/kernel';
 import {
   assertHeaderValueSafe,
+  checkUrl,
   configHash,
   createEgressPolicy,
   createNodeTransport,
@@ -63,6 +64,7 @@ import {
   type Resolver,
 } from '@core/platform';
 import type { LocalModelLogger } from './adapter.ts';
+import { withControlInstruction, type ControlProbeId, type EgressVerdict } from './control.ts';
 import { hostedNarrationFormat, HOSTED_PROVIDERS, type HostedProvider } from './hosted-format.ts';
 import { DEFAULT_GENERATION_OPTIONS } from './ollama-client.ts';
 import {
@@ -123,8 +125,11 @@ export const HOSTED_MAX_RESPONSE_BYTES = 512 * 1024;
 /** The output-token cap per call (Anthropic `max_tokens`, OpenAI `max_completion_tokens`). Room for a reasoning model's thinking. */
 export const HOSTED_MAX_OUTPUT_TOKENS = 16_000;
 
-/** The probe's cap: it asks for an empty narration. */
+/** The probe's cap: it asks for an empty narration. Also the controls self-test's probes' (WP 10.16). */
 export const HOSTED_PROBE_MAX_OUTPUT_TOKENS = 1_024;
+
+/** The Test's and the self-test's probes wait at most this long (never above the configured timeout). */
+export const HOSTED_PROBE_TIMEOUT_MS = 60_000;
 
 /** Per provider, per runtime: at most this many calls in this window. */
 export const HOSTED_RATE_WINDOW = Object.freeze({ maxRequests: 30, windowMs: 60 * 60_000 });
@@ -337,6 +342,34 @@ export interface HostedModelAdapter {
     render(request: LocalModelRequest): { readonly text: string; readonly hash: string };
   };
   readonly policy: EgressPolicy;
+  /**
+   * WP 10.16, the controls self-test: `run` with one fixed control instruction
+   * (`control.ts`) appended to the rendered narration, under the probe's
+   * output-token cap. Same host, key, window, format and wrap as `run`.
+   */
+  controlProbe(
+    id: ControlProbeId,
+    request: LocalModelRequest,
+    signal: AbortSignal,
+  ): Promise<unknown>;
+  /**
+   * How many calls this adapter has seen torn down by the caller's signal while
+   * the request was on the wire (the transport rejected after the abort). A
+   * counter, never a payload: the self-test's level-4 check reads it.
+   */
+  aborts(): number;
+  /** The provider's hourly window this adapter spends against (shared per runtime). */
+  readonly budget: HostedBudget;
+  /**
+   * WP 10.16: this adapter's egress policy, as a classifier over a URL —
+   * `checkUrl`, syntactic: never a DNS lookup, never a connect.
+   */
+  readonly egress: {
+    readonly kind: 'hosted';
+    /** The one URL this adapter posts to. */
+    readonly url: string;
+    classify(url: string): EgressVerdict;
+  };
 }
 
 interface VendorReply {
@@ -521,6 +554,8 @@ export function createHostedModelAdapter(
     options: { max_output_tokens: HOSTED_MAX_OUTPUT_TOKENS },
   })}`;
 
+  let abortsObserved = 0;
+
   /** One POST. Throws `HostedModelError`; logs the provider's words redacted. */
   async function call(
     messages: readonly PromptMessage[],
@@ -581,8 +616,11 @@ export function createHostedModelAdapter(
         signal: controller.signal,
       });
     } catch (error) {
-      if (signal.aborted)
+      if (signal.aborted) {
+        // The caller's signal reached the socket and the transport gave up.
+        abortsObserved += 1;
         throw new HostedModelError('aborted', 'the run was cancelled during the call');
+      }
       if (timedOut)
         throw new HostedModelError('model_timeout', `no reply within ${String(timeoutMs)} ms`);
       if (isEgressRefusedError(error)) {
@@ -660,6 +698,14 @@ export function createHostedModelAdapter(
   }
 
   async function run(request: LocalModelRequest, signal: AbortSignal): Promise<unknown> {
+    return execute(request, signal, null);
+  }
+
+  async function execute(
+    request: LocalModelRequest,
+    signal: AbortSignal,
+    probe: ControlProbeId | null,
+  ): Promise<unknown> {
     const started = clock.nowMs();
     const stage = { value: 'render' };
     let rendered: RenderedPrompt | null = null;
@@ -680,10 +726,10 @@ export function createHostedModelAdapter(
         throw new HostedModelError('model_timeout', 'the request deadline has already passed');
 
       const { reply, status, bodyBytes } = await call(
-        rendered.messages,
+        probe === null ? rendered.messages : withControlInstruction(rendered.messages, probe),
         signal,
-        timeoutMs,
-        HOSTED_MAX_OUTPUT_TOKENS,
+        probe === null ? timeoutMs : Math.min(timeoutMs, HOSTED_PROBE_TIMEOUT_MS),
+        probe === null ? HOSTED_MAX_OUTPUT_TOKENS : HOSTED_PROBE_MAX_OUTPUT_TOKENS,
         stage,
       );
       stage.value = 'wrap';
@@ -732,6 +778,7 @@ export function createHostedModelAdapter(
           shape: requestShape(request),
           sanitiser: countFlags(rendered.flags),
           reply_is_json: parsedReply.isJson,
+          ...(probe === null ? {} : { control_probe: probe }),
         },
         'hosted model run',
       );
@@ -753,6 +800,7 @@ export function createHostedModelAdapter(
           stage: stage.value,
           prompt_bytes: rendered?.bytes ?? null,
           runtime_ms: Math.max(0, clock.nowMs() - started),
+          ...(probe === null ? {} : { control_probe: probe }),
         },
         'hosted model run failed',
       );
@@ -767,7 +815,7 @@ export function createHostedModelAdapter(
       const { reply, status } = await call(
         PROBE_MESSAGES,
         signal,
-        Math.min(config.timeoutMs, 60_000),
+        Math.min(config.timeoutMs, HOSTED_PROBE_TIMEOUT_MS),
         HOSTED_PROBE_MAX_OUTPUT_TOKENS,
         stage,
       );
@@ -799,6 +847,20 @@ export function createHostedModelAdapter(
   return Object.freeze({
     run,
     probe,
+    controlProbe: (id: ControlProbeId, request: LocalModelRequest, signal: AbortSignal) =>
+      execute(request, signal, id),
+    aborts: () => abortsObserved,
+    budget,
+    egress: Object.freeze({
+      kind: 'hosted' as const,
+      url,
+      classify: (target: string): EgressVerdict => {
+        const decision = checkUrl(target, policy);
+        return decision.ok
+          ? { allowed: true, code: null }
+          : { allowed: false, code: decision.code };
+      },
+    }),
     renderPrompt,
     provider,
     model: config.model,

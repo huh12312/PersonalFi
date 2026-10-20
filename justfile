@@ -789,6 +789,36 @@ bootstrap-user name="" timezone="UTC" reissue="false":
       pnpm exec node apps/api/src/bin/bootstrap-user.ts "${args[@]}"
     fi
 
+# Prove the GenAI controls for a holder from the host (WP 10.16): the same checks and evidence row as Settings, Language model, "Run control checks"
+genai-selftest holder="" prove_switch="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `key=value` slots, as bootstrap-user takes them (just's parameters are positional).
+    slots=({{ quote(holder) }} {{ quote(prove_switch) }})
+    holder=""; prove_switch="false"
+    case "${slots[0]}" in holder=*|prove_switch=*|'') ;; *) holder="${slots[0]}" ;; esac
+    case "${slots[1]}" in holder=*|prove_switch=*|'') ;; *) prove_switch="${slots[1]}" ;; esac
+    for slot in "${slots[@]}"; do
+      case "$slot" in
+        holder=*)       holder="${slot#holder=}" ;;
+        prove_switch=*) prove_switch="${slot#prove_switch=}" ;;
+      esac
+    done
+    args=()
+    if [[ -n "$holder" ]]; then args+=(--holder="$holder"); fi
+    if [[ "$prove_switch" == "true" ]]; then args+=(--prove-switch); fi
+    # The api's half runs in its OWN one-shot container from the api service's
+    # definition (it derives the KEK, as bootstrap-user does, so never inside the
+    # running api's cgroup); the worker's half goes to the running worker through
+    # the job queue. The model is only ever reached by the worker.
+    if docker compose ps --status running --services 2>/dev/null | grep -qx api; then
+      docker compose run --rm --no-deps -T --entrypoint node api \
+        /app/apps/api/src/bin/genai-selftest.ts "${args[@]}"
+    else
+      echo "genai-selftest: the stack is not running; using the local dev database (start \`just worker\` for the model checks)" >&2
+      pnpm exec node apps/api/src/bin/genai-selftest.ts "${args[@]}"
+    fi
+
 # Resume a stopped event consumer (one /ready lists under outbox.failedConsumers), e.g. `just consumer-resume budgeting.actuals@v1`
 consumer-resume name:
     #!/usr/bin/env bash

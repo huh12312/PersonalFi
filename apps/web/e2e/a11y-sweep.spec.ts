@@ -17,6 +17,7 @@ import {
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installBudgetCategoryMocks } from './support/mock-budget.ts';
 import { installCategoryMocks } from './support/mock-categories.ts';
+import { seedControlCheckRun, seedRunningControlCheckRun } from './support/mock-narrator.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import {
@@ -1170,6 +1171,96 @@ test.describe('WP 10.14 category detail, a month selected, and the editor', () =
       await expect(page.getByRole('dialog', { name: 'Edit Groceries' })).toBeVisible();
       expect(await motionOffenders(page)).toEqual([]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7k. WP 10.16: Run control checks, and the controls on the backup line
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep reaches Settings › Language model with no run yet and the dashboard's line as "controls never
+ * proven". This block holds the states it does not reach: the Control checks section with a finished run's results
+ * table and its history (one past run open), a run still going (Running badges, the live region, the unavailable
+ * button), and the dashboard line with the controls proven - each in both themes, at 320 px, at 200 % zoom with
+ * 1.4.12 text spacing, and with reduced motion (the Running glyph spins only under `motion-safe`).
+ */
+test.describe('WP 10.16 control checks and the controls on the backup line', () => {
+  type Where = 'settings, results' | 'settings, running' | 'dashboard, controls proven';
+  const WHERE: readonly Where[] = [
+    'settings, results',
+    'settings, running',
+    'dashboard, controls proven',
+  ];
+
+  async function open(page: Page, where: Where): Promise<void> {
+    const mocks = await installSweepMocks(page);
+    const checks = mocks.narrator.controlChecks;
+    seedControlCheckRun(checks, { finishedAt: '2026-10-12T09:41:07.000Z', overall: 'partial' });
+    seedControlCheckRun(checks, { finishedAt: '2026-10-19T14:22:09.000Z', overall: 'pass' });
+    if (where === 'settings, running') seedRunningControlCheckRun(checks, 2);
+    if (where === 'dashboard, controls proven') {
+      await visit(page, '/');
+      await hideDevtools(page);
+      await expect(page.getByTestId('backup-status-line')).toContainText(
+        'controls proven 2026-10-19',
+      );
+      return;
+    }
+    await visit(page, '/settings');
+    await hideDevtools(page);
+    await page.getByRole('tab', { name: 'Language model' }).click();
+    const section = page.getByTestId('control-checks');
+    await expect(section.getByTestId('control-checks-table')).toBeVisible();
+    if (where === 'settings, running') {
+      await expect(section.getByTestId('control-checks-progress')).toHaveText(
+        'Running control checks… 3 of 11 checks done.',
+      );
+      return;
+    }
+    await section.locator('summary').nth(1).click();
+    await expect(section.getByTestId('control-checks-history').getByRole('table')).toBeVisible();
+  }
+
+  for (const where of WHERE) {
+    test(`${where}: axe-clean in both themes, at 1280 and at 320 px`, async ({ page }) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await open(page, where);
+      await scanBothThemes(page, `WP 10.16 ${where}`);
+      await page.setViewportSize(REFLOW);
+      await page.waitForTimeout(600);
+      expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+      await scanBothThemes(page, `WP 10.16 ${where}, at 320 px`);
+    });
+  }
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    for (const where of WHERE) {
+      test(`${where}: nothing is lost`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, where);
+        expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+        await scanBothThemes(page, `WP 10.16 ${where}, at 200 %`);
+        const before = new Set(await clippedTextElements(page));
+        await page.addStyleTag({ content: TEXT_SPACING });
+        await page.waitForTimeout(100);
+        const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+        expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+      });
+    }
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+    for (const where of WHERE) {
+      test(`${where}: nothing animates`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, where);
+        expect(await motionOffenders(page)).toEqual([]);
+      });
+    }
   });
 });
 

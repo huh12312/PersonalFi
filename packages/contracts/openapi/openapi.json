@@ -2289,586 +2289,6 @@
           "status"
         ]
       },
-      "AccountBalanceInput": {
-        "type": "object",
-        "properties": {
-          "current": {
-            "description": "Contribution to net worth. A card you owe on is negative.",
-            "$ref": "#/components/schemas/MoneyInput"
-          },
-          "available": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MoneyInput"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "limit": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MoneyInput"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "A magnitude, not a contribution: always positive."
-          },
-          "asOf": {
-            "type": "string"
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "provider",
-              "manual",
-              "derived"
-            ]
-          }
-        },
-        "required": [
-          "current",
-          "available",
-          "limit",
-          "asOf",
-          "source"
-        ]
-      },
-      "AccountOverlayInput": {
-        "type": "object",
-        "properties": {
-          "taxTreatment": {
-            "type": "object",
-            "properties": {
-              "effective": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "TAXABLE",
-                      "TAX_DEFERRED",
-                      "ROTH",
-                      "HSA"
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "null: the account has no tax bucket."
-              },
-              "source": {
-                "type": "string",
-                "enum": [
-                  "holder",
-                  "provider_subtype",
-                  "provider_fallback",
-                  "none"
-                ],
-                "description": "`provider_subtype`: the provider’s own subtype named it. `provider_fallback`: nothing recognised the subtype and TAXABLE is assumed — a guess, not a fact."
-              },
-              "override": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "TAXABLE",
-                      "TAX_DEFERRED",
-                      "ROTH",
-                      "HSA"
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "What the holder set, if anything."
-              },
-              "providerDefault": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "TAXABLE",
-                      "TAX_DEFERRED",
-                      "ROTH",
-                      "HSA"
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "effective",
-              "source",
-              "override",
-              "providerDefault"
-            ]
-          },
-          "role": {
-            "type": "object",
-            "properties": {
-              "effective": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "spending",
-                      "savings",
-                      "taxable",
-                      "tax_deferred",
-                      "tax_free",
-                      "liability"
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "source": {
-                "type": "string",
-                "enum": [
-                  "holder",
-                  "none"
-                ]
-              }
-            },
-            "required": [
-              "effective",
-              "source"
-            ]
-          },
-          "valuation": {
-            "type": "object",
-            "properties": {
-              "effective": {
-                "type": "string",
-                "enum": [
-                  "holdings",
-                  "balance"
-                ]
-              },
-              "source": {
-                "type": "string",
-                "enum": [
-                  "holder",
-                  "default"
-                ]
-              }
-            },
-            "required": [
-              "effective",
-              "source"
-            ]
-          },
-          "management": {
-            "type": "object",
-            "properties": {
-              "effective": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "advisor",
-                      "robo_advisor",
-                      "self_directed"
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "source": {
-                "type": "string",
-                "enum": [
-                  "holder",
-                  "none"
-                ]
-              }
-            },
-            "required": [
-              "effective",
-              "source"
-            ],
-            "description": "Who manages the account (WP 10.3): advisor, robo_advisor or self_directed. `null` is unclassified — the holder has not said, and nothing infers it. Groups `GET /investments/performance/by-management`; moves no projection."
-          }
-        },
-        "required": [
-          "taxTreatment",
-          "role",
-          "valuation",
-          "management"
-        ]
-      },
-      "AccountInput": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-          },
-          "connectionId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "provider": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "officialName": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "depository",
-              "credit",
-              "loan",
-              "investment",
-              "crypto",
-              "manual"
-            ]
-          },
-          "subtype": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "classification": {
-            "type": "string",
-            "enum": [
-              "asset",
-              "liability"
-            ]
-          },
-          "currency": {
-            "type": "string",
-            "minLength": 3,
-            "maxLength": 3
-          },
-          "mask": {
-            "description": "Last 2-4 digits. Never the full number.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "closedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "includeInNetWorth": {
-            "type": "boolean"
-          },
-          "balance": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AccountBalanceInput"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "null until a balance has been observed."
-          },
-          "overlay": {
-            "$ref": "#/components/schemas/AccountOverlayInput"
-          }
-        },
-        "required": [
-          "id",
-          "connectionId",
-          "provider",
-          "name",
-          "officialName",
-          "type",
-          "subtype",
-          "classification",
-          "currency",
-          "mask",
-          "closedAt",
-          "includeInNetWorth",
-          "balance",
-          "overlay"
-        ]
-      },
-      "NetWorthInput": {
-        "type": "object",
-        "properties": {
-          "asOf": {
-            "description": "The oldest balance the totals rest on.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "totals": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "currency": {
-                  "type": "string",
-                  "minLength": 3,
-                  "maxLength": 3
-                },
-                "assets": {
-                  "$ref": "#/components/schemas/MoneyInput"
-                },
-                "liabilities": {
-                  "$ref": "#/components/schemas/MoneyInput"
-                },
-                "net": {
-                  "$ref": "#/components/schemas/MoneyInput"
-                }
-              },
-              "required": [
-                "currency",
-                "assets",
-                "liabilities",
-                "net"
-              ]
-            }
-          },
-          "inputs": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "accountId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "classification": {
-                  "type": "string",
-                  "enum": [
-                    "asset",
-                    "liability"
-                  ]
-                },
-                "balance": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/MoneyInput"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "asOf": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "included": {
-                  "type": "boolean"
-                },
-                "excludedReason": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "closed",
-                        "opted_out",
-                        "no_balance"
-                      ]
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "accountId",
-                "name",
-                "classification",
-                "balance",
-                "asOf",
-                "included",
-                "excludedReason"
-              ]
-            }
-          }
-        },
-        "required": [
-          "asOf",
-          "totals",
-          "inputs"
-        ],
-        "description": "Net worth from the latest balance of every included account, per currency. `inputs` is the audit trail: every account, whether it counted, and why not."
-      },
-      "AdvisorScopeDefinitionInput": {
-        "type": "object",
-        "properties": {
-          "scope": {
-            "type": "string",
-            "enum": [
-              "networth.summary",
-              "cash.summary",
-              "cashflow.monthly",
-              "budgets.status",
-              "recurring.list",
-              "goals.list",
-              "risk.profile",
-              "market.watchlist",
-              "holdings.aggregate",
-              "holdings.detail",
-              "transactions.summary",
-              "transactions.raw",
-              "institutions.names",
-              "liabilities.terms",
-              "market.rates",
-              "plan.projection",
-              "transactions.anomalies",
-              "fees.summary"
-            ]
-          },
-          "sensitivity": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
-          },
-          "key": {
-            "type": "string"
-          },
-          "yields": {
-            "type": "string"
-          },
-          "drops": {
-            "type": "string"
-          },
-          "externalAllowed": {
-            "type": "boolean"
-          },
-          "requiresPerRunConsent": {
-            "type": "boolean"
-          },
-          "sourcedInPhase2": {
-            "type": "boolean"
-          },
-          "granted": {
-            "type": "boolean"
-          },
-          "requested": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "scope",
-          "sensitivity",
-          "key",
-          "yields",
-          "drops",
-          "externalAllowed",
-          "requiresPerRunConsent",
-          "sourcedInPhase2",
-          "granted",
-          "requested"
-        ]
-      },
-      "AdvisorGrantEventInput": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-          },
-          "advisorId": {
-            "type": "string"
-          },
-          "scope": {
-            "type": "string",
-            "enum": [
-              "networth.summary",
-              "cash.summary",
-              "cashflow.monthly",
-              "budgets.status",
-              "recurring.list",
-              "goals.list",
-              "risk.profile",
-              "market.watchlist",
-              "holdings.aggregate",
-              "holdings.detail",
-              "transactions.summary",
-              "transactions.raw",
-              "institutions.names",
-              "liabilities.terms",
-              "market.rates",
-              "plan.projection",
-              "transactions.anomalies",
-              "fees.summary"
-            ]
-          },
-          "event": {
-            "type": "string",
-            "enum": [
-              "granted",
-              "revoked",
-              "re_granted"
-            ]
-          },
-          "perRunConsent": {
-            "type": "boolean"
-          },
-          "stepUpSessionId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "occurredAt": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "advisorId",
-          "scope",
-          "event",
-          "perRunConsent",
-          "stepUpSessionId",
-          "occurredAt"
-        ]
-      },
       "AdvisorRunSummaryInput": {
         "type": "object",
         "properties": {
@@ -6594,224 +6014,6 @@
           "effective"
         ]
       },
-      "AssumptionsFileInput": {
-        "type": "object",
-        "propertyNames": {
-          "type": "string"
-        },
-        "additionalProperties": {},
-        "description": "The whole cited assumptions file, WP 4.2's shape."
-      },
-      "AssumptionsAppliedOverrideInput": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string"
-          },
-          "value": {
-            "type": "string"
-          },
-          "default": {}
-        },
-        "required": [
-          "path",
-          "value",
-          "default"
-        ]
-      },
-      "AuthOkInput": {
-        "type": "object",
-        "properties": {
-          "ok": {
-            "type": "boolean",
-            "const": true
-          }
-        },
-        "required": [
-          "ok"
-        ]
-      },
-      "UnlockStateInput": {
-        "type": "object",
-        "properties": {
-          "state": {
-            "type": "string",
-            "enum": [
-              "unlocked",
-              "locked"
-            ]
-          },
-          "reason": {
-            "type": "string",
-            "enum": [
-              "no_passphrase",
-              "passphrase_mismatch",
-              "not_started"
-            ]
-          },
-          "bootstrapped": {
-            "type": "boolean",
-            "description": "Whether a user account exists yet."
-          },
-          "kekVersion": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
-          },
-          "rotationRecommended": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "state",
-          "bootstrapped"
-        ]
-      },
-      "SessionStateInput": {
-        "type": "object",
-        "properties": {
-          "userId": {
-            "type": "string"
-          },
-          "displayName": {
-            "type": "string"
-          },
-          "displayTimezone": {
-            "type": "string"
-          },
-          "authMethod": {
-            "type": "string",
-            "enum": [
-              "webauthn",
-              "totp",
-              "recovery_code",
-              "bootstrap"
-            ]
-          },
-          "trustedDevice": {
-            "type": "boolean"
-          },
-          "fresh": {
-            "type": "boolean",
-            "description": "Whether a step-up assertion is still within its window."
-          },
-          "idleExpiresAt": {
-            "type": "string"
-          },
-          "absoluteExpiresAt": {
-            "type": "string"
-          },
-          "credentialCount": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
-          },
-          "totpEnrolled": {
-            "type": "boolean"
-          },
-          "recoveryCodesRemaining": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
-          }
-        },
-        "required": [
-          "userId",
-          "displayName",
-          "displayTimezone",
-          "authMethod",
-          "trustedDevice",
-          "fresh",
-          "idleExpiresAt",
-          "absoluteExpiresAt",
-          "credentialCount",
-          "totpEnrolled",
-          "recoveryCodesRemaining"
-        ]
-      },
-      "CredentialInput": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "credentialId": {
-            "type": "string"
-          },
-          "friendlyName": {
-            "type": "string"
-          },
-          "transports": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "aaguid": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "backedUp": {
-            "type": "boolean"
-          },
-          "deviceType": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string"
-          },
-          "lastUsedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "credentialId",
-          "friendlyName",
-          "transports",
-          "aaguid",
-          "backedUp",
-          "deviceType",
-          "createdAt",
-          "lastUsedAt"
-        ]
-      },
-      "SecurityEventInput": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "occurredAt": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "outcome": {
-            "type": "string"
-          },
-          "detail": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            },
-            "additionalProperties": {}
-          }
-        },
-        "required": [
-          "id",
-          "occurredAt",
-          "kind",
-          "outcome",
-          "detail"
-        ]
-      },
       "BlockMoneyInput": {
         "type": "object",
         "properties": {
@@ -8574,6 +7776,1051 @@
           "components",
           "excluded",
           "computedAt"
+        ]
+      },
+      "ControlCheckRunInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "finished",
+              "interrupted"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "ollama",
+              "openai",
+              "openrouter",
+              "anthropic",
+              "off"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overall": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "partial"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidenceVersion": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "enum": [
+                    "approval_gate",
+                    "kill_level_4_cancel",
+                    "numerals_refusal",
+                    "schema_refusal",
+                    "egress_allowlist",
+                    "consent_withdrawal",
+                    "inspector_digest",
+                    "budget_window",
+                    "module_switch",
+                    "narration_badge",
+                    "model_pin"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "proves": {
+                  "type": "string"
+                },
+                "side": {
+                  "type": "string",
+                  "enum": [
+                    "api",
+                    "worker"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "running",
+                    "pass",
+                    "fail",
+                    "skipped",
+                    "reported"
+                  ]
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "facts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notApplicable": {
+                  "type": "boolean"
+                },
+                "durationMs": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "proves",
+                "side",
+                "status",
+                "reason",
+                "facts",
+                "notApplicable",
+                "durationMs"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "startedAt",
+          "finishedAt",
+          "state",
+          "provider",
+          "model",
+          "overall",
+          "evidenceVersion",
+          "results"
+        ]
+      },
+      "ControlCheckRunsInput": {
+        "type": "object",
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ControlCheckRunInput"
+            }
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "ollama",
+              "openai",
+              "openrouter",
+              "anthropic",
+              "off"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cost": {
+            "type": "object",
+            "properties": {
+              "modelCalls": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "hosted": {
+                "type": "boolean"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "modelCalls",
+              "hosted",
+              "message"
+            ]
+          },
+          "nextAllowedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastProven": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "at": {
+                    "type": "string"
+                  },
+                  "overall": {
+                    "type": "string",
+                    "enum": [
+                      "pass",
+                      "fail",
+                      "partial"
+                    ]
+                  }
+                },
+                "required": [
+                  "at",
+                  "overall"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "runs",
+          "provider",
+          "model",
+          "cost",
+          "nextAllowedAt",
+          "lastProven"
+        ]
+      },
+      "AccountBalanceInput": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "description": "Contribution to net worth. A card you owe on is negative.",
+            "$ref": "#/components/schemas/MoneyInput"
+          },
+          "available": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyInput"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A magnitude, not a contribution: always positive."
+          },
+          "asOf": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "provider",
+              "manual",
+              "derived"
+            ]
+          }
+        },
+        "required": [
+          "current",
+          "available",
+          "limit",
+          "asOf",
+          "source"
+        ]
+      },
+      "AccountOverlayInput": {
+        "type": "object",
+        "properties": {
+          "taxTreatment": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "null: the account has no tax bucket."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "provider_subtype",
+                  "provider_fallback",
+                  "none"
+                ],
+                "description": "`provider_subtype`: the provider’s own subtype named it. `provider_fallback`: nothing recognised the subtype and TAXABLE is assumed — a guess, not a fact."
+              },
+              "override": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What the holder set, if anything."
+              },
+              "providerDefault": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source",
+              "override",
+              "providerDefault"
+            ]
+          },
+          "role": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "spending",
+                      "savings",
+                      "taxable",
+                      "tax_deferred",
+                      "tax_free",
+                      "liability"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ]
+          },
+          "valuation": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "type": "string",
+                "enum": [
+                  "holdings",
+                  "balance"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ]
+          },
+          "management": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "advisor",
+                      "robo_advisor",
+                      "self_directed"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ],
+            "description": "Who manages the account (WP 10.3): advisor, robo_advisor or self_directed. `null` is unclassified — the holder has not said, and nothing infers it. Groups `GET /investments/performance/by-management`; moves no projection."
+          }
+        },
+        "required": [
+          "taxTreatment",
+          "role",
+          "valuation",
+          "management"
+        ]
+      },
+      "AccountInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "connectionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "officialName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "depository",
+              "credit",
+              "loan",
+              "investment",
+              "crypto",
+              "manual"
+            ]
+          },
+          "subtype": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "asset",
+              "liability"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "mask": {
+            "description": "Last 2-4 digits. Never the full number.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "includeInNetWorth": {
+            "type": "boolean"
+          },
+          "balance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountBalanceInput"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null until a balance has been observed."
+          },
+          "overlay": {
+            "$ref": "#/components/schemas/AccountOverlayInput"
+          }
+        },
+        "required": [
+          "id",
+          "connectionId",
+          "provider",
+          "name",
+          "officialName",
+          "type",
+          "subtype",
+          "classification",
+          "currency",
+          "mask",
+          "closedAt",
+          "includeInNetWorth",
+          "balance",
+          "overlay"
+        ]
+      },
+      "NetWorthInput": {
+        "type": "object",
+        "properties": {
+          "asOf": {
+            "description": "The oldest balance the totals rest on.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "currency": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 3
+                },
+                "assets": {
+                  "$ref": "#/components/schemas/MoneyInput"
+                },
+                "liabilities": {
+                  "$ref": "#/components/schemas/MoneyInput"
+                },
+                "net": {
+                  "$ref": "#/components/schemas/MoneyInput"
+                }
+              },
+              "required": [
+                "currency",
+                "assets",
+                "liabilities",
+                "net"
+              ]
+            }
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "accountId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "classification": {
+                  "type": "string",
+                  "enum": [
+                    "asset",
+                    "liability"
+                  ]
+                },
+                "balance": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MoneyInput"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "asOf": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "included": {
+                  "type": "boolean"
+                },
+                "excludedReason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "closed",
+                        "opted_out",
+                        "no_balance"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "accountId",
+                "name",
+                "classification",
+                "balance",
+                "asOf",
+                "included",
+                "excludedReason"
+              ]
+            }
+          }
+        },
+        "required": [
+          "asOf",
+          "totals",
+          "inputs"
+        ],
+        "description": "Net worth from the latest balance of every included account, per currency. `inputs` is the audit trail: every account, whether it counted, and why not."
+      },
+      "AdvisorScopeDefinitionInput": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "networth.summary",
+              "cash.summary",
+              "cashflow.monthly",
+              "budgets.status",
+              "recurring.list",
+              "goals.list",
+              "risk.profile",
+              "market.watchlist",
+              "holdings.aggregate",
+              "holdings.detail",
+              "transactions.summary",
+              "transactions.raw",
+              "institutions.names",
+              "liabilities.terms",
+              "market.rates",
+              "plan.projection",
+              "transactions.anomalies",
+              "fees.summary"
+            ]
+          },
+          "sensitivity": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "key": {
+            "type": "string"
+          },
+          "yields": {
+            "type": "string"
+          },
+          "drops": {
+            "type": "string"
+          },
+          "externalAllowed": {
+            "type": "boolean"
+          },
+          "requiresPerRunConsent": {
+            "type": "boolean"
+          },
+          "sourcedInPhase2": {
+            "type": "boolean"
+          },
+          "granted": {
+            "type": "boolean"
+          },
+          "requested": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "scope",
+          "sensitivity",
+          "key",
+          "yields",
+          "drops",
+          "externalAllowed",
+          "requiresPerRunConsent",
+          "sourcedInPhase2",
+          "granted",
+          "requested"
+        ]
+      },
+      "AdvisorGrantEventInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "advisorId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "networth.summary",
+              "cash.summary",
+              "cashflow.monthly",
+              "budgets.status",
+              "recurring.list",
+              "goals.list",
+              "risk.profile",
+              "market.watchlist",
+              "holdings.aggregate",
+              "holdings.detail",
+              "transactions.summary",
+              "transactions.raw",
+              "institutions.names",
+              "liabilities.terms",
+              "market.rates",
+              "plan.projection",
+              "transactions.anomalies",
+              "fees.summary"
+            ]
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "granted",
+              "revoked",
+              "re_granted"
+            ]
+          },
+          "perRunConsent": {
+            "type": "boolean"
+          },
+          "stepUpSessionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurredAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "advisorId",
+          "scope",
+          "event",
+          "perRunConsent",
+          "stepUpSessionId",
+          "occurredAt"
+        ]
+      },
+      "AssumptionsFileInput": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {},
+        "description": "The whole cited assumptions file, WP 4.2's shape."
+      },
+      "AssumptionsAppliedOverrideInput": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "required": [
+          "path",
+          "value",
+          "default"
+        ]
+      },
+      "AuthOkInput": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "UnlockStateInput": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "unlocked",
+              "locked"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "no_passphrase",
+              "passphrase_mismatch",
+              "not_started"
+            ]
+          },
+          "bootstrapped": {
+            "type": "boolean",
+            "description": "Whether a user account exists yet."
+          },
+          "kekVersion": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "rotationRecommended": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "state",
+          "bootstrapped"
+        ]
+      },
+      "SessionStateInput": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "displayTimezone": {
+            "type": "string"
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "webauthn",
+              "totp",
+              "recovery_code",
+              "bootstrap"
+            ]
+          },
+          "trustedDevice": {
+            "type": "boolean"
+          },
+          "fresh": {
+            "type": "boolean",
+            "description": "Whether a step-up assertion is still within its window."
+          },
+          "idleExpiresAt": {
+            "type": "string"
+          },
+          "absoluteExpiresAt": {
+            "type": "string"
+          },
+          "credentialCount": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "totpEnrolled": {
+            "type": "boolean"
+          },
+          "recoveryCodesRemaining": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "displayTimezone",
+          "authMethod",
+          "trustedDevice",
+          "fresh",
+          "idleExpiresAt",
+          "absoluteExpiresAt",
+          "credentialCount",
+          "totpEnrolled",
+          "recoveryCodesRemaining"
+        ]
+      },
+      "CredentialInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "credentialId": {
+            "type": "string"
+          },
+          "friendlyName": {
+            "type": "string"
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "aaguid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "backedUp": {
+            "type": "boolean"
+          },
+          "deviceType": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "credentialId",
+          "friendlyName",
+          "transports",
+          "aaguid",
+          "backedUp",
+          "deviceType",
+          "createdAt",
+          "lastUsedAt"
+        ]
+      },
+      "SecurityEventInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "occurredAt",
+          "kind",
+          "outcome",
+          "detail"
         ]
       },
       "BudgetLineInput": {
@@ -18609,598 +18856,6 @@
         ],
         "additionalProperties": false
       },
-      "AccountBalance": {
-        "type": "object",
-        "properties": {
-          "current": {
-            "description": "Contribution to net worth. A card you owe on is negative.",
-            "$ref": "#/components/schemas/Money"
-          },
-          "available": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Money"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "limit": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Money"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "A magnitude, not a contribution: always positive."
-          },
-          "asOf": {
-            "type": "string"
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "provider",
-              "manual",
-              "derived"
-            ]
-          }
-        },
-        "required": [
-          "current",
-          "available",
-          "limit",
-          "asOf",
-          "source"
-        ],
-        "additionalProperties": false
-      },
-      "AccountOverlay": {
-        "type": "object",
-        "properties": {
-          "taxTreatment": {
-            "type": "object",
-            "properties": {
-              "effective": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "TAXABLE",
-                      "TAX_DEFERRED",
-                      "ROTH",
-                      "HSA"
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "null: the account has no tax bucket."
-              },
-              "source": {
-                "type": "string",
-                "enum": [
-                  "holder",
-                  "provider_subtype",
-                  "provider_fallback",
-                  "none"
-                ],
-                "description": "`provider_subtype`: the provider’s own subtype named it. `provider_fallback`: nothing recognised the subtype and TAXABLE is assumed — a guess, not a fact."
-              },
-              "override": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "TAXABLE",
-                      "TAX_DEFERRED",
-                      "ROTH",
-                      "HSA"
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "What the holder set, if anything."
-              },
-              "providerDefault": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "TAXABLE",
-                      "TAX_DEFERRED",
-                      "ROTH",
-                      "HSA"
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "effective",
-              "source",
-              "override",
-              "providerDefault"
-            ],
-            "additionalProperties": false
-          },
-          "role": {
-            "type": "object",
-            "properties": {
-              "effective": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "spending",
-                      "savings",
-                      "taxable",
-                      "tax_deferred",
-                      "tax_free",
-                      "liability"
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "source": {
-                "type": "string",
-                "enum": [
-                  "holder",
-                  "none"
-                ]
-              }
-            },
-            "required": [
-              "effective",
-              "source"
-            ],
-            "additionalProperties": false
-          },
-          "valuation": {
-            "type": "object",
-            "properties": {
-              "effective": {
-                "type": "string",
-                "enum": [
-                  "holdings",
-                  "balance"
-                ]
-              },
-              "source": {
-                "type": "string",
-                "enum": [
-                  "holder",
-                  "default"
-                ]
-              }
-            },
-            "required": [
-              "effective",
-              "source"
-            ],
-            "additionalProperties": false
-          },
-          "management": {
-            "type": "object",
-            "properties": {
-              "effective": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "advisor",
-                      "robo_advisor",
-                      "self_directed"
-                    ]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "source": {
-                "type": "string",
-                "enum": [
-                  "holder",
-                  "none"
-                ]
-              }
-            },
-            "required": [
-              "effective",
-              "source"
-            ],
-            "additionalProperties": false,
-            "description": "Who manages the account (WP 10.3): advisor, robo_advisor or self_directed. `null` is unclassified — the holder has not said, and nothing infers it. Groups `GET /investments/performance/by-management`; moves no projection."
-          }
-        },
-        "required": [
-          "taxTreatment",
-          "role",
-          "valuation",
-          "management"
-        ],
-        "additionalProperties": false
-      },
-      "Account": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-          },
-          "connectionId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "provider": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "officialName": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "depository",
-              "credit",
-              "loan",
-              "investment",
-              "crypto",
-              "manual"
-            ]
-          },
-          "subtype": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "classification": {
-            "type": "string",
-            "enum": [
-              "asset",
-              "liability"
-            ]
-          },
-          "currency": {
-            "type": "string",
-            "minLength": 3,
-            "maxLength": 3
-          },
-          "mask": {
-            "description": "Last 2-4 digits. Never the full number.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "closedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "includeInNetWorth": {
-            "type": "boolean"
-          },
-          "balance": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AccountBalance"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "null until a balance has been observed."
-          },
-          "overlay": {
-            "$ref": "#/components/schemas/AccountOverlay"
-          }
-        },
-        "required": [
-          "id",
-          "connectionId",
-          "provider",
-          "name",
-          "officialName",
-          "type",
-          "subtype",
-          "classification",
-          "currency",
-          "mask",
-          "closedAt",
-          "includeInNetWorth",
-          "balance",
-          "overlay"
-        ],
-        "additionalProperties": false
-      },
-      "NetWorth": {
-        "type": "object",
-        "properties": {
-          "asOf": {
-            "description": "The oldest balance the totals rest on.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "totals": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "currency": {
-                  "type": "string",
-                  "minLength": 3,
-                  "maxLength": 3
-                },
-                "assets": {
-                  "$ref": "#/components/schemas/Money"
-                },
-                "liabilities": {
-                  "$ref": "#/components/schemas/Money"
-                },
-                "net": {
-                  "$ref": "#/components/schemas/Money"
-                }
-              },
-              "required": [
-                "currency",
-                "assets",
-                "liabilities",
-                "net"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "inputs": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "accountId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "classification": {
-                  "type": "string",
-                  "enum": [
-                    "asset",
-                    "liability"
-                  ]
-                },
-                "balance": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/Money"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "asOf": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "included": {
-                  "type": "boolean"
-                },
-                "excludedReason": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "closed",
-                        "opted_out",
-                        "no_balance"
-                      ]
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "accountId",
-                "name",
-                "classification",
-                "balance",
-                "asOf",
-                "included",
-                "excludedReason"
-              ],
-              "additionalProperties": false
-            }
-          }
-        },
-        "required": [
-          "asOf",
-          "totals",
-          "inputs"
-        ],
-        "additionalProperties": false,
-        "description": "Net worth from the latest balance of every included account, per currency. `inputs` is the audit trail: every account, whether it counted, and why not."
-      },
-      "AdvisorScopeDefinition": {
-        "type": "object",
-        "properties": {
-          "scope": {
-            "type": "string",
-            "enum": [
-              "networth.summary",
-              "cash.summary",
-              "cashflow.monthly",
-              "budgets.status",
-              "recurring.list",
-              "goals.list",
-              "risk.profile",
-              "market.watchlist",
-              "holdings.aggregate",
-              "holdings.detail",
-              "transactions.summary",
-              "transactions.raw",
-              "institutions.names",
-              "liabilities.terms",
-              "market.rates",
-              "plan.projection",
-              "transactions.anomalies",
-              "fees.summary"
-            ]
-          },
-          "sensitivity": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
-          },
-          "key": {
-            "type": "string"
-          },
-          "yields": {
-            "type": "string"
-          },
-          "drops": {
-            "type": "string"
-          },
-          "externalAllowed": {
-            "type": "boolean"
-          },
-          "requiresPerRunConsent": {
-            "type": "boolean"
-          },
-          "sourcedInPhase2": {
-            "type": "boolean"
-          },
-          "granted": {
-            "type": "boolean"
-          },
-          "requested": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "scope",
-          "sensitivity",
-          "key",
-          "yields",
-          "drops",
-          "externalAllowed",
-          "requiresPerRunConsent",
-          "sourcedInPhase2",
-          "granted",
-          "requested"
-        ],
-        "additionalProperties": false
-      },
-      "AdvisorGrantEvent": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-          },
-          "advisorId": {
-            "type": "string"
-          },
-          "scope": {
-            "type": "string",
-            "enum": [
-              "networth.summary",
-              "cash.summary",
-              "cashflow.monthly",
-              "budgets.status",
-              "recurring.list",
-              "goals.list",
-              "risk.profile",
-              "market.watchlist",
-              "holdings.aggregate",
-              "holdings.detail",
-              "transactions.summary",
-              "transactions.raw",
-              "institutions.names",
-              "liabilities.terms",
-              "market.rates",
-              "plan.projection",
-              "transactions.anomalies",
-              "fees.summary"
-            ]
-          },
-          "event": {
-            "type": "string",
-            "enum": [
-              "granted",
-              "revoked",
-              "re_granted"
-            ]
-          },
-          "perRunConsent": {
-            "type": "boolean"
-          },
-          "stepUpSessionId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "occurredAt": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "advisorId",
-          "scope",
-          "event",
-          "perRunConsent",
-          "stepUpSessionId",
-          "occurredAt"
-        ],
-        "additionalProperties": false
-      },
       "AdvisorRunSummary": {
         "type": "object",
         "properties": {
@@ -22938,230 +22593,6 @@
         ],
         "additionalProperties": false
       },
-      "AssumptionsFile": {
-        "type": "object",
-        "propertyNames": {
-          "type": "string"
-        },
-        "additionalProperties": {},
-        "description": "The whole cited assumptions file, WP 4.2's shape."
-      },
-      "AssumptionsAppliedOverride": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string"
-          },
-          "value": {
-            "type": "string"
-          },
-          "default": {}
-        },
-        "required": [
-          "path",
-          "value",
-          "default"
-        ],
-        "additionalProperties": false
-      },
-      "AuthOk": {
-        "type": "object",
-        "properties": {
-          "ok": {
-            "type": "boolean",
-            "const": true
-          }
-        },
-        "required": [
-          "ok"
-        ],
-        "additionalProperties": false
-      },
-      "UnlockState": {
-        "type": "object",
-        "properties": {
-          "state": {
-            "type": "string",
-            "enum": [
-              "unlocked",
-              "locked"
-            ]
-          },
-          "reason": {
-            "type": "string",
-            "enum": [
-              "no_passphrase",
-              "passphrase_mismatch",
-              "not_started"
-            ]
-          },
-          "bootstrapped": {
-            "type": "boolean",
-            "description": "Whether a user account exists yet."
-          },
-          "kekVersion": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
-          },
-          "rotationRecommended": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "state",
-          "bootstrapped"
-        ],
-        "additionalProperties": false
-      },
-      "SessionState": {
-        "type": "object",
-        "properties": {
-          "userId": {
-            "type": "string"
-          },
-          "displayName": {
-            "type": "string"
-          },
-          "displayTimezone": {
-            "type": "string"
-          },
-          "authMethod": {
-            "type": "string",
-            "enum": [
-              "webauthn",
-              "totp",
-              "recovery_code",
-              "bootstrap"
-            ]
-          },
-          "trustedDevice": {
-            "type": "boolean"
-          },
-          "fresh": {
-            "type": "boolean",
-            "description": "Whether a step-up assertion is still within its window."
-          },
-          "idleExpiresAt": {
-            "type": "string"
-          },
-          "absoluteExpiresAt": {
-            "type": "string"
-          },
-          "credentialCount": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
-          },
-          "totpEnrolled": {
-            "type": "boolean"
-          },
-          "recoveryCodesRemaining": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
-          }
-        },
-        "required": [
-          "userId",
-          "displayName",
-          "displayTimezone",
-          "authMethod",
-          "trustedDevice",
-          "fresh",
-          "idleExpiresAt",
-          "absoluteExpiresAt",
-          "credentialCount",
-          "totpEnrolled",
-          "recoveryCodesRemaining"
-        ],
-        "additionalProperties": false
-      },
-      "Credential": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "credentialId": {
-            "type": "string"
-          },
-          "friendlyName": {
-            "type": "string"
-          },
-          "transports": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "aaguid": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "backedUp": {
-            "type": "boolean"
-          },
-          "deviceType": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string"
-          },
-          "lastUsedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "credentialId",
-          "friendlyName",
-          "transports",
-          "aaguid",
-          "backedUp",
-          "deviceType",
-          "createdAt",
-          "lastUsedAt"
-        ],
-        "additionalProperties": false
-      },
-      "SecurityEvent": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "occurredAt": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "outcome": {
-            "type": "string"
-          },
-          "detail": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            },
-            "additionalProperties": {}
-          }
-        },
-        "required": [
-          "id",
-          "occurredAt",
-          "kind",
-          "outcome",
-          "detail"
-        ],
-        "additionalProperties": false
-      },
       "BlockMoney": {
         "type": "object",
         "properties": {
@@ -24940,6 +24371,1074 @@
           "components",
           "excluded",
           "computedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ControlCheckRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "finished",
+              "interrupted"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "ollama",
+              "openai",
+              "openrouter",
+              "anthropic",
+              "off"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overall": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "partial"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidenceVersion": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "enum": [
+                    "approval_gate",
+                    "kill_level_4_cancel",
+                    "numerals_refusal",
+                    "schema_refusal",
+                    "egress_allowlist",
+                    "consent_withdrawal",
+                    "inspector_digest",
+                    "budget_window",
+                    "module_switch",
+                    "narration_badge",
+                    "model_pin"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "proves": {
+                  "type": "string"
+                },
+                "side": {
+                  "type": "string",
+                  "enum": [
+                    "api",
+                    "worker"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "running",
+                    "pass",
+                    "fail",
+                    "skipped",
+                    "reported"
+                  ]
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "facts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notApplicable": {
+                  "type": "boolean"
+                },
+                "durationMs": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "proves",
+                "side",
+                "status",
+                "reason",
+                "facts",
+                "notApplicable",
+                "durationMs"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "startedAt",
+          "finishedAt",
+          "state",
+          "provider",
+          "model",
+          "overall",
+          "evidenceVersion",
+          "results"
+        ],
+        "additionalProperties": false
+      },
+      "ControlCheckRuns": {
+        "type": "object",
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ControlCheckRun"
+            }
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "ollama",
+              "openai",
+              "openrouter",
+              "anthropic",
+              "off"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cost": {
+            "type": "object",
+            "properties": {
+              "modelCalls": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "hosted": {
+                "type": "boolean"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "modelCalls",
+              "hosted",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          "nextAllowedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastProven": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "at": {
+                    "type": "string"
+                  },
+                  "overall": {
+                    "type": "string",
+                    "enum": [
+                      "pass",
+                      "fail",
+                      "partial"
+                    ]
+                  }
+                },
+                "required": [
+                  "at",
+                  "overall"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "runs",
+          "provider",
+          "model",
+          "cost",
+          "nextAllowedAt",
+          "lastProven"
+        ],
+        "additionalProperties": false
+      },
+      "AccountBalance": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "description": "Contribution to net worth. A card you owe on is negative.",
+            "$ref": "#/components/schemas/Money"
+          },
+          "available": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A magnitude, not a contribution: always positive."
+          },
+          "asOf": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "provider",
+              "manual",
+              "derived"
+            ]
+          }
+        },
+        "required": [
+          "current",
+          "available",
+          "limit",
+          "asOf",
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "AccountOverlay": {
+        "type": "object",
+        "properties": {
+          "taxTreatment": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "null: the account has no tax bucket."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "provider_subtype",
+                  "provider_fallback",
+                  "none"
+                ],
+                "description": "`provider_subtype`: the provider’s own subtype named it. `provider_fallback`: nothing recognised the subtype and TAXABLE is assumed — a guess, not a fact."
+              },
+              "override": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What the holder set, if anything."
+              },
+              "providerDefault": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "TAXABLE",
+                      "TAX_DEFERRED",
+                      "ROTH",
+                      "HSA"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source",
+              "override",
+              "providerDefault"
+            ],
+            "additionalProperties": false
+          },
+          "role": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "spending",
+                      "savings",
+                      "taxable",
+                      "tax_deferred",
+                      "tax_free",
+                      "liability"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "valuation": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "type": "string",
+                "enum": [
+                  "holdings",
+                  "balance"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "management": {
+            "type": "object",
+            "properties": {
+              "effective": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "advisor",
+                      "robo_advisor",
+                      "self_directed"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "holder",
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "effective",
+              "source"
+            ],
+            "additionalProperties": false,
+            "description": "Who manages the account (WP 10.3): advisor, robo_advisor or self_directed. `null` is unclassified — the holder has not said, and nothing infers it. Groups `GET /investments/performance/by-management`; moves no projection."
+          }
+        },
+        "required": [
+          "taxTreatment",
+          "role",
+          "valuation",
+          "management"
+        ],
+        "additionalProperties": false
+      },
+      "Account": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "connectionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "officialName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "depository",
+              "credit",
+              "loan",
+              "investment",
+              "crypto",
+              "manual"
+            ]
+          },
+          "subtype": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "asset",
+              "liability"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "mask": {
+            "description": "Last 2-4 digits. Never the full number.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "includeInNetWorth": {
+            "type": "boolean"
+          },
+          "balance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountBalance"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null until a balance has been observed."
+          },
+          "overlay": {
+            "$ref": "#/components/schemas/AccountOverlay"
+          }
+        },
+        "required": [
+          "id",
+          "connectionId",
+          "provider",
+          "name",
+          "officialName",
+          "type",
+          "subtype",
+          "classification",
+          "currency",
+          "mask",
+          "closedAt",
+          "includeInNetWorth",
+          "balance",
+          "overlay"
+        ],
+        "additionalProperties": false
+      },
+      "NetWorth": {
+        "type": "object",
+        "properties": {
+          "asOf": {
+            "description": "The oldest balance the totals rest on.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "currency": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 3
+                },
+                "assets": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "liabilities": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "net": {
+                  "$ref": "#/components/schemas/Money"
+                }
+              },
+              "required": [
+                "currency",
+                "assets",
+                "liabilities",
+                "net"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "accountId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "classification": {
+                  "type": "string",
+                  "enum": [
+                    "asset",
+                    "liability"
+                  ]
+                },
+                "balance": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Money"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "asOf": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "included": {
+                  "type": "boolean"
+                },
+                "excludedReason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "closed",
+                        "opted_out",
+                        "no_balance"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "accountId",
+                "name",
+                "classification",
+                "balance",
+                "asOf",
+                "included",
+                "excludedReason"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "asOf",
+          "totals",
+          "inputs"
+        ],
+        "additionalProperties": false,
+        "description": "Net worth from the latest balance of every included account, per currency. `inputs` is the audit trail: every account, whether it counted, and why not."
+      },
+      "AdvisorScopeDefinition": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "networth.summary",
+              "cash.summary",
+              "cashflow.monthly",
+              "budgets.status",
+              "recurring.list",
+              "goals.list",
+              "risk.profile",
+              "market.watchlist",
+              "holdings.aggregate",
+              "holdings.detail",
+              "transactions.summary",
+              "transactions.raw",
+              "institutions.names",
+              "liabilities.terms",
+              "market.rates",
+              "plan.projection",
+              "transactions.anomalies",
+              "fees.summary"
+            ]
+          },
+          "sensitivity": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "key": {
+            "type": "string"
+          },
+          "yields": {
+            "type": "string"
+          },
+          "drops": {
+            "type": "string"
+          },
+          "externalAllowed": {
+            "type": "boolean"
+          },
+          "requiresPerRunConsent": {
+            "type": "boolean"
+          },
+          "sourcedInPhase2": {
+            "type": "boolean"
+          },
+          "granted": {
+            "type": "boolean"
+          },
+          "requested": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "scope",
+          "sensitivity",
+          "key",
+          "yields",
+          "drops",
+          "externalAllowed",
+          "requiresPerRunConsent",
+          "sourcedInPhase2",
+          "granted",
+          "requested"
+        ],
+        "additionalProperties": false
+      },
+      "AdvisorGrantEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "advisorId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "networth.summary",
+              "cash.summary",
+              "cashflow.monthly",
+              "budgets.status",
+              "recurring.list",
+              "goals.list",
+              "risk.profile",
+              "market.watchlist",
+              "holdings.aggregate",
+              "holdings.detail",
+              "transactions.summary",
+              "transactions.raw",
+              "institutions.names",
+              "liabilities.terms",
+              "market.rates",
+              "plan.projection",
+              "transactions.anomalies",
+              "fees.summary"
+            ]
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "granted",
+              "revoked",
+              "re_granted"
+            ]
+          },
+          "perRunConsent": {
+            "type": "boolean"
+          },
+          "stepUpSessionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurredAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "advisorId",
+          "scope",
+          "event",
+          "perRunConsent",
+          "stepUpSessionId",
+          "occurredAt"
+        ],
+        "additionalProperties": false
+      },
+      "AssumptionsFile": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {},
+        "description": "The whole cited assumptions file, WP 4.2's shape."
+      },
+      "AssumptionsAppliedOverride": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "required": [
+          "path",
+          "value",
+          "default"
+        ],
+        "additionalProperties": false
+      },
+      "AuthOk": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "additionalProperties": false
+      },
+      "UnlockState": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "unlocked",
+              "locked"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "no_passphrase",
+              "passphrase_mismatch",
+              "not_started"
+            ]
+          },
+          "bootstrapped": {
+            "type": "boolean",
+            "description": "Whether a user account exists yet."
+          },
+          "kekVersion": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "rotationRecommended": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "state",
+          "bootstrapped"
+        ],
+        "additionalProperties": false
+      },
+      "SessionState": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "displayTimezone": {
+            "type": "string"
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "webauthn",
+              "totp",
+              "recovery_code",
+              "bootstrap"
+            ]
+          },
+          "trustedDevice": {
+            "type": "boolean"
+          },
+          "fresh": {
+            "type": "boolean",
+            "description": "Whether a step-up assertion is still within its window."
+          },
+          "idleExpiresAt": {
+            "type": "string"
+          },
+          "absoluteExpiresAt": {
+            "type": "string"
+          },
+          "credentialCount": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "totpEnrolled": {
+            "type": "boolean"
+          },
+          "recoveryCodesRemaining": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "displayTimezone",
+          "authMethod",
+          "trustedDevice",
+          "fresh",
+          "idleExpiresAt",
+          "absoluteExpiresAt",
+          "credentialCount",
+          "totpEnrolled",
+          "recoveryCodesRemaining"
+        ],
+        "additionalProperties": false
+      },
+      "Credential": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "credentialId": {
+            "type": "string"
+          },
+          "friendlyName": {
+            "type": "string"
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "aaguid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "backedUp": {
+            "type": "boolean"
+          },
+          "deviceType": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "credentialId",
+          "friendlyName",
+          "transports",
+          "aaguid",
+          "backedUp",
+          "deviceType",
+          "createdAt",
+          "lastUsedAt"
+        ],
+        "additionalProperties": false
+      },
+      "SecurityEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "occurredAt",
+          "kind",
+          "outcome",
+          "detail"
         ],
         "additionalProperties": false
       },
@@ -56599,6 +57098,133 @@
             }
           },
           "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/narrator/control-checks": {
+      "get": {
+        "operationId": "listNarratorControlChecks",
+        "summary": "The GenAI controls self-test: the last 20 runs, and what a run costs",
+        "tags": [
+          "insights"
+        ],
+        "description": "Newest first, each with its per-check rows (pending, running, pass, fail, skipped with its reason, or reported). The facts are sentences in words: never a payload, a prompt, a key or a model reply. `cost` says, before a press, how many model calls a run spends and with whom; `lastProven` is the newest finished run, for the dashboard.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlCheckRuns"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "runNarratorControlChecks",
+        "summary": "Run the GenAI controls self-test against this install",
+        "tags": [
+          "insights"
+        ],
+        "description": "Needs a step-up (it spends hosted calls with your key and touches run state inside transactions that are rolled back). Answers 202 with the new run, every check pending; the checks run in the background and the row fills in as each finishes (read it back with GET). The checks that need a model run in the worker; this process never calls one. `proveSwitch: true` also proves kill switch 1 by turning the module off inside a rolled-back transaction. One run per holder per 10 minutes: 409 `narrator.control_checks_too_soon` with `Retry-After`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "proveSwitch": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlCheckRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "Default Response",
             "content": {
               "application/json": {

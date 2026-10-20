@@ -132,3 +132,6 @@ export {
   type HealthScoreSnapshotRow,
   type NewHealthScoreSnapshotRow,
 } from './health-snapshots.ts';
+
+// WP 10.16 — the GenAI controls self-test's evidence rows (migration 0052_ops_control_checks.sql).
+export { opsControlChecks, type OpsControlCheckRow } from './control-checks.ts';

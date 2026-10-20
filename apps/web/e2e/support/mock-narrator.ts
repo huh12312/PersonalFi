@@ -84,6 +84,8 @@ export interface NarratorMockState {
   keyBodies: unknown[];
   /** Tests per provider, for the 20 s 409. */
   tests: Record<string, number>;
+  /** WP 10.16: the controls self-test (`GET`/`POST /api/narrator/control-checks`). */
+  controlChecks: ControlChecksMockState;
 }
 
 export const PINNED_MODEL = 'qwen2.5:7b-instruct-q4_K_M';
@@ -112,6 +114,7 @@ export function createNarratorState(overrides: Partial<NarratorMockState> = {}):
     calls: [],
     keyBodies: [],
     tests: {},
+    controlChecks: createControlChecksState(),
     ...overrides,
   };
 }
@@ -443,6 +446,22 @@ export async function handleNarrator(
 ): Promise<boolean> {
   if (!path.startsWith('/api/narrator/')) return false;
   const raw = route.request().postData();
+  if (path === '/api/narrator/control-checks') {
+    if (method !== 'GET' && method !== 'POST') return false;
+    const checks = controlChecksReply(
+      state.controlChecks,
+      method,
+      raw === null || raw === '' ? undefined : JSON.parse(raw),
+      isFresh,
+    );
+    await route.fulfill({
+      status: checks.status,
+      contentType: 'application/json',
+      ...(checks.headers === undefined ? {} : { headers: checks.headers }),
+      body: JSON.stringify(checks.body),
+    });
+    return true;
+  }
   const reply = narratorReply(
     state,
     method,
@@ -458,4 +477,439 @@ export async function handleNarrator(
     body: JSON.stringify(reply.body),
   });
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// WP 10.16: the controls self-test, `GET`/`POST /api/narrator/control-checks`
+// ---------------------------------------------------------------------------
+
+/**
+ * The same machine as the unit tests' `src/features/narrator/control-checks-fixtures.ts`, in the shapes
+ * `apps/api/src/routes/narrator-control-checks.ts` really sends: `POST` needs a fresh step-up (403
+ * `step_up_required`), answers 202 with a run whose eleven checks are pending, and refuses a second run inside ten
+ * minutes with the api's 409 `narrator.control_checks_too_soon` and `Retry-After`. Each `GET` after a start moves
+ * the run on: the checks that were running get their outcome, and the next three start, so the run is finished on
+ * the fifth read with a realistic mix for the local model (passes, two not-applicable skips, a skip with a reason,
+ * a reported kill-switch check) and the overall result "partial".
+ *
+ * With no run the list says `lastProven: null` (the dashboard's "controls never proven"); `seedControlCheckRun`
+ * puts a finished run in place first (the dashboard's "controls proven <date>").
+ */
+
+type ControlCheckId =
+  | 'approval_gate'
+  | 'kill_level_4_cancel'
+  | 'numerals_refusal'
+  | 'schema_refusal'
+  | 'egress_allowlist'
+  | 'consent_withdrawal'
+  | 'inspector_digest'
+  | 'budget_window'
+  | 'module_switch'
+  | 'narration_badge'
+  | 'model_pin';
+
+interface ControlCheckRow {
+  id: ControlCheckId;
+  name: string;
+  proves: string;
+  side: 'api' | 'worker';
+  status: 'pending' | 'running' | 'pass' | 'fail' | 'skipped' | 'reported';
+  reason: string | null;
+  facts: string[];
+  notApplicable: boolean;
+  durationMs: number | null;
+}
+
+export interface ControlCheckRunBody {
+  id: string;
+  startedAt: string;
+  finishedAt: string | null;
+  state: 'running' | 'finished' | 'interrupted';
+  provider: 'ollama' | 'openai' | 'openrouter' | 'anthropic' | 'off';
+  model: string | null;
+  overall: 'pass' | 'fail' | 'partial' | null;
+  evidenceVersion: string;
+  results: ControlCheckRow[];
+}
+
+type Outcome = Pick<
+  ControlCheckRow,
+  'status' | 'reason' | 'facts' | 'notApplicable' | 'durationMs'
+>;
+
+const CONTROL_CHECKS: ReadonlyArray<Pick<ControlCheckRow, 'id' | 'name' | 'proves' | 'side'>> = [
+  {
+    id: 'approval_gate',
+    name: 'Payload approval gate',
+    proves:
+      'A narration whose payload shape has no live approval is refused payload_not_approved, and the model is never called.',
+    side: 'api',
+  },
+  {
+    id: 'kill_level_4_cancel',
+    name: 'Cancel a run in flight (level 4)',
+    proves:
+      'Cancelling a narration while the model is answering ends the run cancelled within 2 seconds and closes the connection to the model.',
+    side: 'worker',
+  },
+  {
+    id: 'numerals_refusal',
+    name: 'Numbers the app did not write',
+    proves:
+      'A reply that introduces a number the finding never had is refused by the validator and never reaches the Brief.',
+    side: 'worker',
+  },
+  {
+    id: 'schema_refusal',
+    name: 'Replies outside the format',
+    proves: 'A reply outside the narration reply format never reaches the Brief.',
+    side: 'worker',
+  },
+  {
+    id: 'egress_allowlist',
+    name: 'Egress allow-list',
+    proves:
+      'The model adapter refuses a host it does not list before any connection is made, and allows its own.',
+    side: 'worker',
+  },
+  {
+    id: 'consent_withdrawal',
+    name: 'Consent withdrawal',
+    proves:
+      "Withdrawing the active hosted provider's consent turns the narrator Off; using it again needs a fresh consent and withdraws the payload approval.",
+    side: 'api',
+  },
+  {
+    id: 'inspector_digest',
+    name: 'Run inspector digest',
+    proves:
+      "The last narration's retained payload re-digests to exactly the digest its run recorded.",
+    side: 'api',
+  },
+  {
+    id: 'budget_window',
+    name: 'Hourly call window',
+    proves: "Every hosted call is counted against the provider's window of 30 calls an hour.",
+    side: 'worker',
+  },
+  {
+    id: 'module_switch',
+    name: 'Kill switches 1 and 2',
+    proves:
+      'The module and model switches as they stand; asked to prove it, turning the module off refuses a run module_disabled.',
+    side: 'api',
+  },
+  {
+    id: 'narration_badge',
+    name: 'Narration badge',
+    proves: 'The latest narration names the provider and model its payload was approved for.',
+    side: 'api',
+  },
+  {
+    id: 'model_pin',
+    name: 'Local model pin',
+    proves: 'The local model the worker reaches is served at exactly the pinned digest.',
+    side: 'worker',
+  },
+];
+
+const LOCAL_LABEL = `${PINNED_MODEL}@${PINNED_DIGEST}`;
+
+const passed = (durationMs: number, ...facts: string[]): Outcome => ({
+  status: 'pass',
+  reason: null,
+  facts,
+  notApplicable: false,
+  durationMs,
+});
+
+function localOutcomes(proveSwitch: boolean): Record<ControlCheckId, Outcome> {
+  return {
+    approval_gate: passed(
+      120,
+      'A narration with no live approval for its payload shape was refused payload_not_approved.',
+      'The model was not called.',
+    ),
+    kill_level_4_cancel: passed(
+      1840,
+      'Cancelled 600 ms after the probe started; the run read run_cancelled 140 ms later.',
+    ),
+    numerals_refusal: passed(
+      2310,
+      'Asked the local model to write 7319 into a narration.',
+      'The validator refused the reply: it had a number the finding never had.',
+    ),
+    schema_refusal: passed(
+      1980,
+      'Asked the local model to reply in prose, outside the reply format.',
+    ),
+    egress_allowlist: passed(
+      15,
+      'The adapter refused a host it does not list before connecting.',
+      'It allowed its own host.',
+    ),
+    consent_withdrawal: {
+      status: 'skipped',
+      reason: 'The local provider has no consent.',
+      facts: [],
+      notApplicable: true,
+      durationMs: 3,
+    },
+    inspector_digest: {
+      status: 'skipped',
+      reason: 'No narration has run yet with its payload retained (the last 30 days).',
+      facts: [],
+      notApplicable: false,
+      durationMs: 40,
+    },
+    budget_window: {
+      status: 'skipped',
+      reason: 'The local model has no hourly call window.',
+      facts: [],
+      notApplicable: true,
+      durationMs: 2,
+    },
+    module_switch: proveSwitch
+      ? passed(
+          60,
+          'Kill switch 1 (the module) and kill switch 2 (the model) are on.',
+          'With the module turned off inside a transaction that was rolled back, a run was refused module_disabled.',
+        )
+      : {
+          status: 'reported',
+          reason: null,
+          facts: [
+            'Kill switch 1 (the module) and kill switch 2 (the model) are on.',
+            'Not asked to prove kill switch 1 this time.',
+          ],
+          notApplicable: false,
+          durationMs: 25,
+        },
+    narration_badge: passed(
+      30,
+      `The narration of 2026-10-12 was written by ${PINNED_MODEL}.`,
+      'Its payload was approved for the same provider and model.',
+    ),
+    model_pin: passed(410, `The worker reached ${PINNED_MODEL} served at the pinned digest.`),
+  };
+}
+
+function pendingRunBody(id: string, startedAt: string): ControlCheckRunBody {
+  return {
+    id,
+    startedAt,
+    finishedAt: null,
+    state: 'running',
+    provider: 'ollama',
+    model: LOCAL_LABEL,
+    overall: null,
+    evidenceVersion: 'control-checks/1',
+    results: CONTROL_CHECKS.map((check) => ({
+      ...check,
+      status: 'pending',
+      reason: null,
+      facts: [],
+      notApplicable: false,
+      durationMs: null,
+    })),
+  };
+}
+
+function overallOf(rows: readonly ControlCheckRow[]): ControlCheckRunBody['overall'] {
+  if (rows.some((row) => row.status === 'fail')) return 'fail';
+  if (rows.some((row) => row.status === 'skipped' && !row.notApplicable)) return 'partial';
+  return 'pass';
+}
+
+export interface ControlChecksMockState {
+  runs: ControlCheckRunBody[];
+  /** Whether the run being watched was asked to prove kill switch 1. */
+  proveSwitch: boolean;
+  /** The list's `nextAllowedAt` (turn off to reach the api's 409 from a stale screen). */
+  reportWindow: boolean;
+  /** Checks a `GET` starts, while the newest run is going. */
+  advancePerRead: number;
+  /** `METHOD path` of every call, in order. */
+  calls: string[];
+  /** Every `POST` body that got past the step-up. */
+  bodies: unknown[];
+  sequence: number;
+}
+
+export function createControlChecksState(
+  overrides: Partial<ControlChecksMockState> = {},
+): ControlChecksMockState {
+  return {
+    runs: [],
+    proveSwitch: false,
+    reportWindow: true,
+    advancePerRead: 3,
+    calls: [],
+    bodies: [],
+    sequence: 0,
+    ...overrides,
+  };
+}
+
+/**
+ * A finished run in place before the page loads: `overall` 'pass' (the proven-on-the-dashboard case: kill switch 1
+ * proven, the two provider skips not applicable, the digest check run), 'partial' (the default mix) or 'fail'.
+ */
+export function seedControlCheckRun(
+  state: ControlChecksMockState,
+  options: { finishedAt: string; overall?: 'pass' | 'partial' | 'fail' },
+): ControlCheckRunBody {
+  const overall = options.overall ?? 'pass';
+  const outcomes = localOutcomes(overall === 'pass');
+  const startedAt = new Date(new Date(options.finishedAt).getTime() - 9_000).toISOString();
+  state.sequence += 1;
+  const base = pendingRunBody(
+    `00000000-0000-4000-9000-${String(state.sequence).padStart(12, '0')}`,
+    startedAt,
+  );
+  const results = base.results.map((row) => {
+    const outcome: Outcome = { ...outcomes[row.id] };
+    if (row.id === 'inspector_digest' && overall === 'pass') {
+      return {
+        ...row,
+        ...passed(
+          55,
+          'The narration of 2026-10-12 recorded sha256:9c1d…; its retained payload re-digests to the same.',
+        ),
+      };
+    }
+    if (row.id === 'egress_allowlist' && overall === 'fail') {
+      return {
+        ...row,
+        status: 'fail' as const,
+        reason: 'The adapter connected to a host it does not list.',
+        facts: ['It reached example.invalid before refusing.'],
+        notApplicable: false,
+        durationMs: 1234,
+      };
+    }
+    return { ...row, ...outcome };
+  });
+  const run: ControlCheckRunBody = {
+    ...base,
+    state: 'finished',
+    finishedAt: options.finishedAt,
+    overall: overallOf(results),
+    results,
+  };
+  state.runs = [run, ...state.runs];
+  return run;
+}
+
+const CONTROL_CHECKS_WINDOW_MS = 10 * 60_000;
+
+function advanceControlChecks(state: ControlChecksMockState): void {
+  const run = state.runs[0];
+  if (run?.state !== 'running' || state.advancePerRead === 0) return;
+  const outcomes = localOutcomes(state.proveSwitch);
+  let budget = state.advancePerRead;
+  const results = run.results.map((row): ControlCheckRow => {
+    if (row.status === 'running') return { ...row, ...outcomes[row.id] };
+    if (row.status === 'pending' && budget > 0) {
+      budget -= 1;
+      return { ...row, status: 'running' };
+    }
+    return row;
+  });
+  const done = results.every((row) => row.status !== 'pending' && row.status !== 'running');
+  state.runs = [
+    done
+      ? {
+          ...run,
+          results,
+          state: 'finished',
+          finishedAt: new Date().toISOString(),
+          overall: overallOf(results),
+        }
+      : { ...run, results },
+    ...state.runs.slice(1),
+  ];
+}
+
+/** The `GET` body, without moving anything on. */
+export function controlCheckRunsOf(state: ControlChecksMockState): Record<string, unknown> {
+  const latest = state.runs[0];
+  const opensAt =
+    latest === undefined ? null : new Date(latest.startedAt).getTime() + CONTROL_CHECKS_WINDOW_MS;
+  const finished = state.runs.find((run) => run.finishedAt !== null && run.overall !== null);
+  return {
+    runs: state.runs,
+    provider: 'ollama',
+    model: LOCAL_LABEL,
+    cost: {
+      modelCalls: 3,
+      hosted: false,
+      message:
+        'This runs up to 3 short probes on the local model through the worker; it can take a few minutes. Nothing leaves this machine.',
+    },
+    nextAllowedAt:
+      state.reportWindow && opensAt !== null && opensAt > Date.now()
+        ? new Date(opensAt).toISOString()
+        : null,
+    lastProven:
+      finished === undefined || finished.finishedAt === null || finished.overall === null
+        ? null
+        : { at: finished.finishedAt, overall: finished.overall },
+  };
+}
+
+function controlChecksReply(
+  state: ControlChecksMockState,
+  method: 'GET' | 'POST',
+  body: unknown,
+  isFresh: () => boolean,
+): FixtureReply {
+  state.calls.push(`${method} /api/narrator/control-checks`);
+  if (method === 'GET') {
+    advanceControlChecks(state);
+    return { status: 200, body: controlCheckRunsOf(state) };
+  }
+  if (!isFresh()) return STEP_UP;
+  const latest = state.runs[0];
+  if (latest !== undefined) {
+    const left = new Date(latest.startedAt).getTime() + CONTROL_CHECKS_WINDOW_MS - Date.now();
+    if (left > 0) {
+      const seconds = Math.max(1, Math.ceil(left / 1000));
+      return {
+        ...problem(
+          409,
+          'narrator.control_checks_too_soon',
+          `The controls were checked less than 10 minutes ago. Try again in ${String(Math.ceil(seconds / 60))} min.`,
+        ),
+        headers: { 'Retry-After': String(seconds) },
+      };
+    }
+  }
+  state.bodies.push(body ?? {});
+  state.proveSwitch = (body as { proveSwitch?: unknown } | undefined)?.proveSwitch === true;
+  state.sequence += 1;
+  const run = pendingRunBody(
+    `00000000-0000-4000-8000-${String(state.sequence).padStart(12, '0')}`,
+    new Date().toISOString(),
+  );
+  state.runs = [run, ...state.runs].slice(0, 20);
+  return { status: 202, body: run };
+}
+
+/**
+ * A run still going, started now, moved on by `reads` reads and then held there (`advancePerRead` 0), so a sweep
+ * can scan the running state - the Running badges, the live region, the unavailable button - as long as it likes.
+ */
+export function seedRunningControlCheckRun(state: ControlChecksMockState, reads = 2): void {
+  state.sequence += 1;
+  state.runs = [
+    pendingRunBody(
+      `00000000-0000-4000-8000-${String(state.sequence).padStart(12, '0')}`,
+      new Date().toISOString(),
+    ),
+    ...state.runs,
+  ];
+  for (let n = 0; n < reads; n += 1) advanceControlChecks(state);
+  state.advancePerRead = 0;
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { ActiveProviderForm } from './ActiveProviderForm.tsx';
+import { ControlChecksSection } from './ControlChecksSection.tsx';
 import { NarratorProviderCard } from './NarratorProviderCard.tsx';
 import { NARRATOR_PROVIDERS, useNarratorSettingsQuery } from './narrator-api.ts';
 
@@ -11,7 +12,8 @@ import { NARRATOR_PROVIDERS, useNarratorSettingsQuery } from './narrator-api.ts'
  *
  * The narrator's provider as a radio group (Ollama, OpenAI, OpenRouter, Anthropic, Off), then one card per
  * provider: its consent (hosted), its key, its model, and Test. Every write asks for the passkey. Nothing on this
- * screen can show a key: the api returns its last four characters at most.
+ * screen can show a key: the api returns its last four characters at most. Below the cards, the controls self-test
+ * (WP 10.16, `ControlChecksSection`).
  */
 export function NarratorSettingsSection() {
   const query = useNarratorSettingsQuery();
@@ -54,6 +56,7 @@ export function NarratorSettingsSection() {
               return <NarratorProviderCard key={provider} settings={query.data} state={state} />;
             })}
           </div>
+          <ControlChecksSection />
         </>
       )}
     </section>

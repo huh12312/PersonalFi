@@ -103,6 +103,13 @@ export interface WarmUpRequest {
 
 export interface OllamaClient {
   checkModelDigest(signal: AbortSignal): Promise<DigestCheck>;
+  /**
+   * WP 10.16: the digest `GET /api/tags` reports for the pinned name, without
+   * judging it — `null` when the name is not served. The controls self-test's
+   * `model_pin` check compares it with the pin; `checkModelDigest` is the
+   * refusal every run makes.
+   */
+  servedDigest(signal: AbortSignal): Promise<string | null>;
   chat(request: ChatRequest): Promise<ChatResult>;
   /**
    * `GET /api/ps`: is the pinned model's name loaded? `null` when the runtime
@@ -155,8 +162,7 @@ export function createOllamaClient(options: OllamaClientOptions): OllamaClient {
     }
   }
 
-  async function checkModelDigest(signal: AbortSignal): Promise<DigestCheck> {
-    const started = clock.nowMs();
+  async function readServed(signal: AbortSignal): Promise<string | null> {
     const response = await send({
       method: 'GET',
       path: '/api/tags',
@@ -185,13 +191,19 @@ export function createOllamaClient(options: OllamaClientOptions): OllamaClient {
       const { name, model: modelName } = candidate as { name?: unknown; model?: unknown };
       return name === wanted || modelName === wanted;
     }) as { digest?: unknown } | undefined;
-    if (entry === undefined) {
+    if (entry === undefined) return null;
+    return typeof entry.digest === 'string' ? normaliseDigest(entry.digest) : '(none)';
+  }
+
+  async function checkModelDigest(signal: AbortSignal): Promise<DigestCheck> {
+    const started = clock.nowMs();
+    const served = await readServed(signal);
+    if (served === null) {
       throw new LocalModelError(
         'model_digest_mismatch',
         `${wanted} is not served; pull it through the local-llm-pull profile and pin its digest`,
       );
     }
-    const served = typeof entry.digest === 'string' ? normaliseDigest(entry.digest) : '(none)';
     if (served !== pinned) {
       throw new LocalModelError(
         'model_digest_mismatch',
@@ -345,7 +357,7 @@ export function createOllamaClient(options: OllamaClientOptions): OllamaClient {
     return { durationMs: clock.nowMs() - started };
   }
 
-  return Object.freeze({ checkModelDigest, chat, isLoaded, warmUp });
+  return Object.freeze({ checkModelDigest, servedDigest: readServed, chat, isLoaded, warmUp });
 }
 
 /** Transport refusals, as the adapter's closed vocabulary. The cause is kept for a debugger, not a log. */

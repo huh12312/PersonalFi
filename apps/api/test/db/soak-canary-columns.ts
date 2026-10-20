@@ -81,6 +81,8 @@ export const NOT_FREE_TEXT: Readonly<Record<string, string>> = {
   'advisors.version': 'a semver string',
   'insights.advisor_version': 'a semver string',
   'insights.confidence_basis': 'the confidence-basis enum',
+  'insights.feedback': 'the feedback enum (helpful | not_helpful), CHECK-constrained (WP 10.15)',
+  'insights.feedback_reason': 'the dismiss-reason enum, CHECK-constrained (WP 10.15)',
   'insights.horizon': 'the horizon enum',
   'insights.impact_basis': 'the impact-basis enum',
   'insights.impact_currency': 'ISO 4217 code',

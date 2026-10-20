@@ -199,6 +199,8 @@ export interface HarnessOptions {
   readonly marketDataResolve?: Resolver;
   /** WP 10.6. The socket under the Language model Test button; a test hands the hermetic vendor fake. */
   readonly narratorTransport?: HttpTransport;
+  /** WP 10.16. A shorter wait than 5 minutes for the controls self-test's worker half. */
+  readonly controlChecksCeilingMs?: number;
 }
 
 /**
@@ -307,6 +309,9 @@ export async function createApiHarness(options: HarnessOptions): Promise<ApiHarn
         }),
     ...(walletRpc === null ? {} : { walletRpc }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.controlChecksCeilingMs === undefined
+      ? {}
+      : { controlChecksCeilingMs: options.controlChecksCeilingMs }),
   });
   const { app, security } = built;
 

@@ -95,3 +95,66 @@ export function describeBackupStatus(status: OpsBackupStatus): BackupLine {
     warning: problems.length > 0 ? problems.join('; ') : null,
   };
 }
+
+// ---------------------------------------------------------------------------
+// WP 10.16: when the GenAI controls were last proven
+// ---------------------------------------------------------------------------
+
+/** `GET /narrator/control-checks`'s `lastProven`: the newest finished run of the controls self-test. */
+export interface ControlsProven {
+  readonly at: string;
+  readonly overall: 'pass' | 'fail' | 'partial';
+}
+
+/**
+ * What the dashboard knows about the controls: `unknown` (the route failed, is not mocked, or answered something
+ * that is not the shape) says nothing at all; `known` with `lastProven: null` is "never proven".
+ */
+export type ControlsStatus =
+  { readonly known: false } | { readonly known: true; readonly lastProven: ControlsProven | null };
+
+export const CONTROLS_UNKNOWN: ControlsStatus = { known: false };
+
+const OVERALLS: ReadonlySet<unknown> = new Set(['pass', 'fail', 'partial']);
+
+/**
+ * A `GET /narrator/control-checks` body is only believed if it has the shape: an object with a `runs` array and a
+ * `lastProven` that is either `null` or a dated `{ at, overall }`. Anything else (an SPA fallback page, a problem
+ * body, a missing key) is `unknown`, so the line can never claim the controls were proven without a row saying so.
+ */
+export function controlsStatusOf(value: unknown): ControlsStatus {
+  if (typeof value !== 'object' || value === null) return CONTROLS_UNKNOWN;
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record['runs']) || !('lastProven' in record)) return CONTROLS_UNKNOWN;
+  const proven = record['lastProven'];
+  if (proven === null) return { known: true, lastProven: null };
+  if (typeof proven !== 'object') return CONTROLS_UNKNOWN;
+  const at = (proven as Record<string, unknown>)['at'];
+  const overall = (proven as Record<string, unknown>)['overall'];
+  if (typeof at !== 'string' || !/^\d{4}-\d{2}-\d{2}T/u.test(at) || !OVERALLS.has(overall)) {
+    return CONTROLS_UNKNOWN;
+  }
+  return { known: true, lastProven: { at, overall: overall as ControlsProven['overall'] } };
+}
+
+/**
+ * The line with the controls appended: "· controls proven 2026-10-19" for a pass, "· controls partly proven
+ * 2026-10-19" for a partial run, "· controls check failed 2026-10-19" (and "the last controls check failed" in
+ * the warning) for a failed one, "· controls never proven" with no run. Unknown adds nothing.
+ */
+export function withControls(line: BackupLine, controls: ControlsStatus): BackupLine {
+  if (!controls.known) return line;
+  const proven = controls.lastProven;
+  if (proven === null) return { ...line, text: `${line.text} · controls never proven` };
+  const day = proven.at.slice(0, 10);
+  if (proven.overall === 'pass') return { ...line, text: `${line.text} · controls proven ${day}` };
+  if (proven.overall === 'partial') {
+    return { ...line, text: `${line.text} · controls partly proven ${day}` };
+  }
+  const failed = 'the last controls check failed';
+  return {
+    tone: 'warning',
+    text: `${line.text} · controls check failed ${day}`,
+    warning: line.warning === null ? failed : `${line.warning}; ${failed}`,
+  };
+}

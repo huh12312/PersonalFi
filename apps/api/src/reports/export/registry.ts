@@ -339,6 +339,10 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'insights: the daily health score (WP 10.12), derived from the snapshot like health_scores above, not data the holder entered; a restore recomputes from the next day on and never backfills.',
   ],
   [
+    'ops_control_checks',
+    "insights: the GenAI controls self-test (WP 10.16), evidence that the narrator controls held on this install at a date; a restore proves them again on the new one rather than inheriting another deployment's proof.",
+  ],
+  [
     'net_worth_milestones',
     'planning: a round net-worth figure crossed (WP 10.13), derived from net_worth_daily by the snapshotter, not data the holder entered; a restore detects from the next crossing on and never backfills.',
   ],

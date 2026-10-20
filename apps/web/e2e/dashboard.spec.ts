@@ -2,6 +2,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { setTheme } from './support/axe.ts';
+import { seedControlCheckRun } from './support/mock-narrator.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import { hideDevtools, visit } from './support/sweep.ts';
@@ -146,6 +147,120 @@ evidenceTest(
           animations: 'disabled',
         });
       }
+    }
+  },
+);
+
+/**
+ * WP 10.16: the backup line says when the GenAI controls were last proven. The narrator layer
+ * (`mock-narrator.ts`, through `installApiMocks`) answers `GET /api/narrator/control-checks`; with no run its
+ * `lastProven` is null ("controls never proven"), and `seedControlCheckRun` puts a finished one in place.
+ */
+const BACKUP = 'Last backup 4 h ago · restore drill passed 2026-10-13';
+
+test.describe('WP 10.16 the controls on the backup line', () => {
+  test('WP 10.16: "controls never proven" with no run, then "controls proven 2026-10-19" after a passing one', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const mocks = await installSweepMocks(page);
+    await visit(page, '/');
+    const line = page.getByTestId('backup-status-line');
+    await expect(line).toHaveText(`${BACKUP} · controls never proven`);
+    await expect(line).toHaveAttribute('data-tone', 'ok');
+
+    seedControlCheckRun(mocks.narrator.controlChecks, {
+      finishedAt: '2026-10-19T14:22:09.000Z',
+      overall: 'pass',
+    });
+    await page.reload();
+    await expect(line).toHaveText(`${BACKUP} · controls proven 2026-10-19`);
+    await expect(line).toHaveAttribute('data-tone', 'ok');
+  });
+
+  test('WP 10.16: a failed controls check is a warning in words; a partial one is "partly proven"', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const mocks = await installSweepMocks(page);
+    seedControlCheckRun(mocks.narrator.controlChecks, {
+      finishedAt: '2026-10-19T14:22:09.000Z',
+      overall: 'fail',
+    });
+    await visit(page, '/');
+    const line = page.getByTestId('backup-status-line');
+    await expect(line).toHaveAttribute('data-tone', 'warning');
+    await expect(line).toContainText('Warning:');
+    await expect(line).toContainText('the last controls check failed');
+    await expect(line).toContainText(`${BACKUP} · controls check failed 2026-10-19`);
+
+    mocks.narrator.controlChecks.runs = [];
+    seedControlCheckRun(mocks.narrator.controlChecks, {
+      finishedAt: '2026-10-19T14:22:09.000Z',
+      overall: 'partial',
+    });
+    await page.reload();
+    await expect(line).toHaveText(`${BACKUP} · controls partly proven 2026-10-19`);
+  });
+
+  test('WP 10.16: when the control-checks route cannot be read the line says nothing about the controls', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await installSweepMocks(page);
+    // Registered last, so it runs first: the route answers with a problem.
+    await page.route('**/api/narrator/control-checks', (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ type: 'about:blank', title: 'Unavailable', status: 503 }),
+      }),
+    );
+    await visit(page, '/');
+    const line = page.getByTestId('backup-status-line');
+    await expect(line).toHaveText(BACKUP);
+    await page.waitForTimeout(500);
+    await expect(line).toHaveText(BACKUP);
+  });
+});
+
+evidenceTest(
+  'WP 10.16 evidence: the dashboard backup line with the controls proven, light and dark, at 1280 and 390',
+  async ({ page, evidenceDir }) => {
+    test.setTimeout(120_000);
+    const mocks = await installSweepMocks(page);
+    seedControlCheckRun(mocks.narrator.controlChecks, {
+      finishedAt: '2026-10-19T14:22:09.000Z',
+      overall: 'pass',
+    });
+    for (const [width, height] of [
+      [1280, 900],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await visit(page, '/');
+      await hideDevtools(page);
+      const line = page.getByTestId('backup-status-line');
+      await expect(line).toHaveText(`${BACKUP} · controls proven 2026-10-19`);
+      for (const theme of ['light', 'dark'] as const) {
+        await setTheme(page, theme);
+        await line.scrollIntoViewIfNeeded();
+        const box = await line.boundingBox();
+        if (box === null) throw new Error('the backup line has no box');
+        // The line with the Brief card above it, so it is seen where it sits.
+        const top = Math.max(0, box.y - 220);
+        await page.screenshot({
+          path: `${screenshotDir(evidenceDir)}wp10.16-dashboard-ops-line-${theme}-${String(width)}.png`,
+          animations: 'disabled',
+          clip: {
+            x: 0,
+            y: top,
+            width,
+            height: Math.min(height - top, box.y + box.height + 24 - top),
+          },
+        });
+      }
+      await setTheme(page, 'light');
     }
   },
 );

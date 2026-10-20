@@ -1793,6 +1793,46 @@ narration. The timeout is `LOCAL_MODEL_TIMEOUT_MS` (the same 300 s ceiling).
 existing kill switches ([Advisor kill switches](#advisor-kill-switches)) — they apply to a hosted
 narrator exactly as to the local one, including a run in flight.
 
+### Proving the GenAI controls
+
+Settings, **Language model**, **Run control checks** (or, from the host, `just genai-selftest
+holder="<name>"`) proves the narrator's controls against this install with your own session (WP
+10.16). It needs a passkey, it states its cost before you press it, and it writes one dated row to
+`ops_control_checks` that the dashboard's backup line reads ("controls proven 2026-10-19", or
+"controls never proven"). One run per holder per 10 minutes. The table on the screen and the
+recipe's text output are the same.
+
+| Check                         | What a pass proves                                                                                                                                  | Where it runs, and what it changes                                                              |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Payload approval gate         | A narration whose payload shape has no live approval is refused `payload_not_approved`, and the model is never called                               | api; withdraws the approval inside a transaction that is rolled back (levels 1–3 held on in it) |
+| Cancel a run in flight (4)    | Cancelling a probe 150 ms after it starts ends it `run_cancelled` within 2 s, through the production watcher, and the adapter closes its connection | worker; one model call                                                                          |
+| Numbers the app did not write | A reply asked to carry 4821 is refused by the unchanged validator (or the model declined; either way the number never reaches the Brief)            | worker; one model call, a fixed synthetic finding, no personal data                             |
+| Replies outside the format    | A reply asked for prose outside the reply format never reaches the Brief (refused, or held to the format at the model)                              | worker; one model call                                                                          |
+| Egress allow-list             | The adapter's own policy refuses `example.com` and allows its host — the policy is asked; nothing is resolved or dialled                            | worker; no call                                                                                 |
+| Consent withdrawal            | Withdrawing the active hosted provider's consent turns the narrator Off; using it again needs a fresh consent and withdraws the approval            | api; rolled back. Skipped (not applicable) for the local model or Off                           |
+| Run inspector digest          | The last narration's retained payload re-digests to the digest its run recorded                                                                     | api; read only. Skipped with no narration in the last 30 days                                   |
+| Hourly call window            | The provider's window (30 calls an hour, per process) counted exactly the probes sent                                                               | worker; read only. Not applicable to the local model                                            |
+| Kill switches 1 and 2         | Their state, reported. With "Also prove kill switch 1" (`prove_switch=true`): the module off refuses a run `module_disabled`                        | api; the proof writes the flag inside a rolled-back transaction                                 |
+| Narration badge               | The latest narration names the provider and model its payload was approved for                                                                      | api; read only                                                                                  |
+| Local model pin               | The worker's served digest is the pinned one                                                                                                        | worker; one `GET /api/tags`. Not applicable to a hosted provider                                |
+
+**What it costs.** With a hosted provider, up to **3 calls** with your key, from the install's
+window of 30 an hour (the screen says so before you press). With the local model, up to 3 short
+probes in the worker; they can take a few minutes on a cold model. Off: nothing is sent.
+
+**Reading the result.** Pass: every check that applies passed. Fail: one did not (the row says
+why, in words). Partial: none failed, but one that applies could not run — no narration yet, the
+model unreachable, or the worker not answering within 5 minutes (it must be running with the
+insights module on). A check that cannot run is never shown as a pass. The rows carry facts and
+refusal classes only, never a payload, prompt, key or reply. Apart from the row and the calls it
+spends, a run changes nothing: the two checks that must change state to prove a refusal do it in a
+transaction that is rolled back, and fail if anything differs afterwards.
+
+**The recipe.** `just genai-selftest holder="Chris"` (add `prove_switch=true` to prove kill switch 1)
+runs the api's half in a one-shot container from the api service's definition (it derives the KEK,
+like `just bootstrap-user`) and hands the model checks to the running worker through the job
+queue. It prints the table and exits 0 (pass), 2 (partial) or 1 (fail).
+
 ## Cryptography inventory
 
 What is encrypted or hashed, with what, where the key lives, and how it rotates. The primitives

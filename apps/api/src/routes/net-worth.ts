@@ -282,10 +282,10 @@ export const netWorthRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
     bucketing: NetWorthBucketing,
   ) => {
     const accounts = await listAccounts(database, { userId, includeClosed: true });
-    const lookup: SegmentAccountLookup = new Map(
+    const accountLookup: SegmentAccountLookup = new Map(
       accounts.map((account) => [account.id, { type: account.type, subtype: account.subtype }]),
     );
-    return readNetWorthBuckets(database, { userId, from, to, bucketing, accounts: lookup });
+    return readNetWorthBuckets(database, { userId, from, to, bucketing, accounts: accountLookup });
   };
 
   return async (app) => {

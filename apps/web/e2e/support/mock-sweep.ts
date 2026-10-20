@@ -5,6 +5,7 @@ import { installAccountMocks } from './mock-accounts.ts';
 import { installAdvisorMocks } from './mock-advisors.ts';
 import { installApiMocks, MANUAL_CONNECTOR } from './mock-api.ts';
 import { installBriefMocks } from './mock-brief.ts';
+import type { NarratorMockState } from './mock-narrator.ts';
 import { installBudgetMocks } from './mock-budget.ts';
 import { installCategoryHistoryMocks } from './mock-categories.ts';
 import { installCashFlowMocks } from './mock-cash-flow.ts';
@@ -39,6 +40,8 @@ export interface SweepMocks {
   readonly unmocked: string[];
   /** WP 10.13: the net-worth layer's state (the milestone dismissals it has seen). */
   readonly networth: MockNetworthState;
+  /** WP 10.16: the narrator layer's state (`mock-narrator.ts`), for seeding a controls self-test run. */
+  readonly narrator: NarratorMockState;
 }
 
 export interface SweepOptions {
@@ -114,7 +117,7 @@ export async function installSweepMocks(
     });
   });
 
-  return { unmocked, networth };
+  return { unmocked, networth, narrator: base.narrator };
 }
 
 /** Signs the mocks in (they all accept the TOTP path), from a page already on the app origin. */

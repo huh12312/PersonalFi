@@ -28,6 +28,7 @@ import {
   HOSTED_PROVIDERS,
   HOSTED_TIMEOUT_CEILING_MS,
   type HostedBudget,
+  type HostedModelAdapter,
   type HostedModelKey,
   type HostedProvider,
   type LocalModelAdapter,
@@ -37,7 +38,7 @@ import {
 } from '@advisor/local-model';
 import { systemClock, type Clock } from '@core/kernel';
 import type { HttpTransport, Resolver } from '@core/platform';
-import type { HolderNarrator } from '@ctx/insights';
+import type { ControlProbeModel, HolderNarrator } from '@ctx/insights';
 
 export interface NarratorWiringDeps {
   readonly logger?: LocalModelLogger;
@@ -137,6 +138,12 @@ export interface ResolvedNarrator extends HolderNarrator {
   readonly label: string;
   /** Where the key came from, for a hosted provider. */
   readonly keySource: 'file' | 'stored' | null;
+  /**
+   * WP 10.16: the controls self-test's reach into this narrator — run mode
+   * only (the worker). The preview runtime the api holds has none: the api
+   * never calls a model.
+   */
+  readonly control?: ControlProbeModel;
 }
 
 export type NarratorUnavailableReason =
@@ -248,6 +255,7 @@ export function createNarratorRuntime(options: NarratorRuntimeOptions): Narrator
       keySource: null,
       renderer: adapter.promptRenderer,
       model: wiring.narratorModel,
+      ...(preview ? {} : { control: controlProbeModelOf('ollama', adapter) }),
     });
   }
 
@@ -320,6 +328,7 @@ export function createNarratorRuntime(options: NarratorRuntimeOptions): Narrator
         keySource,
         renderer: adapter.promptRenderer,
         model: { run: adapter.run },
+        ...(options.mode === 'run' ? { control: controlProbeModelOf(provider, adapter) } : {}),
       }),
     };
   }
@@ -348,4 +357,48 @@ export function createNarratorRuntime(options: NarratorRuntimeOptions): Narrator
     generation: () => generation,
     budgets,
   });
+}
+
+// ---------------------------------------------------------------------------
+// WP 10.16: the controls self-test's reach into a resolved narrator
+// ---------------------------------------------------------------------------
+
+/**
+ * The worker's probe model, from the adapter the run-mode runtime built for
+ * the holder: the narration's own adapter, so the probes share its key, its
+ * window, its egress policy and its format.
+ */
+export function controlProbeModelOf(
+  provider: 'ollama' | 'openai' | 'openrouter' | 'anthropic',
+  adapter: HostedModelAdapter | LocalModelAdapter,
+): ControlProbeModel {
+  if ('egress' in adapter && adapter.egress.kind === 'hosted') {
+    const hosted = adapter as HostedModelAdapter;
+    return {
+      provider,
+      label: hosted.label,
+      probe: (id) => ({ run: (request, signal) => hosted.controlProbe(id, request, signal) }),
+      aborts: () => hosted.aborts(),
+      budget: hosted.budget,
+      egress: {
+        kind: 'hosted',
+        url: hosted.egress.url,
+        classify: (url) => hosted.egress.classify(url),
+      },
+    };
+  }
+  const local = adapter as LocalModelAdapter;
+  return {
+    provider: 'ollama',
+    label: local.promptRenderer.model,
+    probe: (id) => ({ run: (request, signal) => local.controlProbe(id, request, signal) }),
+    aborts: () => local.aborts(),
+    budget: null,
+    egress: {
+      kind: 'local',
+      classify: (endpoint) => local.egress.classify(endpoint),
+      configured: () => local.egress.configured(),
+    },
+    modelPin: (signal) => local.modelPin(signal),
+  };
 }

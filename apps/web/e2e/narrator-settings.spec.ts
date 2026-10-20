@@ -6,6 +6,7 @@ import { expectNoAxeViolations, scanBothThemes, setTheme } from './support/axe.t
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { Journey } from './support/keyboard.ts';
 import { installApiMocks, type MockApiState } from './support/mock-api.ts';
+import { seedControlCheckRun } from './support/mock-narrator.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import { hideDevtools, visit } from './support/sweep.ts';
 import { installVirtualPasskey } from './support/virtual-passkey.ts';
@@ -207,4 +208,204 @@ test.describe('Settings › Language model (WP 10.6)', () => {
     expect(api.narrator.activeProvider).toBe('off');
     await scanBothThemes(page, 'settings › language model, off');
   });
+});
+
+// ---------------------------------------------------------------------------
+// WP 10.16: Run control checks
+// ---------------------------------------------------------------------------
+
+const LOCAL_COST =
+  'This runs up to 3 short probes on the local model through the worker; it can take a few minutes. Nothing leaves this machine.';
+
+/**
+ * WP 10.16: Settings › Language model › Control checks - Chris's "a 'Run control checks' button on the Language
+ * model screen would exercise every control against your live instance with your own session". Against
+ * `support/mock-narrator.ts`'s control-checks machine (202 with eleven pending checks; each read moves the run on by
+ * three; the api's ten-minute 409), with a real CDP virtual authenticator for the passkey step-up.
+ */
+test.describe('Settings › Language model › Control checks (WP 10.16)', () => {
+  test.use({ viewport: { width: 1280, height: 2200 } });
+
+  test('WP 10.16: the cost is said first; Run control checks crosses the passkey step-up; the rows tick over to the final table and the run is in the history', async ({
+    page,
+    context,
+  }) => {
+    test.setTimeout(120_000);
+    const api = await installApiMocks(page);
+    const passkey = await installVirtualPasskey(page, context);
+    await visit(page, '/settings');
+    await hideDevtools(page);
+    await page.getByRole('tab', { name: 'Language model' }).click();
+    const section = page.getByTestId('control-checks');
+    await expect(section.getByRole('heading', { name: 'Control checks' })).toBeVisible();
+
+    // The cost, verbatim, before the button.
+    const cost = section.getByTestId('control-checks-cost');
+    await expect(cost).toHaveText(LOCAL_COST);
+    // By its test id: its name reads "Running control checks…" while a run goes.
+    const button = section.getByTestId('control-checks-run');
+    await expect(button).toHaveAccessibleName('Run control checks');
+    const costFirst = await cost.evaluate(
+      (el, id) =>
+        Boolean(
+          el.compareDocumentPosition(document.querySelector(`[data-testid="${id}"]`) as Node) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      'control-checks-run',
+    );
+    expect(costFirst, 'the cost precedes the button').toBe(true);
+    await expect(section.getByTestId('control-checks-never')).toHaveText(
+      'The controls have not been checked on this install yet.',
+    );
+
+    await passkey.respond(true);
+    await button.click();
+    const live = section.getByTestId('control-checks-progress');
+    await expect(live).toHaveAttribute('role', 'status');
+    await expect(live).toHaveAttribute('aria-live', 'polite');
+    await expect(live).toContainText(/Running control checks… \d+ of 11 checks done\./, {
+      timeout: 15_000,
+    });
+    expect(passkey.assertions(), 'the run crossed the passkey step-up').toBeGreaterThan(0);
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    await expect(button).toHaveAccessibleName('Running control checks…');
+    // The rows tick over: some running while others still wait.
+    const table = section.getByTestId('control-checks-table');
+    await expect(table.locator('tbody tr[data-status="running"]').first()).toBeVisible();
+    await expect(table.locator('tbody tr[data-status="pending"]').first()).toBeVisible();
+    await expect(
+      table.getByTestId('control-check-facts').getByText('Waiting to run.').first(),
+    ).toBeVisible();
+
+    await expect(live).toHaveText(
+      'Control checks finished. Result: Partial: some checks could not run.',
+      { timeout: 20_000 },
+    );
+    await expect(table.locator('tbody tr')).toHaveCount(11);
+    await expect(
+      table.locator('tbody tr[data-status="pending"], tbody tr[data-status="running"]'),
+    ).toHaveCount(0);
+    const result = (id: string) =>
+      table.getByTestId(`control-check-${id}`).getByTestId('control-check-result');
+    await expect(result('approval_gate')).toHaveText('Pass');
+    await expect(result('consent_withdrawal')).toHaveText('Not applicable');
+    await expect(result('inspector_digest')).toHaveText('Skipped');
+    await expect(result('module_switch')).toHaveText('Reported');
+    await expect(table.getByTestId('control-check-inspector_digest')).toContainText(
+      'No narration has run yet with its payload retained (the last 30 days).',
+    );
+    await expect(table.getByTestId('control-check-kill_level_4_cancel')).toContainText('1.8 s');
+    await expect(section.getByTestId('control-checks-summary')).toContainText(
+      'Result: Partial: some checks could not run. 7 passed, 1 skipped, 2 not applicable, 1 reported.',
+    );
+    await expect(section.getByTestId('control-checks-wait')).toHaveText(
+      /^You can run the checks again at \d{2}:\d{2}\.$/,
+    );
+    await expect(button).toHaveText('Run control checks');
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+
+    // The history: the run, its result in words; opening it shows its table.
+    const history = section.getByTestId('control-checks-history');
+    const summary = history.locator('summary');
+    await expect(summary).toHaveCount(1);
+    await expect(summary).toHaveText(
+      /\(latest\) · Ollama \(local\), qwen2\.5:7b-instruct-q4_K_M at sha256:3f3f3f3f3f3f… · Partial: some checks could not run$/,
+    );
+    await summary.click();
+    await expect(history.getByRole('table')).toBeVisible();
+    await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(11);
+
+    // Refused once for want of a step-up, then the retry; the body asks for nothing extra.
+    expect(api.narrator.controlChecks.calls.filter((c) => c.startsWith('POST'))).toEqual([
+      'POST /api/narrator/control-checks',
+      'POST /api/narrator/control-checks',
+    ]);
+    expect(api.narrator.controlChecks.bodies).toEqual([{}]);
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
+  test('WP 10.16: kill switch 1 is proven only when asked, and a second run inside ten minutes is the api’s 409 in words', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const api = await installApiMocks(page);
+    await installFakeWebAuthnAssertion(page);
+    // A screen that does not know about the window (an older list): the api's own 409 is what stops the run.
+    api.narrator.controlChecks.reportWindow = false;
+    api.narrator.controlChecks.advancePerRead = 11;
+    await visit(page, '/settings');
+    await page.getByRole('tab', { name: 'Language model' }).click();
+    const section = page.getByTestId('control-checks');
+    await section
+      .getByRole('checkbox', {
+        name: 'Also prove kill switch 1 (turns the module off inside a transaction that is rolled back)',
+      })
+      .check();
+    await section.getByRole('button', { name: 'Run control checks' }).click();
+    const live = section.getByTestId('control-checks-progress');
+    await expect(live).toHaveText(
+      'Control checks finished. Result: Partial: some checks could not run.',
+      {
+        timeout: 20_000,
+      },
+    );
+    expect(api.narrator.controlChecks.bodies).toEqual([{ proveSwitch: true }]);
+    await expect(
+      section
+        .getByTestId('control-checks-table')
+        .getByTestId('control-check-module_switch')
+        .getByTestId('control-check-result'),
+    ).toHaveText('Pass');
+
+    await section.getByRole('button', { name: 'Run control checks' }).click();
+    await expect(live).toHaveText(
+      /^The controls were checked less than 10 minutes ago\. Try again in \d+ min\.$/,
+    );
+    await expect(section.getByRole('alert')).toHaveCount(0);
+    expect(api.narrator.controlChecks.runs).toHaveLength(1);
+  });
+});
+
+/**
+ * WP 10.16 evidence: the results table on Settings › Language model, light and dark, at 1280 and 390. A finished run
+ * is seeded (the passing one, kill switch 1 proven) over an older partial one, so the picture is the same every time.
+ * `evidenceDir` unset writes to the gitignored directory; `PLAYWRIGHT_EVIDENCE_DIR` writes
+ * `wp10.16-settings-control-checks-{light,dark}-{1280,390}.png` on purpose.
+ */
+test('WP 10.16 evidence: Settings › Language model › Control checks, light and dark, at 1280 and 390', async ({
+  page,
+  evidenceDir,
+}) => {
+  test.setTimeout(120_000);
+  const api = await installApiMocks(page);
+  seedControlCheckRun(api.narrator.controlChecks, {
+    finishedAt: '2026-10-12T09:41:07.000Z',
+    overall: 'partial',
+  });
+  seedControlCheckRun(api.narrator.controlChecks, {
+    finishedAt: '2026-10-19T14:22:09.000Z',
+    overall: 'pass',
+  });
+  // Tall viewports: the settings pane scrolls inside the app frame, and a section scrolled into view sits under the
+  // sticky header, so the whole Language model tab is laid out at once and the section is cut from it.
+  for (const [width, height] of [
+    [1280, 3600],
+    [390, 7600],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await visit(page, '/settings');
+    await hideDevtools(page);
+    await page.getByRole('tab', { name: 'Language model' }).click();
+    const section = page.getByTestId('control-checks');
+    await expect(section.getByTestId('control-checks-table')).toBeVisible();
+    await expect(section.getByTestId('control-checks-summary')).toContainText('Result: Pass.');
+    for (const theme of ['light', 'dark'] as const) {
+      await setTheme(page, theme);
+      await section.screenshot({
+        path: `${screenshotDir(evidenceDir)}wp10.16-settings-control-checks-${theme}-${String(width)}.png`,
+        animations: 'disabled',
+      });
+    }
+    await setTheme(page, 'light');
+  }
 });

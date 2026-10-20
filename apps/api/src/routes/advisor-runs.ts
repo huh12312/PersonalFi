@@ -109,7 +109,7 @@ import type { NarratorRuntime } from '../narrator-wiring.ts';
 import type { RouteDeps } from './deps.ts';
 
 /** D6: one account holder — the same reading every other route file uses. */
-async function timezoneOf(deps: RouteDeps): Promise<string> {
+export async function timezoneOf(deps: Pick<RouteDeps, 'pool'>): Promise<string> {
   const rows = await deps.pool.query<{ display_timezone: string }>(
     `SELECT display_timezone FROM users ORDER BY created_at, id LIMIT 1`,
   );
@@ -163,7 +163,7 @@ function runNotFound(runId: string): AppError {
  * legacy or corrupt manifest must not break preview for every other advisor.
  */
 async function previewRegistryFor(
-  deps: RouteDeps,
+  deps: Pick<RouteDeps, 'database'>,
   userId: string,
   preview: PreviewModel | undefined,
 ): Promise<AdvisorRegistry> {
@@ -202,8 +202,8 @@ async function previewRegistryFor(
  * request, not merchant secrecy, which `snapshot/tokens.ts` handles either
  * way).
  */
-async function previewDependenciesOf(
-  deps: RouteDeps,
+export async function previewDependenciesOf(
+  deps: Pick<RouteDeps, 'database' | 'clock' | 'config'>,
   userId: string,
   timeZone: string,
   preview: PreviewModel | undefined,

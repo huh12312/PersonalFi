@@ -39,7 +39,11 @@
  */
 import { type LocalModelTransport } from '@advisor/local-model';
 import type { LocalModelPin } from '@core/config';
-import { createNarratorWiring, type NarratorRuntime } from './narrator-wiring.ts';
+import {
+  createNarratorWiring,
+  type NarratorRuntime,
+  type NarratorUnavailableReason,
+} from './narrator-wiring.ts';
 import {
   CATEGORIZATION_EVENTS,
   createCategorizationConsumer,
@@ -61,6 +65,7 @@ import {
 import { BUDGETING_EVENTS, createBudgetingConsumer, type BudgetingDatabase } from '@ctx/budgeting';
 import {
   createBriefJob,
+  createControlChecksJob,
   createHealthSnapshotJob,
   createBuiltinRegistry,
   createInsightsConsumer,
@@ -78,6 +83,7 @@ import {
   type PromptRenderer,
   registerAdvisor,
   registerNightlySchedule as registerInsightsNightlySchedule,
+  type ResolvedProbeModel,
   BUILTIN_CATALOGUE,
   INSIGHTS_EVENTS,
   NARRATOR_MANIFEST,
@@ -219,7 +225,8 @@ export interface ModuleWiringOptions {
    * `localModelConfigured` / `promptRenderer` / `narratorModel` decide, as
    * before. The worker supplies it; the api does not run advisors.
    */
-  readonly narratorRuntime?: Pick<NarratorRuntime, 'forUser' | 'invalidate'>;
+  readonly narratorRuntime?: Pick<NarratorRuntime, 'forUser' | 'invalidate'> &
+    Partial<Pick<NarratorRuntime, 'resolve'>>;
   /**
    * The account holder these modules are being built for — the same id
    * `resolveModules(platform, userId, …)` is called with.
@@ -988,6 +995,42 @@ export function createPreviewModel(pin: LocalModelPin | undefined): PreviewModel
   });
 }
 
+/** Why the worker has no probe model for a holder, in words (the controls self-test's skips). */
+const UNAVAILABLE: Readonly<Record<NarratorUnavailableReason, string>> = Object.freeze({
+  off: 'The narrator is Off: there is no model to probe.',
+  not_configured: 'No narrator is configured for you.',
+  consent_required:
+    'The active hosted provider has no standing consent: nothing may be sent to it.',
+  key_missing: 'The active provider has no key.',
+  key_unopenable: 'The stored key cannot be opened (is the install unlocked?).',
+  endpoint_refused: 'The local endpoint set in Settings is refused by the local-endpoint policy.',
+});
+
+/** WP 10.16: the holder's run-mode narrator as the self-test reaches it in the worker. */
+export function probeModelFor(
+  runtime: NonNullable<ModuleWiringOptions['narratorRuntime']>,
+): (userId: string) => Promise<ResolvedProbeModel> {
+  return async (userId) => {
+    if (runtime.resolve !== undefined) {
+      const resolution = await runtime.resolve(userId);
+      if (resolution.narrator === null) {
+        return { model: null, unavailable: UNAVAILABLE[resolution.reason ?? 'not_configured'] };
+      }
+      return resolution.narrator.control === undefined
+        ? {
+            model: null,
+            unavailable: "The worker's narrator has no control probes (preview mode).",
+          }
+        : { model: resolution.narrator.control, unavailable: null };
+    }
+    const narrator = await runtime.forUser(userId);
+    if (narrator === null) return { model: null, unavailable: UNAVAILABLE.not_configured };
+    return narrator.control === undefined
+      ? { model: null, unavailable: "The worker's narrator has no control probes (preview mode)." }
+      : { model: narrator.control, unavailable: null };
+  };
+}
+
 function insightsModule(
   database: ModuleWiringOptions['database'],
   options: ModuleWiringOptions,
@@ -1134,6 +1177,17 @@ function insightsModule(
       createRunLocalJob({ database, dependencies, clock }),
       // WP 5.6's `insights.brief`, WP 5.9's outcome check folded in (above).
       weeklyJob,
+      // WP 10.16: the controls self-test's worker half (`insights.control_checks`): the probes
+      // that need the model run here, through the holder's own run-mode narrator, never in the api.
+      ...(options.narratorRuntime === undefined
+        ? []
+        : [
+            createControlChecksJob({
+              database,
+              clock,
+              probeFor: probeModelFor(options.narratorRuntime),
+            }),
+          ]),
       // WP 10.12: the daily health snapshot (04:10 local), the same snapshot ports the Brief's weekly
       // score reads, plus the budget's variability for the living-expenses cover.
       createHealthSnapshotJob({
