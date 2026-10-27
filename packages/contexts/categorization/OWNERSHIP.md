@@ -37,6 +37,14 @@ the migration creates it.
 
 - `category_abstentions`
 
+### Built (migration 0055, WP 11.2)
+
+- `category_suggestion_cache`
+- `category_suggestion_evals`
+- `category_suggestion_settings`
+
+(0055 also adds the four nullable suggestion columns to `category_abstentions`.)
+
 ## Notes on the names
 
 Four claims from the original sketch are gone, because the built schema answers the

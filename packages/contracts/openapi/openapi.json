@@ -2289,6 +2289,378 @@
           "status"
         ]
       },
+      "CategorySuggestionEvalInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "modelChoice": {
+            "type": "string",
+            "enum": [
+              "narrator",
+              "classifier"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "modelDigest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed"
+            ]
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "goldTotal": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "residue": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "asked": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "scored": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "correct": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "abstained": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "refused": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "precision": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "coverage": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "confusions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "expected": {
+                  "type": "string"
+                },
+                "got": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "expected",
+                "got",
+                "count"
+              ]
+            }
+          },
+          "measuredAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "modelChoice",
+          "model",
+          "modelDigest",
+          "status",
+          "failure",
+          "goldTotal",
+          "residue",
+          "asked",
+          "scored",
+          "correct",
+          "abstained",
+          "refused",
+          "precision",
+          "coverage",
+          "confusions",
+          "measuredAt"
+        ]
+      },
+      "CategorySuggestionSettingsInput": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "no_model",
+              "not_measured",
+              "below_gate",
+              "ready",
+              "on"
+            ],
+            "description": "`no_model`: nothing can answer for the chosen model. `not_measured` / `below_gate`: off, and Enable is refused. `ready`: the gate is open and the switch is off. `on`."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "gate": {
+            "type": "object",
+            "properties": {
+              "open": {
+                "type": "boolean"
+              },
+              "reason": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "not_measured",
+                      "measurement_failed",
+                      "too_few_rows",
+                      "below_precision"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "minPrecision": {
+                "type": "number"
+              },
+              "minScored": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "open",
+              "reason",
+              "minPrecision",
+              "minScored"
+            ]
+          },
+          "modelChoice": {
+            "type": "string",
+            "enum": [
+              "narrator",
+              "classifier"
+            ]
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "choice": {
+                  "type": "string",
+                  "enum": [
+                    "narrator",
+                    "classifier"
+                  ]
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "provider": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "unavailableReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "latest": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CategorySuggestionEvalInput"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "choice",
+                "label",
+                "provider",
+                "available",
+                "unavailableReason",
+                "latest"
+              ]
+            }
+          },
+          "approval": {
+            "type": "object",
+            "properties": {
+              "queryShape": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "approved": {
+                "type": "boolean"
+              },
+              "live": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "queryShape",
+              "approved",
+              "live"
+            ]
+          },
+          "hosted": {
+            "type": "object",
+            "properties": {
+              "applies": {
+                "type": "boolean"
+              },
+              "consented": {
+                "type": "boolean"
+              },
+              "consentText": {
+                "type": "string"
+              },
+              "consentTextSha256": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "applies",
+              "consented",
+              "consentText",
+              "consentTextSha256"
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "enabled",
+          "gate",
+          "modelChoice",
+          "models",
+          "approval",
+          "hosted"
+        ]
+      },
+      "CategorySuggestionPreviewInput": {
+        "type": "object",
+        "properties": {
+          "advisorId": {
+            "type": "string"
+          },
+          "advisorVersion": {
+            "type": "string"
+          },
+          "queryShape": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "promptTemplateHash": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "prompt": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "hash": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "hash"
+            ]
+          },
+          "approved": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "advisorId",
+          "advisorVersion",
+          "queryShape",
+          "scopes",
+          "promptTemplateHash",
+          "provider",
+          "model",
+          "payload",
+          "prompt",
+          "approved"
+        ]
+      },
       "AdvisorRunSummaryInput": {
         "type": "object",
         "properties": {
@@ -2574,7 +2946,7 @@
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
               },
               "granted_scopes": {
-                "maxItems": 19,
+                "maxItems": 20,
                 "type": "array",
                 "items": {
                   "type": "string",
@@ -2597,7 +2969,8 @@
                     "plan.projection",
                     "transactions.anomalies",
                     "fees.summary",
-                    "categorization.rule_candidates"
+                    "categorization.rule_candidates",
+                    "transactions.residue"
                   ]
                 }
               },
@@ -7932,7 +8305,8 @@
                     "budget_window",
                     "module_switch",
                     "narration_badge",
-                    "model_pin"
+                    "model_pin",
+                    "suggest_enum_refusal"
                   ]
                 },
                 "name": {
@@ -8566,7 +8940,8 @@
               "plan.projection",
               "transactions.anomalies",
               "fees.summary",
-              "categorization.rule_candidates"
+              "categorization.rule_candidates",
+              "transactions.residue"
             ]
           },
           "sensitivity": {
@@ -8644,7 +9019,8 @@
               "plan.projection",
               "transactions.anomalies",
               "fees.summary",
-              "categorization.rule_candidates"
+              "categorization.rule_candidates",
+              "transactions.residue"
             ]
           },
           "event": {
@@ -15819,6 +16195,50 @@
                 "detail"
               ]
             }
+          },
+          "suggestion": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "const": "model",
+                    "description": "Always the model: a suggestion is never an assignment."
+                  },
+                  "categoryId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "categoryKey": {
+                    "type": "string"
+                  },
+                  "categoryLabel": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "The model's own words, validated: at most 140 characters, no figures."
+                  },
+                  "suggestedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source",
+                  "categoryId",
+                  "categoryKey",
+                  "categoryLabel",
+                  "reason",
+                  "suggestedAt"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "WP 11.2: a language model's category suggestion for an abstained row, or null. The row stays uncategorised until the holder confirms it through the normal pick (PATCH)."
           }
         },
         "required": [
@@ -15829,7 +16249,8 @@
           "confidence",
           "decidedAt",
           "line",
-          "tiers"
+          "tiers",
+          "suggestion"
         ]
       },
       "TransactionProvenanceInput": {
@@ -19023,6 +19444,387 @@
         ],
         "additionalProperties": false
       },
+      "CategorySuggestionEval": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "modelChoice": {
+            "type": "string",
+            "enum": [
+              "narrator",
+              "classifier"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "modelDigest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed"
+            ]
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "goldTotal": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "residue": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "asked": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "scored": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "correct": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "abstained": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "refused": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "precision": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "coverage": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "confusions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "expected": {
+                  "type": "string"
+                },
+                "got": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "expected",
+                "got",
+                "count"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "measuredAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "modelChoice",
+          "model",
+          "modelDigest",
+          "status",
+          "failure",
+          "goldTotal",
+          "residue",
+          "asked",
+          "scored",
+          "correct",
+          "abstained",
+          "refused",
+          "precision",
+          "coverage",
+          "confusions",
+          "measuredAt"
+        ],
+        "additionalProperties": false
+      },
+      "CategorySuggestionSettings": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "no_model",
+              "not_measured",
+              "below_gate",
+              "ready",
+              "on"
+            ],
+            "description": "`no_model`: nothing can answer for the chosen model. `not_measured` / `below_gate`: off, and Enable is refused. `ready`: the gate is open and the switch is off. `on`."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "gate": {
+            "type": "object",
+            "properties": {
+              "open": {
+                "type": "boolean"
+              },
+              "reason": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "not_measured",
+                      "measurement_failed",
+                      "too_few_rows",
+                      "below_precision"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "minPrecision": {
+                "type": "number"
+              },
+              "minScored": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "open",
+              "reason",
+              "minPrecision",
+              "minScored"
+            ],
+            "additionalProperties": false
+          },
+          "modelChoice": {
+            "type": "string",
+            "enum": [
+              "narrator",
+              "classifier"
+            ]
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "choice": {
+                  "type": "string",
+                  "enum": [
+                    "narrator",
+                    "classifier"
+                  ]
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "provider": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "unavailableReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "latest": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CategorySuggestionEval"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "choice",
+                "label",
+                "provider",
+                "available",
+                "unavailableReason",
+                "latest"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "approval": {
+            "type": "object",
+            "properties": {
+              "queryShape": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "approved": {
+                "type": "boolean"
+              },
+              "live": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "queryShape",
+              "approved",
+              "live"
+            ],
+            "additionalProperties": false
+          },
+          "hosted": {
+            "type": "object",
+            "properties": {
+              "applies": {
+                "type": "boolean"
+              },
+              "consented": {
+                "type": "boolean"
+              },
+              "consentText": {
+                "type": "string"
+              },
+              "consentTextSha256": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "applies",
+              "consented",
+              "consentText",
+              "consentTextSha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "state",
+          "enabled",
+          "gate",
+          "modelChoice",
+          "models",
+          "approval",
+          "hosted"
+        ],
+        "additionalProperties": false
+      },
+      "CategorySuggestionPreview": {
+        "type": "object",
+        "properties": {
+          "advisorId": {
+            "type": "string"
+          },
+          "advisorVersion": {
+            "type": "string"
+          },
+          "queryShape": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "promptTemplateHash": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "prompt": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "hash": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "hash"
+            ],
+            "additionalProperties": false
+          },
+          "approved": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "advisorId",
+          "advisorVersion",
+          "queryShape",
+          "scopes",
+          "promptTemplateHash",
+          "provider",
+          "model",
+          "payload",
+          "prompt",
+          "approved"
+        ],
+        "additionalProperties": false
+      },
       "AdvisorRunSummary": {
         "type": "object",
         "properties": {
@@ -19311,7 +20113,7 @@
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
               },
               "granted_scopes": {
-                "maxItems": 19,
+                "maxItems": 20,
                 "type": "array",
                 "items": {
                   "type": "string",
@@ -19334,7 +20136,8 @@
                     "plan.projection",
                     "transactions.anomalies",
                     "fees.summary",
-                    "categorization.rule_candidates"
+                    "categorization.rule_candidates",
+                    "transactions.residue"
                   ]
                 }
               },
@@ -24695,7 +25498,8 @@
                     "budget_window",
                     "module_switch",
                     "narration_badge",
-                    "model_pin"
+                    "model_pin",
+                    "suggest_enum_refusal"
                   ]
                 },
                 "name": {
@@ -25344,7 +26148,8 @@
               "plan.projection",
               "transactions.anomalies",
               "fees.summary",
-              "categorization.rule_candidates"
+              "categorization.rule_candidates",
+              "transactions.residue"
             ]
           },
           "sensitivity": {
@@ -25423,7 +26228,8 @@
               "plan.projection",
               "transactions.anomalies",
               "fees.summary",
-              "categorization.rule_candidates"
+              "categorization.rule_candidates",
+              "transactions.residue"
             ]
           },
           "event": {
@@ -32778,6 +33584,51 @@
               ],
               "additionalProperties": false
             }
+          },
+          "suggestion": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "const": "model",
+                    "description": "Always the model: a suggestion is never an assignment."
+                  },
+                  "categoryId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "categoryKey": {
+                    "type": "string"
+                  },
+                  "categoryLabel": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "The model's own words, validated: at most 140 characters, no figures."
+                  },
+                  "suggestedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source",
+                  "categoryId",
+                  "categoryKey",
+                  "categoryLabel",
+                  "reason",
+                  "suggestedAt"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "WP 11.2: a language model's category suggestion for an abstained row, or null. The row stays uncategorised until the holder confirms it through the normal pick (PATCH)."
           }
         },
         "required": [
@@ -32788,7 +33639,8 @@
           "confidence",
           "decidedAt",
           "line",
-          "tiers"
+          "tiers",
+          "suggestion"
         ],
         "additionalProperties": false
       },
@@ -45072,6 +45924,16 @@
               }
             }
           },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Default Response",
             "content": {
@@ -53538,7 +54400,8 @@
                         "plan.projection",
                         "transactions.anomalies",
                         "fees.summary",
-                        "categorization.rule_candidates"
+                        "categorization.rule_candidates",
+                        "transactions.residue"
                       ]
                     }
                   },
@@ -53597,7 +54460,8 @@
                           "plan.projection",
                           "transactions.anomalies",
                           "fees.summary",
-                          "categorization.rule_candidates"
+                          "categorization.rule_candidates",
+                          "transactions.residue"
                         ]
                       }
                     },
@@ -53624,7 +54488,8 @@
                           "plan.projection",
                           "transactions.anomalies",
                           "fees.summary",
-                          "categorization.rule_candidates"
+                          "categorization.rule_candidates",
+                          "transactions.residue"
                         ]
                       }
                     },
@@ -53651,7 +54516,8 @@
                           "plan.projection",
                           "transactions.anomalies",
                           "fees.summary",
-                          "categorization.rule_candidates"
+                          "categorization.rule_candidates",
+                          "transactions.residue"
                         ]
                       }
                     }
@@ -58397,6 +59263,592 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categories/suggestions/settings": {
+      "get": {
+        "operationId": "getCategorySuggestionSettings",
+        "summary": "Category suggestions: the gate, the models, the approval and the switch",
+        "tags": [
+          "categories"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategorySuggestionSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "setCategorySuggestionModel",
+        "summary": "Choose which pinned local model suggests categories",
+        "tags": [
+          "categories"
+        ],
+        "description": "Changing the model does not carry a measurement over: the gate reads the latest measurement of the model now chosen.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "modelChoice": {
+                    "type": "string",
+                    "enum": [
+                      "narrator",
+                      "classifier"
+                    ]
+                  }
+                },
+                "required": [
+                  "modelChoice"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategorySuggestionSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categories/suggestions/hosted-consent": {
+      "put": {
+        "operationId": "setCategorySuggestionHostedConsent",
+        "summary": "The separate consent for suggestions on a hosted provider (off by default)",
+        "tags": [
+          "categories"
+        ],
+        "description": "D22: categorisation runs on the local model unless this is given. Consenting names the exact text (its sha256); a reworded consent is not covered by an old tick.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "consent": {
+                    "type": "boolean"
+                  },
+                  "consentTextSha256": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "consent"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategorySuggestionSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categories/suggestions/preview": {
+      "get": {
+        "operationId": "previewCategorySuggestionPayload",
+        "summary": "The exact payload and prompt a suggestion run would send now",
+        "tags": [
+          "categories"
+        ],
+        "description": "Invokes nothing. At most one batch of the current residue.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategorySuggestionPreview"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categories/suggestions/approve": {
+      "post": {
+        "operationId": "approveCategorySuggestionPayload",
+        "summary": "Approve the payload shape the preview showed",
+        "tags": [
+          "categories"
+        ],
+        "description": "409 `insights.shape_changed` when the shape moved since the preview.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "queryShape": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "queryShape"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approvalId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "queryShape": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "approvalId",
+                    "queryShape"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categories/suggestions/measure": {
+      "post": {
+        "operationId": "measureCategorySuggestions",
+        "summary": "Measure the chosen model on your own history (runs in the worker)",
+        "tags": [
+          "categories"
+        ],
+        "description": "The gold-set replay with the model as a seventh tier on the residue the six tiers abstain on, scored against your picks. Writes one result row and nothing else. 202; read the result from the settings.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "modelChoice": {
+                    "type": "string",
+                    "enum": [
+                      "narrator",
+                      "classifier"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "deduped": {
+                      "type": "boolean"
+                    },
+                    "modelChoice": {
+                      "type": "string",
+                      "enum": [
+                        "narrator",
+                        "classifier"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "jobId",
+                    "deduped",
+                    "modelChoice"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categories/suggestions/enabled": {
+      "post": {
+        "operationId": "setCategorySuggestionsEnabled",
+        "summary": "Turn category suggestions on or off (refused below the precision gate)",
+        "tags": [
+          "categories"
+        ],
+        "description": "409 `categorization.suggestions_below_gate` when the latest measurement of the chosen model is below 85 % precision or has fewer than 20 scored rows; 409 `categorization.suggestion_model_unavailable` when nothing can answer. Turning off is always allowed.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategorySuggestionSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transactions/{transactionId}/suggestion/reject": {
+      "post": {
+        "operationId": "rejectCategorySuggestion",
+        "summary": "\"Not this\": record that the suggested category is wrong for this merchant",
+        "tags": [
+          "transactions"
+        ],
+        "description": "Clears the chip on this merchant’s uncategorised rows and stops the cached suggestion from being shown again. Assigns nothing; the classifier is not touched.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "transactionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "rejected",
+                        "no_suggestion"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "outcome"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "Default Response",
             "content": {
               "application/json": {

@@ -9,12 +9,17 @@ import { Money } from '../../components/finance/Money.tsx';
 import { Badge } from '../../components/ui/badge.tsx';
 import { formatDateOnlyShort } from '../../lib/date.ts';
 import type { Transaction } from '../../api/generated/types.gen.ts';
+import { cn } from '../../lib/cn.ts';
+import { SuggestionChip } from '../category-suggestions/SuggestionChip.tsx';
+import type { CategorySuggestion } from '../category-suggestions/suggestion-api.ts';
 
 export interface TransactionRowProps {
   transaction: Transaction;
   accountName: string;
   /** WP 10.14: the row's category (icon + name); null = uncategorised. Undefined while the chart is loading. */
   category?: CategoryIconSource | null;
+  /** WP 11.2: the model's suggestion for an uncategorised row (Confirm / Not this), or null. */
+  suggestion?: CategorySuggestion | null;
   index: number;
   selected: boolean;
   isFocused: boolean;
@@ -42,6 +47,7 @@ function TransactionRowImpl({
   transaction,
   accountName,
   category,
+  suggestion = null,
   index,
   selected,
   isFocused,
@@ -61,7 +67,10 @@ function TransactionRowImpl({
       data-transaction-id={transaction.id}
       tabIndex={isFocused ? 0 : -1}
       style={style}
-      className="absolute left-0 top-0 flex w-full items-center gap-3 border-b border-border-hairline px-3 py-2 outline-none focus-visible:bg-accent-wash data-[selected=true]:bg-accent-wash"
+      className={cn(
+        'absolute left-0 top-0 flex w-full items-center gap-3 border-b border-border-hairline px-3 py-2 outline-none focus-visible:bg-accent-wash data-[selected=true]:bg-accent-wash',
+        suggestion !== null && 'flex-wrap gap-y-1.5',
+      )}
       data-selected={selected}
       onFocus={() => onFocusRow(index)}
       onClick={() => onOpen(transaction.id)}
@@ -132,6 +141,12 @@ function TransactionRowImpl({
       <div role="gridcell" className="shrink-0 text-right">
         <Money value={transaction.amount} className={transaction.pending ? 'opacity-70' : ''} />
       </div>
+
+      {suggestion !== null && (
+        <div role="gridcell" className="min-w-0 basis-full pl-7">
+          <SuggestionChip transactionId={transaction.id} suggestion={suggestion} variant="list" />
+        </div>
+      )}
     </div>
   );
 }

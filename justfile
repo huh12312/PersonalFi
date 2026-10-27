@@ -848,6 +848,35 @@ categorization-eval holder="" json="false":
       pnpm exec node scripts/categorization-eval.ts "${args[@]}"
     fi
 
+# Teach tiers 3 and 5 from the category picks already made (WP 11.2): replays every standing
+# overlay pick into the learning path once; idempotent (a second run learns 0). Never automatic.
+# e.g. `just categorization-learn-backfill holder="Chris"`
+categorization-learn-backfill holder="" json="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    slots=({{ quote(holder) }} {{ quote(json) }})
+    holder=""; json="false"
+    case "${slots[0]}" in holder=*|json=*|'') ;; *) holder="${slots[0]}" ;; esac
+    case "${slots[1]}" in holder=*|json=*|'') ;; *) json="${slots[1]}" ;; esac
+    for slot in "${slots[@]}"; do
+      case "$slot" in
+        holder=*) holder="${slot#holder=}" ;;
+        json=*)   json="${slot#json=}" ;;
+      esac
+    done
+    args=()
+    if [[ -n "$holder" ]]; then args+=(--holder="$holder"); fi
+    if [[ "$json" == "true" ]]; then args+=(--json); fi
+    # Inside the stack the database is not reachable from the host by design, so
+    # this runs in a one-shot container from the api service's definition;
+    # otherwise against the local dev database.
+    if docker compose ps --status running --services 2>/dev/null | grep -qx api; then
+      docker compose run --rm --no-deps -T --entrypoint node api \
+        /app/apps/api/src/bin/categorization-learn-backfill.ts "${args[@]}"
+    else
+      pnpm exec node scripts/categorization-learn-backfill.ts "${args[@]}"
+    fi
+
 # Resume a stopped event consumer (one /ready lists under outbox.failedConsumers), e.g. `just consumer-resume budgeting.actuals@v1`
 consumer-resume name:
     #!/usr/bin/env bash

@@ -535,7 +535,23 @@ describe('the minimisation levers', () => {
   it('every catalogue row that mentions merchants tokenises them', () => {
     for (const definition of SCOPE_CATALOGUE) {
       if (!/merchant/i.test(definition.yields + definition.drops)) continue;
+      // WP 11.2's one, named exception: the residue's merchant words are the
+      // only thing a model could categorise from. Pinned below.
+      if (definition.scope === 'transactions.residue') continue;
       expect(definition.minimisation.tokeniseMerchants, definition.scope).toBe(true);
     }
+  });
+
+  it('the one scope that carries merchant words untokenised is local-only and never built into a snapshot', () => {
+    const untokenised = SCOPE_CATALOGUE.filter(
+      (definition) =>
+        /merchant/i.test(definition.yields + definition.drops) &&
+        !definition.minimisation.tokeniseMerchants,
+    );
+    expect(untokenised.map((definition) => definition.scope)).toEqual(['transactions.residue']);
+    const residue = untokenised[0];
+    expect(residue?.externalAllowed).toBe(false);
+    expect(residue?.sourcedInPhase2).toBe(false);
+    expect(residue?.minimisation.bucketAmounts).toBe(true);
   });
 });

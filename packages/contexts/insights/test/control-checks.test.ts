@@ -36,6 +36,9 @@ import {
   type ModuleSwitchPort,
   type NarrationBadgePort,
   type WorkerCheckContext,
+  checkSuggestEnumRefusal,
+  SUGGEST_PROBE_TAXONOMY,
+  type SuggestProbeModel,
 } from '../src/index.ts';
 
 // ---------------------------------------------------------------------------
@@ -166,7 +169,7 @@ function budget(remainingAfter: () => number, maxRequests = 30, windowMs = 3_600
 // ---------------------------------------------------------------------------
 
 describe('the catalogue', () => {
-  it('names eleven checks, in the order of the brief, each with words for the table', () => {
+  it('names twelve checks, in the order of the brief, each with words for the table', () => {
     expect(CONTROL_CHECKS.map((check) => check.id)).toEqual([...CONTROL_CHECK_IDS]);
     expect(CONTROL_CHECK_IDS).toEqual([
       'approval_gate',
@@ -180,6 +183,7 @@ describe('the catalogue', () => {
       'module_switch',
       'narration_badge',
       'model_pin',
+      'suggest_enum_refusal',
     ]);
     for (const check of CONTROL_CHECKS) {
       expect(check.name.length).toBeGreaterThan(3);
@@ -193,6 +197,7 @@ describe('the catalogue', () => {
       'egress_allowlist',
       'budget_window',
       'model_pin',
+      'suggest_enum_refusal',
     ]);
   });
 
@@ -656,5 +661,62 @@ describe('honesty: no fact carries a payload, a prompt or a reply', () => {
     const numerals = await checkNumeralsRefusal(workerContext(model));
     const schema = await checkSchemaRefusal(workerContext(model));
     expect(JSON.stringify([numerals, schema])).not.toContain(canary);
+  });
+});
+
+describe('suggest_enum_refusal (WP 11.2)', () => {
+  const outside = 'control.outside_taxonomy';
+  function suggestModel(reply: unknown | Error): SuggestProbeModel {
+    return {
+      label: 'qwen2.5:3b-instruct@sha256:test',
+      outsideKey: outside,
+      probe: () => (reply instanceof Error ? Promise.reject(reply) : Promise.resolve({ reply })),
+    };
+  }
+
+  it('passes when an obedient model names a key outside the list and the validator refuses it', async () => {
+    const outcome = await checkSuggestEnumRefusal(
+      workerContext(null, {
+        suggest: suggestModel({
+          suggestions: [{ transaction_ref: 'r1', category_key: outside, reason: 'As asked.' }],
+          abstain: [],
+        }),
+      }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.facts.join(' ')).toContain('unknown_category');
+  });
+
+  it('passes when the model declines, and when the reply is outside the format', async () => {
+    const declined = await checkSuggestEnumRefusal(
+      workerContext(null, {
+        suggest: suggestModel({
+          suggestions: [
+            {
+              transaction_ref: 'r1',
+              category_key: SUGGEST_PROBE_TAXONOMY[0]?.key,
+              reason: 'A guess.',
+            },
+          ],
+          abstain: [],
+        }),
+      }),
+    );
+    expect(declined.status).toBe('pass');
+    const malformed = await checkSuggestEnumRefusal(
+      workerContext(null, { suggest: suggestModel('not json') }),
+    );
+    expect(malformed.status).toBe('pass');
+  });
+
+  it('is skipped (not applicable) with no suggestion model, and skipped when the probe cannot reach it', async () => {
+    expect(await checkSuggestEnumRefusal(workerContext(null))).toMatchObject({
+      status: 'skipped',
+      notApplicable: true,
+    });
+    const unreachable = await checkSuggestEnumRefusal(
+      workerContext(null, { suggest: suggestModel(new Error('econnrefused')) }),
+    );
+    expect(unreachable).toMatchObject({ status: 'skipped', notApplicable: false });
   });
 });

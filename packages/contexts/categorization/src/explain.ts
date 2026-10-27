@@ -39,6 +39,23 @@ export interface TransactionExplanation {
   readonly line: string;
   /** Every stored tier, in order — what the line was composed from. */
   readonly tiers: readonly StoredTierView[];
+  /**
+   * WP 11.2: a language model's suggestion for an abstained row, or `null`.
+   * Never an assignment: `status` stays `abstained` and `categoryKey` `null`.
+   */
+  readonly suggestion: StoredSuggestion | null;
+}
+
+/** A model's suggestion as stored on the abstention row (0055). The source is always the model. */
+export interface StoredSuggestion {
+  readonly source: 'model';
+  readonly categoryId: string;
+  readonly categoryKey: string;
+  readonly categoryLabel: string;
+  /** The model's own words, validated (≤ 140 characters, no figures, the copy linter). */
+  readonly reason: string;
+  readonly suggestedAt: Date;
+  readonly runId: string | null;
 }
 
 function tierViews(chain: readonly unknown[]): StoredTierView[] {
@@ -92,11 +109,21 @@ export async function explainTransactions(
     transaction_id: string;
     evidence: unknown;
     decided_at: string | Date;
+    suggested_category_id: string | null;
+    suggested_key: string | null;
+    suggested_label: string | null;
+    suggestion_reason: string | null;
+    suggested_at: string | Date | null;
+    suggestion_run_id: string | null;
   }>(sql`
-    SELECT transaction_id, evidence, decided_at
-      FROM category_abstentions
-     WHERE user_id = ${input.userId}
-       AND transaction_id = ANY(${idArray})
+    SELECT ab.transaction_id, ab.evidence, ab.decided_at,
+           ab.suggested_category_id, c.key AS suggested_key, c.label AS suggested_label,
+           ab.suggestion_reason, ab.suggested_at, ab.suggestion_run_id
+      FROM category_abstentions ab
+      LEFT JOIN categories c
+        ON c.id = ab.suggested_category_id AND c.user_id = ab.user_id AND c.archived_at IS NULL
+     WHERE ab.user_id = ${input.userId}
+       AND ab.transaction_id = ANY(${idArray})
   `);
 
   const byAssignment = new Map(assigned.rows.map((row) => [row.transaction_id, row]));
@@ -115,6 +142,7 @@ export async function explainTransactions(
         decidedAt: new Date(assignment.decided_at),
         line: explanationLineOf(chain),
         tiers: tierViews(chain),
+        suggestion: null,
       };
     }
     const abstention = byAbstention.get(transactionId);
@@ -129,6 +157,22 @@ export async function explainTransactions(
         decidedAt: new Date(abstention.decided_at),
         line: explanationLineOf(chain),
         tiers: tierViews(chain),
+        suggestion:
+          abstention.suggested_category_id === null ||
+          abstention.suggested_key === null ||
+          abstention.suggested_label === null ||
+          abstention.suggestion_reason === null ||
+          abstention.suggested_at === null
+            ? null
+            : {
+                source: 'model',
+                categoryId: abstention.suggested_category_id,
+                categoryKey: abstention.suggested_key,
+                categoryLabel: abstention.suggested_label,
+                reason: abstention.suggestion_reason,
+                suggestedAt: new Date(abstention.suggested_at),
+                runId: abstention.suggestion_run_id,
+              },
       };
     }
     return {
@@ -140,6 +184,7 @@ export async function explainTransactions(
       decidedAt: null,
       line: explanationLineOf([]),
       tiers: [],
+      suggestion: null,
     };
   });
 }

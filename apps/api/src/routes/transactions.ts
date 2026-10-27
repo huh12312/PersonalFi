@@ -137,6 +137,24 @@ const categoryExplanationSchema = z
         detail: z.string(),
       }),
     ),
+    suggestion: z
+      .object({
+        source: z
+          .literal('model')
+          .describe('Always the model: a suggestion is never an assignment.'),
+        categoryId: z.uuid(),
+        categoryKey: z.string(),
+        categoryLabel: z.string(),
+        reason: z
+          .string()
+          .describe("The model's own words, validated: at most 140 characters, no figures."),
+        suggestedAt: isoInstant,
+      })
+      .nullable()
+      .describe(
+        "WP 11.2: a language model's category suggestion for an abstained row, or null. The row " +
+          'stays uncategorised until the holder confirms it through the normal pick (PATCH).',
+      ),
   })
   .meta({ id: 'CategoryExplanation' });
 
@@ -484,6 +502,17 @@ export const transactionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             decidedAt: entry.decidedAt === null ? null : entry.decidedAt.toISOString(),
             line: entry.line,
             tiers: entry.tiers.map((tier) => ({ ...tier })),
+            suggestion:
+              entry.suggestion === null
+                ? null
+                : {
+                    source: entry.suggestion.source,
+                    categoryId: entry.suggestion.categoryId,
+                    categoryKey: entry.suggestion.categoryKey,
+                    categoryLabel: entry.suggestion.categoryLabel,
+                    reason: entry.suggestion.reason,
+                    suggestedAt: entry.suggestion.suggestedAt.toISOString(),
+                  },
           })),
         };
       },
@@ -594,15 +623,20 @@ export const transactionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
       async (request) => {
         const session = await guards.requireSession(request);
+        // One transaction (WP 11.2): a category pick appends
+        // `ledger.TransactionCategoryChosen` beside the overlay write, and the
+        // two commit together or not at all.
         const updated = await mapDomainErrors(() =>
-          setTransactionOverlay(
-            database,
-            {
-              userId: session.userId,
-              transactionId: request.params.transactionId,
-              patch: patchOf(request.body),
-            },
-            writeContext(String(request.id)),
+          database.transaction((tx) =>
+            setTransactionOverlay(
+              tx,
+              {
+                userId: session.userId,
+                transactionId: request.params.transactionId,
+                patch: patchOf(request.body),
+              },
+              writeContext(String(request.id)),
+            ),
           ),
         );
         return serialiseTransaction(updated);

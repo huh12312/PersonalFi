@@ -132,3 +132,31 @@ export {
   type SanitiserFlagKind,
 } from './sanitise.ts';
 export { capFor, DEFAULT_STRING_CAP, FREE_TEXT_CAPS, RECORD_KEY_CAP } from './caps.ts';
+// WP 11.2: category suggestions for the categoriser's residue, never applied.
+export {
+  createHostedSuggestionAdapter,
+  createLocalSuggestionAdapter,
+  isSuggestControlProbeId,
+  renderSuggestPrompt,
+  SUGGEST_CONTROL_INSTRUCTIONS,
+  SUGGEST_CONTROL_OUTSIDE_KEY,
+  SUGGEST_CONTROL_PROBE_IDS,
+  SUGGEST_FORMAT,
+  SUGGEST_MAX_ROWS,
+  SUGGEST_PROMPT_TEMPLATE_HASH,
+  SUGGEST_PROMPT_TEMPLATE_VERSION,
+  SUGGEST_REASON_MAX,
+  SUGGEST_REF_PATTERN,
+  SUGGEST_SCHEMA_NAME,
+  SUGGEST_SYSTEM_PROMPT,
+  SUGGEST_USER_TRAILER,
+  withSuggestControlInstruction,
+  type LocalSuggestionAdapterDeps,
+  type RenderedSuggestPrompt,
+  type SuggestControlProbeId,
+  type SuggestionModelAdapter,
+  type SuggestModelReply,
+  type SuggestRequest,
+  type SuggestResidueRow,
+  type SuggestTaxonomyEntry,
+} from './suggest.ts';

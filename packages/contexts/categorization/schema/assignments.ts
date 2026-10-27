@@ -197,6 +197,15 @@ export const categoryAbstentions = pgTable(
     /** `{ chain: TierOutcome[] }`, the shape `category_assignments.evidence` has. */
     evidence: jsonb('evidence').notNull(),
     decidedAt: instantColumn('decided_at').notNull(),
+    // WP 11.2 (0055): a language model's suggestion for this uncategorised row. Never an
+    // assignment: the row stays uncategorised until the holder taps Confirm.
+    suggestedCategoryId: uuid('suggested_category_id').references(() => categories.id, {
+      onDelete: 'set null',
+    }),
+    suggestionReason: text('suggestion_reason'),
+    /** `advisor_runs.id` of the categorize.suggest run. @ctx/insights' table: no FK (D8). */
+    suggestionRunId: uuid('suggestion_run_id'),
+    suggestedAt: instantColumn('suggested_at'),
     createdAt: createdAtColumn(),
   },
   (table) => [

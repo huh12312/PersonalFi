@@ -9,6 +9,11 @@ import {
   type MarketDataKeysMockState,
   type MarketDataRefreshMockState,
 } from './mock-market-data-keys.ts';
+import {
+  createCategorySuggestionsState,
+  handleCategorySuggestions,
+  type CategorySuggestionsMockState,
+} from './mock-category-suggestions.ts';
 import { createNarratorState, handleNarrator, type NarratorMockState } from './mock-narrator.ts';
 
 /**
@@ -270,6 +275,8 @@ export interface MockApiState {
   marketDataRefresh: MarketDataRefreshMockState;
   /** WP 10.6: Settings › Language model (`mock-narrator.ts`). */
   narrator: NarratorMockState;
+  /** WP 11.2: Settings › Language model › Category suggestions (`mock-category-suggestions.ts`). */
+  categorySuggestions: CategorySuggestionsMockState;
 }
 
 function json(body: unknown, status = 200) {
@@ -297,6 +304,7 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     marketDataKeys: createMarketDataKeysState(),
     marketDataRefresh: createMarketDataRefreshState(),
     narrator: createNarratorState(),
+    categorySuggestions: createCategorySuggestionsState(),
   };
 
   const transactions = new Map<string, MockTransaction>([
@@ -451,6 +459,19 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
 
     // WP 10.6: Settings › Language model (GET; every write but Test behind the step-up).
     if (await handleNarrator(route, path, method, state.narrator, () => state.steppedUp)) return;
+
+    // WP 11.2: the category-suggestion settings (GET; every write behind the step-up).
+    if (
+      await handleCategorySuggestions(
+        route,
+        path,
+        method,
+        state.categorySuggestions,
+        () => state.steppedUp,
+      )
+    ) {
+      return;
+    }
 
     if (path === '/api/auth/session') {
       if (!state.authenticated) {

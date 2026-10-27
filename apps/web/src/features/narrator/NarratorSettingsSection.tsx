@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
+import { CategorySuggestionsCard } from '../category-suggestions/CategorySuggestionsCard.tsx';
 import { ActiveProviderForm } from './ActiveProviderForm.tsx';
 import { ControlChecksSection } from './ControlChecksSection.tsx';
 import { NarratorProviderCard } from './NarratorProviderCard.tsx';
@@ -13,7 +14,9 @@ import { NARRATOR_PROVIDERS, useNarratorSettingsQuery } from './narrator-api.ts'
  * The narrator's provider as a radio group (Ollama, OpenAI, OpenRouter, Anthropic, Off), then one card per
  * provider: its consent (hosted), its key, its model, and Test. Every write asks for the passkey. Nothing on this
  * screen can show a key: the api returns its last four characters at most. Below the cards, the controls self-test
- * (WP 10.16, `ControlChecksSection`).
+ * (WP 10.16, `ControlChecksSection`), then WP 11.2's category suggestions (`CategorySuggestionsCard`): the model
+ * that suggests a category for what the categoriser could not decide, its measurement against the gate, the Enable
+ * switch, the payload approval and, under a hosted narrator, its own consent.
  */
 export function NarratorSettingsSection() {
   const query = useNarratorSettingsQuery();
@@ -57,6 +60,7 @@ export function NarratorSettingsSection() {
             })}
           </div>
           <ControlChecksSection />
+          <CategorySuggestionsCard />
         </>
       )}
     </section>

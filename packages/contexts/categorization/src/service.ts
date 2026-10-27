@@ -61,6 +61,12 @@ export interface CategorizeResult {
   readonly written: number;
   readonly skipped: number;
   readonly bySource: Readonly<Record<string, number>>;
+  /**
+   * WP 11.2: abstentions this pass recorded or changed — new residue a model
+   * suggestion could be asked about. `0` for a preview and for a re-run that
+   * reached the working already stored.
+   */
+  readonly abstained: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +246,7 @@ export async function categorizeTransactions(
     const bySource: Record<string, number> = {};
     let considered = 0;
     let skipped = 0;
+    let abstained = 0;
 
     for await (const transaction of streamTransactions(port, {
       userId: context.userId,
@@ -276,7 +283,7 @@ export async function categorizeTransactions(
         // anyway, in `category_abstentions`, so the Inbox's "why" is read
         // from what decided rather than re-decided. A preview writes nothing.
         if (options.dryRun !== true && decision.source === 'none') {
-          await recordAbstention(executor, transaction.id, decision, context);
+          if (await recordAbstention(executor, transaction.id, decision, context)) abstained += 1;
         }
         skipped += 1;
         continue;
@@ -325,7 +332,7 @@ export async function categorizeTransactions(
       );
     }
 
-    return { considered, written: changed.length, skipped, bySource };
+    return { considered, written: changed.length, skipped, bySource, abstained };
   });
 }
 
@@ -351,7 +358,7 @@ interface CurrentAssignment {
   version: number;
 }
 
-async function currentAssignment(
+export async function currentAssignment(
   executor: CategorizationExecutor,
   transactionId: string,
 ): Promise<CurrentAssignment | null> {
@@ -444,10 +451,10 @@ async function recordAbstention(
   transactionId: string,
   decision: Decision,
   context: CategorizationContext,
-): Promise<void> {
+): Promise<boolean> {
   const current = await currentAssignment(executor, transactionId);
-  if (current !== null) return;
-  await executor.execute(sql`
+  if (current !== null) return false;
+  const written = await executor.execute<{ id: string }>(sql`
     INSERT INTO category_abstentions (id, user_id, transaction_id, evidence, decided_at)
     VALUES (
       ${newId()}, ${context.userId}, ${transactionId},
@@ -458,7 +465,9 @@ async function recordAbstention(
       evidence = EXCLUDED.evidence,
       decided_at = EXCLUDED.decided_at
     WHERE category_abstentions.evidence IS DISTINCT FROM EXCLUDED.evidence
+    RETURNING id
   `);
+  return written.rows.length > 0;
 }
 
 /** An assignment now holds the working; the abstention it replaces is stale. */
@@ -636,15 +645,45 @@ export async function confirmAssignment(
         { categoryKey: input.categoryKey },
       );
     }
+    return recordConfirmation(
+      executor,
+      {
+        transactionId: input.transactionId,
+        categoryId,
+        categoryKey: input.categoryKey,
+        transaction: input.transaction,
+      },
+      context,
+    );
+  });
+}
 
-    const now = context.clock.now();
-    const current = await currentAssignment(executor, input.transactionId);
-    if (current !== null) {
-      await executor.execute(
-        sql`UPDATE category_assignments SET is_current = FALSE WHERE id = ${current.id}`,
-      );
-    }
-    await executor.execute(sql`
+/**
+ * `confirmAssignment`'s three writes, inside the caller's transaction, for a
+ * category already resolved to this holder's row. Shared with WP 11.2's
+ * learning path (`learn.ts`), which receives the holder's pick as a category
+ * *id* from the ledger overlay — including a category the holder created,
+ * which `isAssignableKey` (the shipped taxonomy's leaves) does not know.
+ */
+export async function recordConfirmation(
+  executor: CategorizationExecutor,
+  input: {
+    readonly transactionId: string;
+    readonly categoryId: string;
+    readonly categoryKey: string;
+    readonly transaction: CategorizableTransaction;
+  },
+  context: CategorizationContext,
+): Promise<ConfirmResult> {
+  const categoryId = input.categoryId;
+  const now = context.clock.now();
+  const current = await currentAssignment(executor, input.transactionId);
+  if (current !== null) {
+    await executor.execute(
+      sql`UPDATE category_assignments SET is_current = FALSE WHERE id = ${current.id}`,
+    );
+  }
+  await executor.execute(sql`
       INSERT INTO category_assignments
         (id, user_id, transaction_id, category_id, source, confidence, rule_id, evidence,
          decided_at, version, is_current, confirmed_at)
@@ -654,42 +693,42 @@ export async function confirmAssignment(
         ${now.toISOString()}::timestamptz, ${(current?.version ?? 0) + 1}, TRUE, ${now.toISOString()}::timestamptz
       )
     `);
-    await clearAbstention(executor, context.userId, input.transactionId);
+  await clearAbstention(executor, context.userId, input.transactionId);
 
-    // --- 2. the classifier's corpus ---------------------------------------
-    // `classifierFeaturesOf` over `decisionInputOf`: the features counted here
-    // are, by construction, the features `decide` will score (WP 11.1 added
-    // the provider primary and the day of month, and both reach training only
-    // because this goes through the same function).
-    const features = classifierFeaturesOf(decisionInputOf(input.transaction));
-    for (const feature of features) {
-      await executor.execute(sql`
+  // --- 2. the classifier's corpus ---------------------------------------
+  // `classifierFeaturesOf` over `decisionInputOf`: the features counted here
+  // are, by construction, the features `decide` will score (WP 11.1 added
+  // the provider primary and the day of month, and both reach training only
+  // because this goes through the same function).
+  const features = classifierFeaturesOf(decisionInputOf(input.transaction));
+  for (const feature of features) {
+    await executor.execute(sql`
         INSERT INTO classifier_examples (id, user_id, feature, category_id, count, updated_at)
         VALUES (${newId()}, ${context.userId}, ${feature}, ${categoryId}, 1, ${now.toISOString()}::timestamptz)
         ON CONFLICT (user_id, feature, category_id)
         DO UPDATE SET count = classifier_examples.count + 1, updated_at = EXCLUDED.updated_at
       `);
-    }
+  }
 
-    // --- 3. the merchant's default ----------------------------------------
-    let merchantDefaultUpdated = false;
-    let merchantSupportCount = 0;
-    const merchantId = input.transaction.merchantId;
-    if (merchantId !== null) {
-      // Support is *accumulated* rather than recounted: a confirmation is by
-      // construction one more agreeing observation, and the `ON CONFLICT` below
-      // does the arithmetic in one statement. The counter is a cache of "how
-      // many confirmed assignments agree", and the confirmed assignments are
-      // still the source of truth if it ever needs rebuilding.
-      const cleaned = cleanDescriptor(
-        input.transaction.rawDescriptor || input.transaction.payee,
-      ).cleaned;
-      const profile = await executor.execute<{
-        id: string;
-        default_category_id: string | null;
-        default_support_count: number;
-        user_locked: boolean;
-      }>(sql`
+  // --- 3. the merchant's default ----------------------------------------
+  let merchantDefaultUpdated = false;
+  let merchantSupportCount = 0;
+  const merchantId = input.transaction.merchantId;
+  if (merchantId !== null) {
+    // Support is *accumulated* rather than recounted: a confirmation is by
+    // construction one more agreeing observation, and the `ON CONFLICT` below
+    // does the arithmetic in one statement. The counter is a cache of "how
+    // many confirmed assignments agree", and the confirmed assignments are
+    // still the source of truth if it ever needs rebuilding.
+    const cleaned = cleanDescriptor(
+      input.transaction.rawDescriptor || input.transaction.payee,
+    ).cleaned;
+    const profile = await executor.execute<{
+      id: string;
+      default_category_id: string | null;
+      default_support_count: number;
+      user_locked: boolean;
+    }>(sql`
         INSERT INTO merchant_profiles
           (id, user_id, ledger_merchant_id, canonical_name, fingerprint,
            descriptor_patterns, default_category_id, default_support_count, last_seen_at)
@@ -722,53 +761,52 @@ export async function confirmAssignment(
         RETURNING id, default_category_id, default_support_count, user_locked
       `);
 
-      const row = profile.rows[0];
-      if (row !== undefined) {
-        merchantDefaultUpdated = true;
-        merchantSupportCount = row.default_support_count;
-        // Emitted at the crossing, not on every confirmation: the fact worth
-        // reacting to is "this merchant became automatic", and saying it once is
-        // the difference between the app feeling like it learned and nagging.
-        if (row.default_support_count === DEFAULT_MERCHANT_SUPPORT) {
-          await appendEvent(
-            outboxOf(executor),
-            MerchantDefaultLearned.create(
-              {
-                merchantProfileId: row.id,
-                ledgerMerchantId: merchantId,
-                categoryId,
-                supportCount: row.default_support_count,
-                locked: row.user_locked,
-              },
-              { userId: context.userId, correlationId: context.correlationId },
-            ),
-          );
-        }
+    const row = profile.rows[0];
+    if (row !== undefined) {
+      merchantDefaultUpdated = true;
+      merchantSupportCount = row.default_support_count;
+      // Emitted at the crossing, not on every confirmation: the fact worth
+      // reacting to is "this merchant became automatic", and saying it once is
+      // the difference between the app feeling like it learned and nagging.
+      if (row.default_support_count === DEFAULT_MERCHANT_SUPPORT) {
+        await appendEvent(
+          outboxOf(executor),
+          MerchantDefaultLearned.create(
+            {
+              merchantProfileId: row.id,
+              ledgerMerchantId: merchantId,
+              categoryId,
+              supportCount: row.default_support_count,
+              locked: row.user_locked,
+            },
+            { userId: context.userId, correlationId: context.correlationId },
+          ),
+        );
       }
     }
+  }
 
-    await appendEvent(
-      outboxOf(executor),
-      AssignmentsChanged.create(
-        {
-          transactionIds: [input.transactionId],
-          count: 1,
-          bySource: { user: 1 },
-          trigger: 'confirm',
-          ruleId: null,
-        },
-        { userId: context.userId, correlationId: context.correlationId },
-      ),
-    );
+  await appendEvent(
+    outboxOf(executor),
+    AssignmentsChanged.create(
+      {
+        transactionIds: [input.transactionId],
+        count: 1,
+        bySource: { user: 1 },
+        trigger: 'confirm',
+        ruleId: null,
+      },
+      { userId: context.userId, correlationId: context.correlationId },
+    ),
+  );
 
-    return {
-      transactionId: input.transactionId,
-      categoryKey: input.categoryKey,
-      merchantDefaultUpdated,
-      merchantSupportCount,
-      featuresCounted: features.length,
-    };
-  });
+  return {
+    transactionId: input.transactionId,
+    categoryKey: input.categoryKey,
+    merchantDefaultUpdated,
+    merchantSupportCount,
+    featuresCounted: features.length,
+  };
 }
 
 /**

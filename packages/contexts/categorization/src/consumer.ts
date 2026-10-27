@@ -35,6 +35,7 @@ import {
 } from '@core/platform';
 import type { CategorizationDatabase } from './db.ts';
 import type { LedgerPort } from './ledger-port.ts';
+import { CATEGORY_CHOSEN_EVENT, learnFromPick } from './learn.ts';
 import { categorizeTransactions, type CategorizeOptions } from './service.ts';
 
 /**
@@ -51,6 +52,8 @@ import { categorizeTransactions, type CategorizeOptions } from './service.ts';
 export const CONSUMED_EVENT_TYPES = [
   'ledger.TransactionsUpserted',
   'ledger.TransactionSupersededByPosted',
+  // WP 11.2: the holder's pick, which tiers 3 and 5 learn from (`learn.ts`).
+  CATEGORY_CHOSEN_EVENT,
 ] as const;
 
 /**
@@ -96,14 +99,52 @@ export function transactionIdsOf(event: EventEnvelope): readonly string[] {
   return [];
 }
 
+/** WP 11.2: what a sync pass that left new residue tells the composition root. */
+export interface ResidueRecorded {
+  readonly userId: string;
+  /** Abstentions recorded or changed by this pass. Always > 0 when called. */
+  readonly abstained: number;
+  /** The pump's transaction: a job enqueued here commits with the offset, or not at all. */
+  readonly tx: ConsumerContext['tx'];
+  readonly correlationId: string;
+  readonly causationId: string;
+}
+
 export function createCategorizationConsumer(dependencies: {
   readonly database: CategorizationDatabase;
   readonly port: LedgerPort;
   readonly options?: CategorizeOptions;
+  /**
+   * WP 11.2: called after a sync pass that recorded new residue, so the
+   * composition root can enqueue the suggestion job (`SUGGEST_JOB_KIND`) — in
+   * the worker, never in the request path, never blocking the ledger. Absent
+   * (the default, and every process with no suggestion wiring): nothing.
+   */
+  readonly onResidueRecorded?: (input: ResidueRecorded) => Promise<void>;
 }): RegisteredConsumer {
   return registerConsumer(
     CONSUMER_NAME,
     async (event: EventEnvelope, context: ConsumerContext) => {
+      if (event.eventType === CATEGORY_CHOSEN_EVENT) {
+        const payload = event.payload as { transactionId?: string; categoryId?: string };
+        if (payload.transactionId === undefined || payload.categoryId === undefined) return;
+        const outcome = await learnFromPick(
+          dependencies.database,
+          dependencies.port,
+          { transactionId: payload.transactionId, categoryId: payload.categoryId },
+          {
+            userId: event.userId,
+            clock: context.clock,
+            correlationId: event.correlationId,
+            causationId: event.id,
+          },
+        );
+        context.logger.info(
+          { consumer: CONSUMER_NAME, eventType: event.eventType, outcome },
+          'learned from a category pick',
+        );
+        return;
+      }
       const transactionIds = transactionIdsOf(event);
       if (transactionIds.length === 0) return;
 
@@ -121,6 +162,16 @@ export function createCategorizationConsumer(dependencies: {
         },
         { ...dependencies.options, trigger: 'sync' },
       );
+
+      if (result.abstained > 0 && dependencies.onResidueRecorded !== undefined) {
+        await dependencies.onResidueRecorded({
+          userId: event.userId,
+          abstained: result.abstained,
+          tx: context.tx,
+          correlationId: event.correlationId,
+          causationId: event.id,
+        });
+      }
 
       context.logger.info(
         {

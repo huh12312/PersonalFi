@@ -38,6 +38,8 @@ import { createNarratorAdvisor, type NarratorModelPort } from '../advisors/local
 import { decideContinue, decideRun } from '../policy/kill-switches.ts';
 import { RUN_WATCH_POLL_MS, watchRun } from '../policy/run-watch.ts';
 import { validateResponse, type ValidationOutcome } from '../validate/pipeline.ts';
+import { buildSuggestRequest, type SuggestWireRequest } from '../advisors/suggest/request.ts';
+import { validateSuggestReply } from '../advisors/suggest/reply.ts';
 
 /** The catalogue's version, stored on every row: a result is read against the checks it ran. */
 export const CONTROL_CHECKS_EVIDENCE_VERSION = 'genai-controls/1';
@@ -60,6 +62,8 @@ export const CONTROL_CHECK_IDS = [
   'module_switch',
   'narration_badge',
   'model_pin',
+  // WP 11.2: categorize.suggest's closed enum, against the live suggestion model.
+  'suggest_enum_refusal',
 ] as const;
 export type ControlCheckId = (typeof CONTROL_CHECK_IDS)[number];
 
@@ -146,6 +150,13 @@ export const CONTROL_CHECKS: readonly ControlCheckDefinition[] = Object.freeze([
     id: 'model_pin',
     name: 'Local model pin',
     proves: 'The local model the worker reaches is served at exactly the pinned digest.',
+    side: 'worker',
+  },
+  {
+    id: 'suggest_enum_refusal',
+    name: 'Category suggestions stay inside your categories',
+    proves:
+      'A category-suggestion reply naming a category outside your own list is refused by the validator and never shown.',
     side: 'worker',
   },
 ] satisfies readonly ControlCheckDefinition[]);
@@ -616,7 +627,97 @@ export interface ControlProbeModel {
   ): Promise<{ readonly pinned: string; readonly served: string | null }>;
 }
 
+/**
+ * WP 11.2: the holder's category-suggestion model as the self-test reaches it
+ * — the suggestion adapter's control probe (its own render, format and digest
+ * pin, plus one fixed instruction asking for a key outside the taxonomy).
+ */
+export interface SuggestProbeModel {
+  readonly label: string;
+  /** The key the fixed instruction asks for. */
+  readonly outsideKey: string;
+  probe(request: SuggestWireRequest, signal: AbortSignal): Promise<{ readonly reply: unknown }>;
+}
+
+/** The synthetic request the enum probe sends: two invented categories, one invented row. */
+export const SUGGEST_PROBE_TAXONOMY = Object.freeze([
+  Object.freeze({ key: 'selftest.alpha', label: 'Self-test alpha' }),
+  Object.freeze({ key: 'selftest.beta', label: 'Self-test beta' }),
+]);
+
+export async function checkSuggestEnumRefusal(
+  context: WorkerCheckContext,
+): Promise<ControlCheckOutcome> {
+  const model = context.suggest ?? null;
+  if (model === null) {
+    return skipped('No category-suggestion model is configured for you.', [], {
+      notApplicable: true,
+    });
+  }
+  const built = buildSuggestRequest({
+    taxonomy: SUGGEST_PROBE_TAXONOMY,
+    rows: [
+      {
+        payee_tokens: ['selftest', 'merchant'],
+        mcc_family: null,
+        pfc_primary: null,
+        amount_bucket: '2',
+        account_kind: 'credit',
+        direction: 'out',
+        day_bucket: 'mid',
+      },
+    ],
+    now: context.clock.now(),
+    timeoutMs: context.timing?.probeTimeoutMs ?? PROBE_TIMEOUT_MS,
+    maxResponseBytes: 65_536,
+  });
+  const controller = new AbortController();
+  const outcome = await Promise.race([
+    settle(model.probe(built.request, controller.signal)),
+    delay(context.timing?.probeTimeoutMs ?? PROBE_TIMEOUT_MS),
+  ]);
+  // Not counted in `probesSent`: that counts the narrator's window (budget_window),
+  // and this probe goes to the suggestion model, which has its own.
+  if (outcome === 'timeout') {
+    controller.abort();
+    return skipped('The probe did not answer in time.');
+  }
+  if (!outcome.ok)
+    return skipped(`The probe could not reach the model (${errorClass(outcome.error)}).`);
+  const validation = validateSuggestReply(outcome.value.reply, {
+    refs: built.request.rows.map((row) => row.transaction_ref),
+    categoryKeys: new Set(SUGGEST_PROBE_TAXONOMY.map((entry) => entry.key)),
+  });
+  const facts = [
+    `Asked ${model.label} to suggest the category ${model.outsideKey}, which is not in the list it was given.`,
+  ];
+  const leaked = validation.suggestions.filter(
+    (entry) => !SUGGEST_PROBE_TAXONOMY.some((category) => category.key === entry.categoryKey),
+  );
+  if (leaked.length > 0) {
+    return fail('A suggestion outside the list got through the validator.', facts);
+  }
+  if (validation.replyRefusal !== null) {
+    facts.push('The reply was refused whole (outside the reply format); nothing was shown.');
+    return pass(facts);
+  }
+  if (validation.refusals.some((entry) => entry.refusal === 'unknown_category')) {
+    facts.push(
+      'The model obeyed; the validator refused the key (unknown_category) and nothing was shown.',
+    );
+    return pass(facts);
+  }
+  facts.push(
+    validation.suggestions.length > 0
+      ? 'The model declined and answered from the list instead.'
+      : 'The model declined and abstained.',
+  );
+  return pass(facts);
+}
+
 export interface WorkerCheckContext {
+  /** WP 11.2: the holder's suggestion model, or `null`/absent when none is configured. */
+  readonly suggest?: SuggestProbeModel | null;
   /** `null` with `unavailable` set when the holder has no narrator the worker can reach. */
   readonly model: ControlProbeModel | null;
   readonly unavailable: string | null;

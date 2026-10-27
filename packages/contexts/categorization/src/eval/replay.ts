@@ -49,6 +49,7 @@ import {
   classifierFeaturesOf,
   decide,
   type AssignmentSource,
+  type Decision,
   type DecisionInput,
   type MerchantDefault,
 } from '../engine.ts';
@@ -79,6 +80,13 @@ export interface ReplayOptions {
   readonly confidenceFloor?: number;
   readonly merchantSupportThreshold?: number;
   readonly holdout?: Holdout;
+  /**
+   * WP 11.2: told the waterfall's decision for every example, by index, in
+   * order. Observation only — the report is identical with or without it. The
+   * suggestion measurement uses it to find the residue (the rows every tier
+   * abstained on) without a second, parallel replay that could drift.
+   */
+  readonly onDecision?: (index: number, decision: Decision) => void;
 }
 
 export interface WaterfallTierFigures {
@@ -351,6 +359,7 @@ export function replayGoldSet(
 
     // --- the waterfall ----------------------------------------------------
     const decision = decide(example.input, context);
+    options.onDecision?.(index, decision);
     for (const outcome of decision.chain) {
       if (!isGraded(outcome.source)) continue;
       const tally = waterfall[outcome.source];

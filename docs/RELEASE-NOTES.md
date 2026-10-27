@@ -9,6 +9,50 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.17: category suggestions from the local model, and picks that teach
+
+**Status:** a patch release on v0.9.16. The tag `v0.9.17` is pushed by the maintainer once CI is green.
+Package 11.2 of the Phase 11 programme (11 §5).
+
+### Upgrading to v0.9.17
+
+```bash
+git pull
+just upgrade
+```
+
+Migrations `0055_category_suggestions` (expand-only: four nullable columns on the abstention table
+and three new, empty tables — the per-merchant answer cache, the precision-gate measurements, and
+the suggestion settings) and `0056_snapshot_grant_scopes_v1_8` (expand-only: the advisor scope
+list widened by one, advisor contract 1.8.0). Nothing is backfilled automatically.
+
+### Manual steps
+
+None. Optional: `just categorization-learn-backfill holder="<name>"` once, to teach the merchant
+defaults and the classifier from the categories you picked before this release; and, to offer a
+second, smaller local model for suggestions, set `LOCAL_MODEL_CLASSIFIER_NAME` and
+`LOCAL_MODEL_CLASSIFIER_DIGEST` ([RUNBOOK](../RUNBOOK.md#category-suggestions-v0917)).
+
+### What changed
+
+- **Your picks teach.** Picking a category — one row, a bulk edit, or Confirm on a suggestion — now
+  also counts towards the merchant's default (three agreeing picks and the merchant files itself)
+  and the classifier's examples. Before, a pick changed that row only.
+- **Category suggestions.** Where every tier abstains, the local model may suggest a category from
+  your own list with a one-line reason: "Suggested by the model: <category> — <reason>", with
+  Confirm and Not this, in the Inbox and the transaction list. Nothing is filed without the tap.
+- **Off until measured.** Settings, Language model, Category suggestions: choose the model, preview
+  and approve the payload, Measure on your own history, and Enable — which stays refused below
+  85 % precision over 20 scored rows. Nothing leaves this machine; a hosted provider needs a
+  separate consent that says merchant names would leave it, and ships unticked.
+- **Self-test.** The GenAI controls self-test gains a twelfth check: a suggestion naming a category
+  outside your list is refused.
+- **API.** New: `/categories/suggestions/settings`, `/preview`, `/approve`, `/measure`,
+  `/enabled`, `/hosted-consent`, and `POST /transactions/{id}/suggestion/reject`;
+  `GET /transactions/explanations` items gain `suggestion`. The advisor contract gains the
+  `transactions.residue` scope (1.8.0, strictly additive). The generic advisor switch refuses to
+  turn `categorize.suggest` on (409).
+
 ## v0.9.16: a classifier that abstains when it should, "make this a rule?", and why a row is uncategorised
 
 **Status:** a patch release on v0.9.15. The tag `v0.9.16` is pushed by the maintainer once CI is green.

@@ -372,7 +372,7 @@ export interface HostedModelAdapter {
   };
 }
 
-interface VendorReply {
+export interface VendorReply {
   readonly content: string | null;
   readonly refused: boolean;
   readonly truncated: boolean;
@@ -390,13 +390,19 @@ function numberOr(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-/** The request body, per vendor. `messages` is the rendered prompt (system then user). */
+/**
+ * The request body, per vendor. `messages` is the rendered prompt (system then
+ * user). `schemaName` is OpenAI's and OpenRouter's `json_schema.name`
+ * (Anthropic's format has none): `narration` for the narrator, and WP 11.2's
+ * category suggestions (`suggest.ts`) name theirs.
+ */
 export function hostedRequestBody(
   provider: HostedProvider,
   model: string,
   messages: readonly PromptMessage[],
   format: Readonly<Record<string, unknown>>,
   maxOutputTokens: number,
+  schemaName = 'narration',
 ): Record<string, unknown> {
   if (provider === 'anthropic') {
     return {
@@ -417,7 +423,7 @@ export function hostedRequestBody(
     messages: messages.map((message) => ({ role: message.role, content: message.content })),
     response_format: {
       type: 'json_schema',
-      json_schema: { name: 'narration', strict: true, schema: format },
+      json_schema: { name: schemaName, strict: true, schema: format },
     },
   };
   if (provider === 'openai') {
@@ -509,10 +515,50 @@ export function parseVendorReply(provider: HostedProvider, body: string): Vendor
   };
 }
 
-export function createHostedModelAdapter(
+/** What one hosted call returns: the vendor's reply in its documented shape. */
+export interface HostedCallResult {
+  readonly reply: VendorReply;
+  readonly status: number;
+  readonly bodyBytes: number;
+}
+
+/**
+ * The part of a hosted adapter that is not the narration (WP 11.2): the
+ * config checks, the one-host egress policy, the window, the key, the POST
+ * and its error mapping and redaction. `createHostedModelAdapter` and the
+ * category-suggestion adapter (`suggest.ts`) are each built over one, so the
+ * two cannot drift on any of that; each brings its own prompt, reply format
+ * and `json_schema` name. Not exported from the package index.
+ */
+export interface HostedCaller {
+  readonly provider: HostedProvider;
+  readonly model: string;
+  readonly host: string;
+  readonly url: string;
+  /** `provider:model`. */
+  readonly label: string;
+  readonly policy: EgressPolicy;
+  readonly budget: HostedBudget;
+  readonly clock: Clock;
+  readonly logger: LocalModelLogger;
+  /** One POST. Throws `HostedModelError`; logs the provider's words redacted. */
+  call(
+    messages: readonly PromptMessage[],
+    signal: AbortSignal,
+    timeoutMs: number,
+    maxOutputTokens: number,
+    stage: { value: string },
+    format: Readonly<Record<string, unknown>>,
+    schemaName: string,
+  ): Promise<HostedCallResult>;
+  /** Calls torn down by the caller's signal while on the wire. */
+  aborts(): number;
+}
+
+export function createHostedCaller(
   config: HostedModelConfig,
   deps: HostedModelDeps = {},
-): HostedModelAdapter {
+): HostedCaller {
   if (!(HOSTED_PROVIDERS as readonly string[]).includes(config.provider)) {
     throw new TypeError(`unknown hosted provider ${String(config.provider)}`);
   }
@@ -543,16 +589,7 @@ export function createHostedModelAdapter(
     maxResponseBytes: HOSTED_MAX_RESPONSE_BYTES,
     timeoutMs: config.timeoutMs,
   });
-  const format = hostedNarrationFormat(provider);
   const label = `${provider}:${config.model}`;
-  const maxPromptBytes = DEFAULT_GENERATION_OPTIONS.maxPromptBytes;
-  const promptTemplateHash = `sha256:${configHash({
-    template: PROMPT_TEMPLATE_HASH,
-    format,
-    provider,
-    model: config.model,
-    options: { max_output_tokens: HOSTED_MAX_OUTPUT_TOKENS },
-  })}`;
 
   let abortsObserved = 0;
 
@@ -563,7 +600,9 @@ export function createHostedModelAdapter(
     timeoutMs: number,
     maxOutputTokens: number,
     stage: { value: string },
-  ): Promise<{ reply: VendorReply; status: number; bodyBytes: number }> {
+    format: Readonly<Record<string, unknown>>,
+    schemaName: string,
+  ): Promise<HostedCallResult> {
     if (signal.aborted)
       throw new HostedModelError('aborted', 'the run was cancelled before the call');
     if (!budget.take(clock.nowMs())) {
@@ -591,7 +630,7 @@ export function createHostedModelAdapter(
       );
     }
     const body = JSON.stringify(
-      hostedRequestBody(provider, config.model, messages, format, maxOutputTokens),
+      hostedRequestBody(provider, config.model, messages, format, maxOutputTokens, schemaName),
     );
 
     stage.value = 'call';
@@ -695,6 +734,48 @@ export function createHostedModelAdapter(
       throw new HostedModelError('model_refused', 'the model declined to answer', { status });
     }
     return { reply, status, bodyBytes: response.bytesRead };
+  }
+
+  return Object.freeze({
+    provider,
+    model: config.model,
+    host,
+    url,
+    label,
+    policy,
+    budget,
+    clock,
+    logger,
+    call,
+    aborts: () => abortsObserved,
+  });
+}
+
+export function createHostedModelAdapter(
+  config: HostedModelConfig,
+  deps: HostedModelDeps = {},
+): HostedModelAdapter {
+  const caller = createHostedCaller(config, deps);
+  const { provider, host, url, label, policy, budget, clock, logger } = caller;
+  const format = hostedNarrationFormat(provider);
+  const maxPromptBytes = DEFAULT_GENERATION_OPTIONS.maxPromptBytes;
+  const promptTemplateHash = `sha256:${configHash({
+    template: PROMPT_TEMPLATE_HASH,
+    format,
+    provider,
+    model: config.model,
+    options: { max_output_tokens: HOSTED_MAX_OUTPUT_TOKENS },
+  })}`;
+
+  /** The narrator's call: its format, its schema name. */
+  function call(
+    messages: readonly PromptMessage[],
+    signal: AbortSignal,
+    timeoutMs: number,
+    maxOutputTokens: number,
+    stage: { value: string },
+  ): Promise<HostedCallResult> {
+    return caller.call(messages, signal, timeoutMs, maxOutputTokens, stage, format, 'narration');
   }
 
   async function run(request: LocalModelRequest, signal: AbortSignal): Promise<unknown> {
@@ -849,7 +930,7 @@ export function createHostedModelAdapter(
     probe,
     controlProbe: (id: ControlProbeId, request: LocalModelRequest, signal: AbortSignal) =>
       execute(request, signal, id),
-    aborts: () => abortsObserved,
+    aborts: caller.aborts,
     budget,
     egress: Object.freeze({
       kind: 'hosted' as const,

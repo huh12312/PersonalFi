@@ -113,6 +113,25 @@ export const TransactionSupersededByPosted = defineEvent({
   }),
 });
 
+export const TransactionCategoryChosen = defineEvent({
+  type: 'ledger.TransactionCategoryChosen',
+  aggregateType: 'transaction',
+  description:
+    'The holder put a transaction in a category by hand: `user_category_id` was set to a new, ' +
+    'non-null value through the overlay (a pick in the list, the detail sheet, a bulk edit, or ' +
+    'Confirm on a suggestion). Emitted in the same transaction as the overlay write (WP 11.2). ' +
+    'Categorization consumes it and learns from the pick (its classifier examples and the ' +
+    "merchant's default) without the ledger knowing that context exists. Clearing a category " +
+    '(null) or re-saving the same one says nothing new and emits nothing. Ids only: the category ' +
+    'id is opaque here, as the overlay column is.',
+  schema: z.object({
+    transactionId: uuid,
+    categoryId: uuid,
+    /** What the overlay held before, or null when the holder had not picked one. */
+    previousCategoryId: uuid.nullable(),
+  }),
+});
+
 /**
  * Registered at the composition root. Exported as a list so `apps/api` cannot
  * forget one: an event type that is appended but not registered is invisible to
@@ -125,6 +144,8 @@ export const LEDGER_EVENTS: readonly EventDefinition[] = Object.freeze([
   TransactionsUpserted,
   TransferPaired,
   TransactionSupersededByPosted,
+  // WP 11.2: a hand pick, which @ctx/categorization learns from.
+  TransactionCategoryChosen,
   // WP 9.2: the holder's overlay on an account (defined beside its store).
   AccountOverrideChanged,
 ]);

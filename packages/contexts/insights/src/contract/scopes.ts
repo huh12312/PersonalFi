@@ -70,6 +70,11 @@ export const ADVISOR_SCOPES = [
   // above was: the published enum is positional. Migration 0054 widens
   // `snapshot_grants_scope_check` in the same change.
   'categorization.rule_candidates',
+  // WP 11.2, advisor contract 1.8.0. `categorize.suggest`'s input: the
+  // classifier's own features per uncategorised row, for a local model to
+  // propose a category from (11 §3.1's residue row). Appended, the enum is
+  // positional; migration 0056 widens `snapshot_grants_scope_check` with it.
+  'transactions.residue',
 ] as const;
 
 export type AdvisorScope = (typeof ADVISOR_SCOPES)[number];
@@ -390,6 +395,42 @@ export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
     minimisation: minimisation({}),
     // WP 11.1: `#ruleCandidates`, over `CategorizationPort.listRuleCandidates`.
     sourcedInPhase2: true,
+  }),
+  Object.freeze({
+    // WP 11.2, advisor contract 1.8.0. The abstained residue, for
+    // `categorize.suggest` — one row per merchant the six tiers could not
+    // place and the model has not been asked about at this taxonomy version,
+    // at most fifty a request. Each row is the classifier's own features,
+    // read off `classifierFeaturesOf` by `@ctx/categorization`'s
+    // `residueFeaturesOf` (the MCC leaf dropped): a field the classifier does
+    // not see cannot reach the model.
+    //
+    // **Merchant words cross untokenised** — they are the only thing a model
+    // could categorise from — which is why this is the most sensitive row a
+    // `local_model` advisor may be granted, why `externalAllowed` is false,
+    // and why D22 keeps it on the local model: a hosted provider sees it only
+    // under the separate consent whose text says merchant names leave this
+    // machine (shipped unticked). Fenced and sanitised on the way into the
+    // prompt like every other string (03 §8.2).
+    //
+    // `sourcedInPhase2: false`: `SnapshotBuilder` emits no block for it. The
+    // rows are chosen by the merchant cache, per run, which a whole-history
+    // snapshot cannot express; `advisors/suggest/request.ts` builds the
+    // payload, and the preview shows exactly that payload.
+    scope: 'transactions.residue',
+    sensitivity: 8,
+    key: 'transactions_residue',
+    yields:
+      'One row per uncategorised merchant: a batch-local ref, the normalised payee tokens, the ' +
+      'MCC family, the provider category primary, the classifier’s amount bucket, the account ' +
+      'kind, the direction and the day-of-month bucket; and the holder’s category keys and labels.',
+    drops:
+      'The memo, every account and transaction id, the raw descriptor beyond the normaliser’s ' +
+      'tokens, exact amounts and dates.',
+    externalAllowed: false,
+    requiresPerRunConsent: false,
+    minimisation: minimisation({ bucketAmounts: true, tokeniseMerchants: false }),
+    sourcedInPhase2: false,
   }),
   Object.freeze({
     scope: 'market.watchlist',

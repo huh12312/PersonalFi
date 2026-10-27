@@ -18,6 +18,14 @@ import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installBudgetCategoryMocks } from './support/mock-budget.ts';
 import { installCategoryMocks } from './support/mock-categories.ts';
 import { seedControlCheckRun, seedRunningControlCheckRun } from './support/mock-narrator.ts';
+import {
+  ABOVE_GATE_RESULT,
+  BELOW_GATE_RESULT,
+  installCategorySuggestionMocks,
+  seedSuggestionResult,
+  SUGGESTED_MERCHANT,
+  SUGGESTION_CHIP,
+} from './support/mock-category-suggestions.ts';
 import { ABSTAINED_LINE, installRuleSuggestionMocks } from './support/mock-rule-suggestions.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
@@ -1215,7 +1223,7 @@ test.describe('WP 10.16 control checks and the controls on the backup line', () 
     await expect(section.getByTestId('control-checks-table')).toBeVisible();
     if (where === 'settings, running') {
       await expect(section.getByTestId('control-checks-progress')).toHaveText(
-        'Running control checks… 3 of 11 checks done.',
+        'Running control checks… 3 of 12 checks done.',
       );
       return;
     }
@@ -1350,6 +1358,108 @@ test.describe('WP 11.1 explanation line and rule suggestion', () => {
         expect(await motionOffenders(page)).toEqual([]);
       });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7m. WP 11.2: the model's category suggestion on /inbox and /transactions, and its settings card
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep's fixtures carry no suggestion, so this block layers WP 11.2's
+ * (`support/mock-category-suggestions.ts`) over the sweep's and holds each screen with it present: the Inbox and the
+ * transaction list with the chip (Confirm / Not this) on Blue Bottle Coffee, and Settings › Language model with the
+ * Category suggestions card measured below the gate (Enable held, its reason in words) and past it, the payload
+ * shown — in both themes, at 1280 and 320 px, at 200 % zoom with 1.4.12 text spacing, and with reduced motion.
+ */
+test.describe('WP 11.2 category suggestions', () => {
+  type Where = '/inbox' | '/transactions' | 'settings, below the gate' | 'settings, past the gate';
+  const WHERE: readonly Where[] = [
+    '/inbox',
+    '/transactions',
+    'settings, below the gate',
+    'settings, past the gate',
+  ];
+
+  async function open(page: Page, where: Where): Promise<void> {
+    const mocks = await installSweepMocks(page);
+    await installCategorySuggestionMocks(page);
+    if (where === '/inbox' || where === '/transactions') {
+      await visit(page, where);
+      await hideDevtools(page);
+      await expect(page.getByTestId('suggestion-chip-text').first()).toHaveText(SUGGESTION_CHIP);
+      if (where === '/inbox') {
+        await expect(page.getByTestId('suggestion-chip').first()).toBeVisible();
+        await expect(page.getByText(SUGGESTED_MERCHANT).first()).toBeVisible();
+      }
+      return;
+    }
+    seedSuggestionResult(
+      mocks.categorySuggestions,
+      where === 'settings, below the gate' ? BELOW_GATE_RESULT : ABOVE_GATE_RESULT,
+    );
+    await visit(page, '/settings');
+    await hideDevtools(page);
+    await page.getByRole('tab', { name: 'Language model' }).click();
+    const card = page.getByTestId('category-suggestions');
+    await expect(card.getByTestId('suggestions-status')).toHaveText(
+      where === 'settings, below the gate'
+        ? 'Off: below the 85 % gate — 72 % on your history, 25 rows scored'
+        : 'Ready to turn on',
+    );
+    await card.getByRole('button', { name: 'Show exactly what a run would send' }).click();
+    await expect(card.getByTestId('suggestions-prompt')).toBeVisible();
+    await card.scrollIntoViewIfNeeded();
+  }
+
+  for (const where of WHERE) {
+    test(`${where}: axe-clean in both themes, at 1280 and at 320 px`, async ({ page }) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await open(page, where);
+      await scanBothThemes(page, `WP 11.2 ${where}`);
+      await page.setViewportSize(REFLOW);
+      await page.waitForTimeout(600);
+      expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+      await scanBothThemes(page, `WP 11.2 ${where}, at 320 px`);
+    });
+  }
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    for (const where of WHERE) {
+      test(`${where}: nothing is lost`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, where);
+        expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+        await scanBothThemes(page, `WP 11.2 ${where}, at 200 %`);
+        const before = new Set(await clippedTextElements(page));
+        await page.addStyleTag({ content: TEXT_SPACING });
+        await page.waitForTimeout(100);
+        const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+        expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+      });
+    }
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+    for (const where of WHERE) {
+      test(`${where}: nothing animates`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, where);
+        expect(await motionOffenders(page)).toEqual([]);
+      });
+    }
+    test('settings: Measuring… does not animate', async ({ page }) => {
+      test.setTimeout(120_000);
+      await installFakeWebAuthnAssertion(page);
+      await open(page, 'settings, below the gate');
+      const card = page.getByTestId('category-suggestions');
+      await card.getByRole('button', { name: 'Measure' }).click();
+      await expect(card.getByTestId('suggestions-measure-live')).toContainText('Measuring…');
+      expect(await motionOffenders(page)).toEqual([]);
+    });
   });
 });
 

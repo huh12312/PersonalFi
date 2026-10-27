@@ -51,7 +51,10 @@ export const OPENAPI_CONTRACT_VERSION = '0.1.0';
 // `rule_candidates` block, the rule-suggestion advisor's input; strictly
 // additive (appended to the scope enum and to the snapshot); migration 0054
 // widens `snapshot_grants_scope_check` to match, in the same change.
-export const ADVISOR_CONTRACT_VERSION = '1.7.0';
+// 1.8.0 (WP 11.2): the `transactions.residue` scope, `categorize.suggest`'s
+// input; appended to the scope enum, no snapshot block; migration 0056 widens
+// `snapshot_grants_scope_check` to match, in the same change.
+export const ADVISOR_CONTRACT_VERSION = '1.8.0';
 
 /**
  * The integer that crosses the wire, as distinct from the artefact version

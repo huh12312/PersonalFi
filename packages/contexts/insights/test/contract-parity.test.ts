@@ -192,17 +192,8 @@ describe('contract parity', () => {
    * nineteenth member and the block is an optional snapshot property, so
    * every 1.6.0 request is a 1.7.0 request.
    */
-  it('the published schemas match the source at 1.7.0', () => {
-    expect(ADVISOR_ARTEFACT_VERSION).toBe('1.7.0');
-    for (const document of advisorSchemaDocuments()) {
-      const onDisk = JSON.parse(readContract('v1', document.file)) as Record<string, unknown>;
-      expect(onDisk['artefactVersion'], document.file).toBe('1.7.0');
-      expect(serialiseSchema(document.document), document.file).toBe(serialiseSchema(onDisk));
-    }
-    const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
-    expect(index['artefactVersion']).toBe('1.7.0');
-
-    expect(ADVISOR_SCOPES).toHaveLength(19);
+  it('the published schemas match the source at 1.7.0 (historical)', () => {
+    // Superseded by 1.8.0 below; kept as the record of what 1.7.0 added.
     expect(ADVISOR_SCOPES[18]).toBe('categorization.rule_candidates');
 
     const request = JSON.parse(readContract('v1', 'request.schema.json')) as {
@@ -246,6 +237,31 @@ describe('contract parity', () => {
     expect(row.properties['transactions']?.['maxItems']).toBe(8);
     // No amount, no date, no name: the block's whole minimisation, readable off the file.
     expect(Object.keys(row.properties).sort()).toEqual([...row.required].sort());
+  });
+
+  /**
+   * WP 11.2's bump. `transactions.residue` — `categorize.suggest`'s input —
+   * lands in the same change as migration 0056, which widens
+   * `snapshot_grants_scope_check`. Strictly additive over 1.7.0: the scope is
+   * appended as the enum's twentieth member, and it has **no** snapshot block
+   * (the suggestion payload is built per run from the merchant cache, not by
+   * `SnapshotBuilder`), so every 1.7.0 request is a 1.8.0 request.
+   */
+  it('the published schemas match the source at 1.8.0', () => {
+    expect(ADVISOR_ARTEFACT_VERSION).toBe('1.8.0');
+    for (const document of advisorSchemaDocuments()) {
+      const onDisk = JSON.parse(readContract('v1', document.file)) as Record<string, unknown>;
+      expect(onDisk['artefactVersion'], document.file).toBe('1.8.0');
+      expect(serialiseSchema(document.document), document.file).toBe(serialiseSchema(onDisk));
+    }
+    const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
+    expect(index['artefactVersion']).toBe('1.8.0');
+    expect(ADVISOR_SCOPES).toHaveLength(20);
+    expect(ADVISOR_SCOPES[19]).toBe('transactions.residue');
+    const request = JSON.parse(readContract('v1', 'request.schema.json')) as {
+      properties: { snapshot: { properties: Record<string, unknown> } };
+    };
+    expect(request.properties.snapshot.properties['transactions_residue']).toBeUndefined();
   });
 
   it('the bundle index names the three documents and the wire major', () => {

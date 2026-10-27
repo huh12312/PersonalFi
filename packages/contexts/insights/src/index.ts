@@ -815,6 +815,8 @@ export {
   checkEgressAllowlist,
   checkInspectorDigest,
   checkModelPin,
+  checkSuggestEnumRefusal,
+  SUGGEST_PROBE_TAXONOMY,
   checkModuleSwitch,
   checkNarrationBadge,
   checkNumeralsRefusal,
@@ -839,6 +841,7 @@ export {
   type ControlChecksOverall,
   type ControlProbeId,
   type ControlProbeModel,
+  type SuggestProbeModel,
   type EgressClassification,
   type InspectorPort,
   type LatestNarration,
@@ -894,3 +897,48 @@ export {
   RULE_SUGGESTION_MIN_CONFIRMATIONS,
   spendingRuleSuggestion,
 } from './advisors/builtin/rule-suggestion/index.ts';
+
+// --- WP 11.2: `categorize.suggest`, category suggestions for the residue -----
+export {
+  CATEGORY_SUGGEST_ADVISOR_ID,
+  CATEGORY_SUGGEST_MANIFEST,
+  CATEGORY_SUGGEST_SCOPES,
+  CATEGORY_SUGGEST_VERSION,
+} from './advisors/suggest/manifest.ts';
+export {
+  SUGGEST_BATCH_MAX,
+  buildSuggestRequest,
+  type BuiltSuggestRequest,
+  type ResidueRowInput,
+  type SuggestTaxonomyEntry,
+  type SuggestWireRequest,
+  type SuggestWireRow,
+} from './advisors/suggest/request.ts';
+export {
+  SUGGEST_REASON_MAX,
+  SUGGEST_REFUSAL_CLASSES,
+  reasonRefusal,
+  validateSuggestReply,
+  type SuggestRefusal,
+  type SuggestRefusalClass,
+  type SuggestValidation,
+  type ValidatedSuggestion,
+} from './advisors/suggest/reply.ts';
+export {
+  categorySuggestShape,
+  measureCategorySuggest,
+  runCategorySuggest,
+  type CategorySuggestDependencies,
+  type CategorySuggestResult,
+  type SuggestAnswer,
+  type SuggestionModelPort,
+} from './advisors/suggest/run.ts';
+export {
+  approveCategorySuggest,
+  ensureCategorySuggestAdvisor,
+  liveCategorySuggestApprovals,
+  previewCategorySuggest,
+  setCategorySuggestEnabled,
+  type CategorySuggestPreview,
+  type SuggestionRenderer,
+} from './advisors/suggest/preview.ts';

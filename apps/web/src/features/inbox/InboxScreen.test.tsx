@@ -25,6 +25,13 @@ import {
   SUGGESTED_CATEGORY_KEY,
   SUGGESTION_ID,
 } from '../../test-support/insight-fixtures.ts';
+import {
+  ABSTAINED_LINE,
+  buildExplanation,
+  SUGGESTED_ID,
+  SUGGESTED_LABEL,
+  SUGGESTED_REASON,
+} from '../../test-support/suggestion-fixtures.ts';
 import { InboxScreen } from './InboxScreen.tsx';
 
 /** `GET /transactions/explanations`, recording every batch of ids it was asked for. */
@@ -240,6 +247,7 @@ describe('InboxScreen › the explanation line', () => {
               { source: 'rule', won: false, detail: '2 rules matched but none set a category' },
               { source: 'classifier', won: true, detail: 'Groceries at 99 %' },
             ],
+            suggestion: null,
           },
           {
             transactionId: 'txn_a',
@@ -250,6 +258,7 @@ describe('InboxScreen › the explanation line', () => {
             decidedAt: null,
             line: 'No categorisation pass has recorded its working for this yet.',
             tiers: [],
+            suggestion: null,
           },
         ],
         calls,
@@ -449,5 +458,176 @@ describe('InboxScreen › rule suggestions', () => {
       expect(reviewBody).toEqual({ action: 'dismiss', reasonCode: 'ALREADY_KNOW', reason: null }),
     );
     await waitFor(() => expect(screen.queryByTestId('rule-suggestion')).not.toBeInTheDocument());
+  });
+});
+
+/**
+ * WP 11.2: an abstained row whose explanation carries the model's suggestion shows the chip — the source stated, the
+ * reason verbatim — under the row, which still reads uncategorised. Confirm is the row's normal pick (`PATCH` with
+ * the suggested category, then the row resolves); Not this posts the rejection, assigns nothing, and the explanations
+ * are read again. Nothing is applied on render.
+ */
+describe('InboxScreen › the model’s suggestion', () => {
+  beforeEach(() => {
+    ensureApiClient();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  interface Recorded {
+    patches: unknown[];
+    rejects: string[];
+    explanationCalls: string[];
+  }
+
+  function suggestionRoutes(
+    rows: ReturnType<typeof buildTransaction>[],
+    recorded: Recorded,
+    options: { rejected?: () => boolean } = {},
+  ): FetchRoute[] {
+    let categorised = new Set<string>();
+    return [
+      categoriesRoute(),
+      insightsFeedRoute(() => []),
+      {
+        match: '/api/transactions/explanations',
+        method: 'GET',
+        handle: ({ url }) => {
+          const ids = url.searchParams.getAll('ids').join(',').split(',');
+          recorded.explanationCalls.push(ids.join(','));
+          const rejected = options.rejected?.() ?? recorded.rejects.length > 0;
+          return jsonResponse({
+            items: ids.map((id) => buildExplanation(id, rejected ? { suggestion: null } : {})),
+          });
+        },
+      },
+      {
+        match: /^\/api\/transactions\/[^/]+\/suggestion\/reject$/,
+        method: 'POST',
+        handle: ({ url }) => {
+          recorded.rejects.push(url.pathname.split('/')[3] ?? '');
+          return jsonResponse({ outcome: 'rejected' });
+        },
+      },
+      {
+        match: /^\/api\/transactions\/[^/]+$/,
+        method: 'PATCH',
+        handle: async ({ request, url }) => {
+          const body = (await request.json()) as { categoryId: string };
+          recorded.patches.push(body);
+          const id = url.pathname.split('/')[3] ?? '';
+          categorised = new Set([...categorised, id]);
+          const row = rows.find((t) => t.id === id);
+          return jsonResponse({ ...row, categoryId: body.categoryId });
+        },
+      },
+      {
+        match: '/api/transactions',
+        method: 'GET',
+        handle: (context) => {
+          const uncategorizedOnly = context.url.searchParams.get('uncategorized') === 'true';
+          const items = uncategorizedOnly ? rows.filter((t) => !categorised.has(t.id)) : [];
+          return jsonResponse({
+            items,
+            nextCursor: null,
+            summary: { count: items.length, totals: [] },
+          });
+        },
+      },
+    ];
+  }
+
+  const CHIP = `Suggested by the model: ${SUGGESTED_LABEL} — ${SUGGESTED_REASON}`;
+
+  it('shows the chip with the source and the reason verbatim, and the row still reads uncategorised; nothing is applied', async () => {
+    const recorded: Recorded = { patches: [], rejects: [], explanationCalls: [] };
+    stubFetchRoutes(
+      suggestionRoutes(
+        [buildTransaction({ id: 'txn_1', name: 'Corner Roastery', merchantName: null })],
+        recorded,
+      ),
+    );
+
+    renderInbox();
+
+    const chip = await screen.findByTestId('suggestion-chip');
+    expect(within(chip).getByTestId('suggestion-chip-text').textContent).toBe(CHIP);
+    // Still a suggestion, not an assignment: the row says uncategorised and keeps its "why".
+    const row = screen.getByRole('listitem');
+    expect(within(row).getByText(/· Uncategorized$/)).toBeInTheDocument();
+    expect(within(row).getByTestId('inbox-why').textContent).toBe(`Why: ${ABSTAINED_LINE}`);
+    expect(within(chip).getByRole('button', { name: `Confirm ${SUGGESTED_LABEL}` })).toBeVisible();
+    expect(within(chip).getByRole('button', { name: 'Not this' })).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('Uncategorized');
+    expect(recorded.patches).toEqual([]);
+    expect(recorded.rejects).toEqual([]);
+  });
+
+  it('Confirm writes the suggested category through the normal pick, and the row leaves the queue', async () => {
+    const recorded: Recorded = { patches: [], rejects: [], explanationCalls: [] };
+    stubFetchRoutes(
+      suggestionRoutes(
+        [
+          buildTransaction({ id: 'txn_1', name: 'Corner Roastery', merchantName: null }),
+          buildTransaction({ id: 'txn_2', name: 'Hardware Barn', merchantName: null }),
+        ],
+        recorded,
+      ),
+    );
+    renderInbox();
+    const user = userEvent.setup();
+
+    expect(await screen.findByText('2 items to review')).toBeInTheDocument();
+    const rows = await screen.findAllByTestId('suggestion-chip');
+    await user.click(within(rows[0]!).getByRole('button', { name: `Confirm ${SUGGESTED_LABEL}` }));
+
+    await waitFor(() => expect(recorded.patches).toEqual([{ categoryId: SUGGESTED_ID }]));
+    expect(await screen.findByText('1 item to review')).toBeInTheDocument();
+    expect(screen.queryByText('Corner Roastery')).not.toBeInTheDocument();
+    expect(screen.getByText('Hardware Barn')).toBeInTheDocument();
+    expect(recorded.rejects).toEqual([]);
+  });
+
+  it('Not this posts the rejection, reads the explanations again, and the chip is gone with the row still uncategorised', async () => {
+    const recorded: Recorded = { patches: [], rejects: [], explanationCalls: [] };
+    stubFetchRoutes(
+      suggestionRoutes(
+        [buildTransaction({ id: 'txn_1', name: 'Corner Roastery', merchantName: null })],
+        recorded,
+      ),
+    );
+    renderInbox();
+    const user = userEvent.setup();
+
+    const chip = await screen.findByTestId('suggestion-chip');
+    expect(recorded.explanationCalls).toHaveLength(1);
+    await user.click(within(chip).getByRole('button', { name: 'Not this' }));
+
+    await waitFor(() => expect(recorded.rejects).toEqual(['txn_1']));
+    await waitFor(() => expect(screen.queryByTestId('suggestion-chip')).not.toBeInTheDocument());
+    expect(recorded.explanationCalls.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Corner Roastery')).toBeInTheDocument();
+    expect(screen.getByText('1 item to review')).toBeInTheDocument();
+    expect(recorded.patches).toEqual([]);
+    // Focus goes to the row, not the document body.
+    expect(document.activeElement).toBe(screen.getByRole('listitem'));
+  });
+
+  it('shows no chip for a row whose explanation has no suggestion', async () => {
+    const recorded: Recorded = { patches: [], rejects: [], explanationCalls: [] };
+    stubFetchRoutes(
+      suggestionRoutes(
+        [buildTransaction({ id: 'txn_1', name: 'Corner Roastery', merchantName: null })],
+        recorded,
+        { rejected: () => true },
+      ),
+    );
+    renderInbox();
+
+    expect(await screen.findByTestId('inbox-why')).toBeInTheDocument();
+    expect(screen.queryByTestId('suggestion-chip')).not.toBeInTheDocument();
   });
 });

@@ -434,6 +434,9 @@ services:
       # that has pulled a model but not yet pinned its digest must still boot.
       LOCAL_MODEL_PIN_NAME: ${LOCAL_MODEL_PIN_NAME:-${LOCAL_MODEL_DIGEST:+${LOCAL_MODEL_NAME:-}}}
       LOCAL_MODEL_PIN_DIGEST: ${LOCAL_MODEL_PIN_DIGEST:-${LOCAL_MODEL_DIGEST:-}}
+      # WP 11.2: the optional second local model for category suggestions (name and digest only).
+      LOCAL_MODEL_CLASSIFIER_NAME: ${LOCAL_MODEL_CLASSIFIER_NAME:-}
+      LOCAL_MODEL_CLASSIFIER_DIGEST: ${LOCAL_MODEL_CLASSIFIER_DIGEST:-}
       NARRATION_TEXT_SHOWN: ${NARRATION_TEXT_SHOWN:-false}
     secrets:
       [
@@ -563,6 +566,8 @@ services:
       LOCAL_MODEL_DIGEST: ${LOCAL_MODEL_DIGEST:-}
       LOCAL_MODEL_TIMEOUT_MS: ${LOCAL_MODEL_TIMEOUT_MS:-180000}
       LOCAL_MODEL_ALLOW_REMOTE: ${LOCAL_MODEL_ALLOW_REMOTE:-false}
+      LOCAL_MODEL_CLASSIFIER_NAME: ${LOCAL_MODEL_CLASSIFIER_NAME:-}
+      LOCAL_MODEL_CLASSIFIER_DIGEST: ${LOCAL_MODEL_CLASSIFIER_DIGEST:-}
       MONTE_CARLO_MAX_CONCURRENT: ${MONTE_CARLO_MAX_CONCURRENT:-8}
     # WP 3.4's four market-data keys and WP 3.5's CDP pair join the list here
     # and on `worker` — and on neither `migrator` nor `proxy` nor `backup`.

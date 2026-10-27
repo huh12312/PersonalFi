@@ -62,6 +62,7 @@ import { createStoredMarketDataKeys } from './market-data-keys.ts';
 import { createStoredPlaid, withStoredPlaid } from './plaid-stored.ts';
 import { createNarratorRuntime, createNarratorWiring } from './narrator-wiring.ts';
 import { createNarratorStores } from './narrator-stores.ts';
+import { createSuggestionRuntime } from './category-suggestions.ts';
 import { MODULE_FLAGS, buildPlatform, resolveModules } from './platform.ts';
 
 /**
@@ -489,6 +490,27 @@ async function main(): Promise<void> {
       logger,
       clock: systemClock,
     });
+    // WP 11.2: category suggestions resolve through the narrator runtime's
+    // per-holder view and the same stores; hosted only under the separate
+    // suggestion consent (off). Run mode: this process calls the model.
+    const suggestionRuntime = createSuggestionRuntime({
+      mode: 'run',
+      database,
+      narrator: narratorRuntime,
+      // The same constructor over the same database and box as the narrator's.
+      stores: createNarratorStores({ database, secretBox: () => secretBox ?? undefined }),
+      localModel: config.localModel,
+      classifier: config.localModelClassifier,
+      timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+      allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+      fileKeys: {
+        openai: config.secrets.openai_api_key,
+        openrouter: config.secrets.openrouter_api_key,
+        anthropic: config.secrets.anthropic_api_key,
+      },
+      logger,
+      clock: systemClock,
+    });
 
     // WP 3.4 (docs/evidence/phase-3/wp3.w-wiring.md). Built once per process,
     // in the worker only: the API runs no job runner and no scheduler, so a
@@ -659,6 +681,8 @@ async function main(): Promise<void> {
               ...(narratorModel === undefined ? {} : { narratorModel }),
               // WP 10.6: per holder, per run (see above).
               narratorRuntime,
+              // WP 11.2: the suggestion and measurement jobs, and the post-sync enqueue.
+              categorySuggestions: { runtime: suggestionRuntime },
               // wp2.6-insights.md §6 open item 5: absent until an operator
               // writes `${SECRETS_DIR}/advisor_token_secret`; `module.insights`
               // then registers no consumer, no job and no schedule (see

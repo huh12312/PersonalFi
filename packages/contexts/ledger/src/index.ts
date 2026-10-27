@@ -69,6 +69,7 @@ export {
   TransactionsUpserted,
   TransferPaired,
   TransactionSupersededByPosted,
+  TransactionCategoryChosen,
 } from './events.ts';
 
 // --- the holder's overlay on an account (WP 9.2) ---------------------------

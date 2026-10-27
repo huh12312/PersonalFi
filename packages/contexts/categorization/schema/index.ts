@@ -39,3 +39,15 @@ export {
   type ClassifierVersionRow,
   type NewCategoryAssignmentRow,
 } from './assignments.ts';
+export {
+  categorySuggestionCache,
+  categorySuggestionEvals,
+  categorySuggestionSettings,
+  SUGGESTION_MODEL_CHOICES,
+  SUGGESTION_VERDICTS,
+  type CategorySuggestionCacheRow,
+  type CategorySuggestionEvalRow,
+  type CategorySuggestionSettingsRow,
+  type SuggestionModelChoice,
+  type SuggestionVerdict,
+} from './suggestions.ts';

@@ -375,6 +375,19 @@ export const environmentSchema = z.object({
   LOCAL_MODEL_PIN_DIGEST: z.string().default(''),
 
   /**
+   * WP 11.2 (11 §6 item 2): an optional second local model for category
+   * suggestions, pinned separately from the narrator's — a smaller instruct
+   * model is the practical choice for batches. Served by the same Ollama
+   * (`LOCAL_MODEL_ENDPOINT`, or the endpoint set in Settings); a name and a
+   * digest, both or neither, the digest shaped like `LOCAL_MODEL_DIGEST`
+   * (`load.ts`'s `resolveLocalModelClassifier`). Read by both processes: the
+   * worker calls it, the api renders and approves for it. Unset: Settings
+   * offers the narrator's model only.
+   */
+  LOCAL_MODEL_CLASSIFIER_NAME: z.string().default(''),
+  LOCAL_MODEL_CLASSIFIER_DIGEST: z.string().default(''),
+
+  /**
    * WP 9.6 item 3, Phase 5 gate R-2: a Brief item carries its narration's
    * status and the AI-assisted badge always, but the narration TEXT reaches
    * the holder only when this is `true`. Default `false`: the gate ruled that

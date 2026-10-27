@@ -343,6 +343,18 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'insights: the daily health score (WP 10.12), derived from the snapshot like health_scores above, not data the holder entered; a restore recomputes from the next day on and never backfills.',
   ],
   [
+    'category_suggestion_cache',
+    "categorization: a language model's answer per merchant (WP 11.2), derived from the residue and the model, not data the holder entered; a restore asks again under its own approval. A holder's 'Not this' lives here too and is not carried: the suggestion it hid may be offered once more after a restore.",
+  ],
+  [
+    'category_suggestion_evals',
+    "categorization: the precision gate's measurements (WP 11.2), evidence about one model on one install at a date; a restore measures again rather than inheriting another deployment's figures, and suggestions stay off until it does.",
+  ],
+  [
+    'category_suggestion_settings',
+    "categorization: the suggestion model choice and the separate hosted consent (WP 11.2). Like the narrator's consents, a consent is not carried to another install: a restore starts unticked, on the local model.",
+  ],
+  [
     'ops_control_checks',
     "insights: the GenAI controls self-test (WP 10.16), evidence that the narrator controls held on this install at a date; a restore proves them again on the new one rather than inheriting another deployment's proof.",
   ],

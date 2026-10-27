@@ -585,6 +585,17 @@ describeWithDb('runMigrations', () => {
       //   with `ADVISOR_SCOPES` is asserted by apps/api's registration test, which
       //   reads the latest CHECK across migrations -- the 0019 lesson mechanised, same
       //   as 0024's and 0029's. Expand-only; references only 0012/0019-era objects.
+      // 0055_category_suggestions (WP 11.2): category_abstentions gains four nullable columns
+      //   (suggested_category_id -> categories ON DELETE SET NULL, suggestion_reason <= 140 chars,
+      //   suggestion_run_id, suggested_at; category_abstentions_suggestion_whole keeps them set together),
+      //   and three new @ctx/categorization tables: category_suggestion_cache (one model answer per
+      //   (user_id, merchant_key, taxonomy_version); verdict suggested | abstained | refused; rejected_at
+      //   is the holder's "Not this"), category_suggestion_evals (the precision gate's measurements) and
+      //   category_suggestion_settings (model choice, the separate hosted consent; no row = local, unticked).
+      //   Expand-only; references only users and categories. None exported (registry.ts exempts all three).
+      // 0056_snapshot_grant_scopes_v1_8 (WP 11.2): no table. Re-declares `snapshot_grants_scope_check`
+      //   with advisor contract 1.8.0's one added scope (`transactions.residue` -- categorize.suggest's
+      //   input). Same pairing rule as 0054; parity asserted by apps/api's registration test.
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -617,6 +628,9 @@ describeWithDb('runMigrations', () => {
         'categories',
         'category_abstentions',
         'category_assignments',
+        'category_suggestion_cache',
+        'category_suggestion_evals',
+        'category_suggestion_settings',
         'classifier_examples',
         'classifier_versions',
         'config_snapshots',

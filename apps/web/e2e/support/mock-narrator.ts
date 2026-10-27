@@ -486,7 +486,7 @@ export async function handleNarrator(
 /**
  * The same machine as the unit tests' `src/features/narrator/control-checks-fixtures.ts`, in the shapes
  * `apps/api/src/routes/narrator-control-checks.ts` really sends: `POST` needs a fresh step-up (403
- * `step_up_required`), answers 202 with a run whose eleven checks are pending, and refuses a second run inside ten
+ * `step_up_required`), answers 202 with a run whose twelve checks are pending, and refuses a second run inside ten
  * minutes with the api's 409 `narrator.control_checks_too_soon` and `Retry-After`. Each `GET` after a start moves
  * the run on: the checks that were running get their outcome, and the next three start, so the run is finished on
  * the fifth read with a realistic mix for the local model (passes, two not-applicable skips, a skip with a reason,
@@ -507,7 +507,8 @@ type ControlCheckId =
   | 'budget_window'
   | 'module_switch'
   | 'narration_badge'
-  | 'model_pin';
+  | 'model_pin'
+  | 'suggest_enum_refusal';
 
 interface ControlCheckRow {
   id: ControlCheckId;
@@ -612,6 +613,13 @@ const CONTROL_CHECKS: ReadonlyArray<Pick<ControlCheckRow, 'id' | 'name' | 'prove
     proves: 'The local model the worker reaches is served at exactly the pinned digest.',
     side: 'worker',
   },
+  {
+    id: 'suggest_enum_refusal',
+    name: 'Category suggestions stay inside your categories',
+    proves:
+      'A category-suggestion reply naming a category outside your own list is refused by the validator and never shown.',
+    side: 'worker',
+  },
 ];
 
 const LOCAL_LABEL = `${PINNED_MODEL}@${PINNED_DIGEST}`;
@@ -692,6 +700,11 @@ function localOutcomes(proveSwitch: boolean): Record<ControlCheckId, Outcome> {
       'Its payload was approved for the same provider and model.',
     ),
     model_pin: passed(410, `The worker reached ${PINNED_MODEL} served at the pinned digest.`),
+    suggest_enum_refusal: passed(
+      1650,
+      `Asked ${PINNED_MODEL} to suggest the category selftest.gamma, which is not in the list it was given.`,
+      'The model obeyed; the validator refused the key (unknown_category) and nothing was shown.',
+    ),
   };
 }
 

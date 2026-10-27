@@ -1833,6 +1833,60 @@ runs the api's half in a one-shot container from the api service's definition (i
 like `just bootstrap-user`) and hands the model checks to the running worker through the job
 queue. It prints the table and exits 0 (pass), 2 (partial) or 1 (fail).
 
+## Category suggestions (v0.9.17)
+
+WP 11.2. For a transaction every categorisation tier abstained on, the local model may **suggest**
+one category from your own list, with a one-line reason. The Inbox and the transaction list show it
+as a chip — "Suggested by the model: Groceries — …" — with **Confirm** and **Not this**. Nothing is
+filed until you tap Confirm; the row stays uncategorised until then, in the data as well as on the
+screen. Confirm is the ordinary category pick, so it also teaches the merchant default and the
+classifier; **Not this** hides that suggestion for that merchant and changes nothing else.
+
+**It is off until it has earned it.** Settings, Language model, **Category suggestions**:
+
+1. **Model.** The narrator's pinned local model, or — if the operator pins one — a second, smaller
+   local model just for suggestions (`LOCAL_MODEL_CLASSIFIER_NAME` and
+   `LOCAL_MODEL_CLASSIFIER_DIGEST`, both or neither, the digest shaped like `LOCAL_MODEL_DIGEST`,
+   served by the same Ollama; `.env.example`). The card reports each model's last measurement so
+   the two can be compared.
+2. **Preview, then approve the payload.** The exact rows and prompt a run would send; a new
+   template, format or version is a new shape and needs a new approval.
+3. **Measure.** The worker replays everything you filed by hand with each merchant held out, asks
+   the model about the rows the six tiers cannot place, and scores its answers against your picks:
+   precision, coverage, scored rows and the top confusions. A measurement writes its own result row
+   and nothing else.
+4. **Enable.** Refused until the latest measurement of the chosen model shows **≥ 85 % precision
+   over ≥ 20 scored rows** (11 §6 item 4); the worker checks the same gate before every batch. The
+   advisor's generic switch on the Advisors page refuses to turn it on.
+
+**When it runs.** In the worker, after a sync's categorisation pass leaves new uncategorised rows
+(`categorization.suggest`, a minute later, one job per holder): at most fifteen merchants per
+request, each merchant asked once per version of your category list (renaming or adding a
+category is a new version), never in a request, never in front of the ledger. Every batch is a row
+in the run inspector with its digest; the kill ladder is the narrator's (`advisors.kind.local_model`,
+the advisor's own switch, the breaker, cancel).
+
+**What leaves the machine: nothing.** Each row the model sees is the classifier's own features —
+the normalised payee words, the merchant-category family, the bank's broad category, an amount
+band, the account kind, the direction and the part of the month — never the memo, an account or
+transaction id, or the raw descriptor. D22 keeps categorisation on the local model. A hosted
+provider is used only when the narrator is on one **and** the holder ticks a separate box whose
+text says "merchant names leave this machine"; it ships unticked, and with it unticked a holder
+whose narrator is hosted gets no suggestions. Merchant words are fenced and sanitised on the way
+into the prompt (03 §8.2); a reply naming a category outside your list, a reason with a number,
+a link or advice, or anything outside the reply format is refused and never shown.
+
+**Teaching the tiers from picks you already made.** Since v0.9.17 every pick teaches as it
+happens. For the history before it, once:
+
+```bash
+just categorization-learn-backfill holder="Chris"   # counts only; a second run learns 0
+```
+
+It replays every standing category pick into the merchant defaults and the classifier's examples
+(the classifier itself is rebuilt by the Sunday retrain). It is never run automatically: it
+changes what later syncs file on their own.
+
 ## Categorisation: measuring the tiers (`just categorization-eval`)
 
 WP 11.1. Replays every transaction you filed by hand (the categories you picked, plus any confirmed

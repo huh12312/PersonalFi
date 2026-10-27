@@ -4,7 +4,7 @@
   "title": "PersonalFi AdvisorManifest v1",
   "description": "What an advisor declares at registration: the scopes it may read, the capabilities it claims (deterministic is reserved for builtin and is checked), its severity ceiling, the limits we floor against the platform ceiling, and its egress allow-list.",
   "contractVersion": 1,
-  "artefactVersion": "1.7.0",
+  "artefactVersion": "1.8.0",
   "type": "object",
   "properties": {
     "advisor_id": {
@@ -61,7 +61,8 @@
           "plan.projection",
           "transactions.anomalies",
           "fees.summary",
-          "categorization.rule_candidates"
+          "categorization.rule_candidates",
+          "transactions.residue"
         ]
       }
     },

@@ -1,18 +1,25 @@
 // SPDX-License-Identifier: MIT
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AlertTriangle, Receipt } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import { EmptyState } from '../../components/patterns/EmptyState.tsx';
 import { Skeleton } from '../../components/patterns/Skeleton.tsx';
 import type { Transaction } from '../../api/generated/types.gen.ts';
 import { useCategories } from '../categories/useCategories.ts';
+import {
+  MAX_EXPLANATION_IDS,
+  suggestionOf,
+  useCategoryExplanations,
+} from '../category-suggestions/suggestion-api.ts';
 import { TransactionRow } from './TransactionRow.tsx';
 import { hasActiveFilters, type TransactionsSearch } from './filters.ts';
 import { useTransactionsList } from './useTransactionsList.ts';
 
 const ROW_HEIGHT = 60;
+/** WP 11.2: a row carrying the model's suggestion chip starts at this estimate; its real height is measured. */
+const SUGGESTION_ROW_ESTIMATE = 104;
 
 export interface TransactionsListProps {
   search: TransactionsSearch;
@@ -33,6 +40,10 @@ export interface TransactionsListProps {
  * plus a roving `tabIndex` driven by `focusedIndex` — the row itself owns
  * `aria-selected`/checkbox wiring, this component only owns which row is
  * the current stop and moves it on ArrowUp/ArrowDown/Enter.
+ *
+ * WP 11.2: the uncategorised rows loaded so far (the first `MAX_EXPLANATION_IDS`) are asked about in **one**
+ * `GET /transactions/explanations` batch, as the Inbox does; a row whose explanation carries the model's suggestion
+ * shows the compact chip (Confirm / Not this) under its cells, and is measured rather than given the fixed height.
  */
 export function TransactionsList({
   search,
@@ -57,10 +68,28 @@ export function TransactionsList({
   const parentRef = useRef<HTMLDivElement>(null);
   const [focusedIndex, setFocusedIndex] = useState(0);
 
+  const uncategorizedIds = useMemo(
+    () =>
+      items
+        .filter((transaction) => transaction.categoryId === null)
+        .slice(0, MAX_EXPLANATION_IDS)
+        .map((transaction) => transaction.id),
+    [items],
+  );
+  const explanations = useCategoryExplanations(uncategorizedIds);
+  const suggestionAt = useCallback(
+    (transaction: Transaction | undefined) =>
+      transaction === undefined || transaction.categoryId !== null
+        ? null
+        : suggestionOf(explanations.get(transaction.id)),
+    [explanations],
+  );
+
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: (index) =>
+      suggestionAt(items[index]) === null ? ROW_HEIGHT : SUGGESTION_ROW_ESTIMATE,
     overscan: 8,
   });
 
@@ -149,6 +178,7 @@ export function TransactionsList({
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualItems.map((virtualRow) => {
           const transaction = items[virtualRow.index] as Transaction;
+          const suggestion = suggestionAt(transaction);
           return (
             <TransactionRow
               key={transaction.id}
@@ -166,6 +196,7 @@ export function TransactionsList({
                             label: 'Archived category',
                           }),
                   })}
+              suggestion={suggestion}
               index={virtualRow.index}
               selected={selected.has(transaction.id)}
               isFocused={focusedIndex === virtualRow.index}
@@ -178,7 +209,9 @@ export function TransactionsList({
                 top: 0,
                 left: 0,
                 width: '100%',
-                height: `${ROW_HEIGHT}px`,
+                ...(suggestion === null
+                  ? { height: `${ROW_HEIGHT}px` }
+                  : { minHeight: `${ROW_HEIGHT}px` }),
                 transform: `translateY(${virtualRow.start}px)`,
               }}
             />

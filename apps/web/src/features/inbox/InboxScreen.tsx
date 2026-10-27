@@ -16,6 +16,8 @@ import { Money } from '../../components/finance/Money.tsx';
 import { formatDateOnly } from '../../lib/date.ts';
 import { CategoryIcon } from '../../components/finance/CategoryIcon.tsx';
 import { useCategories } from '../categories/useCategories.ts';
+import { SuggestionChip } from '../category-suggestions/SuggestionChip.tsx';
+import { suggestionOf } from '../category-suggestions/suggestion-api.ts';
 import { CategoryPicker } from '../transactions/CategoryPicker.tsx';
 import { orientPair } from '../transactions/transfer-candidates.ts';
 import {
@@ -54,6 +56,11 @@ import { useInboxQueue } from './useInboxQueue.ts';
  * for the rows on screen, `useInboxExplanations.ts`) — rendered verbatim as a caption, never composed here — and a
  * "Rule suggestions" section lists the pending `spending.rule_suggestion` insights (`RuleSuggestions.tsx`): Create
  * rule opens the existing rule dialog pre-filled with the suggested category, Not now dismisses with a reason.
+ *
+ * WP 11.2: an abstained row whose explanation carries the model's `suggestion` shows it as a chip under the row
+ * (`SuggestionChip`): Confirm is this row's normal pick with the suggested category (so the row resolves and focus
+ * moves to its neighbour exactly as a manual pick does), Not this records a rejection and leaves the row
+ * uncategorised. Nothing is filed without the holder's press.
  */
 export function InboxScreen() {
   const [state, dispatch] = useReducer(inboxReducer, EMPTY_INBOX_STATE);
@@ -196,6 +203,7 @@ function UncategorizedRow({ transaction, explanation, onResolved }: Uncategorize
   // WP 10.14: the row's current category as its icon (uncategorised: ❔), beside the picker that changes it.
   const { byId } = useCategories();
   const current = transaction.categoryId === null ? undefined : byId.get(transaction.categoryId);
+  const suggestion = transaction.categoryId === null ? suggestionOf(explanation) : null;
 
   function handleCategoryChange(categoryId: string | null): void {
     if (categoryId === null) return;
@@ -242,6 +250,15 @@ function UncategorizedRow({ transaction, explanation, onResolved }: Uncategorize
         disabled={overlay.isPending}
         className="shrink-0"
       />
+      {suggestion !== null && (
+        <div className="basis-full">
+          <SuggestionChip
+            transactionId={transaction.id}
+            suggestion={suggestion}
+            onConfirmed={onResolved}
+          />
+        </div>
+      )}
     </div>
   );
 }

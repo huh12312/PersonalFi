@@ -15,9 +15,11 @@
  * alone. That distinction is why the patch type uses optional properties rather
  * than a partial row.
  */
+import { appendEvent } from '@core/platform';
 import { and, eq } from 'drizzle-orm';
 import { transactions, transactionsProvider } from '../schema/index.ts';
-import { transactionOf, type LedgerExecutor } from './db.ts';
+import { outboxOf, transactionOf, type LedgerExecutor } from './db.ts';
+import { TransactionCategoryChosen } from './events.ts';
 import { LedgerError } from './errors.ts';
 import { projectEffective } from './apply.ts';
 import { ensureMerchants } from './merchant-store.ts';
@@ -94,6 +96,31 @@ export async function setTransactionOverlay(
   const projected = { ...projectEffective(patched, row.fact, merchantIds), updatedAt: now };
   const { id, createdAt: _createdAt, ...rest } = projected;
   await executor.update(transactions).set(rest).where(eq(transactions.id, id));
+
+  // WP 11.2: a hand pick is a fact other contexts learn from. Only a new,
+  // non-null category is one: clearing the overlay withdraws intent rather than
+  // stating it, and re-saving the same category says nothing new. Appended in
+  // the caller's transaction, so a pick that rolls back teaches nothing.
+  const chosen = input.patch.userCategoryId;
+  if (chosen !== undefined && chosen !== null && chosen !== row.transaction.userCategoryId) {
+    await appendEvent(
+      outboxOf(executor),
+      TransactionCategoryChosen.create(
+        {
+          transactionId: id,
+          categoryId: chosen,
+          previousCategoryId: row.transaction.userCategoryId ?? null,
+        },
+        {
+          userId: input.userId,
+          aggregateId: id,
+          correlationId: context.correlationId,
+          causationId: context.causationId ?? null,
+        },
+        context.clock,
+      ),
+    );
+  }
   return transactionOf(projected);
 }
 

@@ -191,6 +191,12 @@ export interface AppConfig {
    * two api-side `LOCAL_MODEL_PIN_*` keys; `undefined` when neither is set.
    */
   readonly localModelPin: LocalModelPin | undefined;
+  /**
+   * WP 11.2: the second pinned local model for category suggestions
+   * (`LOCAL_MODEL_CLASSIFIER_*`, § `resolveLocalModelClassifier`); `undefined`
+   * when unset.
+   */
+  readonly localModelClassifier: LocalModelPin | undefined;
   readonly isProduction: boolean;
   readonly isTest: boolean;
 }
@@ -365,6 +371,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const coinbase = resolveCoinbase(secrets, problems);
   const localModel = resolveLocalModel(env, problems);
   const localModelPin = resolveLocalModelPin(env, localModel, problems);
+  const localModelClassifier = resolveLocalModelClassifier(env, problems);
 
   if (problems.length > 0) throw new ConfigError(problems);
   if (databaseUrl === undefined) throw new ConfigError(problems); // unreachable; narrows the type
@@ -393,6 +400,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     }),
     localModel,
     localModelPin,
+    localModelClassifier,
     isProduction,
     isTest: env.NODE_ENV === 'test',
   });
@@ -953,6 +961,49 @@ function resolveLocalModelPin(
       key: 'LOCAL_MODEL_PIN_DIGEST',
       problem: `is "${digest}", which is not sha256: followed by 64 lowercase hex characters`,
       hint: 'copy the digest verbatim from LOCAL_MODEL_DIGEST — no tag, no uppercase, no truncation',
+    });
+  }
+  return valid ? { name, digest } : undefined;
+}
+
+/**
+ * WP 11.2: `LOCAL_MODEL_CLASSIFIER_NAME` and `_DIGEST`, the optional second
+ * local model for category suggestions. Both or neither, the digest checked
+ * for shape exactly as `resolveLocalModel` checks `LOCAL_MODEL_DIGEST` — a
+ * half is a boot problem, named, rather than a choice Settings offers and the
+ * worker cannot serve.
+ */
+function resolveLocalModelClassifier(
+  env: EnvironmentConfig,
+  problems: ConfigProblem[],
+): LocalModelPin | undefined {
+  const name = env.LOCAL_MODEL_CLASSIFIER_NAME.trim();
+  const digest = env.LOCAL_MODEL_CLASSIFIER_DIGEST.trim();
+  if (name.length === 0 && digest.length === 0) return undefined;
+  let valid = true;
+  if (name.length === 0) {
+    valid = false;
+    problems.push({
+      key: 'LOCAL_MODEL_CLASSIFIER_NAME',
+      problem:
+        'is missing, but LOCAL_MODEL_CLASSIFIER_DIGEST is set — the suggestion model is a name and a digest',
+      hint: 'set LOCAL_MODEL_CLASSIFIER_NAME to the model pulled for category suggestions, or clear both keys',
+    });
+  }
+  if (digest.length === 0) {
+    valid = false;
+    problems.push({
+      key: 'LOCAL_MODEL_CLASSIFIER_DIGEST',
+      problem:
+        'is missing, but LOCAL_MODEL_CLASSIFIER_NAME is set — the suggestion model is pinned by digest like the narrator',
+      hint: 'set LOCAL_MODEL_CLASSIFIER_DIGEST to sha256:<64 lowercase hex characters> from GET /api/tags, or clear both keys',
+    });
+  } else if (!SHA256_DIGEST_PATTERN.test(digest)) {
+    valid = false;
+    problems.push({
+      key: 'LOCAL_MODEL_CLASSIFIER_DIGEST',
+      problem: `is "${digest}", which is not sha256: followed by 64 lowercase hex characters`,
+      hint: 'copy the digest verbatim from GET /api/tags — no tag, no uppercase, no truncation',
     });
   }
   return valid ? { name, digest } : undefined;

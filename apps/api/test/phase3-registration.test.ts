@@ -617,6 +617,13 @@ describe('advisor scopes and their readers (WP 3.9, closed by WP 3.10a)', () => 
   // WP 4.9 gave `goals.list` and `risk.profile` their readers and builder arms
   // (and added `plan.projection` with its own); the two left are Phase 5's.
   const NOT_YET_MODELLED = ['institutions.names', 'market.watchlist'];
+  /**
+   * WP 11.2: scopes whose reader is not `SnapshotBuilder`. `transactions.residue`
+   * is read by `categorize.suggest`'s own payload builder
+   * (`advisors/suggest/request.ts`, over `@ctx/categorization`'s residue and
+   * merchant cache), per run — so it is unsourced *for the snapshot* on purpose.
+   */
+  const READ_OUTSIDE_THE_SNAPSHOT = ['transactions.residue'];
 
   /**
    * Rules that ship **on** while declaring a scope with no reader, each
@@ -659,7 +666,7 @@ describe('advisor scopes and their readers (WP 3.9, closed by WP 3.10a)', () => 
       unsourced,
       'the scopes with no reader must be exactly the four whose source context does not exist ' +
         'yet; wp3.10 §7.1’s four landed in WP 3.10a',
-    ).toEqual([...NOT_YET_MODELLED].sort());
+    ).toEqual([...NOT_YET_MODELLED, ...READ_OUTSIDE_THE_SNAPSHOT].sort());
 
     // 3. The four WP 3.10a landed are asserted *sourced* by name. This is the
     //    direction that matters now: reverting one flag — or deleting an arm
@@ -683,6 +690,7 @@ describe('advisor scopes and their readers (WP 3.9, closed by WP 3.10a)', () => 
     //    than a field nobody maintains.
     for (const definition of SCOPE_CATALOGUE) {
       if (NOT_YET_MODELLED.includes(definition.scope)) continue;
+      if (READ_OUTSIDE_THE_SNAPSHOT.includes(definition.scope)) continue;
       expect(definition.sourcedInPhase2, `${definition.scope} lost its reader`).toBe(true);
     }
   });

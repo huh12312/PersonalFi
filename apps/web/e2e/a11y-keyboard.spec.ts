@@ -10,6 +10,12 @@ import {
   RULE_SUGGESTION_INSIGHT_ID,
   SUGGESTED_CATEGORY_KEY,
 } from './support/mock-rule-suggestions.ts';
+import {
+  installCategorySuggestionMocks,
+  SUGGESTED_CATEGORY_ID,
+  SUGGESTED_MERCHANT,
+  SUGGESTED_TRANSACTION_ID,
+} from './support/mock-category-suggestions.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { assertReadingOrder, Journey } from './support/keyboard.ts';
 import { installVirtualPasskey } from './support/virtual-passkey.ts';
@@ -746,7 +752,7 @@ test('settings › language model (WP 10.16): Tab to Run control checks, press i
   await page.keyboard.press('Enter');
   const history = section.getByTestId('control-checks-history');
   await expect(history.getByRole('table')).toBeVisible();
-  await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(11);
+  await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(12);
   await journey.expectFocus(/\(latest\)/, 'focus stays on the opened summary');
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
@@ -1027,4 +1033,91 @@ test('inbox: Tab to a rule suggestion’s Create rule, keep the suggested catego
     )
     .toBe(true);
   await journey.check('after saving the rule, in the review queue');
+});
+
+// ---------------------------------------------------------------------------
+// WP 11.2: the model's category suggestion, by keyboard
+// ---------------------------------------------------------------------------
+
+test('inbox: Tab to the suggestion’s Confirm, Enter files it; focus lands on the next row of the queue', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await installSweepMocks(page);
+  const mocks = await installCategorySuggestionMocks(page);
+  await visit(page, '/inbox');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'inbox model suggestion, Confirm');
+  const row = page
+    .getByRole('list', { name: 'Review inbox' })
+    .locator('> li')
+    .filter({ hasText: SUGGESTED_MERCHANT });
+  await expect(row.getByTestId('suggestion-chip')).toBeVisible();
+
+  await journey.tabTo(/^Confirm Coffee Shops$/, { max: 60 });
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => mocks.patches)
+    .toEqual([
+      { transactionId: SUGGESTED_TRANSACTION_ID, body: { categoryId: SUGGESTED_CATEGORY_ID } },
+    ]);
+  await expect(row).toHaveCount(0);
+  // The row (and the button) is gone: focus is on the review queue's current row, not the document body.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.activeElement?.matches('ul[aria-label="Review inbox"] > li[tabindex="0"]') ===
+          true,
+      ),
+    )
+    .toBe(true);
+  await journey.check('after Confirm, on the next row of the queue');
+});
+
+test('inbox: Not this by keyboard; the chip goes and focus stays on its row', async ({ page }) => {
+  test.setTimeout(120_000);
+  await installSweepMocks(page);
+  const mocks = await installCategorySuggestionMocks(page);
+  await visit(page, '/inbox');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'inbox model suggestion, Not this');
+  const row = page
+    .getByRole('list', { name: 'Review inbox' })
+    .locator('> li')
+    .filter({ hasText: SUGGESTED_MERCHANT });
+  await expect(row.getByTestId('suggestion-chip')).toBeVisible();
+
+  await journey.tabTo(/^Not this$/, { max: 60 });
+  await page.keyboard.press('Enter');
+  await expect.poll(() => mocks.rejects).toEqual([SUGGESTED_TRANSACTION_ID]);
+  await expect(row.getByTestId('suggestion-chip')).toHaveCount(0);
+  await expect(row).toBeFocused();
+  await journey.check('after Not this, on the same row');
+  expect(mocks.patches).toEqual([]);
+});
+
+test('transactions: Tab to the chip’s Confirm, Enter files it without opening the row; focus is on the row', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await installSweepMocks(page);
+  const mocks = await installCategorySuggestionMocks(page);
+  await visit(page, '/transactions');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'transactions model suggestion');
+  const row = page.locator(`[role="row"][data-transaction-id="${SUGGESTED_TRANSACTION_ID}"]`);
+  await expect(row.getByTestId('suggestion-chip')).toBeVisible();
+
+  await journey.tabTo(/^Confirm Coffee Shops$/, { max: 60 });
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => mocks.patches)
+    .toEqual([
+      { transactionId: SUGGESTED_TRANSACTION_ID, body: { categoryId: SUGGESTED_CATEGORY_ID } },
+    ]);
+  await expect(row.getByTestId('suggestion-chip')).toHaveCount(0);
+  await expect(row).toBeFocused();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await journey.check('after Confirm, on the row');
 });

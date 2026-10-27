@@ -40,6 +40,8 @@ import { createPreviewModel } from './modules.ts';
 import { createNarratorStores } from './narrator-stores.ts';
 import { createNarratorRuntime } from './narrator-wiring.ts';
 import { narratorSettingsRoutes } from './routes/narrator-settings.ts';
+import { categorySuggestionRoutes } from './routes/category-suggestions.ts';
+import { createSuggestionRuntime } from './category-suggestions.ts';
 import { narratorControlCheckRoutes } from './routes/narrator-control-checks.ts';
 import { buildPlatform } from './platform.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
@@ -757,6 +759,35 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   // WP 10.6: per holder — their provider and model key the approval.
   await app.register(
     advisorRunRoutes(deps, createPreviewModel(config.localModelPin), narratorPreview),
+  );
+  // WP 11.2: Settings → Language model → Category suggestions, and the Inbox's
+  // "Not this". Preview mode: this process renders and approves the suggestion
+  // payload and never calls a model; the worker runs and measures.
+  await app.register(
+    categorySuggestionRoutes(deps, {
+      runtime: createSuggestionRuntime({
+        mode: 'preview',
+        database,
+        narrator: narratorPreview,
+        // The same constructor over the same database and box as the narrator's.
+        stores: createNarratorStores({
+          database,
+          secretBox: () => {
+            try {
+              return security.requireSecretBox();
+            } catch {
+              return undefined;
+            }
+          },
+        }),
+        localModel: undefined,
+        classifier: config.localModelClassifier,
+        timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+        allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+        fileKeys: narratorFileKeys,
+        clock,
+      }),
+    }),
   );
   // WP 9.1 (09 §4 batch 3, W-A): `GET /ops/backup-status` — install-wide
   // backup and restore-drill status from `@core/platform`'s ops tables

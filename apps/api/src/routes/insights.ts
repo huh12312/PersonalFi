@@ -56,6 +56,7 @@ import {
   requestAdvisorRuns,
   reviewInsight,
   setAdvisorEnabled,
+  CATEGORY_SUGGEST_ADVISOR_ID,
   contextLineOf,
   mentionCandidatesOf,
   segmentText,
@@ -751,7 +752,7 @@ export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           body: z.object({ enabled: z.boolean(), clearQuarantine: z.boolean().optional() }),
           response: {
             200: z.object({ advisorId: z.string(), enabled: z.boolean() }),
-            ...problems(401, 403, 404, 503),
+            ...problems(401, 403, 404, 409, 503),
           },
         },
       },
@@ -765,6 +766,19 @@ export const insightRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             title: 'Not Found',
             detail: `no advisor ${request.params.advisorId}`,
             family: 'user',
+          });
+        }
+        // WP 11.2: categorize.suggest is switched on only by its own card, which
+        // checks the precision gate first (`/categories/suggestions/enabled`).
+        // Switching it off here is always allowed.
+        if (request.params.advisorId === CATEGORY_SUGGEST_ADVISOR_ID && request.body.enabled) {
+          throw new AppError({
+            status: 409,
+            code: 'categorization.suggestions_enable_elsewhere',
+            title: 'Conflict',
+            detail:
+              'Category suggestions are turned on in Settings, Language model, Category suggestions, which checks the precision gate first.',
+            family: 'domain',
           });
         }
         const context = contextOf(deps, session.userId, request);

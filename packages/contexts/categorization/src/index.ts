@@ -173,6 +173,7 @@ export { loadGoldSet, type LoadedGoldSet } from './eval/load.ts';
 export {
   MAX_EXPLAIN_BATCH,
   explainTransactions,
+  type StoredSuggestion,
   type StoredTierView,
   type TransactionExplanation,
 } from './explain.ts';
@@ -186,6 +187,60 @@ export {
   listRuleCandidates,
   type RuleCandidate,
 } from './rule-candidates.ts';
+
+// --- WP 11.2: the holder's pick teaches tiers 3 and 5 ------------------------
+export {
+  CATEGORY_CHOSEN_EVENT,
+  backfillLearningFromPicks,
+  learnFromPick,
+  type BackfillLearningResult,
+  type LearnOutcome,
+} from './learn.ts';
+
+// --- WP 11.2: model suggestions for the residue (this context's half) -------
+export {
+  DEFAULT_SUGGESTION_SETTINGS,
+  SUGGESTION_BATCH_MAX,
+  SUGGESTION_GATE,
+  SUGGESTION_REASON_MAX,
+  SUGGEST_JOB_KIND,
+  SUGGEST_MEASURE_JOB_KIND,
+  applyCachedSuggestions,
+  emptyFigures,
+  gateOf,
+  latestSuggestionEval,
+  listResidueForSuggestion,
+  measurementResidue,
+  merchantKeyOf,
+  readSuggestionSettings,
+  recordSuggestionEval,
+  recordSuggestions,
+  rejectSuggestion,
+  residueFeaturesOf,
+  scoreMeasurement,
+  suggestionTaxonomy,
+  writeSuggestionSettings,
+  type CachedAnswer,
+  type GateVerdict,
+  type MeasuredAnswer,
+  type MeasurementFigures,
+  type MeasurementResidue,
+  type MerchantAnswer,
+  type RecordSuggestionsResult,
+  type RejectOutcome,
+  type ResidueFeatures,
+  type ResidueForSuggestion,
+  type ResidueMerchant,
+  type SuggestionCategory,
+  type SuggestionEval,
+  type SuggestionSettings,
+  type SuggestionTaxonomy,
+} from './suggestions.ts';
+export {
+  SUGGESTION_MODEL_CHOICES,
+  type SuggestionModelChoice,
+  type SuggestionVerdict,
+} from '../schema/index.ts';
 
 // --- the port this context reads the ledger through ------------------------
 export {
@@ -225,6 +280,7 @@ export {
   CONSUMED_EVENT_TYPES,
   CONSUMER_NAME,
   createCategorizationConsumer,
+  type ResidueRecorded,
   transactionIdsOf,
 } from './consumer.ts';
 

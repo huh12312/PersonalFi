@@ -37,7 +37,7 @@
  * for which of the four `apps/api/test/db/phase2-wiring.test.ts` proved green
  * enough to flip, and why any that stayed off did.
  */
-import { type LocalModelTransport } from '@advisor/local-model';
+import { SUGGEST_CONTROL_OUTSIDE_KEY, type LocalModelTransport } from '@advisor/local-model';
 import type { LocalModelPin } from '@core/config';
 import {
   createNarratorWiring,
@@ -84,7 +84,9 @@ import {
   registerAdvisor,
   registerNightlySchedule as registerInsightsNightlySchedule,
   type ResolvedProbeModel,
+  type SuggestProbeModel,
   BUILTIN_CATALOGUE,
+  CATEGORY_SUGGEST_MANIFEST,
   INSIGHTS_EVENTS,
   NARRATOR_MANIFEST,
   type InsightsDatabase,
@@ -161,6 +163,12 @@ import {
 import type { InvestmentSyncPort } from '@ctx/investments';
 import { ADVISOR_KIND_FLAGS, MODULE_FLAGS, type ModuleRegistration } from './platform.ts';
 import { createLivingExpensesPort } from './reports/living-expenses.ts';
+import {
+  createCategorySuggestJob,
+  createCategorySuggestMeasureJob,
+  enqueueSuggestionsAfterSync,
+  type SuggestionRuntime,
+} from './category-suggestions.ts';
 
 export interface ModuleWiringOptions {
   /**
@@ -228,6 +236,15 @@ export interface ModuleWiringOptions {
    */
   readonly narratorRuntime?: Pick<NarratorRuntime, 'forUser' | 'invalidate'> &
     Partial<Pick<NarratorRuntime, 'resolve'>>;
+  /**
+   * WP 11.2: category suggestions for the residue — the worker's run-mode
+   * suggestion runtime (`category-suggestions.ts`). Present: the
+   * categorization consumer enqueues `categorization.suggest` after a sync
+   * pass that left new residue, and the suggestion and measurement jobs are
+   * registered. Absent (the api, and any process without a model wiring):
+   * nothing is enqueued and nothing runs.
+   */
+  readonly categorySuggestions?: { readonly runtime: SuggestionRuntime };
   /**
    * The account holder these modules are being built for — the same id
    * `resolveModules(platform, userId, …)` is called with.
@@ -473,6 +490,14 @@ export async function registerBuiltinAdvisors(
       { manifest: entry.advisor.manifest, enabled: entry.defaultEnabled },
     );
   }
+  // WP 11.2: `categorize.suggest`'s row, off — its approval, grant and runs
+  // need a parent, and only its own Settings card (behind the precision gate)
+  // turns it on. Not in the registry the nightly fan-out iterates.
+  await registerAdvisor(
+    database,
+    { userId: context.userId, clock: context.clock, correlationId: context.correlationId },
+    { manifest: CATEGORY_SUGGEST_MANIFEST, enabled: false },
+  );
 }
 
 export function appModules(options: ModuleWiringOptions): readonly ModuleRegistration[] {
@@ -527,13 +552,37 @@ export function appModules(options: ModuleWiringOptions): readonly ModuleRegistr
         createCategorizationConsumer({
           database,
           port: createCategorizationLedgerPort(database, clock),
+          // WP 11.2: new residue after a sync pass enqueues the suggestion job
+          // (worker only; deduped per holder; the job checks every switch).
+          ...(options.categorySuggestions === undefined
+            ? {}
+            : { onResidueRecorded: enqueueSuggestionsAfterSync(clock) }),
         }),
       ],
       // WP 2.5: weekly retrain, after the nightly sync has had time to land
       // (`RETRAIN_CRON`, Sunday 04:00 local). `retrainClassifier` never throws
       // for "nothing to train" — an untrained user gets `COLD_MODEL`, not a
       // failure — so a retry only fires for a genuine database problem.
-      jobs: [retrainJobHandler(database)],
+      jobs: [
+        retrainJobHandler(database),
+        // WP 11.2: the suggestion pass and the precision-gate measurement.
+        ...(options.categorySuggestions === undefined
+          ? []
+          : [
+              createCategorySuggestJob({
+                database,
+                runtime: options.categorySuggestions.runtime,
+                switches: insightsRunSwitches(database, options),
+                clock,
+              }),
+              createCategorySuggestMeasureJob({
+                database,
+                runtime: options.categorySuggestions.runtime,
+                switches: insightsRunSwitches(database, options),
+                clock,
+              }),
+            ]),
+      ],
       schedules: async (userId: string): Promise<void> => {
         await registerRetrainSchedule(database, { userId, timezone: options.timezone }, clock);
       },
@@ -1007,6 +1056,20 @@ const UNAVAILABLE: Readonly<Record<NarratorUnavailableReason, string>> = Object.
   endpoint_refused: 'The local endpoint set in Settings is refused by the local-endpoint policy.',
 });
 
+/** WP 11.2: the holder's suggestion model's enum probe, for the controls self-test. */
+export function suggestProbeFor(runtime: SuggestionRuntime) {
+  return async (userId: string): Promise<SuggestProbeModel | null> => {
+    const resolution = await runtime.resolve(userId);
+    const adapter = resolution.adapter;
+    if (adapter === null) return null;
+    return {
+      label: adapter.label,
+      outsideKey: SUGGEST_CONTROL_OUTSIDE_KEY,
+      probe: (request, signal) => adapter.controlProbe('suggest_enum', request, signal),
+    };
+  };
+}
+
 /** WP 10.16: the holder's run-mode narrator as the self-test reaches it in the worker. */
 export function probeModelFor(
   runtime: NonNullable<ModuleWiringOptions['narratorRuntime']>,
@@ -1191,6 +1254,10 @@ function insightsModule(
               database,
               clock,
               probeFor: probeModelFor(options.narratorRuntime),
+              // WP 11.2: `suggest_enum_refusal`, through the holder's suggestion model.
+              ...(options.categorySuggestions === undefined
+                ? {}
+                : { suggestProbeFor: suggestProbeFor(options.categorySuggestions.runtime) }),
             }),
           ]),
       // WP 10.12: the daily health snapshot (04:10 local), the same snapshot ports the Brief's weekly

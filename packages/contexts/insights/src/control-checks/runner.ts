@@ -31,6 +31,7 @@ import {
   checkNarrationBadge,
   checkNumeralsRefusal,
   checkSchemaRefusal,
+  checkSuggestEnumRefusal,
   errorClass,
   pendingRow,
   runCheck,
@@ -38,6 +39,7 @@ import {
   type ControlCheckOutcome,
   type ControlProbeModel,
   type ModuleSwitchPort,
+  type SuggestProbeModel,
   type WorkerCheckContext,
 } from './catalogue.ts';
 import type { HolderCheckPorts } from './holder-ports.ts';
@@ -198,6 +200,8 @@ export interface ControlChecksJobDependencies {
   readonly clock?: Clock;
   /** The holder's narrator in the worker (run mode), as the self-test reaches it. */
   probeFor(userId: string): Promise<ResolvedProbeModel>;
+  /** WP 11.2: the holder's suggestion model's enum probe; absent or `null` skips that check as not applicable. */
+  suggestProbeFor?(userId: string): Promise<SuggestProbeModel | null>;
   /** Tests only. */
   readonly timing?: WorkerCheckContext['timing'];
 }
@@ -211,6 +215,7 @@ const WORKER_CHECKS: Partial<
   egress_allowlist: checkEgressAllowlist,
   budget_window: checkBudgetWindow,
   model_pin: checkModelPin,
+  suggest_enum_refusal: checkSuggestEnumRefusal,
 };
 
 /** The worker's checks for one run, in catalogue order. Total: never throws past a check. */
@@ -232,7 +237,11 @@ export async function runWorkerControlChecks(
     };
   }
   const clock = context.clock;
+  const suggest: SuggestProbeModel | null = await (
+    dependencies.suggestProbeFor?.(context.userId) ?? Promise.resolve(null)
+  ).catch(() => null);
   const workerContext: WorkerCheckContext = {
+    suggest,
     model: resolved.model,
     unavailable: resolved.unavailable,
     request: controlProbeRequest(clock),
