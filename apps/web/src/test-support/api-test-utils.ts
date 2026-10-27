@@ -207,6 +207,10 @@ export function buildTransaction(
     pending: false,
     excluded: false,
     categoryId: null,
+    // WP 11.2b: a category a test sets is, unless it says otherwise, the holder's own pick (no chip).
+    categorySource:
+      overrides.categoryId === undefined || overrides.categoryId === null ? null : 'user',
+    autoCategory: null,
     note: null,
     isTransfer: false,
     transferLinkId: null,

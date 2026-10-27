@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { createdAtColumn, idColumn } from '@core/db/columns';
+import { createdAtColumn, flagColumn, idColumn } from '@core/db/columns';
 import { jsonb, pgTable, text } from 'drizzle-orm/pg-core';
 
 /**
@@ -25,6 +25,11 @@ export const users = pgTable('users', {
    * default layout. The CHECK `users_dashboard_layout_is_array` holds the array shape; the route holds the ids.
    */
   dashboardLayout: jsonb('dashboard_layout').$type<readonly { id: string; visible: boolean }[]>(),
+  /**
+   * Whether the Inbox lists "Auto-categorised, unreviewed" (WP 11.2b, migration `0058`). TRUE (the default) = shown.
+   * Read and written only by `apps/api/src/routes/inbox-preferences.ts`.
+   */
+  inboxShowAutoReview: flagColumn('inbox_show_auto_review').notNull().default(true),
   createdAt: createdAtColumn(),
 });
 

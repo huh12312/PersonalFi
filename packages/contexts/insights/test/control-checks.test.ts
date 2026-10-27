@@ -36,8 +36,10 @@ import {
   type ModuleSwitchPort,
   type NarrationBadgePort,
   type WorkerCheckContext,
+  checkExplainGrounding,
   checkSuggestEnumRefusal,
   SUGGEST_PROBE_TAXONOMY,
+  type ExplainProbeModel,
   type SuggestProbeModel,
 } from '../src/index.ts';
 
@@ -169,7 +171,7 @@ function budget(remainingAfter: () => number, maxRequests = 30, windowMs = 3_600
 // ---------------------------------------------------------------------------
 
 describe('the catalogue', () => {
-  it('names twelve checks, in the order of the brief, each with words for the table', () => {
+  it('names thirteen checks, in the order of the brief, each with words for the table', () => {
     expect(CONTROL_CHECKS.map((check) => check.id)).toEqual([...CONTROL_CHECK_IDS]);
     expect(CONTROL_CHECK_IDS).toEqual([
       'approval_gate',
@@ -184,6 +186,7 @@ describe('the catalogue', () => {
       'narration_badge',
       'model_pin',
       'suggest_enum_refusal',
+      'explain_grounding',
     ]);
     for (const check of CONTROL_CHECKS) {
       expect(check.name.length).toBeGreaterThan(3);
@@ -198,6 +201,7 @@ describe('the catalogue', () => {
       'budget_window',
       'model_pin',
       'suggest_enum_refusal',
+      'explain_grounding',
     ]);
   });
 
@@ -716,6 +720,54 @@ describe('suggest_enum_refusal (WP 11.2)', () => {
     });
     const unreachable = await checkSuggestEnumRefusal(
       workerContext(null, { suggest: suggestModel(new Error('econnrefused')) }),
+    );
+    expect(unreachable).toMatchObject({ status: 'skipped', notApplicable: false });
+  });
+});
+
+describe('explain_grounding (WP 11.3)', () => {
+  const figure = '$9,173.46';
+  function explainModel(reply: unknown | Error): ExplainProbeModel {
+    return {
+      label: 'qwen2.5:7b-instruct@sha256:test',
+      figure,
+      probe: () => (reply instanceof Error ? Promise.reject(reply) : Promise.resolve({ reply })),
+    };
+  }
+
+  it('passes when an obedient model states the figure and the validator refuses it (numeral)', async () => {
+    const outcome = await checkExplainGrounding(
+      workerContext(null, {
+        explain: explainModel({ explanation: `Your accounts total ${figure}.` }),
+      }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.facts.join(' ')).toContain('validator refused the reply (numeral)');
+    // The fact names the asked-for figure, never the model's reply.
+    expect(outcome.facts.join(' ')).not.toContain('Your accounts total');
+  });
+
+  it('passes when the model declines, and when the reply is outside the format', async () => {
+    const declined = await checkExplainGrounding(
+      workerContext(null, {
+        explain: explainModel({ explanation: 'The self-test figure is $250.00.' }),
+      }),
+    );
+    expect(declined.status).toBe('pass');
+    expect(declined.facts.join(' ')).toContain('declined');
+    const malformed = await checkExplainGrounding(
+      workerContext(null, { explain: explainModel('not json') }),
+    );
+    expect(malformed.status).toBe('pass');
+  });
+
+  it('is skipped (not applicable) with no explain model, and skipped when the probe cannot reach it', async () => {
+    expect(await checkExplainGrounding(workerContext(null))).toMatchObject({
+      status: 'skipped',
+      notApplicable: true,
+    });
+    const unreachable = await checkExplainGrounding(
+      workerContext(null, { explain: explainModel(new Error('econnrefused')) }),
     );
     expect(unreachable).toMatchObject({ status: 'skipped', notApplicable: false });
   });

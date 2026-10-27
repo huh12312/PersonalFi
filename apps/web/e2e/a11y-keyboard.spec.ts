@@ -16,7 +16,15 @@ import {
   SUGGESTED_MERCHANT,
   SUGGESTED_TRANSACTION_ID,
 } from './support/mock-category-suggestions.ts';
+import {
+  GROCERIES_EXPLANATION,
+  SAVINGS_RATE_EXPLANATION,
+  explainBody,
+  scriptExplanation,
+  shownBody,
+} from './support/mock-explain.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
+import { installInvestmentsMocks } from './support/mock-investments.ts';
 import { assertReadingOrder, Journey } from './support/keyboard.ts';
 import { installVirtualPasskey } from './support/virtual-passkey.ts';
 import { concretePath, hideDevtools, routePatternsInTree, visit } from './support/sweep.ts';
@@ -580,7 +588,13 @@ test('investments (WP 10.3): the Activity tab by arrow keys, its type filter, an
   page,
 }) => {
   test.setTimeout(120_000);
-  const journey = await begin(page, 'investments', '/investments');
+  // The sweep answers Activity as an install with no activity (its empty state is swept elsewhere);
+  // this journey walks the table, so the screen's own Sandbox-shaped fixture is installed last and wins.
+  await installSweepMocks(page);
+  await installInvestmentsMocks(page);
+  await visit(page, '/investments');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'investments');
 
   // The tab list is one stop; arrows move, Enter chooses.
   const tab = await journey.tabTo(/^Holdings$/, { max: 40 });
@@ -752,7 +766,7 @@ test('settings › language model (WP 10.16): Tab to Run control checks, press i
   await page.keyboard.press('Enter');
   const history = section.getByTestId('control-checks-history');
   await expect(history.getByRole('table')).toBeVisible();
-  await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(12);
+  await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(13);
   await journey.expectFocus(/\(latest\)/, 'focus stays on the opened summary');
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
@@ -1121,3 +1135,63 @@ test('transactions: Tab to the chip’s Confirm, Enter files it without opening 
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await journey.check('after Confirm, on the row');
 });
+
+// ---------------------------------------------------------------------------
+// WP 11.3: "Explain this", by keyboard
+// ---------------------------------------------------------------------------
+
+for (const [where, kind, id, name, text] of [
+  [
+    '/insights',
+    'insight',
+    'insight_groceries',
+    /^Explain this — Groceries has been running higher than usual$/u,
+    GROCERIES_EXPLANATION,
+  ],
+  [
+    '/health/savings-rate',
+    'health_pillar',
+    'savings_rate',
+    /^Explain this — Savings rate$/u,
+    SAVINGS_RATE_EXPLANATION,
+  ],
+] as const) {
+  test(`WP 11.3 ${where}: Tab to Explain this, Enter asks; the live region says Explaining…; focus lands on the explanation and Tab goes on from it`, async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const mocks = await installSweepMocks(page);
+    scriptExplanation(mocks.explain, kind, id, {
+      post: explainBody(kind, id, 'computing'),
+      computingReads: 2,
+      result: shownBody(kind, id, text),
+    });
+    await visit(page, where);
+    await hideDevtools(page);
+    const journey = new Journey(page, `WP 11.3 ${where} Explain this`);
+    await journey.tabTo(name, { max: 80 });
+    await page.keyboard.press('Enter');
+    const live = page.getByTestId('explain-live').filter({ hasText: 'Explaining…' });
+    await expect(live).toHaveCount(1);
+    await expect(live).toHaveAttribute('role', 'status');
+    // Busy, the button keeps focus (aria-disabled, never disabled): nothing drops to the body.
+    await journey.expectFocus(name, 'the busy button keeps focus');
+    const explanation = page.getByTestId('explanation');
+    await expect(explanation).toBeFocused({ timeout: 15_000 });
+    await expect(explanation.getByTestId('explanation-text')).toHaveText(text);
+    await journey.check('on the explanation');
+    // Tab goes on from the explanation: to the next stop after it, or — the last card on the page — round to the
+    // skip link. Never back to a stop before it, never the body.
+    await page.keyboard.press('Tab');
+    expect(
+      await page.evaluate(() => {
+        const box = document.querySelector('[data-testid="explanation"]');
+        const active = document.activeElement;
+        if (box === null || active === null || active === document.body) return false;
+        if ((box.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0)
+          return true;
+        return active.textContent?.trim() === 'Skip to main content';
+      }),
+    ).toBe(true);
+  });
+}

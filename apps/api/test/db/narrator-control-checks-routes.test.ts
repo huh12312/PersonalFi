@@ -289,7 +289,7 @@ describe.skipIf(NO_DATABASE)('Run control checks (WP 10.16)', () => {
     expect(run.state).toBe('running');
     expect(run.provider).toBe('anthropic');
     expect(run.model).toBe('anthropic:claude-sonnet-5-5');
-    expect(run.results.map((row) => row.status)).toEqual(Array(12).fill('pending'));
+    expect(run.results.map((row) => row.status)).toEqual(Array(13).fill('pending'));
 
     const callsBefore = fake.calls.length;
     await runWorker(async () => (await list()).runs[0]?.state === 'finished');
@@ -315,6 +315,8 @@ describe.skipIf(NO_DATABASE)('Run control checks (WP 10.16)', () => {
     expect(by['model_pin']).toMatchObject({ status: 'skipped', notApplicable: true });
     // WP 11.2: this worker binds no suggestion model, so the enum probe does not apply.
     expect(by['suggest_enum_refusal']).toMatchObject({ status: 'skipped', notApplicable: true });
+    // WP 11.3: nor an explain model.
+    expect(by['explain_grounding']).toMatchObject({ status: 'skipped', notApplicable: true });
     expect(done.overall).toBe('partial');
 
     // Three calls to the one host, nothing else; the key never in a fact.
@@ -380,6 +382,7 @@ describe.skipIf(NO_DATABASE)('Run control checks (WP 10.16)', () => {
       'budget_window',
       'model_pin',
       'suggest_enum_refusal',
+      'explain_grounding',
     ]) {
       const row = done.results.find((entry) => entry.id === id);
       expect(row?.status, id).toBe('skipped');

@@ -2,6 +2,16 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { setTheme } from './support/axe.ts';
+import {
+  EXPLAIN_LOCAL_BADGE,
+  EXPLAIN_REFUSED_WORDS,
+  GROCERIES_EXPLANATION,
+  SAVINGS_RATE_EXPLANATION,
+  explainBody,
+  refusedBody,
+  scriptExplanation,
+  shownBody,
+} from './support/mock-explain.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import { hideDevtools, visit } from './support/sweep.ts';
@@ -168,6 +178,130 @@ evidenceTest(
             fullPage: true,
           });
         }
+      }
+    }
+  },
+);
+
+/**
+ * WP 11.3 ("Explain this") on Financial health: every scored pillar card and a scored pillar's detail offer it; the
+ * withheld pillar offers none. `mock-explain.ts` scripts the savings-rate pillar.
+ */
+test.describe('WP 11.3 Explain this on Financial health', () => {
+  test('WP 11.3: each scored pillar card offers Explain this, the withheld one none; rendering only reads', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const mocks = await installSweepMocks(page);
+    await visit(page, '/health');
+    const grid = page.getByTestId('pillars-grid');
+    await expect(grid.locator('[data-pillar-status="scored"]')).toHaveCount(5);
+    await expect(
+      grid.locator('[data-pillar-status="scored"] [data-testid="explain-this"]'),
+    ).toHaveCount(5);
+    await expect(
+      grid.locator('[data-pillar="diversification"] [data-testid="explain-this"]'),
+    ).toHaveCount(0);
+    await expect(grid.getByRole('button', { name: 'Explain this — Savings rate' })).toBeVisible();
+    await expect.poll(() => mocks.explain.calls.length).toBe(5);
+    expect(mocks.explain.calls.every((c) => c.startsWith('GET /api/insights/health/'))).toBe(true);
+  });
+
+  test('WP 11.3: a pillar’s detail, by keyboard: Enter asks, 202 computing then shown; the inputs stay beneath', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const mocks = await installSweepMocks(page);
+    scriptExplanation(mocks.explain, 'health_pillar', 'savings_rate', {
+      post: explainBody('health_pillar', 'savings_rate', 'computing'),
+      computingReads: 2,
+      result: shownBody('health_pillar', 'savings_rate', SAVINGS_RATE_EXPLANATION),
+    });
+    await visit(page, '/health/savings-rate');
+    const button = page.getByRole('button', { name: 'Explain this — Savings rate' });
+    await button.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('explain-live')).toHaveText('Explaining…');
+    await expect(button).toHaveAttribute('aria-busy', 'true');
+    const explanation = page.getByTestId('explanation');
+    await expect(explanation).toBeFocused({ timeout: 15_000 });
+    await expect(explanation.getByTestId('explanation-text')).toHaveText(SAVINGS_RATE_EXPLANATION);
+    await expect(explanation.getByTestId('explanation-badge')).toHaveText(EXPLAIN_LOCAL_BADGE);
+    await expect(explanation.getByText('AI-assisted wording')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'What it is built from' })).toBeVisible();
+    await expect(page.getByTestId('pillar-inputs')).toContainText('$90,000.00');
+    expect(mocks.explain.calls).toContain('POST /api/insights/health/savings_rate/explain');
+  });
+
+  test('WP 11.3: a refused pillar explanation keeps the api’s words; a withheld pillar’s detail has no button', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    const mocks = await installSweepMocks(page);
+    scriptExplanation(mocks.explain, 'health_pillar', 'savings_rate', {
+      initial: refusedBody('health_pillar', 'savings_rate'),
+    });
+    await visit(page, '/health/savings-rate');
+    await expect(page.getByTestId('explanation-refused')).toHaveText(EXPLAIN_REFUSED_WORDS);
+    await expect(page.getByTestId('pillar-inputs')).toBeVisible();
+    await visit(page, '/health/diversification');
+    await expect(page.getByTestId('pillar-withheld')).toBeVisible();
+    await expect(page.getByTestId('explain-this')).toHaveCount(0);
+  });
+});
+
+evidenceTest(
+  'WP 11.3 evidence: an insight explained, a pillar explained and a refusal, light and dark, at 1280 and 390',
+  async ({ page, evidenceDir }) => {
+    test.setTimeout(240_000);
+    const mocks = await installSweepMocks(page);
+    scriptExplanation(mocks.explain, 'insight', 'insight_groceries', {
+      initial: shownBody('insight', 'insight_groceries', GROCERIES_EXPLANATION),
+    });
+    scriptExplanation(mocks.explain, 'insight', 'insight_price', {
+      initial: refusedBody('insight', 'insight_price'),
+    });
+    scriptExplanation(mocks.explain, 'health_pillar', 'savings_rate', {
+      initial: shownBody('health_pillar', 'savings_rate', SAVINGS_RATE_EXPLANATION),
+    });
+    const insightCard = (text: string) =>
+      page.getByRole('list', { name: 'Insights' }).locator('> li').filter({ hasText: text });
+    for (const [width, height] of [
+      [1280, 1400],
+      [390, 2400],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await visit(page, '/insights');
+      await hideDevtools(page);
+      await expect(
+        insightCard('has been running higher than usual').getByTestId('explanation-text'),
+      ).toBeVisible();
+      await expect(
+        insightCard('A subscription went up in price').getByTestId('explanation-refused'),
+      ).toBeVisible();
+      for (const theme of ['light', 'dark'] as const) {
+        await setTheme(page, theme);
+        await page.waitForTimeout(600);
+        await insightCard('has been running higher than usual').screenshot({
+          path: `${screenshotDir(evidenceDir)}wp11.3-insight-explained-${theme}-${String(width)}.png`,
+          animations: 'disabled',
+        });
+        await insightCard('A subscription went up in price').screenshot({
+          path: `${screenshotDir(evidenceDir)}wp11.3-refused-${theme}-${String(width)}.png`,
+          animations: 'disabled',
+        });
+      }
+      await visit(page, '/health/savings-rate');
+      await hideDevtools(page);
+      await expect(page.getByTestId('explanation-text')).toBeVisible();
+      for (const theme of ['light', 'dark'] as const) {
+        await setTheme(page, theme);
+        await page.waitForTimeout(800);
+        await page.screenshot({
+          path: `${screenshotDir(evidenceDir)}wp11.3-pillar-explained-${theme}-${String(width)}.png`,
+          animations: 'disabled',
+          fullPage: true,
+        });
       }
     }
   },

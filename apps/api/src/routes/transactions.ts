@@ -57,6 +57,7 @@ import { createCategorizationLedgerPort } from '../domain.ts';
 import { AppError, problems } from '../problem.ts';
 import { clearTransactionSplits, setTransactionSplits } from '../ledger-splits.ts';
 import { mapDomainErrors } from './domain-errors.ts';
+import { inboxPreferenceRoutes } from './inbox-preferences.ts';
 import { ruleRecordSchema, serialiseRule } from './rules.ts';
 import {
   booleanQuery,
@@ -70,6 +71,9 @@ import {
   moneySchema,
 } from '../wire.ts';
 import type { RouteDeps } from './deps.ts';
+
+/** WP 11.2b: how far back the Inbox's “Auto-categorised, unreviewed” section looks. */
+export const AUTO_REVIEW_WINDOW_DAYS = 30;
 
 /** Rows per page of the export loop. Not the API page size; this one never ships. */
 const EXPORT_CHUNK = 1_000;
@@ -86,6 +90,25 @@ const splitSchema = z
   })
   .meta({ id: 'TransactionSplit' });
 
+/**
+ * WP 11.2b: where an automatic placement came from, for the provenance chip. Present only when the
+ * automatic tiers are what the row's effective category came from (`categorySource: 'auto'`): a rule-set or
+ * holder-set category carries none, so the client never has to decide whether to draw a chip.
+ */
+const autoCategorySchema = z
+  .object({
+    tier: z
+      .enum(['merchant_default', 'provider', 'classifier'])
+      .describe('3 a learned merchant default, 4 the provider’s category, 5 the classifier.'),
+    confidence: z
+      .number()
+      .min(0)
+      .max(1)
+      .describe('The calibrated figure the engine stored with the assignment; never recomputed.'),
+    decidedAt: isoInstant,
+  })
+  .meta({ id: 'AutoCategory' });
+
 const transactionSchema = z
   .object({
     id: z.uuid(),
@@ -98,7 +121,29 @@ const transactionSchema = z
     merchantName: z.string().nullable(),
     pending: z.boolean(),
     excluded: z.boolean().describe('The user took this out of budgets and totals.'),
-    categoryId: z.uuid().nullable().describe('Opaque here; @ctx/categorization owns categories.'),
+    categoryId: z
+      .uuid()
+      .nullable()
+      .describe(
+        'The effective category: the holder’s pick, else a rule’s, else an automatic tier’s ' +
+          '(a learned merchant default, the provider’s category, the classifier above its floor). ' +
+          'Opaque here; @ctx/categorization owns categories.',
+      ),
+    categorySource: z
+      .enum(['user', 'rule', 'auto'])
+      .nullable()
+      .optional()
+      .describe(
+        'Which tier `categoryId` came from; null when it is null. Always sent; optional in the ' +
+          'contract so a client tolerates an api that predates WP 11.2b.',
+      ),
+    autoCategory: autoCategorySchema
+      .nullable()
+      .optional()
+      .describe(
+        'Provenance of an automatic placement; null unless `categorySource` is `auto`. Always ' +
+          'sent; optional in the contract for the same reason as `categorySource`.',
+      ),
     note: z.string().nullable(),
     isTransfer: z.boolean(),
     transferLinkId: z.uuid().nullable(),
@@ -135,6 +180,14 @@ const categoryExplanationSchema = z
         source: z.string(),
         won: z.boolean(),
         detail: z.string(),
+        facts: z
+          .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+          .nullable()
+          .optional()
+          .describe(
+            'WP 11.2b: the figures behind `detail` as stored (a merchant default’s `support`, ' +
+              'the classifier’s `confidence` and `floor`); null for a chain stored before WP 11.1.',
+          ),
       }),
     ),
     suggestion: z
@@ -237,6 +290,10 @@ const listQuery = z.object({
   excluded: booleanQuery,
   transfers: z.enum(['include', 'exclude', 'only']).optional(),
   uncategorized: booleanQuery,
+  autoReview: booleanQuery.describe(
+    'WP 11.2b: only rows an automatic tier placed in the last 30 days that neither a rule nor the ' +
+      'holder has since decided - the Inbox’s “Auto-categorised, unreviewed”.',
+  ),
   includeRemoved: booleanQuery,
   includeDuplicates: booleanQuery,
 });
@@ -259,6 +316,15 @@ function serialiseTransaction(row: LedgerTransaction): z.infer<typeof transactio
     pending: row.effective.pending,
     excluded: row.effective.excluded,
     categoryId: row.effective.categoryId,
+    categorySource: row.effective.categorySource,
+    autoCategory:
+      row.effective.categorySource === 'auto' && row.auto !== null
+        ? {
+            tier: row.auto.tier,
+            confidence: row.auto.confidence,
+            decidedAt: row.auto.decidedAt.toISOString(),
+          }
+        : null,
     note: row.effective.note,
     isTransfer: row.isTransfer,
     transferLinkId: row.transferLinkId,
@@ -325,7 +391,7 @@ function serialiseDetail(detail: TransactionDetail): z.infer<typeof transactionD
  * different thing from `{}` to both TypeScript and the filter builder — the
  * latter means "show both", which is the default a user expects.
  */
-function filtersOf(query: FilterQuery): TransactionFilters {
+function filtersOf(query: FilterQuery, now: Date): TransactionFilters {
   return {
     ...(query.accountIds === undefined ? {} : { accountIds: query.accountIds }),
     ...(query.merchantIds === undefined ? {} : { merchantIds: query.merchantIds }),
@@ -338,6 +404,9 @@ function filtersOf(query: FilterQuery): TransactionFilters {
     ...(query.excluded === undefined ? {} : { excluded: query.excluded }),
     ...(query.transfers === undefined ? {} : { transfers: query.transfers }),
     ...(query.uncategorized === undefined ? {} : { uncategorized: query.uncategorized }),
+    ...(query.autoReview === true
+      ? { autoReviewSince: new Date(now.getTime() - AUTO_REVIEW_WINDOW_DAYS * 86_400_000) }
+      : {}),
     ...(query.q === undefined ? {} : { search: query.q }),
     ...(query.includeRemoved === undefined ? {} : { includeRemoved: query.includeRemoved }),
     ...(query.includeDuplicates === undefined
@@ -399,6 +468,10 @@ export const transactionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
   }
 
   return async (app) => {
+    // WP 11.2b: the Inbox's one preference (show / hide "Auto-categorised, unreviewed"). Nested here, not in
+    // app.ts, so this package touches no shared registration file.
+    await app.register(inboxPreferenceRoutes(deps));
+
     app.get(
       '/transactions',
       {
@@ -423,7 +496,7 @@ export const transactionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
       async (request) => {
         const session = await guards.requireSession(request);
-        const filters = filtersOf(request.query);
+        const filters = filtersOf(request.query, clock.now());
         const input = {
           userId: session.userId,
           filters,
@@ -466,7 +539,10 @@ export const transactionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             'one line plus the tier-by-tier detail. `status` is `assigned` when a tier decided, ' +
             '`abstained` when every tier declined (the line names what each tried, with its ' +
             'figures), and `not_recorded` when no categorisation pass has run on it since this ' +
-            'was introduced. Read from what was stored when it was decided; never recomputed.',
+            'was introduced. Read from what was stored when it was decided; never recomputed. ' +
+            'WP 11.2b: for an `assigned` row this is the chain behind its provenance chip - which ' +
+            'tier won and the stored figures (a merchant default’s support, the classifier’s ' +
+            'confidence and floor).',
           tags: ['transactions'],
           querystring: z.object({ ids: idList }),
           response: {
@@ -538,7 +614,7 @@ export const transactionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       },
       async (request, reply) => {
         const session = await guards.requireFreshSession(request);
-        const filters = filtersOf(request.query);
+        const filters = filtersOf(request.query, clock.now());
 
         const lines = [
           'date,name,amount_minor,currency,account_id,category_id,pending,excluded,transfer,note',

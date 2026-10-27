@@ -32,8 +32,10 @@
  * file is what finally calls it on a schedule instead of only from a test.
  */
 import { systemClock, type Clock } from '@core/kernel';
-import { defineJob, upsertSchedule, type JobHandlerRegistration } from '@core/platform';
+import { defineJob, enqueueJob, upsertSchedule, type JobHandlerRegistration } from '@core/platform';
 import { outboxOf, type CategorizationDatabase, type CategorizationExecutor } from './db.ts';
+import { reprojectAutoCategories } from './auto-projection.ts';
+import type { LedgerPort } from './ledger-port.ts';
 import { retrainClassifier } from './service.ts';
 
 export const RETRAIN_JOB_KIND = 'categorization.retrain';
@@ -92,5 +94,56 @@ export function registerRetrainSchedule(
       jitterSeconds: 30 * 60,
     },
     clock,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WP 11.2b: the ledger's projection of tiers 3-5, re-derived
+// ---------------------------------------------------------------------------
+
+export const PROJECT_AUTO_JOB_KIND = 'categorization.project_auto';
+
+/**
+ * Re-derive the ledger's `transactions.auto_*` from the current assignments (`reprojectAutoCategories`).
+ *
+ * The backfill for an install that had tier 3-5 assignments before migration 0058 existed (expand -> backfill ->
+ * contract: the migration adds nullable columns and a job fills them), and a self-heal thereafter. Idempotent -
+ * the ledger writes nothing for a placement it already holds - so enqueueing it at every boot costs one indexed
+ * scan of the current assignments. Never throws for "nothing to project".
+ */
+export function projectAutoJobHandler(
+  database: CategorizationDatabase,
+  port: LedgerPort,
+): JobHandlerRegistration {
+  return defineJob(
+    PROJECT_AUTO_JOB_KIND,
+    async (_payload, context) => {
+      await reprojectAutoCategories(database, port, {
+        userId: context.userId,
+        clock: context.clock,
+        correlationId: context.correlationId,
+      });
+    },
+    { concurrency: 1 },
+  );
+}
+
+/** Enqueue the reprojection for one holder. Deduped: one waiting at a time. Called at boot by `modules.ts`. */
+export async function enqueueProjectAuto(
+  executor: CategorizationExecutor,
+  input: { readonly userId: string; readonly correlationId: string },
+  clock: Clock = systemClock,
+): Promise<void> {
+  await enqueueJob(
+    outboxOf(executor),
+    {
+      userId: input.userId,
+      kind: PROJECT_AUTO_JOB_KIND,
+      dedupeKey: `${PROJECT_AUTO_JOB_KIND}:${input.userId}`,
+      priority: 500,
+      maxAttempts: 3,
+      correlationId: input.correlationId,
+    },
+    { clock },
   );
 }

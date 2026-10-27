@@ -9,8 +9,10 @@ import {
 } from '@core/kernel';
 import type { Executor } from '@core/platform';
 import type { SQL } from 'drizzle-orm';
-import { resolveCategoryId } from './effective.ts';
+import { resolveCategory } from './effective.ts';
 import type {
+  AutoCategoryView,
+  AutoResolution,
   EffectiveTransaction,
   LedgerTransaction,
   ProviderCounterparty,
@@ -119,6 +121,68 @@ export function ruleOf(row: TransactionRow): RuleResolution {
 }
 
 /**
+ * The automatic tiers' stored answer, as `resolveEffective`'s `auto` argument
+ * expects it. Sparse like `ruleOf`: written by nothing under `src/` except
+ * `setAutoCategories` (`auto-category.ts`).
+ */
+export function autoOf(row: TransactionRow): AutoResolution {
+  return { autoCategoryId: row.autoCategoryId };
+}
+
+/**
+ * The stored provenance of an automatic placement, or `null` when there is none.
+ * Read back from the row, never recomputed: the confidence is the calibrated
+ * figure the engine stored with the assignment.
+ */
+export function autoViewOf(row: TransactionRow): AutoCategoryView | null {
+  if (
+    row.autoCategoryId === null ||
+    row.autoTier === null ||
+    row.autoConfidence === null ||
+    row.autoDecidedAt === null ||
+    row.autoAssignmentId === null
+  ) {
+    return null;
+  }
+  return {
+    tier: row.autoTier,
+    confidence: row.autoConfidence,
+    decidedAt: row.autoDecidedAt,
+    assignmentId: row.autoAssignmentId,
+    supersededAt: row.autoSupersededAt,
+  };
+}
+
+/**
+ * A row's columns minus the six `auto_*` ones. Every write path that sets a whole
+ * row (a sync page, a user edit) goes through this, so none of them can write a
+ * stale automatic placement back over a categorisation pass that committed after
+ * the row was read.
+ */
+export function withoutAutoColumns<T extends Partial<TransactionRow>>(
+  row: T,
+): Omit<
+  T,
+  | 'autoCategoryId'
+  | 'autoTier'
+  | 'autoConfidence'
+  | 'autoDecidedAt'
+  | 'autoAssignmentId'
+  | 'autoSupersededAt'
+> {
+  const {
+    autoCategoryId: _a,
+    autoTier: _b,
+    autoConfidence: _c,
+    autoDecidedAt: _d,
+    autoAssignmentId: _e,
+    autoSupersededAt: _f,
+    ...rest
+  } = row;
+  return rest;
+}
+
+/**
  * Rehydrate the stored effective columns.
  *
  * Note what this does *not* do: recompute them. The stored columns are the
@@ -129,13 +193,15 @@ export function ruleOf(row: TransactionRow): RuleResolution {
  *
  * `categoryId` is the one field here that is not simply read back: there is no
  * stored `effective_category_id` column, unlike `effective_date` and its
- * siblings, because the category tier order needs only the overlay and the rule
- * column — both already on this row — and never the fact. Computing it here
- * rather than denormalising a seventh `effective_*` column is one fewer column a
- * rule write or a user edit would have to keep in sync.
+ * siblings, because the category tier order needs only the overlay, the rule
+ * column and (WP 11.2b) the automatic tiers' column — all already on this row —
+ * and never the fact. Computing it here rather than denormalising a seventh
+ * `effective_*` column is one fewer column a rule write, a pick or a
+ * categorisation pass would have to keep in sync.
  */
 export function effectiveOf(row: TransactionRow): EffectiveTransaction {
   const merchantName = row.userMerchantName ?? row.effectiveName;
+  const category = resolveCategory(overlayOf(row), ruleOf(row), autoOf(row));
   return {
     date: dateOnlyOf(row.effectiveDate),
     amount: moneyOf(row.effectiveAmountMinor, row.effectiveCurrency),
@@ -144,7 +210,8 @@ export function effectiveOf(row: TransactionRow): EffectiveTransaction {
     merchantDisplayName: row.effectiveMerchantId === null ? null : merchantName,
     pending: row.pending,
     excluded: row.userExcluded,
-    categoryId: resolveCategoryId(overlayOf(row), ruleOf(row)),
+    categoryId: category.categoryId,
+    categorySource: category.source,
     note: row.userNote,
   };
 }
@@ -155,6 +222,7 @@ export function transactionOf(row: TransactionRow): LedgerTransaction {
     accountId: row.accountId,
     factId: row.currentFactId,
     effective: effectiveOf(row),
+    auto: autoViewOf(row),
     merchantId: row.effectiveMerchantId,
     isTransfer: row.isTransfer,
     transferLinkId: row.transferLinkId,

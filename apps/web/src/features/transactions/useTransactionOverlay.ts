@@ -40,7 +40,14 @@ function toOptimisticFields(patch: TransactionOverlayPatchInput): Partial<Transa
   return {
     ...(patch.note !== undefined ? { note: patch.note } : {}),
     ...(patch.excluded !== undefined ? { excluded: patch.excluded } : {}),
-    ...(patch.categoryId !== undefined ? { categoryId: patch.categoryId } : {}),
+    // WP 11.2b: a category the holder just picked is theirs, so its provenance chip goes at once. (A cleared
+    // category cannot be resolved here - a rule or the machine's placement may take its place - and is
+    // reconciled by the invalidation.)
+    ...(patch.categoryId !== undefined
+      ? patch.categoryId === null
+        ? { categoryId: null }
+        : { categoryId: patch.categoryId, categorySource: 'user' as const, autoCategory: null }
+      : {}),
     // `payeeName: null` restores the provider's name, which this cache patch
     // cannot know without the row's `provenance` (only present on the detail
     // shape, not the list row) — left alone in that case and reconciled by

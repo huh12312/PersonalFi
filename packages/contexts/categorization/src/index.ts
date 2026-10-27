@@ -242,12 +242,26 @@ export {
   type SuggestionVerdict,
 } from '../schema/index.ts';
 
+// --- WP 11.2b: tiers 3-5 made effective, through the ledger's projection -----
+export {
+  AUTO_SOURCES,
+  PROJECTING_SOURCES,
+  autoChangeOf,
+  isAutoTier,
+  reprojectAutoCategories,
+  type AssignmentRowForProjection,
+  type AutoSource,
+  type ReprojectResult,
+} from './auto-projection.ts';
+
 // --- the port this context reads the ledger through ------------------------
 export {
   streamTransactions,
   type CategorizableTransaction,
+  type AutoCategoryChangeInput,
   type CategorizableTransactionPage,
   type LedgerPort,
+  type WriteAutoCategoriesInput,
   type ListForCategorizationInput,
   type WriteRuleCategoryInput,
 } from './ledger-port.ts';
@@ -286,6 +300,9 @@ export {
 
 // --- the retrain schedule (WP 2.5) ------------------------------------------
 export {
+  PROJECT_AUTO_JOB_KIND,
+  enqueueProjectAuto,
+  projectAutoJobHandler,
   RETRAIN_CRON,
   RETRAIN_JOB_KIND,
   RETRAIN_SCHEDULE_NAME,

@@ -79,6 +79,34 @@ export const SENSITIVE_COLUMNS: readonly SensitiveColumn[] = [
 ];
 
 /**
+ * Columns that are a **projection**, not data: omitted from the bundle and re-derived on import.
+ *
+ * WP 11.2b. `transactions.auto_*` is the ledger's copy of what the automatic categorisation tiers decided
+ * (3 a merchant default, 4 the provider's category, 5 the classifier). The decisions themselves are
+ * `category_assignments`, which the bundle already carries; the import re-derives the projection from them with
+ * the same mapping the categorisation pass uses (`autoChangeOf`), exactly as it re-runs `projectEffective` for
+ * `effective_*` rather than trusting what the export carried. A bundle that carried the columns could disagree
+ * with its own assignments, and the projection would then be a second writer of what the assignments say.
+ */
+export const DERIVED_COLUMNS: ReadonlyMap<string, readonly string[]> = new Map([
+  [
+    'transactions',
+    [
+      'auto_category_id',
+      'auto_tier',
+      'auto_confidence',
+      'auto_decided_at',
+      'auto_assignment_id',
+      'auto_superseded_at',
+    ],
+  ],
+]);
+
+export function isDerivedColumn(table: string, column: string): boolean {
+  return DERIVED_COLUMNS.get(table)?.includes(column) ?? false;
+}
+
+/**
  * Defence in depth: a column named like a secret is dropped from *any* table.
  *
  * The `sealed` branch exists for `sealed_credentials`/`sealed_config`/
@@ -353,6 +381,10 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
   [
     'category_suggestion_settings',
     "categorization: the suggestion model choice and the separate hosted consent (WP 11.2). Like the narrator's consents, a consent is not carried to another install: a restore starts unticked, on the local model.",
+  ],
+  [
+    'insight_explanations',
+    'insights: a language model\'s "Explain this" wording per evidence digest (WP 11.3), derived from the insight or pillar and the model, not data the holder entered; a restore explains again under its own approval.',
   ],
   [
     'ops_control_checks',

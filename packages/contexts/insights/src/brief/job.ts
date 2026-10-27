@@ -43,6 +43,7 @@ import { SnapshotBuilder } from '../snapshot/builder.ts';
 import type { SnapshotPorts } from '../snapshot/ports.ts';
 import { deriveTokenKey } from '../snapshot/tokens.ts';
 import { isoWeekOf } from './iso-week.ts';
+import { briefPrefetchIds } from '../advisors/explain/jobs.ts';
 import type { RetirementImpactPort } from './ports.ts';
 import { retirementEffectOf } from './retirement.ts';
 import {
@@ -103,6 +104,21 @@ export interface BriefJobDependencies {
    */
   readonly snapshotPorts?: SnapshotPorts;
   readonly tokenSecret?: string;
+  /**
+   * WP 11.3: prefetch "Explain this" for **the week's ranked items only** —
+   * `briefPrefetchIds`, at most `EXPLAIN_PREFETCH_MAX` (five), in rank order,
+   * never the backlog and never the attention list. The composition root
+   * binds it (it owns the explain model's template hash, which the approval
+   * check needs) and enqueues `insights.explain` only for an item the holder
+   * could explain now (narrator on, the shape approved, the scopes granted)
+   * and the cache does not already hold. Enqueued, never awaited: the Brief
+   * never waits on a model. A failure here is logged; the Brief stands.
+   */
+  readonly explainPrefetch?: (input: {
+    readonly userId: string;
+    readonly insightIds: readonly string[];
+    readonly correlationId: string;
+  }) => Promise<void>;
 }
 
 /**
@@ -270,6 +286,24 @@ export function createBriefJob(input: BriefJobDependencies): JobHandlerRegistrat
             correlationId: context.correlationId,
             maxAttempts: 1,
           });
+        }
+      }
+
+      if (input.explainPrefetch !== undefined) {
+        const insightIds = briefPrefetchIds(
+          assembled.ranked.map((item) => item.candidate.insightId),
+        );
+        try {
+          await input.explainPrefetch({
+            userId: context.userId,
+            insightIds,
+            correlationId: context.correlationId,
+          });
+        } catch (error) {
+          context.logger.warn(
+            { job: BRIEF_JOB_KIND, isoWeek, err: error },
+            'Explain-this prefetch not enqueued; the Brief stands',
+          );
         }
       }
     },

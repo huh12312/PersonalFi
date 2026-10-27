@@ -165,6 +165,7 @@ import {
   netWorthNow,
   overrideFingerprint,
   recordBalance,
+  setAutoCategories,
   setRuleCategory,
   upsertAccount,
   type AccountOverride,
@@ -413,6 +414,29 @@ export function createCategorizationLedgerPort(database: LedgerDatabase, clock: 
           { clock, correlationId: input.correlationId, causationId: input.causationId ?? null },
         ),
       );
+    },
+    // WP 11.2b: tiers 3-5 made effective. Unlike `writeRuleCategory`, this runs on the categorisation
+    // pass's own transaction when it is handed one (the two contexts share a database, and the executor
+    // shapes are the same `Pick<Database, ...>`): the placement then commits with the assignment and before
+    // the `AssignmentsChanged` event that budgeting and recurring recompute on.
+    async writeAutoCategories(input) {
+      const write = (executor: Parameters<typeof setAutoCategories>[0]) =>
+        setAutoCategories(
+          executor,
+          {
+            userId: input.userId,
+            changes: input.changes.map((change) => ({
+              transactionId: change.transactionId,
+              placement: change.placement,
+            })),
+          },
+          { clock },
+        );
+      if (input.executor !== undefined) {
+        await write(input.executor);
+        return;
+      }
+      await database.transaction(async (tx) => write(tx));
     },
   };
 }

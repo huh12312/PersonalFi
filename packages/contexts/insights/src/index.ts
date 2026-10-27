@@ -815,7 +815,9 @@ export {
   checkEgressAllowlist,
   checkInspectorDigest,
   checkModelPin,
+  checkExplainGrounding,
   checkSuggestEnumRefusal,
+  EXPLAIN_PROBE_TARGET,
   SUGGEST_PROBE_TAXONOMY,
   checkModuleSwitch,
   checkNarrationBadge,
@@ -841,6 +843,7 @@ export {
   type ControlChecksOverall,
   type ControlProbeId,
   type ControlProbeModel,
+  type ExplainProbeModel,
   type SuggestProbeModel,
   type EgressClassification,
   type InspectorPort,
@@ -942,3 +945,81 @@ export {
   type CategorySuggestPreview,
   type SuggestionRenderer,
 } from './advisors/suggest/preview.ts';
+
+// --- WP 11.3: `insight.explain`, "Explain this" on insights and health pillars ---
+export {
+  EXPLAIN_PREFETCH_MAX,
+  INSIGHT_EXPLAIN_ADVISOR_ID,
+  INSIGHT_EXPLAIN_MANIFEST,
+  INSIGHT_EXPLAIN_SCOPES,
+  INSIGHT_EXPLAIN_VERSION,
+} from './advisors/explain/manifest.ts';
+export {
+  EXPLAIN_MAX_EVIDENCE_ROWS,
+  EXPLAIN_MAX_PILLAR_INPUTS,
+  PILLAR_MEANINGS,
+  PILLAR_NAMES,
+  PILLAR_SCOPES,
+  buildExplainRequest,
+  explainTraceContext,
+  insightSubjectOf,
+  nextBandOf,
+  pillarLadder,
+  pillarSubjectOf,
+  type BuiltExplainRequest,
+  type ExplainEntityKind,
+  type ExplainEvidenceRow,
+  type ExplainInsightSubject,
+  type ExplainPayload,
+  type ExplainPillarDatum,
+  type ExplainPillarSubject,
+  type ExplainSubject,
+  type ExplainTarget,
+  type ExplainWireRequest,
+  type RuleText,
+} from './advisors/explain/request.ts';
+export {
+  EXPLAIN_REFUSAL_CLASSES,
+  EXPLAIN_TEXT_MAX,
+  validateExplainReply,
+  type ExplainRefusalClass,
+  type ExplainValidation,
+} from './advisors/explain/reply.ts';
+export {
+  findExplanation,
+  isHealthComponentId,
+  latestExplainRun,
+  listExplanations,
+  loadInsightExplainTarget,
+  loadPillarExplainTarget,
+  recordExplanation,
+  ruleTextOf,
+  type ExplainSourceOutcome,
+  type StoredExplanation,
+} from './advisors/explain/source.ts';
+export {
+  explainUnavailable,
+  insightExplainShape,
+  runInsightExplain,
+  ungrantedExplainScopes,
+  type ExplainModelPort,
+  type ExplainRenderer,
+  type ExplainUnavailableReason,
+  type InsightExplainDependencies,
+  type InsightExplainResult,
+} from './advisors/explain/run.ts';
+export {
+  EXPLAIN_PREVIEW_EXAMPLE,
+  approveInsightExplain,
+  ensureInsightExplainAdvisor,
+  liveInsightExplainApprovals,
+  previewInsightExplain,
+  type InsightExplainPreview,
+} from './advisors/explain/preview.ts';
+export {
+  EXPLAIN_JOB_KIND,
+  briefPrefetchIds,
+  enqueueExplain,
+  explainDedupeKey,
+  type ExplainJobPayload,
+} from './advisors/explain/jobs.ts';

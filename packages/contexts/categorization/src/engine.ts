@@ -274,6 +274,7 @@ export function decide(input: DecisionInput, context: DecisionContext): Decision
         detail: 'You pinned this category for this merchant.',
         categoryKey: merchant.categoryKey,
         confidence: 1,
+        facts: { locked: true, support: merchant.supportCount },
       });
       return finish(
         input,
@@ -301,6 +302,8 @@ export function decide(input: DecisionInput, context: DecisionContext): Decision
         detail: `${merchant.supportCount} earlier transactions with this merchant are filed here.`,
         categoryKey: merchant.categoryKey,
         confidence,
+        // WP 11.2b: the figure the chip's "Learned from N confirmations" prints, read from the stored chain.
+        facts: { locked: false, support: merchant.supportCount },
       });
       return finish(
         input,

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 import type { Page, Route } from '@playwright/test';
 
+import { createExplainState, handleExplain } from './mock-explain.ts';
+
 /**
  * A self-contained network mock for `recurring-insights.spec.ts`, entirely
  * separate from `e2e/support/mock-api.ts` (WP 2.10's own instructions: this
@@ -556,11 +558,17 @@ export async function installRecurringInsightsMocks(
     ],
   };
 
+  // WP 11.3: every card reads where its "Explain this" stands; on its own this mock answers `idle` for each (the
+  // sweep layers `mock-explain.ts` over it for the scripted states).
+  const explain = createExplainState();
+
   await page.route('**/*', async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
     const method = request.method();
+
+    if (await handleExplain(route, path, method, explain)) return;
 
     if (path === '/api/auth/session') {
       if (!state.authenticated) {

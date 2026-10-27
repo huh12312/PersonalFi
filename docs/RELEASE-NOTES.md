@@ -9,6 +9,90 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.19: what the automatic tiers decide now counts
+
+**Status:** a patch release on v0.9.18 (v0.9.18 is package 11.3; if it has not been tagged when this
+is, tag them in order). The tag `v0.9.19` is pushed by the maintainer once CI is green. Package
+11.2b of the Phase 11 programme (11 §5), on Chris's decision of 2026-10-27.
+
+### Upgrading to v0.9.19
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0058_transaction_auto_category` (expand-only: six nullable columns and a partial index on
+`transactions`, one boolean with a default on `users`; no row is rewritten).
+
+### Manual steps
+
+None. The worker fills the new columns from your existing assignments shortly after it starts (the
+`categorization.project_auto` job; idempotent). Until it has run, only rows categorised after the
+upgrade show the new behaviour ([RUNBOOK](../RUNBOOK.md#the-effective-category-and-the-inboxs-review-section-v0919)).
+
+### What changed
+
+- **The effective category is your pick, else a rule's, else an automatic tier's.** A learned
+  merchant default (tier 3), Plaid's category (tier 4) and the classifier at or above its floor
+  (tier 5) used to be recorded and explainable but invisible: a row they had placed read as
+  uncategorised in the list, the Inbox, budgets and every report. They now count everywhere, through
+  the one resolver. Your pick, or a rule, always wins. **Budgets and reports can therefore move** on
+  upgrade, by exactly the rows that only a machine had placed.
+- **Never silently.** Every automatic placement wears a chip ("Plaid", "Learned", "Classifier
+  92 %") on the transaction list, the detail sheet and a category's screen; hover it, or focus it
+  and press Enter, to read the stored explanation ("Learned from 4 confirmations"). A category you
+  picked or a rule set shows none.
+- **The Inbox.** "Uncategorised" is now only what every tier declined. A second section,
+  **Auto-categorised, unreviewed**, lists what the machine placed in the last 30 days and you have
+  not looked at (newest first, a page of 50): **Looks right** teaches the learning tiers like any
+  pick, **Change** opens the picker. A switch in its header, stored on your account, hides it.
+- **Export and import.** The projection is derived: the export omits it and the import re-derives it
+  from the bundle's category assignments.
+- **API.** `GET /transactions` rows gain `categorySource` and `autoCategory`; `autoReview=true`
+  filters the Inbox's review rows; the `categoryIds` and `uncategorized` filters follow the resolver
+  (a rule's category is now found by `categoryIds`); `GET /transactions/explanations` tiers carry
+  the stored `facts`; new `GET`/`PUT /inbox/preferences`; the import answers `autoCategoriesReprojected`.
+
+## v0.9.18: Explain this, on insights and health pillars
+
+**Status:** a patch release on v0.9.17. The tag `v0.9.18` is pushed by the maintainer once CI is green.
+Package 11.3 of the Phase 11 programme (11 §5).
+
+### Upgrading to v0.9.18
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0057_insight_explanations` (expand-only: one new, empty table, the explanation cache).
+Nothing is backfilled.
+
+### Manual steps
+
+None. To use it: approve the `insight.explain` payload once in Advisors
+([RUNBOOK](../RUNBOOK.md#explain-this-v0918)).
+
+### What changed
+
+- **Explain this.** A button on every insight card and on each scored health pillar (card and
+  detail) asks the language model why the finding appeared or why the pillar scores as it does,
+  what it is built from and what would change it. The text carries a badge naming the provider and
+  model and "AI-assisted wording"; the evidence stays beneath it. A reply with a figure not in the
+  evidence, advice, a link or markup is refused, and the refusal is shown as one.
+- **The narrator's provider and consent.** It runs on the local model by default, or on a hosted
+  provider only when that provider is your narrator under its consent; the payload is the
+  narrator's class (the entity's own evidence, minimised; its scopes bounded by your narrator
+  grant), so there is no new consent. The api never calls a model; the worker does.
+- **Cached per evidence.** One explanation per entity and evidence digest, reused; changed evidence
+  is a new explanation and the old one is kept. The weekly Brief prefetches its ranked items, at
+  most five.
+- **Self-test.** The GenAI controls self-test gains a thirteenth check, `explain_grounding`.
+- **API.** New: `POST`/`GET /insights/{insightId}/explain` and
+  `POST`/`GET /insights/health/{pillar}/explain` (202 while the worker explains). Advisors' payload
+  preview and approval cover `insight.explain` (its preview's `request` is the explain request).
+
 ## v0.9.17: category suggestions from the local model, and picks that teach
 
 **Status:** a patch release on v0.9.16. The tag `v0.9.17` is pushed by the maintainer once CI is green.

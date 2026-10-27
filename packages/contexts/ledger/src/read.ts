@@ -72,18 +72,23 @@ export interface TransactionFilters {
   /** Free text over the effective payee name. */
   readonly search?: string;
   /**
-   * Rows the user has not assigned a category to.
+   * Rows with no effective category.
    *
-   * The *ledger's* meaning of uncategorized, which is `user_category_id IS NULL`
-   * and nothing more. A row that `@ctx/categorization` has classified but the
-   * user has never touched is still uncategorized by this definition, because
-   * the ledger cannot see that context's assignments — `transactions` stores the
-   * user's choice and only the user's. The transactions screen's
-   * "Uncategorized ●12" chip needs the *effective* category and therefore needs
-   * categorization's read model joined in; this filter is the Phase 1 stand-in
-   * and is documented as such in the WP 1.5 evidence note.
+   * Since WP 11.2b this is the resolver's meaning, `user ?? rule ?? auto` is
+   * null (`effectiveCategorySql`): a row the holder never touched but a rule or
+   * an automatic tier (a learned merchant default, the provider's category, the
+   * classifier above its floor) has placed is categorised, and wears a
+   * provenance chip. "Uncategorised" is tier 6 only. (Before, this was
+   * `user_category_id IS NULL`, and the ledger could not see the automatic
+   * tiers at all.)
    */
   readonly uncategorized?: boolean;
+  /**
+   * The Inbox's review section: rows whose effective category is an automatic
+   * placement decided at or after this instant, with nothing since from a rule
+   * or the holder. WP 11.2b.
+   */
+  readonly autoReviewSince?: Date;
   /** Tombstoned rows are hidden by default. */
   readonly includeRemoved?: boolean;
   /** Cross-provider duplicates are shown by default — marked, never hidden. */
@@ -204,6 +209,7 @@ async function selectAggregateRows(
     effective_currency: string;
     user_category_id: string | null;
     rule_category_id: string | null;
+    auto_category_id: string | null;
     effective_merchant_id: string | null;
     is_transfer: boolean;
     transfer_link_id: string | null;
@@ -218,6 +224,7 @@ async function selectAggregateRows(
            ${transactions.effectiveCurrency} AS effective_currency,
            ${transactions.userCategoryId} AS user_category_id,
            ${transactions.ruleCategoryId} AS rule_category_id,
+           ${transactions.autoCategoryId} AS auto_category_id,
            ${transactions.effectiveMerchantId} AS effective_merchant_id,
            ${transactions.isTransfer} AS is_transfer,
            ${transactions.transferLinkId} AS transfer_link_id,
@@ -242,7 +249,8 @@ async function selectAggregateRows(
       // The `DATE` parser hands over the column's own ISO text, which is a DateOnly by construction.
       date: row.effective_date as DateOnlyType,
       amount: moneyOf(row.effective_amount_minor, code),
-      // `effectiveOf`'s own rule: the overlay's category, else the rule tier's (only `userCategoryId` is read).
+      // `effectiveOf`'s own rule: the overlay's category, else the rule tier's, else the automatic tiers' (only
+      // `userCategoryId` is read off the overlay).
       categoryId: resolveCategoryId(
         {
           userNote: null,
@@ -251,6 +259,7 @@ async function selectAggregateRows(
           userMerchantName: null,
         },
         { ruleCategoryId: row.rule_category_id },
+        { autoCategoryId: row.auto_category_id },
       ),
       merchantId: row.effective_merchant_id,
       isTransfer: row.is_transfer,
@@ -351,6 +360,7 @@ export async function listAggregateSumsInWindow(
     effective_currency: string;
     user_category_id: string | null;
     rule_category_id: string | null;
+    auto_category_id: string | null;
     effective_merchant_id: string | null;
     is_transfer: boolean;
     linked: boolean;
@@ -364,6 +374,7 @@ export async function listAggregateSumsInWindow(
            ${transactions.effectiveCurrency} AS effective_currency,
            ${transactions.userCategoryId} AS user_category_id,
            ${transactions.ruleCategoryId} AS rule_category_id,
+           ${transactions.autoCategoryId} AS auto_category_id,
            ${transactions.effectiveMerchantId} AS effective_merchant_id,
            ${transactions.isTransfer} AS is_transfer,
            (${transactions.transferLinkId} IS NOT NULL) AS linked,
@@ -374,7 +385,7 @@ export async function listAggregateSumsInWindow(
       ${segment.join}
      WHERE ${and(...filterConditions(input.userId, input.filters))}
        AND NOT ${refundLinked(input.userId)}
-     GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+     GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
   `);
   // No ORDER BY: it turned a hash aggregate into a sort of every row (68 → 33 ms on 25,000 dense rows), and a sum's
   // order means nothing — the amounts are exact and a sum has no identity.
@@ -399,6 +410,7 @@ export async function listAggregateSumsInWindow(
           userMerchantName: null,
         },
         { ruleCategoryId: row.rule_category_id },
+        { autoCategoryId: row.auto_category_id },
       ),
       merchantId: row.effective_merchant_id,
       isTransfer: row.is_transfer,
@@ -435,6 +447,15 @@ export async function countTransactions(
   return Number(rows[0]?.count ?? 0);
 }
 
+/**
+ * The effective category as SQL: `resolveCategoryId`'s order, spelled once for
+ * every statement that filters on it. `test/read.test.ts` pins the two
+ * spellings together (every combination of the three columns).
+ */
+export const effectiveCategorySql = sql<
+  string | null
+>`COALESCE(${transactions.userCategoryId}, ${transactions.ruleCategoryId}, ${transactions.autoCategoryId})`;
+
 function filterConditions(userId: string, filters: TransactionFilters): (SQL | undefined)[] {
   const conditions: (SQL | undefined)[] = [eq(transactions.userId, userId)];
 
@@ -447,7 +468,7 @@ function filterConditions(userId: string, filters: TransactionFilters): (SQL | u
     conditions.push(inArray(transactions.effectiveMerchantId, [...filters.merchantIds]));
   }
   if (filters.categoryIds !== undefined && filters.categoryIds.length > 0) {
-    conditions.push(inArray(transactions.userCategoryId, [...filters.categoryIds]));
+    conditions.push(inArray(effectiveCategorySql, [...filters.categoryIds]));
   }
   if (filters.dateFrom !== undefined) {
     conditions.push(gte(transactions.effectiveDate, filters.dateFrom));
@@ -460,8 +481,18 @@ function filterConditions(userId: string, filters: TransactionFilters): (SQL | u
   if (filters.amountMaxMinor !== undefined) {
     conditions.push(lte(transactions.effectiveAmountMinor, filters.amountMaxMinor));
   }
-  if (filters.uncategorized === true) conditions.push(isNull(transactions.userCategoryId));
-  if (filters.uncategorized === false) conditions.push(isNotNull(transactions.userCategoryId));
+  if (filters.uncategorized === true) conditions.push(sql`${effectiveCategorySql} IS NULL`);
+  if (filters.uncategorized === false) conditions.push(sql`${effectiveCategorySql} IS NOT NULL`);
+  if (filters.autoReviewSince !== undefined) {
+    // The Inbox's "Auto-categorised, unreviewed": the machine placed it recently and nothing since (a rule, or the
+    // holder's own pick) has decided it. Matches `transactions_auto_review_idx` (0058).
+    conditions.push(
+      sql`${transactions.autoCategoryId} IS NOT NULL`,
+      sql`${transactions.userCategoryId} IS NULL`,
+      sql`${transactions.ruleCategoryId} IS NULL`,
+      gte(transactions.autoDecidedAt, filters.autoReviewSince),
+    );
+  }
   if (filters.pending !== undefined) conditions.push(eq(transactions.pending, filters.pending));
   if (filters.excluded !== undefined) {
     conditions.push(eq(transactions.userExcluded, filters.excluded));

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import type { DateOnly, Money } from '@core/kernel';
+import type { AutoTier } from '../schema/transactions.ts';
 
 /**
  * The shapes the ledger speaks.
@@ -115,6 +116,35 @@ export interface RuleResolution {
 export const NO_RULE: RuleResolution = Object.freeze({ ruleCategoryId: null });
 
 /**
+ * The automatic tiers' answer for one transaction (WP 11.2b, migration 0058): 04 §2.2's last category tier.
+ *
+ * Opaque in the way `ruleCategoryId` is. Tiers 3 (a merchant default), 4 (the provider's category) and 5 (the
+ * classifier, at or above its calibrated floor) project here; tier 6 is the absence of an answer, and tiers 1 and 2
+ * have their own columns. The provenance fields are what the chip prints; they are stored with the assignment and read
+ * back, never recomputed.
+ */
+export interface AutoResolution {
+  readonly autoCategoryId: string | null;
+}
+
+/** The machine said nothing. The state every row resolves in until a pass places it. */
+export const NO_AUTO: AutoResolution = Object.freeze({ autoCategoryId: null });
+
+/** Where a category on the wire came from, in resolution order. */
+export type CategorySource = 'user' | 'rule' | 'auto';
+
+/** The stored provenance of an automatic placement, as the list and the detail sheet print it. */
+export interface AutoCategoryView {
+  readonly tier: AutoTier;
+  /** The calibrated figure the engine stored with the assignment. */
+  readonly confidence: number;
+  readonly decidedAt: Date;
+  readonly assignmentId: string;
+  /** Set once the holder's own pick landed on the row; the placement is then history, not effective. */
+  readonly supersededAt: Date | null;
+}
+
+/**
  * What a read path sees: fact and overlay, resolved.
  *
  * `merchantKey` rather than a merchant id, because resolution is pure and a
@@ -130,6 +160,11 @@ export interface EffectiveTransaction {
   readonly pending: boolean;
   readonly excluded: boolean;
   readonly categoryId: string | null;
+  /**
+   * Which tier `categoryId` came from, or `null` when it is `null`. `auto` is the only value that gets a
+   * provenance chip: a rule-set or holder-set category shows none.
+   */
+  readonly categorySource: CategorySource | null;
   readonly note: string | null;
 }
 
@@ -139,6 +174,11 @@ export interface LedgerTransaction {
   readonly accountId: string;
   readonly factId: string;
   readonly effective: EffectiveTransaction;
+  /**
+   * The automatic placement stored on the row, whether or not it is the effective category (a rule or the holder
+   * may have outranked it since: `effective.categorySource` says which). `null` when no automatic tier has placed it.
+   */
+  readonly auto: AutoCategoryView | null;
   readonly merchantId: string | null;
   readonly isTransfer: boolean;
   readonly transferLinkId: string | null;

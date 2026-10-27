@@ -105,6 +105,10 @@ interface MockTransaction {
   pending: boolean;
   excluded: boolean;
   categoryId: string | null;
+  /** WP 11.2b: which tier the category came from; absent = the holder's pick when a category is set. */
+  categorySource?: 'user' | 'rule' | 'auto' | null;
+  /** WP 11.2b: the provenance of an automatic placement (`categorySource: 'auto'`). */
+  autoCategory?: { tier: string; confidence: number; decidedAt: string } | null;
   note: string | null;
   isTransfer: boolean;
   transferLinkId: string | null;
@@ -277,6 +281,10 @@ export interface MockApiState {
   narrator: NarratorMockState;
   /** WP 11.2: Settings › Language model › Category suggestions (`mock-category-suggestions.ts`). */
   categorySuggestions: CategorySuggestionsMockState;
+  /** WP 11.2b: the Inbox's "Auto-categorised, unreviewed" switch (`/api/inbox/preferences`), and what was saved. */
+  inboxPreferences: { showAutoReview: boolean; puts: Array<{ showAutoReview: boolean }> };
+  /** WP 11.2b: adds a transaction to the general fixture (an automatic placement, say). */
+  addTransaction(overrides: Record<string, unknown> & { id: string }): void;
 }
 
 function json(body: unknown, status = 200) {
@@ -305,6 +313,8 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     marketDataRefresh: createMarketDataRefreshState(),
     narrator: createNarratorState(),
     categorySuggestions: createCategorySuggestionsState(),
+    inboxPreferences: { showAutoReview: true, puts: [] },
+    addTransaction: () => undefined,
   };
 
   const transactions = new Map<string, MockTransaction>([
@@ -362,6 +372,13 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     ],
   ]);
 
+  state.addTransaction = (overrides) => {
+    transactions.set(
+      overrides.id,
+      makeTransaction(overrides as Partial<MockTransaction> & { id: string }),
+    );
+  };
+
   interface MockRule {
     id: string;
     name: string;
@@ -403,6 +420,9 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       pending: t.pending,
       excluded: t.excluded,
       categoryId: t.categoryId,
+      // WP 11.2b
+      categorySource: t.categorySource ?? (t.categoryId === null ? null : 'user'),
+      autoCategory: t.autoCategory ?? null,
       note: t.note,
       isTransfer: t.isTransfer,
       transferLinkId: t.transferLinkId,
@@ -570,12 +590,24 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       );
     }
 
+    if (path === '/api/inbox/preferences') {
+      if (method === 'PUT') {
+        const body = request.postDataJSON() as { showAutoReview: boolean };
+        state.inboxPreferences.showAutoReview = body.showAutoReview;
+        state.inboxPreferences.puts.push({ showAutoReview: body.showAutoReview });
+      }
+      return route.fulfill(json({ showAutoReview: state.inboxPreferences.showAutoReview }));
+    }
+
     if (path === '/api/transactions' && method === 'GET') {
       const q = url.searchParams;
       let items = [...transactions.values()];
 
       const uncategorized = q.get('uncategorized');
       if (uncategorized === 'true') items = items.filter((t) => t.categoryId === null);
+
+      // WP 11.2b: the Inbox's review rows are the ones an automatic tier placed.
+      if (q.get('autoReview') === 'true') items = items.filter((t) => t.categorySource === 'auto');
 
       const transfers = q.get('transfers');
       if (transfers === 'exclude') items = items.filter((t) => !t.isTransfer);
@@ -624,6 +656,11 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       const patch = request.postDataJSON() as Record<string, unknown>;
       state.lastPatchBody = patch;
       Object.assign(t, patch);
+      // WP 11.2b: a category the holder just picked is theirs, and carries no chip.
+      if (typeof patch['categoryId'] === 'string') {
+        t.categorySource = 'user';
+        t.autoCategory = null;
+      }
       return route.fulfill(json(transactionResponse(t)));
     }
 

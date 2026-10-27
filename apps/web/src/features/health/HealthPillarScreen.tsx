@@ -7,6 +7,7 @@ import type { HealthOverview, HealthPillar } from '../../api/generated/types.gen
 import { DateOnlyText } from '../../components/finance/DateOnlyText.tsx';
 import { Card } from '../../components/ui/card.tsx';
 import { DateOnly } from '@core/kernel';
+import { ExplainThis } from '../insights/ExplainThis.tsx';
 import { BAND_LABEL, COMPONENT_LABEL } from './format.ts';
 import { HealthStates, scoreText } from './HealthScreen.tsx';
 import { HealthZoneChart } from './HealthZoneChart.tsx';
@@ -88,6 +89,15 @@ function PillarDetail({
               </p>
             </div>
           )}
+          {/* WP 11.3: a scored pillar only; "What it is built from" stays beneath, always. */}
+          {pillar.status === 'scored' && (
+            <ExplainThis
+              entity={{ kind: 'health_pillar', pillar: component }}
+              subject={label}
+              evidenceWord="the inputs under “What it is built from”"
+              className="mt-1 w-full"
+            />
+          )}
         </section>
       </Card>
 
@@ -152,7 +162,10 @@ function PillarDetail({
   );
 }
 
-/** `/health/$pillar` (WP 10.12): one pillar against its health zones, its history, its ladder and its inputs. */
+/**
+ * `/health/$pillar` (WP 10.12): one pillar against its health zones, its history, its ladder and its inputs. WP 11.3:
+ * a scored pillar offers **Explain this** under its figure.
+ */
 export function HealthPillarScreen({ slug }: { readonly slug: string }) {
   const { query, health, notComputed } = useHealthOverview();
   const component = componentOfSlug(slug);

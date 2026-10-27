@@ -20,9 +20,11 @@ import { TransactionDetailSheet } from '../transactions/TransactionDetailSheet.t
 import { CreateRuleFromInsight } from './CreateRuleFromInsight.tsx';
 import { DISMISS_REASON_CODES, DismissReasonDialog } from './DismissReasonDialog.tsx';
 import { EvidencePanel } from './EvidencePanel.tsx';
+import { ExplainButton, ExplanationResult } from './ExplainThis.tsx';
 import { segmentsFor, valueLineOf, verifiedMentionOf } from './mentions.ts';
 import { ruleDraftOf } from './rule-draft.ts';
 import { confidencePercentLabel } from './severity.ts';
+import { useExplanation } from './useExplanation.ts';
 
 export interface InsightCardProps {
   insight: Insight;
@@ -160,6 +162,10 @@ export function InsightCard({ insight, onReviewed }: InsightCardProps) {
   const [dismissing, setDismissing] = useState(false);
   const [explainingNotHelpful, setExplainingNotHelpful] = useState(false);
   const [openTransactionId, setOpenTransactionId] = useState<string | null>(null);
+  const explanation = useExplanation({ kind: 'insight', insightId: insight.id });
+  // An explanation, or its refusal, always has the evidence it was worded from right beneath it.
+  const explained = explanation.status === 'shown' || explanation.status === 'refused';
+  const evidenceShown = expanded || explained;
   const queryClient = useQueryClient();
   const invalidateFeed = () =>
     queryClient.invalidateQueries({ queryKey: listInsightsFeedQueryKey() });
@@ -271,22 +277,25 @@ export function InsightCard({ insight, onReviewed }: InsightCardProps) {
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((prev) => !prev)}
-          className="inline-flex min-h-6 items-center gap-1 rounded-sm text-small text-accent-text hover:underline focus-visible:outline-none"
-        >
-          {expanded ? 'Hide evidence panel' : 'View evidence panel'}
-          <ChevronDown
-            size={14}
-            aria-hidden="true"
-            className={cn(
-              'transition-transform duration-fast ease-standard',
-              expanded && 'rotate-180',
-            )}
-          />
-        </button>
+        {!explained && (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((prev) => !prev)}
+            className="inline-flex min-h-6 items-center gap-1 rounded-sm text-small text-accent-text hover:underline focus-visible:outline-none"
+          >
+            {expanded ? 'Hide evidence panel' : 'View evidence panel'}
+            <ChevronDown
+              size={14}
+              aria-hidden="true"
+              className={cn(
+                'transition-transform duration-fast ease-standard',
+                expanded && 'rotate-180',
+              )}
+            />
+          </button>
+        )}
+        <ExplainButton explanation={explanation} subject={insight.title} />
         <div
           className="flex flex-wrap items-center gap-1"
           role="group"
@@ -368,8 +377,10 @@ export function InsightCard({ insight, onReviewed }: InsightCardProps) {
         </div>
       </div>
 
-      {expanded && (
-        <div className="mt-3">
+      <ExplanationResult explanation={explanation} className="mt-3" />
+
+      {evidenceShown && (
+        <div className="mt-3" data-testid="insight-evidence">
           <EvidencePanel insight={insight} />
         </div>
       )}

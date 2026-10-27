@@ -135,3 +135,12 @@ export {
 
 // WP 10.16 — the GenAI controls self-test's evidence rows (migration 0052_ops_control_checks.sql).
 export { opsControlChecks, type OpsControlCheckRow } from './control-checks.ts';
+
+// WP 11.3 — "Explain this", cached per evidence digest (migration 0057_insight_explanations.sql).
+export {
+  EXPLANATION_ENTITY_KINDS,
+  insightExplanations,
+  type ExplanationEntityKind,
+  type InsightExplanationRow,
+  type NewInsightExplanationRow,
+} from './explanations.ts';

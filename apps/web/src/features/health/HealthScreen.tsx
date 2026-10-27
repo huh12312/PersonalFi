@@ -15,6 +15,8 @@ import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { Card } from '../../components/ui/card.tsx';
 import { cn } from '../../lib/cn.ts';
 import { formatDateOnly } from '../../lib/date.ts';
+import { ExplainButton, ExplanationResult } from '../insights/ExplainThis.tsx';
+import { useExplanation } from '../insights/useExplanation.ts';
 import { COMPONENT_LABEL } from './format.ts';
 import { deltaVs30Days, scoreSeries } from './history.ts';
 import { BandChip, InputsList, LivingCover, WithheldChip } from './parts.tsx';
@@ -178,19 +180,61 @@ function PillarCard({ pillar }: { readonly pillar: HealthPillar }) {
           )}
           <InputsList inputs={pillar.inputs} />
           {pillar.livingCover !== undefined && <LivingCover cover={pillar.livingCover} />}
-          <div className="mt-auto pt-1">
-            <Link
-              to="/health/$pillar"
-              params={{ pillar: PILLAR_SLUG[pillar.component] }}
-              className="inline-flex min-h-6 items-center gap-0.5 text-small font-medium text-accent-text underline-offset-4 hover:underline"
-            >
-              See detail<span className="sr-only"> — {label}</span>
-              <ChevronRight size={14} aria-hidden="true" />
-            </Link>
-          </div>
+          {pillar.status === 'scored' ? (
+            // WP 11.3: scored pillars only — a withheld one has no figure to explain. The button sits in the
+            // card's footer beside "See detail", on the baseline every card in a row shares, so Tab never jumps
+            // up the grid (WCAG 2.4.3); the explanation opens under that row and names the inputs above it.
+            <PillarExplain component={pillar.component} label={label} />
+          ) : (
+            <div className="mt-auto pt-1">
+              <SeeDetail component={pillar.component} label={label} />
+            </div>
+          )}
         </section>
       </Card>
     </li>
+  );
+}
+
+function SeeDetail({
+  component,
+  label,
+}: {
+  readonly component: HealthPillar['component'];
+  readonly label: string;
+}) {
+  return (
+    <Link
+      to="/health/$pillar"
+      params={{ pillar: PILLAR_SLUG[component] }}
+      className="inline-flex min-h-6 items-center gap-0.5 text-small font-medium text-accent-text underline-offset-4 hover:underline"
+    >
+      See detail<span className="sr-only"> — {label}</span>
+      <ChevronRight size={14} aria-hidden="true" />
+    </Link>
+  );
+}
+
+function PillarExplain({
+  component,
+  label,
+}: {
+  readonly component: HealthPillar['component'];
+  readonly label: string;
+}) {
+  const explanation = useExplanation({ kind: 'health_pillar', pillar: component });
+  return (
+    <div className="mt-auto flex flex-col gap-2 pt-1" data-testid="explain-block">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ExplainButton explanation={explanation} subject={label} />
+        <SeeDetail component={component} label={label} />
+      </div>
+      <ExplanationResult
+        explanation={explanation}
+        evidenceWord="the inputs above"
+        className="w-full"
+      />
+    </div>
   );
 }
 
@@ -223,6 +267,9 @@ export function PillarsGrid({
  * with its tier in words and the one thing to do next, its as-of date and its 90-day history with the change
  * since 30 days ago; then a card per pillar — scored with its inputs, or withheld with why and what would unlock
  * it, never a zero. Every figure here is a field of `GET /insights/health`.
+ *
+ * WP 11.3: each scored pillar card offers **Explain this** in its footer, beside "See detail" (`insights/ExplainThis.tsx`); a
+ * withheld pillar offers none.
  */
 export function HealthScreen() {
   const { query, health, notComputed } = useHealthOverview();

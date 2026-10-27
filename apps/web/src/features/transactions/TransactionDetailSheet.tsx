@@ -20,6 +20,7 @@ import { Money } from '../../components/finance/Money.tsx';
 import { formatDateOnly } from '../../lib/date.ts';
 import { RuleFromTransactionDialog } from '../rules/RuleFromTransactionDialog.tsx';
 import { CategoryPicker } from './CategoryPicker.tsx';
+import { TransactionProvenanceChip } from './ProvenanceChip.tsx';
 import { SplitEditor } from './SplitEditor.tsx';
 import { TransferPairDialog } from './TransferPairDialog.tsx';
 import { useTransactionOverlayMutation } from './useTransactionOverlay.ts';
@@ -157,7 +158,10 @@ export function TransactionDetailSheet({
             )}
 
             <div className="mt-4 flex flex-col gap-1.5">
-              <Label htmlFor="transaction-category">Category</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Label htmlFor="transaction-category">Category</Label>
+                <TransactionProvenanceChip transaction={transaction} />
+              </div>
               <CategoryPicker
                 id="transaction-category"
                 value={transaction.categoryId}

@@ -43,6 +43,11 @@ allowBuilds:
 # past the seven-day cooldown. Remove the override when the parser moves on.
 overrides:
   js-yaml: 4.3.2
+  # zod 4.6.6 (2026-10-11) closes CVE-2023-54404 (DoS via unbounded array validation); follow-redirects
+  # 1.16.1 (2026-10-01) closes CVE-2026-111755/111756 (information disclosure) reached through axios ← plaid.
+  # Both older than minimumReleaseAge at the time of the bump (2026-10-27, CI trivy red after the billing hold).
+  zod: 4.6.6
+  follow-redirects: 1.16.1
   # CVE-2026-93749 (HIGH, DoS) in source-map-js 1.2.1, a transitive dev
   # dependency (postcss <- vite); snoozed in .trivyignore on 2026-10-06 while
   # 1.2.2 sat inside the 7-day minimumReleaseAge, bumped the day it matured.

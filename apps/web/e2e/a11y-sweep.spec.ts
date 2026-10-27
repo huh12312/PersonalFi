@@ -27,6 +27,16 @@ import {
   SUGGESTION_CHIP,
 } from './support/mock-category-suggestions.ts';
 import { ABSTAINED_LINE, installRuleSuggestionMocks } from './support/mock-rule-suggestions.ts';
+import {
+  EXPLAIN_LOCAL_BADGE,
+  EXPLAIN_REFUSED_WORDS,
+  GROCERIES_EXPLANATION,
+  SAVINGS_RATE_EXPLANATION,
+  explainBody,
+  refusedBody,
+  scriptExplanation,
+  shownBody,
+} from './support/mock-explain.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import {
@@ -1223,7 +1233,7 @@ test.describe('WP 10.16 control checks and the controls on the backup line', () 
     await expect(section.getByTestId('control-checks-table')).toBeVisible();
     if (where === 'settings, running') {
       await expect(section.getByTestId('control-checks-progress')).toHaveText(
-        'Running control checks… 3 of 12 checks done.',
+        'Running control checks… 3 of 13 checks done.',
       );
       return;
     }
@@ -1460,6 +1470,117 @@ test.describe('WP 11.2 category suggestions', () => {
       await expect(card.getByTestId('suggestions-measure-live')).toContainText('Measuring…');
       expect(await motionOffenders(page)).toEqual([]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7n. WP 11.3: "Explain this" on /insights, /health and a pillar's detail (and the Brief, which has no button)
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep's explain layer answers `idle` everywhere, so this block scripts `support/mock-explain.ts` and
+ * holds each screen with an explanation shown and with a refusal: the Groceries card explained and the price card
+ * refused on /insights; savings rate explained and debt-to-income refused on /health; each on its own pillar detail;
+ * and the Brief (it renders no insight card, so no button — scanned to prove it stays clean). Both themes at 1280 and
+ * 320 px, 200 % zoom with 1.4.12 text spacing, and reduced motion while the worker is explaining.
+ */
+test.describe('WP 11.3 Explain this', () => {
+  type Where =
+    '/insights' | '/health' | '/health/savings-rate' | '/health/debt-to-income' | '/brief';
+  const WHERE: readonly Where[] = [
+    '/insights',
+    '/health',
+    '/health/savings-rate',
+    '/health/debt-to-income',
+    '/brief',
+  ];
+
+  async function open(page: Page, where: Where): Promise<void> {
+    const mocks = await installSweepMocks(page);
+    scriptExplanation(mocks.explain, 'insight', 'insight_groceries', {
+      initial: shownBody('insight', 'insight_groceries', GROCERIES_EXPLANATION),
+    });
+    scriptExplanation(mocks.explain, 'insight', 'insight_price', {
+      initial: refusedBody('insight', 'insight_price'),
+    });
+    scriptExplanation(mocks.explain, 'health_pillar', 'savings_rate', {
+      initial: shownBody('health_pillar', 'savings_rate', SAVINGS_RATE_EXPLANATION),
+    });
+    scriptExplanation(mocks.explain, 'health_pillar', 'debt_to_income', {
+      initial: refusedBody('health_pillar', 'debt_to_income'),
+    });
+    await visit(page, where);
+    await hideDevtools(page);
+    if (where === '/brief') return;
+    if (where !== '/health/debt-to-income') {
+      await expect(page.getByTestId('explanation-text').first()).toBeVisible();
+      await expect(page.getByTestId('explanation-badge').first()).toHaveText(EXPLAIN_LOCAL_BADGE);
+    }
+    if (where !== '/health/savings-rate') {
+      await expect(page.getByTestId('explanation-refused').first()).toHaveText(
+        EXPLAIN_REFUSED_WORDS,
+      );
+    }
+    // Both cards' evidence panels are drawn beneath their outcomes before anything is measured.
+    if (where === '/insights') await expect(page.getByTestId('insight-evidence')).toHaveCount(2);
+    await waitForAnimationsToDrain(page);
+  }
+
+  for (const where of WHERE) {
+    test(`WP 11.3 ${where}: axe-clean in both themes, at 1280 and at 320 px`, async ({ page }) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await open(page, where);
+      await scanBothThemes(page, `WP 11.3 ${where}`);
+      await page.setViewportSize(REFLOW);
+      await page.waitForTimeout(600);
+      expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+      await scanBothThemes(page, `WP 11.3 ${where}, at 320 px`);
+    });
+  }
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    for (const where of WHERE) {
+      test(`WP 11.3 ${where}: nothing is lost`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, where);
+        expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+        await scanBothThemes(page, `WP 11.3 ${where}, at 200 %`);
+        const before = new Set(await clippedTextElements(page));
+        await page.addStyleTag({ content: TEXT_SPACING });
+        await page.waitForTimeout(100);
+        const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+        expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+      });
+    }
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+    for (const [where, kind, id, name] of [
+      ['/insights', 'insight', 'insight_duplicate_charge', /^Explain this — Possible duplicate/u],
+      ['/health/fees', 'health_pillar', 'fee_drag', /^Explain this — /u],
+    ] as const) {
+      test(`WP 11.3 ${where}: Explaining… does not animate, and is axe-clean`, async ({ page }) => {
+        test.setTimeout(120_000);
+        const mocks = await installSweepMocks(page);
+        scriptExplanation(mocks.explain, kind, id, {
+          post: explainBody(kind, id, 'computing'),
+          computingReads: 1_000,
+        });
+        await visit(page, where);
+        await hideDevtools(page);
+        const button = page.getByRole('button', { name });
+        await button.click();
+        await expect(button).toHaveAttribute('aria-busy', 'true');
+        await expect(
+          page.getByTestId('explain-live').filter({ hasText: 'Explaining…' }),
+        ).toHaveCount(1);
+        expect(await motionOffenders(page)).toEqual([]);
+        await scanBothThemes(page, `WP 11.3 ${where}, explaining`);
+      });
+    }
   });
 });
 

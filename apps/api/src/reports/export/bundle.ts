@@ -39,7 +39,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { decodeRow, encodeRow, StreamHasher, type RawRow } from './codec.ts';
-import { isSensitiveColumn, STREAM_ORDER_BY, TABLE_ORDER } from './registry.ts';
+import { isDerivedColumn, isSensitiveColumn, STREAM_ORDER_BY, TABLE_ORDER } from './registry.ts';
 
 export const BUNDLE_VERSION = 1;
 
@@ -64,7 +64,9 @@ export interface ExportBundle {
 }
 
 function redactedColumns(table: string, columns: readonly string[]): string[] {
-  return columns.filter((column) => !isSensitiveColumn(table, column));
+  return columns.filter(
+    (column) => !isSensitiveColumn(table, column) && !isDerivedColumn(table, column),
+  );
 }
 
 async function tableExists(pool: Pool, table: string): Promise<boolean> {

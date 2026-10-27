@@ -16,6 +16,13 @@ import { accounts } from './accounts.ts';
 import { merchants } from './merchants.ts';
 
 /**
+ * The automatic tiers that project onto `transactions.auto_*` (migration 0058): 3, 4 and 5 of the decision
+ * order. Tier 1 is `user_category_id`, tier 2 is `rule_category_id`, tier 6 is the absence of an answer.
+ */
+export const AUTO_TIERS = ['merchant_default', 'provider', 'classifier'] as const;
+export type AutoTier = (typeof AUTO_TIERS)[number];
+
+/**
  * Immutable provider facts.
  *
  * One row per provider revision of one transaction. Sync writes here and nothing
@@ -163,6 +170,24 @@ export const transactions = pgTable(
      * Migration `0007_ledger_rule_category.sql`, additive.
      */
     ruleCategoryId: uuid('rule_category_id'),
+
+    // --- the automatic tiers (WP 11.2b, migration 0058) ------------------------
+    /**
+     * The automatic tiers' answer: 3 (a merchant default), 4 (the provider's category) or 5 (the
+     * classifier, at or above its floor). The last tier of `resolveCategoryId`'s order, `user ?? rule ??
+     * auto`. Written only through `setAutoCategories`, by the categorization pass that decided it, in that
+     * pass's transaction. Opaque, no foreign key, for `userCategoryId`'s reason. DERIVED: the export omits
+     * these six columns and the import re-derives them from `category_assignments`.
+     */
+    autoCategoryId: uuid('auto_category_id'),
+    autoTier: text('auto_tier').$type<AutoTier>(),
+    /** The calibrated figure the engine stored with the assignment. Read back, never recomputed. */
+    autoConfidence: confidenceColumn('auto_confidence'),
+    autoDecidedAt: instantColumn('auto_decided_at'),
+    /** The `category_assignments` row this mirrors; writes are idempotent per assignment id. */
+    autoAssignmentId: uuid('auto_assignment_id'),
+    /** Set when the holder's own pick landed on this row. The machine's answer stays as history. */
+    autoSupersededAt: instantColumn('auto_superseded_at'),
 
     // --- ledger-derived ------------------------------------------------------
     isTransfer: flagColumn('is_transfer').notNull().default(false),

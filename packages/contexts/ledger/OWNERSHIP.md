@@ -44,6 +44,17 @@ facts on `accounts` are never mutated; `resolveAccountOverlay` decides.
 
 - `account_overrides`
 
+### Built (migration 0058, WP 11.2b): columns, not a table
+
+The automatic tiers' answer (3 a merchant default, 4 the provider's category, 5 the classifier above
+its floor) is a **projection this context owns**: six nullable `auto_*` columns on `transactions`
+(`auto_category_id`, `auto_tier`, `auto_confidence`, `auto_decided_at`, `auto_assignment_id`,
+`auto_superseded_at`), written only by `setAutoCategories` and read through `resolveCategoryId`
+(`user ?? rule ?? auto`). Columns rather than a side table for the overlay's own reason (below): every
+reader of the effective category reads `transactions`. It is derived data: the export omits it and the
+import re-derives it from `@ctx/categorization`'s `category_assignments`. The ledger never reads that
+table; the categorisation pass hands the placements over through its `LedgerPort`.
+
 ### Claimed, not yet built
 
 - `institutions`

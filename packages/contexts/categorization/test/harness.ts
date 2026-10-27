@@ -23,6 +23,7 @@ import type {
   CategorizationContext,
   CategorizationDatabase,
   LedgerPort,
+  WriteAutoCategoriesInput,
   WriteRuleCategoryInput,
 } from '../src/index.ts';
 
@@ -130,12 +131,15 @@ export function transactionFixture(
  */
 export interface RecordingLedgerPort extends LedgerPort {
   readonly ruleCategoryWrites: WriteRuleCategoryInput[];
+  /** WP 11.2b: every `writeAutoCategories` call, so a test can assert which tiers project and which clear. */
+  readonly autoCategoryWrites: WriteAutoCategoriesInput[];
 }
 
 export function inMemoryPort(
   transactions: readonly CategorizableTransaction[],
 ): RecordingLedgerPort {
   const ruleCategoryWrites: WriteRuleCategoryInput[] = [];
+  const autoCategoryWrites: WriteAutoCategoriesInput[] = [];
   return {
     listForCategorization: (input) => {
       const wanted = input.transactionIds;
@@ -151,7 +155,12 @@ export function inMemoryPort(
       ruleCategoryWrites.push(input);
       return Promise.resolve();
     },
+    writeAutoCategories: (input) => {
+      autoCategoryWrites.push(input);
+      return Promise.resolve();
+    },
     ruleCategoryWrites,
+    autoCategoryWrites,
   };
 }
 

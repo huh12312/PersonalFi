@@ -26,7 +26,7 @@
 export const CONTEXT_ID = 'ledger' as const;
 
 // --- the resolver, and the shapes it speaks --------------------------------
-export { resolveCategoryId, resolveEffective, withinDays } from './effective.ts';
+export { resolveCategory, resolveCategoryId, resolveEffective, withinDays } from './effective.ts';
 export {
   normaliseMerchantName,
   dedupKeyOf,
@@ -43,7 +43,11 @@ export {
 export { pruneNoiseMerchants } from './merchant-store.ts';
 export {
   EMPTY_OVERLAY,
+  NO_AUTO,
   NO_RULE,
+  type AutoCategoryView,
+  type AutoResolution,
+  type CategorySource,
   type EffectiveTransaction,
   type LedgerTransaction,
   type ProviderCounterparty,
@@ -59,7 +63,7 @@ export { LedgerError, isLedgerError, type LedgerErrorCode } from './errors.ts';
 
 // --- the executor shapes a caller needs ------------------------------------
 export type { LedgerDatabase, LedgerExecutor, LedgerContext } from './db.ts';
-export { factOf, overlayOf, ruleOf, effectiveOf, transactionOf } from './db.ts';
+export { autoOf, autoViewOf, factOf, overlayOf, ruleOf, effectiveOf, transactionOf } from './db.ts';
 
 // --- events ----------------------------------------------------------------
 export {
@@ -131,6 +135,14 @@ export {
   type UpsertAccountResult,
 } from './accounts.ts';
 export { setRuleCategory, setTransactionOverlay, type OverlayPatch } from './overlay.ts';
+
+// --- WP 11.2b: the automatic tiers' projection (tiers 3-5 of the decision order) ---
+export {
+  setAutoCategories,
+  type AutoCategoryChange,
+  type AutoPlacement,
+  type SetAutoCategoriesResult,
+} from './auto-category.ts';
 
 // --- heuristics ------------------------------------------------------------
 export {

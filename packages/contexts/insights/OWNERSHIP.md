@@ -49,3 +49,4 @@ data the advisor never received would _resolve_.
 - `narrator_provider_consents`
 - `health_score_snapshots`
 - `ops_control_checks`
+- `insight_explanations`

@@ -186,6 +186,12 @@ export const exportRoutes = (
               tablesLoaded: z.array(z.string()),
               rowsLoaded: z.int().nonnegative(),
               transactionsReprojected: z.int().nonnegative(),
+              autoCategoriesReprojected: z
+                .int()
+                .nonnegative()
+                .describe(
+                  'Placements re-derived onto transactions.auto_* from the loaded category_assignments (WP 11.2b); the projection is derived and never exported.',
+                ),
             }),
             ...problems(400, 401, 403, 409, 503),
           },

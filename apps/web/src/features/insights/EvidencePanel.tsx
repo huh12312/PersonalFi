@@ -72,7 +72,9 @@ export function EvidencePanel({ insight }: EvidencePanelProps) {
               <div className="min-w-0">
                 <p className="text-text-secondary">{row.label}</p>
                 {row.sourceRef !== null && (
-                  <p className="truncate text-caption text-text-muted" title={row.sourceRef}>
+                  // Wrapped, not truncated (WP 11.3): an explanation keeps this panel open beneath it, and 1.4.12
+                  // text spacing at 200 % zoom must not clip the source.
+                  <p className="text-caption text-text-muted [overflow-wrap:anywhere]">
                     source: {row.sourceRef}
                   </p>
                 )}

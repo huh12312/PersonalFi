@@ -22,9 +22,14 @@
  * `userId` at the route) and every table's `user_id` column is overwritten
  * with it during insert, before the row ever reaches Postgres.
  */
-import { DateOnly } from '@core/kernel';
+import { DateOnly, systemClock } from '@core/kernel';
 import type { TransactionProviderRow, TransactionRow } from '@ctx/ledger/schema';
-import { projectEffective } from '@ctx/ledger';
+import {
+  PROJECTING_SOURCES,
+  autoChangeOf,
+  type AutoCategoryChangeInput,
+} from '@ctx/categorization';
+import { projectEffective, setAutoCategories, type LedgerExecutor } from '@ctx/ledger';
 import {
   currentRegistry,
   deriveTolerance,
@@ -35,6 +40,7 @@ import {
   type AssumptionDeltas,
   type AssumptionsRegistry,
 } from '@ctx/planning';
+import { drizzle } from 'drizzle-orm/node-postgres';
 import type { Pool, PoolClient } from 'pg';
 import { AppError } from '../../problem.ts';
 import { TABLE_ORDER } from './registry.ts';
@@ -312,10 +318,52 @@ async function reprojectTransactions(client: PoolClient, userId: string): Promis
   return updated;
 }
 
+/**
+ * Re-derives `transactions.auto_*` (WP 11.2b) from the `category_assignments` just loaded: the tiers 3-5 the
+ * bundle's current assignments name, written through `@ctx/ledger`'s `setAutoCategories` with the same mapping
+ * the categorisation pass uses (`autoChangeOf`). The columns are not in the bundle (`DERIVED_COLUMNS`), so this
+ * is the only writer; a transaction the holder had already picked keeps the placement as history, superseded.
+ */
+async function reprojectAutoCategories(client: PoolClient, userId: string): Promise<number> {
+  const assignments = await client.query<{
+    id: string;
+    transaction_id: string;
+    category_id: string;
+    source: string;
+    confidence: string;
+    decided_at: string | Date;
+  }>(
+    `SELECT id, transaction_id, category_id, source, confidence, decided_at
+       FROM category_assignments
+      WHERE user_id = $1 AND is_current AND source = ANY($2::text[])`,
+    [userId, [...PROJECTING_SOURCES]],
+  );
+  const changes = assignments.rows.flatMap((row) => {
+    const change = autoChangeOf(row);
+    return change === null ? [] : [change];
+  });
+  if (changes.length === 0) return 0;
+  // The client is inside the import's transaction; only `execute` is used, never `transaction()`.
+  const executor = drizzle(client) as unknown as LedgerExecutor;
+  let placed = 0;
+  for (let from = 0; from < changes.length; from += 500) {
+    const chunk: AutoCategoryChangeInput[] = changes.slice(from, from + 500);
+    const result = await setAutoCategories(
+      executor,
+      { userId, changes: chunk },
+      { clock: systemClock },
+    );
+    placed += result.placed;
+  }
+  return placed;
+}
+
 export interface ImportResult {
   readonly tablesLoaded: string[];
   readonly rowsLoaded: number;
   readonly transactionsReprojected: number;
+  /** WP 11.2b: placements re-derived onto `transactions.auto_*` from the loaded assignments. */
+  readonly autoCategoriesReprojected: number;
 }
 
 /**
@@ -360,8 +408,13 @@ export async function importBundle(
       ? await reprojectTransactions(client, targetUserId)
       : 0;
 
+    const autoCategoriesReprojected =
+      tablesLoaded.includes('transactions') && tablesLoaded.includes('category_assignments')
+        ? await reprojectAutoCategories(client, targetUserId)
+        : 0;
+
     await client.query('COMMIT');
-    return { tablesLoaded, rowsLoaded, transactionsReprojected };
+    return { tablesLoaded, rowsLoaded, transactionsReprojected, autoCategoriesReprojected };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;

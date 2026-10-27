@@ -4,6 +4,16 @@ import type { Page } from '@playwright/test';
 
 import { expectNoAxeViolations, setTheme } from './support/axe.ts';
 import { installCategoryMocks } from './support/mock-categories.ts';
+import {
+  EXPLAIN_LOCAL_BADGE,
+  EXPLAIN_OFF_WORDS,
+  EXPLAIN_REFUSED_WORDS,
+  GROCERIES_EXPLANATION,
+  explainBody,
+  refusedBody,
+  scriptExplanation,
+  shownBody,
+} from './support/mock-explain.ts';
 import { installRecurringInsightsMocks } from './support/mock-recurring-insights.ts';
 import { installPlanMocks } from './support/mock-plan.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
@@ -818,5 +828,117 @@ test.describe('WP 10.15 insight cards', () => {
       'aria-pressed',
       'true',
     );
+  });
+});
+
+/**
+ * WP 11.3 ("Explain this") on /insights: the whole app's mocks with `mock-explain.ts` scripting the Groceries card
+ * (idle → a 202 `computing` → `shown` from the local model) and the price card (`refused`). Rendering only reads;
+ * the tap asks; the evidence stays beneath whatever comes back.
+ */
+test.describe('WP 11.3 Explain this on /insights', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 1000 });
+  });
+
+  function cardOf(page: Page, text: string) {
+    return page.getByRole('list', { name: 'Insights' }).locator('> li').filter({ hasText: text });
+  }
+
+  test('WP 11.3: idle → computing → shown through a mocked 202 and a polled GET; the badge names the local model', async ({
+    page,
+  }) => {
+    const mocks = await installSweepMocks(page);
+    scriptExplanation(mocks.explain, 'insight', 'insight_groceries', {
+      post: explainBody('insight', 'insight_groceries', 'computing'),
+      computingReads: 2,
+      result: shownBody('insight', 'insight_groceries', GROCERIES_EXPLANATION),
+    });
+    await visit(page, '/insights');
+    const card = cardOf(page, 'has been running higher than usual');
+    const button = card.getByRole('button', { name: /^Explain this/u });
+    await expect(button).toBeVisible();
+    await expect(card.getByRole('button', { name: 'View evidence panel' })).toBeVisible();
+    // Rendering read every card's state and asked for nothing.
+    await expect
+      .poll(() => mocks.explain.calls.filter((c) => c.endsWith('/insight_groceries/explain')))
+      .toEqual(['GET /api/insights/insight_groceries/explain']);
+    expect(mocks.explain.calls.some((c) => c.startsWith('POST'))).toBe(false);
+
+    await button.click();
+    await expect(card.getByTestId('explain-live')).toHaveText('Explaining…');
+    await expect(button).toHaveAttribute('aria-busy', 'true');
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+
+    const explanation = card.getByTestId('explanation');
+    await expect(explanation.getByTestId('explanation-text')).toHaveText(GROCERIES_EXPLANATION, {
+      timeout: 15_000,
+    });
+    await expect(explanation.getByTestId('explanation-badge')).toHaveText(EXPLAIN_LOCAL_BADGE);
+    await expect(explanation.getByText('AI-assisted wording')).toBeVisible();
+    await expect(card.getByTestId('insight-evidence')).toBeVisible();
+    await expect(card.getByTestId('insight-evidence')).toContainText('$420.00');
+    expect(
+      mocks.explain.calls.filter((c) => c === 'POST /api/insights/insight_groceries/explain'),
+    ).toHaveLength(1);
+    // Polling stopped once shown.
+    const reads = mocks.explain.calls.length;
+    await page.waitForTimeout(2_000);
+    expect(mocks.explain.calls).toHaveLength(reads);
+  });
+
+  test('WP 11.3: the refused state says so in the api’s words and keeps the panel of facts beneath it', async ({
+    page,
+  }) => {
+    const mocks = await installSweepMocks(page);
+    scriptExplanation(mocks.explain, 'insight', 'insight_price', {
+      initial: refusedBody('insight', 'insight_price'),
+    });
+    await visit(page, '/insights');
+    const card = cardOf(page, 'A subscription went up in price');
+    await expect(card.getByTestId('explanation-refused')).toHaveText(EXPLAIN_REFUSED_WORDS);
+    await expect(card.getByTestId('explanation-badge')).toHaveCount(0);
+    await expect(card.getByTestId('insight-evidence')).toBeVisible();
+    await expect(card.getByTestId('insight-evidence')).toContainText('$18.99');
+    expect(mocks.explain.calls.some((c) => c.startsWith('POST'))).toBe(false);
+  });
+
+  test('WP 11.3: Explain this by keyboard — Enter asks, the live region speaks, focus lands on the explanation', async ({
+    page,
+  }) => {
+    const mocks = await installSweepMocks(page);
+    scriptExplanation(mocks.explain, 'insight', 'insight_groceries', {
+      post: explainBody('insight', 'insight_groceries', 'computing'),
+      computingReads: 1,
+      result: shownBody('insight', 'insight_groceries', GROCERIES_EXPLANATION),
+    });
+    await visit(page, '/insights');
+    const card = cardOf(page, 'has been running higher than usual');
+    const button = card.getByRole('button', { name: /^Explain this/u });
+    await button.focus();
+    await page.keyboard.press('Enter');
+    await expect(card.getByTestId('explain-live')).toHaveText('Explaining…');
+    // Busy, the button keeps focus (aria-disabled, never disabled).
+    await expect(button).toBeFocused();
+    await expect(card.getByTestId('explanation')).toBeFocused({ timeout: 15_000 });
+    await expect(card.getByTestId('explanation-text')).toHaveText(GROCERIES_EXPLANATION);
+  });
+
+  test('WP 11.3: unavailable (the narrator Off) shows the api’s message and the ways to fix it, no retry', async ({
+    page,
+  }) => {
+    await installSweepMocks(page);
+    await visit(page, '/insights');
+    const card = cardOf(page, 'has been running higher than usual');
+    await card.getByRole('button', { name: /^Explain this/u }).click();
+    const box = card.getByTestId('explanation');
+    await expect(box).toHaveAttribute('data-explanation-state', 'unavailable');
+    await expect(box).toContainText(EXPLAIN_OFF_WORDS);
+    await expect(box.getByRole('link', { name: 'Advisor management' })).toHaveAttribute(
+      'href',
+      '/settings/advisors',
+    );
+    await expect(box.getByRole('link', { name: 'Settings › Language model' })).toBeVisible();
+    await expect(box.getByRole('button')).toHaveCount(0);
   });
 });

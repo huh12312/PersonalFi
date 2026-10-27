@@ -243,4 +243,60 @@ describe('TransactionsScreen', () => {
 
     await waitFor(() => expect(patchedBody).toEqual({ categoryId: 'cat_dining_coffee' }));
   });
+
+  it('WP 11.2b: a row the machine placed wears its chip; a picked or rule-set row does not', async () => {
+    stubFetchRoutes([
+      categoriesRoute(),
+      { match: '/api/auth/session', handle: () => jsonResponse(SESSION) },
+      { match: '/api/accounts', handle: () => jsonResponse({ accounts: [ACCOUNT] }) },
+      {
+        match: '/api/transactions',
+        handle: () =>
+          jsonResponse({
+            items: [
+              transaction({
+                id: 'txn_auto',
+                name: 'Plaid Placed',
+                merchantName: 'Plaid Placed',
+                categoryId: 'cat_dining_coffee',
+                categorySource: 'auto',
+                autoCategory: {
+                  tier: 'provider',
+                  confidence: 0.85,
+                  decidedAt: '2026-01-15T00:00:00.000Z',
+                },
+              }),
+              transaction({
+                id: 'txn_picked',
+                name: 'Picked By Me',
+                merchantName: 'Picked By Me',
+                categoryId: 'cat_dining_coffee',
+                categorySource: 'user',
+                autoCategory: null,
+              }),
+              transaction({
+                id: 'txn_rule',
+                name: 'Ruled',
+                merchantName: 'Ruled',
+                categoryId: 'cat_dining_coffee',
+                categorySource: 'rule',
+                autoCategory: null,
+              }),
+            ],
+            nextCursor: null,
+            summary: { count: 3, totals: [] },
+          }),
+      },
+    ]);
+
+    renderTransactions();
+
+    const auto = (await screen.findByText('Plaid Placed')).closest('[role="row"]') as HTMLElement;
+    expect(auto.querySelector('[data-testid="provenance-chip"]')).toHaveTextContent('Plaid');
+    for (const name of ['Picked By Me', 'Ruled']) {
+      const row = screen.getByText(name).closest('[role="row"]') as HTMLElement;
+      expect(row.querySelector('[data-testid="provenance-chip"]')).toBeNull();
+    }
+    expect(screen.getAllByTestId('provenance-chip')).toHaveLength(1);
+  });
 });

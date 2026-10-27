@@ -25,6 +25,11 @@ export interface StoredTierView {
   readonly source: string;
   readonly won: boolean;
   readonly detail: string;
+  /**
+   * WP 11.2b: the figures behind `detail`, as stored (`null` for a chain stored before WP 11.1).
+   * What the chip's "Learned from N confirmations" reads.
+   */
+  readonly facts: Readonly<Record<string, string | number | boolean | null>> | null;
 }
 
 export interface TransactionExplanation {
@@ -68,9 +73,26 @@ function tierViews(chain: readonly unknown[]): StoredTierView[] {
         source: record['source'],
         won: record['won'] === true,
         detail: typeof record['detail'] === 'string' ? record['detail'] : '',
+        facts: flatFacts(record['facts']),
       },
     ];
   });
+}
+
+function flatFacts(raw: unknown): StoredTierView['facts'] {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const facts: Record<string, string | number | boolean | null> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (
+      value === null ||
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      facts[key] = value;
+    }
+  }
+  return facts;
 }
 
 function chainOf(evidence: unknown): readonly unknown[] {

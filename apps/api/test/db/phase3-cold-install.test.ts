@@ -196,9 +196,15 @@ describe.skipIf(NO_DATABASE)(
       const advisorsResponse = await h.request({ method: 'GET', url: '/advisors', session });
       expectStatus(advisorsResponse, 200);
       const advisors = (advisorsResponse.json() as { advisors: WireAdvisor[] }).advisors;
-      expect(advisors).toHaveLength(BUILTIN_CATALOGUE.length);
+      // The catalogue, plus the two query types registered beside it and never in the
+      // nightly registry: WP 11.2's categorize.suggest (off) and WP 11.3's insight.explain (on).
+      expect(advisors).toHaveLength(BUILTIN_CATALOGUE.length + 2);
       expect(new Set(advisors.map((a) => a.advisorId))).toEqual(
-        new Set(BUILTIN_CATALOGUE.map((entry) => entry.advisor.manifest.advisor_id)),
+        new Set([
+          ...BUILTIN_CATALOGUE.map((entry) => entry.advisor.manifest.advisor_id),
+          'categorize.suggest',
+          'insight.explain',
+        ]),
       );
 
       // `schedules` — read directly (there is no HTTP route over this table)

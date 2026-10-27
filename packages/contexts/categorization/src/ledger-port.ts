@@ -41,6 +41,7 @@
  * that column and nothing else.
  */
 import type { DateOnly } from '@core/kernel';
+import type { CategorizationExecutor } from './db.ts';
 
 /** Everything a decision is allowed to see about a transaction. */
 export interface CategorizableTransaction {
@@ -99,10 +100,47 @@ export interface WriteRuleCategoryInput {
   readonly causationId?: string | null;
 }
 
+/**
+ * WP 11.2b: one transaction's automatic placement (tiers 3-5), for the ledger's projection.
+ * `null` clears it - tier 6, or a rule has taken the row over.
+ */
+export interface AutoCategoryChangeInput {
+  readonly transactionId: string;
+  readonly placement: {
+    /** `category_assignments.id`. The ledger writes idempotently per this id. */
+    readonly assignmentId: string;
+    readonly categoryId: string;
+    readonly tier: 'merchant_default' | 'provider' | 'classifier';
+    /** Exactly the figure stored on the assignment (`NUMERIC(5,4)`), never recomputed. */
+    readonly confidence: number;
+    readonly decidedAt: Date;
+  } | null;
+}
+
+export interface WriteAutoCategoriesInput {
+  readonly userId: string;
+  readonly changes: readonly AutoCategoryChangeInput[];
+  /**
+   * The categorisation pass's own transaction handle. The adapter writes on it, so the
+   * placement commits with the assignment and before the `AssignmentsChanged` event that
+   * budgeting and recurring recompute on (a separate transaction could be visible to
+   * neither, or to one of them only). Absent: the adapter opens its own.
+   */
+  readonly executor?: CategorizationExecutor;
+  readonly correlationId: string;
+  readonly causationId?: string | null;
+}
+
 export interface LedgerPort {
   listForCategorization(input: ListForCategorizationInput): Promise<CategorizableTransactionPage>;
   /** Push the rule tier's answer into `@ctx/ledger`'s `resolveEffective` seam. */
   writeRuleCategory(input: WriteRuleCategoryInput): Promise<void>;
+  /**
+   * WP 11.2b: push the automatic tiers' answer (3 merchant default, 4 provider, 5 classifier)
+   * into the ledger's projection, the last tier of `resolveCategoryId`'s `user ?? rule ?? auto`.
+   * Idempotent per assignment id.
+   */
+  writeAutoCategories(input: WriteAutoCategoriesInput): Promise<void>;
 }
 
 /**

@@ -16,9 +16,9 @@
  * than a partial row.
  */
 import { appendEvent } from '@core/platform';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { transactions, transactionsProvider } from '../schema/index.ts';
-import { outboxOf, transactionOf, type LedgerExecutor } from './db.ts';
+import { outboxOf, transactionOf, withoutAutoColumns, type LedgerExecutor } from './db.ts';
 import { TransactionCategoryChosen } from './events.ts';
 import { LedgerError } from './errors.ts';
 import { projectEffective } from './apply.ts';
@@ -93,9 +93,34 @@ export async function setTransactionOverlay(
           now,
         );
 
-  const projected = { ...projectEffective(patched, row.fact, merchantIds), updatedAt: now };
-  const { id, createdAt: _createdAt, ...rest } = projected;
+  // WP 11.2b: the holder speaking about the category outranks, and so supersedes, the machine's answer. The
+  // placement is kept as history (`auto_superseded_at`), and un-superseded if the pick is withdrawn. Set by its own
+  // statement, never from the row read above: `auto_*` belongs to `setAutoCategories`, and a whole-row write-back
+  // here could overwrite a placement a categorisation pass committed meanwhile.
+  const pick = input.patch.userCategoryId;
+  const supersededAt =
+    pick === undefined
+      ? row.transaction.autoSupersededAt
+      : pick === null
+        ? null
+        : row.transaction.autoCategoryId === null
+          ? null
+          : (row.transaction.autoSupersededAt ?? now);
+  const projected = {
+    ...projectEffective({ ...patched, autoSupersededAt: supersededAt }, row.fact, merchantIds),
+    updatedAt: now,
+  };
+  const { id, createdAt: _createdAt, ...withAuto } = projected;
+  const rest = withoutAutoColumns(withAuto);
   await executor.update(transactions).set(rest).where(eq(transactions.id, id));
+  if (pick !== undefined) {
+    await executor.execute(
+      pick === null
+        ? sql`UPDATE transactions SET auto_superseded_at = NULL WHERE id = ${id} AND auto_superseded_at IS NOT NULL`
+        : sql`UPDATE transactions SET auto_superseded_at = COALESCE(auto_superseded_at, ${now.toISOString()}::timestamptz)
+               WHERE id = ${id} AND auto_category_id IS NOT NULL`,
+    );
+  }
 
   // WP 11.2: a hand pick is a fact other contexts learn from. Only a new,
   // non-null category is one: clearing the overlay withdraws intent rather than

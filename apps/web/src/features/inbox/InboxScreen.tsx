@@ -24,6 +24,7 @@ import {
   invalidateTransactionQueries,
   useTransactionOverlayMutation,
 } from '../transactions/useTransactionOverlay.ts';
+import { AutoReviewSection } from './AutoReviewSection.tsx';
 import { EMPTY_INBOX_STATE, inboxReducer } from './inbox-reducer.ts';
 import { RuleSuggestionsSection } from './RuleSuggestions.tsx';
 import { useInboxExplanations } from './useInboxExplanations.ts';
@@ -56,6 +57,10 @@ import { useInboxQueue } from './useInboxQueue.ts';
  * for the rows on screen, `useInboxExplanations.ts`) — rendered verbatim as a caption, never composed here — and a
  * "Rule suggestions" section lists the pending `spending.rule_suggestion` insights (`RuleSuggestions.tsx`): Create
  * rule opens the existing rule dialog pre-filled with the suggested category, Not now dismisses with a reason.
+ *
+ * WP 11.2b: "Uncategorised" now means tier 6 only (the automatic tiers' placements are effective, with a provenance
+ * chip), so this queue shrinks to what the machine could not place; the rows it did place and the holder has not
+ * looked at are the second queue, `AutoReviewSection` ("Auto-categorised, unreviewed"), with its own switch.
  *
  * WP 11.2: an abstained row whose explanation carries the model's `suggestion` shows it as a chip under the row
  * (`SuggestionChip`): Confirm is this row's normal pick with the suggested category (so the row resolves and focus
@@ -130,6 +135,7 @@ export function InboxScreen() {
           headline="You're all caught up"
           description="No uncategorized transactions or transfer suggestions need your attention."
         />
+        <AutoReviewSection />
         <RuleSuggestionsSection />
       </div>
     );
@@ -176,6 +182,8 @@ export function InboxScreen() {
           </li>
         ))}
       </ul>
+
+      <AutoReviewSection />
 
       <RuleSuggestionsSection />
 

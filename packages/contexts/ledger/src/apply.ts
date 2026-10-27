@@ -52,7 +52,15 @@ import {
   type TransactionProviderRow,
   type TransactionRow,
 } from '../schema/index.ts';
-import { dateOnlyOf, factOf, moneyOf, outboxOf, overlayOf, type LedgerExecutor } from './db.ts';
+import {
+  dateOnlyOf,
+  factOf,
+  moneyOf,
+  outboxOf,
+  overlayOf,
+  withoutAutoColumns,
+  type LedgerExecutor,
+} from './db.ts';
 import { resolveEffective } from './effective.ts';
 import { LedgerError } from './errors.ts';
 import { TransactionSupersededByPosted, TransactionsUpserted } from './events.ts';
@@ -533,6 +541,13 @@ function newTransaction(
     // through setRuleCategory — never here. A brand-new row starts with no rule
     // decision, same as it starts with no user edit.
     ruleCategoryId: NO_RULE.ruleCategoryId,
+    // Likewise the automatic tiers (WP 11.2b): a new row has not been placed by a pass yet.
+    autoCategoryId: null,
+    autoTier: null,
+    autoConfidence: null,
+    autoDecidedAt: null,
+    autoAssignmentId: null,
+    autoSupersededAt: null,
     isTransfer: false,
     transferLinkId: null,
     refundOfId: null,
@@ -690,7 +705,10 @@ async function writeTransactions(
     await executor.insert(transactions).values(chunk);
   }
   for (const plan of updates) {
-    const { id, createdAt: _createdAt, ...rest } = plan.row;
+    // The automatic tiers' columns are written by `setAutoCategories` and by nothing else: a sync page that read
+    // the row before a categorisation pass committed must not write its stale `auto_*` back over the pass's answer.
+    const { id, createdAt: _createdAt, ...withAuto } = plan.row;
+    const rest = withoutAutoColumns(withAuto);
     await executor.update(transactions).set(rest).where(eq(transactions.id, id));
   }
 }

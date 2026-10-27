@@ -1887,6 +1887,53 @@ It replays every standing category pick into the merchant defaults and the class
 (the classifier itself is rebuilt by the Sunday retrain). It is never run automatically: it
 changes what later syncs file on their own.
 
+## Explain this (v0.9.18)
+
+WP 11.3. An **Explain this** button on every insight card (beside "Why am I seeing this?") and on
+each scored health pillar, card and detail. It asks the language model for a short, plain-English
+explanation of that one finding or pillar: why it appeared (or why the pillar scores as it does),
+what it is built from, and what would change it (for a pillar, what moves it to the next band). The
+text is shown with a badge naming the provider and model and the words "AI-assisted wording"; the
+evidence panel (or the pillar's "Built from" list) stays beneath it and remains the arithmetic.
+
+**What it sends.** Exactly the entity on your screen, minimised the narrator's way: for an insight,
+the rule's catalogue name and plain-English purpose, its title, summary, figures (per year, one
+time, the basis in words) and its evidence rows as the evidence panel shows them (label, value,
+source reference); for a pillar, its name and meaning, its figure, score and band, the scoring
+ladder in words, the next band's edge and its "Built from" inputs. No ids, no account or institution
+names; a goal name's digits are removed. The request's scopes are exactly the scopes the entity was
+built from, and it is sent only when every one of them is in your grant to the narrator (Advisors);
+`transactions.raw` never is, so a finding built from raw rows cannot be explained.
+
+**Where it runs.** On the narrator's provider: the local model by default, a hosted provider only
+when you have made it the narrator under its consent (Settings, Language model) — no separate
+consent, because nothing beyond the narrator's payload class leaves the machine; the narrator's key
+and hourly window apply. Off is off. The api never calls a model: a tap answers "Explaining…" and the
+worker's `insights.explain` job does the call; the screen polls.
+
+**The approval.** Advisors, `insight.explain`: preview the exact payload and prompt, then approve the
+shape once. A new template, format, version, provider or model is a new shape and needs a new
+approval. Until then the button says it is unavailable and links to Advisors. Its advisor switch,
+the `local_model` kind switch, the breaker and cancel are the narrator's ladder.
+
+**What is checked.** Every figure in the reply must be, as written, one of the entity's own evidence
+values or figures (any other number, in digits or words, is refused); the insight copy linter
+(advice, banned phrases), no links, no markup, at most 900 characters, the reply format exactly.
+A refusal is shown as one ("the explanation didn't pass the checks; the evidence below is the
+arithmetic"), never replaced by template wording. Every explanation is a run-inspector row with the
+payload's digest. The controls self-test's thirteenth check, `explain_grounding`, asks the model
+for a figure its evidence does not carry and passes when the validator refuses it.
+
+**The cache.** `insight_explanations`: one row per entity and evidence digest — the same evidence is
+explained once and reused; changed evidence is a new digest and a new row; old rows stay for the
+audit and nothing is deleted on dismissal. A refusal is cached too (asking again until the checks
+pass would be retry-until-valid); a run that failed (the model did not answer) is not, and **Try
+again** asks again.
+
+**The Brief's prefetch.** After the weekly Brief publishes, the worker explains its ranked items
+ahead of time — **at most five a week**, each only if it could be explained now and is not already
+cached. Never the backlog, never the attention list.
+
 ## Categorisation: measuring the tiers (`just categorization-eval`)
 
 WP 11.1. Replays every transaction you filed by hand (the categories you picked, plus any confirmed
@@ -1920,6 +1967,42 @@ The Inbox shows the same working per row: the one-line "why" under an uncategori
 is read from what the tiers recorded when they decided (`GET /transactions/explanations`), never
 recomputed. A row categorised before v0.9.16 says "No categorisation pass has recorded its working
 for this yet" until its next sync.
+
+### The effective category, and the Inbox's review section (v0.9.19)
+
+WP 11.2b. A transaction's category is the first of these that exists: **your pick**, then **a rule's**,
+then **an automatic tier's**, else it is uncategorised. The automatic tiers are tier 3 (a merchant
+default learned from your picks, or pinned), tier 4 (Plaid's own category, through our mapping table)
+and tier 5 (the classifier, only at or above its calibrated floor, 60 % by default). Before v0.9.19
+only your pick and a rule counted: the automatic tiers' answers were recorded and explainable but
+reached no list, filter, budget or report, and a row they had placed read as uncategorised. Now they
+count everywhere the category is read, through the one resolver in `@ctx/ledger`
+(`resolveCategoryId`): the transaction list and its filters, the Inbox, budgets, spending, income,
+cash flow, pace, category history, the insights snapshot, and the CSV export.
+
+Nothing is applied silently. Every automatic placement wears a **chip**: "Plaid", "Learned" or
+"Classifier 92 %" (the calibrated figure stored with the decision, never recomputed). Hover it, or
+focus it and press Enter, and it shows the stored explanation ("Learned from 4 confirmations");
+a category you picked or a rule set shows no chip. "Uncategorised" now means only the rows every tier
+declined, so the Inbox's first queue shrinks to those; the rows the machine did place in the last 30
+days and you have not looked at are the second queue, **Auto-categorised, unreviewed** (newest first,
+a page of 50). **Looks right** is an ordinary pick of the category already there, so it teaches the
+merchant default and the classifier and the row leaves the list; **Change** opens the normal picker.
+The switch in that section's header, "Review automatic placements", hides it (stored on your account;
+shown by default). The placements still count when it is off.
+
+Your own pick always wins, and the machine's answer is kept beside it (`transactions.auto_*`, with
+`auto_superseded_at` set), so withdrawing the pick brings the placement back. Budgets and reports
+move when an install first gains these placements, by exactly the rows that were uncategorised
+because only a machine had placed them; their as-of notes ("so far", the sync time) are unchanged.
+
+**Upgrading.** Migration `0058` adds nullable columns and changes nothing else. The worker enqueues
+`categorization.project_auto` at boot, which reads the current assignments and fills the columns
+(idempotent: it writes nothing for a placement already stored); until it has run, the new behaviour
+shows only for rows categorised after the upgrade. Check it with
+`SELECT count(*) FROM transactions WHERE auto_category_id IS NOT NULL;` on the database, or see the
+chips appear. The export omits `transactions.auto_*` (a projection, not data) and the import
+re-derives it from the bundle's `category_assignments`.
 
 ## Cryptography inventory
 

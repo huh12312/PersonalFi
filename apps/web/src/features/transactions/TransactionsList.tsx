@@ -14,12 +14,15 @@ import {
   useCategoryExplanations,
 } from '../category-suggestions/suggestion-api.ts';
 import { TransactionRow } from './TransactionRow.tsx';
+import { autoPlacementOf } from './provenance.ts';
 import { hasActiveFilters, type TransactionsSearch } from './filters.ts';
 import { useTransactionsList } from './useTransactionsList.ts';
 
 const ROW_HEIGHT = 60;
 /** WP 11.2: a row carrying the model's suggestion chip starts at this estimate; its real height is measured. */
 const SUGGESTION_ROW_ESTIMATE = 104;
+/** WP 11.2b: a row carrying a provenance chip on its own line; its real height is measured too. */
+const PROVENANCE_ROW_ESTIMATE = 92;
 
 export interface TransactionsListProps {
   search: TransactionsSearch;
@@ -88,8 +91,13 @@ export function TransactionsList({
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: (index) =>
-      suggestionAt(items[index]) === null ? ROW_HEIGHT : SUGGESTION_ROW_ESTIMATE,
+    estimateSize: (index) => {
+      const item = items[index];
+      if (suggestionAt(item) !== null) return SUGGESTION_ROW_ESTIMATE;
+      return item !== undefined && autoPlacementOf(item) !== null
+        ? PROVENANCE_ROW_ESTIMATE
+        : ROW_HEIGHT;
+    },
     overscan: 8,
   });
 
@@ -209,7 +217,7 @@ export function TransactionsList({
                 top: 0,
                 left: 0,
                 width: '100%',
-                ...(suggestion === null
+                ...(suggestion === null && autoPlacementOf(transaction) === null
                   ? { height: `${ROW_HEIGHT}px` }
                   : { minHeight: `${ROW_HEIGHT}px` }),
                 transform: `translateY(${virtualRow.start}px)`,

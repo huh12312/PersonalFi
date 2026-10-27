@@ -215,7 +215,14 @@ describe('InsightsScreen', () => {
         reason: null,
       }),
     );
-    expect(await screen.findByRole('status')).toHaveTextContent('Dismissed until');
+    // Each card also carries its "Explain this" live region (WP 11.3), so the notice is found by its words.
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole('status')
+          .filter((region) => region.textContent?.includes('Dismissed until') === true),
+      ).toHaveLength(1),
+    );
   });
 
   it('no proposed action ever renders as something that performs a transfer', async () => {

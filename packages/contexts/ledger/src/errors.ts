@@ -15,7 +15,8 @@ export type LedgerErrorCode =
   | 'ledger.splits_do_not_sum'
   | 'ledger.transfer_same_account'
   | 'ledger.transfer_already_paired'
-  | 'ledger.cursor_invalid';
+  | 'ledger.cursor_invalid'
+  | 'ledger.invalid_auto_placement';
 
 export class LedgerError extends Error {
   readonly code: LedgerErrorCode;

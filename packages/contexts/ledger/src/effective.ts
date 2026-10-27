@@ -2,7 +2,10 @@
 import { DateOnly } from '@core/kernel';
 import { resolveMerchantIdentity } from './normalise.ts';
 import {
+  NO_AUTO,
   NO_RULE,
+  type AutoResolution,
+  type CategorySource,
   type EffectiveTransaction,
   type RuleResolution,
   type TransactionFact,
@@ -50,26 +53,54 @@ import {
 
 /**
  * The category tier order, alone: an explicit user edit, then a rule the user
- * wrote in advance, then nothing (04 §2.2's first two tiers; the provider and
- * everything below it are `@ctx/categorization`'s own tiers and never reach
- * this column — see `category_assignments`).
+ * wrote in advance, then what the automatic tiers decided (04 §2.2: 3 a merchant
+ * default, 4 the provider's category, 5 the classifier at or above its floor),
+ * then nothing.
+ *
+ * WP 11.2b made the last tier effective. Until then `auto` did not exist and a
+ * tier 3-5 answer lived only in `category_assignments`, so a row the machine
+ * had placed was "uncategorised" to the list, the Inbox filter, budgets and
+ * every report. It is a *projection* the ledger owns (`transactions.auto_*`,
+ * written by `setAutoCategories`), because the ledger may not read the
+ * categorization context's tables, and it is a tier of **this** function
+ * because the one rule of this module is that there is one place that knows the
+ * order. A holder's pick or a rule always outranks it; it is never applied
+ * silently - the chip, the stored explanation and the classifier's floor are
+ * what 04 §5.2's "never silently apply" rests on.
  *
  * Exported and shared rather than inlined twice: `resolveEffective` calls it to
  * build the projection at write time, and `effectiveOf` (`db.ts`) calls it to
  * rehydrate a stored row without a fact in hand. Two implementations of one
- * tier order is exactly the drift this module's header exists to prevent.
+ * tier order is exactly the drift this module's header exists to prevent. The
+ * SQL readers (`read.ts`'s filters) spell the same order as one `COALESCE`
+ * (`effectiveCategorySql`), pinned to this function by `test/read.test.ts`.
  */
 export function resolveCategoryId(
   overlay: TransactionOverlay,
   rule: RuleResolution = NO_RULE,
+  auto: AutoResolution = NO_AUTO,
 ): string | null {
-  return overlay.userCategoryId ?? rule.ruleCategoryId;
+  return overlay.userCategoryId ?? rule.ruleCategoryId ?? auto.autoCategoryId;
+}
+
+/** `resolveCategoryId`, and which tier the answer came from. */
+export function resolveCategory(
+  overlay: TransactionOverlay,
+  rule: RuleResolution = NO_RULE,
+  auto: AutoResolution = NO_AUTO,
+): { readonly categoryId: string | null; readonly source: CategorySource | null } {
+  if (overlay.userCategoryId !== null)
+    return { categoryId: overlay.userCategoryId, source: 'user' };
+  if (rule.ruleCategoryId !== null) return { categoryId: rule.ruleCategoryId, source: 'rule' };
+  if (auto.autoCategoryId !== null) return { categoryId: auto.autoCategoryId, source: 'auto' };
+  return { categoryId: null, source: null };
 }
 
 export function resolveEffective(
   fact: TransactionFact,
   overlay: TransactionOverlay,
   rule: RuleResolution = NO_RULE,
+  auto: AutoResolution = NO_AUTO,
 ): EffectiveTransaction {
   const date = fact.authorizedDate ?? fact.postedDate;
 
@@ -110,9 +141,18 @@ export function resolveEffective(
     // owns that mapping and writes its result to `category_assignments`, so
     // surfacing it here would be a second place that decides what a transaction
     // is.
-    categoryId: resolveCategoryId(overlay, rule),
+    ...categoryOf(overlay, rule, auto),
     note: blankToNull(overlay.userNote),
   };
+}
+
+function categoryOf(
+  overlay: TransactionOverlay,
+  rule: RuleResolution,
+  auto: AutoResolution,
+): { categoryId: string | null; categorySource: CategorySource | null } {
+  const resolved = resolveCategory(overlay, rule, auto);
+  return { categoryId: resolved.categoryId, categorySource: resolved.source };
 }
 
 /**

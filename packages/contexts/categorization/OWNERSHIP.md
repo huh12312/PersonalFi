@@ -89,6 +89,11 @@ Two names are new since the sketch:
   `categories.id` values opaquely. It is tier 1 of the decision order and this context
   only ever _reads_ it; the ledger's `setTransactionOverlay` is what writes it.
 
+- `transactions.auto_*` (WP 11.2b, migration 0058) - `@ctx/ledger`'s projection of this context's tier 3-5
+  decisions, the last tier of its `resolveCategoryId`. This context writes it only through the
+  `LedgerPort.writeAutoCategories` it is handed (in the categorisation pass's own transaction), never by
+  SQL, and `reprojectAutoCategories` re-derives it from `category_assignments`.
+
 `category_assignments.transaction_id`, `merchant_profiles.ledger_merchant_id` and
 `rules.created_from_transaction_id` all point into `@ctx/ledger` and none of them is a
 `REFERENCES` clause — the same call `@ctx/ledger` made in the other direction, and for

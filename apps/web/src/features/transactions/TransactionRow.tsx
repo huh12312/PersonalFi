@@ -12,6 +12,8 @@ import type { Transaction } from '../../api/generated/types.gen.ts';
 import { cn } from '../../lib/cn.ts';
 import { SuggestionChip } from '../category-suggestions/SuggestionChip.tsx';
 import type { CategorySuggestion } from '../category-suggestions/suggestion-api.ts';
+import { TransactionProvenanceChip } from './ProvenanceChip.tsx';
+import { autoPlacementOf } from './provenance.ts';
 
 export interface TransactionRowProps {
   transaction: Transaction;
@@ -57,6 +59,9 @@ function TransactionRowImpl({
   onOpen,
   onFocusRow,
 }: TransactionRowProps) {
+  // WP 11.2b: a category the machine placed is never shown bare. The chip has its own line under the row (as the
+  // model's suggestion has): at 320 px the name cell is too narrow to hold it beside the amount.
+  const placedByMachine = autoPlacementOf(transaction) !== null;
   return (
     <div
       ref={measureRef}
@@ -69,7 +74,7 @@ function TransactionRowImpl({
       style={style}
       className={cn(
         'absolute left-0 top-0 flex w-full items-center gap-3 border-b border-border-hairline px-3 py-2 outline-none focus-visible:bg-accent-wash data-[selected=true]:bg-accent-wash',
-        suggestion !== null && 'flex-wrap gap-y-1.5',
+        (suggestion !== null || placedByMachine) && 'flex-wrap gap-y-1.5',
       )}
       data-selected={selected}
       onFocus={() => onFocusRow(index)}
@@ -145,6 +150,12 @@ function TransactionRowImpl({
       {suggestion !== null && (
         <div role="gridcell" className="min-w-0 basis-full pl-7">
           <SuggestionChip transactionId={transaction.id} suggestion={suggestion} variant="list" />
+        </div>
+      )}
+
+      {placedByMachine && (
+        <div role="gridcell" className="min-w-0 basis-full pl-7">
+          <TransactionProvenanceChip transaction={transaction} />
         </div>
       )}
     </div>

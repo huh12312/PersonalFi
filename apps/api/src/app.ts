@@ -42,6 +42,8 @@ import { createNarratorRuntime } from './narrator-wiring.ts';
 import { narratorSettingsRoutes } from './routes/narrator-settings.ts';
 import { categorySuggestionRoutes } from './routes/category-suggestions.ts';
 import { createSuggestionRuntime } from './category-suggestions.ts';
+import { createExplainRuntime } from './insight-explain.ts';
+import { explainSwitchesOf, insightExplainRoutes } from './routes/insight-explain.ts';
 import { narratorControlCheckRoutes } from './routes/narrator-control-checks.ts';
 import { buildPlatform } from './platform.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
@@ -757,8 +759,32 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   // and "Approve this payload" work through the product and the worker's next
   // narration is not refused `payload_not_approved`.
   // WP 10.6: per holder — their provider and model key the approval.
+  // WP 11.3: the explain runtime in preview mode, for Advisor management's
+  // preview and approval of `insight.explain` and for the explain routes below.
+  const explainPreview = createExplainRuntime({
+    mode: 'preview',
+    narrator: narratorPreview,
+    // The same constructor over the same database and box as the narrator's.
+    stores: createNarratorStores({
+      database,
+      secretBox: () => {
+        try {
+          return security.requireSecretBox();
+        } catch {
+          return undefined;
+        }
+      },
+    }),
+    localModel: undefined,
+    timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+    allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+    fileKeys: narratorFileKeys,
+    clock,
+  });
   await app.register(
-    advisorRunRoutes(deps, createPreviewModel(config.localModelPin), narratorPreview),
+    advisorRunRoutes(deps, createPreviewModel(config.localModelPin), narratorPreview, {
+      runtime: explainPreview,
+    }),
   );
   // WP 11.2: Settings → Language model → Category suggestions, and the Inbox's
   // "Not this". Preview mode: this process renders and approves the suggestion
@@ -788,6 +814,12 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
         clock,
       }),
     }),
+  );
+  // WP 11.3: "Explain this" on insights and health pillars. Preview mode: the
+  // holder's explain model (the narrator's provider) is resolved here only for
+  // its template hash, which keys the approval; the worker runs every call.
+  await app.register(
+    insightExplainRoutes(deps, { runtime: explainPreview, switches: explainSwitchesOf(deps) }),
   );
   // WP 9.1 (09 §4 batch 3, W-A): `GET /ops/backup-status` — install-wide
   // backup and restore-drill status from `@core/platform`'s ops tables

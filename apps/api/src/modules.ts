@@ -38,6 +38,12 @@
  * enough to flip, and why any that stayed off did.
  */
 import { SUGGEST_CONTROL_OUTSIDE_KEY, type LocalModelTransport } from '@advisor/local-model';
+import {
+  createExplainJob,
+  createExplainPrefetch,
+  explainProbeFor,
+  type ExplainRuntime,
+} from './insight-explain.ts';
 import type { LocalModelPin } from '@core/config';
 import {
   createNarratorWiring,
@@ -47,6 +53,8 @@ import {
 import {
   CATEGORIZATION_EVENTS,
   createCategorizationConsumer,
+  enqueueProjectAuto,
+  projectAutoJobHandler,
   registerRetrainSchedule,
   retrainJobHandler,
   type CategorizationDatabase,
@@ -87,6 +95,7 @@ import {
   type SuggestProbeModel,
   BUILTIN_CATALOGUE,
   CATEGORY_SUGGEST_MANIFEST,
+  INSIGHT_EXPLAIN_MANIFEST,
   INSIGHTS_EVENTS,
   NARRATOR_MANIFEST,
   type InsightsDatabase,
@@ -245,6 +254,14 @@ export interface ModuleWiringOptions {
    * nothing is enqueued and nothing runs.
    */
   readonly categorySuggestions?: { readonly runtime: SuggestionRuntime };
+  /**
+   * WP 11.3: "Explain this" — the worker's run-mode explain runtime
+   * (`insight-explain.ts`, the narrator's provider). Present: the
+   * `insights.explain` job is registered, the Brief prefetches its ranked
+   * items (at most five) and the self-test probes `explain_grounding`.
+   * Absent (the api): nothing runs here; the api only enqueues.
+   */
+  readonly insightExplain?: { readonly runtime: ExplainRuntime };
   /**
    * The account holder these modules are being built for — the same id
    * `resolveModules(platform, userId, …)` is called with.
@@ -498,6 +515,14 @@ export async function registerBuiltinAdvisors(
     { userId: context.userId, clock: context.clock, correlationId: context.correlationId },
     { manifest: CATEGORY_SUGGEST_MANIFEST, enabled: false },
   );
+  // WP 11.3: `insight.explain`'s row, on — nothing runs without the holder's
+  // tap (or the Brief's prefetch) and an approved shape; level 3's switch in
+  // Advisor management still turns it off. Not in the nightly registry.
+  await registerAdvisor(
+    database,
+    { userId: context.userId, clock: context.clock, correlationId: context.correlationId },
+    { manifest: INSIGHT_EXPLAIN_MANIFEST, enabled: true },
+  );
 }
 
 export function appModules(options: ModuleWiringOptions): readonly ModuleRegistration[] {
@@ -565,6 +590,8 @@ export function appModules(options: ModuleWiringOptions): readonly ModuleRegistr
       // failure — so a retry only fires for a genuine database problem.
       jobs: [
         retrainJobHandler(database),
+        // WP 11.2b: re-derive the ledger's projection of tiers 3-5 from the current assignments.
+        projectAutoJobHandler(database, createCategorizationLedgerPort(database, clock)),
         // WP 11.2: the suggestion pass and the precision-gate measurement.
         ...(options.categorySuggestions === undefined
           ? []
@@ -585,6 +612,9 @@ export function appModules(options: ModuleWiringOptions): readonly ModuleRegistr
       ],
       schedules: async (userId: string): Promise<void> => {
         await registerRetrainSchedule(database, { userId, timezone: options.timezone }, clock);
+        // WP 11.2b: the backfill for assignments made before migration 0058, and a self-heal after.
+        // Deduped, idempotent, and run by the worker - never on the boot path.
+        await enqueueProjectAuto(database, { userId, correlationId: newId() }, clock);
       },
     },
     {
@@ -1201,6 +1231,23 @@ function insightsModule(
           narratorConfiguredFor: async (userId: string) =>
             (await options.narratorRuntime?.forUser(userId)) != null,
         }),
+    // WP 11.3: "Explain this" for the week's ranked items, at most five.
+    ...(options.insightExplain === undefined
+      ? {}
+      : {
+          explainPrefetch: async (input: {
+            readonly userId: string;
+            readonly insightIds: readonly string[];
+            readonly correlationId: string;
+          }) => {
+            await createExplainPrefetch({
+              database,
+              runtime: (options.insightExplain as { readonly runtime: ExplainRuntime }).runtime,
+              switches: insightsRunSwitches(database, options),
+              clock,
+            })(input);
+          },
+        }),
   });
   // WP 5.9's outcome check (`evaluateDueOutcomes`) is exported as a plain
   // function, not a job step of its own (§4 W-C: "the outcome check ...
@@ -1258,6 +1305,21 @@ function insightsModule(
               ...(options.categorySuggestions === undefined
                 ? {}
                 : { suggestProbeFor: suggestProbeFor(options.categorySuggestions.runtime) }),
+              // WP 11.3: `explain_grounding`, through the holder's explain model.
+              ...(options.insightExplain === undefined
+                ? {}
+                : { explainProbeFor: explainProbeFor(options.insightExplain.runtime) }),
+            }),
+          ]),
+      // WP 11.3: `insights.explain` — the holder's tap or the Brief's prefetch, never the api.
+      ...(options.insightExplain === undefined
+        ? []
+        : [
+            createExplainJob({
+              database,
+              runtime: options.insightExplain.runtime,
+              switches: insightsRunSwitches(database, options),
+              clock,
             }),
           ]),
       // WP 10.12: the daily health snapshot (04:10 local), the same snapshot ports the Brief's weekly

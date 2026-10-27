@@ -3,7 +3,7 @@ import type { Page, Route } from '@playwright/test';
 
 import { installAccountMocks } from './mock-accounts.ts';
 import { installAdvisorMocks } from './mock-advisors.ts';
-import { installApiMocks, MANUAL_CONNECTOR } from './mock-api.ts';
+import { installApiMocks, MANUAL_CONNECTOR, type MockApiState } from './mock-api.ts';
 import { installBriefMocks } from './mock-brief.ts';
 import type { CategorySuggestionsMockState } from './mock-category-suggestions.ts';
 import type { NarratorMockState } from './mock-narrator.ts';
@@ -11,6 +11,7 @@ import { installBudgetMocks } from './mock-budget.ts';
 import { installCategoryHistoryMocks } from './mock-categories.ts';
 import { installCashFlowMocks } from './mock-cash-flow.ts';
 import { installDashboardMocks } from './mock-dashboard.ts';
+import { installExplainMocks, type ExplainMockState } from './mock-explain.ts';
 import { installGoalsMocks } from './mock-goals.ts';
 import { installInvestmentsMocks } from './mock-investments.ts';
 import {
@@ -45,6 +46,10 @@ export interface SweepMocks {
   readonly narrator: NarratorMockState;
   /** WP 11.2: the category-suggestion settings layer's state (`mock-category-suggestions.ts`), for seeding a result. */
   readonly categorySuggestions: CategorySuggestionsMockState;
+  /** WP 11.3: the "Explain this" layer's state (`mock-explain.ts`): every entity `idle` until a test scripts it. */
+  readonly explain: ExplainMockState;
+  /** WP 11.2b: the general fixture's own state, for adding a transaction an automatic tier placed. */
+  readonly api: MockApiState;
 }
 
 export interface SweepOptions {
@@ -105,6 +110,8 @@ export async function installSweepMocks(
   await installAdvisorMocks(page, base);
   await installBriefMocks(page, { standalone: false });
   if (options.accountSettings === true) await installAccountMocks(page);
+  // WP 11.3: "Explain this" on /insights and /health (only its own paths; everything else falls through).
+  const explain = await installExplainMocks(page);
 
   // Every link kind the app renders a form for, so the "Add a connection" dialog and the Crypto settings tab show
   // the add-wallet and Coinbase-key forms instead of "Not available in this deployment" (the general fixture lists
@@ -125,6 +132,8 @@ export async function installSweepMocks(
     networth,
     narrator: base.narrator,
     categorySuggestions: base.categorySuggestions,
+    explain,
+    api: base,
   };
 }
 

@@ -30,6 +30,8 @@ export {
   transactionsProvider,
   transactions,
   transactionSplits,
+  AUTO_TIERS,
+  type AutoTier,
   type TransactionProviderRow,
   type NewTransactionProviderRow,
   type TransactionRow,

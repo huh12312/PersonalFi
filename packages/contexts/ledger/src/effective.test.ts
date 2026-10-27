@@ -8,7 +8,7 @@
 import { DateOnly, money, type DateOnly as DateOnlyType } from '@core/kernel';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { resolveCategoryId, resolveEffective, withinDays } from './effective.ts';
+import { resolveCategory, resolveCategoryId, resolveEffective, withinDays } from './effective.ts';
 import { dedupKeyOf, normaliseMerchantName } from './normalise.ts';
 import {
   EMPTY_OVERLAY,
@@ -147,7 +147,51 @@ describe('resolveEffective', () => {
     expect(effective.categoryId).not.toBe(ruleCategoryId);
   });
 
-  it('neither user nor rule leaves the category unset — the provider and classifier tiers live in @ctx/categorization, never here', () => {
+  it('WP 11.2b: user ?? rule ?? auto, for every combination of the three, with the tier it came from', () => {
+    const user = '01920000-0000-7000-8000-0000000000a1';
+    const rule = '01920000-0000-7000-8000-0000000000a2';
+    const auto = '01920000-0000-7000-8000-0000000000a3';
+    for (const hasUser of [false, true]) {
+      for (const hasRule of [false, true]) {
+        for (const hasAuto of [false, true]) {
+          const overlay = { ...EMPTY_OVERLAY, userCategoryId: hasUser ? user : null };
+          const ruleResolution = { ruleCategoryId: hasRule ? rule : null };
+          const autoResolution = { autoCategoryId: hasAuto ? auto : null };
+          const expected = hasUser ? user : hasRule ? rule : hasAuto ? auto : null;
+          const source = hasUser ? 'user' : hasRule ? 'rule' : hasAuto ? 'auto' : null;
+          expect(resolveCategoryId(overlay, ruleResolution, autoResolution)).toBe(expected);
+          expect(resolveCategory(overlay, ruleResolution, autoResolution)).toEqual({
+            categoryId: expected,
+            source,
+          });
+        }
+      }
+    }
+  });
+
+  it('WP 11.2b: the automatic tiers alone make a category effective, and the rule outranks them', () => {
+    const fact: TransactionFact = {
+      amount: money(-500n, 'USD'),
+      postedDate: DateOnly.parse('2026-05-20'),
+      authorizedDate: null,
+      name: 'CHEWY.COM',
+      merchantName: null,
+      pending: false,
+    };
+    const auto = '01920000-0000-7000-8000-0000000000a3';
+    const rule = '01920000-0000-7000-8000-0000000000a2';
+    const viaAuto = resolveEffective(fact, EMPTY_OVERLAY, NO_RULE, { autoCategoryId: auto });
+    expect(viaAuto).toMatchObject({ categoryId: auto, categorySource: 'auto' });
+    const viaRule = resolveEffective(
+      fact,
+      EMPTY_OVERLAY,
+      { ruleCategoryId: rule },
+      { autoCategoryId: auto },
+    );
+    expect(viaRule).toMatchObject({ categoryId: rule, categorySource: 'rule' });
+  });
+
+  it('neither user nor rule nor the automatic tiers leaves the category unset — tier 6 is the absence of an answer', () => {
     const fact: TransactionFact = {
       amount: money(-500n, 'USD'),
       postedDate: DateOnly.parse('2026-05-20'),

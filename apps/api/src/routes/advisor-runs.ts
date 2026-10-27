@@ -80,6 +80,13 @@ import {
   latestRuns,
   listAdvisors,
   NARRATOR_MANIFEST,
+  INSIGHT_EXPLAIN_ADVISOR_ID,
+  approveInsightExplain,
+  insightFeed,
+  loadInsightExplainTarget,
+  previewInsightExplain,
+  ungrantedExplainScopes,
+  type ExplainTarget,
   previewRequest,
   requestRunCancel,
   ruleHealth,
@@ -107,6 +114,7 @@ import { AppError, problems } from '../problem.ts';
 import { isoInstant } from '../wire.ts';
 import type { PreviewModel } from '../modules.ts';
 import type { NarratorRuntime } from '../narrator-wiring.ts';
+import type { ExplainRuntime } from '../insight-explain.ts';
 import type { RouteDeps } from './deps.ts';
 
 /** D6: one account holder — the same reading every other route file uses. */
@@ -335,6 +343,18 @@ const runInspectorSchema = z
   })
   .meta({ id: 'AdvisorRunInspector' });
 
+/** WP 11.3: what `insight.explain` would send now (`previewInsightExplain`). */
+const explainPreviewRequestSchema = z
+  .object({
+    request_id: z.string(),
+    subject: z.record(z.string(), z.unknown()),
+    deadline: z.string(),
+    max_response_bytes: z.int(),
+    snapshot: z.record(z.string(), z.unknown()),
+    granted_scopes: z.array(z.string()),
+  })
+  .meta({ id: 'ExplainPreviewRequest' });
+
 const payloadPreviewSchema = z
   .object({
     advisorId: z.string(),
@@ -342,7 +362,10 @@ const payloadPreviewSchema = z
     queryShape: z.string(),
     scopes: z.array(z.string()),
     promptTemplateHash: z.string().nullable(),
-    request: AdvisorRequestSchema,
+    // WP 11.3: `insight.explain`'s request is its own (a subject, not a
+    // snapshot of scopes); it still carries `snapshot` and `granted_scopes`,
+    // which is what the panel shows.
+    request: z.union([AdvisorRequestSchema, explainPreviewRequestSchema]),
     prompt: z.object({ text: z.string(), hash: z.string() }).nullable(),
     approvalRequired: z.boolean(),
     approved: z.boolean(),
@@ -439,8 +462,42 @@ export const advisorRunRoutes = (
   deps: RouteDeps,
   staticPreview?: PreviewModel,
   narratorPreview?: Pick<NarratorRuntime, 'forUser'>,
+  explain?: { readonly runtime: ExplainRuntime },
 ): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
+
+  /**
+   * WP 11.3: `insight.explain`'s renderer for this holder — the narrator's
+   * provider, in preview mode — or a 503 naming why there is none.
+   */
+  async function explainRenderer(userId: string) {
+    const resolution = explain === undefined ? null : await explain.runtime.resolve(userId);
+    if (resolution?.adapter == null) {
+      throw new AppError({
+        status: 503,
+        code: 'insights.prompt_renderer_unavailable',
+        title: 'Service Unavailable',
+        detail:
+          'no language model is configured for you (the narrator is Off or not set up), so the ' +
+          'payload of insight.explain cannot be shown or approved: choose a model in Settings, ' +
+          'Language model, first',
+        family: 'internal',
+      });
+    }
+    return resolution.adapter;
+  }
+
+  /** The holder's own top explainable insight, for the preview; `null` shows the illustrative one. */
+  async function explainPreviewTarget(userId: string): Promise<ExplainTarget | null> {
+    const feed = await insightFeed(database, { userId, now: clock.now(), currency: 'USD' });
+    for (const view of feed.list.slice(0, 20)) {
+      const loaded = await loadInsightExplainTarget(database, userId, view.id);
+      if (loaded.status !== 'found') continue;
+      if ((await ungrantedExplainScopes(database, userId, loaded.target)).length > 0) continue;
+      return loaded.target;
+    }
+    return null;
+  }
 
   /**
    * WP 10.6 (D30): the holder's own narrator — their provider and model, or
@@ -603,6 +660,32 @@ export const advisorRunRoutes = (
       },
       async (request) => {
         const session = await guards.requireSession(request);
+        if (request.params.advisorId === INSIGHT_EXPLAIN_ADVISOR_ID) {
+          const renderer = await explainRenderer(session.userId);
+          const preview = await previewInsightExplain(
+            database,
+            contextOf(deps, session.userId, request),
+            { renderer, target: await explainPreviewTarget(session.userId) },
+          );
+          return {
+            advisorId: preview.advisorId,
+            kind: 'local_model' as const,
+            queryShape: preview.queryShape,
+            scopes: [...preview.scopes],
+            promptTemplateHash: preview.promptTemplateHash,
+            request: {
+              request_id: preview.request.request_id,
+              subject: preview.request.subject as unknown as Record<string, unknown>,
+              deadline: preview.request.deadline,
+              max_response_bytes: preview.request.max_response_bytes,
+              snapshot: preview.request.snapshot as unknown as Record<string, unknown>,
+              granted_scopes: [...preview.request.granted_scopes],
+            },
+            prompt: preview.prompt,
+            approvalRequired: true,
+            approved: preview.approved,
+          };
+        }
         const timeZone = await timezoneOf(deps);
         const holderPreview = await previewFor(session.userId);
         const dependencies = await previewDependenciesOf(
@@ -658,6 +741,18 @@ export const advisorRunRoutes = (
       },
       async (request) => {
         const session = await guards.requireFreshSession(request);
+        if (request.params.advisorId === INSIGHT_EXPLAIN_ADVISOR_ID) {
+          const renderer = await explainRenderer(session.userId);
+          try {
+            return await approveInsightExplain(database, contextOf(deps, session.userId, request), {
+              renderer,
+              queryShape: request.body.queryShape,
+            });
+          } catch (error) {
+            if (error instanceof PreviewError) throw previewProblem(error);
+            throw error;
+          }
+        }
         const timeZone = await timezoneOf(deps);
         const preview = await previewFor(session.userId);
         const dependencies = await previewDependenciesOf(deps, session.userId, timeZone, preview);

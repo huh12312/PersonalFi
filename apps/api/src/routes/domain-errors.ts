@@ -63,6 +63,7 @@ const LEDGER_STATUS: Readonly<Record<LedgerErrorCode, number>> = {
   'ledger.currency_mismatch': 409,
   'ledger.transfer_same_account': 409,
   'ledger.transfer_already_paired': 409,
+  'ledger.invalid_auto_placement': 422,
 };
 
 const CONNECTIONS_STATUS: Readonly<Record<ConnectionsErrorCode, number>> = {

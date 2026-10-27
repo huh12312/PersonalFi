@@ -32,9 +32,11 @@ import {
   type MerchantDefault,
 } from './engine.ts';
 import { AssignmentsChanged, MerchantDefaultLearned, RuleApplied } from './events.ts';
+import { isAutoTier } from './auto-projection.ts';
 import { CategorizationError } from './errors.ts';
 import {
   streamTransactions,
+  type AutoCategoryChangeInput,
   type CategorizableTransaction,
   type LedgerPort,
 } from './ledger-port.ts';
@@ -243,6 +245,7 @@ export async function categorizeTransactions(
     };
 
     const changed: string[] = [];
+    const autoChanges: AutoCategoryChangeInput[] = [];
     const bySource: Record<string, number> = {};
     let considered = 0;
     let skipped = 0;
@@ -272,10 +275,13 @@ export async function categorizeTransactions(
         continue;
       }
 
-      const wrote =
+      const written =
         options.dryRun === true
-          ? await wouldWrite(executor, transaction.id, decision, idByKey)
+          ? (await wouldWrite(executor, transaction.id, decision, idByKey))
+            ? 'dry'
+            : null
           : await writeAssignment(executor, transaction.id, decision, idByKey, context);
+      const wrote = written !== null;
 
       if (!wrote) {
         // WP 11.1: every tier abstained and nothing was ever assigned, so
@@ -284,11 +290,35 @@ export async function categorizeTransactions(
         // from what decided rather than re-decided. A preview writes nothing.
         if (options.dryRun !== true && decision.source === 'none') {
           if (await recordAbstention(executor, transaction.id, decision, context)) abstained += 1;
+          // WP 11.2b: tier 6 with nothing ever assigned leaves no placement behind. (An existing
+          // assignment is never demoted by an abstention, so its placement stands.)
+          if ((await currentAssignment(executor, transaction.id)) === null) {
+            autoChanges.push({ transactionId: transaction.id, placement: null });
+          }
         }
         skipped += 1;
         continue;
       }
       changed.push(transaction.id);
+      // WP 11.2b: the ledger's projection of tiers 3-5, written beside the assignment. A rule's
+      // win clears it: the rule has its own column, and the machine's older answer is history.
+      if (written !== 'dry') {
+        const categoryId = idByKey.get(decision.categoryKey);
+        if (isAutoTier(decision.source) && categoryId !== undefined) {
+          autoChanges.push({
+            transactionId: transaction.id,
+            placement: {
+              assignmentId: written.id,
+              categoryId,
+              tier: decision.source,
+              confidence: Number(confidenceText(decision.confidence)),
+              decidedAt: written.decidedAt,
+            },
+          });
+        } else if (decision.source === 'rule') {
+          autoChanges.push({ transactionId: transaction.id, placement: null });
+        }
+      }
       bySource[decision.source] = (bySource[decision.source] ?? 0) + 1;
 
       // The rule tier's write path (wp1.4 evidence §6): only a *winning* rule
@@ -310,6 +340,18 @@ export async function categorizeTransactions(
           });
         }
       }
+    }
+
+    // Before the event, in this transaction: budgeting and recurring recompute when it arrives and
+    // must find the placement already there (see `@ctx/ledger`'s auto-category.ts).
+    if (autoChanges.length > 0 && options.dryRun !== true) {
+      await port.writeAutoCategories({
+        userId: context.userId,
+        changes: autoChanges,
+        executor,
+        correlationId: context.correlationId,
+        causationId: context.causationId ?? null,
+      });
     }
 
     if (changed.length > 0 && options.dryRun !== true) {
@@ -398,19 +440,19 @@ async function writeAssignment(
   decision: Decision,
   idByKey: ReadonlyMap<string, string>,
   context: CategorizationContext,
-): Promise<boolean> {
+): Promise<{ readonly id: string; readonly decidedAt: Date } | null> {
   const categoryId = idByKey.get(decision.categoryKey);
-  if (categoryId === undefined) return false;
+  if (categoryId === undefined) return null;
 
   const current = await currentAssignment(executor, transactionId);
   if (current !== null) {
-    if (!shouldReplace(current.source, decision.source)) return false;
-    if (current.categoryId === categoryId && current.source === decision.source) return false;
+    if (!shouldReplace(current.source, decision.source)) return null;
+    if (current.categoryId === categoryId && current.source === decision.source) return null;
   } else if (decision.categoryKey === UNCATEGORISED_KEY) {
     // Recording "we don't know" as the very first thing we ever say about a
     // transaction buys a row and says nothing. The absence of an assignment
     // already means uncategorised, and the review queue reads both.
-    return false;
+    return null;
   }
 
   const now = context.clock.now();
@@ -422,19 +464,20 @@ async function writeAssignment(
     );
   }
 
+  const assignmentId = newId();
   await executor.execute(sql`
     INSERT INTO category_assignments
       (id, user_id, transaction_id, category_id, source, confidence, rule_id, evidence,
        decided_at, version, is_current)
     VALUES (
-      ${newId()}, ${context.userId}, ${transactionId}, ${categoryId}, ${decision.source},
+      ${assignmentId}, ${context.userId}, ${transactionId}, ${categoryId}, ${decision.source},
       ${confidenceText(decision.confidence)}::numeric, ${decision.ruleId},
       ${JSON.stringify({ chain: decision.chain, deferredActions: decision.deferredActions })}::jsonb,
       ${now.toISOString()}::timestamptz, ${(current?.version ?? 0) + 1}, TRUE
     )
   `);
   await clearAbstention(executor, context.userId, transactionId);
-  return true;
+  return { id: assignmentId, decidedAt: now };
 }
 
 /**

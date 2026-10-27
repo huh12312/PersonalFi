@@ -596,6 +596,18 @@ describeWithDb('runMigrations', () => {
       // 0056_snapshot_grant_scopes_v1_8 (WP 11.2): no table. Re-declares `snapshot_grants_scope_check`
       //   with advisor contract 1.8.0's one added scope (`transactions.residue` -- categorize.suggest's
       //   input). Same pairing rule as 0054; parity asserted by apps/api's registration test.
+      // 0057_insight_explanations (WP 11.3): one new @ctx/insights table, insight_explanations ("Explain
+      //   this": one model explanation or its refusal class per (user_id, entity_kind insight | health_pillar,
+      //   entity_id, evidence_digest) -- insight_explanations_text_or_refusal keeps exactly one set --,
+      //   llm_provider, llm_model, run_id). A new digest is a new row; nothing deleted on dismissal.
+      //   Expand-only; references only users. Not exported (registry.ts exempts it).
+      // 0058_transaction_auto_category (WP 11.2b): no new table. transactions gains six nullable columns, the
+      //   ledger's projection of the automatic categorisation tiers (auto_category_id, auto_tier -- merchant_default |
+      //   provider | classifier, transactions_auto_tier_check --, auto_confidence NUMERIC(5,4), auto_decided_at,
+      //   auto_assignment_id, auto_superseded_at; transactions_auto_whole keeps the first five set together) and
+      //   transactions_auto_review_idx (partial: the Inbox's review rows); users gains inbox_show_auto_review
+      //   BOOLEAN NOT NULL DEFAULT TRUE. Expand-only, no backfill (a job fills it). DERIVED: registry.ts omits the
+      //   six columns from the export (DERIVED_COLUMNS) and the import re-derives them from category_assignments.
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -654,6 +666,7 @@ describeWithDb('runMigrations', () => {
         'insight_actions',
         'insight_dismissals',
         'insight_evidence',
+        'insight_explanations',
         'insight_feedback',
         'insight_outcomes',
         'insights',
