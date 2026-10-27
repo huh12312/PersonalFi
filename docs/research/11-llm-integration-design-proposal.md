@@ -102,7 +102,7 @@ Three rules make the right-hand column safe, and they are the same three the nar
 
 | # | Package | Depends on | Size |
 |---|---|---|---|
-| 11.1 | **Deterministic classifier improvements + rule-suggestion advisor** (no model): MCC family, PFC and account-kind features; "make this a rule?" from ≥ 3 confirmations; gold-set replay harness that every later package reuses | — | S |
+| 11.1 | **Deterministic classifier improvements + rule-suggestion advisor** (no model): MCC family, PFC and account-kind features; "make this a rule?" from ≥ 3 confirmations; gold-set replay harness that every later package reuses. **Built:** [WP 11.1 evidence](../evidence/phase-11/wp11.1-classifier-and-gold-set.md) | — | S |
 | 11.2 | **Category suggestions for the residue** (`categorize.suggest`): manifest, local-model adapter path, batch + cache, Inbox chip, confirm → tiers 3/5, gold-set precision gate, red-team probes, self-test check | 11.1 | M |
 | 11.3 | **Explain this** (`insight.explain`): grounded explanations on insights and health pillars, cached per evidence digest | — | S |
 | 11.4 | **Brief-level narration** (G5-15) and the recap narration over V8 blocks | — | S |

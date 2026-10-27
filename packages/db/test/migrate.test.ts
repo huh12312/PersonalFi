@@ -569,6 +569,22 @@ describeWithDb('runMigrations', () => {
       //   controls self-test's dated evidence: user_id, started_at, finished_at and overall set together --
       //   ops_control_checks_finished_has_overall --, provider, model, results JSONB array of per-check facts,
       //   evidence_version). Expand-only; references only users. Not exported (install evidence, per holder).
+      // 0053_category_abstentions (WP 11.1): one new @ctx/categorization table, category_abstentions (the
+      //   stored decide() chain for a transaction every tier abstained on and nothing was ever assigned to:
+      //   user_id, transaction_id -- unique per (user_id, transaction_id), no FK into @ctx/ledger (D8) --,
+      //   evidence JSONB with category_abstentions_evidence_has_chain, decided_at). Written by
+      //   categorizeTransactions only when the chain changes, deleted when an assignment is written; read
+      //   by GET /transactions/explanations for the Inbox's "why". Expand-only; references only users.
+      //   Exported after category_assignments.
+      // 0054_snapshot_grant_scopes_v1_7 (WP 11.1): no table. Re-declares
+      //   `snapshot_grants_scope_check` with advisor contract 1.7.0's one added
+      //   scope (`categorization.rule_candidates` -- the (merchant, category) pairs
+      //   the holder keeps filing by hand, which builtin.spending.rule_suggestion
+      //   turns into "make this a rule?"); 1.5.0 and 1.6.0 were envelope changes and
+      //   needed no widening. Ships in the same change as the contract bump; parity
+      //   with `ADVISOR_SCOPES` is asserted by apps/api's registration test, which
+      //   reads the latest CHECK across migrations -- the 0019 lesson mechanised, same
+      //   as 0024's and 0029's. Expand-only; references only 0012/0019-era objects.
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -599,6 +615,7 @@ describeWithDb('runMigrations', () => {
         'budgets',
         'cash_earmarks',
         'categories',
+        'category_abstentions',
         'category_assignments',
         'classifier_examples',
         'classifier_versions',

@@ -33,11 +33,13 @@ import type { AdvisorRequest } from '../../src/contract/request.ts';
 import { SnapshotBuilder } from '../../src/snapshot/builder.ts';
 import {
   inMemoryBudgetPort,
+  inMemoryCategorizationPort,
   inMemoryInvestmentsPort,
   inMemoryLedgerPort,
   inMemoryMarketDataPort,
   inMemoryPlanningPort,
   inMemoryRecurringPort,
+  type CategorizationPort,
   type FakeLedgerData,
   type InsightsGoal,
   type InsightsPlanProjection,
@@ -749,6 +751,74 @@ const CONTROL_PLANNING: PlanningPort = inMemoryPlanningPort({
 });
 
 // ---------------------------------------------------------------------------
+// WP 11.1 — `categorization.rule_candidates`
+// ---------------------------------------------------------------------------
+
+/**
+ * The merchants `drift`'s holder keeps filing by hand. One pair qualifies
+ * (the pet store, four times, no rule, not locked); every other pair is a
+ * reason the advisor must stay quiet — two confirmations, a rule already
+ * filing it, a locked category, and a merchant filed two ways. `tight` and
+ * `control` bind no port, so their snapshots carry no key at all.
+ */
+const DRIFT_CATEGORIZATION: CategorizationPort = inMemoryCategorizationPort([
+  {
+    merchantId: 'merchant-pet-store',
+    categoryId: 'cat-pets',
+    categorySlug: 'shopping.pets',
+    confirmations: 4,
+    transactionIds: ['txn-pets-4', 'txn-pets-3', 'txn-pets-2', 'txn-pets-1'],
+    coveredByRule: false,
+    lockedDefault: false,
+  },
+  {
+    merchantId: 'merchant-gym',
+    categoryId: 'cat-fitness',
+    categorySlug: 'health.fitness',
+    confirmations: 5,
+    transactionIds: ['txn-gym-5', 'txn-gym-4', 'txn-gym-3', 'txn-gym-2', 'txn-gym-1'],
+    coveredByRule: true,
+    lockedDefault: false,
+  },
+  {
+    merchantId: 'merchant-grocer',
+    categoryId: 'cat-groceries',
+    categorySlug: 'food.groceries',
+    confirmations: 3,
+    transactionIds: ['txn-grocer-3', 'txn-grocer-2', 'txn-grocer-1'],
+    coveredByRule: false,
+    lockedDefault: true,
+  },
+  {
+    merchantId: 'merchant-bigbox',
+    categoryId: 'cat-groceries',
+    categorySlug: 'food.groceries',
+    confirmations: 3,
+    transactionIds: ['txn-bigbox-6', 'txn-bigbox-4', 'txn-bigbox-2'],
+    coveredByRule: false,
+    lockedDefault: false,
+  },
+  {
+    merchantId: 'merchant-bigbox',
+    categoryId: 'cat-household',
+    categorySlug: 'shopping.household',
+    confirmations: 3,
+    transactionIds: ['txn-bigbox-5', 'txn-bigbox-3', 'txn-bigbox-1'],
+    coveredByRule: false,
+    lockedDefault: false,
+  },
+  {
+    merchantId: 'merchant-cafe',
+    categoryId: 'cat-coffee',
+    categorySlug: 'food.coffee',
+    confirmations: 2,
+    transactionIds: ['txn-cafe-2', 'txn-cafe-1'],
+    coveredByRule: false,
+    lockedDefault: false,
+  },
+]);
+
+// ---------------------------------------------------------------------------
 // Building
 // ---------------------------------------------------------------------------
 
@@ -767,6 +837,7 @@ function portsFor(seedCase: SeedCase): SnapshotPorts {
         investments: inMemoryInvestmentsPort({}),
         marketData: inMemoryMarketDataPort(null),
         planning: DRIFT_PLANNING,
+        categorization: DRIFT_CATEGORIZATION,
       };
     case 'tight':
       return {

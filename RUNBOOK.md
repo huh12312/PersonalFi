@@ -1833,6 +1833,40 @@ runs the api's half in a one-shot container from the api service's definition (i
 like `just bootstrap-user`) and hands the model checks to the running worker through the job
 queue. It prints the table and exits 0 (pass), 2 (partial) or 1 (fail).
 
+## Categorisation: measuring the tiers (`just categorization-eval`)
+
+WP 11.1. Replays every transaction you filed by hand (the categories you picked, plus any confirmed
+assignments) through the six categorisation tiers as if the engine had never been told the answer,
+and prints how often each tier was right:
+
+```bash
+just categorization-eval holder="Chris"             # two text tables
+just categorization-eval holder="Chris" json=true   # one JSON document, schema categorization-eval/1
+```
+
+- **Two holdouts.** `transaction` leaves one transaction out at a time (the merchant is still known
+  from its others: how good the engine is on merchants it has seen). `merchant` leaves a whole
+  merchant out (the residue's case, and the figure WP 11.2's model suggestions must beat at
+  ≥ 85 % precision before they can be switched on).
+- **Waterfall and isolated.** `waterfall` is the engine as it runs (first tier to speak wins);
+  `isolated` asks each tier alone on every row, so the classifier can be measured even where the
+  provider always speaks first. Precision is right ÷ decided; recall is right ÷ all; abstain is
+  declined ÷ asked. The confusion list is the ten most frequent wrong answers, as category keys.
+- **It never writes.** Every connection it opens is `default_transaction_read_only = on`; a write
+  anywhere on its path is refused by Postgres. It calls no model and prints no payee, amount or id.
+- **Where it runs.** With the stack up, in a one-shot container from the api service's definition
+  (the database is not reachable from the host); otherwise against the local dev database, which
+  needs a readable `SECRETS_DIR` with a `master_key` as `just dev` does.
+- **Reading it.** Low `classifier` precision in the `merchant` table with a low abstain rate would
+  mean the classifier is guessing; since WP 11.1 a prediction that no word of the payee backs is
+  capped at a coin flip and abstains under the default 60 % floor. `examples: 0` means nothing has
+  been filed by hand yet.
+
+The Inbox shows the same working per row: the one-line "why" under an uncategorised transaction
+is read from what the tiers recorded when they decided (`GET /transactions/explanations`), never
+recomputed. A row categorised before v0.9.16 says "No categorisation pass has recorded its working
+for this yet" until its next sync.
+
 ## Cryptography inventory
 
 What is encrypted or hashed, with what, where the key lives, and how it rotates. The primitives

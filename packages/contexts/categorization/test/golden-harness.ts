@@ -49,12 +49,19 @@ import type { CategorizableTransaction } from '../src/index.ts';
 import {
   COLD_MODEL,
   cleanDescriptor,
+  classifierFeaturesOf,
   decide,
-  featuresOf,
+  decisionInputOf,
   fingerprint,
   train,
 } from '../src/index.ts';
-import type { ClassifierModel, Decision, MerchantDefault, Rule } from '../src/index.ts';
+import type {
+  ClassifierModel,
+  Decision,
+  GoldExample,
+  MerchantDefault,
+  Rule,
+} from '../src/index.ts';
 import { UNCATEGORISED_KEY, isAssignableKey } from '../src/taxonomy.ts';
 
 /**
@@ -161,6 +168,53 @@ export const SYNTHETIC_PFC: ReadonlyMap<string, string> = new Map([
   ['Acme Corp Payroll', 'INCOME_SALARY'],
 ]);
 
+/**
+ * The MCC an acquirer would plausibly have registered each merchant under
+ * (WP 11.1).
+ *
+ * The same caveat as `SYNTHETIC_PFC`, and then some: the seed carries no MCC at
+ * all, and Plaid does not send one, so these codes exist only to exercise the
+ * classifier's `m:` / `mf:` features on the gold-set replay. Like the PFC codes
+ * they are deliberately **not** one-to-one with the truth — Costco registers as
+ * a wholesale club, Amazon as a large digital-goods merchant, AT&T as a telecom
+ * service, State Farm as generic insurance, Chase Mortgage as a financial
+ * institution — so the MCC family is a hint the classifier has to weigh, never
+ * the answer. Payroll has no MCC: an employer is not a card acceptor.
+ */
+export const SYNTHETIC_MCC: ReadonlyMap<string, string> = new Map([
+  ['Blue Bottle Coffee', '5814'],
+  ['The French Laundry', '5812'],
+  ["Trader Joe's", '5411'],
+  ['Whole Foods Market', '5411'],
+  ['Costco Wholesale', '5300'],
+  ['Safeway', '5411'],
+  ['Amazon', '5818'],
+  ['Target', '5310'],
+  ['Shell Oil', '5541'],
+  ['Chevron', '5542'],
+  ['Uber', '4121'],
+  ['Lyft', '4121'],
+  ['Netflix', '5815'],
+  ['Spotify', '5815'],
+  ['iCloud', '5818'],
+  ['Adobe Creative Cloud', '5817'],
+  ['Planet Fitness', '7997'],
+  ['Equinox', '7997'],
+  ['Kaiser Permanente', '8011'],
+  ['CVS Pharmacy', '5912'],
+  ['PG&E', '4900'],
+  ['Comcast Xfinity', '4899'],
+  ['AT&T Wireless', '4814'],
+  ['State Farm Insurance', '6300'],
+  ['Chase Mortgage', '6012'],
+  ['AMC Theatres', '7832'],
+  ["Dave's Hot Chicken", '5814'],
+  ['Philz Coffee', '5814'],
+  ['REI', '5941'],
+  ['Delta Air Lines', '3058'],
+  ['Marriott Hotels', '3509'],
+]);
+
 export interface LabelledTransaction extends CategorizableTransaction {
   readonly expectedKey: string;
   readonly merchantName: string;
@@ -180,6 +234,8 @@ export interface BuildOptions {
   readonly trainFraction?: number;
   /** Attach a synthetic `provider_category` to every row. */
   readonly withProviderCategory?: boolean;
+  /** Attach a synthetic MCC to every row that has one (WP 11.1). */
+  readonly withMcc?: boolean;
 }
 
 export function buildGoldenDataset(options: BuildOptions = {}): GoldenDataset {
@@ -231,7 +287,7 @@ export function buildGoldenDataset(options: BuildOptions = {}): GoldenDataset {
         options.withProviderCategory === true && pfc !== undefined
           ? { primary: primaryOf(pfc), detailed: pfc, confidence_level: 'HIGH' }
           : null,
-      mcc: null,
+      mcc: options.withMcc === true ? (SYNTHETIC_MCC.get(merchant.canonicalName) ?? null) : null,
       isTransfer: false,
       userCategoryId: null,
       expectedKey,
@@ -337,12 +393,14 @@ export function evaluate(dataset: GoldenDataset, config: EvaluationConfig): Eval
   const classifier: ClassifierModel =
     config.useClassifier === true
       ? train(
+          // WP 11.1: trained on exactly the features `decide` will score —
+          // `classifierFeaturesOf` over the same input the test rows get, the
+          // provider's category included only when this configuration lets
+          // the engine see it.
           dataset.train.map((entry) => ({
-            features: featuresOf({
-              cleanedPayee: cleanDescriptor(entry.rawDescriptor).cleaned,
-              amountMinor: entry.amountMinor,
-              accountType: entry.accountType,
-              mcc: entry.mcc,
+            features: classifierFeaturesOf({
+              ...decisionInputOf(entry),
+              providerCategory: config.useProvider === true ? entry.providerCategory : null,
             }),
             categoryKey: entry.expectedKey,
           })),
@@ -578,4 +636,19 @@ export function evaluateColdMerchants(
       .sort((a, b) => b.count - a.count)
       .slice(0, 8),
   };
+}
+
+/**
+ * The whole labelled set as a gold set for `replayGoldSet` (WP 11.1).
+ *
+ * Every labelled row stands in for a confirmation — train and test together,
+ * because the replay does its own holding out. `decisionInputOf` is the same
+ * mapping the service uses, so the replay sees what the engine would.
+ */
+export function goldExamplesOf(dataset: GoldenDataset): readonly GoldExample[] {
+  return [...dataset.train, ...dataset.test].map((entry) => ({
+    input: decisionInputOf(entry),
+    expectedKey: entry.expectedKey,
+    merchantKey: entry.merchantId,
+  }));
 }

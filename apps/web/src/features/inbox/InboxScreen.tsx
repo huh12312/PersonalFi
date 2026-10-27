@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftRight, CheckCircle2, X } from 'lucide-react';
-import { useEffect, useReducer, useRef } from 'react';
+import { useEffect, useMemo, useReducer, useRef } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import {
   pairTransferMutation,
   rejectTransferMutation,
 } from '../../api/generated/@tanstack/react-query.gen.ts';
-import type { Transaction } from '../../api/generated/types.gen.ts';
+import type { CategoryExplanation, Transaction } from '../../api/generated/types.gen.ts';
 import { EmptyState } from '../../components/patterns/EmptyState.tsx';
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { Button } from '../../components/ui/button.tsx';
@@ -23,6 +23,8 @@ import {
   useTransactionOverlayMutation,
 } from '../transactions/useTransactionOverlay.ts';
 import { EMPTY_INBOX_STATE, inboxReducer } from './inbox-reducer.ts';
+import { RuleSuggestionsSection } from './RuleSuggestions.tsx';
+import { useInboxExplanations } from './useInboxExplanations.ts';
 import { useInboxQueue } from './useInboxQueue.ts';
 
 /**
@@ -47,12 +49,27 @@ import { useInboxQueue } from './useInboxQueue.ts';
  * accepting or rejecting a transfer — removes it and moves focus to its
  * neighbour (`inbox-reducer.ts#resolve`), so a whole queue clears without the
  * keyboard ever leaving the list.
+ *
+ * WP 11.1: each uncategorised row carries the server's one-line "why" (`GET /transactions/explanations`, one batch
+ * for the rows on screen, `useInboxExplanations.ts`) — rendered verbatim as a caption, never composed here — and a
+ * "Rule suggestions" section lists the pending `spending.rule_suggestion` insights (`RuleSuggestions.tsx`): Create
+ * rule opens the existing rule dialog pre-filled with the suggested category, Not now dismisses with a reason.
  */
 export function InboxScreen() {
   const [state, dispatch] = useReducer(inboxReducer, EMPTY_INBOX_STATE);
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
 
   const { items, isLoading } = useInboxQueue();
+  // Asked once the whole queue has loaded: until the transfer pool arrives, a suggested transfer's legs are
+  // still in the uncategorised list, and a batch asked for then would be a second, wider request.
+  const uncategorizedIds = useMemo(
+    () =>
+      isLoading
+        ? []
+        : items.flatMap((item) => (item.kind === 'uncategorized' ? [item.transaction.id] : [])),
+    [items, isLoading],
+  );
+  const explanations = useInboxExplanations(uncategorizedIds);
 
   useEffect(() => {
     dispatch({ type: 'set-items', items });
@@ -74,6 +91,9 @@ export function InboxScreen() {
     const focusIsInsideAnyRow =
       active !== null && [...rowRefs.current.values()].some((row) => row.contains(active));
     if (focusIsInsideAnyRow) return;
+    // WP 11.1: nor when the holder is working a rule suggestion (or a dialog it opened) — a queue refetch
+    // moving the focused row must not pull focus out of that section.
+    if (active?.closest('[data-inbox-section="rule-suggestions"], [role="dialog"]')) return;
     node.focus();
   }, [state.focusedId]);
 
@@ -97,11 +117,14 @@ export function InboxScreen() {
 
   if (state.items.length === 0) {
     return (
-      <EmptyState
-        icon={CheckCircle2}
-        headline="You're all caught up"
-        description="No uncategorized transactions or transfer suggestions need your attention."
-      />
+      <div className="flex flex-col gap-4">
+        <EmptyState
+          icon={CheckCircle2}
+          headline="You're all caught up"
+          description="No uncategorized transactions or transfer suggestions need your attention."
+        />
+        <RuleSuggestionsSection />
+      </div>
     );
   }
 
@@ -133,6 +156,7 @@ export function InboxScreen() {
             {item.kind === 'uncategorized' ? (
               <UncategorizedRow
                 transaction={item.transaction}
+                explanation={explanations.get(item.transaction.id)}
                 onResolved={() => resolve(item.id)}
               />
             ) : (
@@ -145,6 +169,8 @@ export function InboxScreen() {
           </li>
         ))}
       </ul>
+
+      <RuleSuggestionsSection />
 
       <section aria-labelledby="inbox-low-confidence-heading" className="mt-2">
         <h2 id="inbox-low-confidence-heading" className="text-small font-semibold text-text-muted">
@@ -160,10 +186,12 @@ export function InboxScreen() {
 
 interface UncategorizedRowProps {
   transaction: Transaction;
+  /** WP 11.1: the server's explanation for this row; absent while loading, on error, or if it sent none. */
+  explanation: CategoryExplanation | undefined;
   onResolved: () => void;
 }
 
-function UncategorizedRow({ transaction, onResolved }: UncategorizedRowProps) {
+function UncategorizedRow({ transaction, explanation, onResolved }: UncategorizedRowProps) {
   const overlay = useTransactionOverlayMutation();
   // WP 10.14: the row's current category as its icon (uncategorised: ❔), beside the picker that changes it.
   const { byId } = useCategories();
@@ -179,7 +207,7 @@ function UncategorizedRow({ transaction, onResolved }: UncategorizedRowProps) {
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-3">
+      <div className="flex min-w-0 flex-1 basis-60 items-center gap-3">
         <CategoryIcon
           category={
             current ?? { id: null, key: 'uncategorised', label: 'Uncategorized', isSystem: true }
@@ -193,6 +221,18 @@ function UncategorizedRow({ transaction, onResolved }: UncategorizedRowProps) {
           <p className="text-small text-text-muted">
             {formatDateOnly(transaction.date)} · {current?.label ?? 'Uncategorized'}
           </p>
+          {explanation !== undefined && (
+            // The server's line, verbatim (WP 11.1): read from the decision working stored when the
+            // decision was made. Never rebuilt from `explanation.tiers` on this side.
+            <p
+              className="mt-0.5 text-caption text-text-muted [overflow-wrap:anywhere]"
+              data-testid="inbox-why"
+              data-status={explanation.status}
+            >
+              <span className="sr-only">Why: </span>
+              {explanation.line}
+            </p>
+          )}
         </div>
       </div>
       <Money value={transaction.amount} className="shrink-0" />

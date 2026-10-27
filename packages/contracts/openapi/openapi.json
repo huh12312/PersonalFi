@@ -2574,7 +2574,7 @@
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
               },
               "granted_scopes": {
-                "maxItems": 18,
+                "maxItems": 19,
                 "type": "array",
                 "items": {
                   "type": "string",
@@ -2596,7 +2596,8 @@
                     "market.rates",
                     "plan.projection",
                     "transactions.anomalies",
-                    "fees.summary"
+                    "fees.summary",
+                    "categorization.rule_candidates"
                   ]
                 }
               },
@@ -5594,6 +5595,82 @@
                       "expense_ratio_drag"
                     ],
                     "additionalProperties": false
+                  },
+                  "rule_candidates": {
+                    "type": "object",
+                    "properties": {
+                      "merchants": {
+                        "maxItems": 64,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "merchant_ref": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[A-Za-z0-9_:.-]+$"
+                            },
+                            "category_ref": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[A-Za-z0-9_:.-]+$"
+                            },
+                            "category_slug": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 96
+                            },
+                            "confirmations": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "covered_by_rule": {
+                              "type": "boolean"
+                            },
+                            "locked_default": {
+                              "type": "boolean"
+                            },
+                            "transactions": {
+                              "minItems": 1,
+                              "maxItems": 8,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "transaction_ref": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                                  }
+                                },
+                                "required": [
+                                  "transaction_ref"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "merchant_ref",
+                            "category_ref",
+                            "category_slug",
+                            "confirmations",
+                            "covered_by_rule",
+                            "locked_default",
+                            "transactions"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "merchants"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false,
@@ -8488,7 +8565,8 @@
               "market.rates",
               "plan.projection",
               "transactions.anomalies",
-              "fees.summary"
+              "fees.summary",
+              "categorization.rule_candidates"
             ]
           },
           "sensitivity": {
@@ -8565,7 +8643,8 @@
               "market.rates",
               "plan.projection",
               "transactions.anomalies",
-              "fees.summary"
+              "fees.summary",
+              "categorization.rule_candidates"
             ]
           },
           "event": {
@@ -15665,6 +15744,94 @@
         ],
         "description": "A transaction as the reader resolves it: provider fact plus user overlay. The provider’s own numbers are under `provenance` in the detail endpoint."
       },
+      "CategoryExplanationInput": {
+        "type": "object",
+        "properties": {
+          "transactionId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "assigned",
+              "abstained",
+              "not_recorded"
+            ]
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "rule",
+                  "merchant_default",
+                  "provider",
+                  "classifier",
+                  "none"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "categoryKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "line": {
+            "type": "string",
+            "description": "The one-line \"why\", composed from the stored working."
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "won": {
+                  "type": "boolean"
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source",
+                "won",
+                "detail"
+              ]
+            }
+          }
+        },
+        "required": [
+          "transactionId",
+          "status",
+          "source",
+          "categoryKey",
+          "confidence",
+          "decidedAt",
+          "line",
+          "tiers"
+        ]
+      },
       "TransactionProvenanceInput": {
         "type": "object",
         "properties": {
@@ -19144,7 +19311,7 @@
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
               },
               "granted_scopes": {
-                "maxItems": 18,
+                "maxItems": 19,
                 "type": "array",
                 "items": {
                   "type": "string",
@@ -19166,7 +19333,8 @@
                     "market.rates",
                     "plan.projection",
                     "transactions.anomalies",
-                    "fees.summary"
+                    "fees.summary",
+                    "categorization.rule_candidates"
                   ]
                 }
               },
@@ -22164,6 +22332,82 @@
                       "expense_ratio_drag"
                     ],
                     "additionalProperties": false
+                  },
+                  "rule_candidates": {
+                    "type": "object",
+                    "properties": {
+                      "merchants": {
+                        "maxItems": 64,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "merchant_ref": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[A-Za-z0-9_:.-]+$"
+                            },
+                            "category_ref": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[A-Za-z0-9_:.-]+$"
+                            },
+                            "category_slug": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 96
+                            },
+                            "confirmations": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "covered_by_rule": {
+                              "type": "boolean"
+                            },
+                            "locked_default": {
+                              "type": "boolean"
+                            },
+                            "transactions": {
+                              "minItems": 1,
+                              "maxItems": 8,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "transaction_ref": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                                  }
+                                },
+                                "required": [
+                                  "transaction_ref"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "merchant_ref",
+                            "category_ref",
+                            "category_slug",
+                            "confirmations",
+                            "covered_by_rule",
+                            "locked_default",
+                            "transactions"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "merchants"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false,
@@ -25099,7 +25343,8 @@
               "market.rates",
               "plan.projection",
               "transactions.anomalies",
-              "fees.summary"
+              "fees.summary",
+              "categorization.rule_candidates"
             ]
           },
           "sensitivity": {
@@ -25177,7 +25422,8 @@
               "market.rates",
               "plan.projection",
               "transactions.anomalies",
-              "fees.summary"
+              "fees.summary",
+              "categorization.rule_candidates"
             ]
           },
           "event": {
@@ -32456,6 +32702,96 @@
         "additionalProperties": false,
         "description": "A transaction as the reader resolves it: provider fact plus user overlay. The provider’s own numbers are under `provenance` in the detail endpoint."
       },
+      "CategoryExplanation": {
+        "type": "object",
+        "properties": {
+          "transactionId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "assigned",
+              "abstained",
+              "not_recorded"
+            ]
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "rule",
+                  "merchant_default",
+                  "provider",
+                  "classifier",
+                  "none"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "categoryKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "line": {
+            "type": "string",
+            "description": "The one-line \"why\", composed from the stored working."
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "won": {
+                  "type": "boolean"
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source",
+                "won",
+                "detail"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "transactionId",
+          "status",
+          "source",
+          "categoryKey",
+          "confidence",
+          "decidedAt",
+          "line",
+          "tiers"
+        ],
+        "additionalProperties": false
+      },
       "TransactionProvenance": {
         "type": "object",
         "properties": {
@@ -35793,6 +36129,90 @@
                     "items",
                     "nextCursor",
                     "summary"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transactions/explanations": {
+      "get": {
+        "operationId": "listCategoryExplanations",
+        "summary": "Why each of these transactions is (or is not) categorised",
+        "tags": [
+          "transactions"
+        ],
+        "description": "For up to 200 transaction ids, the stored working of the categorisation tiers as one line plus the tier-by-tier detail. `status` is `assigned` when a tier decided, `abstained` when every tier declined (the line names what each tried, with its figures), and `not_recorded` when no categorisation pass has run on it since this was introduced. Read from what was stored when it was decided; never recomputed.",
+        "parameters": [
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "ids",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CategoryExplanation"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
                   ],
                   "additionalProperties": false
                 }
@@ -53117,7 +53537,8 @@
                         "market.rates",
                         "plan.projection",
                         "transactions.anomalies",
-                        "fees.summary"
+                        "fees.summary",
+                        "categorization.rule_candidates"
                       ]
                     }
                   },
@@ -53175,7 +53596,8 @@
                           "market.rates",
                           "plan.projection",
                           "transactions.anomalies",
-                          "fees.summary"
+                          "fees.summary",
+                          "categorization.rule_candidates"
                         ]
                       }
                     },
@@ -53201,7 +53623,8 @@
                           "market.rates",
                           "plan.projection",
                           "transactions.anomalies",
-                          "fees.summary"
+                          "fees.summary",
+                          "categorization.rule_candidates"
                         ]
                       }
                     },
@@ -53227,7 +53650,8 @@
                           "market.rates",
                           "plan.projection",
                           "transactions.anomalies",
-                          "fees.summary"
+                          "fees.summary",
+                          "categorization.rule_candidates"
                         ]
                       }
                     }

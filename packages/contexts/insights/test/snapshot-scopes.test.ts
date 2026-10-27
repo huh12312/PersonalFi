@@ -23,6 +23,7 @@ import { SnapshotBuilder, bucketOf, roundToMultiple } from '../src/snapshot/buil
 import {
   PERCENT_PER_ANNUM,
   inMemoryBudgetPort,
+  inMemoryCategorizationPort,
   inMemoryInvestmentsPort,
   inMemoryLedgerPort,
   inMemoryMarketDataPort,
@@ -351,6 +352,19 @@ function fullPorts(): SnapshotPorts {
       liabilities: LIABILITIES,
     }),
     marketData: inMemoryMarketDataPort(RATES),
+    // WP 11.1, for the same reason: `categorization.rule_candidates` is
+    // filled here, so the whole-catalogue schema check below covers it.
+    categorization: inMemoryCategorizationPort([
+      {
+        merchantId: 'merchant-1',
+        categoryId: 'cat-pets',
+        categorySlug: 'shopping.pets',
+        confirmations: 3,
+        transactionIds: ['txn-3', 'txn-2', 'txn-1'],
+        coveredByRule: false,
+        lockedDefault: false,
+      },
+    ]),
   };
 }
 
@@ -394,6 +408,20 @@ describe('snapshot scopes', () => {
     expect(external.grantedScopes).not.toContain('transactions.raw');
     expect(scopesPermittedForKind('external')).not.toContain('transactions.raw');
     expect(scopesPermittedForKind('external')).not.toContain('institutions.names');
+  });
+
+  it('categorization.rule_candidates: no key ungranted, none for an external advisor', async () => {
+    // WP 11.1. The positive half first: these ports can fill the block.
+    const builtin = await build('builtin', ['categorization.rule_candidates', 'cash.summary']);
+    expect(Object.keys(builtin.snapshot)).toContain('rule_candidates');
+
+    const ungranted = await build('builtin', ['cash.summary']);
+    expect('rule_candidates' in ungranted.snapshot).toBe(false);
+
+    const external = await build('external', ['categorization.rule_candidates', 'cash.summary']);
+    expect('rule_candidates' in external.snapshot).toBe(false);
+    expect(external.grantedScopes).not.toContain('categorization.rule_candidates');
+    expect(scopesPermittedForKind('external')).not.toContain('categorization.rule_candidates');
   });
 
   it('a granted scope with no source behind it yields no key either', async () => {
@@ -447,6 +475,7 @@ describe('snapshot scopes', () => {
       'builtin',
       SCOPE_CATALOGUE.map((definition) => definition.scope),
     );
+    expect(built.snapshot.rule_candidates?.merchants).toHaveLength(1);
     const parsed = AdvisorSnapshotSchema.safeParse(built.snapshot);
     expect(parsed.success, JSON.stringify(parsed.error?.issues ?? [])).toBe(true);
   });

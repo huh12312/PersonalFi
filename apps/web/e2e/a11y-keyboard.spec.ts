@@ -5,6 +5,11 @@ import type { Page } from '@playwright/test';
 
 import { installBudgetCategoryMocks } from './support/mock-budget.ts';
 import { installCategoryMocks } from './support/mock-categories.ts';
+import {
+  installRuleSuggestionMocks,
+  RULE_SUGGESTION_INSIGHT_ID,
+  SUGGESTED_CATEGORY_KEY,
+} from './support/mock-rule-suggestions.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { assertReadingOrder, Journey } from './support/keyboard.ts';
 import { installVirtualPasskey } from './support/virtual-passkey.ts';
@@ -963,4 +968,63 @@ test('category (WP 10.14): Tab to the month chart, select months with arrows, Ho
   await journey.expectFocus(/^Edit Groceries$/, 'focus returns to Edit when the editor closes');
   expect(mocks.patches).toHaveLength(1);
   expect(Object.keys(mocks.patches[0]!).sort()).toEqual(['emoji', 'hue']);
+});
+
+// ---------------------------------------------------------------------------
+// WP 11.1: a rule suggestion in the Inbox, by keyboard
+// ---------------------------------------------------------------------------
+
+test('inbox: Tab to a rule suggestion’s Create rule, keep the suggested category, save; focus lands in the queue', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await installSweepMocks(page);
+  const mocks = await installRuleSuggestionMocks(page);
+  await visit(page, '/inbox');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'inbox rule suggestion');
+  const suggestion = page.getByTestId('rule-suggestion');
+  await expect(suggestion.getByTestId('rule-suggestion-merchant')).toHaveText("Trader Joe's");
+
+  // Escape first: nothing is created, and focus goes back to the button that opened the dialog.
+  await journey.tabTo(/^Create rule$/, { max: 60 });
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Always categorize like this' });
+  await expect(dialog).toBeVisible();
+  await journey.settle();
+  await journey.check('the rule dialog, pre-filled');
+  await expect(dialog.getByRole('combobox', { name: 'Category' })).toHaveValue('Groceries');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await journey.expectFocus(/^Create rule$/, 'Escape returns focus to Create rule');
+  expect(mocks.ruleCreates).toEqual([]);
+
+  // Again, keeping the suggested category: Preview creates the rule, Just save the rule closes the dialog.
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeVisible();
+  await journey.settle();
+  // Tab passes the Category combobox (left on the suggested Groceries) on its way to Preview.
+  await journey.tabTo(/^Preview$/, { max: 8 });
+  await expect(dialog.getByRole('combobox', { name: 'Category' })).toHaveValue('Groceries');
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => mocks.ruleCreates.map((create) => create.body['categoryKey']))
+    .toEqual([SUGGESTED_CATEGORY_KEY]);
+  await expect
+    .poll(() => mocks.reviews)
+    .toEqual([{ insightId: RULE_SUGGESTION_INSIGHT_ID, body: { action: 'accept' } }]);
+  await journey.tabTo(/^Just save the rule$/, { max: 8 });
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId('rule-suggestion')).toHaveCount(0);
+
+  // The suggestion (and the button that opened the dialog) is gone: focus is on the review queue's current row.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.activeElement?.closest('ul[aria-label="Review inbox"]') !== null,
+      ),
+    )
+    .toBe(true);
+  await journey.check('after saving the rule, in the review queue');
 });

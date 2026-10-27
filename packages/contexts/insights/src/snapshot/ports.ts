@@ -666,6 +666,29 @@ export interface PlanningPort {
 }
 
 /**
+ * One (merchant, category) pair the holder has confirmed by hand, as
+ * `@ctx/categorization`'s `listRuleCandidates` reports it (WP 11.1).
+ *
+ * The port reads and decides nothing: every pair at or over the reader's own
+ * floor arrives here, and `builtin.spending.rule_suggestion` applies the
+ * threshold. `transactionIds` are newest first.
+ */
+export interface InsightsRuleCandidate {
+  readonly merchantId: string;
+  readonly categoryId: string;
+  readonly categorySlug: string;
+  readonly confirmations: number;
+  readonly transactionIds: readonly string[];
+  readonly coveredByRule: boolean;
+  readonly lockedDefault: boolean;
+}
+
+/** `@ctx/categorization`, read-only, as one answer. */
+export interface CategorizationPort {
+  listRuleCandidates(input: { readonly userId: string }): Promise<readonly InsightsRuleCandidate[]>;
+}
+
+/**
  * The five ports the builder always wants, plus the FX conversion it wants
  * only when an account's currency does not already match `baseCurrency`.
  *
@@ -691,6 +714,12 @@ export interface SnapshotPorts {
   readonly marketData: MarketDataPort;
   readonly fx?: FxPort;
   readonly planning?: PlanningPort;
+  /**
+   * WP 11.1. Optional for `planning`'s reason: every composition site would
+   * otherwise have to bind it in one change. Absent, `categorization.rule_candidates`
+   * emits **no key** — the same outcome as a holder who has confirmed nothing.
+   */
+  readonly categorization?: CategorizationPort;
 }
 
 // ---------------------------------------------------------------------------
@@ -842,6 +871,21 @@ export function inMemoryPlanningPort(data: {
     },
     projection() {
       return Promise.resolve(data.projection ?? null);
+    },
+  };
+}
+
+/**
+ * A `CategorizationPort` over fixed candidates, returned verbatim — the fake
+ * filters nothing, because the reader it stands in for filters nothing above
+ * its own floor either, and the threshold under test is the advisor's.
+ */
+export function inMemoryCategorizationPort(
+  candidates: readonly InsightsRuleCandidate[],
+): CategorizationPort {
+  return {
+    listRuleCandidates() {
+      return Promise.resolve(candidates);
     },
   };
 }

@@ -4,7 +4,7 @@
   "title": "PersonalFi AdvisorRequest v1",
   "description": "What crosses the boundary to an advisor: a minimised, read-only snapshot with one key per granted scope, the digest we stored, and the limits we enforce. One-way — there is no return channel, no token and no handle (08 §4.1).",
   "contractVersion": 1,
-  "artefactVersion": "1.6.0",
+  "artefactVersion": "1.7.0",
   "type": "object",
   "properties": {
     "contract_version": {
@@ -48,7 +48,7 @@
       "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
     },
     "granted_scopes": {
-      "maxItems": 18,
+      "maxItems": 19,
       "type": "array",
       "items": {
         "type": "string",
@@ -70,7 +70,8 @@
           "market.rates",
           "plan.projection",
           "transactions.anomalies",
-          "fees.summary"
+          "fees.summary",
+          "categorization.rule_candidates"
         ]
       }
     },
@@ -2691,6 +2692,78 @@
             "by_account",
             "expense_ratio_drag"
           ],
+          "additionalProperties": false
+        },
+        "rule_candidates": {
+          "type": "object",
+          "properties": {
+            "merchants": {
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "merchant_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                  },
+                  "category_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_:.-]+$"
+                  },
+                  "category_slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96
+                  },
+                  "confirmations": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "covered_by_rule": {
+                    "type": "boolean"
+                  },
+                  "locked_default": {
+                    "type": "boolean"
+                  },
+                  "transactions": {
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "transaction_ref": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[A-Za-z0-9_:.-]+$"
+                        }
+                      },
+                      "required": ["transaction_ref"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "merchant_ref",
+                  "category_ref",
+                  "category_slug",
+                  "confirmations",
+                  "covered_by_rule",
+                  "locked_default",
+                  "transactions"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["merchants"],
           "additionalProperties": false
         }
       },

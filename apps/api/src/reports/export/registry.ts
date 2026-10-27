@@ -149,6 +149,10 @@ export const TABLE_ORDER: readonly string[] = [
   'rules',
   'rule_runs',
   'category_assignments',
+  // WP 11.1 (0053): the stored working behind an abstention, the "why" the
+  // Inbox reads. Exported with the assignments it stands in for; references
+  // only users.
+  'category_abstentions',
   'classifier_examples',
   'classifier_versions',
   'merchant_profiles',

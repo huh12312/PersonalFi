@@ -27,11 +27,13 @@ export {
 } from './merchants.ts';
 export { ruleRuns, rules, type NewRuleRow, type RuleRow, type RuleRunRow } from './rules.ts';
 export {
+  categoryAbstentions,
   categoryAssignments,
   classifierExamples,
   classifierVersions,
   ASSIGNMENT_SOURCES,
   type AssignmentSourceValue,
+  type CategoryAbstentionRow,
   type CategoryAssignmentRow,
   type ClassifierExampleRow,
   type ClassifierVersionRow,

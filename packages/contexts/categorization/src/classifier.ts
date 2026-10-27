@@ -21,13 +21,29 @@
  *
  * ## Features
  *
- * Tokens from the *normalised* payee, plus three coarse contextual features:
+ * Tokens from the *normalised* payee, plus coarse contextual features:
  *
  *     t:chewy  t:com          — payee tokens
  *     b:3                     — amount magnitude bucket (powers of ~3)
+ *     d:out                   — direction (with `b:`, the sign-magnitude bucket)
  *     a:credit                — account type
- *     d:out                   — direction
- *     m:family.pets           — the MCC's category, when a code is present
+ *     m:family.pet_medical    — the MCC's category leaf, when a code is present
+ *     mf:family               — the MCC's *family*: the leaf's top level (WP 11.1)
+ *     p:food_and_drink        — the provider's PFC primary, when one was sent (WP 11.1)
+ *     dm:early | mid | late   — where in the month it fell: 1–10, 11–20, 21+ (WP 11.1)
+ *
+ * WP 11.1 added the last three, deterministically (11 §3.1: "accuracy at a few
+ * hundred examples is feature engineering"). `mf:` lets two vets with different
+ * leaf codes share evidence the leaf alone splits; `p:` lets the provider's
+ * coarse opinion count as evidence where the mapping does not place it (a
+ * primary newer than our table — the provider *tier* only speaks when the
+ * mapping does), and lets training learn from the provider
+ * codes on every confirmed row; `dm:` is the signal a rent, a paycheck or a card payment carries in
+ * its date. Each is named in `topFeatures`, so `explainAssignment` shows it by
+ * name when it moved the answer. The account's management or role overlay was
+ * considered and left out: `CategorizableTransaction` does not carry it, and
+ * widening `@ctx/ledger`'s port for a feature that only separates accounts the
+ * `a:` type already separates was not cheap.
  *
  * Amount is bucketed rather than used raw because naive Bayes wants categorical
  * features, and because the *scale* is what carries signal: a $4 charge and a
@@ -56,6 +72,7 @@
  * asserts that a cold model abstains on everything — the state it ships in.
  */
 
+import type { DateOnly } from '@core/kernel';
 import { lookupMcc } from './mcc-codes.ts';
 import { fingerprint } from './normalize/fingerprint.ts';
 
@@ -72,6 +89,18 @@ export interface ClassifierFeatureInput {
   readonly amountMinor: bigint;
   readonly accountType: string | null;
   readonly mcc?: string | null;
+  /** The provider's PFC primary (`FOOD_AND_DRINK`), as `readProviderCategory` reads it. */
+  readonly providerPrimary?: string | null;
+  /** The transaction's date, for the day-of-month bucket. */
+  readonly date?: DateOnly | null;
+}
+
+/** Day-of-month thirds. Calendar days, so a 28-day February loses nothing. */
+export function dayOfMonthBucket(date: DateOnly): 'early' | 'mid' | 'late' {
+  const day = Number(date.slice(8, 10));
+  if (day <= 10) return 'early';
+  if (day <= 20) return 'mid';
+  return 'late';
 }
 
 /**
@@ -129,7 +158,16 @@ export function featuresOf(input: ClassifierFeatureInput): readonly string[] {
     features.push(`a:${input.accountType}`);
   }
   const mcc = lookupMcc(input.mcc);
-  if (mcc !== undefined) features.push(`m:${mcc.categoryKey}`);
+  if (mcc !== undefined) {
+    features.push(`m:${mcc.categoryKey}`);
+    const family = mcc.categoryKey.split('.')[0];
+    if (family !== undefined && family !== '') features.push(`mf:${family}`);
+  }
+  const primary = input.providerPrimary?.trim().toLowerCase() ?? '';
+  if (/^[a-z0-9_]{1,64}$/u.test(primary)) features.push(`p:${primary}`);
+  if (input.date !== undefined && input.date !== null) {
+    features.push(`dm:${dayOfMonthBucket(input.date)}`);
+  }
 
   // Deduplicated: a descriptor that repeats a word should not count it twice,
   // and the fingerprint has already deduplicated the payee tokens anyway.
@@ -185,10 +223,34 @@ export type ClassifierOutcome =
       readonly confidence: number;
       readonly runnerUp: string | null;
       readonly margin: number;
+      /** A word of the payee's own had been seen with this category (WP 11.1). */
+      readonly payeeEvidence: boolean;
       /** The three features that moved the answer most. The explanation. */
       readonly topFeatures: readonly FeatureContribution[];
     }
-  | { readonly kind: 'abstained'; readonly reason: string; readonly categoryKey: string | null };
+  | {
+      readonly kind: 'abstained';
+      readonly reason: string;
+      readonly categoryKey: string | null;
+      /**
+       * Which gate stopped it, as a code a caller can switch on (WP 11.1). The
+       * Inbox's "why" line is composed from this and the figures beside it —
+       * never by parsing `reason`, which is prose and gets rewritten.
+       */
+      readonly code: AbstainCode;
+      /** The calibrated confidence it reached, when it got as far as computing one. */
+      readonly confidence?: number;
+      /** The floor it was held to, when `code` is `below_floor`. */
+      readonly floor?: number;
+      /** Confirmed examples for the leading category, when `code` is `under_supported`. */
+      readonly examples?: number;
+      /** Whether a payee word had been seen with the leader, when `code` is `below_floor`. */
+      readonly payeeEvidence?: boolean;
+    };
+
+/** The six ways the classifier declines, in the order its gates run. */
+export type AbstainCode =
+  'cold' | 'no_features' | 'single_category' | 'under_supported' | 'too_close' | 'below_floor';
 
 /**
  * Score every category and return the winner, or abstain.
@@ -207,10 +269,16 @@ export function predict(
       kind: 'abstained',
       reason: 'model is cold: no confirmed examples yet',
       categoryKey: null,
+      code: 'cold',
     };
   }
   if (features.length === 0) {
-    return { kind: 'abstained', reason: 'no usable features', categoryKey: null };
+    return {
+      kind: 'abstained',
+      reason: 'no usable features',
+      categoryKey: null,
+      code: 'no_features',
+    };
   }
 
   const categories = Object.keys(model.categoryCounts);
@@ -221,6 +289,7 @@ export function predict(
       kind: 'abstained',
       reason: 'fewer than two categories have confirmed examples',
       categoryKey: null,
+      code: 'single_category',
     };
   }
 
@@ -271,6 +340,8 @@ export function predict(
       kind: 'abstained',
       reason: `only ${winnerExamples} confirmed example(s) for ${winner}; needs ${MIN_EXAMPLES_PER_CATEGORY}`,
       categoryKey: winner,
+      code: 'under_supported',
+      examples: winnerExamples,
     };
   }
   if (margin < MIN_MARGIN) {
@@ -278,15 +349,26 @@ export function predict(
       kind: 'abstained',
       reason: `too close to call: ${winner} leads ${runnerUp?.[0] ?? '(nothing)'} by ${margin.toFixed(4)}`,
       categoryKey: winner,
+      code: 'too_close',
+      confidence: confidenceFromMargin(margin, true),
     };
   }
 
-  const confidence = confidenceFromMargin(margin);
+  // WP 11.1's calibration split: does anything in the payee's own name point
+  // at the winner? See `confidenceFromMargin`.
+  const payeeEvidence = features.some(
+    (feature) => feature.startsWith('t:') && (model.featureCounts[feature]?.[winner] ?? 0) > 0,
+  );
+  const confidence = confidenceFromMargin(margin, payeeEvidence);
   if (confidence < confidenceFloor) {
     return {
       kind: 'abstained',
       reason: `confidence ${confidence.toFixed(4)} is below the floor of ${confidenceFloor}`,
       categoryKey: winner,
+      code: 'below_floor',
+      confidence,
+      floor: confidenceFloor,
+      payeeEvidence,
     };
   }
 
@@ -315,12 +397,14 @@ export function predict(
     confidence,
     runnerUp: runnerUp?.[0] ?? null,
     margin,
+    payeeEvidence,
     topFeatures,
   };
 }
 
 /**
- * How sure the model is, as a function of the **margin** — not of a softmax.
+ * How sure the model is, as a function of the **margin** — not of a softmax —
+ * and of whether the payee's own words back the answer.
  *
  * A softmax over the category scores is the obvious thing and it is wrong here,
  * for a reason that is easy to miss and that the golden set made obvious: its
@@ -333,21 +417,59 @@ export function predict(
  * The margin has none of that. It is the gap between the winner and the
  * runner-up in mean log-odds per feature — "the winner is e^margin times more
  * likely, per piece of evidence" — and it is unchanged by the existence of
- * twenty other categories that both beat. A logistic maps it to 0–1:
+ * twenty other categories that both beat.
  *
- *     margin 0.00 -> 0.50   a coin flip; the two leaders are indistinguishable
- *     margin 0.19 -> 0.60   the default floor
- *     margin 0.50 -> 0.75
- *     margin 1.50 -> 0.96
+ * ## The calibration, re-derived in WP 11.1
+ *
+ * WP 11.1 widened the feature set (`mf:`, `p:`, `dm:`) and built the gold-set
+ * replay (`eval/replay.ts`), and the replay showed the old single curve
+ * (`logistic(2.2 × margin)`) was wrong in *both* directions once it could be
+ * measured on merchants the model had never been told about:
+ *
+ *   * **Payee-evidenced** predictions — at least one `t:` token of this payee
+ *     has been confirmed under the winning category — were right 98.8 % of the
+ *     time (4,045 predictions over the demo seed's four variants × two
+ *     holdouts), and right ≥ 85 % in every margin bin from 0.08 up. The old
+ *     curve called the 0.08–0.19 bin 55–60 % sure; it was 95 % right.
+ *   * **Context-only** predictions — no payee word ever seen with the winner,
+ *     so only the amount bucket, the account type, the direction, the MCC, the
+ *     provider primary and the day of month spoke — were right **7.4 %** of the
+ *     time (2,279 predictions) and no better than 11 % in any margin bin. The
+ *     old curve let 1,495 of them through the 0.6 floor at 8 % precision. That
+ *     is the classifier guessing, which 04 §5.2 forbids.
+ *
+ * So the curve is two segments:
+ *
+ *     payee-evidenced   logistic(PAYEE_MARGIN_SCALE × margin), capped at 0.99
+ *         margin 0.08 -> 0.64   the MIN_MARGIN gate; just over the default floor
+ *         margin 0.19 -> 0.79
+ *         margin 0.50 -> 0.97
+ *     context-only      the same, capped at CONTEXT_ONLY_CEILING (0.5)
+ *
+ * `PAYEE_MARGIN_SCALE` is the maximum-likelihood slope of a one-parameter
+ * logistic (anchored at 0.5 for a margin of 0, a tie being a coin flip) fitted
+ * to the payee-evidenced predictions: 7.10, rounded down to 7. The context-only
+ * ceiling is a policy, not a fit — the fit says ~0.07, which is a property of a
+ * seed whose 32 merchants mostly sit in categories of their own; 0.5 says what
+ * is true everywhere, that context alone is no better than a coin flip, and it
+ * keeps the default floor of 0.6 an abstention for every context-only answer.
+ * A holder who lowers the floor below 0.5 has asked for guesses and gets them.
+ *
+ * `classifier.test.ts` re-runs the fit on the demo seed and fails if the shipped
+ * slope drifts from it by more than 10 %, and asserts that above the floor the
+ * cold-merchant replay is right at least as often as the floor promises.
  *
  * Capped at 0.99: a model trained on a few hundred of one household's
  * transactions is never entitled to say "certain", and 1.0 is reserved for the
  * tiers that are instructions rather than estimates — a user's edit and a user's
  * rule.
  */
-const MARGIN_SCALE = 2.2;
+export const PAYEE_MARGIN_SCALE = 7;
+/** The most a prediction resting on context features alone may claim. */
+export const CONTEXT_ONLY_CEILING = 0.5;
 
-export function confidenceFromMargin(margin: number): number {
-  if (!Number.isFinite(margin)) return 0.99;
-  return Math.min(0.99, 1 / (1 + Math.exp(-MARGIN_SCALE * margin)));
+export function confidenceFromMargin(margin: number, payeeEvidence = true): number {
+  const ceiling = payeeEvidence ? 0.99 : CONTEXT_ONLY_CEILING;
+  if (!Number.isFinite(margin)) return ceiling;
+  return Math.min(ceiling, 1 / (1 + Math.exp(-PAYEE_MARGIN_SCALE * margin)));
 }

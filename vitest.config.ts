@@ -146,7 +146,7 @@ export default defineConfig({
         root: './packages/contexts/categorization',
         test: {
           name: 'categorization',
-          include: ['src/**/*.test.ts', 'test/golden.test.ts'],
+          include: ['src/**/*.test.ts', 'test/golden.test.ts', 'test/gold-set.test.ts'],
           environment: 'node',
         },
       },
@@ -155,7 +155,7 @@ export default defineConfig({
         test: {
           name: 'categorization-db',
           include: ['test/**/*.test.ts'],
-          exclude: ['test/golden.test.ts'],
+          exclude: ['test/golden.test.ts', 'test/gold-set.test.ts'],
           environment: 'node',
           fileParallelism: false,
           testTimeout: 120_000,

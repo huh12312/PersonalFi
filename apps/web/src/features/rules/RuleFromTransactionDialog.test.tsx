@@ -11,6 +11,7 @@ import {
   jsonResponse,
   stubFetchRoutes,
 } from '../../test-support/api-test-utils.ts';
+import { createdRuleResponse, previewRoute } from '../../test-support/insight-fixtures.ts';
 import { RuleFromTransactionDialog } from './RuleFromTransactionDialog.tsx';
 
 function renderDialog() {
@@ -166,5 +167,48 @@ describe('RuleFromTransactionDialog', () => {
 
     await waitFor(() => expect(applyBody).toEqual({ retroactive: true }));
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  it('WP 11.1: starts on initialCategoryId and reports the created rule before any apply', async () => {
+    ensureApiClient();
+    let createBody: unknown = null;
+    stubFetchRoutes([
+      categoriesRoute(),
+      {
+        match: '/api/transactions/txn_1/rule',
+        method: 'POST',
+        handle: async ({ request }) => {
+          createBody = await request.json();
+          return createdRuleResponse('txn_1', 'dining.restaurants');
+        },
+      },
+      previewRoute(),
+    ]);
+    const transaction = buildTransactionDetail({ id: 'txn_1', categoryId: 'cat_dining_coffee' });
+    const onRuleCreated = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RuleFromTransactionDialog
+          transaction={transaction}
+          open
+          onOpenChange={vi.fn()}
+          initialCategoryId="cat_dining_restaurants"
+          onRuleCreated={onRuleCreated}
+        />
+      </QueryClientProvider>,
+    );
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('Restaurants'),
+    );
+    expect(onRuleCreated).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Preview' }));
+    await waitFor(() =>
+      expect(createBody).toEqual({ categoryKey: 'dining.restaurants', name: expect.any(String) }),
+    );
+    await waitFor(() => expect(onRuleCreated).toHaveBeenCalledWith('rule_1'));
+    expect(onRuleCreated).toHaveBeenCalledTimes(1);
   });
 });

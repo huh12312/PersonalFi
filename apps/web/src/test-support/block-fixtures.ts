@@ -70,7 +70,7 @@ function magnitude(minor: string): string {
  */
 export function categoryMonthBlocks(
   cells: readonly CategoryMonthCellWire[],
-  lookup: CategoryLookup,
+  categoryLookup: CategoryLookup,
   title: string,
 ): Block[] {
   const shown = cells.filter((cell) => cell.amount.minor !== '0' && cell.amount.minor !== '-0');
@@ -82,7 +82,7 @@ export function categoryMonthBlocks(
     const byMonth = new Map<string, StackedBarGroup[]>();
     for (const cell of shown) {
       if (cell.amount.currency !== currency) continue;
-      const category = lookup(cell.categoryId);
+      const category = categoryLookup(cell.categoryId);
       const group: StackedBarGroup = {
         key: cell.categoryId ?? 'uncategorised',
         label: category.label,

@@ -12,7 +12,7 @@
 import { newId } from '@core/kernel';
 import { appendEvent } from '@core/platform';
 import { sql } from 'drizzle-orm';
-import { COLD_MODEL, featuresOf, train, type ClassifierModel } from './classifier.ts';
+import { COLD_MODEL, train, type ClassifierModel } from './classifier.ts';
 import {
   confidenceText,
   outboxOf,
@@ -23,6 +23,7 @@ import {
 import {
   DEFAULT_CONFIDENCE_FLOOR,
   DEFAULT_MERCHANT_SUPPORT,
+  classifierFeaturesOf,
   decide,
   shouldReplace,
   type AssignmentSource,
@@ -270,6 +271,13 @@ export async function categorizeTransactions(
           : await writeAssignment(executor, transaction.id, decision, idByKey, context);
 
       if (!wrote) {
+        // WP 11.1: every tier abstained and nothing was ever assigned, so
+        // `category_assignments` has no row to hold the working. Keep it
+        // anyway, in `category_abstentions`, so the Inbox's "why" is read
+        // from what decided rather than re-decided. A preview writes nothing.
+        if (options.dryRun !== true && decision.source === 'none') {
+          await recordAbstention(executor, transaction.id, decision, context);
+        }
         skipped += 1;
         continue;
       }
@@ -418,7 +426,50 @@ async function writeAssignment(
       ${now.toISOString()}::timestamptz, ${(current?.version ?? 0) + 1}, TRUE
     )
   `);
+  await clearAbstention(executor, context.userId, transactionId);
   return true;
+}
+
+/**
+ * Record the working behind an abstention, when there is no assignment to hold it.
+ *
+ * Rewritten only when the chain changes (`IS DISTINCT FROM`), so a re-sync that
+ * reaches the same abstention writes nothing and `decided_at` keeps saying when
+ * that working was first recorded. A transaction that already has an assignment
+ * keeps its assignment's working: an abstention never demotes (`shouldReplace`),
+ * so the stored assignment is still the answer and still the explanation.
+ */
+async function recordAbstention(
+  executor: CategorizationExecutor,
+  transactionId: string,
+  decision: Decision,
+  context: CategorizationContext,
+): Promise<void> {
+  const current = await currentAssignment(executor, transactionId);
+  if (current !== null) return;
+  await executor.execute(sql`
+    INSERT INTO category_abstentions (id, user_id, transaction_id, evidence, decided_at)
+    VALUES (
+      ${newId()}, ${context.userId}, ${transactionId},
+      ${JSON.stringify({ chain: decision.chain })}::jsonb,
+      ${context.clock.now().toISOString()}::timestamptz
+    )
+    ON CONFLICT (user_id, transaction_id) DO UPDATE SET
+      evidence = EXCLUDED.evidence,
+      decided_at = EXCLUDED.decided_at
+    WHERE category_abstentions.evidence IS DISTINCT FROM EXCLUDED.evidence
+  `);
+}
+
+/** An assignment now holds the working; the abstention it replaces is stale. */
+async function clearAbstention(
+  executor: CategorizationExecutor,
+  userId: string,
+  transactionId: string,
+): Promise<void> {
+  await executor.execute(
+    sql`DELETE FROM category_abstentions WHERE user_id = ${userId} AND transaction_id = ${transactionId}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -603,15 +654,14 @@ export async function confirmAssignment(
         ${now.toISOString()}::timestamptz, ${(current?.version ?? 0) + 1}, TRUE, ${now.toISOString()}::timestamptz
       )
     `);
+    await clearAbstention(executor, context.userId, input.transactionId);
 
     // --- 2. the classifier's corpus ---------------------------------------
-    const features = featuresOf({
-      cleanedPayee: cleanDescriptor(input.transaction.rawDescriptor || input.transaction.payee)
-        .cleaned,
-      amountMinor: input.transaction.amountMinor,
-      accountType: input.transaction.accountType,
-      mcc: input.transaction.mcc,
-    });
+    // `classifierFeaturesOf` over `decisionInputOf`: the features counted here
+    // are, by construction, the features `decide` will score (WP 11.1 added
+    // the provider primary and the day of month, and both reach training only
+    // because this goes through the same function).
+    const features = classifierFeaturesOf(decisionInputOf(input.transaction));
     for (const feature of features) {
       await executor.execute(sql`
         INSERT INTO classifier_examples (id, user_id, feature, category_id, count, updated_at)

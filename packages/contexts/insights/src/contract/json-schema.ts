@@ -56,9 +56,11 @@ import { ADVISOR_CONTRACT_MAJOR, ADVISOR_SCHEMA_BASE } from './version.ts';
 // (`transactions.anomalies`, `fees.summary`); 1.5.0 WP 5.3 (`AdvisorRequest.findings`,
 // the narration envelope — an envelope field, not a scope, so no migration);
 // 1.6.0 WP 9.5 (`findings[].placed_figures`, `findings[].evidence[].slot`: the
-// figure slots of option B, both optional and app-written).
+// figure slots of option B, both optional and app-written); 1.7.0 WP 11.1
+// (`categorization.rule_candidates`, the rule-suggestion advisor's input —
+// migration 0054 widens `snapshot_grants_scope_check` to match).
 // Each strictly additive.
-export const ADVISOR_ARTEFACT_VERSION = '1.6.0' as const;
+export const ADVISOR_ARTEFACT_VERSION = '1.7.0' as const;
 
 export interface SchemaDocument {
   /** File name under `packages/contracts/advisor/v1/`. */

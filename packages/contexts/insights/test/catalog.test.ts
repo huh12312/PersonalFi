@@ -200,7 +200,9 @@ describe('the built-in catalogue', () => {
     // retirement rules), the six 07 §7.4 spending rules WP 5.7 releases
     // (S2, S3, S6, S7, S9, S10), and WP 5.7's own three (S1, S5, the fee
     // hunter — carrying `ruleId: 'S7'` too, `advisorId` tells the two apart).
-    expect(BUILTIN_CATALOGUE.filter((entry) => entry.defaultEnabled).length).toBe(40);
+    // Forty-one since WP 11.1's rule suggestion (`RS1`), sourced and enabled
+    // from its first commit.
+    expect(BUILTIN_CATALOGUE.filter((entry) => entry.defaultEnabled).length).toBe(41);
     expect(BUILTIN_CATALOGUE.filter((entry) => !entry.defaultEnabled).length).toBe(0);
   });
 

@@ -95,6 +95,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
   createInsightsBudgetPort,
+  createInsightsCategorizationPort,
   createInsightsInvestmentsPort,
   createInsightsLedgerPort,
   createInsightsMarketDataPort,
@@ -218,6 +219,10 @@ export async function previewDependenciesOf(
       investments: createInsightsInvestmentsPort(deps.database, deps.clock),
       planning: createInsightsPlanningPort(deps.database, deps.clock, { timeZone }),
       marketData: createInsightsMarketDataPort({ source: undefined }),
+      // WP 11.1: `categorization.rule_candidates`, bound as the worker's
+      // `insightsModule` binds it, so an on-demand run (and its preview) sees the
+      // same block the nightly run does.
+      categorization: createInsightsCategorizationPort(deps.database, deps.clock),
     },
     settings: {
       timeZone,

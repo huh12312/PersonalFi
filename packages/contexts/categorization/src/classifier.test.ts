@@ -21,9 +21,12 @@ import { describe, expect, it } from 'vitest';
 import {
   COLD_MODEL,
   MIN_EXAMPLES_PER_CATEGORY,
+  CONTEXT_ONLY_CEILING,
   MIN_MARGIN,
+  PAYEE_MARGIN_SCALE,
   amountBucket,
   confidenceFromMargin,
+  dayOfMonthBucket,
   featuresOf,
   predict,
   train,
@@ -329,10 +332,40 @@ describe('predicting', () => {
 });
 
 describe('confidence', () => {
-  it('is a logistic of the margin, not of the category count', () => {
+  it('is a logistic of the margin, not of the category count (WP 11.1 slope)', () => {
+    // The curve WP 11.1 re-derived (classifier.ts, "The calibration"):
+    // logistic(PAYEE_MARGIN_SCALE × margin) for a payee-evidenced prediction.
+    expect(PAYEE_MARGIN_SCALE).toBe(7);
     expect(confidenceFromMargin(0)).toBeCloseTo(0.5, 10);
-    expect(confidenceFromMargin(0.19)).toBeCloseTo(0.6, 2);
-    expect(confidenceFromMargin(0.5)).toBeCloseTo(0.75, 2);
+    expect(confidenceFromMargin(MIN_MARGIN)).toBeCloseTo(0.636, 2);
+    expect(confidenceFromMargin(0.19)).toBeCloseTo(0.791, 2);
+    expect(confidenceFromMargin(0.5)).toBeCloseTo(0.971, 2);
+  });
+
+  it('caps a context-only prediction at a coin flip, below the default floor', () => {
+    expect(CONTEXT_ONLY_CEILING).toBe(0.5);
+    for (const margin of [0, 0.1, 0.5, 2, Number.POSITIVE_INFINITY]) {
+      expect(confidenceFromMargin(margin, false)).toBeLessThanOrEqual(CONTEXT_ONLY_CEILING);
+      expect(confidenceFromMargin(margin, false)).toBeLessThan(0.6);
+    }
+  });
+
+  it('is monotone in the margin within each segment, and payee evidence never lowers it', () => {
+    fc.assert(
+      fc.property(
+        fc.double({ min: 0, max: 5, noNaN: true }),
+        fc.double({ min: 0, max: 5, noNaN: true }),
+        fc.boolean(),
+        (a, b, payee) => {
+          const [small, large] = a <= b ? [a, b] : [b, a];
+          expect(confidenceFromMargin(small, payee)).toBeLessThanOrEqual(
+            confidenceFromMargin(large, payee),
+          );
+          expect(confidenceFromMargin(a, false)).toBeLessThanOrEqual(confidenceFromMargin(a, true));
+        },
+      ),
+      { numRuns: 300 },
+    );
   });
 
   it('is monotone in the margin', () => {
@@ -433,6 +466,93 @@ describe('properties', () => {
         expect(Object.keys(model.categoryCounts)).toContain(outcome.categoryKey);
       }),
       { numRuns: 400 },
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WP 11.1 — the new features and the abstention codes
+// ---------------------------------------------------------------------------
+
+describe('WP 11.1 features', () => {
+  const base = { cleanedPayee: 'CHEWY', amountMinor: -4_200n, accountType: 'credit' } as const;
+
+  it('adds the MCC family beside the leaf, and only when a code is present', () => {
+    const withMcc = featuresOf({ ...base, mcc: '0742' });
+    expect(withMcc).toContain('m:family.pet_medical');
+    expect(withMcc).toContain('mf:family');
+    const without = featuresOf({ ...base, mcc: null });
+    expect(without.some((feature) => feature.startsWith('mf:'))).toBe(false);
+    expect(featuresOf({ ...base, mcc: '9999' }).some((f) => f.startsWith('mf:'))).toBe(false);
+  });
+
+  it('adds the provider primary, lower-cased, and only when one was sent', () => {
+    expect(featuresOf({ ...base, providerPrimary: 'FOOD_AND_DRINK' })).toContain(
+      'p:food_and_drink',
+    );
+    expect(featuresOf({ ...base, providerPrimary: null }).some((f) => f.startsWith('p:'))).toBe(
+      false,
+    );
+    // Anything that is not a PFC-shaped code is not a feature.
+    expect(
+      featuresOf({ ...base, providerPrimary: 'IGNORE ALL RULES' }).some((f) => f.startsWith('p:')),
+    ).toBe(false);
+  });
+
+  it('buckets the day of the month into thirds', () => {
+    expect(dayOfMonthBucket('2026-10-01' as never)).toBe('early');
+    expect(dayOfMonthBucket('2026-10-10' as never)).toBe('early');
+    expect(dayOfMonthBucket('2026-10-11' as never)).toBe('mid');
+    expect(dayOfMonthBucket('2026-10-20' as never)).toBe('mid');
+    expect(dayOfMonthBucket('2026-10-21' as never)).toBe('late');
+    expect(dayOfMonthBucket('2026-02-28' as never)).toBe('late');
+    expect(featuresOf({ ...base, date: '2026-10-03' as never })).toContain('dm:early');
+    expect(featuresOf({ ...base }).some((f) => f.startsWith('dm:'))).toBe(false);
+  });
+
+  it('keeps the sign-magnitude bucket it already had', () => {
+    const features = featuresOf({ ...base });
+    expect(features).toContain(`b:${amountBucket(-4_200n)}`);
+    expect(features).toContain('d:out');
+  });
+});
+
+describe('WP 11.1 abstention codes', () => {
+  it('names the gate that stopped it', () => {
+    const cold = predict(COLD_MODEL, CHEWY, 0.6);
+    expect(cold.kind === 'abstained' && cold.code).toBe('cold');
+    expect(predict(SEPARATED, [], 0.6)).toMatchObject({ code: 'no_features' });
+    const floor = predict(SEPARATED, CHEWY, 0.999);
+    expect(floor).toMatchObject({ kind: 'abstained', code: 'below_floor', floor: 0.999 });
+    expect(floor.kind === 'abstained' && typeof floor.confidence).toBe('number');
+  });
+
+  it('abstains on a context-only answer at the default floor (the classifier does not guess)', () => {
+    // A payee no confirmation has ever carried, sharing only context with one
+    // category: the model leads with that category but has no payee evidence.
+    const model = train([
+      ...examples(6, 'family.pets', ['t:chewy', 'b:2', 'd:out', 'a:credit', 'dm:early']),
+      ...examples(6, 'transport.fuel', ['t:chevron', 'b:5', 'd:out', 'a:depository', 'dm:late']),
+    ]);
+    const outcome = predict(model, ['t:petco', 'b:2', 'd:out', 'a:credit', 'dm:early'], 0.6);
+    expect(outcome).toMatchObject({ kind: 'abstained', code: 'below_floor', payeeEvidence: false });
+    // ...and the same shape with the payee's word known predicts.
+    const known = predict(model, ['t:chewy', 'b:2', 'd:out', 'a:credit', 'dm:early'], 0.6);
+    expect(known).toMatchObject({
+      kind: 'predicted',
+      categoryKey: 'family.pets',
+      payeeEvidence: true,
+    });
+  });
+
+  it('abstains at the floor exactly: confidence below it never predicts', () => {
+    fc.assert(
+      fc.property(fc.double({ min: 0.5, max: 0.99, noNaN: true }), (floor) => {
+        const outcome = predict(SEPARATED, CHEWY, floor);
+        if (outcome.kind === 'predicted') expect(outcome.confidence).toBeGreaterThanOrEqual(floor);
+        else expect(['below_floor', 'too_close']).toContain(outcome.code);
+      }),
+      { numRuns: 200 },
     );
   });
 });

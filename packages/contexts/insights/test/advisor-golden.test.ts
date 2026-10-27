@@ -567,6 +567,22 @@ const GOLDEN: readonly Golden[] = [
     severity: 'warning',
     annualized: '700',
   },
+  {
+    // WP 11.1. Only the pet store qualifies on `drift`: the café has two
+    // confirmations, the gym a rule, the grocer a locked category, and the
+    // big-box store is filed two ways (`seed.ts`' `DRIFT_CATEGORIZATION`).
+    // The key is the builder's own `MERCHANT_` pseudonym of
+    // `merchant-pet-store` under the seed's token key.
+    ruleId: 'RS1',
+    advisorId: 'builtin.spending.rule_suggestion',
+    seedCase: 'drift',
+    keys: ['spending.rule_suggestion.MERCHANT_6283f0d623cb'],
+    summary:
+      'You have filed this merchant under shopping.pets 4 times by hand. A rule would file it ' +
+      'there automatically from now on — nothing changes until you save one.',
+    severity: 'info',
+    annualized: null,
+  },
 ];
 
 describe('each rule on the seed case it was designed for', () => {

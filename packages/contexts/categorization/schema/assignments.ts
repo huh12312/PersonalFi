@@ -178,6 +178,33 @@ export const classifierVersions = pgTable(
   (table) => [uniqueIndex('classifier_versions_user_version_idx').on(table.userId, table.version)],
 );
 
+/**
+ * The stored working behind "uncategorised" (migration 0053, WP 11.1).
+ *
+ * When every tier abstains on a transaction with no assignment yet,
+ * `category_assignments` records nothing, so the chain that explains the
+ * abstention lives here instead: one row per transaction, rewritten only when
+ * the chain changes, deleted when an assignment is written. Read by
+ * `explainTransactions` for the Inbox's "why" line — never recomputed.
+ */
+export const categoryAbstentions = pgTable(
+  'category_abstentions',
+  {
+    id: idColumn(),
+    userId: userIdColumn(),
+    /** `@ctx/ledger`'s `transactions.id`. Opaque here. */
+    transactionId: uuid('transaction_id').notNull(),
+    /** `{ chain: TierOutcome[] }`, the shape `category_assignments.evidence` has. */
+    evidence: jsonb('evidence').notNull(),
+    decidedAt: instantColumn('decided_at').notNull(),
+    createdAt: createdAtColumn(),
+  },
+  (table) => [
+    uniqueIndex('category_abstentions_transaction_idx').on(table.userId, table.transactionId),
+  ],
+);
+
+export type CategoryAbstentionRow = typeof categoryAbstentions.$inferSelect;
 export type CategoryAssignmentRow = typeof categoryAssignments.$inferSelect;
 export type NewCategoryAssignmentRow = typeof categoryAssignments.$inferInsert;
 export type ClassifierExampleRow = typeof classifierExamples.$inferSelect;

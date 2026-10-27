@@ -134,6 +134,10 @@ export const SNAPSHOT_WINDOWS = Object.freeze({
   anomalyMinCategorySample: 5,
   /** `TransactionsAnomaliesSchema.rows`' own ceiling. */
   anomalyMaxRows: 500,
+  /** WP 11.1. `RuleCandidatesSchema.merchants`' own ceiling. */
+  ruleCandidates: 64,
+  /** WP 11.1. `RuleCandidatesSchema.merchants[].transactions`' own ceiling. */
+  ruleCandidateTransactions: 8,
 });
 
 /**
@@ -417,6 +421,8 @@ export class SnapshotBuilder {
         return this.#transactionsAnomalies(input, tokeniser, memo);
       case 'fees.summary':
         return this.#feesSummary(input, tokeniser, granted, memo);
+      case 'categorization.rule_candidates':
+        return this.#ruleCandidates(input, tokeniser);
       default:
         // Every remaining scope has `sourcedInPhase2: false` and is filtered
         // out before this is reached. The `null` is the second line of defence
@@ -424,6 +430,53 @@ export class SnapshotBuilder {
         // whose builder does not exist must emit no key, not throw in a worker.
         return null;
     }
+  }
+
+  /**
+   * WP 11.1: `categorization.rule_candidates`, over `CategorizationPort`.
+   *
+   * A pass-through with the scope's levers applied and nothing decided: the
+   * merchant is tokenised for every kind (D22), the category and each
+   * transaction cross as their uuid for an in-process advisor and a token
+   * otherwise (`tokens.ts`' table — moot today, since an `external` advisor
+   * never reaches this arm), and both lists are capped at the schema's own
+   * ceilings. A pair with no transaction behind it cannot be cited and is
+   * dropped rather than crossing uncitable. Sorted here, not trusted from the
+   * port, so the block — and the digest over it — is the same on two runs
+   * whatever order a reader happened to return.
+   */
+  async #ruleCandidates(input: BuildSnapshotInput, tokeniser: Tokeniser): Promise<unknown> {
+    const port = this.#ports.categorization;
+    if (port === undefined) return null;
+    const candidates = await port.listRuleCandidates({ userId: input.userId });
+    const rows = candidates
+      .filter(
+        (candidate) =>
+          Number.isInteger(candidate.confirmations) &&
+          candidate.confirmations > 0 &&
+          candidate.transactionIds.length > 0 &&
+          candidate.categorySlug.length > 0,
+      )
+      .map((candidate) => ({
+        merchant_ref: tokeniser.merchant(candidate.merchantId),
+        category_ref: tokeniser.ref('category', candidate.categoryId),
+        category_slug: candidate.categorySlug,
+        confirmations: candidate.confirmations,
+        covered_by_rule: candidate.coveredByRule,
+        locked_default: candidate.lockedDefault,
+        transactions: candidate.transactionIds
+          .slice(0, SNAPSHOT_WINDOWS.ruleCandidateTransactions)
+          .map((id) => ({ transaction_ref: tokeniser.ref('transaction', id) })),
+      }))
+      .sort(
+        (left, right) =>
+          right.confirmations - left.confirmations ||
+          left.merchant_ref.localeCompare(right.merchant_ref) ||
+          left.category_slug.localeCompare(right.category_slug),
+      )
+      .slice(0, SNAPSHOT_WINDOWS.ruleCandidates);
+    if (rows.length === 0) return null;
+    return { merchants: rows };
   }
 
   async #netWorth(input: BuildSnapshotInput): Promise<unknown> {

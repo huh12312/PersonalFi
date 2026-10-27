@@ -95,8 +95,8 @@ export default defineConfig<ColdStartOptions & EvidenceDirOptions>({
         process.env['PW_SUITE'] === 'a11y'
           ? /(a11y-sweep|a11y-keyboard)\.spec\.ts/
           : process.env['PW_SUITE'] === 'functional'
-            ? /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan|plan-sliders|brief|advisors|accounts-overrides|goals|security|connections-plaid-setup|market-data-keys|price-refresh|narrator-settings|tokens|dashboard|cash-flow|health|categories|reports|blocks)\.spec\.ts/
-            : /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan|plan-sliders|brief|advisors|accounts-overrides|goals|security|connections-plaid-setup|market-data-keys|price-refresh|narrator-settings|tokens|dashboard|cash-flow|health|categories|reports|blocks|a11y-sweep|a11y-keyboard)\.spec\.ts/,
+            ? /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan|plan-sliders|brief|advisors|accounts-overrides|goals|security|connections-plaid-setup|market-data-keys|price-refresh|narrator-settings|tokens|dashboard|cash-flow|health|categories|reports|blocks|rule-suggestions)\.spec\.ts/
+            : /(smoke|app-walkthrough|inbox|splits|rule-from-transaction|category-filter|notification-settings|recurring-insights|budget|investments|networth|market-data|plan|plan-sliders|brief|advisors|accounts-overrides|goals|security|connections-plaid-setup|market-data-keys|price-refresh|narrator-settings|tokens|dashboard|cash-flow|health|categories|reports|blocks|rule-suggestions|a11y-sweep|a11y-keyboard)\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         baseURL: 'http://localhost:5183',

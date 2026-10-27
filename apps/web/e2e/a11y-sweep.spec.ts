@@ -18,6 +18,7 @@ import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installBudgetCategoryMocks } from './support/mock-budget.ts';
 import { installCategoryMocks } from './support/mock-categories.ts';
 import { seedControlCheckRun, seedRunningControlCheckRun } from './support/mock-narrator.ts';
+import { ABSTAINED_LINE, installRuleSuggestionMocks } from './support/mock-rule-suggestions.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import {
@@ -1243,6 +1244,94 @@ test.describe('WP 10.16 control checks and the controls on the backup line', () 
         await open(page, where);
         expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
         await scanBothThemes(page, `WP 10.16 ${where}, at 200 %`);
+        const before = new Set(await clippedTextElements(page));
+        await page.addStyleTag({ content: TEXT_SPACING });
+        await page.waitForTimeout(100);
+        const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+        expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+      });
+    }
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+    for (const where of WHERE) {
+      test(`${where}: nothing animates`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, where);
+        expect(await motionOffenders(page)).toEqual([]);
+      });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7l. WP 11.1: the Inbox's explanation line and a rule suggestion, on /inbox and /insights
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep's fixtures carry no explanation and no `spending.rule_suggestion`, so this block layers WP 11.1's
+ * (`support/mock-rule-suggestions.ts`) over the sweep's and holds both screens with them present: the Inbox with the
+ * "why" caption under its uncategorised rows and the Rule suggestions section, `/insights` with the suggestion's
+ * Create rule button beside an S3 card whose draft stays inert — each with the pre-filled rule dialog open too — in
+ * both themes, at 320 px, at 200 % zoom with 1.4.12 text spacing, and with reduced motion.
+ */
+test.describe('WP 11.1 explanation line and rule suggestion', () => {
+  type Where = '/inbox' | '/insights' | '/inbox, rule dialog open' | '/insights, rule dialog open';
+  const WHERE: readonly Where[] = [
+    '/inbox',
+    '/insights',
+    '/inbox, rule dialog open',
+    '/insights, rule dialog open',
+  ];
+
+  async function open(page: Page, where: Where): Promise<void> {
+    await installSweepMocks(page);
+    await installRuleSuggestionMocks(page);
+    const inbox = where.startsWith('/inbox');
+    await visit(page, inbox ? '/inbox' : '/insights');
+    await hideDevtools(page);
+    const scope = inbox
+      ? page.getByTestId('rule-suggestion')
+      : page
+          .getByRole('list', { name: 'Insights' })
+          .locator('> li')
+          .filter({ hasText: 'A merchant you always file the same way' });
+    if (inbox) {
+      await expect(page.getByTestId('inbox-why').first()).toHaveText(`Why: ${ABSTAINED_LINE}`);
+      await expect(scope.getByTestId('rule-suggestion-merchant')).toHaveText("Trader Joe's");
+    }
+    await expect(scope.getByRole('button', { name: 'Create rule' })).toBeVisible();
+    if (where.endsWith('rule dialog open')) {
+      await scope.getByRole('button', { name: 'Create rule' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Always categorize like this' });
+      await expect(dialog.getByRole('combobox', { name: 'Category' })).toHaveValue('Groceries');
+      await waitForAnimationsToDrain(page);
+    }
+  }
+
+  for (const where of WHERE) {
+    test(`${where}: axe-clean in both themes, at 1280 and at 320 px`, async ({ page }) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await open(page, where);
+      await scanBothThemes(page, `WP 11.1 ${where}`);
+      await page.setViewportSize(REFLOW);
+      await page.waitForTimeout(600);
+      expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+      expect(await overlayFitProblems(page), 'an overlay does not fit 320 px').toEqual([]);
+      await scanBothThemes(page, `WP 11.1 ${where}, at 320 px`);
+    });
+  }
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    for (const where of WHERE) {
+      test(`${where}: nothing is lost`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, where);
+        expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+        await scanBothThemes(page, `WP 11.1 ${where}, at 200 %`);
         const before = new Set(await clippedTextElements(page));
         await page.addStyleTag({ content: TEXT_SPACING });
         await page.waitForTimeout(100);

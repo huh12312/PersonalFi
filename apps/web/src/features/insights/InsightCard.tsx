@@ -17,9 +17,11 @@ import { SeverityBadge } from '../../components/finance/SeverityBadge.tsx';
 import { cn } from '../../lib/cn.ts';
 import { useAccountsLookup } from '../accounts/useAccountsLookup.ts';
 import { TransactionDetailSheet } from '../transactions/TransactionDetailSheet.tsx';
+import { CreateRuleFromInsight } from './CreateRuleFromInsight.tsx';
 import { DISMISS_REASON_CODES, DismissReasonDialog } from './DismissReasonDialog.tsx';
 import { EvidencePanel } from './EvidencePanel.tsx';
 import { segmentsFor, valueLineOf, verifiedMentionOf } from './mentions.ts';
+import { ruleDraftOf } from './rule-draft.ts';
 import { confidencePercentLabel } from './severity.ts';
 
 export interface InsightCardProps {
@@ -147,6 +149,11 @@ function MentionedTransactionSheet({
  * there is no "saved so far" because no field records a captured value. **Bookmark** and **Helpful / Not helpful**
  * persist on the insight row (`POST /insights/{id}/bookmark|feedback`, migration 0051); "Not helpful" asks why
  * with the dismissal's own reason dialog. Neither moves the advisor's policy — dismissing does.
+ *
+ * WP 11.1: a `create_rule_draft` action becomes a real **Create rule** button only when this insight's own evidence
+ * resolves both the category and the transaction the rule is drafted from (`rule-draft.ts`); it opens the existing
+ * rule dialog pre-filled and accepts the insight once the rule exists. Otherwise it stays the inert suggestion the
+ * evidence panel lists.
  */
 export function InsightCard({ insight, onReviewed }: InsightCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -191,6 +198,7 @@ export function InsightCard({ insight, onReviewed }: InsightCardProps) {
   const contextLine = insight.contextLine ?? null;
 
   const value = valueLineOf(insight);
+  const ruleDraft = ruleDraftOf(insight);
   const openTransaction = (id: string) => setOpenTransactionId(id);
   const sendFeedback = (
     next: 'helpful' | 'not_helpful' | null,
@@ -336,7 +344,15 @@ export function InsightCard({ insight, onReviewed }: InsightCardProps) {
             Not helpful
           </Button>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {ruleDraft !== null && (
+            <CreateRuleFromInsight
+              insightId={insight.id}
+              draft={ruleDraft}
+              variant="secondary"
+              size="md"
+            />
+          )}
           <Button variant="ghost" onClick={() => setDismissing(true)} disabled={review.isPending}>
             Dismiss
           </Button>

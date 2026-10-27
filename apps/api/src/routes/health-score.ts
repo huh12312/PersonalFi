@@ -30,6 +30,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
   createInsightsBudgetPort,
+  createInsightsCategorizationPort,
   createInsightsInvestmentsPort,
   createInsightsLedgerPort,
   createInsightsMarketDataPort,
@@ -214,6 +215,8 @@ export const healthScoreRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
                 investments: createInsightsInvestmentsPort(deps.database, deps.clock),
                 planning: createInsightsPlanningPort(deps.database, deps.clock, { timeZone }),
                 marketData: createInsightsMarketDataPort({ source: undefined }),
+                // WP 11.1: the same port the worker binds, so a run here sees the same snapshot.
+                categorization: createInsightsCategorizationPort(deps.database, deps.clock),
               },
               tokenSecret: tokenSecret.reveal(),
               currencyCode: 'USD',

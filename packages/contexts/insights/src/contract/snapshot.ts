@@ -384,6 +384,49 @@ export const FeesSummarySchema = z.strictObject({
 });
 
 // ---------------------------------------------------------------------------
+// categorization.rule_candidates — WP 11.1
+// ---------------------------------------------------------------------------
+
+/**
+ * `categorization.rule_candidates` — merchants the holder keeps filing the
+ * same way by hand, the input to `builtin.spending.rule_suggestion`.
+ *
+ * One row per (merchant, category) pair with at least two current, confirmed,
+ * user-sourced assignments, most-confirmed first. The block carries every
+ * such pair rather than only the ones over the advisor's threshold: the
+ * threshold is a decision, and decisions belong to the advisor that is
+ * tested on them, not to a reader.
+ *
+ * `transactions[]` is an array of objects rather than of bare refs so that
+ * every evidence row citing one ends in a `transaction_ref` leaf — the leaf
+ * `mentions.ts` and the web's evidence panel resolve an entity link from.
+ */
+export const RuleCandidatesSchema = z.strictObject({
+  merchants: z
+    .array(
+      z.strictObject({
+        /** `MERCHANT_<12 hex>`, for every advisor kind (D22). */
+        merchant_ref: opaqueRef,
+        /** The category's uuid for an in-process advisor; a token for any other. */
+        category_ref: opaqueRef,
+        category_slug: z.string().min(1).max(96),
+        /** Current, user-sourced, confirmed assignments of this merchant to this category. */
+        confirmations: z.number().int().positive(),
+        /** An enabled rule would already file this merchant's newest confirmed transaction. */
+        covered_by_rule: z.boolean(),
+        /** The holder pinned this merchant's category, so the merchant tier already files it. */
+        locked_default: z.boolean(),
+        /** The newest confirmed transactions behind the count, newest first. */
+        transactions: z
+          .array(z.strictObject({ transaction_ref: opaqueRef }))
+          .min(1)
+          .max(8),
+      }),
+    )
+    .max(64),
+});
+
+// ---------------------------------------------------------------------------
 // holdings.aggregate, holdings.detail — WP 3.10
 // ---------------------------------------------------------------------------
 
@@ -922,6 +965,8 @@ export const AdvisorSnapshotSchema = z
     // into scope-catalogue order, which keeps the contract diff additive.
     transactions_anomalies: TransactionsAnomaliesSchema.optional(),
     fees_summary: FeesSummarySchema.optional(),
+    // Contract 1.7.0 (WP 11.1). Appended, like 1.4.0's two blocks.
+    rule_candidates: RuleCandidatesSchema.optional(),
   })
   .describe('The minimised, read-only view an advisor receives. One key per granted scope.');
 

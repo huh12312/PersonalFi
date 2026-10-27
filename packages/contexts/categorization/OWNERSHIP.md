@@ -33,6 +33,10 @@ the migration creates it.
 - `classifier_examples`
 - `classifier_versions`
 
+### Built (migration 0053, WP 11.1)
+
+- `category_abstentions`
+
 ## Notes on the names
 
 Four claims from the original sketch are gone, because the built schema answers the

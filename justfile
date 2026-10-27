@@ -819,6 +819,35 @@ genai-selftest holder="" prove_switch="false":
       pnpm exec node apps/api/src/bin/genai-selftest.ts "${args[@]}"
     fi
 
+# The categorisation gold-set replay (WP 11.1): the holder's confirmed assignments through the
+# six tiers, leave-one-out, per tier and overall. Read-only; no model. e.g. `just categorization-eval holder="Chris"`
+categorization-eval holder="" json="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `key=value` slots, as genai-selftest takes them (just's parameters are positional).
+    slots=({{ quote(holder) }} {{ quote(json) }})
+    holder=""; json="false"
+    case "${slots[0]}" in holder=*|json=*|'') ;; *) holder="${slots[0]}" ;; esac
+    case "${slots[1]}" in holder=*|json=*|'') ;; *) json="${slots[1]}" ;; esac
+    for slot in "${slots[@]}"; do
+      case "$slot" in
+        holder=*) holder="${slot#holder=}" ;;
+        json=*)   json="${slot#json=}" ;;
+      esac
+    done
+    args=()
+    if [[ -n "$holder" ]]; then args+=(--holder="$holder"); fi
+    if [[ "$json" == "true" ]]; then args+=(--json); fi
+    # Inside the stack the database is not reachable from the host by design, so
+    # the replay runs in a one-shot container from the api service's definition;
+    # otherwise against the local dev database. Every connection is read-only.
+    if docker compose ps --status running --services 2>/dev/null | grep -qx api; then
+      docker compose run --rm --no-deps -T --entrypoint node api \
+        /app/apps/api/src/bin/categorization-eval.ts "${args[@]}"
+    else
+      pnpm exec node scripts/categorization-eval.ts "${args[@]}"
+    fi
+
 # Resume a stopped event consumer (one /ready lists under outbox.failedConsumers), e.g. `just consumer-resume budgeting.actuals@v1`
 consumer-resume name:
     #!/usr/bin/env bash

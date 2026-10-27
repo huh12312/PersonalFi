@@ -28,8 +28,14 @@
  * list is 200 rows and the answer to "where did this come from?" is one click
  * away.
  */
-import { DateOnly, money as makeMoney, type Money as MoneyType } from '@core/kernel';
-import { createRuleFromTransaction, listRuleRecords } from '@ctx/categorization';
+import { DateOnly, isUuid, money as makeMoney, type Money as MoneyType } from '@core/kernel';
+import {
+  MAX_EXPLAIN_BATCH,
+  createRuleFromTransaction,
+  explainTransactions,
+  listRuleRecords,
+  type CategorizationExecutor,
+} from '@ctx/categorization';
 import {
   confirmTransferPair,
   getTransaction,
@@ -112,6 +118,27 @@ const transactionSchema = z
       'A transaction as the reader resolves it: provider fact plus user overlay. The provider’s ' +
       'own numbers are under `provenance` in the detail endpoint.',
   });
+
+const categoryExplanationSchema = z
+  .object({
+    transactionId: z.string(),
+    status: z.enum(['assigned', 'abstained', 'not_recorded']),
+    source: z
+      .enum(['user', 'rule', 'merchant_default', 'provider', 'classifier', 'none'])
+      .nullable(),
+    categoryKey: z.string().nullable(),
+    confidence: z.number().nullable(),
+    decidedAt: isoInstant.nullable(),
+    line: z.string().describe('The one-line "why", composed from the stored working.'),
+    tiers: z.array(
+      z.object({
+        source: z.string(),
+        won: z.boolean(),
+        detail: z.string(),
+      }),
+    ),
+  })
+  .meta({ id: 'CategoryExplanation' });
 
 const provenanceSchema = z
   .object({
@@ -401,6 +428,63 @@ export const transactionRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
           items: page.items.map(serialiseTransaction),
           nextCursor: page.nextCursor,
           summary,
+        };
+      },
+    );
+
+    // WP 11.1: the Inbox's one-line "why" for each row it shows, read from the
+    // stored decision working (`@ctx/categorization`'s `explainTransactions`):
+    // the current assignment's chain, else the abstention's, else "nothing
+    // recorded". Never re-decided — a recomputed reason answers "what would we
+    // decide today?", a different question. Reads only.
+    app.get(
+      '/transactions/explanations',
+      {
+        schema: {
+          operationId: 'listCategoryExplanations',
+          summary: 'Why each of these transactions is (or is not) categorised',
+          description:
+            'For up to 200 transaction ids, the stored working of the categorisation tiers as ' +
+            'one line plus the tier-by-tier detail. `status` is `assigned` when a tier decided, ' +
+            '`abstained` when every tier declined (the line names what each tried, with its ' +
+            'figures), and `not_recorded` when no categorisation pass has run on it since this ' +
+            'was introduced. Read from what was stored when it was decided; never recomputed.',
+          tags: ['transactions'],
+          querystring: z.object({ ids: idList }),
+          response: {
+            200: z.object({ items: z.array(categoryExplanationSchema) }),
+            ...problems(400, 401, 503),
+          },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireSession(request);
+        // An id that is not a UUID names no transaction; dropped rather than refused.
+        const ids = (request.query.ids ?? []).filter((id) => isUuid(id));
+        if (ids.length > MAX_EXPLAIN_BATCH) {
+          throw new AppError({
+            status: 400,
+            code: 'transactions.too_many_ids',
+            title: 'Bad Request',
+            detail: `at most ${String(MAX_EXPLAIN_BATCH)} transaction ids per request`,
+            family: 'user',
+          });
+        }
+        const explanations = await explainTransactions(
+          database as unknown as CategorizationExecutor,
+          { userId: session.userId, transactionIds: ids },
+        );
+        return {
+          items: explanations.map((entry) => ({
+            transactionId: entry.transactionId,
+            status: entry.status,
+            source: entry.source,
+            categoryKey: entry.categoryKey,
+            confidence: entry.confidence,
+            decidedAt: entry.decidedAt === null ? null : entry.decidedAt.toISOString(),
+            line: entry.line,
+            tiers: entry.tiers.map((tier) => ({ ...tier })),
+          })),
         };
       },
     );

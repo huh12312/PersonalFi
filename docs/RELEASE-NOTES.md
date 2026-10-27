@@ -9,6 +9,50 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.16: a classifier that abstains when it should, "make this a rule?", and why a row is uncategorised
+
+**Status:** a patch release on v0.9.15. The tag `v0.9.16` is pushed by the maintainer once CI is green.
+The first package of the Phase 11 programme (11 §5, package 11.1). No language model is involved.
+
+### Upgrading to v0.9.16
+
+```bash
+git pull
+just upgrade
+```
+
+Migrations `0053_category_abstentions` (expand-only: one new, empty table holding the working behind
+an "uncategorised" decision) and `0054_snapshot_grant_scopes_v1_7` (expand-only: the advisor scope
+list widened by one, advisor contract 1.7.0). Nothing is backfilled.
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **The classifier stops guessing.** Measured on merchants it had never seen, the old classifier was
+  sure enough to file a transaction but wrong two times in three. A prediction that no word of the
+  payee backs is now capped at a coin flip, so it stays uncategorised under the default 60 % floor;
+  one the payee's own words back is scored on a re-derived curve. It also reads three new signals:
+  the merchant-category-code family, your bank's broad category, and the part of the month.
+- **Why is this uncategorised?** Each uncategorised row in the Inbox says, in one line, what each
+  tier tried: for example "Every tier abstained: none of your 4 rules matched, merchant confirmed 1
+  of 3 times needed, no bank category, classifier 41 % below its 60 % floor." It is read from what
+  was recorded when the decision was made, never recomputed. Rows from before this release say that
+  nothing was recorded yet, until their next sync.
+- **"Make this a rule?"** When you have filed a merchant under the same category three or more times
+  by hand and no rule or pinned category covers it, the Inbox and Insights offer **Create rule**,
+  which opens the rule editor already filled in. Nothing is created until you save it; saving
+  resolves the suggestion, and **Not now** dismisses it with the usual 30-day, 90-day, then permanent
+  quiet. Like every built-in advisor it runs only once you grant it its data: Settings, Advisors,
+  "A merchant you keep filing the same way", grant `categorization.rule_candidates`.
+- **From the host:** `just categorization-eval holder="<name>"` replays everything you filed by hand
+  through the categorisation tiers and prints each tier's precision, recall and abstain rate (add
+  `json=true` for the JSON the next package's precision gate reads). It only reads.
+- **API.** New: `GET /transactions/explanations?ids=…`. The advisor contract gains the
+  `categorization.rule_candidates` scope (1.7.0, strictly additive).
+
 ## v0.9.15: prove the GenAI controls from the app
 
 **Status:** a patch release on v0.9.14. The tag `v0.9.15` is pushed by the maintainer once CI is green.

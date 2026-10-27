@@ -43,6 +43,7 @@ import { CRYPTO_RULES } from './builtin/crypto/index.ts';
 import { DEBT_RULES } from './builtin/debt/index.ts';
 import { INVESTING_RULES } from './builtin/investing/index.ts';
 import { RETIREMENT_RULES } from './builtin/retirement/index.ts';
+import { RULE_SUGGESTION_RULES } from './builtin/rule-suggestion/index.ts';
 import { CASH_RULES } from './rules-cash.ts';
 import { SPENDING_RULES } from './rules-spending.ts';
 import { SUBSCRIPTION_RULES } from './rules-subscriptions.ts';
@@ -194,6 +195,7 @@ const [cryptoShare, cryptoCustody, idleStablecoins, cryptoLoss, cryptoBasis] = C
 const [savingsRate, successProbability, rmdWindow, claimingAge, goalPace, withdrawalGuardrail] =
   RETIREMENT_RULES;
 const [categoryAnomaly, newMerchantHighCharge, feeHunter] = ANOMALY_RULES;
+const [ruleSuggestion] = RULE_SUGGESTION_RULES;
 
 function required(rule: BuiltinRule | undefined, id: string): BuiltinRule {
   if (rule === undefined) throw new Error(`catalogue is missing the rule for ${id}`);
@@ -280,6 +282,12 @@ export const BUILTIN_CATALOGUE: readonly BuiltinCatalogueEntry[] = Object.freeze
   entry('S1', required(categoryAnomaly, 'S1'), 'anomalies', 'P2', true),
   entry('S5', required(newMerchantHighCharge, 'S5'), 'anomalies', 'P1', true),
   entry('S7', required(feeHunter, 'S7'), 'anomalies', 'P1', true),
+  // --- WP 11.1, advisor contract 1.7.0. 11 §3.1's rule suggestion — not a 07
+  //     §3.3 rule, so `RS1` is this catalogue's own label rather than a 07
+  //     number. `categorization.rule_candidates` lands sourced in the same
+  //     change, so it ships enabled; it emits `info` with no impact and
+  //     therefore ranks after everything that claims a figure.
+  entry('RS1', required(ruleSuggestion, 'RS1'), 'spending', 'P3', true),
 ]);
 
 /**
@@ -493,6 +501,8 @@ export const CATALOGUE_SCOPE: readonly string[] = Object.freeze([
   'R5',
   'R6',
   'R7',
+  // WP 11.1: 11 §3.1's rule suggestion, this catalogue's own `RS1`.
+  'RS1',
 ]);
 
 /** The rule ids WP 3.10 was asked for: the whole of the I, D and X families. */

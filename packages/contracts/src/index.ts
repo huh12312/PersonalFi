@@ -47,7 +47,11 @@ export const OPENAPI_CONTRACT_VERSION = '0.1.0';
 // 1.6.0 (WP 9.5): the narration envelope's figure slots — optional, app-written
 // `findings[].placed_figures` and `findings[].evidence[].slot` (option B, the
 // Phase 5 gate's R-2); strictly additive, no migration.
-export const ADVISOR_CONTRACT_VERSION = '1.6.0';
+// 1.7.0 (WP 11.1): the `categorization.rule_candidates` scope and its
+// `rule_candidates` block, the rule-suggestion advisor's input; strictly
+// additive (appended to the scope enum and to the snapshot); migration 0054
+// widens `snapshot_grants_scope_check` to match, in the same change.
+export const ADVISOR_CONTRACT_VERSION = '1.7.0';
 
 /**
  * The integer that crosses the wire, as distinct from the artefact version

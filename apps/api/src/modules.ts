@@ -145,6 +145,7 @@ import {
   createBudgetingLedgerPort,
   createCategorizationLedgerPort,
   createInsightsBudgetPort,
+  createInsightsCategorizationPort,
   createInsightsInvestmentsPort,
   createInsightsPlanningPort,
   createInsightsLedgerPort,
@@ -1074,6 +1075,10 @@ function insightsModule(
       // latest projection run) under 08 §4.2 minimisation; the retirement
       // wave is silent without this binding.
       planning: createInsightsPlanningPort(database, clock, { timeZone: options.timezone }),
+      // WP 11.1. `categorization.rule_candidates` reads `@ctx/categorization`'s
+      // `listRuleCandidates` over the real ledger; the rule-suggestion advisor
+      // is silent without this binding.
+      categorization: createInsightsCategorizationPort(database, clock),
       // `market.rates` needs a *source*, and there is only one in the
       // deployment: `createMarketDataRuntime(...)`'s FRED adapter, which
       // exists only when a key file does. `undefined` here is the same

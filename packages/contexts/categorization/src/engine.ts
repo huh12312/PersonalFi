@@ -36,7 +36,12 @@
 
 import type { DateOnly } from '@core/kernel';
 import type { ClassifierModel } from './classifier.ts';
-import { featuresOf, predict, type ClassifierOutcome } from './classifier.ts';
+import {
+  MIN_EXAMPLES_PER_CATEGORY,
+  featuresOf,
+  predict,
+  type ClassifierOutcome,
+} from './classifier.ts';
 import { matchProviderCategory, readProviderCategory, type ProviderMatch } from './pfc-map.ts';
 import { matchRule, orderRules, type MatchSubject, type RuleMatch } from './rules/match.ts';
 import {
@@ -129,7 +134,17 @@ export interface TierOutcome {
   readonly categoryKey?: string | null;
   readonly confidence?: number;
   readonly ruleId?: string | null;
+  /**
+   * The figures behind `detail`, as data (WP 11.1). Stored with the chain, so the
+   * Inbox's one-line "why" (`explanationLineOf`) is composed from what decided at
+   * the time — never re-derived, and never parsed back out of prose. Absent on
+   * chains stored before WP 11.1; the line falls back to `detail` for those.
+   */
+  readonly facts?: TierFacts;
 }
+
+/** Per-tier figures. Flat and JSON-safe: they live in `evidence` jsonb. */
+export type TierFacts = Readonly<Record<string, string | number | boolean | null>>;
 
 export interface Decision {
   readonly transactionId: string;
@@ -246,6 +261,7 @@ export function decide(input: DecisionInput, context: DecisionContext): Decision
       matchedRuleIds.length === 0
         ? `None of your ${context.rules.length} rule(s) matched.`
         : `${matchedRuleIds.length} rule(s) matched but none set a category.`,
+    facts: { rules: context.rules.length, matched: matchedRuleIds.length },
   });
 
   // --- tier 3: the merchant's default --------------------------------------
@@ -301,12 +317,14 @@ export function decide(input: DecisionInput, context: DecisionContext): Decision
       source: 'merchant_default',
       won: false,
       detail: `Only ${merchant.supportCount} earlier transaction(s) here; ${context.merchantSupportThreshold} are needed.`,
+      facts: { support: merchant.supportCount, needed: context.merchantSupportThreshold },
     });
   } else {
     chain.push({
       source: 'merchant_default',
       won: false,
       detail: 'No default set or learned for this merchant.',
+      facts: { support: 0, needed: context.merchantSupportThreshold },
     });
   }
 
@@ -340,15 +358,11 @@ export function decide(input: DecisionInput, context: DecisionContext): Decision
       input.providerCategory === null || input.providerCategory === undefined
         ? 'Your bank’s data service sent no category for this one.'
         : 'Your bank’s data service sent a category we do not recognise.',
+    facts: { sent: input.providerCategory !== null && input.providerCategory !== undefined },
   });
 
   // --- tier 5: the classifier ----------------------------------------------
-  const features = featuresOf({
-    cleanedPayee: input.cleanedPayee,
-    amountMinor: input.amountMinor,
-    accountType: input.accountType,
-    mcc: input.mcc,
-  });
+  const features = classifierFeaturesOf(input);
   const outcome: ClassifierOutcome = predict(context.classifier, features, context.confidenceFloor);
 
   if (outcome.kind === 'predicted' && isAssignableKey(outcome.categoryKey)) {
@@ -360,6 +374,14 @@ export function decide(input: DecisionInput, context: DecisionContext): Decision
         .join(', ')}.`,
       categoryKey: outcome.categoryKey,
       confidence: outcome.confidence,
+      facts: {
+        confidence: outcome.confidence,
+        floor: context.confidenceFloor,
+        payeeEvidence: outcome.payeeEvidence,
+        // Every feature that moved the answer, by name — WP 11.1's `mf:`, `p:`
+        // and `dm:` included — so the stored working says which ones did.
+        signals: outcome.topFeatures.map((contribution) => contribution.feature).join(' '),
+      },
     });
     return finish(
       input,
@@ -377,6 +399,17 @@ export function decide(input: DecisionInput, context: DecisionContext): Decision
     won: false,
     detail:
       outcome.kind === 'abstained' ? outcome.reason : 'predicted a category we do not recognise',
+    facts:
+      outcome.kind === 'abstained'
+        ? {
+            code: outcome.code,
+            confidence: outcome.confidence ?? null,
+            floor: context.confidenceFloor,
+            examples: outcome.examples ?? null,
+            examplesNeeded: MIN_EXAMPLES_PER_CATEGORY,
+            payeeEvidence: outcome.payeeEvidence ?? null,
+          }
+        : { code: 'unrecognised', confidence: null, floor: context.confidenceFloor },
   });
 
   // --- tier 6: say so ------------------------------------------------------
@@ -388,6 +421,28 @@ export function decide(input: DecisionInput, context: DecisionContext): Decision
     confidence: 0,
   });
   return finish(input, UNCATEGORISED_KEY, 'none', 0, null, chain, actions, deferredActions);
+}
+
+/**
+ * The classifier's features for one decision input — the **one** place the
+ * mapping from a transaction to its feature set lives.
+ *
+ * `decide` calls it for tier 5, `confirmAssignment` calls it (through
+ * `decisionInputOf`) when it counts a confirmation, and the gold-set replay
+ * (`eval/replay.ts`) calls it to train and to grade. Three callers, one
+ * function: a feature that training sees and prediction does not (or the
+ * other way round) is the quietest way to make a classifier worse, and it
+ * cannot happen if there is nothing to disagree about.
+ */
+export function classifierFeaturesOf(input: DecisionInput): readonly string[] {
+  return featuresOf({
+    cleanedPayee: input.cleanedPayee,
+    amountMinor: input.amountMinor,
+    accountType: input.accountType,
+    mcc: input.mcc,
+    providerPrimary: readProviderCategory(input.providerCategory)?.primary ?? null,
+    date: input.date,
+  });
 }
 
 function finish(

@@ -109,7 +109,7 @@ import {
   type RegisteredConnector,
   type RunInvestmentFacts,
 } from '@ctx/connections';
-import { listCategories, type LedgerPort } from '@ctx/categorization';
+import { listCategories, listRuleCandidates, type LedgerPort } from '@ctx/categorization';
 import {
   getPeriod,
   listBudgets,
@@ -126,6 +126,7 @@ import type {
   AccountTaxTreatment,
   BudgetPort as InsightsBudgetPort,
   CashAccountType,
+  CategorizationPort as InsightsCategorizationPort,
   InsightsAccount,
   InsightsBudgetLine,
   InsightsBudgetPeriod,
@@ -1584,6 +1585,38 @@ export function createInsightsMarketDataPort(options: {
 // starting-balance day, and it writes nothing: no `projection_runs` row, no
 // `ProjectionCompleted`. A snapshot that caused a stored run would be a read
 // with a side effect no advisor asked for.
+
+/**
+ * `@ctx/insights`' `CategorizationPort` (WP 11.1): the merchants the holder
+ * keeps filing the same way by hand, for `categorization.rule_candidates`.
+ *
+ * `@ctx/categorization`'s `listRuleCandidates` over the same `LedgerPort`
+ * adapter the categorization routes use — so "a rule already files it" is
+ * answered by `decide` over the real rules and the real ledger rows, exactly
+ * as the sync path would answer it. Reads only; the threshold is the
+ * advisor's. The one translation is the name: categorization calls a
+ * category's slug its `key`, the snapshot calls it `category_slug`.
+ */
+export function createInsightsCategorizationPort(
+  database: Database,
+  clock: Clock,
+): InsightsCategorizationPort {
+  const ledger = createCategorizationLedgerPort(database, clock);
+  return {
+    async listRuleCandidates(input) {
+      const candidates = await listRuleCandidates(database, ledger, input.userId);
+      return candidates.map((candidate) => ({
+        merchantId: candidate.merchantId,
+        categoryId: candidate.categoryId,
+        categorySlug: candidate.categoryKey,
+        confirmations: candidate.confirmations,
+        transactionIds: candidate.transactionIds,
+        coveredByRule: candidate.coveredByRule,
+        lockedDefault: candidate.lockedDefault,
+      }));
+    },
+  };
+}
 
 /** `@ctx/insights`' `PlanningPort`, named through the exported `SnapshotPorts`. */
 type InsightsPlanningPort = NonNullable<InsightsSnapshotPorts['planning']>;

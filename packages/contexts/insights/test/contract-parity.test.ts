@@ -102,8 +102,10 @@ describe('contract parity', () => {
     // Strictly additive: the two scopes are the enum's last two members, in
     // the order they were appended, so every position a 1.3.0 reader relied
     // on is where it was.
-    expect(ADVISOR_SCOPES[ADVISOR_SCOPES.length - 2]).toBe('transactions.anomalies');
-    expect(ADVISOR_SCOPES[ADVISOR_SCOPES.length - 1]).toBe('fees.summary');
+    // Positions, not `length - n`: 1.7.0 appended one more member after them,
+    // and "where it was" is exactly what an append preserves.
+    expect(ADVISOR_SCOPES[16]).toBe('transactions.anomalies');
+    expect(ADVISOR_SCOPES[17]).toBe('fees.summary');
   });
 
   /**
@@ -142,9 +144,10 @@ describe('contract parity', () => {
 
     // An envelope field, not a scope: the wire enum is 1.4.0's, unchanged,
     // which is why there is no 0029-style migration beside this bump
-    // (`apps/api/test/phase3-registration.test.ts` tracks scopes only).
-    expect(ADVISOR_SCOPES).toHaveLength(18);
-    expect(ADVISOR_SCOPES[ADVISOR_SCOPES.length - 1]).toBe('fees.summary');
+    // (`apps/api/test/phase3-registration.test.ts` tracks scopes only). The
+    // first eighteen members are still 1.4.0's; 1.7.0 appended a nineteenth.
+    expect(ADVISOR_SCOPES.slice(0, 18)).toHaveLength(18);
+    expect(ADVISOR_SCOPES[17]).toBe('fees.summary');
   });
 
   /**
@@ -154,16 +157,9 @@ describe('contract parity', () => {
    * the app, never by an advisor, so every 1.5.0 request is a 1.6.0 request.
    * An envelope change, not a scope: no migration, the scope enum unchanged.
    */
-  it('the published schemas match the source at 1.6.0', () => {
-    expect(ADVISOR_ARTEFACT_VERSION).toBe('1.6.0');
-    for (const document of advisorSchemaDocuments()) {
-      const onDisk = JSON.parse(readContract('v1', document.file)) as Record<string, unknown>;
-      expect(onDisk['artefactVersion'], document.file).toBe('1.6.0');
-      expect(serialiseSchema(document.document), document.file).toBe(serialiseSchema(onDisk));
-    }
-    const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
-    expect(index['artefactVersion']).toBe('1.6.0');
-
+  it('the published schemas match the source at 1.6.0 (historical)', () => {
+    // Superseded by 1.7.0 below; kept as the record of what 1.6.0 added,
+    // checked against fields that are still present and unmoved.
     const request = JSON.parse(readContract('v1', 'request.schema.json')) as {
       properties: Record<string, Record<string, unknown>>;
     };
@@ -184,7 +180,72 @@ describe('contract parity', () => {
     ).items;
     expect(row.properties['slot']?.['pattern']).toBe('^e[1-9][0-9]?$');
     expect(row.required).not.toContain('slot');
-    expect(ADVISOR_SCOPES).toHaveLength(18);
+    // An envelope change: the first eighteen scope members are 1.4.0's.
+    expect(ADVISOR_SCOPES[17]).toBe('fees.summary');
+  });
+
+  /**
+   * WP 11.1's bump. `categorization.rule_candidates` — the rule-suggestion
+   * advisor's input — and its `rule_candidates` block land in the same change
+   * as migration 0054, which widens `snapshot_grants_scope_check` to match.
+   * Strictly additive over 1.6.0: the scope is appended as the enum's
+   * nineteenth member and the block is an optional snapshot property, so
+   * every 1.6.0 request is a 1.7.0 request.
+   */
+  it('the published schemas match the source at 1.7.0', () => {
+    expect(ADVISOR_ARTEFACT_VERSION).toBe('1.7.0');
+    for (const document of advisorSchemaDocuments()) {
+      const onDisk = JSON.parse(readContract('v1', document.file)) as Record<string, unknown>;
+      expect(onDisk['artefactVersion'], document.file).toBe('1.7.0');
+      expect(serialiseSchema(document.document), document.file).toBe(serialiseSchema(onDisk));
+    }
+    const index = JSON.parse(readContract('advisor.schema.json')) as Record<string, unknown>;
+    expect(index['artefactVersion']).toBe('1.7.0');
+
+    expect(ADVISOR_SCOPES).toHaveLength(19);
+    expect(ADVISOR_SCOPES[18]).toBe('categorization.rule_candidates');
+
+    const request = JSON.parse(readContract('v1', 'request.schema.json')) as {
+      properties: {
+        snapshot: {
+          properties: Record<string, Record<string, unknown>>;
+          required?: readonly string[];
+        };
+      };
+    };
+    const snapshot = request.properties.snapshot;
+    expect(snapshot.required ?? []).not.toContain('rule_candidates');
+    const block = snapshot.properties['rule_candidates'] as {
+      additionalProperties: boolean;
+      properties: {
+        merchants: {
+          maxItems: number;
+          items: {
+            additionalProperties: boolean;
+            required: readonly string[];
+            properties: Record<string, Record<string, unknown>>;
+          };
+        };
+      };
+    };
+    expect(block.additionalProperties).toBe(false);
+    expect(block.properties.merchants.maxItems).toBe(64);
+    const row = block.properties.merchants.items;
+    expect(row.additionalProperties).toBe(false);
+    expect([...row.required].sort()).toEqual(
+      [
+        'category_ref',
+        'category_slug',
+        'confirmations',
+        'covered_by_rule',
+        'locked_default',
+        'merchant_ref',
+        'transactions',
+      ].sort(),
+    );
+    expect(row.properties['transactions']?.['maxItems']).toBe(8);
+    // No amount, no date, no name: the block's whole minimisation, readable off the file.
+    expect(Object.keys(row.properties).sort()).toEqual([...row.required].sort());
   });
 
   it('the bundle index names the three documents and the wire major', () => {

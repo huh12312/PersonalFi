@@ -65,6 +65,11 @@ export const ADVISOR_SCOPES = [
   // the same commit as this bump, the rule 05 §4 states as non-negotiable.
   'transactions.anomalies',
   'fees.summary',
+  // WP 11.1, advisor contract 1.7.0. The rule-suggestion advisor's input
+  // (11 §3.1: "a count, not a model"). Appended for the reason every member
+  // above was: the published enum is positional. Migration 0054 widens
+  // `snapshot_grants_scope_check` in the same change.
+  'categorization.rule_candidates',
 ] as const;
 
 export type AdvisorScope = (typeof ADVISOR_SCOPES)[number];
@@ -352,6 +357,38 @@ export const SCOPE_CATALOGUE: readonly ScopeDefinition[] = Object.freeze([
     requiresPerRunConsent: false,
     minimisation: minimisation({}),
     // WP 5.7: `#feesSummary`, over `LedgerPort.listTransactions`.
+    sourcedInPhase2: true,
+  }),
+  Object.freeze({
+    // WP 11.1, advisor contract 1.7.0. The merchants the holder keeps filing
+    // the same way by hand — the facts behind `builtin.spending.rule_suggestion`
+    // ("you have filed this merchant under pets three times; make it a
+    // rule?"). `@ctx/categorization`'s `listRuleCandidates` reads them and
+    // decides nothing: the threshold is the advisor's, so a pair below it
+    // still crosses and the advisor's own test sees it refused.
+    //
+    // Low in sensitivity — a count, a category and a merchant pseudonym, no
+    // amount and no date — and still `externalAllowed: false`: what it is for
+    // is prefilling the app's own rule editor, which needs the transaction
+    // ids an in-process advisor holds and an external one never should, and
+    // nothing an external advisor could do with a confirmation count is worth
+    // a row-level reference crossing the boundary.
+    scope: 'categorization.rule_candidates',
+    sensitivity: 4,
+    key: 'rule_candidates',
+    yields:
+      'One row per (merchant, category) pair the holder has confirmed by hand at least twice: ' +
+      'the tokenised merchant, the category ref and slug, how many confirmations, whether an ' +
+      'enabled rule already files that merchant, whether its category is locked, and refs to ' +
+      'the newest confirmed transactions behind the count (at most eight).',
+    drops:
+      'Every amount, date, descriptor and account: a confirmed transaction crosses as a ref and ' +
+      'nothing else. Merchant names are tokenised; the rule conditions behind ' +
+      '`covered_by_rule` never cross — only the verdict.',
+    externalAllowed: false,
+    requiresPerRunConsent: false,
+    minimisation: minimisation({}),
+    // WP 11.1: `#ruleCandidates`, over `CategorizationPort.listRuleCandidates`.
     sourcedInPhase2: true,
   }),
   Object.freeze({

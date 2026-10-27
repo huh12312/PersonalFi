@@ -119,10 +119,15 @@ export {
   COLD_MODEL,
   MIN_EXAMPLES_PER_CATEGORY,
   MIN_MARGIN,
+  CONTEXT_ONLY_CEILING,
+  PAYEE_MARGIN_SCALE,
   amountBucket,
+  confidenceFromMargin,
+  dayOfMonthBucket,
   featuresOf,
   predict,
   train,
+  type AbstainCode,
   type ClassifierModel,
   type ClassifierOutcome,
   type TrainingExample,
@@ -132,6 +137,7 @@ export {
 export {
   DEFAULT_CONFIDENCE_FLOOR,
   DEFAULT_MERCHANT_SUPPORT,
+  classifierFeaturesOf,
   decide,
   precedenceOf,
   shouldReplace,
@@ -140,8 +146,46 @@ export {
   type DecisionContext,
   type DecisionInput,
   type MerchantDefault,
+  type TierFacts,
   type TierOutcome,
 } from './engine.ts';
+
+// --- the gold-set replay (WP 11.1) ------------------------------------------
+export {
+  EVAL_SCHEMA,
+  GRADED_TIERS,
+  formatReplayReport,
+  replayGoldSet,
+  withoutExamples,
+  type ConfusionPair,
+  type GoldExample,
+  type GradedTier,
+  type Holdout,
+  type IsolatedTierFigures,
+  type OverallFigures,
+  type ReplayOptions,
+  type ReplayReport,
+  type WaterfallTierFigures,
+} from './eval/replay.ts';
+export { loadGoldSet, type LoadedGoldSet } from './eval/load.ts';
+
+// --- the Inbox's one-line "why", read from the stored working (WP 11.1) -----
+export {
+  MAX_EXPLAIN_BATCH,
+  explainTransactions,
+  type StoredTierView,
+  type TransactionExplanation,
+} from './explain.ts';
+export { explanationLineOf, percentText } from './explain-line.ts';
+
+// --- "make this a rule?" — the facts behind the suggestion (WP 11.1) --------
+export {
+  MAX_CANDIDATE_TRANSACTIONS,
+  MAX_RULE_CANDIDATES,
+  MIN_REPORTED_CONFIRMATIONS,
+  listRuleCandidates,
+  type RuleCandidate,
+} from './rule-candidates.ts';
 
 // --- the port this context reads the ledger through ------------------------
 export {

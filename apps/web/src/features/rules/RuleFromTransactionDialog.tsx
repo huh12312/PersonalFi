@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { useState } from 'react';
+import type { ComponentProps } from 'react';
 
 import type { RuleApplyResult, TransactionDetail } from '../../api/generated/types.gen.ts';
 import { Button } from '../../components/ui/button.tsx';
@@ -22,6 +23,15 @@ export interface RuleFromTransactionDialogProps {
   transaction: TransactionDetail;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * WP 11.1: the category the picker starts on (a rule suggestion's own category), instead of the transaction's
+   * current one. Only a starting value: the holder can change it, and nothing is created until they press Preview.
+   */
+  initialCategoryId?: string | null;
+  /** WP 11.1: called once the rule exists (`POST /transactions/{id}/rule` succeeded), before any apply. */
+  onRuleCreated?: (ruleId: string) => void;
+  /** Where focus goes when the dialog closes (Base UI's `finalFocus`); default: back to what opened it. */
+  finalFocus?: ComponentProps<typeof DialogContent>['finalFocus'];
 }
 
 type Stage = { kind: 'draft' } | { kind: 'previewed'; ruleId: string; result: RuleApplyResult };
@@ -39,9 +49,14 @@ export function RuleFromTransactionDialog({
   transaction,
   open,
   onOpenChange,
+  initialCategoryId,
+  onRuleCreated,
+  finalFocus,
 }: RuleFromTransactionDialogProps) {
   const { byId } = useCategories();
-  const [categoryId, setCategoryId] = useState<string | null>(transaction.categoryId);
+  const startingCategoryId =
+    initialCategoryId === undefined ? transaction.categoryId : initialCategoryId;
+  const [categoryId, setCategoryId] = useState<string | null>(startingCategoryId);
   const [stage, setStage] = useState<Stage>({ kind: 'draft' });
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +67,7 @@ export function RuleFromTransactionDialog({
   function reset(): void {
     setStage({ kind: 'draft' });
     setError(null);
-    setCategoryId(transaction.categoryId);
+    setCategoryId(startingCategoryId);
   }
 
   async function handlePreview(): Promise<void> {
@@ -70,6 +85,7 @@ export function RuleFromTransactionDialog({
           name: `${transaction.merchantName ?? transaction.name} → ${category.label}`,
         },
       });
+      onRuleCreated?.(created.rule.id);
       const preview = await previewRule.mutateAsync({
         body: { ruleId: created.rule.id, retroactive: true },
       });
@@ -99,7 +115,10 @@ export function RuleFromTransactionDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent aria-describedby={undefined}>
+      <DialogContent
+        aria-describedby={undefined}
+        {...(finalFocus === undefined ? {} : { finalFocus })}
+      >
         <DialogTitle>Always categorize like this</DialogTitle>
         <DialogDescription>
           Every future transaction from {transaction.merchantName ?? transaction.name} will be

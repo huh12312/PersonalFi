@@ -879,3 +879,18 @@ export {
   type ResolvedProbeModel,
   type WorkerHandoff,
 } from './control-checks/runner.ts';
+
+// WP 11.1 — the rule-suggestion advisor (advisor contract 1.7.0, migration
+// 0054). Its own labelled block, appended, for the reason the WP 5.7 block
+// gives: two packages editing this file never collide on the same lines.
+export { RuleCandidatesSchema } from './contract/snapshot.ts';
+export {
+  inMemoryCategorizationPort,
+  type CategorizationPort,
+  type InsightsRuleCandidate,
+} from './snapshot/ports.ts';
+export {
+  RULE_SUGGESTION_ADVISOR_ID,
+  RULE_SUGGESTION_MIN_CONFIRMATIONS,
+  spendingRuleSuggestion,
+} from './advisors/builtin/rule-suggestion/index.ts';
