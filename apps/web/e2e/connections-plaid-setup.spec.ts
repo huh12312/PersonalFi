@@ -131,20 +131,45 @@ async function login(page: Page): Promise<void> {
 const activeId = (page: Page): Promise<string> =>
   page.evaluate(() => document.activeElement?.id ?? '');
 
-/** Tab until the focused element satisfies `test`; fails with where focus ended up. */
+/**
+ * Tab until the focused element satisfies `matches`; fails with where focus went. Two things seen in
+ * CI and locally shape it: the dialog's initial focus may already sit on the element wanted (so the
+ * check runs before the first press), and a focus move can land a beat after the key (the dialog's
+ * focus guards redirect asynchronously), so each press is followed by a short settle poll rather than
+ * one synchronous read.
+ */
 async function tabUntil(
   page: Page,
   describe: string,
   matches: () => Promise<boolean>,
   max = 14,
 ): Promise<void> {
+  const settled = async (): Promise<boolean> => {
+    for (let i = 0; i < 5; i += 1) {
+      if (await matches()) return true;
+      await page.waitForTimeout(40);
+    }
+    return false;
+  };
+  if (await settled()) return;
+  const trail: string[] = [];
   for (let n = 0; n < max; n += 1) {
     await page.keyboard.press('Tab');
-    if (await matches()) return;
+    if (await settled()) return;
+    trail.push(
+      await page.evaluate(() => {
+        const el = document.activeElement;
+        if (el === null || el === document.body) return 'body';
+        const role = el.getAttribute('role') ?? el.tagName.toLowerCase();
+        const name = (el.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 30);
+        return `${role}:${name}`;
+      }),
+    );
   }
-  throw new Error(`never reached ${describe} in ${String(max)} Tab presses`);
+  throw new Error(
+    `never reached ${describe} in ${String(max)} Tab presses; focus went: ${trail.join(' → ')}`,
+  );
 }
-
 test('a holder sets up Plaid from the Add connection dialog by keyboard, passes step-up, and the Link flow appears without a reload', async ({
   page,
 }) => {
@@ -172,6 +197,9 @@ test('a holder sets up Plaid from the Add connection dialog by keyboard, passes 
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('dialog', { name: 'Add a connection' });
   await expect(dialog).toBeVisible();
+  // The dialog is visible while its connectors are still loading, and the tab list only exists once
+  // they have arrived; Tab presses before that never reach it (a flake seen in CI and locally).
+  await expect(dialog.getByRole('tablist')).toBeVisible();
 
   // --- to the Plaid tab: Tab to the tab list, ArrowRight, Enter ----------------------------------
   await tabUntil(

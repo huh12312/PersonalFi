@@ -16,8 +16,13 @@
  *   1. the job's own `database.transaction` calls, counted by a spy wrapped
  *      around the real Drizzle handle — how many are open right now;
  *   2. Postgres itself: `pg_stat_activity` for this database, read on another
- *      pooled connection — any backend with an open transaction
- *      (`xact_start IS NOT NULL`) other than the one asking.
+ *      pooled connection — any backend other than the one asking that is
+ *      sitting in an open transaction (`state` idle in transaction, which is
+ *      what a transaction held across the engine's await looks like). A
+ *      backend that is merely `active` is inside the implicit transaction of
+ *      one statement — a pooled connection mid-query at the sampling instant —
+ *      and is not a held transaction; counting it made this test flake (CI
+ *      2026-10-28, `postgres: 1` with the spy at 0).
  *
  * Both must read zero for the deterministic engine and for the Monte Carlo
  * runner. Then the run, its bands and `ProjectionCompleted` must still have
@@ -135,11 +140,12 @@ describe.skipIf(NO_DATABASE)('planning.projection_refresh and its transactions (
     ]);
   });
 
-  /** Backends of this database with an open transaction, other than the one asking. */
+  /** Backends of this database holding a transaction open (idle in it), other than the one asking. */
   async function transactionsOpenInPostgres(): Promise<number> {
     const result = await database.db.execute<{ n: string }>(sql`
       SELECT count(*)::text AS n FROM pg_stat_activity
        WHERE datname = current_database() AND pid <> pg_backend_pid() AND xact_start IS NOT NULL
+         AND state IN ('idle in transaction', 'idle in transaction (aborted)')
     `);
     return Number(result.rows[0]?.n ?? '-1');
   }
