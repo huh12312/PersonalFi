@@ -18,6 +18,11 @@ import { resolveMerchantIdentity } from './normalise.ts';
 const SELECT_CHUNK = 900;
 const INSERT_CHUNK = 400;
 
+/** A locale-free total order on keys (`normalized_key` is `[a-z0-9]+`, so code points suffice). */
+function byCodePoint(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /** What the write path knows about one payee it wants a row for. */
 export interface WantedMerchant {
   readonly display: string;
@@ -48,7 +53,18 @@ export async function ensureMerchants(
   const resolved = new Map<string, string>();
   if (wanted.size === 0) return resolved;
 
-  const keys = [...wanted.keys()];
+  // One global key order for every write below. Two syncs for one holder
+  // (eight connections on the nightly chain; two providers for one payee) can
+  // be resolving overlapping keys at the same moment, each inside its own
+  // transaction. A multi-row `INSERT … ON CONFLICT DO NOTHING` takes the unique
+  // index's locks in the order of its VALUES, and a per-key UPDATE takes its
+  // row lock as it goes; with the keys in two different orders each side ends
+  // up holding what the other wants — Postgres `40P01`, "deadlock detected",
+  // which the sync records as `INTERNAL` and never retries (CI 2026-10-28, the
+  // nightly chain's first sync). Sorted, every writer takes the same locks in
+  // the same order and one simply waits for the other.
+  // `merchant-store-order.test.ts` runs the two orders concurrently.
+  const keys = [...wanted.keys()].sort(byCodePoint);
   await lookup(executor, userId, keys, resolved);
 
   const missing = keys.filter((key) => !resolved.has(key));
@@ -95,8 +111,9 @@ async function recordEntityIds(
   wanted: ReadonlyMap<string, WantedMerchant>,
   now: Date,
 ): Promise<void> {
-  for (const [key, entry] of wanted) {
-    if (entry.entityIds.length === 0) continue;
+  for (const key of [...wanted.keys()].sort(byCodePoint)) {
+    const entry = wanted.get(key);
+    if (entry === undefined || entry.entityIds.length === 0) continue;
     const json = JSON.stringify([...entry.entityIds]);
     await executor.execute(sql`
       UPDATE merchants
