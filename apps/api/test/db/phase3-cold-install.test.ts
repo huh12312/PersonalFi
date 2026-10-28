@@ -196,16 +196,18 @@ describe.skipIf(NO_DATABASE)(
       const advisorsResponse = await h.request({ method: 'GET', url: '/advisors', session });
       expectStatus(advisorsResponse, 200);
       const advisors = (advisorsResponse.json() as { advisors: WireAdvisor[] }).advisors;
-      // The catalogue, plus the three query types registered beside it and never in the
-      // nightly registry: WP 11.2's categorize.suggest (off), WP 11.3's insight.explain (on)
-      // and WP 11.4's brief.narrate (on).
-      expect(advisors).toHaveLength(BUILTIN_CATALOGUE.length + 3);
+      // The catalogue, plus the five query types registered beside it and never in the
+      // nightly registry: WP 11.2's categorize.suggest (off), WP 11.3's insight.explain (on),
+      // WP 11.4's brief.narrate (on) and WP 11.5c's ask.compile and ask.narrate (on).
+      expect(advisors).toHaveLength(BUILTIN_CATALOGUE.length + 5);
       expect(new Set(advisors.map((a) => a.advisorId))).toEqual(
         new Set([
           ...BUILTIN_CATALOGUE.map((entry) => entry.advisor.manifest.advisor_id),
           'categorize.suggest',
           'insight.explain',
           'brief.narrate',
+          'ask.compile',
+          'ask.narrate',
         ]),
       );
 

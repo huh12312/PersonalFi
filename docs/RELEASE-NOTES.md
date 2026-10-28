@@ -9,6 +9,51 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.23: Ask PersonalFi
+
+**Status:** a patch release on v0.9.22 (if an earlier v0.9.x has not been tagged when this is, tag
+them in order). The tag `v0.9.23` is pushed by the maintainer once CI is green. Package 11.5c of the
+Phase 11 programme (12 §6): Ask PersonalFi in reporting mode.
+
+### Upgrading to v0.9.23
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0060_ask_sessions` (expand-only: one new table; nothing existing is touched).
+
+### Manual steps
+
+None for the upgrade. To ask, approve both `ask.compile` and `ask.narrate` once in Advisors (`/ask`
+says so until you do) ([RUNBOOK](../RUNBOOK.md#ask-personalfi-v0923)).
+
+### What changed
+
+- **`/ask`.** Type a question about your own figures; a language model turns it into at most four
+  calls from the advisor's catalogue, the app runs them, and a second call words the results in at
+  most four sentences, badged with the provider and model and "AI-assisted wording". Under every
+  answer, the app's own "I looked at: …" line, each item expandable to its figures. A history of
+  your questions sits beside it.
+- **The model is a compiler, not an oracle.** It never reads the ledger: the compiler sees the
+  question, the date and the functions you have granted; the wording sees the results' figures.
+  A call to a function not in your listing, arguments its schema refuses, a figure outside the
+  results, a function it was not given or a citation of a page never sent (every playbook page is
+  still a draft) is refused by name, and the arithmetic is shown without the prose.
+- **Refusals by name.** An instruction to the model or a merchant reference in the question is
+  refused, and security picks, timing, tax filing, insurance, estate questions and requests to move
+  money get the nearest screen — both without asking any model. A question no function computes
+  gets "I can't compute that yet" and the nearest screen.
+- **Two query types, each approved on its own** in Advisor management, under the narrator's provider
+  and consent; the consent text for each (what leaves the machine for a hosted provider) is
+  versioned and part of the approval.
+- **The controls self-test gains a fifteenth check, `ask_grounding`.**
+- **Evaluation.** `node scripts/advisor-eval.ts --ask` measures the compiler on a 64-question golden
+  set: precision and recall per catalogue function.
+- **API.** `GET /ask`, `POST /ask` (202 while the worker answers; 200 for a question answered by the
+  pre-check), `GET /ask/{sessionId}`; `insights.ask` runs in the worker only.
+
 ## v0.9.22: the advisor's catalogue
 
 **Status:** a patch release on v0.9.21 (if an earlier v0.9.x has not been tagged when this is, tag

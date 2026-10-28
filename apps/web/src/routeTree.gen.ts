@@ -16,6 +16,7 @@ import { Route as RegisterRouteImport } from './routes/register'
 import { Route as UnlockRouteImport } from './routes/unlock'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
 import { Route as AppAccountsRouteImport } from './routes/_app.accounts'
+import { Route as AppAskRouteImport } from './routes/_app.ask'
 import { Route as AppBriefRouteImport } from './routes/_app.brief'
 import { Route as AppBudgetRouteImport } from './routes/_app.budget'
 import { Route as AppCashFlowRouteImport } from './routes/_app.cash-flow'
@@ -70,6 +71,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppAccountsRoute = AppAccountsRouteImport.update({
   id: '/accounts',
   path: '/accounts',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAskRoute = AppAskRouteImport.update({
+  id: '/ask',
+  path: '/ask',
   getParentRoute: () => AppRoute,
 } as any)
 const AppBriefRoute = AppBriefRouteImport.update({
@@ -185,6 +191,7 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/unlock': typeof UnlockRoute
   '/accounts': typeof AppAccountsRouteWithChildren
+  '/ask': typeof AppAskRoute
   '/brief': typeof AppBriefRoute
   '/budget': typeof AppBudgetRoute
   '/cash-flow': typeof AppCashFlowRoute
@@ -212,6 +219,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/unlock': typeof UnlockRoute
+  '/ask': typeof AppAskRoute
   '/brief': typeof AppBriefRoute
   '/budget': typeof AppBudgetRoute
   '/cash-flow': typeof AppCashFlowRoute
@@ -242,6 +250,7 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/unlock': typeof UnlockRoute
   '/_app/accounts': typeof AppAccountsRouteWithChildren
+  '/_app/ask': typeof AppAskRoute
   '/_app/brief': typeof AppBriefRoute
   '/_app/budget': typeof AppBudgetRoute
   '/_app/cash-flow': typeof AppCashFlowRoute
@@ -274,6 +283,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/unlock'
     | '/accounts'
+    | '/ask'
     | '/brief'
     | '/budget'
     | '/cash-flow'
@@ -301,6 +311,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/unlock'
+    | '/ask'
     | '/brief'
     | '/budget'
     | '/cash-flow'
@@ -330,6 +341,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/unlock'
     | '/_app/accounts'
+    | '/_app/ask'
     | '/_app/brief'
     | '/_app/budget'
     | '/_app/cash-flow'
@@ -412,6 +424,13 @@ declare module '@tanstack/react-router' {
       path: '/accounts'
       fullPath: '/accounts'
       preLoaderRoute: typeof AppAccountsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/ask': {
+      id: '/_app/ask'
+      path: '/ask'
+      fullPath: '/ask'
+      preLoaderRoute: typeof AppAskRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/brief': {
@@ -596,6 +615,7 @@ const AppHealthRouteWithChildren = AppHealthRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAccountsRoute: typeof AppAccountsRouteWithChildren
+  AppAskRoute: typeof AppAskRoute
   AppBriefRoute: typeof AppBriefRoute
   AppBudgetRoute: typeof AppBudgetRoute
   AppCashFlowRoute: typeof AppCashFlowRoute
@@ -616,6 +636,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAccountsRoute: AppAccountsRouteWithChildren,
+  AppAskRoute: AppAskRoute,
   AppBriefRoute: AppBriefRoute,
   AppBudgetRoute: AppBudgetRoute,
   AppCashFlowRoute: AppCashFlowRoute,

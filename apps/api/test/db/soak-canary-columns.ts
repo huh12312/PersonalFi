@@ -136,3 +136,14 @@ export const NOT_FREE_TEXT: Readonly<Record<string, string>> = {
   'security_events.outcome': 'the outcome enum',
   'security_events.user_agent_hash': 'a hash of the user agent, not the string',
 };
+
+/**
+ * Tables the soak report does **not** read, named so the decision is visible (WP 11.5c). A table here holds
+ * free text a holder typed or a model wrote, so the day the report's SQL reads one of them,
+ * `soak-canary-coverage.test.ts` fails until each of its text columns is classified SEEDED (and seeded) or
+ * NOT_FREE_TEXT above — and the table moves out of this list.
+ */
+export const NOT_READ_BY_THE_REPORT: Readonly<Record<string, string>> = {
+  ask_sessions:
+    "Ask PersonalFi's question log (WP 11.5c): question and narration_text are free text (the holder's question, a model's wording); the weekly report counts none of it.",
+};

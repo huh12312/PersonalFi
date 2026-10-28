@@ -614,6 +614,14 @@ describeWithDb('runMigrations', () => {
       //   cancelled; narration_text and recap_text set together exactly when shown; refusal exactly when refused).
       //   Expand-only; references users and advisory_briefs (the composite user-scoped key). Not exported
       //   (registry.ts exempts it).
+      // 0060_ask_sessions (WP 11.5c): one new @ctx/insights table, ask_sessions (Ask PersonalFi, reporting
+      //   mode: one row per question -- question <= 500 chars, status compiling | running | narrating |
+      //   shown | refused | unanswerable | failed | cancelled, finished_at set exactly when not in flight,
+      //   compiled_calls and results JSONB arrays of at most four, narration_text <= 900 chars exactly when
+      //   shown, refusal (question.* | compile.* | narrate.*) exactly when refused, unanswerable_reason with
+      //   nearest_screen exactly when unanswerable, error_code exactly when failed or cancelled, the two
+      //   step runs each claimed whole with its input digest, llm_provider with llm_model). Expand-only;
+      //   references only users. Not exported (registry.ts exempts it).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -634,6 +642,7 @@ describeWithDb('runMigrations', () => {
         'advisory_brief_items',
         'advisory_briefs',
         'allocation_targets',
+        'ask_sessions',
         'auth_attempts',
         'auth_lockouts',
         'basis_method_elections',

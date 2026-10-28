@@ -18,7 +18,7 @@
 import { SOAK_QUERIES } from '../../../../scripts/soak/report.ts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApiHarness, NO_DATABASE, type ApiHarness } from '../helpers/api-harness.ts';
-import { NOT_FREE_TEXT, SEEDED } from './soak-canary-columns.ts';
+import { NOT_FREE_TEXT, NOT_READ_BY_THE_REPORT, SEEDED } from './soak-canary-columns.ts';
 
 /** `FROM x` / `JOIN x` names that are real tables (CTE names are the queries' own). */
 function tablesReadBy(sql: string): Set<string> {
@@ -90,6 +90,21 @@ describe.skipIf(NO_DATABASE)(
         (column) => !exists.has(column),
       );
       expect(stale, 'classified columns that no longer exist').toEqual([]);
+    });
+
+    it('a table named as not read by the report exists, is not read by it, and says why (WP 11.5c)', async () => {
+      const result = await h.database.pool.query<{ table_name: string }>(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
+      );
+      const exists = new Set(result.rows.map((row) => row.table_name));
+      for (const [table, reason] of Object.entries(NOT_READ_BY_THE_REPORT)) {
+        expect(exists.has(table), table).toBe(true);
+        expect(
+          referenced.has(table),
+          `${table} is read by the soak report now: classify its columns and drop it from NOT_READ_BY_THE_REPORT`,
+        ).toBe(false);
+        expect(reason.length, table).toBeGreaterThanOrEqual(12);
+      }
     });
 
     it('every NOT_FREE_TEXT entry carries a reason', () => {

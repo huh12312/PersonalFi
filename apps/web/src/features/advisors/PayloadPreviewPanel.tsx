@@ -162,6 +162,8 @@ export function PayloadPreviewPanel({ advisorId }: PayloadPreviewPanelProps) {
   if (preview === undefined) return null;
 
   const messages = preview.prompt !== null ? parseMessages(preview.prompt.text) : null;
+  // An ask or explain request carries the consent text the holder's approval covers (`request.consent`).
+  const consent = 'consent' in preview.request ? preview.request.consent : undefined;
   const byteLength =
     preview.prompt !== null ? new TextEncoder().encode(preview.prompt.text).length : null;
 
@@ -183,6 +185,27 @@ export function PayloadPreviewPanel({ advisorId }: PayloadPreviewPanelProps) {
           </>
         )}
       </dl>
+
+      {consent !== undefined && (
+        <section
+          aria-label="What leaves this machine"
+          className="rounded-md border border-border-hairline bg-bg-subtle p-3"
+          data-testid="payload-consent"
+        >
+          <p className="text-caption font-semibold uppercase tracking-wide text-text-muted">
+            What leaves this machine
+          </p>
+          <p
+            className="mt-1 text-small whitespace-pre-line text-text-primary"
+            data-testid="payload-consent-text"
+          >
+            {consent.text}
+          </p>
+          <p className="mt-1 text-caption text-text-muted [overflow-wrap:anywhere]">
+            Consent wording {consent.version}, sha256 {consent.sha256}
+          </p>
+        </section>
+      )}
 
       {preview.prompt !== null ? (
         messages !== null ? (

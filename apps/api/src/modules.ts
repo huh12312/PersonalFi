@@ -50,6 +50,7 @@ import {
   createBriefNarrationEnqueue,
   type BriefNarrateRuntime,
 } from './brief-narration.ts';
+import { askProbeFor, createAskJob, type AskRuntime } from './ask.ts';
 import type { LocalModelPin } from '@core/config';
 import {
   createNarratorWiring,
@@ -103,6 +104,8 @@ import {
   CATEGORY_SUGGEST_MANIFEST,
   INSIGHT_EXPLAIN_MANIFEST,
   BRIEF_NARRATE_MANIFEST,
+  ASK_COMPILE_MANIFEST,
+  ASK_NARRATE_MANIFEST,
   INSIGHTS_EVENTS,
   NARRATOR_MANIFEST,
   type InsightsDatabase,
@@ -282,6 +285,14 @@ export interface ModuleWiringOptions {
     readonly runtime: BriefNarrateRuntime;
     readonly textShown: boolean;
   };
+  /**
+   * WP 11.5c: Ask PersonalFi — the worker's run-mode runtime (`ask.ts`, the
+   * narrator's provider). Present (and an advisor token secret configured):
+   * the `insights.ask` job is registered and the self-test probes
+   * `ask_grounding`. Absent (the api): nothing runs here; the api only writes
+   * the session and enqueues.
+   */
+  readonly ask?: { readonly runtime: AskRuntime };
   /**
    * The account holder these modules are being built for — the same id
    * `resolveModules(platform, userId, …)` is called with.
@@ -551,6 +562,16 @@ export async function registerBuiltinAdvisors(
     { userId: context.userId, clock: context.clock, correlationId: context.correlationId },
     { manifest: BRIEF_NARRATE_MANIFEST, enabled: true },
   );
+  // WP 11.5c: Ask PersonalFi's two rows, on — nothing is sent without both
+  // shapes approved and the narrator on; level 3's switches in Advisor
+  // management still turn either off. Not in the nightly registry.
+  for (const manifest of [ASK_COMPILE_MANIFEST, ASK_NARRATE_MANIFEST]) {
+    await registerAdvisor(
+      database,
+      { userId: context.userId, clock: context.clock, correlationId: context.correlationId },
+      { manifest, enabled: true },
+    );
+  }
 }
 
 export function appModules(options: ModuleWiringOptions): readonly ModuleRegistration[] {
@@ -1347,6 +1368,10 @@ function insightsModule(
                 : {
                     briefNarrateProbeFor: briefNarrateProbeFor(options.briefNarration.runtime),
                   }),
+              // WP 11.5c: `ask_grounding`, through the holder's Ask narration model.
+              ...(options.ask === undefined
+                ? {}
+                : { askProbeFor: askProbeFor(options.ask.runtime) }),
             }),
           ]),
       // WP 11.4: `insights.brief_narrate` — once per published Brief, never the api.
@@ -1358,6 +1383,20 @@ function insightsModule(
               runtime: options.briefNarration.runtime,
               switches: insightsRunSwitches(database, options),
               textShown: options.briefNarration.textShown,
+              clock,
+            }),
+          ]),
+      // WP 11.5c: `insights.ask` — compile → the catalogue calls → narrate, never the api.
+      ...(options.ask === undefined || options.advisorTokenSecret === undefined
+        ? []
+        : [
+            createAskJob({
+              database,
+              runtime: options.ask.runtime,
+              switches: insightsRunSwitches(database, options),
+              timeZone: options.timezone,
+              monteCarlo: options.monteCarlo ?? null,
+              tokenSecret: options.advisorTokenSecret,
               clock,
             }),
           ]),

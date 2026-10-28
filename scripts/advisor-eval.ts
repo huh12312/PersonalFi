@@ -56,6 +56,14 @@
  *   (`brief.narrate`, one call), judged by the production validator
  *   (`advisor-eval-brief-week.ts`; CI runs it over the Ollama fake).
  *
+ *     node --experimental-strip-types scripts/advisor-eval.ts --ask [--live \
+ *       --endpoint http://ollama:11434 --model <name> --digest sha256:<64 hex> --out <dir>/ask.jsonl]
+ *
+ *   WP 11.5c: Ask PersonalFi's compile golden set (`advisor-eval-ask.ts`):
+ *   precision and recall per catalogue function over the recorded replies
+ *   (replay, the default; CI runs it, and over the Ollama fake), or over the
+ *   pinned model with `--live`.
+ *
  * ## What it prints, and what it never prints
  *
  * Counts, step names, refusal reasons, durations and token counts. **Never a
@@ -80,6 +88,7 @@ import { resolveLimits } from '../packages/contexts/insights/src/contract/manife
 import type { AdvisorRequest } from '../packages/contexts/insights/src/contract/request.ts';
 import { evalCases } from './advisor-eval.fixtures.ts';
 import { BRIEF_CASE_TYPES, briefWeek } from './advisor-eval-brief-week.ts';
+import { askGoldenOverModel, formatAskReport, replayAskGolden } from './advisor-eval-ask.ts';
 
 /**
  * One finding per request — the production shape since WP 9.5 (C5-2:
@@ -596,8 +605,35 @@ async function briefWeekMode(args: Args): Promise<void> {
   );
 }
 
+/** `--ask` (WP 11.5c): the compile golden set, replayed or live. */
+async function askMode(args: Args): Promise<void> {
+  if (!args.flags.has('live')) {
+    const { report } = replayAskGolden();
+    console.log("ask: replay (recorded compile replies, today's validator)");
+    for (const line of formatAskReport(report)) console.log(line);
+    return;
+  }
+  const endpoint = args.values.get('endpoint');
+  const model = args.values.get('model');
+  const digest = args.values.get('digest');
+  if (endpoint === undefined || model === undefined || digest === undefined) {
+    throw new Error('--ask --live needs --endpoint, --model and --digest');
+  }
+  const out = args.values.get('out');
+  const { report, calls } = await askGoldenOverModel({
+    endpoint,
+    model,
+    digest,
+    timeoutMs: Number(args.values.get('timeout-ms') ?? '180000'),
+    ...(out === undefined ? {} : { out }),
+  });
+  console.log(`ask: live (${String(calls)} compile calls, first attempt only)`);
+  for (const line of formatAskReport(report)) console.log(line);
+}
+
 const args = parseArgs(process.argv.slice(2));
-if (args.flags.has('live')) await live(args);
+if (args.flags.has('ask')) await askMode(args);
+else if (args.flags.has('live')) await live(args);
 else if (args.flags.has('brief-week')) await briefWeekMode(args);
 else if (args.flags.has('brief')) await brief(args);
 else if (args.values.has('finalise')) await finalise(args);

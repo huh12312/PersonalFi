@@ -153,3 +153,15 @@ export {
   type BriefNarrationStatus,
   type NewBriefNarrationRow,
 } from './brief-narrations.ts';
+
+// WP 11.5c — Ask PersonalFi, reporting mode (migration 0060_ask_sessions.sql).
+export {
+  ASK_SESSION_IN_FLIGHT,
+  ASK_SESSION_STATUSES,
+  ASK_UNANSWERABLE_REASONS,
+  askSessions,
+  type AskSessionRow,
+  type AskSessionStatus,
+  type AskUnanswerableReason,
+  type NewAskSessionRow,
+} from './ask-sessions.ts';

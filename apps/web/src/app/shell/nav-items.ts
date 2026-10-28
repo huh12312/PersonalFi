@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Lightbulb,
   LineChart,
+  MessageCircleQuestion,
   PiggyBank,
   Receipt,
   Repeat,
@@ -36,6 +37,7 @@ export type NavPath =
   | '/plan'
   | '/goals'
   | '/insights'
+  | '/ask'
   | '/health'
   | '/brief'
   | '/settings';
@@ -58,6 +60,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard },
       { to: '/insights', label: 'Insights', icon: Lightbulb },
+      { to: '/ask', label: 'Ask', icon: MessageCircleQuestion },
       { to: '/health', label: 'Financial health', icon: HeartPulse },
       { to: '/brief', label: 'Brief', icon: CalendarClock },
     ],
@@ -98,6 +101,7 @@ export const BOTTOM_TABS: NavItem[] = [
 /** Everything not on the bottom bar, surfaced from the "More" sheet. */
 export const MORE_NAV_ITEMS: NavItem[] = [
   { to: '/inbox', label: 'Inbox', icon: Inbox },
+  { to: '/ask', label: 'Ask', icon: MessageCircleQuestion },
   { to: '/health', label: 'Financial health', icon: HeartPulse },
   { to: '/cash-flow', label: 'Cash flow', icon: Waves },
   { to: '/accounts', label: 'Accounts', icon: Landmark },

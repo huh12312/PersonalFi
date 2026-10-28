@@ -391,6 +391,10 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     "insights: a language model's wording of one published Brief and its weekly recap (WP 11.4), derived from the Brief and the model, not data the holder entered; a restore keeps the Brief's own deterministic opening and asks no model again.",
   ],
   [
+    'ask_sessions',
+    "insights: Ask PersonalFi's question log (WP 11.5c) — the holder's question, a language model's compiled calls and wording, and digests of results derived from data that is exported in its own right; each row points at advisor_runs, which is not carried either. A restore asks again under its own approval rather than replaying another install's model runs.",
+  ],
+  [
     'ops_control_checks',
     "insights: the GenAI controls self-test (WP 10.16), evidence that the narrator controls held on this install at a date; a restore proves them again on the new one rather than inheriting another deployment's proof.",
   ],

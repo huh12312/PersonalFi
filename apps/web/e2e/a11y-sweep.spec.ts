@@ -1241,7 +1241,7 @@ test.describe('WP 10.16 control checks and the controls on the backup line', () 
     await expect(section.getByTestId('control-checks-table')).toBeVisible();
     if (where === 'settings, running') {
       await expect(section.getByTestId('control-checks-progress')).toHaveText(
-        'Running control checks… 3 of 14 checks done.',
+        'Running control checks… 3 of 15 checks done.',
       );
       return;
     }
@@ -1665,6 +1665,118 @@ test.describe('WP 11.4 the Brief’s own wording', () => {
       await open(page, SHOWN_NARRATION);
       expect(await motionOffenders(page)).toEqual([]);
       await scanBothThemes(page, 'WP 11.4 /brief, shown, reduced motion');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7p. WP 11.5c: Ask PersonalFi — an answer shown, the arithmetic after a refusal, an out-of-scope question, a question going
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep's `/ask` is the default layer (ready, three earlier questions, none selected); this block picks
+ * each earlier question from the history so the screen is held with an answer (its "I looked at" item expanded), a
+ * draft refused at the narrate step (the arithmetic open), and an out-of-scope question with its link. Both themes at
+ * 1280 and 320 px, 200 % zoom with 1.4.12 text spacing, and reduced motion — with a question going (`Running the
+ * calculations…`), where nothing may animate.
+ */
+test.describe('WP 11.5c Ask PersonalFi', () => {
+  const STATES = [
+    ['shown', 0],
+    ['refused', 1],
+    ['unanswerable', 2],
+  ] as const;
+
+  async function open(page: Page, state: string, index: number): Promise<void> {
+    await installSweepMocks(page);
+    await visit(page, '/ask');
+    await hideDevtools(page);
+    await page.getByTestId('ask-history-item').nth(index).click();
+    await expect(page.getByTestId('ask-answer')).toHaveAttribute('data-state', state);
+    if (state === 'shown') {
+      const toggle = page.getByRole('button', { name: /Contribution room \(2026, IRA\)/u });
+      await toggle.click();
+      await expect(page.getByTestId('ask-figures')).toBeVisible();
+    }
+    await waitForAnimationsToDrain(page);
+  }
+
+  for (const [state, index] of STATES) {
+    test(`WP 11.5c /ask, ${state}: axe-clean in both themes, at 1280 and at 320 px`, async ({
+      page,
+    }) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await open(page, state, index);
+      await scanBothThemes(page, `WP 11.5c /ask, ${state}`);
+      await page.setViewportSize(REFLOW);
+      await page.waitForTimeout(600);
+      expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+      await scanBothThemes(page, `WP 11.5c /ask, ${state}, at 320 px`);
+    });
+  }
+
+  test('WP 11.5c /ask, unavailable: axe-clean in both themes, at 1280 and at 320 px', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await installSweepMocks(page, {
+      ask: {
+        availability: {
+          state: 'unavailable',
+          reason: 'payload_not_approved',
+          step: 'compile',
+          message:
+            'Ask PersonalFi cannot run yet: the payload for ask.compile has not been approved.',
+        },
+      },
+    });
+    await visit(page, '/ask');
+    await hideDevtools(page);
+    await expect(page.getByTestId('ask-unavailable')).toBeVisible();
+    await scanBothThemes(page, 'WP 11.5c /ask, unavailable');
+    await page.setViewportSize(REFLOW);
+    await page.waitForTimeout(600);
+    expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+    await scanBothThemes(page, 'WP 11.5c /ask, unavailable, at 320 px');
+  });
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    for (const [state, index] of STATES) {
+      test(`WP 11.5c /ask, ${state}: nothing is lost`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, state, index);
+        expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+        await scanBothThemes(page, `WP 11.5c /ask, ${state}, at 200 %`);
+        const before = new Set(await clippedTextElements(page));
+        await page.addStyleTag({ content: TEXT_SPACING });
+        await page.waitForTimeout(100);
+        const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+        expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+      });
+    }
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+    test('WP 11.5c /ask, a question going: nothing animates, and it is axe-clean', async ({
+      page,
+    }) => {
+      test.setTimeout(120_000);
+      await installSweepMocks(page, { ask: { hold: 'running' } });
+      await visit(page, '/ask');
+      await hideDevtools(page);
+      const box = page.getByLabel('Your question');
+      await box.fill('How much IRA contribution room is left this year?');
+      await box.press('Enter');
+      await expect(page.getByTestId('ask-live')).toContainText('Running the calculations…', {
+        timeout: 15_000,
+      });
+      await expect(page.getByTestId('ask-submit')).toHaveAttribute('aria-busy', 'true');
+      expect(await motionOffenders(page)).toEqual([]);
+      await scanBothThemes(page, 'WP 11.5c /ask, a question going, reduced motion');
     });
   });
 });

@@ -36,7 +36,7 @@ vi.mock('@simplewebauthn/browser', () => ({
 
 /**
  * WP 10.16: Settings › Language model › Control checks, against `control-checks-fixtures.ts` (the api's rules, with
- * real state): the cost said before the button, the passkey step-up for a run, the fourteen checks ticking over with a
+ * real state): the cost said before the button, the passkey step-up for a run, the fifteen checks ticking over with a
  * polite live region, the results table in words (never colour alone), the button unavailable until the api's
  * `nextAllowedAt`, the api's 409 in words, and every past run behind a disclosure.
  */
@@ -133,7 +133,7 @@ describe('control checks, in words', () => {
     );
     expect(providerModelWords('off', null)).toBe('Off (no model)');
     const run = pendingRun('r', ago(0));
-    expect(progressWords(run)).toBe('0 of 14 checks done.');
+    expect(progressWords(run)).toBe('0 of 15 checks done.');
     const now = new Date(2026, 9, 19, 14, 22);
     const later = new Date(2026, 9, 19, 14, 32).toISOString();
     expect(nextAllowedWords(later, now)).toBe('You can run the checks again at 14:32.');
@@ -177,7 +177,7 @@ describe('Settings › Language model › Control checks (WP 10.16)', () => {
     expect(columns.map((th) => th.textContent)).toEqual(['Check', 'Result', 'Facts', 'Duration']);
     for (const th of columns) expect(th).toHaveAttribute('scope', 'col');
     const rowHeaders = within(table).getAllByRole('rowheader');
-    expect(rowHeaders).toHaveLength(14);
+    expect(rowHeaders).toHaveLength(15);
     for (const th of rowHeaders) expect(th).toHaveAttribute('scope', 'row');
 
     const row = (id: string) => within(table).getByTestId(`control-check-${id}`);
@@ -230,7 +230,7 @@ describe('Settings › Language model › Control checks (WP 10.16)', () => {
       'sm:table-cell',
     );
     expect(screen.getByTestId('control-checks-summary')).toHaveTextContent(
-      /Result: Fail\. 9 passed, 1 failed, 1 skipped, 2 not applicable, 1 reported\./,
+      /Result: Fail\. 10 passed, 1 failed, 1 skipped, 2 not applicable, 1 reported\./,
     );
   });
 
@@ -248,7 +248,7 @@ describe('Settings › Language model › Control checks (WP 10.16)', () => {
     expect(resultOf('numerals_refusal')).toHaveTextContent(/^Running$/);
     expect(resultOf('schema_refusal')).toHaveTextContent(/^Pending$/);
     expect(screen.getByRole('status')).toHaveTextContent(
-      'Running control checks… 2 of 14 checks done.',
+      'Running control checks… 2 of 15 checks done.',
     );
     expect(screen.getByTestId('control-checks-run')).toHaveTextContent('Running control checks…');
     expect(screen.getByTestId('control-checks-run')).toHaveAttribute('aria-disabled', 'true');
@@ -274,7 +274,7 @@ describe('Settings › Language model › Control checks (WP 10.16)', () => {
     const live = screen.getByTestId('control-checks-progress');
     expect(live).toHaveAttribute('role', 'status');
     expect(live).toHaveAttribute('aria-live', 'polite');
-    await waitFor(() => expect(live).toHaveTextContent(/of 14 checks done\./));
+    await waitFor(() => expect(live).toHaveTextContent(/of 15 checks done\./));
     // Focus stays on the button: it is aria-disabled, never disabled.
     expect(button).toHaveAttribute('aria-disabled', 'true');
     expect(button).toHaveTextContent('Running control checks…');
@@ -287,7 +287,7 @@ describe('Settings › Language model › Control checks (WP 10.16)', () => {
       { timeout: 10_000 },
     );
     const table = screen.getByTestId('control-checks-table');
-    expect(within(table).getAllByRole('rowheader')).toHaveLength(14);
+    expect(within(table).getAllByRole('rowheader')).toHaveLength(15);
     expect(table.querySelectorAll('[data-status="pending"], [data-status="running"]')).toHaveLength(
       0,
     );
@@ -368,7 +368,7 @@ describe('Settings › Language model › Control checks (WP 10.16)', () => {
     expect(screen.queryByTestId(`control-checks-history-table-${older.id}`)).toBeNull();
     await user.click(summaries[2] as HTMLElement);
     const table = await screen.findByTestId(`control-checks-history-table-${older.id}`);
-    expect(within(table).getAllByRole('rowheader')).toHaveLength(14);
+    expect(within(table).getAllByRole('rowheader')).toHaveLength(15);
   });
 
   it('says the checks cannot be read, and offers no button, when the route fails', async () => {

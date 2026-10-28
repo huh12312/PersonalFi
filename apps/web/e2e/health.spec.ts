@@ -134,14 +134,18 @@ test.describe('WP 10.12 financial health', () => {
     await expect(page.getByTestId('health-hero')).toBeVisible();
   });
 
-  test('the nav lists Financial health under Overview, after Insights', async ({ page }) => {
+  test('the nav lists Financial health under Overview, after Insights and Ask', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await installSweepMocks(page);
     await visit(page, '/');
     const nav = page.getByRole('navigation').first();
     const labels = await nav.getByRole('link').allInnerTexts();
     const insights = labels.findIndex((label) => label.trim() === 'Insights');
-    expect(labels[insights + 1]?.trim()).toBe('Financial health');
+    // WP 11.5c put Ask between Insights and Financial health.
+    expect(labels[insights + 1]?.trim()).toBe('Ask');
+    expect(labels[insights + 2]?.trim()).toBe('Financial health');
     await nav.getByRole('link', { name: 'Financial health' }).click();
     await expect(page).toHaveURL(/\/health$/u);
     await expect(page).toHaveTitle('Financial health · PersonalFi');

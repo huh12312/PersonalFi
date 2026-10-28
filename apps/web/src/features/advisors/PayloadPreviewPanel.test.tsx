@@ -157,4 +157,66 @@ describe('PayloadPreviewPanel', () => {
     expect(await screen.findByText('Approved for this exact payload shape')).toBeInTheDocument();
     expect(approveBody).toEqual({ queryShape: 'sha256:shape2' });
   });
+
+  it('shows the consent wording a request carries as "What leaves this machine", and nothing when it has none', async () => {
+    const consent = {
+      version: 'ask-consent/1',
+      sha256: 'ab'.repeat(32),
+      text: 'Your question and the figures the calculations return are sent to the provider you chose.',
+    };
+    const request = (extra: object) => ({
+      ...BASE_REQUEST,
+      kind: 'external',
+      advisor_id: 'ask.narrate',
+      ...extra,
+    });
+    stubFetchRoutes([
+      {
+        match: '/api/advisors/ask.narrate/payload-preview',
+        method: 'GET',
+        handle: () =>
+          jsonResponse({
+            advisorId: 'ask.narrate',
+            kind: 'external',
+            queryShape: 'sha256:shape3',
+            scopes: [],
+            promptTemplateHash: null,
+            request: request({ consent }),
+            prompt: null,
+            approvalRequired: true,
+            approved: false,
+          }),
+      },
+    ]);
+
+    renderPanel('ask.narrate');
+    const block = await screen.findByTestId('payload-consent');
+    expect(block).toHaveAccessibleName('What leaves this machine');
+    expect(screen.getByTestId('payload-consent-text')).toHaveTextContent(consent.text);
+    expect(block).toHaveTextContent('ask-consent/1');
+  });
+
+  it('shows no consent block for a request without consent', async () => {
+    stubFetchRoutes([
+      {
+        match: '/api/advisors/builtin.cash/payload-preview',
+        method: 'GET',
+        handle: () =>
+          jsonResponse({
+            advisorId: 'builtin.cash',
+            kind: 'builtin',
+            queryShape: 'sha256:shape2',
+            scopes: ['cash.summary'],
+            promptTemplateHash: null,
+            request: { ...BASE_REQUEST, kind: 'builtin', advisor_id: 'builtin.cash' },
+            prompt: null,
+            approvalRequired: true,
+            approved: false,
+          }),
+      },
+    ]);
+    renderPanel('builtin.cash');
+    await screen.findByTestId('no-prompt-notice');
+    expect(screen.queryByTestId('payload-consent')).not.toBeInTheDocument();
+  });
 });

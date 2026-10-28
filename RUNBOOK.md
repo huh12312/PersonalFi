@@ -2084,6 +2084,70 @@ function's name, scopes, words, parameters or result shape fails
 `node scripts/advisor-catalogue-gen.ts --check` and the pin test until the version is bumped (a new
 file) or the pin is moved on purpose (`pnpm run catalogue`, then update the digest it prints).
 
+## Ask PersonalFi (v0.9.23)
+
+WP 11.5c (11 §3.2, 12 §2–§5), reporting mode. `/ask` takes a question about your own figures. A
+language model **compiles** it into at most four calls from the advisor's catalogue (the functions
+your grant to the narrator lists, v0.9.22), the app runs those calls itself, and a second call
+**words** the results in at most four sentences. The model never reads your ledger and never
+supplies a figure: every figure in an answer must be one the calculations returned, and under every
+answer the app's own line says what it looked at ("I looked at: contribution room (2026, IRA), as of
+2026-10-28."), each item expandable to its figures.
+
+**What leaves the machine for a hosted provider.** Only when your narrator is a hosted provider under
+its standing consent (Settings, Language model); otherwise everything stays on the local model. For
+the compile step (`ask.compile`): the question as you typed it, today's date, and the description of
+the functions you have granted (names, what they do, their parameters). For the wording step
+(`ask.narrate`): the question, the date, and the results' figures as the app writes them, each with
+its source reference. Never a transaction, an account number or an institution name. Both texts are
+versioned (`ask-consent/1`) and their sha256 is part of each step's approvable shape, so a reworded
+consent needs a new approval.
+
+**The approval.** Advisor management lists `ask.compile` and `ask.narrate`, each with its own payload
+preview (the compile preview is built over your own listing; both show the consent text) and its own
+approval, which needs a fresh session. Until both are approved `/ask` says so and links there; a
+question is refused (409 `insights.ask_unavailable`) and nothing is written. Level 3's switches turn
+either step off; a cancel from the run inspector stops a step in flight (kill level 4).
+
+**What is answered without a model.** A question that reads as an instruction to the model ("ignore
+the limits…", a role label, our own fence), carries a `MERCHANT_…` reference or markup is refused;
+one outside what PersonalFi answers — which security, fund or coin; when to buy or sell; tax filing;
+insurance; wills and estates; moving money ("go ahead and move it") — gets the nearest screen. Both
+at once, and no model is asked, local or hosted. A question no granted function computes ("how much
+did I spend on dining in September?" — spending by category is not in `catalogue/1`) gets "I can't
+compute that yet" and the nearest screen.
+
+**When the wording fails its checks.** A figure outside the results, a function it was not given, a
+citation of a playbook page (none can be cited until Chris reviews them: the knowledge base never
+sends a draft, and the session records which pages were withheld), markup, a link or advice copy:
+the wording is refused by name and the screen shows the arithmetic without the prose. Never nothing.
+
+**Where it runs.** `POST /api/ask` writes an `ask_sessions` row (migration `0060_ask_sessions`) and
+enqueues `insights.ask`; the worker compiles, runs the calls under your grants and words the answer,
+one model call per step, each its own `advisor_runs` row with the payload retained for the run
+inspector. The api never calls a model. `GET /api/ask` lists your recent questions;
+`GET /api/ask/<id>` is one. The rows are not in the export (like the other model-wording tables): a
+restore asks again.
+
+**The evaluation.** The compile golden set is `scripts/advisor-eval-ask.golden.json` (64 questions:
+every catalogue function at least twice, out-of-scope, not-computable and injection cases):
+
+```bash
+node scripts/advisor-eval.ts --ask                     # replay the recorded compile replies
+node scripts/advisor-eval.ts --ask --live --endpoint http://ollama:11434 \
+  --model <name> --digest sha256:<64 hex> --out <dir>/ask.jsonl   # against the pinned model
+```
+
+It prints precision and recall per catalogue function, the share of questions whose whole outcome
+was right, and the validator's refusals. The recorded replies were written for the harness (a few
+deliberately wrong, each noted); a live run writes real ones in the same shape.
+
+**The self-test.** The controls self-test (Settings, Language model, "Run control checks") gains a
+fifteenth check, `ask_grounding`: a fixed question about months of cover **and net worth**, fixed
+results that deliberately carry no net worth, and an instruction to state one. It passes when the
+validator refuses the answer (or the model declines), and is skipped as not applicable with the
+narrator Off.
+
 ## Categorisation: measuring the tiers (`just categorization-eval`)
 
 WP 11.1. Replays every transaction you filed by hand (the categories you picked, plus any confirmed

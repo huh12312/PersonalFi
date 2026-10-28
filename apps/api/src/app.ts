@@ -44,6 +44,8 @@ import { categorySuggestionRoutes } from './routes/category-suggestions.ts';
 import { createSuggestionRuntime } from './category-suggestions.ts';
 import { createExplainRuntime } from './insight-explain.ts';
 import { createBriefNarrateRuntime } from './brief-narration.ts';
+import { createAskRuntime } from './ask.ts';
+import { askRoutes } from './routes/ask.ts';
 import { explainSwitchesOf, insightExplainRoutes } from './routes/insight-explain.ts';
 import { narratorControlCheckRoutes } from './routes/narrator-control-checks.ts';
 import { buildPlatform } from './platform.ts';
@@ -812,6 +814,29 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     fileKeys: narratorFileKeys,
     clock,
   });
+  // WP 11.5c: Ask PersonalFi in preview mode — for `/ask`'s availability and
+  // for Advisor management's preview and approval of `ask.compile` and
+  // `ask.narrate`. The api writes the session and enqueues; the worker runs
+  // every call.
+  const askPreview = createAskRuntime({
+    mode: 'preview',
+    narrator: narratorPreview,
+    stores: createNarratorStores({
+      database,
+      secretBox: () => {
+        try {
+          return security.requireSecretBox();
+        } catch {
+          return undefined;
+        }
+      },
+    }),
+    localModel: undefined,
+    timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+    allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+    fileKeys: narratorFileKeys,
+    clock,
+  });
   await app.register(
     advisorRunRoutes(
       deps,
@@ -819,8 +844,10 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       narratorPreview,
       { runtime: explainPreview },
       { runtime: briefNarratePreview },
+      { runtime: askPreview },
     ),
   );
+  await app.register(askRoutes(deps, { runtime: askPreview, switches: explainSwitchesOf(deps) }));
   // WP 11.2: Settings → Language model → Category suggestions, and the Inbox's
   // "Not this". Preview mode: this process renders and approves the suggestion
   // payload and never calls a model; the worker runs and measures.

@@ -6,7 +6,7 @@ import { expectNoAxeViolations, scanBothThemes, setTheme } from './support/axe.t
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { Journey } from './support/keyboard.ts';
 import { installApiMocks, type MockApiState } from './support/mock-api.ts';
-import { seedControlCheckRun } from './support/mock-narrator.ts';
+import { CONTROL_CHECKS, seedControlCheckRun } from './support/mock-narrator.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import { hideDevtools, visit } from './support/sweep.ts';
 import { installVirtualPasskey } from './support/virtual-passkey.ts';
@@ -220,7 +220,7 @@ const LOCAL_COST =
 /**
  * WP 10.16: Settings › Language model › Control checks - Chris's "a 'Run control checks' button on the Language
  * model screen would exercise every control against your live instance with your own session". Against
- * `support/mock-narrator.ts`'s control-checks machine (202 with fourteen pending checks; each read moves the run on by
+ * `support/mock-narrator.ts`'s control-checks machine (202 with fifteen pending checks; each read moves the run on by
  * three; the api's ten-minute 409), with a real CDP virtual authenticator for the passkey step-up.
  */
 test.describe('Settings › Language model › Control checks (WP 10.16)', () => {
@@ -263,9 +263,12 @@ test.describe('Settings › Language model › Control checks (WP 10.16)', () =>
     const live = section.getByTestId('control-checks-progress');
     await expect(live).toHaveAttribute('role', 'status');
     await expect(live).toHaveAttribute('aria-live', 'polite');
-    await expect(live).toContainText(/Running control checks… \d+ of 14 checks done\./, {
-      timeout: 15_000,
-    });
+    await expect(live).toContainText(
+      new RegExp(`Running control checks… \\d+ of ${String(CONTROL_CHECKS.length)} checks done\\.`),
+      {
+        timeout: 15_000,
+      },
+    );
     expect(passkey.assertions(), 'the run crossed the passkey step-up').toBeGreaterThan(0);
     await expect(button).toHaveAttribute('aria-disabled', 'true');
     await expect(button).toHaveAccessibleName('Running control checks…');
@@ -281,7 +284,7 @@ test.describe('Settings › Language model › Control checks (WP 10.16)', () =>
       'Control checks finished. Result: Partial: some checks could not run.',
       { timeout: 20_000 },
     );
-    await expect(table.locator('tbody tr')).toHaveCount(14);
+    await expect(table.locator('tbody tr')).toHaveCount(CONTROL_CHECKS.length);
     await expect(
       table.locator('tbody tr[data-status="pending"], tbody tr[data-status="running"]'),
     ).toHaveCount(0);
@@ -296,7 +299,7 @@ test.describe('Settings › Language model › Control checks (WP 10.16)', () =>
     );
     await expect(table.getByTestId('control-check-kill_level_4_cancel')).toContainText('1.8 s');
     await expect(section.getByTestId('control-checks-summary')).toContainText(
-      'Result: Partial: some checks could not run. 10 passed, 1 skipped, 2 not applicable, 1 reported.',
+      'Result: Partial: some checks could not run. 11 passed, 1 skipped, 2 not applicable, 1 reported.',
     );
     await expect(section.getByTestId('control-checks-wait')).toHaveText(
       // Dated when the ten-minute window crosses midnight (CI runs in UTC): "28 Oct, 00:01".
@@ -314,7 +317,7 @@ test.describe('Settings › Language model › Control checks (WP 10.16)', () =>
     );
     await summary.click();
     await expect(history.getByRole('table')).toBeVisible();
-    await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(14);
+    await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(CONTROL_CHECKS.length);
 
     // Refused once for want of a step-up, then the retry; the body asks for nothing extra.
     expect(api.narrator.controlChecks.calls.filter((c) => c.startsWith('POST'))).toEqual([

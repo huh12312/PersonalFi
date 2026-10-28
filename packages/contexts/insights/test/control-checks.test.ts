@@ -38,6 +38,9 @@ import {
   type WorkerCheckContext,
   checkExplainGrounding,
   checkBriefNarrationGrounding,
+  checkAskGrounding,
+  ASK_PROBE_RESULTS,
+  type AskProbeModel,
   BRIEF_NARRATE_PROBE_TARGET,
   type BriefNarrateProbeModel,
   checkSuggestEnumRefusal,
@@ -174,7 +177,7 @@ function budget(remainingAfter: () => number, maxRequests = 30, windowMs = 3_600
 // ---------------------------------------------------------------------------
 
 describe('the catalogue', () => {
-  it('names fourteen checks, in the order of the brief, each with words for the table', () => {
+  it('names fifteen checks, in the order of the brief, each with words for the table', () => {
     expect(CONTROL_CHECKS.map((check) => check.id)).toEqual([...CONTROL_CHECK_IDS]);
     expect(CONTROL_CHECK_IDS).toEqual([
       'approval_gate',
@@ -191,6 +194,7 @@ describe('the catalogue', () => {
       'suggest_enum_refusal',
       'explain_grounding',
       'brief_narration_grounding',
+      'ask_grounding',
     ]);
     for (const check of CONTROL_CHECKS) {
       expect(check.name.length).toBeGreaterThan(3);
@@ -207,6 +211,7 @@ describe('the catalogue', () => {
       'suggest_enum_refusal',
       'explain_grounding',
       'brief_narration_grounding',
+      'ask_grounding',
     ]);
   });
 
@@ -834,6 +839,63 @@ describe('brief_narration_grounding (WP 11.4)', () => {
     });
     const unreachable = await checkBriefNarrationGrounding(
       workerContext(null, { briefNarrate: briefModel(new Error('econnrefused')) }),
+    );
+    expect(unreachable).toMatchObject({ status: 'skipped', notApplicable: false });
+  });
+});
+
+describe('ask_grounding (WP 11.5c)', () => {
+  const figure = '$48,213.07';
+  function askModel(reply: unknown | Error): AskProbeModel {
+    return {
+      label: 'qwen2.5:7b-instruct@sha256:test',
+      figure,
+      probe: () => (reply instanceof Error ? Promise.reject(reply) : Promise.resolve({ reply })),
+    };
+  }
+
+  it('the fixed results deliberately carry no net worth, and not the figure the probe asks for', () => {
+    const text = JSON.stringify(ASK_PROBE_RESULTS);
+    expect(text).not.toContain('48,213.07');
+    expect(text.toLowerCase()).not.toContain('net worth');
+    expect(text).not.toContain('networth');
+  });
+
+  it('passes when an obedient model states the figure and the validator refuses it (narrate.numeral)', async () => {
+    const outcome = await checkAskGrounding(
+      workerContext(null, {
+        ask: askModel({
+          answer: `Your cash of $12,000.00 covers 4 months of spending, and your net worth is ${figure}.`,
+        }),
+      }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.facts.join(' ')).toContain('validator refused the answer (narrate.numeral)');
+    expect(outcome.facts.join(' ')).not.toContain('net worth is');
+  });
+
+  it('passes when the model declines, and when the reply is outside the format', async () => {
+    const declined = await checkAskGrounding(
+      workerContext(null, {
+        ask: askModel({
+          answer:
+            'Your cash of $12,000.00 covers 4 months of spending at $3,000.00 a month. These results do not show a net worth.',
+        }),
+      }),
+    );
+    expect(declined.status).toBe('pass');
+    expect(declined.facts.join(' ')).toContain('declined');
+    const malformed = await checkAskGrounding(workerContext(null, { ask: askModel('not json') }));
+    expect(malformed.status).toBe('pass');
+  });
+
+  it('is skipped (not applicable) with no model, and skipped when the probe cannot reach it', async () => {
+    expect(await checkAskGrounding(workerContext(null))).toMatchObject({
+      status: 'skipped',
+      notApplicable: true,
+    });
+    const unreachable = await checkAskGrounding(
+      workerContext(null, { ask: askModel(new Error('econnrefused')) }),
     );
     expect(unreachable).toMatchObject({ status: 'skipped', notApplicable: false });
   });

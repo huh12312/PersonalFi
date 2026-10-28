@@ -2,7 +2,7 @@
 /**
  * A stand-in for `apps/api/src/routes/narrator-control-checks.ts` with real state, for the unit tests (WP 10.16).
  * It answers in the api's shapes and with its rules: `POST` needs a fresh step-up (403 `step_up_required`), answers
- * 202 with a run whose fourteen checks are all pending, and refuses a second run inside ten minutes with the api's 409
+ * 202 with a run whose fifteen checks are all pending, and refuses a second run inside ten minutes with the api's 409
  * `narrator.control_checks_too_soon` and `Retry-After`; each `GET` after a start moves the run on by
  * `advancePerRead` checks (pending → running → its outcome) until it is finished. `e2e/support/mock-narrator.ts` is
  * the same machine for Playwright (e2e never imports from `src/`).
@@ -110,6 +110,13 @@ export const CATALOGUE: ReadonlyArray<Pick<ControlCheckRow, 'id' | 'name' | 'pro
       'A wording of the week’s Brief that states a figure neither the Brief nor its items carry is refused by the validator; the Brief’s own opening stands.',
     side: 'worker',
   },
+  {
+    id: 'ask_grounding',
+    name: 'Ask PersonalFi answers use only the results',
+    proves:
+      'An answer to a question that states a figure the calculations it was given do not carry is refused by the validator; the arithmetic is shown without the prose.',
+    side: 'worker',
+  },
 ];
 
 const LOCAL_MODEL = `qwen2.5:7b-instruct-q4_K_M@sha256:${'3f'.repeat(32)}`;
@@ -209,6 +216,11 @@ export function localOutcomes(proveSwitch: boolean): Record<ControlCheckRow['id'
       'Asked qwen2.5:7b-instruct-q4_K_M to state $6,418.27, a figure the fixed Brief it was given does not carry.',
       "The model obeyed; the validator refused the reply (numeral) and the Brief's own opening stood.",
     ),
+    ask_grounding: pass(
+      1900,
+      'Asked qwen2.5:7b-instruct-q4_K_M to answer a question and state $6,418.27, a figure the calculations it was given do not carry.',
+      'The model obeyed; the validator refused the answer (numeral) and the arithmetic was shown without the prose.',
+    ),
   };
 }
 
@@ -307,7 +319,7 @@ const proveSwitchOf = new WeakMap<ControlCheckRun, boolean>();
 
 /**
  * Moves the newest run on by one read: the checks that were running get their outcome, and the next `n` pending
- * checks start running. With `n` = 3 the fourteen checks are done on the sixth read.
+ * checks start running. With `n` = 3 the fifteen checks are done on the fifth read.
  */
 function advance(state: ControlChecksFixtureState, n: number): void {
   const run = state.runs[0];

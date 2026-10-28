@@ -30,6 +30,7 @@ import {
   narratedBriefItems,
   SHOWN_NARRATION,
 } from './support/mock-brief.ts';
+import { ASK_OUT_OF_SCOPE_QUESTION, ASK_QUESTION } from './support/mock-ask.ts';
 import { CONTROL_CHECKS } from './support/mock-narrator.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { installInvestmentsMocks } from './support/mock-investments.ts';
@@ -774,7 +775,7 @@ test('settings › language model (WP 10.16): Tab to Run control checks, press i
   await page.keyboard.press('Enter');
   const history = section.getByTestId('control-checks-history');
   await expect(history.getByRole('table')).toBeVisible();
-  // One row per check in the mock's catalogue (fourteen since WP 11.4's brief_narration_grounding).
+  // One row per check in the mock's catalogue (derived, so a new check is picked up: fifteen since WP 11.5c's ask_grounding).
   await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(CONTROL_CHECKS.length);
   await journey.expectFocus(/\(latest\)/, 'focus stays on the opened summary');
   await page.unrouteAll({ behavior: 'ignoreErrors' });
@@ -1245,4 +1246,70 @@ test('WP 11.4 /brief: with "Your week" and the narration shown, the Tab walk kee
   const withWording = await walk(SHOWN_NARRATION);
   await expect(page.getByTestId('brief-recap')).toBeVisible();
   expect(withWording.length).toBe(without.length);
+});
+
+// ---------------------------------------------------------------------------
+// WP 11.5c: Ask PersonalFi, by keyboard
+// ---------------------------------------------------------------------------
+
+/** A name matched as a whole, whatever punctuation it holds. */
+function exactly(text: string): RegExp {
+  return new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u');
+}
+
+test('WP 11.5c /ask: Tab to the box, type, send with Enter, reach the answer, open and close an evidence item, then reach the nearest-screen link of an out-of-scope question', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const mocks = await installSweepMocks(page);
+  await visit(page, '/ask');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'WP 11.5c /ask');
+
+  // The box, by Tab; the question typed; Enter sends it (Shift+Enter would start a new line).
+  await journey.tabTo(/^Your question$/, { max: 40 });
+  await journey.type(ASK_QUESTION);
+  await expect(page.getByTestId('ask-count')).toContainText(`${String(ASK_QUESTION.length)} / 500`);
+  await journey.press('Enter', 'Enter sends the question and focus stays on the box');
+  await expect(page.getByTestId('ask-live')).toContainText(
+    'Turning your question into calculations…',
+    {
+      timeout: 15_000,
+    },
+  );
+
+  // The answer lands and takes focus; the live region keeps the outcome for a screen reader.
+  await expect(page.getByTestId('ask-answer')).toHaveAttribute('data-state', 'shown', {
+    timeout: 20_000,
+  });
+  await journey.expectFocus(exactly(ASK_QUESTION), 'focus lands on the answer');
+  await expect(page.getByTestId('ask-live')).toHaveText('The answer is ready.');
+
+  // The next stop is the first "I looked at" item: Enter opens it, Space closes it, Enter opens it again.
+  const item = await journey.tabTo(/^Contribution room \(2026, IRA\)$/, { max: 6 });
+  expect(item.tag).toBe('button');
+  const toggle = page.getByRole('button', { name: /^Contribution room/u });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await journey.press('Enter', 'Enter opens the item');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByTestId('ask-figures')).toContainText('$2,500.00');
+  await journey.press('Space', 'Space closes it');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await journey.press('Enter', 'Enter opens it again');
+  // The item's screen link comes next.
+  await journey.tabTo(/^Accounts$/, { max: 4 });
+
+  // An out-of-scope question: back to the box (Shift+Tab), ask, and the nearest screen is a link in the Tab order.
+  mocks.ask.options = { ...mocks.ask.options, outcome: 'unanswerable' };
+  await journey.tabTo(/^Your question$/, { backwards: true, max: 30 });
+  await journey.type(ASK_OUT_OF_SCOPE_QUESTION);
+  await journey.press('Enter', 'Enter sends the out-of-scope question');
+  await expect(page.getByTestId('ask-answer')).toHaveAttribute('data-state', 'unanswerable', {
+    timeout: 20_000,
+  });
+  await journey.expectFocus(exactly(ASK_OUT_OF_SCOPE_QUESTION), 'focus lands on the answer');
+  await journey.tabTo(/^Investments$/, { max: 4 });
+  await journey.press('Enter', 'Enter follows the nearest-screen link');
+  await expect(page).toHaveURL(/\/investments$/u);
 });

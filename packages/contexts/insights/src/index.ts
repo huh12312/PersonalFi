@@ -818,6 +818,9 @@ export {
   checkExplainGrounding,
   checkBriefNarrationGrounding,
   BRIEF_NARRATE_PROBE_TARGET,
+  checkAskGrounding,
+  ASK_PROBE_QUESTION,
+  ASK_PROBE_RESULTS,
   checkSuggestEnumRefusal,
   EXPLAIN_PROBE_TARGET,
   SUGGEST_PROBE_TAXONOMY,
@@ -847,6 +850,7 @@ export {
   type ControlProbeModel,
   type ExplainProbeModel,
   type BriefNarrateProbeModel,
+  type AskProbeModel,
   type SuggestProbeModel,
   type EgressClassification,
   type InspectorPort,
@@ -1210,3 +1214,6 @@ export {
   type PortRequiredSavings,
 } from './catalogue/ports.ts';
 export { amortise, avalancheOrder, snowballOrder } from './catalogue/amortisation.ts';
+
+// WP 11.5c — Ask PersonalFi, reporting mode: `ask.compile` and `ask.narrate`.
+export * from './advisors/ask/index.ts';

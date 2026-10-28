@@ -3,6 +3,7 @@ import type { Page, Route } from '@playwright/test';
 
 import { installAccountMocks } from './mock-accounts.ts';
 import { installAdvisorMocks } from './mock-advisors.ts';
+import { installAskMocks, type AskMockOptions, type AskMockState } from './mock-ask.ts';
 import { installApiMocks, MANUAL_CONNECTOR, type MockApiState } from './mock-api.ts';
 import { installBriefMocks } from './mock-brief.ts';
 import type { CategorySuggestionsMockState } from './mock-category-suggestions.ts';
@@ -48,6 +49,8 @@ export interface SweepMocks {
   readonly categorySuggestions: CategorySuggestionsMockState;
   /** WP 11.3: the "Explain this" layer's state (`mock-explain.ts`): every entity `idle` until a test scripts it. */
   readonly explain: ExplainMockState;
+  /** WP 11.5c: the Ask PersonalFi layer's state (`mock-ask.ts`): a ready overview with three earlier questions. */
+  readonly ask: AskMockState;
   /** WP 11.2b: the general fixture's own state, for adding a transaction an automatic tier placed. */
   readonly api: MockApiState;
 }
@@ -65,6 +68,8 @@ export interface SweepOptions {
    * milestone. `{}` is WP 3.12's five-day fixture.
    */
   readonly networth?: NetworthMockOptions;
+  /** WP 11.5c: the Ask PersonalFi layer (`mock-ask.ts`). Default: ready, three earlier questions, the next one is answered. */
+  readonly ask?: AskMockOptions;
 }
 
 export async function installSweepMocks(
@@ -112,6 +117,8 @@ export async function installSweepMocks(
   if (options.accountSettings === true) await installAccountMocks(page);
   // WP 11.3: "Explain this" on /insights and /health (only its own paths; everything else falls through).
   const explain = await installExplainMocks(page);
+  // WP 11.5c: Ask PersonalFi on /ask (only its own paths; everything else falls through).
+  const ask = await installAskMocks(page, options.ask);
 
   // Every link kind the app renders a form for, so the "Add a connection" dialog and the Crypto settings tab show
   // the add-wallet and Coinbase-key forms instead of "Not available in this deployment" (the general fixture lists
@@ -133,6 +140,7 @@ export async function installSweepMocks(
     narrator: base.narrator,
     categorySuggestions: base.categorySuggestions,
     explain,
+    ask,
     api: base,
   };
 }

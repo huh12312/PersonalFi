@@ -10,6 +10,7 @@ describe('documentTitleFor (WCAG 2.4.2)', () => {
     expect(documentTitleFor('/settings/advisors')).toBe('Advisor management · PersonalFi');
     expect(documentTitleFor('/accounts/connections')).toBe('Connections · PersonalFi');
     expect(documentTitleFor('/login')).toBe('Sign in · PersonalFi');
+    expect(documentTitleFor('/ask')).toBe('Ask · PersonalFi');
   });
 
   it('gives different routes different titles', () => {

@@ -51,6 +51,7 @@ data the advisor never received would _resolve_.
 - `ops_control_checks`
 - `insight_explanations`
 - `brief_narrations`
+- `ask_sessions` (WP 11.5c, migration `0060_ask_sessions.sql`: one row per Ask PersonalFi question — the compiled calls, the results' digests and figures, the narration or refusal class; references only `users`)
 
 ## Data modules (not tables)
 

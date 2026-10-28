@@ -36,7 +36,12 @@ export type ChatMode =
   /** Stream forever, one line every `intervalMs`, until the client goes. */
   | { readonly kind: 'endless'; readonly intervalMs: number; readonly lineBytes?: number }
   /** Answer with a status and no stream. */
-  | { readonly kind: 'status'; readonly status: number; readonly body?: string };
+  | { readonly kind: 'status'; readonly status: number; readonly body?: string }
+  /**
+   * WP 11.5c: the reply chosen per request from the chat body — one fake
+   * serving two query types in one job (Ask's compile, then its narrate).
+   */
+  | { readonly kind: 'respond'; readonly respond: (body: unknown) => string };
 
 export interface RecordedRequest {
   readonly method: string;
@@ -139,7 +144,11 @@ export async function startFakeOllama(initial: {
         res.socket?.on('close', () => {
           record.closed = true;
         });
-        serveChat(state.chat, res, record);
+        const mode: ChatMode =
+          state.chat.kind === 'respond'
+            ? { kind: 'reply', reply: state.chat.respond(body) }
+            : state.chat;
+        serveChat(mode, res, record);
         return;
       }
       res.writeHead(404);
@@ -202,6 +211,8 @@ function serveChat(
   res: http.ServerResponse,
   record: { closed: boolean; linesWritten: number },
 ): void {
+  if (mode.kind === 'respond')
+    throw new Error('a respond mode is resolved to a reply before serving');
   if (mode.kind === 'status') {
     res.writeHead(mode.status, { 'content-type': 'application/json' });
     res.end(mode.body ?? '{"error":"model is loading"}');
