@@ -31,7 +31,7 @@ export const VARIABILITY_LABELS: Record<VariabilityKey, string> = {
   unclassified: 'Unclassified',
 };
 
-/** The totals row's words, Monarch's own. */
+/** The totals row's words. */
 export const VARIABILITY_TOTAL_LABELS: Record<CategoryVariability, string> = {
   fixed: 'Budgeted fixed expenses',
   flexible: 'Budgeted flexible expenses',

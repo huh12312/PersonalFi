@@ -22,8 +22,8 @@ export interface CategoryIconProps {
 }
 
 /**
- * A category's icon in a circle tinted by its hue (WP 10.14, V7; Monarch's emoji `Category.icon` in a hue-washed
- * circle). The glyph is the holder's emoji, the system default for the key, or the initials (`categoryGlyph`).
+ * A category's icon in a circle tinted by its hue (WP 10.14, V7; the emoji-in-a-hue-washed-circle pattern of
+ * docs/research/10-visual-design-notes.md §3 V7). The glyph is the holder's emoji, the system default for the key, or the initials (`categoryGlyph`).
  *
  * **Decorative**: `aria-hidden`, always beside the category's name, which is the accessible label — an emoji's own
  * name ("shopping cart") read before "Groceries" would be noise, and colour is identity only, never meaning.

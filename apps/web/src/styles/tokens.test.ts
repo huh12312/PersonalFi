@@ -112,7 +112,7 @@ describe('the role source', () => {
         for (const hex of scale[theme]) expect(hex).toMatch(/^#[0-9a-f]{6}$/);
       }
     }
-    // Spot values from the 3.0.0 tarball (and Monarch's recovered theme, docs/research/10 §1.2).
+    // Spot values from the 3.0.0 tarball (docs/research/10 §1.2 names the same steps).
     expect(RADIX_SCALES.teal.light[8]).toBe('#12a594');
     expect(RADIX_SCALES.sand.dark[0]).toBe('#111110');
     expect(RADIX_SCALES.cyan.light[8]).toBe('#00a2c7');

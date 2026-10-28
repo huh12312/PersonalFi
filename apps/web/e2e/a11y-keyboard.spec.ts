@@ -30,6 +30,7 @@ import {
   narratedBriefItems,
   SHOWN_NARRATION,
 } from './support/mock-brief.ts';
+import { CONTROL_CHECKS } from './support/mock-narrator.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { installInvestmentsMocks } from './support/mock-investments.ts';
 import { assertReadingOrder, Journey } from './support/keyboard.ts';
@@ -773,7 +774,8 @@ test('settings › language model (WP 10.16): Tab to Run control checks, press i
   await page.keyboard.press('Enter');
   const history = section.getByTestId('control-checks-history');
   await expect(history.getByRole('table')).toBeVisible();
-  await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(13);
+  // One row per check in the mock's catalogue (fourteen since WP 11.4's brief_narration_grounding).
+  await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(CONTROL_CHECKS.length);
   await journey.expectFocus(/\(latest\)/, 'focus stays on the opened summary');
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 });

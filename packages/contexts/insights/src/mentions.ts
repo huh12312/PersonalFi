@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
- * Entity mentions on an insight card (WP 10.15, V8; Monarch's equivalent title / body / contextLine as
- * `{ text, entityType, entityId }`).
+ * Entity mentions on an insight card (WP 10.15, V8; a title, a body and a context line, each able to
+ * name an entity as `{ text, entityType, entityId }`).
  *
  * **A mention comes from the insight's own evidence, or not at all.** `mentionCandidatesOf` reads only the rows
  * the insight already cites (`insight_evidence`, as stored when the insight was proposed) and admits a row only

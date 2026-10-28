@@ -5,7 +5,7 @@ import type { BudgetLine } from '../../api/generated/types.gen.ts';
 import { parseWireMoney } from '../../lib/money.ts';
 
 /**
- * The budget meter's arithmetic and state machine (WP 10.11; Monarch's equivalent with a `tickPercent`,
+ * The budget meter's arithmetic and state machine (WP 10.11; a filled bar with a tick at the pace mark,
  * docs/research/10-visual-design-notes.md §1.4). Pure, so every boundary is a unit test
  * (`budget-meter.test.ts`) rather than a screenshot.
  *

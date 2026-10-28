@@ -541,7 +541,9 @@ type Outcome = Pick<
   'status' | 'reason' | 'facts' | 'notApplicable' | 'durationMs'
 >;
 
-const CONTROL_CHECKS: ReadonlyArray<Pick<ControlCheckRow, 'id' | 'name' | 'proves' | 'side'>> = [
+export const CONTROL_CHECKS: ReadonlyArray<
+  Pick<ControlCheckRow, 'id' | 'name' | 'proves' | 'side'>
+> = [
   {
     id: 'approval_gate',
     name: 'Payload approval gate',
