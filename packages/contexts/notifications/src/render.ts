@@ -89,6 +89,10 @@ export const CONSUMED_EVENT_TYPES = [
   // not a later edit somewhere else; `test/insight-subscription.test.ts` fails
   // if it is removed.
   'insights.InsightProposed',
+  // WP 11.4: the week's Brief, announced once its own composition step has
+  // finished — the deterministic lines always, the "Your week" recap as
+  // optional text only when the validator passed it (see the render case).
+  'insights.BriefRecapReady',
 ] as const;
 
 export type ConsumedEventType = (typeof CONSUMED_EVENT_TYPES)[number];
@@ -240,9 +244,64 @@ export function renderNotification(
       };
     }
 
+    case 'insights.BriefRecapReady': {
+      // WP 11.4. The deterministic lines are the notification: the week, the
+      // counts the Brief carries, where to read it. The recap is optional
+      // text after them, only when the payload carries one (it is present
+      // only when it passed the validator) and always under the words that
+      // say who wrote it — so a channel that truncates (`maxBytes`) cuts the
+      // model's paragraph, never the Brief's own lines.
+      const briefId = str(payload, 'briefId');
+      const isoWeek = str(payload, 'isoWeek');
+      const ranked = typeof payload['rankedCount'] === 'number' ? payload['rankedCount'] : 0;
+      const attention =
+        typeof payload['attentionCount'] === 'number' ? payload['attentionCount'] : 0;
+      const nothingMaterial = payload['nothingMaterial'] === true;
+      const lines = [
+        nothingMaterial || ranked === 0
+          ? `Nothing material this week (${isoWeek}).`
+          : `${String(ranked)} ranked ${ranked === 1 ? 'action' : 'actions'} this week (${isoWeek}), in order of dollar impact.`,
+        ...(attention === 0
+          ? []
+          : [`${String(attention)} ${attention === 1 ? 'item needs' : 'items need'} attention.`]),
+      ];
+      const recap = str(payload, 'recap');
+      const by = payload['recapBy'];
+      const byWords =
+        by !== null && typeof by === 'object'
+          ? recapAuthor(str(by as Payload, 'provider'), str(by as Payload, 'model'))
+          : null;
+      const body =
+        recap !== '' && byWords !== null
+          ? `${lines.join(' ')}\n\nYour week (AI-assisted wording, ${byWords}): ${recap}`
+          : lines.join(' ');
+      return {
+        dedupeKey: `insights.brief:${briefId}`,
+        groupKey: 'insights.brief',
+        title: 'Your weekly Brief is ready',
+        bodyMd: body,
+        priority: 'low',
+        deepLink: '/brief',
+      };
+    }
+
     default:
       return null;
   }
+}
+
+const RECAP_PROVIDERS: Readonly<Record<string, string>> = {
+  ollama: 'the local model',
+  openai: 'OpenAI',
+  openrouter: 'OpenRouter',
+  anthropic: 'Anthropic',
+};
+
+/** "the local model qwen2.5…" / "Anthropic claude-…": who wrote the recap, or `null` for a provider not on the list. */
+function recapAuthor(provider: string, model: string): string | null {
+  const name = RECAP_PROVIDERS[provider];
+  if (name === undefined || model === '') return null;
+  return `${name} ${model}`;
 }
 
 function humaniseThreshold(threshold: string): string {

@@ -37,6 +37,14 @@ import {
   scriptExplanation,
   shownBody,
 } from './support/mock-explain.ts';
+import {
+  buildBrief,
+  installBriefMocks,
+  NARRATED_OPENING,
+  narratedBriefItems,
+  REFUSED_NARRATION,
+  SHOWN_NARRATION,
+} from './support/mock-brief.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import {
@@ -1233,7 +1241,7 @@ test.describe('WP 10.16 control checks and the controls on the backup line', () 
     await expect(section.getByTestId('control-checks-table')).toBeVisible();
     if (where === 'settings, running') {
       await expect(section.getByTestId('control-checks-progress')).toHaveText(
-        'Running control checks… 3 of 13 checks done.',
+        'Running control checks… 3 of 14 checks done.',
       );
       return;
     }
@@ -1581,6 +1589,83 @@ test.describe('WP 11.3 Explain this', () => {
         await scanBothThemes(page, `WP 11.3 ${where}, explaining`);
       });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7o. WP 11.4: the Brief's own wording — "Your week", the opening and the composed narration, shown and refused
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep's Brief carries the default composition (unavailable, muted words); this block layers
+ * `support/mock-brief.ts` over it with the narration shown (the recap region, the narration and both badges) and
+ * refused (the api's words under the opening). Both themes at 1280 and 320 px, 200 % zoom with 1.4.12 text spacing,
+ * and reduced motion (nothing in the header may animate).
+ */
+test.describe('WP 11.4 the Brief’s own wording', () => {
+  const STATES = [
+    ['shown', SHOWN_NARRATION],
+    ['refused', REFUSED_NARRATION],
+  ] as const;
+
+  async function open(page: Page, narration: Record<string, unknown>): Promise<void> {
+    await installSweepMocks(page);
+    await installBriefMocks(page, {
+      standalone: false,
+      brief: buildBrief({ items: narratedBriefItems(), opening: NARRATED_OPENING, narration }),
+    });
+    await visit(page, '/brief');
+    await hideDevtools(page);
+    await expect(page.getByTestId('brief-opening')).toHaveText(NARRATED_OPENING);
+    await expect(page.getByTestId('brief-narration')).toHaveAttribute(
+      'data-state',
+      String(narration['state']),
+    );
+    await waitForAnimationsToDrain(page);
+  }
+
+  for (const [state, narration] of STATES) {
+    test(`WP 11.4 /brief, ${state}: axe-clean in both themes, at 1280 and at 320 px`, async ({
+      page,
+    }) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await open(page, narration);
+      await scanBothThemes(page, `WP 11.4 /brief, ${state}`);
+      await page.setViewportSize(REFLOW);
+      await page.waitForTimeout(600);
+      expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+      await scanBothThemes(page, `WP 11.4 /brief, ${state}, at 320 px`);
+    });
+  }
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    for (const [state, narration] of STATES) {
+      test(`WP 11.4 /brief, ${state}: nothing is lost`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, narration);
+        expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+        await scanBothThemes(page, `WP 11.4 /brief, ${state}, at 200 %`);
+        const before = new Set(await clippedTextElements(page));
+        await page.addStyleTag({ content: TEXT_SPACING });
+        await page.waitForTimeout(100);
+        const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+        expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+      });
+    }
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+    test('WP 11.4 /brief, shown: nothing in the header animates, and it is axe-clean', async ({
+      page,
+    }) => {
+      test.setTimeout(120_000);
+      await open(page, SHOWN_NARRATION);
+      expect(await motionOffenders(page)).toEqual([]);
+      await scanBothThemes(page, 'WP 11.4 /brief, shown, reduced motion');
+    });
   });
 });
 

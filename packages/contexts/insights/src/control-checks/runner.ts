@@ -32,6 +32,7 @@ import {
   checkNumeralsRefusal,
   checkSchemaRefusal,
   checkExplainGrounding,
+  checkBriefNarrationGrounding,
   checkSuggestEnumRefusal,
   errorClass,
   pendingRow,
@@ -41,6 +42,7 @@ import {
   type ControlProbeModel,
   type ModuleSwitchPort,
   type ExplainProbeModel,
+  type BriefNarrateProbeModel,
   type SuggestProbeModel,
   type WorkerCheckContext,
 } from './catalogue.ts';
@@ -206,6 +208,8 @@ export interface ControlChecksJobDependencies {
   suggestProbeFor?(userId: string): Promise<SuggestProbeModel | null>;
   /** WP 11.3: the holder's explain model's grounding probe; absent or `null` skips that check as not applicable. */
   explainProbeFor?(userId: string): Promise<ExplainProbeModel | null>;
+  /** WP 11.4: the holder's Brief-narration model's grounding probe; absent or `null` skips that check as not applicable. */
+  briefNarrateProbeFor?(userId: string): Promise<BriefNarrateProbeModel | null>;
   /** Tests only. */
   readonly timing?: WorkerCheckContext['timing'];
 }
@@ -221,6 +225,7 @@ const WORKER_CHECKS: Partial<
   model_pin: checkModelPin,
   suggest_enum_refusal: checkSuggestEnumRefusal,
   explain_grounding: checkExplainGrounding,
+  brief_narration_grounding: checkBriefNarrationGrounding,
 };
 
 /** The worker's checks for one run, in catalogue order. Total: never throws past a check. */
@@ -248,9 +253,13 @@ export async function runWorkerControlChecks(
   const explain: ExplainProbeModel | null = await (
     dependencies.explainProbeFor?.(context.userId) ?? Promise.resolve(null)
   ).catch(() => null);
+  const briefNarrate: BriefNarrateProbeModel | null = await (
+    dependencies.briefNarrateProbeFor?.(context.userId) ?? Promise.resolve(null)
+  ).catch(() => null);
   const workerContext: WorkerCheckContext = {
     suggest,
     explain,
+    briefNarrate,
     model: resolved.model,
     unavailable: resolved.unavailable,
     request: controlProbeRequest(clock),

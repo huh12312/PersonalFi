@@ -64,6 +64,7 @@ import { createNarratorRuntime, createNarratorWiring } from './narrator-wiring.t
 import { createNarratorStores } from './narrator-stores.ts';
 import { createSuggestionRuntime } from './category-suggestions.ts';
 import { createExplainRuntime } from './insight-explain.ts';
+import { createBriefNarrateRuntime } from './brief-narration.ts';
 import { MODULE_FLAGS, buildPlatform, resolveModules } from './platform.ts';
 
 /**
@@ -531,6 +532,24 @@ async function main(): Promise<void> {
       clock: systemClock,
     });
 
+    // WP 11.4: the Brief's own narration and the weekly recap, on the narrator's
+    // own provider — its model, its consent, its key and its hourly window.
+    const briefNarrateRuntime = createBriefNarrateRuntime({
+      mode: 'run',
+      narrator: narratorRuntime,
+      stores: createNarratorStores({ database, secretBox: () => secretBox ?? undefined }),
+      localModel: config.localModel,
+      timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+      allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+      fileKeys: {
+        openai: config.secrets.openai_api_key,
+        openrouter: config.secrets.openrouter_api_key,
+        anthropic: config.secrets.anthropic_api_key,
+      },
+      logger,
+      clock: systemClock,
+    });
+
     // WP 3.4 (docs/evidence/phase-3/wp3.w-wiring.md). Built once per process,
     // in the worker only: the API runs no job runner and no scheduler, so a
     // market-data runtime there would be four adapters nobody can invoke —
@@ -704,6 +723,11 @@ async function main(): Promise<void> {
               categorySuggestions: { runtime: suggestionRuntime },
               // WP 11.3: the explain job, the Brief's prefetch and the self-test's probe.
               insightExplain: { runtime: explainRuntime },
+              // WP 11.4: the Brief's own narration job, its enqueue and the self-test's probe.
+              briefNarration: {
+                runtime: briefNarrateRuntime,
+                textShown: config.env.NARRATION_TEXT_SHOWN,
+              },
               // wp2.6-insights.md §6 open item 5: absent until an operator
               // writes `${SECRETS_DIR}/advisor_token_secret`; `module.insights`
               // then registers no consumer, no job and no schedule (see

@@ -20,7 +20,7 @@ import { CONSUMED_EVENT_TYPES, renderNotification } from '../src/render.ts';
 import type { NotificationsDatabase } from '../src/db.ts';
 
 describe('the consumer’s subscriptions', () => {
-  it('subscribes to all six event types, including the unwired insights one', () => {
+  it('subscribes to all seven event types, including the unwired insights one', () => {
     expect([...CONSUMED_EVENT_TYPES]).toEqual([
       'budgeting.BudgetThresholdCrossed',
       'recurring.PriceChangeDetected',
@@ -28,6 +28,7 @@ describe('the consumer’s subscriptions', () => {
       'connections.SyncRunCompleted',
       'investments.SecurityResolutionFailed',
       'insights.InsightProposed',
+      'insights.BriefRecapReady',
     ]);
 
     // The filter the pump actually reads, not just the constant.
@@ -37,7 +38,8 @@ describe('the consumer’s subscriptions', () => {
     expect(consumer.name).toBe(CONSUMER_NAME);
     expect(consumer.filter).toContain('insights.InsightProposed');
     expect(consumer.filter).toContain('investments.SecurityResolutionFailed');
-    expect(consumer.filter).toHaveLength(6);
+    expect(consumer.filter).toContain('insights.BriefRecapReady');
+    expect(consumer.filter).toHaveLength(7);
   });
 
   it('renders an insights.InsightProposed payload of the shape WP 2.6 specifies', () => {
@@ -174,5 +176,70 @@ describe('the derivations that decide how often a user is woken', () => {
     expect(
       renderNotification('connections.SyncRunCompleted', { syncRunId: 'r1', status: 'failed' }),
     ).not.toBeNull();
+  });
+});
+
+describe('the weekly Brief (WP 11.4): the deterministic lines always, the recap only as optional text', () => {
+  const base = {
+    briefId: '01920000-0000-7000-8000-0000000000c1',
+    isoWeek: '2026-W43',
+    rankedCount: 3,
+    attentionCount: 1,
+    nothingMaterial: false,
+  };
+
+  it('without a narration: the Brief’s own lines and nothing else', () => {
+    const rendered = renderNotification('insights.BriefRecapReady', {
+      ...base,
+      recap: null,
+      recapBy: null,
+    });
+    expect(rendered).toEqual({
+      dedupeKey: 'insights.brief:01920000-0000-7000-8000-0000000000c1',
+      groupKey: 'insights.brief',
+      title: 'Your weekly Brief is ready',
+      bodyMd:
+        '3 ranked actions this week (2026-W43), in order of dollar impact. 1 item needs attention.',
+      priority: 'low',
+      deepLink: '/brief',
+    });
+  });
+
+  it('with a narration: the same lines first, then the recap under who wrote it', () => {
+    const rendered = renderNotification('insights.BriefRecapReady', {
+      ...base,
+      recap: 'A week of three ranked actions and a score of 72.5 / 100.',
+      recapBy: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+    });
+    expect(rendered?.bodyMd).toBe(
+      '3 ranked actions this week (2026-W43), in order of dollar impact. 1 item needs attention.' +
+        '\n\nYour week (AI-assisted wording, Anthropic claude-sonnet-5-5): ' +
+        'A week of three ranked actions and a score of 72.5 / 100.',
+    );
+    // A replay of the same Brief is the same notification.
+    expect(rendered?.dedupeKey).toBe('insights.brief:01920000-0000-7000-8000-0000000000c1');
+  });
+
+  it('a recap with no named author, or an author not on the list, is not carried', () => {
+    for (const recapBy of [null, { provider: 'elsewhere', model: 'x' }]) {
+      const rendered = renderNotification('insights.BriefRecapReady', {
+        ...base,
+        recap: 'Some text.',
+        recapBy,
+      });
+      expect(rendered?.bodyMd).not.toContain('Some text.');
+    }
+  });
+
+  it('a quiet week says so', () => {
+    const rendered = renderNotification('insights.BriefRecapReady', {
+      ...base,
+      rankedCount: 0,
+      attentionCount: 0,
+      nothingMaterial: true,
+      recap: null,
+      recapBy: null,
+    });
+    expect(rendered?.bodyMd).toBe('Nothing material this week (2026-W43).');
   });
 });

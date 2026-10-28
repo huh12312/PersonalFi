@@ -81,6 +81,10 @@ import {
   listAdvisors,
   NARRATOR_MANIFEST,
   INSIGHT_EXPLAIN_ADVISOR_ID,
+  BRIEF_NARRATE_ADVISOR_ID,
+  approveBriefNarrate,
+  previewBriefNarrate,
+  type BriefNarrateTarget,
   approveInsightExplain,
   insightFeed,
   loadInsightExplainTarget,
@@ -96,7 +100,8 @@ import {
   type InsightsContext,
   type InsightsDependencies,
 } from '@ctx/insights';
-import { REASON_CODES, type ReasonCode } from '@ctx/insights/schema';
+import { REASON_CODES, advisoryBriefs, type ReasonCode } from '@ctx/insights/schema';
+import { desc, eq } from 'drizzle-orm';
 import { PLATFORM_FLAGS, createFlagService, platformExecutor } from '@core/platform';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -115,6 +120,7 @@ import { isoInstant } from '../wire.ts';
 import type { PreviewModel } from '../modules.ts';
 import type { NarratorRuntime } from '../narrator-wiring.ts';
 import type { ExplainRuntime } from '../insight-explain.ts';
+import { loadBriefNarrateTarget, type BriefNarrateRuntime } from '../brief-narration.ts';
 import type { RouteDeps } from './deps.ts';
 
 /** D6: one account holder — the same reading every other route file uses. */
@@ -463,8 +469,44 @@ export const advisorRunRoutes = (
   staticPreview?: PreviewModel,
   narratorPreview?: Pick<NarratorRuntime, 'forUser'>,
   explain?: { readonly runtime: ExplainRuntime },
+  briefNarrate?: { readonly runtime: Pick<BriefNarrateRuntime, 'resolve'> },
 ): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
+
+  /** WP 11.4: `brief.narrate`'s renderer for this holder (the narrator's provider, preview mode), or a 503. */
+  async function briefNarrateRenderer(userId: string) {
+    const resolution =
+      briefNarrate === undefined ? null : await briefNarrate.runtime.resolve(userId);
+    if (resolution?.adapter == null) {
+      throw new AppError({
+        status: 503,
+        code: 'insights.prompt_renderer_unavailable',
+        title: 'Service Unavailable',
+        detail:
+          'no language model is configured for you (the narrator is Off or not set up), so the ' +
+          'payload of brief.narrate cannot be shown or approved: choose a model in Settings, ' +
+          'Language model, first',
+        family: 'internal',
+      });
+    }
+    return resolution.adapter;
+  }
+
+  /** The holder's latest published Brief as a composition target; `null` shows the illustrative one. */
+  async function briefNarratePreviewTarget(userId: string): Promise<BriefNarrateTarget | null> {
+    const rows = await database
+      .select({ id: advisoryBriefs.id })
+      .from(advisoryBriefs)
+      .where(eq(advisoryBriefs.userId, userId))
+      .orderBy(desc(advisoryBriefs.isoWeek))
+      .limit(1);
+    const latest = rows[0];
+    if (latest === undefined) return null;
+    const loaded = await loadBriefNarrateTarget(database, userId, latest.id, {
+      textShown: deps.config.env.NARRATION_TEXT_SHOWN,
+    });
+    return loaded?.target ?? null;
+  }
 
   /**
    * WP 11.3: `insight.explain`'s renderer for this holder — the narrator's
@@ -660,6 +702,32 @@ export const advisorRunRoutes = (
       },
       async (request) => {
         const session = await guards.requireSession(request);
+        if (request.params.advisorId === BRIEF_NARRATE_ADVISOR_ID) {
+          const renderer = await briefNarrateRenderer(session.userId);
+          const preview = await previewBriefNarrate(
+            database,
+            contextOf(deps, session.userId, request),
+            { renderer, target: await briefNarratePreviewTarget(session.userId) },
+          );
+          return {
+            advisorId: preview.advisorId,
+            kind: 'local_model' as const,
+            queryShape: preview.queryShape,
+            scopes: [...preview.scopes],
+            promptTemplateHash: preview.promptTemplateHash,
+            request: {
+              request_id: preview.request.request_id,
+              subject: preview.request.subject as unknown as Record<string, unknown>,
+              deadline: preview.request.deadline,
+              max_response_bytes: preview.request.max_response_bytes,
+              snapshot: preview.request.snapshot as unknown as Record<string, unknown>,
+              granted_scopes: [...preview.request.granted_scopes],
+            },
+            prompt: preview.prompt,
+            approvalRequired: true,
+            approved: preview.approved,
+          };
+        }
         if (request.params.advisorId === INSIGHT_EXPLAIN_ADVISOR_ID) {
           const renderer = await explainRenderer(session.userId);
           const preview = await previewInsightExplain(
@@ -741,6 +809,18 @@ export const advisorRunRoutes = (
       },
       async (request) => {
         const session = await guards.requireFreshSession(request);
+        if (request.params.advisorId === BRIEF_NARRATE_ADVISOR_ID) {
+          const renderer = await briefNarrateRenderer(session.userId);
+          try {
+            return await approveBriefNarrate(database, contextOf(deps, session.userId, request), {
+              renderer,
+              queryShape: request.body.queryShape,
+            });
+          } catch (error) {
+            if (error instanceof PreviewError) throw previewProblem(error);
+            throw error;
+          }
+        }
         if (request.params.advisorId === INSIGHT_EXPLAIN_ADVISOR_ID) {
           const renderer = await explainRenderer(session.userId);
           try {

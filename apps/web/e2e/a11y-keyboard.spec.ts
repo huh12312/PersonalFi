@@ -23,6 +23,13 @@ import {
   scriptExplanation,
   shownBody,
 } from './support/mock-explain.ts';
+import {
+  buildBrief,
+  installBriefMocks,
+  NARRATED_OPENING,
+  narratedBriefItems,
+  SHOWN_NARRATION,
+} from './support/mock-brief.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { installInvestmentsMocks } from './support/mock-investments.ts';
 import { assertReadingOrder, Journey } from './support/keyboard.ts';
@@ -1195,3 +1202,45 @@ for (const [where, kind, id, name, text] of [
     ).toBe(true);
   });
 }
+
+// ---------------------------------------------------------------------------
+// WP 11.4: the Brief's own wording, by keyboard
+// ---------------------------------------------------------------------------
+
+test('WP 11.4 /brief: with "Your week" and the narration shown, the Tab walk keeps its reading order and gains no stop', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  // The route walk's own viewport (section 1): at the default 720 px the sidebar's last stops sit below its fold.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const walk = async (narration: Record<string, unknown> | null): Promise<string[]> => {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await installSweepMocks(page);
+    if (narration !== null) {
+      await installBriefMocks(page, {
+        standalone: false,
+        brief: buildBrief({ items: narratedBriefItems(), opening: NARRATED_OPENING, narration }),
+      });
+    } else {
+      await installBriefMocks(page, {
+        standalone: false,
+        brief: buildBrief({ items: narratedBriefItems(), opening: NARRATED_OPENING }),
+      });
+    }
+    await visit(page, '/brief');
+    await hideDevtools(page);
+    await expect(page.getByTestId('brief-opening')).toBeVisible();
+    const journey = new Journey(
+      page,
+      `WP 11.4 /brief ${narration === null ? 'unavailable' : 'shown'}`,
+    );
+    const stops = await journey.walk(90);
+    assertReadingOrder(journey.name, stops);
+    return stops.map((stop) => JSON.stringify(stop));
+  };
+  const without = await walk(null);
+  await expect(page.getByTestId('brief-recap')).toHaveCount(0);
+  const withWording = await walk(SHOWN_NARRATION);
+  await expect(page.getByTestId('brief-recap')).toBeVisible();
+  expect(withWording.length).toBe(without.length);
+});

@@ -10,6 +10,12 @@ import {
   COMPUTED_EFFECT,
   HEALTH_SCORE_RESULT,
   installBriefMocks,
+  NARRATED_OPENING,
+  narratedBriefItems,
+  PENDING_NARRATION,
+  REFUSED_NARRATION,
+  SHOWN_NARRATION,
+  UNAVAILABLE_NARRATION,
 } from './support/mock-brief.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import { hideDevtools } from './support/sweep.ts';
@@ -346,5 +352,134 @@ test.describe('Brief screen (WP 5.11)', () => {
     await setTheme(page, 'dark');
     await expectNoAxeViolations(page, 'Brief screen (dark)');
     await shoot(page, evidenceDir, 'brief-dark');
+  });
+});
+
+/**
+ * WP 11.4 (G5-15): the Brief's own wording. The header keeps its deterministic opening whatever the model says; the
+ * composed narration of the week's ranked actions sits under it with a badge naming the provider and model, and
+ * "Your week" sits at the top — or, refused, the api's words; pending and unavailable, muted words. Mocked api.
+ */
+test.describe('Brief screen: the Brief’s own wording (WP 11.4)', () => {
+  async function reach(page: Page, narration: Record<string, unknown>): Promise<void> {
+    await installFakeWebAuthnAssertion(page);
+    await installBriefMocks(page, {
+      brief: buildBrief({ items: narratedBriefItems(), opening: NARRATED_OPENING, narration }),
+      healthScoreStatus: 200,
+      healthScore: HEALTH_SCORE_RESULT,
+    });
+    await loginAndReachBrief(page);
+  }
+
+  test('shown: "Your week", the opening and the narration, each AI wording badged with provider and model', async ({
+    page,
+  }) => {
+    await reach(page, SHOWN_NARRATION);
+    const recap = page.getByRole('region', { name: 'Your week' });
+    await expect(recap).toContainText(String(SHOWN_NARRATION.recap));
+    await expect(recap.getByTestId('brief-recap-badge')).toHaveText(
+      'Worded by the local model qwen2.5:7b-instruct-q4_K_M',
+    );
+    await expect(recap.getByText('AI-assisted wording')).toBeVisible();
+    await expect(page.getByTestId('brief-opening')).toHaveText(NARRATED_OPENING);
+    const narration = page.getByTestId('brief-narration');
+    await expect(narration).toHaveAttribute('data-state', 'shown');
+    await expect(narration.getByTestId('brief-narration-text')).toHaveText(
+      String(SHOWN_NARRATION.text),
+    );
+    await expect(narration.getByTestId('brief-narration-badge')).toHaveText(
+      'Worded by the local model qwen2.5:7b-instruct-q4_K_M',
+    );
+    await expect(narration.getByText('AI-assisted wording')).toBeVisible();
+    // The h2 is still the first heading; no heading was added for the wording.
+    const headings = await page.getByRole('heading').allTextContents();
+    expect(headings).not.toContain('Your week');
+    expect(headings.indexOf("This week's Brief")).toBeLessThan(headings.indexOf('At a glance'));
+  });
+
+  test('refused: the api’s words under the opening, no narration text and no recap', async ({
+    page,
+  }) => {
+    await reach(page, REFUSED_NARRATION);
+    await expect(page.getByTestId('brief-opening')).toHaveText(NARRATED_OPENING);
+    await expect(page.getByTestId('brief-narration')).toHaveAttribute('data-state', 'refused');
+    await expect(page.getByTestId('brief-narration-message')).toHaveText(
+      String(REFUSED_NARRATION.message),
+    );
+    await expect(page.getByTestId('brief-narration-text')).toHaveCount(0);
+    await expect(page.getByTestId('brief-recap')).toHaveCount(0);
+    await expect(
+      page.getByTestId('brief-narration').getByText('AI-assisted wording', { exact: true }),
+    ).toHaveCount(0);
+  });
+
+  test('pending and unavailable: muted words, the opening alone', async ({ page }) => {
+    await reach(page, PENDING_NARRATION);
+    await expect(page.getByTestId('brief-narration')).toHaveAttribute('data-state', 'pending');
+    await expect(page.getByTestId('brief-narration-message')).toHaveText(
+      String(PENDING_NARRATION.message),
+    );
+    await expect(page.getByTestId('brief-opening')).toBeVisible();
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await reach(page, UNAVAILABLE_NARRATION);
+    await expect(page.getByTestId('brief-narration')).toHaveAttribute('data-state', 'unavailable');
+    await expect(page.getByTestId('brief-narration-message')).toHaveText(
+      String(UNAVAILABLE_NARRATION.message),
+    );
+    await expect(page.getByTestId('brief-recap')).toHaveCount(0);
+  });
+
+  test('keyboard: the wording adds no stop to the Tab order', async ({ page }) => {
+    const stops = async (): Promise<string[]> => {
+      const seen: string[] = [];
+      await page.getByRole('heading', { name: "This week's Brief" }).click();
+      for (let index = 0; index < 8; index += 1) {
+        await page.keyboard.press('Tab');
+        seen.push(
+          await page.evaluate(() => {
+            const active = document.activeElement;
+            return active === null
+              ? ''
+              : `${active.tagName}:${(active.textContent ?? '').trim().slice(0, 40)}`;
+          }),
+        );
+      }
+      return seen;
+    };
+    await reach(page, UNAVAILABLE_NARRATION);
+    const without = await stops();
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await reach(page, SHOWN_NARRATION);
+    expect(await stops()).toEqual(without);
+  });
+
+  test('WP 11.4 evidence: the Brief with its own wording and the refused state, light and dark, at 1280 and 390', async ({
+    page,
+    evidenceDir,
+  }) => {
+    test.setTimeout(240_000);
+    for (const [name, narration] of [
+      ['brief-narrated', SHOWN_NARRATION],
+      ['brief-refused', REFUSED_NARRATION],
+    ] as const) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await page.setViewportSize({ width: 1280, height: 1000 });
+      await reach(page, narration);
+      await hideDevtools(page);
+      for (const [width, height] of [
+        [1280, 1000],
+        [390, 1800],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        for (const theme of ['light', 'dark'] as const) {
+          await setTheme(page, theme);
+          await page.waitForTimeout(600);
+          await page.screenshot({
+            path: `${screenshotDir(evidenceDir)}wp11.4-${name}-${theme}-${String(width)}.png`,
+            animations: 'disabled',
+          });
+        }
+      }
+    }
   });
 });

@@ -110,6 +110,15 @@ function buildBrief(overrides: Partial<AdvisoryBrief> = {}): AdvisoryBrief {
     inputDigest: 'sha256:digest',
     publishedAt: '2026-10-04T06:00:00.000Z',
     items: [buildItem({ id: '1' })],
+    opening: '1 ranked action this week, in order of dollar impact.',
+    narration: {
+      state: 'unavailable',
+      text: null,
+      recap: null,
+      narratedBy: null,
+      refusal: null,
+      message: null,
+    },
     ...overrides,
   };
   return {
@@ -611,5 +620,46 @@ describe('BriefScreen', () => {
     // The exact, correctly-rounded dollar figure a bigint-based formatter
     // produces for this minor-unit value.
     expect(within(card).getByText('$90,071,992,547,409.93')).toBeInTheDocument();
+  });
+});
+
+describe('the Brief’s own wording on the screen (WP 11.4)', () => {
+  beforeEach(() => {
+    ensureApiClient();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('shows "Your week", the opening and the narration under the one h2, from the response', async () => {
+    stubFetchRoutes([
+      briefRoute(
+        buildBrief({
+          opening: '1 ranked action this week, in order of dollar impact.',
+          narration: {
+            state: 'shown',
+            text: 'Avoidable fees this year is the one action this week, at $720.00 a year.',
+            recap: 'A week of 1 ranked action.',
+            narratedBy: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+            refusal: null,
+            message: null,
+          },
+        }),
+      ),
+      healthScoreNotComputedRoute(),
+    ]);
+    renderScreen();
+    expect(await screen.findByTestId('brief-recap')).toHaveTextContent(
+      'A week of 1 ranked action.',
+    );
+    expect(screen.getByTestId('brief-opening')).toHaveTextContent(
+      '1 ranked action this week, in order of dollar impact.',
+    );
+    expect(screen.getByTestId('brief-narration-badge')).toHaveTextContent(
+      'Worded by Anthropic claude-sonnet-5-5',
+    );
+    const headings = screen.getAllByRole('heading').map((heading) => heading.textContent);
+    expect(headings[0]).toBe("This week's Brief");
+    expect(headings).not.toContain('Your week');
   });
 });

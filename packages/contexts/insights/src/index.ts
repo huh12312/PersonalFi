@@ -816,6 +816,8 @@ export {
   checkInspectorDigest,
   checkModelPin,
   checkExplainGrounding,
+  checkBriefNarrationGrounding,
+  BRIEF_NARRATE_PROBE_TARGET,
   checkSuggestEnumRefusal,
   EXPLAIN_PROBE_TARGET,
   SUGGEST_PROBE_TAXONOMY,
@@ -844,6 +846,7 @@ export {
   type ControlProbeId,
   type ControlProbeModel,
   type ExplainProbeModel,
+  type BriefNarrateProbeModel,
   type SuggestProbeModel,
   type EgressClassification,
   type InspectorPort,
@@ -1023,3 +1026,81 @@ export {
   explainDedupeKey,
   type ExplainJobPayload,
 } from './advisors/explain/jobs.ts';
+
+// --- WP 11.4: `brief.narrate`, the Brief's own narration and the weekly recap (G5-15) ---
+export { BriefRecapReady } from './events.ts';
+export {
+  BRIEF_NARRATE_ADVISOR_ID,
+  BRIEF_NARRATE_MANIFEST,
+  BRIEF_NARRATE_MAX_ITEMS,
+  BRIEF_NARRATE_MAX_MILESTONES,
+  BRIEF_NARRATE_SCOPES,
+  BRIEF_NARRATE_VERSION,
+} from './advisors/brief-narrate/manifest.ts';
+export {
+  briefItemFigureOf,
+  briefMoneyText,
+  briefNarrateTargetOf,
+  briefNarrateTraceContext,
+  briefOpeningOf,
+  buildBriefNarrateRequest,
+  normaliseTitle,
+  type BriefNarrateCheck,
+  type BriefNarrateItem,
+  type BriefNarrateItemSource,
+  type BriefNarrateLastWeek,
+  type BriefNarrateMilestone,
+  type BriefNarratePayload,
+  type BriefNarrateSubject,
+  type BriefNarrateTarget,
+  type BriefNarrateWireRequest,
+  type BriefOutcomeCounts,
+  type BriefWeekFigures,
+  type BuiltBriefNarrateRequest,
+} from './advisors/brief-narrate/request.ts';
+export {
+  BRIEF_NARRATE_REFUSAL_CLASSES,
+  BRIEF_NARRATION_MAX_SENTENCES,
+  BRIEF_NARRATION_TEXT_MAX,
+  BRIEF_RECAP_TEXT_MAX,
+  validateBriefNarrateReply,
+  type BriefNarrateRefusalClass,
+  type BriefNarrateValidation,
+} from './advisors/brief-narrate/reply.ts';
+export {
+  briefNarrationRun,
+  claimBriefNarration,
+  findBriefNarration,
+  finishBriefNarration,
+  loadBriefNarrateSources,
+  type BriefNarrateSources,
+  type StoredBriefNarration,
+} from './advisors/brief-narrate/source.ts';
+export {
+  briefNarrateCeiling,
+  briefNarrateShape,
+  briefNarrateUnavailable,
+  runBriefNarration,
+  ungrantedBriefNarrateScopes,
+  type BriefNarrateDependencies,
+  type BriefNarrateModelPort,
+  type BriefNarrateRenderer,
+  type BriefNarrateResult,
+  type BriefNarrateUnavailableReason,
+} from './advisors/brief-narrate/run.ts';
+export {
+  BRIEF_NARRATE_PREVIEW_EXAMPLE,
+  approveBriefNarrate,
+  ensureBriefNarrateAdvisor,
+  liveBriefNarrateApprovals,
+  previewBriefNarrate,
+  type BriefNarratePreview,
+} from './advisors/brief-narrate/preview.ts';
+export {
+  BRIEF_NARRATE_JOB_KIND,
+  BRIEF_NARRATE_MAX_WAITS,
+  BRIEF_NARRATE_WAIT_MS,
+  briefNarrateDedupeKey,
+  enqueueBriefNarration,
+  type BriefNarrateJobPayload,
+} from './advisors/brief-narrate/jobs.ts';

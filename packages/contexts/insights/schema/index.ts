@@ -144,3 +144,12 @@ export {
   type InsightExplanationRow,
   type NewInsightExplanationRow,
 } from './explanations.ts';
+
+// WP 11.4 — the Brief's own narration and the weekly recap (migration 0059_brief_narrations.sql).
+export {
+  BRIEF_NARRATION_STATUSES,
+  briefNarrations,
+  type BriefNarrationRow,
+  type BriefNarrationStatus,
+  type NewBriefNarrationRow,
+} from './brief-narrations.ts';

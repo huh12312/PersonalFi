@@ -43,6 +43,7 @@ import { narratorSettingsRoutes } from './routes/narrator-settings.ts';
 import { categorySuggestionRoutes } from './routes/category-suggestions.ts';
 import { createSuggestionRuntime } from './category-suggestions.ts';
 import { createExplainRuntime } from './insight-explain.ts';
+import { createBriefNarrateRuntime } from './brief-narration.ts';
 import { explainSwitchesOf, insightExplainRoutes } from './routes/insight-explain.ts';
 import { narratorControlCheckRoutes } from './routes/narrator-control-checks.ts';
 import { buildPlatform } from './platform.ts';
@@ -733,7 +734,34 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       ...(options.narratorResolve === undefined ? {} : { resolve: options.narratorResolve }),
     }),
   );
-  await app.register(briefRoutes(deps, { narrator: narratorPreview }));
+  // WP 11.4: the Brief's own narration in preview mode — for `pending` versus
+  // `unavailable` on the Brief, and for Advisor management's preview and
+  // approval of `brief.narrate`. The worker runs every call.
+  const briefNarratePreview = createBriefNarrateRuntime({
+    mode: 'preview',
+    narrator: narratorPreview,
+    stores: createNarratorStores({
+      database,
+      secretBox: () => {
+        try {
+          return security.requireSecretBox();
+        } catch {
+          return undefined;
+        }
+      },
+    }),
+    localModel: undefined,
+    timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+    allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+    fileKeys: narratorFileKeys,
+    clock,
+  });
+  await app.register(
+    briefRoutes(deps, {
+      narrator: narratorPreview,
+      briefNarrate: { runtime: briefNarratePreview, switches: explainSwitchesOf(deps) },
+    }),
+  );
   // WP 10.16: the GenAI controls self-test — the api's half here (the database,
   // the preview runtime), the worker's half (every check that needs a model)
   // through the job queue. This process still never calls a model.
@@ -782,9 +810,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     clock,
   });
   await app.register(
-    advisorRunRoutes(deps, createPreviewModel(config.localModelPin), narratorPreview, {
-      runtime: explainPreview,
-    }),
+    advisorRunRoutes(
+      deps,
+      createPreviewModel(config.localModelPin),
+      narratorPreview,
+      { runtime: explainPreview },
+      { runtime: briefNarratePreview },
+    ),
   );
   // WP 11.2: Settings → Language model → Category suggestions, and the Inbox's
   // "Not this". Preview mode: this process renders and approves the suggestion

@@ -44,6 +44,12 @@ import {
   explainProbeFor,
   type ExplainRuntime,
 } from './insight-explain.ts';
+import {
+  briefNarrateProbeFor,
+  createBriefNarrateJob,
+  createBriefNarrationEnqueue,
+  type BriefNarrateRuntime,
+} from './brief-narration.ts';
 import type { LocalModelPin } from '@core/config';
 import {
   createNarratorWiring,
@@ -96,6 +102,7 @@ import {
   BUILTIN_CATALOGUE,
   CATEGORY_SUGGEST_MANIFEST,
   INSIGHT_EXPLAIN_MANIFEST,
+  BRIEF_NARRATE_MANIFEST,
   INSIGHTS_EVENTS,
   NARRATOR_MANIFEST,
   type InsightsDatabase,
@@ -262,6 +269,19 @@ export interface ModuleWiringOptions {
    * Absent (the api): nothing runs here; the api only enqueues.
    */
   readonly insightExplain?: { readonly runtime: ExplainRuntime };
+  /**
+   * WP 11.4: the Brief's own narration and the weekly recap — the worker's
+   * run-mode runtime (`brief-narration.ts`, the narrator's provider) and
+   * `NARRATION_TEXT_SHOWN`. Present: the Brief job enqueues one
+   * `insights.brief_narrate` per published Brief, that job is registered (it
+   * announces the Brief whether or not a model is configured) and the
+   * self-test probes `brief_narration_grounding`. Absent (the api): nothing
+   * runs here.
+   */
+  readonly briefNarration?: {
+    readonly runtime: BriefNarrateRuntime;
+    readonly textShown: boolean;
+  };
   /**
    * The account holder these modules are being built for — the same id
    * `resolveModules(platform, userId, …)` is called with.
@@ -522,6 +542,14 @@ export async function registerBuiltinAdvisors(
     database,
     { userId: context.userId, clock: context.clock, correlationId: context.correlationId },
     { manifest: INSIGHT_EXPLAIN_MANIFEST, enabled: true },
+  );
+  // WP 11.4: `brief.narrate`'s row, on — nothing is sent without an approved
+  // shape and the narrator on; level 3's switch in Advisor management still
+  // turns it off. Not in the nightly registry.
+  await registerAdvisor(
+    database,
+    { userId: context.userId, clock: context.clock, correlationId: context.correlationId },
+    { manifest: BRIEF_NARRATE_MANIFEST, enabled: true },
   );
 }
 
@@ -1248,6 +1276,10 @@ function insightsModule(
             })(input);
           },
         }),
+    // WP 11.4: the Brief's own narration and the weekly recap, once per published Brief.
+    ...(options.briefNarration === undefined
+      ? {}
+      : { briefNarration: createBriefNarrationEnqueue(database) }),
   });
   // WP 5.9's outcome check (`evaluateDueOutcomes`) is exported as a plain
   // function, not a job step of its own (§4 W-C: "the outcome check ...
@@ -1309,6 +1341,24 @@ function insightsModule(
               ...(options.insightExplain === undefined
                 ? {}
                 : { explainProbeFor: explainProbeFor(options.insightExplain.runtime) }),
+              // WP 11.4: `brief_narration_grounding`, through the holder's Brief-narration model.
+              ...(options.briefNarration === undefined
+                ? {}
+                : {
+                    briefNarrateProbeFor: briefNarrateProbeFor(options.briefNarration.runtime),
+                  }),
+            }),
+          ]),
+      // WP 11.4: `insights.brief_narrate` — once per published Brief, never the api.
+      ...(options.briefNarration === undefined
+        ? []
+        : [
+            createBriefNarrateJob({
+              database,
+              runtime: options.briefNarration.runtime,
+              switches: insightsRunSwitches(database, options),
+              textShown: options.briefNarration.textShown,
+              clock,
             }),
           ]),
       // WP 11.3: `insights.explain` — the holder's tap or the Brief's prefetch, never the api.

@@ -387,6 +387,10 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'insights: a language model\'s "Explain this" wording per evidence digest (WP 11.3), derived from the insight or pillar and the model, not data the holder entered; a restore explains again under its own approval.',
   ],
   [
+    'brief_narrations',
+    "insights: a language model's wording of one published Brief and its weekly recap (WP 11.4), derived from the Brief and the model, not data the holder entered; a restore keeps the Brief's own deterministic opening and asks no model again.",
+  ],
+  [
     'ops_control_checks',
     "insights: the GenAI controls self-test (WP 10.16), evidence that the narrator controls held on this install at a date; a restore proves them again on the new one rather than inheriting another deployment's proof.",
   ],

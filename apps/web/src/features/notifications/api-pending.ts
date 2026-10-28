@@ -49,6 +49,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   'budgeting.BudgetThresholdCrossed',
   'recurring.PriceChangeDetected',
   'insights.InsightProposed',
+  'insights.BriefRecapReady',
   'connections.ConnectionStatusChanged',
   'connections.SyncRunCompleted',
 ] as const;

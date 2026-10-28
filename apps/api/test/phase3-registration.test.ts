@@ -451,8 +451,12 @@ describe('Phase 3 registration (apps/api/src/{platform,modules}.ts)', () => {
     // proves the count is a deliberate edit rather than a drift. WP 5.1 added
     // AdvisorRunCancelled (05-phase-5-dispatch.md §2's "kill switch 1" row);
     // WP 5.6 adds BriefPublished (§4 item 5, this pin named as WP 5.6's);
-    // WP 10.6 adds NarratorSettingsChanged (the worker's narrator cache).
-    expect(INSIGHTS_EVENTS).toHaveLength(10);
+    // WP 10.6 adds NarratorSettingsChanged (the worker's narrator cache);
+    // WP 11.4 adds BriefRecapReady (the weekly Brief's notification hook).
+    expect(INSIGHTS_EVENTS).toHaveLength(11);
+    expect(INSIGHTS_EVENTS.map((definition) => definition.type)).toContain(
+      'insights.BriefRecapReady',
+    );
     expect(INSIGHTS_EVENTS.map((definition) => definition.type)).toContain(
       'insights.NarratorSettingsChanged',
     );

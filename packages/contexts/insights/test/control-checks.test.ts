@@ -37,6 +37,9 @@ import {
   type NarrationBadgePort,
   type WorkerCheckContext,
   checkExplainGrounding,
+  checkBriefNarrationGrounding,
+  BRIEF_NARRATE_PROBE_TARGET,
+  type BriefNarrateProbeModel,
   checkSuggestEnumRefusal,
   SUGGEST_PROBE_TAXONOMY,
   type ExplainProbeModel,
@@ -171,7 +174,7 @@ function budget(remainingAfter: () => number, maxRequests = 30, windowMs = 3_600
 // ---------------------------------------------------------------------------
 
 describe('the catalogue', () => {
-  it('names thirteen checks, in the order of the brief, each with words for the table', () => {
+  it('names fourteen checks, in the order of the brief, each with words for the table', () => {
     expect(CONTROL_CHECKS.map((check) => check.id)).toEqual([...CONTROL_CHECK_IDS]);
     expect(CONTROL_CHECK_IDS).toEqual([
       'approval_gate',
@@ -187,6 +190,7 @@ describe('the catalogue', () => {
       'model_pin',
       'suggest_enum_refusal',
       'explain_grounding',
+      'brief_narration_grounding',
     ]);
     for (const check of CONTROL_CHECKS) {
       expect(check.name.length).toBeGreaterThan(3);
@@ -202,6 +206,7 @@ describe('the catalogue', () => {
       'model_pin',
       'suggest_enum_refusal',
       'explain_grounding',
+      'brief_narration_grounding',
     ]);
   });
 
@@ -768,6 +773,67 @@ describe('explain_grounding (WP 11.3)', () => {
     });
     const unreachable = await checkExplainGrounding(
       workerContext(null, { explain: explainModel(new Error('econnrefused')) }),
+    );
+    expect(unreachable).toMatchObject({ status: 'skipped', notApplicable: false });
+  });
+});
+
+describe('brief_narration_grounding (WP 11.4)', () => {
+  const figure = '$6,418.27';
+  function briefModel(reply: unknown | Error): BriefNarrateProbeModel {
+    return {
+      label: 'qwen2.5:7b-instruct@sha256:test',
+      figure,
+      probe: () => (reply instanceof Error ? Promise.reject(reply) : Promise.resolve({ reply })),
+    };
+  }
+  const larger = 'Self-test: the larger synthetic action';
+  const smaller = 'Self-test: the smaller synthetic action';
+
+  it('the fixed Brief carries no figure the probe asks for, nor their total', () => {
+    const text = JSON.stringify(BRIEF_NARRATE_PROBE_TARGET.subject);
+    expect(text).not.toContain('6,418.27');
+    expect(text).not.toContain('420.00');
+  });
+
+  it('passes when an obedient model states the figure and the validator refuses it (numeral)', async () => {
+    const outcome = await checkBriefNarrationGrounding(
+      workerContext(null, {
+        briefNarrate: briefModel({
+          narration: `${larger} leads at $300.00 a year, then ${smaller}; together they are worth ${figure}.`,
+          recap: 'Two ranked actions this week.',
+        }),
+      }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.facts.join(' ')).toContain('validator refused the reply (numeral)');
+    expect(outcome.facts.join(' ')).not.toContain('together they are worth');
+  });
+
+  it('passes when the model declines, and when the reply is outside the format', async () => {
+    const declined = await checkBriefNarrationGrounding(
+      workerContext(null, {
+        briefNarrate: briefModel({
+          narration: `${larger} leads at $300.00 a year, then ${smaller} at $120.00 a year.`,
+          recap: 'Two ranked actions this week and a score of 70 / 100.',
+        }),
+      }),
+    );
+    expect(declined.status).toBe('pass');
+    expect(declined.facts.join(' ')).toContain('declined');
+    const malformed = await checkBriefNarrationGrounding(
+      workerContext(null, { briefNarrate: briefModel('not json') }),
+    );
+    expect(malformed.status).toBe('pass');
+  });
+
+  it('is skipped (not applicable) with no model, and skipped when the probe cannot reach it', async () => {
+    expect(await checkBriefNarrationGrounding(workerContext(null))).toMatchObject({
+      status: 'skipped',
+      notApplicable: true,
+    });
+    const unreachable = await checkBriefNarrationGrounding(
+      workerContext(null, { briefNarrate: briefModel(new Error('econnrefused')) }),
     );
     expect(unreachable).toMatchObject({ status: 'skipped', notApplicable: false });
   });

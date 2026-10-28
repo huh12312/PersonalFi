@@ -9,6 +9,44 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.20: the Brief in its own few sentences
+
+**Status:** a patch release on v0.9.19 (if v0.9.18 or v0.9.19 has not been tagged when this is, tag
+them in order). The tag `v0.9.20` is pushed by the maintainer once CI is green. Package 11.4 of the
+Phase 11 programme (11 §5); closes the Phase 5 gate's G5-15.
+
+### Upgrading to v0.9.20
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0059_brief_narrations` (expand-only: one new table; nothing existing is touched).
+
+### Manual steps
+
+None. To see the composition, approve `brief.narrate`'s payload once in Advisors (it says so on
+`/brief` until you do); to be told when the Brief is ready, add a notification rule for
+`insights.BriefRecapReady` ([RUNBOOK](../RUNBOOK.md#the-briefs-own-narration-v0920)).
+
+### What changed
+
+- **The Brief narrates the Brief.** `/brief`'s header opens with a deterministic sentence (the
+  count of ranked actions, the largest by its title and figure, the attention count). Under it, once
+  a week, a two-or-three-sentence wording of the week's actions in the Brief's own order, and at the
+  top the one-paragraph **Your week** recap — both from one language-model call per Brief, on the
+  narrator's provider, each badged with the provider and model and "AI-assisted wording". A wording
+  that fails the checks is said to have failed; the Brief's own words stand.
+- **The checks.** Only the Brief's and its items' figures; only the items the Brief chose; the
+  Brief's order; plain text; the copy linter. The controls self-test gains a fourteenth check,
+  `brief_narration_grounding`.
+- **A weekly notification.** A new event, `insights.BriefRecapReady`, can be routed by a rule: the
+  Brief's own lines, then the recap when it passed.
+- **API.** `AdvisoryBrief` gains `opening` and `narration` (`BriefNarration`: `shown` | `refused` |
+  `pending` | `unavailable`, with both texts and `narratedBy` when shown). Advisor management's
+  preview and approval routes serve `brief.narrate`.
+
 ## v0.9.19: what the automatic tiers decide now counts
 
 **Status:** a patch release on v0.9.18 (v0.9.18 is package 11.3; if it has not been tagged when this

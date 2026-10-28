@@ -49,6 +49,13 @@
  *
  *   The 5-item Brief timing (C5-2), from a model `--cold` unloads first.
  *
+ *     node --experimental-strip-types scripts/advisor-eval.ts --brief-week [--cold] \
+ *       --endpoint http://ollama:11434 --model <name> --digest sha256:<64 hex> --out <dir>/brief-week.jsonl
+ *
+ *   WP 11.4: the same five items, then the Brief's own composed narration
+ *   (`brief.narrate`, one call), judged by the production validator
+ *   (`advisor-eval-brief-week.ts`; CI runs it over the Ollama fake).
+ *
  * ## What it prints, and what it never prints
  *
  * Counts, step names, refusal reasons, durations and token counts. **Never a
@@ -72,6 +79,7 @@ import { NARRATOR_MANIFEST } from '../packages/contexts/insights/src/advisors/lo
 import { resolveLimits } from '../packages/contexts/insights/src/contract/manifest.ts';
 import type { AdvisorRequest } from '../packages/contexts/insights/src/contract/request.ts';
 import { evalCases } from './advisor-eval.fixtures.ts';
+import { BRIEF_CASE_TYPES, briefWeek } from './advisor-eval-brief-week.ts';
 
 /**
  * One finding per request — the production shape since WP 9.5 (C5-2:
@@ -80,14 +88,8 @@ import { evalCases } from './advisor-eval.fixtures.ts';
  */
 export const GROUP_SIZES = [1] as const;
 
-/** The Brief measurement's five findings (`--brief`): the case ids, in Brief order. */
-export const BRIEF_CASE_TYPES = [
-  'subscription.price_increase',
-  'cash.yield_spread',
-  'debt.minimum_only',
-  'spending.category_creep',
-  'investing.concentration',
-] as const;
+/** The Brief measurement's five findings (`--brief`, `--brief-week`): the case ids, in Brief order. */
+export { BRIEF_CASE_TYPES };
 
 const RECORDED = join(import.meta.dirname, 'advisor-eval.recorded.json');
 
@@ -563,8 +565,40 @@ async function replay(): Promise<void> {
   if (!same) process.exitCode = 1;
 }
 
+/**
+ * `--brief-week` (WP 11.4): the five-item Brief and then its own composed
+ * narration, through the shipped compositions (`advisor-eval-brief-week.ts`).
+ */
+async function briefWeekMode(args: Args): Promise<void> {
+  const endpoint = args.values.get('endpoint');
+  const model = args.values.get('model');
+  const digest = args.values.get('digest');
+  if (endpoint === undefined || model === undefined || digest === undefined) {
+    throw new Error('--brief-week needs --endpoint, --model and --digest');
+  }
+  const out = args.values.get('out');
+  if (out === undefined) throw new Error('--brief-week needs --out');
+  if (args.flags.has('cold')) console.log(`brief-week: ${await unload(endpoint, args)}`);
+  console.log(`brief-week: load ${loadAverage()}`);
+  const report = await briefWeek({
+    endpoint,
+    model,
+    digest,
+    timeoutMs: Number(args.values.get('timeout-ms') ?? '180000'),
+    out,
+    log: (line) => console.log(line),
+  });
+  const accepted = report.items.filter((item) => item.accepted).length;
+  console.log(
+    `brief-week: items ${String(accepted)}/5 accepted · composition ` +
+      `${report.composition.accepted ? 'accepted' : `refused (${String(report.composition.refusal ?? report.composition.error)})`} · ` +
+      `${String(report.totalMs)} ms in all (each request's deadline ${String(report.deadlineMs)} ms)`,
+  );
+}
+
 const args = parseArgs(process.argv.slice(2));
 if (args.flags.has('live')) await live(args);
+else if (args.flags.has('brief-week')) await briefWeekMode(args);
 else if (args.flags.has('brief')) await brief(args);
 else if (args.values.has('finalise')) await finalise(args);
 else await replay();

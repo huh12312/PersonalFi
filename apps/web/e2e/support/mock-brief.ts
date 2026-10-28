@@ -209,10 +209,76 @@ export function withServedBlocks(
         : { kind: 'scored', overall: score.overall, isoWeek: score.isoWeek };
   const served = { ...brief, items } as unknown as Parameters<typeof briefOverviewBlocks>[0];
   return {
+    // WP 11.4: the two fields every Brief now carries, unless a test sets its own.
+    opening: 'One ranked action this week, in order of dollar impact.',
+    narration: UNAVAILABLE_NARRATION,
     ...brief,
     items,
     blocks: brief['blocks'] ?? blockDocumentOf(briefOverviewBlocks(served, health, [])),
   };
+}
+
+/** WP 11.4: the Brief's own composition when none was made (the narrator Off) — the default a mock serves. */
+export const UNAVAILABLE_NARRATION = {
+  state: 'unavailable',
+  text: null,
+  recap: null,
+  narratedBy: null,
+  refusal: null,
+  message: 'The language model is Off in Settings, so the Brief is in its own words only.',
+};
+
+/** WP 11.4: a Brief's deterministic opening for the two-item fixtures below. */
+export const NARRATED_OPENING =
+  '2 ranked actions this week, in order of dollar impact. The largest is “Avoidable fees this year”, $720.00 a year.';
+
+/** WP 11.4: a composition that passed the checks — the narration and "Your week", by the local model. */
+export const SHOWN_NARRATION = {
+  state: 'shown',
+  text:
+    'Avoidable fees this year leads the week at $720.00 a year, ahead of Idle cash is earning little at ' +
+    '$310.00 a year. Last week 1 action was accepted and 1 is carried into this week.',
+  recap:
+    'Week 2026-W40 has 2 ranked actions and nothing needing attention, with a health score of 72.5 / 100.',
+  narratedBy: { provider: 'ollama', model: 'qwen2.5:7b-instruct-q4_K_M' },
+  refusal: null,
+  message: null,
+};
+
+/** WP 11.4: a composition the validator refused — the api's words; the opening stands. */
+export const REFUSED_NARRATION = {
+  state: 'refused',
+  text: null,
+  recap: null,
+  narratedBy: { provider: 'ollama', model: 'qwen2.5:7b-instruct-q4_K_M' },
+  refusal: 'numeral',
+  message:
+    "An AI-assisted wording of this week's Brief didn't pass the app's checks, so it is not shown. The Brief's own words above stand.",
+};
+
+/** WP 11.4: still expected. */
+export const PENDING_NARRATION = {
+  state: 'pending',
+  text: null,
+  recap: null,
+  narratedBy: null,
+  refusal: null,
+  message: 'An AI-assisted wording of the week may follow; the words above are the Brief’s own.',
+};
+
+/** WP 11.4: the two ranked items the narration fixtures above talk about. */
+export function narratedBriefItems(): Record<string, unknown>[] {
+  return [
+    briefItem({ id: '1' }),
+    briefItem({
+      id: '2',
+      position: 1,
+      title: 'Idle cash is earning little',
+      summaryMd: 'Cash beyond three months of spending is earning little interest.',
+      annualizedImpact: { minor: '31000', currency: 'USD' },
+      carried: true,
+    }),
+  ];
 }
 
 export interface MockState {

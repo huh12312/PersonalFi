@@ -10,6 +10,11 @@ import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { HealthScoreSection } from '../health/HealthScoreSection.tsx';
 import { AttentionStrip } from './AttentionStrip.tsx';
 import { BriefItemCard } from './BriefItemCard.tsx';
+import {
+  BriefNarrationHeader,
+  BriefRecap,
+  type BriefNarrationFields,
+} from './BriefNarrationHeader.tsx';
 import { BRIEF_DISCLAIMER } from './disclaimer.ts';
 import type { BriefItemWithNarration } from './types.ts';
 
@@ -62,6 +67,8 @@ export function BriefScreen() {
   if (brief === undefined) {
     return <SkeletonText lines={8} />;
   }
+  // A response that predates WP 11.4 has neither field (tolerated, as `types.ts` tolerates older items).
+  const withNarration: BriefNarrationFields = brief as BriefNarrationFields;
   const attention: BriefItemWithNarration[] = brief.items.filter(
     (item) => item.section === 'attention',
   );
@@ -76,6 +83,12 @@ export function BriefScreen() {
         <p className="mt-1 text-caption text-text-muted" data-testid="brief-disclaimer">
           {BRIEF_DISCLAIMER}
         </p>
+        {/* WP 11.4: "Your week" at the top, then the Brief's own opening, then its composed narration. */}
+        <BriefRecap narration={withNarration.narration} />
+        <BriefNarrationHeader
+          {...(withNarration.opening === undefined ? {} : { opening: withNarration.opening })}
+          {...(withNarration.narration === undefined ? {} : { narration: withNarration.narration })}
+        />
       </div>
 
       {brief.coldStart && brief.coldStartNote !== null && (

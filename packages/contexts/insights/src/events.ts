@@ -261,6 +261,38 @@ export const NarratorSettingsChanged = defineEvent({
 });
 
 /**
+ * WP 11.4. The week's Brief is ready to announce: its own composition step
+ * (`insights.brief_narrate`) has finished — narrated, refused, or unavailable —
+ * so a notification can carry the deterministic lines and, when one was
+ * validated, the "Your week" recap as optional text. Emitted once per Brief by
+ * that job; a notification renderer keys on the Brief id, so a replay sends
+ * nothing twice.
+ */
+export const BriefRecapReady = defineEvent({
+  type: 'insights.BriefRecapReady',
+  aggregateType: 'advisory_brief',
+  description:
+    "The week's Brief finished its own composition step (WP 11.4): the counts the Brief carries and, " +
+    'only when the validator passed it, the one-paragraph "Your week" recap with the provider and model ' +
+    'that wrote it. Emitted once per Brief after its narrations; the recap is null when the composition ' +
+    'was refused, unavailable or not attempted, and the deterministic lines stand alone.',
+  schema: z.object({
+    briefId: uuid,
+    isoWeek: z.string().regex(/^[0-9]{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$/),
+    rankedCount: z.int().nonnegative(),
+    attentionCount: z.int().nonnegative(),
+    nothingMaterial: z.boolean(),
+    recap: z.string().min(1).max(600).nullable(),
+    recapBy: z
+      .object({
+        provider: z.enum(['ollama', 'openai', 'openrouter', 'anthropic']),
+        model: z.string().min(1).max(200),
+      })
+      .nullable(),
+  }),
+});
+
+/**
  * Registered at the composition root. Exported as a list so `apps/api` cannot
  * forget one: an event type that is appended but not registered is invisible to
  * the pump's upcasting, and the failure surfaces as a silent consumer rather
@@ -277,4 +309,5 @@ export const INSIGHTS_EVENTS: readonly EventDefinition[] = Object.freeze([
   InsightReviewed,
   BriefPublished,
   NarratorSettingsChanged,
+  BriefRecapReady,
 ]);

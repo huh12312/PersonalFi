@@ -608,6 +608,12 @@ describeWithDb('runMigrations', () => {
       //   transactions_auto_review_idx (partial: the Inbox's review rows); users gains inbox_show_auto_review
       //   BOOLEAN NOT NULL DEFAULT TRUE. Expand-only, no backfill (a job fills it). DERIVED: registry.ts omits the
       //   six columns from the export (DERIVED_COLUMNS) and the import re-derives them from category_assignments.
+      // 0059_brief_narrations (WP 11.4): one new @ctx/insights table, brief_narrations (the Brief's own
+      //   narration and the weekly recap: one language-model call per published Brief, UNIQUE on (user_id,
+      //   brief_id), claimed as status calling before the call and finished once as shown | refused | failed |
+      //   cancelled; narration_text and recap_text set together exactly when shown; refusal exactly when refused).
+      //   Expand-only; references users and advisory_briefs (the composite user-scoped key). Not exported
+      //   (registry.ts exempts it).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -631,6 +637,7 @@ describeWithDb('runMigrations', () => {
         'auth_attempts',
         'auth_lockouts',
         'basis_method_elections',
+        'brief_narrations',
         'budget_alerts_state',
         'budget_line_actuals',
         'budget_lines',

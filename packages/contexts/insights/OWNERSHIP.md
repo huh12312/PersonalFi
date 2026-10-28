@@ -50,3 +50,4 @@ data the advisor never received would _resolve_.
 - `health_score_snapshots`
 - `ops_control_checks`
 - `insight_explanations`
+- `brief_narrations`

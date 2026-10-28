@@ -98,7 +98,10 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { PLATFORM_FLAGS, createFlagService, platformExecutor } from '@core/platform';
 import {
+  briefNarrateUnavailable,
+  briefOpeningOf,
   findAdvisor,
+  findBriefNarration,
   findLatestHealthScore,
   HEALTH_BANDS,
   HEALTH_COMPONENT_IDS,
@@ -106,6 +109,7 @@ import {
   MODULE_FLAG_KEY,
   narrationsFor,
   retirementReasonInWords,
+  type RunSwitches,
   type NarrationView,
 } from '@ctx/insights';
 import { advisoryBriefItems, advisoryBriefs } from '@ctx/insights/schema';
@@ -116,6 +120,7 @@ import { ADVISOR_KIND_FLAGS, MODULE_FLAGS } from '../platform.ts';
 import { AppError, problems } from '../problem.ts';
 import { isoInstant, moneySchema } from '../wire.ts';
 import type { NarratorRuntime } from '../narrator-wiring.ts';
+import type { BriefNarrateRuntime } from '../brief-narration.ts';
 import {
   briefItemBlocks,
   briefOverviewBlocks,
@@ -311,6 +316,35 @@ const briefItemSchema = z
   })
   .meta({ id: 'BriefItem' });
 
+/**
+ * WP 11.4 (G5-15): the Brief's own composition — the week's ranked actions in the Brief's order and the "Your week"
+ * recap, one language-model call per Brief, validated before it is stored. `shown` carries both texts and who wrote
+ * them; `refused` says so in words (the deterministic opening stands); `pending` while one is expected;
+ * `unavailable` (Off, not approved, not granted, failed, cancelled, nothing to narrate) with why, in words.
+ */
+const briefNarrationSchema = z
+  .object({
+    state: z.enum(['shown', 'refused', 'pending', 'unavailable']),
+    /** The composed narration: two or three sentences, the Brief's order. Only when `shown`. */
+    text: z.string().nullable(),
+    /** The one-paragraph "Your week" recap. Only when `shown`. */
+    recap: z.string().nullable(),
+    /** The provider and model that wrote it (`shown`, `refused`). */
+    narratedBy: z
+      .object({
+        provider: z.enum(['ollama', 'openai', 'openrouter', 'anthropic']),
+        model: z.string(),
+      })
+      .nullable(),
+    /** The validator's refusal class when `refused`. */
+    refusal: z.string().nullable(),
+    /** Why it is refused, pending or unavailable, in words. */
+    message: z.string().nullable(),
+  })
+  .meta({ id: 'BriefNarration' });
+
+type BriefNarrationWire = z.infer<typeof briefNarrationSchema>;
+
 const briefSchema = z
   .object({
     id: z.uuid(),
@@ -322,6 +356,13 @@ const briefSchema = z
     inputDigest: z.string(),
     publishedAt: isoInstant,
     items: z.array(briefItemSchema),
+    /**
+     * WP 11.4: the Brief's deterministic opening — the count of ranked actions, the largest by its title and figure,
+     * and the attention count, in words. Built from the stored rows; what the header says whatever any model says.
+     */
+    opening: z.string(),
+    /** WP 11.4: the Brief's own composition and the weekly recap (`BriefNarration`). */
+    narration: briefNarrationSchema,
     /**
      * WP 10.15 (V8): the overview above the cards as blocks — the week, the ranked actions by dollar impact, net
      * worth milestones if any, and the health link card (`blocks/brief.ts`). Deterministic server code.
@@ -538,7 +579,7 @@ function serialiseBrief(
   brief: typeof advisoryBriefs.$inferSelect,
   items: readonly (typeof advisoryBriefItems.$inferSelect)[],
   narrations: NarrationContext,
-): Omit<z.infer<typeof briefSchema>, 'blocks' | 'items'> & {
+): Omit<z.infer<typeof briefSchema>, 'blocks' | 'items' | 'opening' | 'narration'> & {
   readonly items: Omit<z.infer<typeof briefItemSchema>, 'blocks'>[];
 } {
   const sorted = [...items].sort((a, b) =>
@@ -586,32 +627,157 @@ function serialiseBrief(
 
 /** WP 10.15: the served Brief plus its blocks — built from the served fields only, after they are final. */
 function withBlocks(
-  served: Omit<z.infer<typeof briefSchema>, 'blocks' | 'items'> & {
+  served: Omit<z.infer<typeof briefSchema>, 'blocks' | 'items' | 'opening' | 'narration'> & {
     readonly items: readonly Omit<z.infer<typeof briefItemSchema>, 'blocks'>[];
   },
   overview: {
     readonly health: HealthForBlocks;
     readonly milestones: readonly MilestoneForBlocks[];
   },
+  narration: BriefNarrationWire,
 ): z.infer<typeof briefSchema> {
+  const ranked = served.items.filter((item) => item.section === 'ranked');
   return {
     ...served,
     items: served.items.map((item) => ({ ...item, blocks: blockDocument(briefItemBlocks(item)) })),
+    opening: briefOpeningOf({
+      nothingMaterial: served.nothingMaterial,
+      ranked,
+      attentionCount: served.items.length - ranked.length,
+    }),
+    narration,
     blocks: blockDocument(briefOverviewBlocks(served, overview.health, overview.milestones)),
   };
 }
 
-/** The two reads the Brief screen's overview stands on, as their own routes serve them. */
-async function overviewReadsFor(
+const BRIEF_NARRATION_UNAVAILABLE_WORDS: Readonly<Record<string, string>> = Object.freeze({
+  off: 'The language model is Off in Settings, so the Brief is in its own words only.',
+  not_configured: 'No language model is configured for you, so the Brief is in its own words only.',
+  consent_required: 'The hosted provider has no standing consent: nothing may be sent to it.',
+  key_missing: 'The language model provider has no key.',
+  key_unopenable: 'The stored key cannot be opened (is the install unlocked?).',
+  endpoint_refused: 'The local endpoint set in Settings is refused by the local-endpoint policy.',
+  advisors_disabled: 'Advisors are switched off for this install.',
+  module_disabled: 'Insights are switched off.',
+  kind_disabled: 'The language model is switched off in Advisor management.',
+  advisor_disabled: 'The Brief’s own wording is switched off in Advisor management.',
+  advisor_quarantined:
+    'The Brief’s own wording is paused after repeated failures; see Advisor management.',
+  payload_not_approved:
+    'The payload the Brief’s own wording sends has not been approved yet. Review and approve it in Advisor management.',
+  failed:
+    'The language model did not finish a wording of this week’s Brief; the Brief is in its own words.',
+  cancelled:
+    'The wording of this week’s Brief was stopped by a switch; the Brief is in its own words.',
+  not_attempted:
+    'No AI-assisted wording was made for this week’s Brief; the Brief is in its own words.',
+  nothing_material: 'Nothing material this week, so there is nothing to word.',
+});
+
+const BRIEF_NARRATION_REFUSED_WORDS =
+  "An AI-assisted wording of this week's Brief didn't pass the app's checks, so it is not shown. The Brief's own words above stand.";
+
+const BRIEF_NARRATION_PENDING_WORDS =
+  'An AI-assisted wording of the week may follow; the words above are the Brief’s own.';
+
+function unavailableNarration(reason: string): BriefNarrationWire {
+  return {
+    state: 'unavailable',
+    text: null,
+    recap: null,
+    narratedBy: null,
+    refusal: null,
+    message:
+      BRIEF_NARRATION_UNAVAILABLE_WORDS[reason] ??
+      BRIEF_NARRATION_UNAVAILABLE_WORDS['not_attempted'] ??
+      null,
+  };
+}
+
+/**
+ * WP 11.4: the Brief's own composition as the holder may see it. The stored row first (`brief_narrations`, one
+ * per Brief); with none, `pending` only while a composition is still expected (a model resolves for this holder,
+ * the ladder and the approval are open, and the Brief is recent), else `unavailable` with why. The api reads and
+ * renders; it never calls a model.
+ */
+async function briefNarrationStateFor(
   deps: RouteDeps,
+  options: BriefRouteOptions,
+  userId: string,
+  brief: typeof advisoryBriefs.$inferSelect,
+): Promise<BriefNarrationWire> {
+  const stored = await findBriefNarration(deps.database, userId, brief.id);
+  if (stored !== null) {
+    if (stored.status === 'shown' && stored.narration !== null && stored.recap !== null) {
+      return {
+        state: 'shown',
+        text: stored.narration,
+        recap: stored.recap,
+        narratedBy: narratedByOf(stored.model),
+        refusal: null,
+        message: null,
+      };
+    }
+    if (stored.status === 'refused') {
+      return {
+        state: 'refused',
+        text: null,
+        recap: null,
+        narratedBy: narratedByOf(stored.model),
+        refusal: stored.refusal,
+        message: BRIEF_NARRATION_REFUSED_WORDS,
+      };
+    }
+    if (stored.status === 'calling') {
+      return {
+        state: 'pending',
+        text: null,
+        recap: null,
+        narratedBy: null,
+        refusal: null,
+        message: BRIEF_NARRATION_PENDING_WORDS,
+      };
+    }
+    return unavailableNarration(stored.status);
+  }
+  if (brief.nothingMaterial) return unavailableNarration('nothing_material');
+  const narrate = options.briefNarrate;
+  if (narrate === undefined) return unavailableNarration('not_attempted');
+  const resolution = await narrate.runtime.resolve(userId);
+  if (resolution.adapter === null)
+    return unavailableNarration(resolution.reason ?? 'not_configured');
+  const gate = await briefNarrateUnavailable(deps.database, narrate.switches, {
+    userId,
+    templateHash: resolution.adapter.templateHash,
+  });
+  if (gate !== null) return unavailableNarration(gate);
+  if (deps.clock.now().getTime() - brief.publishedAt.getTime() > NARRATION_PENDING_WINDOW_MS) {
+    return unavailableNarration('not_attempted');
+  }
+  return {
+    state: 'pending',
+    text: null,
+    recap: null,
+    narratedBy: null,
+    refusal: null,
+    message: BRIEF_NARRATION_PENDING_WORDS,
+  };
+}
+
+/**
+ * The two reads the Brief screen's overview stands on, as their own routes serve them. Exported (WP 11.4) so the
+ * worker's `brief.narrate` reads the overview's figures from the same blocks the route serves.
+ */
+export async function overviewReadsFor(
+  database: RouteDeps['database'],
   userId: string,
 ): Promise<{
   readonly health: HealthForBlocks;
   readonly milestones: readonly MilestoneForBlocks[];
 }> {
   const [score, milestones] = await Promise.all([
-    findLatestHealthScore(deps.database, userId),
-    listUndismissedMilestones(deps.database, userId),
+    findLatestHealthScore(database, userId),
+    listUndismissedMilestones(database, userId),
   ]);
   const health: HealthForBlocks =
     score === null
@@ -633,6 +799,15 @@ async function overviewReadsFor(
 export interface BriefRouteOptions {
   /** WP 10.6: the holder's narrator (the api's preview-mode runtime). Absent: `LOCAL_MODEL_PIN_*`, as before. */
   readonly narrator?: Pick<NarratorRuntime, 'forUser'>;
+  /**
+   * WP 11.4: the Brief's own composition — the api's preview-mode runtime (resolves and renders for the
+   * approval's template hash, never calls) and the run switches, for `pending` versus `unavailable`. Absent: a Brief
+   * with no stored composition reads `unavailable`.
+   */
+  readonly briefNarrate?: {
+    readonly runtime: Pick<BriefNarrateRuntime, 'resolve'>;
+    readonly switches: RunSwitches;
+  };
 }
 
 export const briefRoutes = (
@@ -665,11 +840,14 @@ export const briefRoutes = (
           throw briefNotFound('no Weekly Advisory Brief has been published for this holder yet');
         }
         const items = await loadItems(deps.database, session.userId, brief.id);
-        const [narrations, overview] = await Promise.all([
+        const [narrations, overview, narration] = await Promise.all([
           narrationContextFor(deps, options, session.userId, brief, items),
-          overviewReadsFor(deps, session.userId),
+          overviewReadsFor(deps.database, session.userId),
+          briefNarrationStateFor(deps, options, session.userId, brief),
         ]);
-        return { brief: withBlocks(serialiseBrief(brief, items, narrations), overview) };
+        return {
+          brief: withBlocks(serialiseBrief(brief, items, narrations), overview, narration),
+        };
       },
     );
 
@@ -694,11 +872,14 @@ export const briefRoutes = (
           throw briefNotFound(`no Weekly Advisory Brief for ${request.params.isoWeek}`);
         }
         const items = await loadItems(deps.database, session.userId, brief.id);
-        const [narrations, overview] = await Promise.all([
+        const [narrations, overview, narration] = await Promise.all([
           narrationContextFor(deps, options, session.userId, brief, items),
-          overviewReadsFor(deps, session.userId),
+          overviewReadsFor(deps.database, session.userId),
+          briefNarrationStateFor(deps, options, session.userId, brief),
         ]);
-        return { brief: withBlocks(serialiseBrief(brief, items, narrations), overview) };
+        return {
+          brief: withBlocks(serialiseBrief(brief, items, narrations), overview, narration),
+        };
       },
     );
 

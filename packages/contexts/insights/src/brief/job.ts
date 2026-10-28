@@ -119,6 +119,22 @@ export interface BriefJobDependencies {
     readonly insightIds: readonly string[];
     readonly correlationId: string;
   }) => Promise<void>;
+  /**
+   * WP 11.4 (G5-15): the Brief's own composition — once per **published**
+   * Brief, after the per-item narrations above are enqueued. The composition
+   * root binds it (it owns the model, the Brief's blocks and the wait for the
+   * item narrations) and enqueues one `insights.brief_narrate` job; that job
+   * asks the model at most once per Brief and announces the Brief
+   * (`insights.BriefRecapReady`) whatever the model does. Enqueued, never
+   * awaited past the enqueue: the Brief never waits on a model. A failure
+   * here is logged; the Brief stands.
+   */
+  readonly briefNarration?: (input: {
+    readonly userId: string;
+    readonly briefId: string;
+    readonly isoWeek: string;
+    readonly correlationId: string;
+  }) => Promise<void>;
 }
 
 /**
@@ -303,6 +319,22 @@ export function createBriefJob(input: BriefJobDependencies): JobHandlerRegistrat
           context.logger.warn(
             { job: BRIEF_JOB_KIND, isoWeek, err: error },
             'Explain-this prefetch not enqueued; the Brief stands',
+          );
+        }
+      }
+
+      if (input.briefNarration !== undefined) {
+        try {
+          await input.briefNarration({
+            userId: context.userId,
+            briefId: published.id,
+            isoWeek,
+            correlationId: context.correlationId,
+          });
+        } catch (error) {
+          context.logger.warn(
+            { job: BRIEF_JOB_KIND, isoWeek, err: error },
+            "the Brief's own narration not enqueued; the Brief stands",
           );
         }
       }

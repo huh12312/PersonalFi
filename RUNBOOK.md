@@ -1952,6 +1952,60 @@ again** asks again.
 ahead of time — **at most five a week**, each only if it could be explained now and is not already
 cached. Never the backlog, never the attention list.
 
+## The Brief's own narration (v0.9.20)
+
+WP 11.4 (the Phase 5 gate's G5-15). Once per published weekly Brief, after its per-item narrations,
+the worker asks the narrator's model for **one** composition of the week as a whole: two or three
+sentences that go through the week's ranked actions in the Brief's own order (by the dollar impact
+the Brief computed, the largest first, each by its title) and say what changed since last week, plus
+the one-paragraph **Your week** recap (the counts, the health score line, milestones). On `/brief`
+the recap sits at the top of the header and the narration under the Brief's own deterministic
+opening ("3 ranked actions this week, in order of dollar impact. The largest is …"), each with a
+badge naming the provider and model and the words "AI-assisted wording". One query type,
+`brief.narrate`, carries both: the recap's data is a subset of the narration's.
+
+**What it sends.** The overview's figures as `/brief` shows them (the week, the count of ranked
+actions and of items needing attention, the score line, the newest three milestones), the ranked
+items (title, wording, headline figure, whether carried from last week) and last week's outcomes as
+counts (accepted, dismissed, carried) — never a previous item's title, no ids, no evidence rows,
+goal-name digits removed. An item's wording is its per-item narration only when the install shows
+narration text (`NARRATION_TEXT_SHOWN`); otherwise, the default, the built-in summary. The scopes are
+the union of the items' own source scopes, sent only inside your grant to the narrator;
+`transactions.raw` never is, so an item built from raw rows is left out of the composition.
+
+**Where it runs.** The narrator's provider, consent, key and hourly window, as for Explain this; no
+separate consent. Off is off. The api never calls a model: the weekly Brief job enqueues
+`insights.brief_narrate`, which waits (asking nothing) while any of that Brief's item narrations is
+still queued, then asks **at most once per Brief** — the `brief_narrations` row is claimed before
+the call and never asked again, whatever the outcome.
+
+**The approval.** Advisors, `brief.narrate`: preview the exact payload and prompt (your latest
+Brief, or an illustrative one), then approve the shape once. A new template, format, provider or
+model is a new shape. The advisor switch, the `local_model` kind switch, the breaker and cancel are
+the narrator's ladder.
+
+**What is checked.** Every figure in either text must be, as written, one of the Brief's figures or
+an item's headline figure (a total, a difference, a figure from inside a summary, a figure in words
+are refused); the texts may name only the items the Brief chose (a finding it did not choose is
+refused, `item_reference`); the narration must name the first action first and keep the Brief's
+order (`order`); plain text only, no links, the insight copy linter, at most 1 200 and 600
+characters, at most three sentences, the reply format exactly. A refusal shows as one, and the
+Brief's opening stands; nothing is invented in its place. The controls self-test's fourteenth check,
+`brief_narration_grounding`, asks for a figure a fixed Brief does not carry and passes when the
+validator refuses it.
+
+**The notification.** When the step finishes the worker appends `insights.BriefRecapReady`. A
+notification rule for it (Settings, Notifications) sends "Your weekly Brief is ready" with the
+Brief's own lines; the recap follows them, under who wrote it, only when it passed the checks.
+
+**Measuring it.** `--brief-week` is the 5-item Brief measurement with the composition added; CI runs
+it over the Ollama fake. The live run, inside the compose `llm` network as for `--brief`:
+
+```bash
+node --experimental-strip-types scripts/advisor-eval.ts --brief-week --cold \
+  --endpoint http://ollama:11434 --model <name> --digest sha256:<64 hex> --out <dir>/brief-week.jsonl
+```
+
 ## Categorisation: measuring the tiers (`just categorization-eval`)
 
 WP 11.1. Replays every transaction you filed by hand (the categories you picked, plus any confirmed
