@@ -177,7 +177,7 @@ function budget(remainingAfter: () => number, maxRequests = 30, windowMs = 3_600
 // ---------------------------------------------------------------------------
 
 describe('the catalogue', () => {
-  it('names fifteen checks, in the order of the brief, each with words for the table', () => {
+  it('names sixteen checks, in the order of the brief, each with words for the table', () => {
     expect(CONTROL_CHECKS.map((check) => check.id)).toEqual([...CONTROL_CHECK_IDS]);
     expect(CONTROL_CHECK_IDS).toEqual([
       'approval_gate',
@@ -195,6 +195,7 @@ describe('the catalogue', () => {
       'explain_grounding',
       'brief_narration_grounding',
       'ask_grounding',
+      'advisor_cost_pairing',
     ]);
     for (const check of CONTROL_CHECKS) {
       expect(check.name.length).toBeGreaterThan(3);

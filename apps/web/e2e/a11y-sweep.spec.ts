@@ -45,6 +45,7 @@ import {
   REFUSED_NARRATION,
   SHOWN_NARRATION,
 } from './support/mock-brief.ts';
+import { ADVISOR_QUESTION, ADVISOR_QUESTIONS } from './support/mock-advisor.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import {
@@ -1777,6 +1778,139 @@ test.describe('WP 11.5c Ask PersonalFi', () => {
       await expect(page.getByTestId('ask-submit')).toHaveAttribute('aria-busy', 'true');
       expect(await motionOffenders(page)).toEqual([]);
       await scanBothThemes(page, 'WP 11.5c /ask, a question going, reduced motion');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7q. WP 11.5d: the Advisor - clarify, options, plan, refused, unavailable, a step going
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep's `/advisor` is the default layer (ready, five earlier sessions, none selected); this block picks
+ * each earlier session from the history so the screen is held at the options (each card with its gains and costs),
+ * the clarify form, the plan with what is followed, and a refusal at the trade-offs step; plus the unavailable
+ * state. Both themes at 1280 and 320 px, 200 % zoom with 1.4.12 text spacing, and reduced motion - with a step going
+ * (`Gathering your figures...`), where nothing may animate.
+ */
+test.describe('WP 11.5d Advisor', () => {
+  const STATES = [
+    ['options', 0, 'awaiting_pick'],
+    ['clarify', 1, 'clarifying'],
+    ['plan', 2, 'tracked'],
+    ['refused', 3, 'refused'],
+  ] as const;
+
+  async function open(page: Page, index: number, state: string): Promise<void> {
+    await installSweepMocks(page);
+    await visit(page, '/advisor');
+    await hideDevtools(page);
+    await page.getByTestId('advisor-history-item').nth(index).click();
+    await expect(page.getByTestId('advisor-session')).toHaveAttribute('data-state', state);
+    if (state === 'awaiting_pick') {
+      const toggle = page.getByRole('button', { name: /Emergency fund runway/u });
+      await toggle.click();
+      await expect(page.getByTestId('advisor-figures')).toBeVisible();
+    }
+    await waitForAnimationsToDrain(page);
+  }
+
+  for (const [name, index, state] of STATES) {
+    test(`WP 11.5d /advisor, ${name}: axe-clean in both themes, at 1280 and at 320 px`, async ({
+      page,
+    }) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await open(page, index, state);
+      await scanBothThemes(page, `WP 11.5d /advisor, ${name}`);
+      await page.setViewportSize(REFLOW);
+      await page.waitForTimeout(600);
+      expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+      await scanBothThemes(page, `WP 11.5d /advisor, ${name}, at 320 px`);
+    });
+  }
+
+  test('WP 11.5d /advisor, unavailable: axe-clean in both themes, at 1280 and at 320 px', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await installSweepMocks(page, {
+      advisor: {
+        availability: {
+          state: 'unavailable',
+          reason: 'payload_not_approved',
+          step: 'clarify',
+          message:
+            'The advisor cannot run yet: the payload for advisor.clarify has not been approved.',
+        },
+        engine: null,
+      },
+    });
+    await visit(page, '/advisor');
+    await hideDevtools(page);
+    await expect(page.getByTestId('advisor-unavailable')).toBeVisible();
+    await scanBothThemes(page, 'WP 11.5d /advisor, unavailable');
+    await page.setViewportSize(REFLOW);
+    await page.waitForTimeout(600);
+    expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+    await scanBothThemes(page, 'WP 11.5d /advisor, unavailable, at 320 px');
+  });
+
+  test('WP 11.5d /settings/advisors: the hosted consent card is axe-clean in both themes, at 1280 and at 320 px', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await installSweepMocks(page);
+    await visit(page, '/settings/advisors');
+    await hideDevtools(page);
+    await expect(page.getByTestId('advisor-consent')).toBeVisible();
+    await scanBothThemes(page, 'WP 11.5d /settings/advisors, hosted consent');
+    await page.setViewportSize(REFLOW);
+    await page.waitForTimeout(600);
+    expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+    await scanBothThemes(page, 'WP 11.5d /settings/advisors, hosted consent, at 320 px');
+  });
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    for (const [name, index, state] of STATES) {
+      test(`WP 11.5d /advisor, ${name}: nothing is lost`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, index, state);
+        expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+        await scanBothThemes(page, `WP 11.5d /advisor, ${name}, at 200 %`);
+        const before = new Set(await clippedTextElements(page));
+        await page.addStyleTag({ content: TEXT_SPACING });
+        await page.waitForTimeout(100);
+        const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+        expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+      });
+    }
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+    test('WP 11.5d /advisor, a step going: nothing animates, and it is axe-clean', async ({
+      page,
+    }) => {
+      test.setTimeout(120_000);
+      await installSweepMocks(page, { advisor: { hold: 'gathering' } });
+      await visit(page, '/advisor');
+      await hideDevtools(page);
+      const box = page.getByLabel('Your question');
+      await box.fill(ADVISOR_QUESTION);
+      await box.press('Enter');
+      await expect(page.getByTestId('advisor-clarify')).toBeVisible({ timeout: 15_000 });
+      await page.getByLabel(ADVISOR_QUESTIONS[0]!).fill('Six months');
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await expect(page.getByTestId('advisor-live')).toContainText('Gathering your figures…', {
+        timeout: 15_000,
+      });
+      await expect(page.getByTestId('advisor-submit')).toHaveAttribute('aria-busy', 'true');
+      expect(await motionOffenders(page)).toEqual([]);
+      await scanBothThemes(page, 'WP 11.5d /advisor, a step going, reduced motion');
     });
   });
 });

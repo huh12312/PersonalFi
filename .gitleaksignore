@@ -59,3 +59,14 @@
 d025adc820181a7e36d5ab353df1d270cdeebc44:apps/api/test/db/brief-routes.test.ts:generic-api-key:714
 d025adc820181a7e36d5ab353df1d270cdeebc44:apps/api/test/db/brief-routes.test.ts:generic-api-key:870
 d025adc820181a7e36d5ab353df1d270cdeebc44:apps/api/test/db/narrator-composition.test.ts:generic-api-key:86
+
+# False positives (WP 11.5d, 2026-10-28): the advisor's pinned payload snapshot
+# carries the parameter citation key `tax.us.2026.retirement.ira_contribution`
+# under a JSON field named "key", and the generic-api-key heuristic reads the
+# key *name* as a secret. One is inside a vitest inline snapshot (a comment
+# would change the snapshot), the other is the same JSON quoted in the
+# evidence file. Verified by reading both lines — a parameter key name, not a
+# credential. The commit-less form covers the pre-commit `protect --staged`
+# scan; the commit-ful lines below it cover CI's full-history scan.
+packages/contexts/insights/test/wp115d-advisor.test.ts:generic-api-key:454
+docs/evidence/phase-11/wp11.5d-advisor-mode.md:generic-api-key:104

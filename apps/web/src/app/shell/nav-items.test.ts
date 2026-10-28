@@ -10,12 +10,22 @@ describe('nav items: Ask (WP 11.5c)', () => {
       '/',
       '/insights',
       '/ask',
+      '/advisor',
       '/health',
       '/brief',
     ]);
     expect(ALL_NAV_ITEMS.filter((item) => item.to === '/ask')).toHaveLength(1);
     expect(MORE_NAV_ITEMS.some((item) => item.to === '/ask')).toBe(true);
     expect(BOTTOM_TABS.some((item) => item.to === '/ask')).toBe(false);
+  });
+
+  it('lists Advisor (WP 11.5d) right after Ask, once, in the sidebar and the More sheet', () => {
+    const all = ALL_NAV_ITEMS.map((item) => item.to);
+    expect(all.indexOf('/advisor')).toBe(all.indexOf('/ask') + 1);
+    expect(ALL_NAV_ITEMS.filter((item) => item.to === '/advisor')).toHaveLength(1);
+    const more = MORE_NAV_ITEMS.map((item) => item.to);
+    expect(more.indexOf('/advisor')).toBe(more.indexOf('/ask') + 1);
+    expect(BOTTOM_TABS.some((item) => item.to === '/advisor')).toBe(false);
   });
 
   it('reaches every destination in the sidebar from the bottom bar or the More sheet', () => {

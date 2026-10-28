@@ -34,6 +34,7 @@ import {
   checkExplainGrounding,
   checkBriefNarrationGrounding,
   checkAskGrounding,
+  checkAdvisorCostPairing,
   checkSuggestEnumRefusal,
   errorClass,
   pendingRow,
@@ -114,6 +115,8 @@ export async function runApiControlChecks(
     inspector_digest: () => checkInspectorDigest(ports.inspector),
     module_switch: () => checkModuleSwitch(ports.moduleSwitch, { prove: options.proveSwitch }),
     narration_badge: () => checkNarrationBadge(ports.badge),
+    // WP 11.5d: no model, no database — the shipped validator over a fixed reply.
+    advisor_cost_pairing: () => checkAdvisorCostPairing(),
   };
   for (const definition of CONTROL_CHECKS) {
     if (definition.side !== 'api') continue;

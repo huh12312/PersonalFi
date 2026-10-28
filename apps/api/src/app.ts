@@ -46,6 +46,8 @@ import { createExplainRuntime } from './insight-explain.ts';
 import { createBriefNarrateRuntime } from './brief-narration.ts';
 import { createAskRuntime } from './ask.ts';
 import { askRoutes } from './routes/ask.ts';
+import { advisorSessionRoutes } from './routes/advisor-sessions.ts';
+import { createAdvisorRuntime } from './advisor-mode.ts';
 import { explainSwitchesOf, insightExplainRoutes } from './routes/insight-explain.ts';
 import { narratorControlCheckRoutes } from './routes/narrator-control-checks.ts';
 import { buildPlatform } from './platform.ts';
@@ -837,6 +839,30 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     fileKeys: narratorFileKeys,
     clock,
   });
+  // WP 11.5d: the advisor in preview mode — for `/advisor/sessions`' availability
+  // and badge, and for Advisor management's preview and approval of its six
+  // steps. The api writes the session and enqueues; the worker runs every call.
+  const advisorPreview = createAdvisorRuntime({
+    mode: 'preview',
+    database,
+    narrator: narratorPreview,
+    stores: createNarratorStores({
+      database,
+      secretBox: () => {
+        try {
+          return security.requireSecretBox();
+        } catch {
+          return undefined;
+        }
+      },
+    }),
+    localModel: undefined,
+    localModelPin: config.localModelPin,
+    timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+    allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+    fileKeys: narratorFileKeys,
+    clock,
+  });
   await app.register(
     advisorRunRoutes(
       deps,
@@ -845,6 +871,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       { runtime: explainPreview },
       { runtime: briefNarratePreview },
       { runtime: askPreview },
+      { runtime: advisorPreview },
     ),
   );
   await app.register(askRoutes(deps, { runtime: askPreview, switches: explainSwitchesOf(deps) }));
@@ -887,6 +914,11 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   // backup and restore-drill status from `@core/platform`'s ops tables
   // (0036). Session only; nothing in the answer is a holder's.
   await app.register(opsRoutes(deps));
+  // WP 11.5d: the advisor's sessions and its own hosted consent (preview mode:
+  // this process never calls a model; the worker runs every step).
+  await app.register(
+    advisorSessionRoutes(deps, { runtime: advisorPreview, switches: explainSwitchesOf(deps) }),
+  );
 
   /**
    * Idempotent repair pass for every user that already exists (condition D-6,

@@ -1217,3 +1217,4 @@ export { amortise, avalancheOrder, snowballOrder } from './catalogue/amortisatio
 
 // WP 11.5c — Ask PersonalFi, reporting mode: `ask.compile` and `ask.narrate`.
 export * from './advisors/ask/index.ts';
+export * from './advisors/advisor/index.ts';

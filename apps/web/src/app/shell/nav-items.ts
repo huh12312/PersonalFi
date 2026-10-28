@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import {
   CalendarClock,
+  Compass,
   Flag,
   HeartPulse,
   Inbox,
@@ -38,6 +39,7 @@ export type NavPath =
   | '/goals'
   | '/insights'
   | '/ask'
+  | '/advisor'
   | '/health'
   | '/brief'
   | '/settings';
@@ -61,6 +63,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard },
       { to: '/insights', label: 'Insights', icon: Lightbulb },
       { to: '/ask', label: 'Ask', icon: MessageCircleQuestion },
+      { to: '/advisor', label: 'Advisor', icon: Compass },
       { to: '/health', label: 'Financial health', icon: HeartPulse },
       { to: '/brief', label: 'Brief', icon: CalendarClock },
     ],
@@ -102,6 +105,7 @@ export const BOTTOM_TABS: NavItem[] = [
 export const MORE_NAV_ITEMS: NavItem[] = [
   { to: '/inbox', label: 'Inbox', icon: Inbox },
   { to: '/ask', label: 'Ask', icon: MessageCircleQuestion },
+  { to: '/advisor', label: 'Advisor', icon: Compass },
   { to: '/health', label: 'Financial health', icon: HeartPulse },
   { to: '/cash-flow', label: 'Cash flow', icon: Waves },
   { to: '/accounts', label: 'Accounts', icon: Landmark },

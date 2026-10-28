@@ -55,6 +55,8 @@ import { validateBriefNarrateReply } from '../advisors/brief-narrate/reply.ts';
 import { buildAskNarrateRequest, type AskNarrateWireRequest } from '../advisors/ask/narrate.ts';
 import { validateAskNarrateReply } from '../advisors/ask/narrate.ts';
 import type { AskResultView } from '../advisors/ask/results.ts';
+import { buildAdvisorContext } from '../advisors/advisor/context.ts';
+import { validateTradeoffsReply } from '../advisors/advisor/tradeoffs.ts';
 
 /** The catalogue's version, stored on every row: a result is read against the checks it ran. */
 export const CONTROL_CHECKS_EVIDENCE_VERSION = 'genai-controls/1';
@@ -85,6 +87,8 @@ export const CONTROL_CHECK_IDS = [
   'brief_narration_grounding',
   // WP 11.5c: ask.narrate's numerals check, against the holder's Ask model (12 §5).
   'ask_grounding',
+  // WP 11.5d: the advisor's cost-pairing validator, over a fixed reply (12 §2.3 step 4).
+  'advisor_cost_pairing',
 ] as const;
 export type ControlCheckId = (typeof CONTROL_CHECK_IDS)[number];
 
@@ -200,6 +204,13 @@ export const CONTROL_CHECKS: readonly ControlCheckDefinition[] = Object.freeze([
     proves:
       'An answer to a question that states a figure the calculations it was given do not carry is refused by the validator; the arithmetic is shown without the prose.',
     side: 'worker',
+  },
+  {
+    id: 'advisor_cost_pairing',
+    name: 'Every advisor option carries its cost',
+    proves:
+      'An advisor reply that offers an option without a cost is refused by the validator (tradeoffs.cost_missing) and never shown.',
+    side: 'api',
   },
 ] satisfies readonly ControlCheckDefinition[]);
 
@@ -1470,4 +1481,74 @@ export async function checkModelPin(context: WorkerCheckContext): Promise<Contro
   if (pin.served === null) return fail('The pinned model is not served.', facts);
   if (pin.served !== pin.pinned) return fail('The served model is not the pinned digest.', facts);
   return pass(facts);
+}
+
+// ---------------------------------------------------------------------------
+// WP 11.5d: the advisor's cost-pairing rule (no model: a fixed reply)
+// ---------------------------------------------------------------------------
+
+/**
+ * The fixed reply the check sends through the shipped trade-offs validator:
+ * two options over the fixed probe results, the second **with no cost** —
+ * 07 §7.2's "always pair a recommendation with its cost" broken on purpose.
+ * Pass exactly when the validator refuses it `tradeoffs.cost_missing`, and
+ * accepts the same reply once the cost is given (so a validator that refuses
+ * everything does not pass either).
+ */
+export const ADVISOR_COST_PAIRING_REPLY = Object.freeze({
+  tradeoffs: [
+    {
+      option: 'o1',
+      benefit: ['r1:months_covered'],
+      cost: ['r1:cash_held'],
+      note: 'Keeping the cash leaves 4 months covered.',
+    },
+    {
+      option: 'o2',
+      benefit: ['r1:monthly_spending'],
+      cost: [],
+      note: 'Spending stays at $3,000.00.',
+    },
+  ],
+});
+
+export function checkAdvisorCostPairing(): Promise<ControlCheckOutcome> {
+  const built = buildAdvisorContext({
+    restatement: 'How many months of spending does my cash cover?',
+    answers: [],
+    date: '2026-01-15',
+    results: ASK_PROBE_RESULTS,
+    knowledge: { pages: [], params: [], withheld: [] },
+    knowledgeCatalogue: null,
+  });
+  const check = { ...built.check, options: ['o1', 'o2'] };
+  const broken = validateTradeoffsReply(ADVISOR_COST_PAIRING_REPLY, check);
+  const mended = validateTradeoffsReply(
+    {
+      tradeoffs: ADVISOR_COST_PAIRING_REPLY.tradeoffs.map((entry) =>
+        entry.cost.length === 0 ? { ...entry, cost: ['r1:cash_held'] } : entry,
+      ),
+    },
+    check,
+  );
+  const facts = [
+    'A fixed advisor reply offered two options; the second had no cost.',
+    broken.ok
+      ? 'The trade-offs validator accepted it.'
+      : `The trade-offs validator refused it (${broken.refusal}).`,
+    mended.ok
+      ? 'The same reply with the cost given was accepted.'
+      : `The same reply with the cost given was refused too (${mended.refusal}).`,
+  ];
+  if (broken.ok)
+    return Promise.resolve(fail('An option without a cost got through the validator.', facts));
+  if (broken.refusal !== 'tradeoffs.cost_missing') {
+    return Promise.resolve(fail('The reply was refused, but not for the missing cost.', facts));
+  }
+  if (!mended.ok) {
+    return Promise.resolve(
+      fail('The validator refuses a reply that pairs every option with its cost.', facts),
+    );
+  }
+  return Promise.resolve(pass(facts));
 }

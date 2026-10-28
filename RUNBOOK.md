@@ -2148,6 +2148,90 @@ results that deliberately carry no net worth, and an instruction to state one. I
 validator refuses the answer (or the model declines), and is skipped as not applicable with the
 narrator Off.
 
+## The advisor (v0.9.24)
+
+WP 11.5d (12 §2.3, §4, §5; D31), advisor mode. `/advisor` runs a fixed six-step protocol over your
+own figures — a free chat never happens, and the language model never supplies a figure, a rule or a
+limit:
+
+1. **Clarify** (`advisor.clarify`): the question restated, at most two short questions, and the plan
+   defaults it assumed. It is sent the question, the names of the calculations you have granted and
+   your goals' names by their pseudonymous refs (never an id); a ref it was not sent is refused.
+2. **Gather** (`advisor.gather`): Ask PersonalFi's compile step, unchanged, over the restatement and
+   your answers; the app runs the calls under your grants and reads the playbook pages the question
+   touches, chosen by keyword — through the review gate, so none is sent while every page is a draft
+   (the session lists them as withheld).
+3. **Options** (`advisor.options`): two to four, each backed by a result figure. An option no figure
+   backs is dropped before you see it; fewer than two left refuses the step.
+4. **Trade-offs** (`advisor.tradeoffs`): each option's benefit and **its cost**, as figures from the
+   results. An option without a cost refuses the step (`tradeoffs.cost_missing`) — "always pair a
+   recommendation with its cost", enforced — and the screen shows the arithmetic without the prose.
+5. **Plan** (`advisor.plan`): after you pick, one to six steps, each a link to a screen of this app
+   (Goals, Accounts, Connections, Plan, Investments, Settings for rules, …). Never an execution and
+   never an external address; nothing is done for you.
+6. **Follow-up** (no model): the plan becomes a tracked item. A deterministic watcher re-runs the
+   figure it was about (a goal's pace, a debt plan's balances, the year's contribution room) daily at
+   05:40 local (`insights.advisor_follow_up`) and reports it into the Brief as an ordinary finding of
+   `advisor.follow_up` — fixed wording through the seven-step validator, ranked with the rest; a
+   dismissal moves its cooldown ladder like any other's. Contribution room has no snapshot field to
+   cite, so its progress shows on the session only.
+
+Every surface carries the disclaimer and a badge naming the provider and model; the session shows
+how many tokens it has used of its budget (60,000) and, on a hosted provider, the calls left in the
+hour's window. A session that spends its budget stops before its next call.
+
+**What leaves the machine, and the consent (D31).** By default — no tick — every step runs on the
+local model, whatever your narrator is. Advisor management has the advisor's own tick-box, separate
+from the narrator's: ticked to the exact text shown (`advisor-consent/1`; its sha256 is stored, and
+part of every step's approvable shape), the steps run on the hosted provider you chose for them
+(default: the narrator's own), under that provider's standing consent and key in Settings, Language
+model, and its hourly window. What a hosted provider then sees: the question and your answers; your
+goals' names; the calculated results the advisor works from (aggregated figures over the data you
+granted, merchants as pseudonyms, amounts as rounded as each scope rounds them); the text of the
+reviewed playbook pages it cites. The rubric check sees the wording with every figure masked. Never a
+transaction row, an account number or an institution name. Untick to go back to the local model.
+
+**The approvals.** Advisor management lists the six steps (`advisor.clarify`, `advisor.gather`,
+`advisor.options`, `advisor.tradeoffs`, `advisor.plan`, `advisor.judge`), each with its own payload
+preview showing the consent text and its own approval (a fresh session). Until the first five are
+approved `/advisor` says which and links there; the judge is evidence and never blocks. Level 3's
+switches turn any step off; closing a session asks a step in flight to stop (kill level 4).
+
+**The judge.** After the trade-offs a second call scores the wording against a rubric in code (per
+playbook page: did it state the cost, did it say when the approach does not apply, did it stay in
+scope). It is sent only the masked wording and the rubric; a reply carrying a figure or a reference is
+refused (`judge.holder_data`). Its score is stored on the session with its run id. A low score never
+stops a session — the cost-pairing validator is the gate.
+
+**The inspector.** `GET /api/advisor/sessions/<id>` lists every model call the session made — the
+step, its `advisor_runs` id, the digest of the payload it was sent (re-verified at
+`/api/advisors/runs/<runId>`), provider, model, what it read from the knowledge base and its outcome —
+and the context object's digest, so "why did it say that?" is answerable months later. Sessions live
+in `advisor_sessions` and `advisor_session_steps` (migration `0061_advisor_sessions`); the consent in
+`advisor_settings`. None is in the export: a restore starts unticked and asks again.
+
+**Where it runs.** `POST /api/advisor/sessions`, `…/<id>/answers`, `…/<id>/pick` and `…/<id>/cancel`
+write the session and enqueue `insights.advisor_step`; the worker runs the steps, one model call per
+step (each claimed in `advisor_session_steps`, which has room for one). The api never calls a model.
+
+**The evaluation.** The golden set is `scripts/advisor-eval-advisor.golden.json` (27 sessions,
+12 §3's three worked examples among them, every refusal class exercised):
+
+```bash
+node scripts/advisor-eval.ts --advisor                  # replay the recorded step replies
+node scripts/advisor-eval.ts --advisor --live --endpoint http://ollama:11434 \
+  --model <name> --digest sha256:<64 hex> --out <dir>/advisor.jsonl   # against the pinned model
+```
+
+It prints the outcomes right by kind, the catalogue calls' precision and recall, option counts, the
+validators' refusal classes and the rubric judge's scores. The recorded replies were written for the
+harness (two deliberately wrong, each noted); a live run writes real ones.
+
+**The self-test.** The controls self-test gains a sixteenth check, `advisor_cost_pairing` (the api's
+half, no model): a fixed trade-offs reply in which one option has no cost goes through the shipped
+validator, and passes when it is refused `tradeoffs.cost_missing` (and the same reply with the cost
+given is accepted).
+
 ## Categorisation: measuring the tiers (`just categorization-eval`)
 
 WP 11.1. Replays every transaction you filed by hand (the categories you picked, plus any confirmed

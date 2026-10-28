@@ -16,6 +16,7 @@ import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { useStepUpRetry } from '../../lib/step-up.ts';
 import { CATALOGUE_GAPS } from '../insights/catalogue-gaps.ts';
 import { advisorLevelWords, kindLevelWords, runLevelWords } from './kill-levels.ts';
+import { AdvisorHostedConsentCard } from './AdvisorHostedConsentCard.tsx';
 import { KindSwitch } from './KindSwitch.tsx';
 import { ModuleSwitch } from './ModuleSwitch.tsx';
 import { PayloadPreviewPanel } from './PayloadPreviewPanel.tsx';
@@ -98,6 +99,8 @@ export function AdvisorManagementScreen() {
       <ModuleSwitch />
 
       {hasLocalModelAdvisor && <KindSwitch kind="local_model" />}
+
+      <AdvisorHostedConsentCard />
 
       {stepUp.error !== null && (
         <p className="text-small text-status-danger-text">{stepUp.error}</p>

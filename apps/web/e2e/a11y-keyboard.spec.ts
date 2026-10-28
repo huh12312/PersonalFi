@@ -30,6 +30,7 @@ import {
   narratedBriefItems,
   SHOWN_NARRATION,
 } from './support/mock-brief.ts';
+import { ADVISOR_QUESTION, ADVISOR_QUESTIONS } from './support/mock-advisor.ts';
 import { ASK_OUT_OF_SCOPE_QUESTION, ASK_QUESTION } from './support/mock-ask.ts';
 import { CONTROL_CHECKS } from './support/mock-narrator.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
@@ -775,7 +776,7 @@ test('settings › language model (WP 10.16): Tab to Run control checks, press i
   await page.keyboard.press('Enter');
   const history = section.getByTestId('control-checks-history');
   await expect(history.getByRole('table')).toBeVisible();
-  // One row per check in the mock's catalogue (derived, so a new check is picked up: fifteen since WP 11.5c's ask_grounding).
+  // One row per check in the mock's catalogue (derived, so a new check is picked up: sixteen since WP 11.5d's advisor_cost_pairing).
   await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(CONTROL_CHECKS.length);
   await journey.expectFocus(/\(latest\)/, 'focus stays on the opened summary');
   await page.unrouteAll({ behavior: 'ignoreErrors' });
@@ -1312,4 +1313,60 @@ test('WP 11.5c /ask: Tab to the box, type, send with Enter, reach the answer, op
   await journey.tabTo(/^Investments$/, { max: 4 });
   await journey.press('Enter', 'Enter follows the nearest-screen link');
   await expect(page).toHaveURL(/\/investments$/u);
+});
+
+// ---------------------------------------------------------------------------
+// WP 11.5d: the Advisor, by keyboard
+// ---------------------------------------------------------------------------
+
+test('WP 11.5d /advisor: Tab to the box, start a session, answer the clarifying questions, pick an option, and reach a plan link, all by keyboard', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await installSweepMocks(page);
+  await visit(page, '/advisor');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'WP 11.5d /advisor');
+  const session = page.getByTestId('advisor-session');
+
+  // The box, by Tab; the question typed; Enter starts the session (Shift+Enter would start a new line).
+  await journey.tabTo(/^Your question$/, { max: 40 });
+  await journey.type(ADVISOR_QUESTION);
+  await expect(page.getByTestId('advisor-count')).toContainText(
+    `${String(ADVISOR_QUESTION.length)} / 500`,
+  );
+  await journey.press('Enter', 'Enter starts the session and focus stays on the box');
+  await expect(page.getByTestId('advisor-live')).toContainText('Restating your question…', {
+    timeout: 15_000,
+  });
+
+  // The clarify form lands and takes focus; its two boxes are the next stops, then Continue.
+  await expect(session).toHaveAttribute('data-state', 'clarifying', { timeout: 20_000 });
+  await expect(page.getByTestId('advisor-clarify')).toBeVisible();
+  await journey.expectFocus(exactly(ADVISOR_QUESTION), 'focus lands on the session');
+  await journey.tabTo(exactly(ADVISOR_QUESTIONS[0]!), { max: 6 });
+  await journey.type('Six months');
+  await journey.tabTo(exactly(ADVISOR_QUESTIONS[1]!), { max: 3 });
+  await journey.type('By spring');
+  await journey.tabTo(/^Continue$/, { max: 3 });
+  await journey.press('Enter', 'Enter sends the answers');
+
+  // The options land and take focus; the first card's pick button is reachable, Enter picks.
+  await expect(session).toHaveAttribute('data-state', 'awaiting_pick', { timeout: 30_000 });
+  await journey.expectFocus(exactly(ADVISOR_QUESTION), 'focus lands on the options');
+  await expect(page.getByTestId('advisor-live')).toHaveText('The options are ready.');
+  await journey.tabTo(/^Pick this option: Raise the monthly transfer to savings$/, { max: 8 });
+  await journey.press('Enter', 'Enter picks the option');
+
+  // The plan lands and takes focus; its first link is the next stop, Enter follows it.
+  await expect(session).toHaveAttribute('data-state', 'tracked', { timeout: 30_000 });
+  await journey.expectFocus(exactly(ADVISOR_QUESTION), 'focus lands on the plan');
+  await journey.tabTo(/^Goals$/, { max: 4 });
+  await journey.tabTo(/^Accounts$/, { max: 2 });
+  await journey.tabTo(/^Plan$/, { max: 2 });
+  await journey.tabTo(/^See it in the Brief$/, { max: 2 });
+  await journey.tabTo(/^Goals$/, { backwards: true, max: 4 });
+  await journey.press('Enter', 'Enter follows the plan link');
+  await expect(page).toHaveURL(/\/goals$/u);
 });

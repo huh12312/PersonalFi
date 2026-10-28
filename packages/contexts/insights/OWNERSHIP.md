@@ -52,6 +52,9 @@ data the advisor never received would _resolve_.
 - `insight_explanations`
 - `brief_narrations`
 - `ask_sessions` (WP 11.5c, migration `0060_ask_sessions.sql`: one row per Ask PersonalFi question — the compiled calls, the results' digests and figures, the narration or refusal class; references only `users`)
+- `advisor_sessions` (WP 11.5d, migration `0061_advisor_sessions.sql`: one row per advisor-mode conversation — the six-step protocol's status machine, the holder's answers, the gathered context object's digest, the options, trade-offs, pick, plan, the follow-up watcher and the rubric judge's score; references only `users`)
+- `advisor_session_steps` (WP 11.5d, migration `0061`: one row per model call an advisor session made, UNIQUE per session and step — the step's `advisor_runs` id, its input digest, provider, model and knowledge read; references `users` and `advisor_sessions`)
+- `advisor_settings` (WP 11.5d, migration `0061`: the advisor's own hosted consent, D31 — the sha256 of the exact text ticked and the hosted provider; no row = unticked, the local model; references only `users`)
 
 ## Data modules (not tables)
 

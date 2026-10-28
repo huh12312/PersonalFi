@@ -501,8 +501,9 @@ export function askKnowledgeFor(
   return { pages, params, withheld };
 }
 
-async function runCalls(
-  dependencies: AskRunDependencies,
+/** WP 11.5d: the advisor's gather step runs its compiled calls through this, unchanged. */
+export async function runAskCalls(
+  dependencies: Pick<AskRunDependencies, 'catalogue'>,
   context: InsightsContext,
   calls: readonly AskCompiledCall[],
 ): Promise<readonly AskResultView[]> {
@@ -691,7 +692,7 @@ export async function runAskSession(
 
   // --- the calls: deterministic, in process, under the holder's grants -------------
   const callsStarted = context.clock.nowMs();
-  const results = await runCalls(dependencies, context, calls);
+  const results = await runAskCalls(dependencies, context, calls);
   const callsMs = context.clock.nowMs() - callsStarted;
   const answered = results.filter((result) => result.status === 'ok');
   if (answered.length === 0) {

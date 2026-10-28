@@ -64,6 +64,16 @@
  *   (replay, the default; CI runs it, and over the Ollama fake), or over the
  *   pinned model with `--live`.
  *
+ *     node --experimental-strip-types scripts/advisor-eval.ts --advisor [--live \
+ *       --endpoint http://ollama:11434 --model <name> --digest sha256:<64 hex> --out <dir>/advisor.jsonl]
+ *
+ *   WP 11.5d: the advisor-mode golden set (`advisor-eval-advisor.ts`): at
+ *   least twenty sessions through every step's validator over 11.5b's
+ *   catalogue fixture — outcomes, calls precision/recall, option counts,
+ *   refusal classes and the rubric judge's scores — over the recorded replies
+ *   (replay, the default; CI runs it, and over the Ollama fake), or over the
+ *   pinned model with `--live`.
+ *
  * ## What it prints, and what it never prints
  *
  * Counts, step names, refusal reasons, durations and token counts. **Never a
@@ -89,6 +99,11 @@ import type { AdvisorRequest } from '../packages/contexts/insights/src/contract/
 import { evalCases } from './advisor-eval.fixtures.ts';
 import { BRIEF_CASE_TYPES, briefWeek } from './advisor-eval-brief-week.ts';
 import { askGoldenOverModel, formatAskReport, replayAskGolden } from './advisor-eval-ask.ts';
+import {
+  advisorGoldenOverModel,
+  formatAdvisorReport,
+  replayAdvisorGolden,
+} from './advisor-eval-advisor.ts';
 
 /**
  * One finding per request — the production shape since WP 9.5 (C5-2:
@@ -631,8 +646,35 @@ async function askMode(args: Args): Promise<void> {
   for (const line of formatAskReport(report)) console.log(line);
 }
 
+/** `--advisor` (WP 11.5d): the advisor-mode golden set, replayed or live. */
+async function advisorMode(args: Args): Promise<void> {
+  if (!args.flags.has('live')) {
+    const { report } = await replayAdvisorGolden();
+    console.log("advisor: replay (recorded step replies, today's validators)");
+    for (const line of formatAdvisorReport(report)) console.log(line);
+    return;
+  }
+  const endpoint = args.values.get('endpoint');
+  const model = args.values.get('model');
+  const digest = args.values.get('digest');
+  if (endpoint === undefined || model === undefined || digest === undefined) {
+    throw new Error('--advisor --live needs --endpoint, --model and --digest');
+  }
+  const out = args.values.get('out');
+  const { report, calls } = await advisorGoldenOverModel({
+    endpoint,
+    model,
+    digest,
+    timeoutMs: Number(args.values.get('timeout-ms') ?? '180000'),
+    ...(out === undefined ? {} : { out }),
+  });
+  console.log(`advisor: live (${String(calls)} model calls, first attempt only)`);
+  for (const line of formatAdvisorReport(report)) console.log(line);
+}
+
 const args = parseArgs(process.argv.slice(2));
-if (args.flags.has('ask')) await askMode(args);
+if (args.flags.has('advisor')) await advisorMode(args);
+else if (args.flags.has('ask')) await askMode(args);
 else if (args.flags.has('live')) await live(args);
 else if (args.flags.has('brief-week')) await briefWeekMode(args);
 else if (args.flags.has('brief')) await brief(args);

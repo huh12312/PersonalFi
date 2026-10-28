@@ -395,6 +395,18 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     "insights: Ask PersonalFi's question log (WP 11.5c) — the holder's question, a language model's compiled calls and wording, and digests of results derived from data that is exported in its own right; each row points at advisor_runs, which is not carried either. A restore asks again under its own approval rather than replaying another install's model runs.",
   ],
   [
+    'advisor_sessions',
+    "insights: the advisor's session log (WP 11.5d) — the holder's question and answers, a language model's restatement, options, trade-offs and plan, the rubric judge's score and a follow-up watcher, all derived from data exported in its own right; each step points at advisor_runs, which is not carried either. A restore starts a new session under its own approvals rather than replaying another install's model runs.",
+  ],
+  [
+    'advisor_session_steps',
+    'insights: one row per model call an advisor session made (WP 11.5d) — run ids, payload digests, provider and model; evidence about advisor_runs, which is not carried, so it has nothing to point at after a restore.',
+  ],
+  [
+    'advisor_settings',
+    "insights: the advisor's own hosted consent (WP 11.5d, D31) — a consent is given on the install it applies to; a restore starts unticked (the local model) and the holder ticks again, as for the narrator's and the category suggestions' hosted consents.",
+  ],
+  [
     'ops_control_checks',
     "insights: the GenAI controls self-test (WP 10.16), evidence that the narrator controls held on this install at a date; a restore proves them again on the new one rather than inheriting another deployment's proof.",
   ],

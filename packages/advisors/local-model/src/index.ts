@@ -261,3 +261,22 @@ export {
   type LocalAskAdapterDeps,
   type RenderedAskPrompt,
 } from './ask.ts';
+// WP 11.5d: Ask PersonalFi, advisor mode — clarify, options, trade-offs, plan and the rubric judge
+// (the gather step is `ask.compile`'s adapter, unchanged); validated by the caller.
+export {
+  ADVISOR_FORMATS,
+  ADVISOR_MAX_SUBJECT_BYTES,
+  ADVISOR_MODEL_STEPS,
+  ADVISOR_PROMPT_TEMPLATE_HASHES,
+  ADVISOR_PROMPT_TEMPLATE_VERSIONS,
+  ADVISOR_SCHEMA_NAMES,
+  ADVISOR_SYSTEM_PROMPTS,
+  ADVISOR_USER_TRAILERS,
+  createHostedAdvisorAdapter,
+  createLocalAdvisorAdapter,
+  renderAdvisorPrompt,
+  type AdvisorModelAdapter,
+  type AdvisorModelReply,
+  type AdvisorModelStep,
+  type AdvisorStepRequest,
+} from './advisor.ts';

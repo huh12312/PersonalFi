@@ -83,6 +83,9 @@ import {
   INSIGHT_EXPLAIN_ADVISOR_ID,
   BRIEF_NARRATE_ADVISOR_ID,
   ASK_COMPILE_ADVISOR_ID,
+  advisorStepOf,
+  approveAdvisorStep,
+  previewAdvisorStep,
   ASK_NARRATE_ADVISOR_ID,
   approveAsk,
   listCatalogue,
@@ -128,6 +131,7 @@ import type { NarratorRuntime } from '../narrator-wiring.ts';
 import type { ExplainRuntime } from '../insight-explain.ts';
 import { loadBriefNarrateTarget, type BriefNarrateRuntime } from '../brief-narration.ts';
 import type { AskRuntime } from '../ask.ts';
+import type { AdvisorRuntime } from '../advisor-mode.ts';
 import type { RouteDeps } from './deps.ts';
 
 /** D6: one account holder — the same reading every other route file uses. */
@@ -481,8 +485,27 @@ export const advisorRunRoutes = (
   explain?: { readonly runtime: ExplainRuntime },
   briefNarrate?: { readonly runtime: Pick<BriefNarrateRuntime, 'resolve'> },
   ask?: { readonly runtime: Pick<AskRuntime, 'resolve'> },
+  advisor?: { readonly runtime: Pick<AdvisorRuntime, 'resolve'> },
 ): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
+
+  /** WP 11.5d: the advisor's renderers for this holder (D31's provider rule, preview mode), or a 503. */
+  async function advisorRenderers(userId: string) {
+    const resolution = advisor === undefined ? null : await advisor.runtime.resolve(userId);
+    if (resolution?.models == null) {
+      throw new AppError({
+        status: 503,
+        code: 'insights.prompt_renderer_unavailable',
+        title: 'Service Unavailable',
+        detail:
+          'no language model can run the advisor for you (the narrator is Off, or no local model ' +
+          'is set up and the advisor’s hosted box is not ticked), so its payloads cannot be shown ' +
+          'or approved: choose a model in Settings, Language model, first',
+        family: 'internal',
+      });
+    }
+    return resolution.models;
+  }
 
   /** WP 11.5c: Ask PersonalFi's two renderers for this holder (the narrator's provider, preview mode), or a 503. */
   async function askRenderers(userId: string) {
@@ -731,6 +754,39 @@ export const advisorRunRoutes = (
       },
       async (request) => {
         const session = await guards.requireSession(request);
+        const advisorStep = advisorStepOf(request.params.advisorId);
+        if (advisorStep !== null) {
+          const models = await advisorRenderers(session.userId);
+          const preview = await previewAdvisorStep(
+            database,
+            contextOf(deps, session.userId, request),
+            {
+              step: advisorStep,
+              renderer: models[advisorStep] as never,
+              listing: await listCatalogue({ database }, { userId: session.userId }),
+              timeZone: await timezoneOf(deps),
+            },
+          );
+          return {
+            advisorId: preview.advisorId,
+            kind: 'local_model' as const,
+            queryShape: preview.queryShape,
+            scopes: [...preview.scopes],
+            promptTemplateHash: preview.promptTemplateHash,
+            request: {
+              request_id: preview.request.request_id,
+              subject: preview.request.subject,
+              deadline: preview.request.deadline,
+              max_response_bytes: preview.request.max_response_bytes,
+              snapshot: preview.request.snapshot,
+              granted_scopes: [...preview.request.granted_scopes],
+              consent: { ...preview.request.consent },
+            },
+            prompt: preview.prompt,
+            approvalRequired: true,
+            approved: preview.approved,
+          };
+        }
         if (
           request.params.advisorId === ASK_COMPILE_ADVISOR_ID ||
           request.params.advisorId === ASK_NARRATE_ADVISOR_ID
@@ -872,6 +928,20 @@ export const advisorRunRoutes = (
       },
       async (request) => {
         const session = await guards.requireFreshSession(request);
+        const advisorStep = advisorStepOf(request.params.advisorId);
+        if (advisorStep !== null) {
+          const models = await advisorRenderers(session.userId);
+          try {
+            return await approveAdvisorStep(database, contextOf(deps, session.userId, request), {
+              step: advisorStep,
+              renderer: models[advisorStep],
+              queryShape: request.body.queryShape,
+            });
+          } catch (error) {
+            if (error instanceof PreviewError) throw previewProblem(error);
+            throw error;
+          }
+        }
         if (
           request.params.advisorId === ASK_COMPILE_ADVISOR_ID ||
           request.params.advisorId === ASK_NARRATE_ADVISOR_ID

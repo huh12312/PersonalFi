@@ -146,4 +146,10 @@ export const NOT_FREE_TEXT: Readonly<Record<string, string>> = {
 export const NOT_READ_BY_THE_REPORT: Readonly<Record<string, string>> = {
   ask_sessions:
     "Ask PersonalFi's question log (WP 11.5c): question and narration_text are free text (the holder's question, a model's wording); the weekly report counts none of it.",
+  advisor_sessions:
+    "The advisor's session log (WP 11.5d): question, answers and the JSONB of clarification, options, trade-offs and plan are free text (the holder's words, a model's wording); the weekly report counts none of it.",
+  advisor_session_steps:
+    'One row per advisor model call (WP 11.5d): run ids, digests, provider and model, and the knowledge-read record; the weekly report counts none of it.',
+  advisor_settings:
+    "The advisor's own hosted consent (WP 11.5d): a provider name and the sha256 of a consent text, no holder free text; the weekly report counts none of it.",
 };

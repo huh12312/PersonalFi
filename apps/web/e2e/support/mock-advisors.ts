@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 import type { Page, Route } from '@playwright/test';
 
+import { installAdvisorSessionMocks, type AdvisorMockState } from './mock-advisor.ts';
+
 /**
  * The advisor-management routes (WP 5.12), as a layerable mock: moved out of `advisors.spec.ts` by WP 9.8
  * so `a11y-sweep.spec.ts` can visit `/settings/advisors` with the same bodies. Install it after
@@ -185,7 +187,12 @@ export function doneRun() {
 export async function installAdvisorMocks(
   page: Page,
   state: { steppedUp: boolean },
+  advisor?: AdvisorMockState,
 ): Promise<Store> {
+  // WP 11.5d: the advisor's own sessions and hosted consent (`/api/advisor/**`; the management screen reads the
+  // consent). Its settings write honours the same step-up gate as this layer.
+  await installAdvisorSessionMocks(page, () => state.steppedUp, advisor);
+
   const store: Store = {
     grantedScopes: new Set(['cash.summary']),
     approved: false,

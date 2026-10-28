@@ -198,8 +198,9 @@ describe.skipIf(NO_DATABASE)(
       const advisors = (advisorsResponse.json() as { advisors: WireAdvisor[] }).advisors;
       // The catalogue, plus the five query types registered beside it and never in the
       // nightly registry: WP 11.2's categorize.suggest (off), WP 11.3's insight.explain (on),
-      // WP 11.4's brief.narrate (on) and WP 11.5c's ask.compile and ask.narrate (on).
-      expect(advisors).toHaveLength(BUILTIN_CATALOGUE.length + 5);
+      // WP 11.4's brief.narrate (on) and WP 11.5c's ask.compile and ask.narrate (on); WP 11.5d's
+      // six advisor steps (on) and its builtin follow-up watcher (on).
+      expect(advisors).toHaveLength(BUILTIN_CATALOGUE.length + 12);
       expect(new Set(advisors.map((a) => a.advisorId))).toEqual(
         new Set([
           ...BUILTIN_CATALOGUE.map((entry) => entry.advisor.manifest.advisor_id),
@@ -208,6 +209,13 @@ describe.skipIf(NO_DATABASE)(
           'brief.narrate',
           'ask.compile',
           'ask.narrate',
+          'advisor.clarify',
+          'advisor.gather',
+          'advisor.options',
+          'advisor.tradeoffs',
+          'advisor.plan',
+          'advisor.judge',
+          'advisor.follow_up',
         ]),
       );
 

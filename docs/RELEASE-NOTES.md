@@ -9,6 +9,49 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.24: the advisor
+
+**Status:** a patch release on v0.9.23 (if an earlier v0.9.x has not been tagged when this is, tag
+them in order). The tag `v0.9.24` is pushed by the maintainer once CI is green. Package 11.5d of the
+Phase 11 programme (12 §6): Ask PersonalFi in advisor mode.
+
+### Upgrading to v0.9.24
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0061_advisor_sessions` (expand-only: three new tables — `advisor_sessions`,
+`advisor_session_steps`, `advisor_settings`; nothing existing is touched).
+
+### Manual steps
+
+None for the upgrade. To use the advisor, approve its steps once in Advisors (`/advisor` says which
+until you do). To run it on a hosted provider, tick the advisor's own box there (it is unticked by
+default, and the local model runs it) ([RUNBOOK](../RUNBOOK.md#the-advisor-v0924)).
+
+### What changed
+
+- **`/advisor`.** A six-step protocol, not a chat: the question restated with at most two questions
+  and the plan defaults it assumed; the calculations gathered; two to four options, each backed by a
+  figure; each option's benefit and cost; after you pick, a plan of steps that are links to screens
+  of this app; then a tracked item the Brief reports on. Badged with the provider and model, the
+  disclaimer on every state, the token count shown.
+- **Every option carries its cost.** An option without a cost refuses the step and the arithmetic is
+  shown without the prose; an option no figure backs is dropped; a plan step outside the app's own
+  screens, an external address or a claim that the app will act is refused.
+- **D31: the advisor's own hosted consent**, separate from the narrator's: unticked, the local model;
+  ticked to the exact text, the hosted provider you chose for it. The text says exactly what leaves.
+- **The rubric judge** scores the wording (with every figure masked) against a rubric per playbook
+  page; evidence on the session, never a gate.
+- **Follow-up**: a deterministic watcher reports the picked plan's figure into the Brief, daily.
+- **The controls self-test gains a sixteenth check, `advisor_cost_pairing`.**
+- **Evaluation.** `node scripts/advisor-eval.ts --advisor` replays a 27-session golden set.
+- **API.** `GET/POST /advisor/sessions`, `GET /advisor/sessions/{id}` (with the step inspector),
+  `POST …/answers`, `…/pick`, `…/cancel`, `GET/PUT /advisor/settings`; `insights.advisor_step` and
+  `insights.advisor_follow_up` run in the worker only.
+
 ## v0.9.23: Ask PersonalFi
 
 **Status:** a patch release on v0.9.22 (if an earlier v0.9.x has not been tagged when this is, tag

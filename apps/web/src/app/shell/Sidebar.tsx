@@ -73,7 +73,7 @@ export function Sidebar() {
                     <Link
                       to={item.to}
                       className={cn(
-                        'flex h-10 items-center gap-3 rounded-md border-l-2 border-transparent px-2.5 text-small font-medium text-text-secondary hover:bg-bg-subtle focus-visible:outline-none',
+                        'flex h-9 items-center gap-3 rounded-md border-l-2 border-transparent px-2.5 text-small font-medium text-text-secondary hover:bg-bg-subtle focus-visible:outline-none',
                         // wp3.11 §10 item 3 / wp4.10: `text-accent-text` on
                         // `--accent-wash` measured 4.28:1 in dark mode
                         // (axe, `color-contrast`, AA needs 4.5:1) — the same

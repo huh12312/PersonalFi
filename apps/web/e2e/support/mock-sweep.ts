@@ -2,6 +2,11 @@
 import type { Page, Route } from '@playwright/test';
 
 import { installAccountMocks } from './mock-accounts.ts';
+import {
+  createAdvisorState,
+  type AdvisorMockOptions,
+  type AdvisorMockState,
+} from './mock-advisor.ts';
 import { installAdvisorMocks } from './mock-advisors.ts';
 import { installAskMocks, type AskMockOptions, type AskMockState } from './mock-ask.ts';
 import { installApiMocks, MANUAL_CONNECTOR, type MockApiState } from './mock-api.ts';
@@ -51,6 +56,8 @@ export interface SweepMocks {
   readonly explain: ExplainMockState;
   /** WP 11.5c: the Ask PersonalFi layer's state (`mock-ask.ts`): a ready overview with three earlier questions. */
   readonly ask: AskMockState;
+  /** WP 11.5d: the Advisor layer's state (`mock-advisor.ts`): a ready overview with five earlier sessions. */
+  readonly advisor: AdvisorMockState;
   /** WP 11.2b: the general fixture's own state, for adding a transaction an automatic tier placed. */
   readonly api: MockApiState;
 }
@@ -70,6 +77,8 @@ export interface SweepOptions {
   readonly networth?: NetworthMockOptions;
   /** WP 11.5c: the Ask PersonalFi layer (`mock-ask.ts`). Default: ready, three earlier questions, the next one is answered. */
   readonly ask?: AskMockOptions;
+  /** WP 11.5d: the Advisor layer (`mock-advisor.ts`). Default: ready, five earlier sessions, the next one walks to the pick. */
+  readonly advisor?: AdvisorMockOptions;
 }
 
 export async function installSweepMocks(
@@ -112,7 +121,8 @@ export async function installSweepMocks(
   // WP 10.14: the category detail screen's 13 months (any category; its own path).
   await installCategoryHistoryMocks(page);
   const base = await installApiMocks(page);
-  await installAdvisorMocks(page, base);
+  const advisor = createAdvisorState(options.advisor);
+  await installAdvisorMocks(page, base, advisor);
   await installBriefMocks(page, { standalone: false });
   if (options.accountSettings === true) await installAccountMocks(page);
   // WP 11.3: "Explain this" on /insights and /health (only its own paths; everything else falls through).
@@ -141,6 +151,7 @@ export async function installSweepMocks(
     categorySuggestions: base.categorySuggestions,
     explain,
     ask,
+    advisor,
     api: base,
   };
 }

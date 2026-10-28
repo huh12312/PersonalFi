@@ -622,6 +622,18 @@ describeWithDb('runMigrations', () => {
       //   nearest_screen exactly when unanswerable, error_code exactly when failed or cancelled, the two
       //   step runs each claimed whole with its input digest, llm_provider with llm_model). Expand-only;
       //   references only users. Not exported (registry.ts exempts it).
+      // 0061_advisor_sessions (WP 11.5d): three new @ctx/insights tables. advisor_sessions (Ask PersonalFi,
+      //   advisor mode: one row per conversation -- question <= 500 chars, status clarifying | gathering |
+      //   options | tradeoffs | awaiting_pick | planning | tracked | refused | unanswerable | failed | cancelled,
+      //   finished_at set exactly when final, the protocol's order held by CHECKs (answers after the
+      //   clarification, the gathered results and the context digest after the answers, options (2..4) after
+      //   them, trade-offs after the options, a pick after the trade-offs, a plan (1..6) after the pick),
+      //   tracked exactly when plan, watcher and watcher_id are set, judge_score with its detail and run,
+      //   token_budget and tokens_used); advisor_session_steps (one row per model call, UNIQUE (session_id,
+      //   step) -- one call per step --, the step's run id, input digest, provider, model, egress, outcome,
+      //   knowledge read; a user-scoped composite FK to advisor_sessions); advisor_settings (the advisor's own
+      //   hosted consent, D31: provider, consented_at with the consent text's sha256, together or not at all).
+      //   Expand-only; references users and advisor_sessions. None exported (registry.ts exempts all three).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -638,6 +650,9 @@ describeWithDb('runMigrations', () => {
         'advisor_payload_approvals',
         'advisor_run_payloads',
         'advisor_runs',
+        'advisor_session_steps',
+        'advisor_sessions',
+        'advisor_settings',
         'advisors',
         'advisory_brief_items',
         'advisory_briefs',

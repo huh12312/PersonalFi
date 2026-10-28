@@ -235,7 +235,8 @@ export const ASK_NARRATE_SYSTEM_PROMPT = [
 export const ASK_NARRATE_USER_TRAILER =
   'Answer the question in the data above from its results, following the rules. Reply with the JSON object only.';
 
-function templateHashOf(version: string, system: string, trailer: string): string {
+/** WP 11.5d: shared with `advisor.ts`'s steps. */
+export function templateHashOf(version: string, system: string, trailer: string): string {
   return `sha256:${configHash({
     version,
     system,
@@ -338,7 +339,8 @@ function narrateView(subject: AskNarrateSubject): Record<string, unknown> {
   };
 }
 
-function renderWith(
+/** WP 11.5d: shared with `advisor.ts`'s steps. */
+export function renderWith(
   system: string,
   trailer: string,
   templateHash: string,
@@ -440,9 +442,16 @@ export interface AskModelReply {
   /** Sanitiser flags by kind/path (never the removed text), cut-at-length notes. At most 16. */
   readonly warnings: readonly string[];
   readonly runtimeMs: number;
+  /**
+   * WP 11.5d: tokens the call spent (prompt + reply) as the runtime reported
+   * them — Ollama's eval counts, the vendor's usage — or `null` when it
+   * reported none. The advisor's per-session budget counts these.
+   */
+  readonly tokens: number | null;
 }
 
-interface AskStepAdapter<Req> {
+/** WP 11.5d: exported for `advisor.ts`. */
+export interface AskStepAdapter<Req> {
   readonly provider: 'ollama' | HostedProvider;
   readonly label: string;
   /** sha256 over the template hash, the format and the options (hosted: also provider and model). */
@@ -463,8 +472,9 @@ export interface AskNarrateModelAdapter extends AskStepAdapter<AskNarrateRequest
   ): Promise<AskModelReply>;
 }
 
-interface StepSpec<Req> {
-  readonly event: 'ask_compile' | 'ask_narrate';
+/** WP 11.5d: exported for `advisor.ts` (its steps' events are `advisor_*`). */
+export interface StepSpec<Req> {
+  readonly event: string;
   readonly templateHash: string;
   readonly format: Readonly<Record<string, unknown>>;
   readonly schemaName: string;
@@ -512,6 +522,15 @@ export interface LocalAskAdapterDeps {
 
 const SILENT: LocalModelLogger = Object.freeze({ info: () => undefined, warn: () => undefined });
 
+/** Prompt + reply tokens, or `null` when the runtime reported neither. */
+function tokensOf(prompt: unknown, reply: unknown): number | null {
+  const count = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
+  const left = count(prompt);
+  const right = count(reply);
+  return left === null && right === null ? null : (left ?? 0) + (right ?? 0);
+}
+
 function parseReply(content: string): { readonly reply: unknown; readonly isJson: boolean } {
   try {
     return { reply: JSON.parse(content) as unknown, isJson: true };
@@ -520,7 +539,8 @@ function parseReply(content: string): { readonly reply: unknown; readonly isJson
   }
 }
 
-function createLocalStep<
+/** WP 11.5d: exported for `advisor.ts`. */
+export function createLocalStep<
   Req extends {
     readonly request_id: string;
     readonly deadline: string;
@@ -703,6 +723,7 @@ function createLocalStep<
         promptHash: rendered.hash,
         warnings: Object.freeze(capWarnings(warnings)),
         runtimeMs,
+        tokens: tokensOf(reply.promptEvalCount, reply.evalCount),
       });
     } catch (error) {
       const failure =
@@ -744,7 +765,8 @@ function createLocalStep<
   });
 }
 
-function createHostedStep<
+/** WP 11.5d: exported for `advisor.ts`. */
+export function createHostedStep<
   Req extends {
     readonly request_id: string;
     readonly deadline: string;
@@ -848,6 +870,7 @@ function createHostedStep<
         promptHash: rendered.hash,
         warnings: Object.freeze(capWarnings(warnings)),
         runtimeMs,
+        tokens: tokensOf(reply.inputTokens, reply.outputTokens),
       });
     } catch (error) {
       const failure =

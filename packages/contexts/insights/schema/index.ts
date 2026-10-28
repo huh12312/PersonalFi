@@ -165,3 +165,23 @@ export {
   type AskUnanswerableReason,
   type NewAskSessionRow,
 } from './ask-sessions.ts';
+
+// WP 11.5d — Ask PersonalFi, advisor mode (migration 0061_advisor_sessions.sql).
+export {
+  ADVISOR_SESSION_OPEN,
+  ADVISOR_SESSION_STATUSES,
+  ADVISOR_SESSION_WORKING,
+  ADVISOR_STEP_OUTCOMES,
+  ADVISOR_STEPS,
+  advisorSessions,
+  advisorSessionSteps,
+  advisorSettings,
+  type AdvisorSessionRow,
+  type AdvisorSessionStatus,
+  type AdvisorSessionStepRow,
+  type AdvisorSettingsRow,
+  type AdvisorStep,
+  type AdvisorStepOutcome,
+  type NewAdvisorSessionRow,
+  type NewAdvisorSessionStepRow,
+} from './advisor-sessions.ts';

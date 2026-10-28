@@ -66,6 +66,7 @@ import { createSuggestionRuntime } from './category-suggestions.ts';
 import { createExplainRuntime } from './insight-explain.ts';
 import { createBriefNarrateRuntime } from './brief-narration.ts';
 import { createAskRuntime } from './ask.ts';
+import { createAdvisorRuntime } from './advisor-mode.ts';
 import { MODULE_FLAGS, buildPlatform, resolveModules } from './platform.ts';
 
 /**
@@ -569,6 +570,26 @@ async function main(): Promise<void> {
       clock: systemClock,
     });
 
+    // WP 11.5d: the advisor — the local model by default; a hosted provider only
+    // under the advisor's own consent (D31), with the narrator's standing consent,
+    // key and hourly window for it. Run mode: this process calls it.
+    const advisorRuntime = createAdvisorRuntime({
+      mode: 'run',
+      database,
+      narrator: narratorRuntime,
+      stores: createNarratorStores({ database, secretBox: () => secretBox ?? undefined }),
+      localModel: config.localModel,
+      timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+      allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+      fileKeys: {
+        openai: config.secrets.openai_api_key,
+        openrouter: config.secrets.openrouter_api_key,
+        anthropic: config.secrets.anthropic_api_key,
+      },
+      logger,
+      clock: systemClock,
+    });
+
     // WP 3.4 (docs/evidence/phase-3/wp3.w-wiring.md). Built once per process,
     // in the worker only: the API runs no job runner and no scheduler, so a
     // market-data runtime there would be four adapters nobody can invoke —
@@ -749,6 +770,8 @@ async function main(): Promise<void> {
               },
               // WP 11.5c: the Ask job and the self-test's probe.
               ask: { runtime: askRuntime },
+              // WP 11.5d: the advisor's step job (the follow-up job needs no model).
+              advisor: { runtime: advisorRuntime },
               // wp2.6-insights.md §6 open item 5: absent until an operator
               // writes `${SECRETS_DIR}/advisor_token_secret`; `module.insights`
               // then registers no consumer, no job and no schedule (see

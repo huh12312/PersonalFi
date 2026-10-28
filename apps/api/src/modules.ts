@@ -51,6 +51,11 @@ import {
   type BriefNarrateRuntime,
 } from './brief-narration.ts';
 import { askProbeFor, createAskJob, type AskRuntime } from './ask.ts';
+import {
+  createAdvisorFollowUpJob,
+  createAdvisorStepJob,
+  type AdvisorRuntime,
+} from './advisor-mode.ts';
 import type { LocalModelPin } from '@core/config';
 import {
   createNarratorWiring,
@@ -106,6 +111,9 @@ import {
   BRIEF_NARRATE_MANIFEST,
   ASK_COMPILE_MANIFEST,
   ASK_NARRATE_MANIFEST,
+  ADVISOR_FOLLOW_UP_MANIFEST,
+  ADVISOR_STEP_MANIFESTS,
+  registerAdvisorFollowUpSchedule,
   INSIGHTS_EVENTS,
   NARRATOR_MANIFEST,
   type InsightsDatabase,
@@ -293,6 +301,16 @@ export interface ModuleWiringOptions {
    * the session and enqueues.
    */
   readonly ask?: { readonly runtime: AskRuntime };
+  /**
+   * WP 11.5d: Ask PersonalFi, advisor mode — the worker's run-mode runtime
+   * (`advisor-mode.ts`: the local model, or a hosted provider only under the
+   * advisor's own consent, D31). Present (and an advisor token secret
+   * configured): the `insights.advisor_step` job is registered. Absent (the
+   * api): nothing runs here; the api writes the session and enqueues. The
+   * follow-up watchers (`insights.advisor_follow_up`) need no model and run
+   * whenever a token secret is configured.
+   */
+  readonly advisor?: { readonly runtime: AdvisorRuntime };
   /**
    * The account holder these modules are being built for — the same id
    * `resolveModules(platform, userId, …)` is called with.
@@ -566,6 +584,16 @@ export async function registerBuiltinAdvisors(
   // shapes approved and the narrator on; level 3's switches in Advisor
   // management still turn either off. Not in the nightly registry.
   for (const manifest of [ASK_COMPILE_MANIFEST, ASK_NARRATE_MANIFEST]) {
+    await registerAdvisor(
+      database,
+      { userId: context.userId, clock: context.clock, correlationId: context.correlationId },
+      { manifest, enabled: true },
+    );
+  }
+  // WP 11.5d: the advisor's six query types, on — nothing is sent without each
+  // shape approved; level 3's switches in Advisor management still turn any
+  // off — and the follow-up watcher (builtin, no model). Not in the nightly registry.
+  for (const manifest of [...Object.values(ADVISOR_STEP_MANIFESTS), ADVISOR_FOLLOW_UP_MANIFEST]) {
     await registerAdvisor(
       database,
       { userId: context.userId, clock: context.clock, correlationId: context.correlationId },
@@ -1400,6 +1428,32 @@ function insightsModule(
               clock,
             }),
           ]),
+      // WP 11.5d: `insights.advisor_step` — the advisor's model steps, never the api.
+      ...(options.advisor === undefined || options.advisorTokenSecret === undefined
+        ? []
+        : [
+            createAdvisorStepJob({
+              database,
+              runtime: options.advisor.runtime,
+              switches: insightsRunSwitches(database, options),
+              timeZone: options.timezone,
+              monteCarlo: options.monteCarlo ?? null,
+              tokenSecret: options.advisorTokenSecret,
+              clock,
+            }),
+          ]),
+      // WP 11.5d: `insights.advisor_follow_up` — the watchers of tracked plans; no model.
+      ...(options.advisorTokenSecret === undefined
+        ? []
+        : [
+            createAdvisorFollowUpJob({
+              database,
+              timeZone: options.timezone,
+              monteCarlo: options.monteCarlo ?? null,
+              tokenSecret: options.advisorTokenSecret,
+              clock,
+            }),
+          ]),
       // WP 11.3: `insights.explain` — the holder's tap or the Brief's prefetch, never the api.
       ...(options.insightExplain === undefined
         ? []
@@ -1453,6 +1507,12 @@ function insightsModule(
       // WP 10.12: 04:10 local, every day — after the 03:45 price refresh and the 04:00 net-worth
       // snapshot, before the 04:15 advisor pass.
       await registerHealthSnapshotSchedule(database, { userId, timezone: options.timezone }, clock);
+      // WP 11.5d: 05:40 local, every day — the advisor's follow-up watchers, before Sunday's Brief.
+      await registerAdvisorFollowUpSchedule(
+        database,
+        { userId, timezone: options.timezone },
+        clock,
+      );
     },
   };
 }

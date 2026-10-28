@@ -43,7 +43,7 @@ export function useRefreshControlChecks() {
 
 /**
  * `POST /narrator/control-checks` - step-up. The run it answers with goes to the top of the cached list at once,
- * so the table shows fifteen pending rows without waiting for the next read, and polling starts.
+ * so the table shows sixteen pending rows without waiting for the next read, and polling starts.
  */
 export function useRunControlChecksMutation() {
   const queryClient = useQueryClient();
