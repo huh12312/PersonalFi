@@ -156,13 +156,32 @@ export async function computeCategoryMonthActivity(
   return categoryMonthCellsOf(rows, accounts).map(({ lines: _lines, ...cell }) => cell);
 }
 
+/**
+ * The ids of every category of kind `transfer`. Since WP 11.2b a provider's own
+ * category (tier 4) is the effective one, so an unpaired on-ramp deposit or an
+ * account transfer the pairing heuristic missed now carries
+ * `transfers.between_accounts` instead of `null` — and a transfer is neither
+ * spending nor income, whichever way the money moved. Before 11.2b that row was
+ * uncategorised and excluded by sign alone (`onramp-spending-e2e.test.ts`
+ * records that this was a coincidence, not a rule).
+ */
+export function transferCategoryIdsOf(
+  categories: readonly { readonly id: string; readonly kind: string }[],
+): ReadonlySet<string> {
+  return new Set(
+    categories.filter((category) => category.kind === 'transfer').map((category) => category.id),
+  );
+}
+
 /** `computeCategoryMonthActivity` restricted to categories that spend money. */
 export function spendingRowsOf<T extends CategoryMonthActivity>(
   cells: readonly T[],
   incomeCategoryIds: ReadonlySet<string>,
+  transferCategoryIds: ReadonlySet<string>,
 ): T[] {
   return cells.filter((cell) => {
     if (cell.categoryId === null) return !Money.isPositive(cell.amount);
+    if (transferCategoryIds.has(cell.categoryId)) return false;
     return !incomeCategoryIds.has(cell.categoryId);
   });
 }
@@ -171,9 +190,11 @@ export function spendingRowsOf<T extends CategoryMonthActivity>(
 export function incomeRowsOf<T extends CategoryMonthActivity>(
   cells: readonly T[],
   incomeCategoryIds: ReadonlySet<string>,
+  transferCategoryIds: ReadonlySet<string>,
 ): T[] {
   return cells.filter((cell) => {
     if (cell.categoryId === null) return Money.isPositive(cell.amount);
+    if (transferCategoryIds.has(cell.categoryId)) return false;
     return incomeCategoryIds.has(cell.categoryId);
   });
 }

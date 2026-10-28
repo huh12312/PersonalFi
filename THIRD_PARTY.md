@@ -5,7 +5,7 @@
 # Third-Party Notices
 
 PersonalFi is MIT-licensed. This file lists the runtime (production) dependency tree —
-`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:6cb125de05758f9c.
+`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:a1e7518f9d9dcac6.
 devDependencies (build tooling, test frameworks) are not distributed and are not listed
 here; see `licenses.policy.yaml` for the policy that governs both.
 
@@ -236,7 +236,7 @@ not an npm dependency, so it is not in the tree below.
 - `fastify-plugin`@6.0.0 — https://github.com/fastify/fastify-plugin#readme
 - `fastify-type-provider-zod`@7.0.0 — https://github.com/turkerdev/fastify-type-provider-zod
 - `find-my-way`@9.9.0 — https://github.com/delvedor/find-my-way#readme
-- `follow-redirects`@1.16.0 — https://github.com/follow-redirects/follow-redirects
+- `follow-redirects`@1.16.1 — https://github.com/follow-redirects/follow-redirects
 - `form-data`@4.0.6 — https://github.com/form-data/form-data#readme
 - `function-bind`@1.1.2 — https://github.com/Raynos/function-bind
 - `get-intrinsic`@1.3.0 — https://github.com/ljharb/get-intrinsic#readme
@@ -335,7 +335,7 @@ not an npm dependency, so it is not in the tree below.
 - `uuid`@14.0.2 — https://github.com/uuidjs/uuid#readme
 - `wsl-utils`@0.3.1 — https://github.com/sindresorhus/wsl-utils#readme
 - `xtend`@4.0.2 — https://github.com/Raynos/xtend
-- `zod`@4.5.4 — https://zod.dev
+- `zod`@4.6.6 — https://zod.dev
 
 ## MIT and ISC
 

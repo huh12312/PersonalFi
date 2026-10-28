@@ -44,6 +44,7 @@ import {
   incomeRowsOf,
   spendingRowsOf,
   type CategoryMonthCellWithLines,
+  transferCategoryIdsOf,
 } from './spending-income.ts';
 import type { DrillThroughFilter, ReportAccount, ReportRow } from './types.ts';
 
@@ -257,14 +258,15 @@ export function cellsOfWindow(
   incomeCategoryIds: ReadonlySet<string>,
   from: DateOnlyType,
   to: DateOnlyType,
+  transferCategoryIds: ReadonlySet<string>,
 ): WindowCells {
   const cells = categoryMonthCellsOf(
     rows.filter((row) => inWindow(row, from, to)),
     accounts,
   );
   return {
-    spending: spendingRowsOf(cells, incomeCategoryIds),
-    income: incomeRowsOf(cells, incomeCategoryIds),
+    spending: spendingRowsOf(cells, incomeCategoryIds, transferCategoryIds),
+    income: incomeRowsOf(cells, incomeCategoryIds, transferCategoryIds),
   };
 }
 
@@ -283,6 +285,7 @@ export function windowReader(
   rows: readonly ReportRow[],
   accounts: readonly ReportAccount[],
   incomeCategoryIds: ReadonlySet<string>,
+  transferCategoryIds: ReadonlySet<string>,
 ) {
   const byMonth = new Map<string, ReportRow[]>();
   for (const row of rows) {
@@ -335,8 +338,8 @@ export function windowReader(
     cells(from: DateOnlyType, to: DateOnlyType): WindowCells {
       const cells = monthsOf(from, to).flatMap((month) => monthCells(month, from, to));
       return {
-        spending: spendingRowsOf(cells, incomeCategoryIds),
-        income: incomeRowsOf(cells, incomeCategoryIds),
+        spending: spendingRowsOf(cells, incomeCategoryIds, transferCategoryIds),
+        income: incomeRowsOf(cells, incomeCategoryIds, transferCategoryIds),
       };
     },
     /** Any row at all in `[from, to]`: a period with none has no data, which is not a zero. */
@@ -544,7 +547,7 @@ export async function computeCashFlow(
     categories.filter((category) => category.kind === 'income').map((category) => category.id),
   );
 
-  const reader = windowReader(rows, accounts, incomeIds);
+  const reader = windowReader(rows, accounts, incomeIds, transferCategoryIdsOf(categories));
   const rowsById = reader.rowsById;
   const hasRowsIn = (period: CashFlowPeriod) => reader.hasRows(period.start, period.end);
 

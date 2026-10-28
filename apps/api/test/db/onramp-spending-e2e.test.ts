@@ -66,7 +66,11 @@ import { listCategories, matchProviderCategory } from '@ctx/categorization';
 import { createEgressPolicy, createNtfyChannel, createSmtpChannel } from '@ctx/notifications';
 import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { computeCategoryMonthActivity, spendingRowsOf } from '../../src/reports/spending-income.ts';
+import {
+  computeCategoryMonthActivity,
+  spendingRowsOf,
+  transferCategoryIdsOf,
+} from '../../src/reports/spending-income.ts';
 import {
   createConnectorRegistry,
   createDomainRuntime,
@@ -162,7 +166,7 @@ async function categorizeAndAggregate(
     dateFrom: DateOnlyType.parse(month.from),
     dateTo: DateOnlyType.parse(month.to),
   });
-  return { spending: spendingRowsOf(cells, incomeIds) };
+  return { spending: spendingRowsOf(cells, incomeIds, transferCategoryIdsOf(categories)) };
 }
 
 describe.skipIf(NO_DATABASE)(
@@ -221,9 +225,9 @@ describe.skipIf(NO_DATABASE)(
     );
 
     it(
-      'characterises the matching outflow leg: an unpaired bank-side TRANSFER_OUT with the same ' +
-        'PFC shape is NOT excluded today (the residual risk this WP records for 4.12c, not fixed ' +
-        'here — see the file header)',
+      'the matching outflow leg: an unpaired bank-side TRANSFER_OUT with the same PFC shape is ' +
+        'excluded too (the residual risk recorded for 4.12c closed on 2026-10-28: WP 11.2b made the ' +
+        "provider's own transfer category effective and spending-income.ts excludes kind 'transfer')",
       async () => {
         await linkManual(h, {
           providerConnectionId: 'onramp-outflow-conn',
@@ -261,18 +265,15 @@ describe.skipIf(NO_DATABASE)(
           to: '2026-08-31',
         });
         const total = spending.reduce((sum, cell) => sum + cell.amount.minor, 0n);
-        // This is the CURRENT, verified behaviour, not the desired one — see
-        // the file header's "residual risk" paragraph. If `@ctx/budgeting` or
-        // `apps/api/src/reports/spending-income.ts` is later changed to
-        // exclude `kind: 'transfer'` categories structurally (the fix this WP
-        // names but does not make), this assertion becomes `toBe(0n)` and its
-        // own comment is the signal that the gap closed.
+        // Closed on 2026-10-28. WP 11.2b made the provider's own category (tier 4)
+        // the effective one, so this leg carries `transfers.between_accounts`, and
+        // `spending-income.ts`'s predicates now exclude `kind: 'transfer'` categories
+        // structurally (`transferCategoryIdsOf`, a required argument). The sign
+        // coincidence the file header describes no longer carries the invariant.
         expect(
           total,
-          'CURRENTLY (not desired): an unpaired, uncategorised transfer-shaped outflow is counted ' +
-            'as spending. If this now reads 0n, the gap this test documents has closed — update the ' +
-            'comment and evidence, do not just delete the assertion.',
-        ).toBe(-LEG_MINOR);
+          'an unpaired transfer-shaped outflow carries the transfer category and is excluded from spending',
+        ).toBe(0n);
       },
       60_000,
     );

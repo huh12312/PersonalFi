@@ -51,6 +51,8 @@ export interface SpendingPaceInput {
   readonly includePending: boolean;
   /** `@ctx/categorization` categories of kind `income` — the same set `GET /reports/spending` passes. */
   readonly incomeCategoryIds: ReadonlySet<string>;
+  /** Categories of kind `transfer` — neither spending nor income (WP 11.2b made tier 4 effective). */
+  readonly transferCategoryIds: ReadonlySet<string>;
 }
 
 export interface PaceDay {
@@ -128,6 +130,7 @@ export function cumulativeSpendByDay(
   actuals: MonthActuals,
   length: number,
   incomeCategoryIds: ReadonlySet<string>,
+  transferCategoryIds: ReadonlySet<string>,
 ): bigint[] {
   const lines = [...actuals.byCategory.values()].map((activity) => {
     const daily = new Array<bigint>(length).fill(0n);
@@ -153,7 +156,7 @@ export function cumulativeSpendByDay(
         refundNettedCount: line.activity.refundNettedCount,
       };
     });
-    const spent = spendingRowsOf(cells, incomeCategoryIds).reduce(
+    const spent = spendingRowsOf(cells, incomeCategoryIds, transferCategoryIds).reduce(
       (total, cell) => total - cell.amount.minor,
       0n,
     );
@@ -275,7 +278,12 @@ export async function computeSpendingPace(
   const curveOf = (key: string, monthLength: number): bigint[] => {
     const actuals = actualsByMonth.get(key);
     if (actuals === undefined) return new Array<bigint>(monthLength).fill(0n);
-    return cumulativeSpendByDay(actuals, monthLength, input.incomeCategoryIds);
+    return cumulativeSpendByDay(
+      actuals,
+      monthLength,
+      input.incomeCategoryIds,
+      input.transferCategoryIds,
+    );
   };
 
   const currentCurve =

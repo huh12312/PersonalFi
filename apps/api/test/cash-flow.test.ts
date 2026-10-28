@@ -162,7 +162,7 @@ describe('windowReader', () => {
   it('agrees with cellsOfWindow (Reports over the window’s own rows) for every window, whole or cut mid-month', () => {
     const { rows, accounts } = ledger();
     const income = new Set(['salary']);
-    const reader = windowReader(rows, accounts, income);
+    const reader = windowReader(rows, accounts, income, new Set<string>());
     const crossMonthRefunds = rows.filter((row) => {
       if (row.refundOfId === null) return false;
       const purchase = rows.find((candidate) => candidate.id === row.refundOfId);
@@ -193,6 +193,7 @@ describe('windowReader', () => {
         income,
         DateOnly.parse(from),
         DateOnly.parse(to),
+        new Set<string>(),
       );
       const actual = reader.cells(DateOnly.parse(from), DateOnly.parse(to));
       expect({ from, to, spending: asMap(actual.spending) }).toEqual({
@@ -271,7 +272,7 @@ describe('summed history (loadReportHistoryInOneRead)', () => {
       [...history.weights.values()].reduce((a, b) => a + b, 0) +
         history.rows.filter((r) => !r.id.startsWith('sum:')).length,
     ).toBe(rows.length);
-    const reader = windowReader(history.rows, accounts, income);
+    const reader = windowReader(history.rows, accounts, income, new Set<string>());
     const ends: string[] = [...cuts];
     for (
       let first = DateOnly.parse('2024-01-01');
@@ -285,7 +286,7 @@ describe('summed history (loadReportHistoryInOneRead)', () => {
         if (end < start) continue;
         const from = DateOnly.parse(start);
         const to = DateOnly.parse(end);
-        const expected = cellsOfWindow(rows, accounts, income, from, to);
+        const expected = cellsOfWindow(rows, accounts, income, from, to, new Set<string>());
         const actual = reader.cells(from, to);
         expect({
           start,

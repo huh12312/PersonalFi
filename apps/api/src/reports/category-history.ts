@@ -29,6 +29,7 @@
 import { DateOnly, type DateOnly as DateOnlyType } from '@core/kernel';
 import { listTransactions, type LedgerDatabase } from '@ctx/ledger';
 import { windowReader, type CategoryInfo } from './cash-flow.ts';
+import { transferCategoryIdsOf } from './spending-income.ts';
 import { loadReportAccounts, loadReportHistoryInOneRead } from './ledger-source.ts';
 import { divideHalfEven, pickCurrency } from './spending-pace.ts';
 import type { DrillThroughFilter, ReportRow } from './types.ts';
@@ -258,7 +259,7 @@ export async function computeCategoryHistory(
       .filter((candidate) => candidate.kind === 'income')
       .map((candidate) => candidate.id),
   );
-  const reader = windowReader(rows, accounts, incomeIds);
+  const reader = windowReader(rows, accounts, incomeIds, transferCategoryIdsOf(input.categories));
   const currentMonth = last.month;
 
   const months: CategoryHistoryMonth[] = window.map((month) => {

@@ -299,7 +299,8 @@ test.describe('Settings › Language model › Control checks (WP 10.16)', () =>
       'Result: Partial: some checks could not run. 9 passed, 1 skipped, 2 not applicable, 1 reported.',
     );
     await expect(section.getByTestId('control-checks-wait')).toHaveText(
-      /^You can run the checks again at \d{2}:\d{2}\.$/,
+      // Dated when the ten-minute window crosses midnight (CI runs in UTC): "28 Oct, 00:01".
+      /^You can run the checks again at (?:\d{1,2} [A-Z][a-z]{2}, )?\d{2}:\d{2}\.$/,
     );
     await expect(button).toHaveText('Run control checks');
     await expect(button).toHaveAttribute('aria-disabled', 'true');

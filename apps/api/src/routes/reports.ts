@@ -29,6 +29,7 @@ import {
   computeCategoryMonthActivity,
   incomeRowsOf,
   spendingRowsOf,
+  transferCategoryIdsOf,
 } from '../reports/spending-income.ts';
 import { computeSankey } from '../reports/sankey.ts';
 import {
@@ -440,8 +441,11 @@ export const reportRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
       ...(query.categoryIds === undefined ? {} : { categoryIds: query.categoryIds }),
       ...(query.accountIds === undefined ? {} : { accountIds: query.accountIds }),
     });
+    const transferIds = transferCategoryIdsOf(categories);
     const rows =
-      side === 'spending' ? spendingRowsOf(cells, incomeIds) : incomeRowsOf(cells, incomeIds);
+      side === 'spending'
+        ? spendingRowsOf(cells, incomeIds, transferIds)
+        : incomeRowsOf(cells, incomeIds, transferIds);
     return rows.map((cell) => ({
       month: cell.month,
       categoryId: cell.categoryId,
@@ -696,6 +700,7 @@ export const reportRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             today,
             includePending: request.query.includePending ?? false,
             incomeCategoryIds: incomeIds,
+            transferCategoryIds: transferCategoryIdsOf(categories),
           }),
           pool.query<{ last: Date | null }>(
             'SELECT max(last_synced_at) AS last FROM connections WHERE user_id = $1',

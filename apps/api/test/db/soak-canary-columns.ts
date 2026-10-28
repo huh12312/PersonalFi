@@ -83,6 +83,8 @@ export const NOT_FREE_TEXT: Readonly<Record<string, string>> = {
   'insights.confidence_basis': 'the confidence-basis enum',
   'insights.feedback': 'the feedback enum (helpful | not_helpful), CHECK-constrained (WP 10.15)',
   'insights.feedback_reason': 'the dismiss-reason enum, CHECK-constrained (WP 10.15)',
+  'transactions.auto_tier':
+    'the automatic-categorisation tier enum (merchant_default | provider | classifier), CHECK-constrained (WP 11.2b)',
   'insights.horizon': 'the horizon enum',
   'insights.impact_basis': 'the impact-basis enum',
   'insights.impact_currency': 'ISO 4217 code',

@@ -10,7 +10,11 @@
 import type { Database } from '@core/db';
 import { listCategories } from '@ctx/categorization';
 import type { LivingExpensesPort } from '@ctx/insights';
-import { computeCategoryMonthActivity, spendingRowsOf } from './spending-income.ts';
+import {
+  computeCategoryMonthActivity,
+  spendingRowsOf,
+  transferCategoryIdsOf,
+} from './spending-income.ts';
 
 export function createLivingExpensesPort(
   database: Database,
@@ -28,6 +32,7 @@ export function createLivingExpensesPort(
         dateTo: window.to,
       }),
       incomeIds,
+      transferCategoryIdsOf(categories),
     );
     return {
       currency,
