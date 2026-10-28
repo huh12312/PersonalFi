@@ -1551,7 +1551,7 @@ function isAge(value: number): boolean {
  * recorded for the orchestrator, and must travel with the `@core/secretbox`
  * swap `tokens.ts`' header carries, since both change the same construction.
  */
-function goalRef(tokenKey: string, goalId: string): string {
+export function goalRef(tokenKey: string, goalId: string): string {
   const digest = configHash({
     label: 'personalfi/v1|advisor-token',
     key: tokenKey,

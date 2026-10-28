@@ -9,6 +9,50 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.22: the advisor's catalogue
+
+**Status:** a patch release on v0.9.21 (if an earlier v0.9.x has not been tagged when this is, tag
+them in order). The tag `v0.9.22` is pushed by the maintainer once CI is green. Package 11.5b of the
+Phase 11 programme (12 §6). Nothing a holder sees in the app changes: this is the set of tools the
+advisor packages (11.5c–d) call.
+
+### Upgrading to v0.9.22
+
+```bash
+git pull
+just upgrade
+```
+
+No migration.
+
+### Manual steps
+
+None. A function is available only for the scopes you have granted the narrator
+([RUNBOOK](../RUNBOOK.md#the-advisors-catalogue-v0922)).
+
+### What changed
+
+- **The advisory catalogue, `catalogue/1`.** Nineteen deterministic functions, each a thin wrapper
+  over an engine, report or rule that already exists: the snapshot, the emergency fund, payoff
+  plans, required savings, projections, compares, the levers tornado, claiming ages, the guardrail,
+  the RMD window, allocation, drift, concentration, fund costs, asset location (answers that no
+  engine computes it yet), contribution room, subscription findings, the Brief and a stored
+  explanation. `GET /advisor/catalogue` lists what you can call; `POST /advisor/catalogue/{name}`
+  calls one. Read only: no run is stored and no model is asked.
+- **Every figure carries its sources.** A result's figures are money, decimal strings or dates, each
+  with `source_refs` into the result's own inputs; a result with a figure that does not trace, or a
+  float anywhere, is never returned.
+- **Payoff plans, costed.** The debt payoff order (D1) now has a month-by-month schedule in whole
+  cents: avalanche, snowball or your own order side by side, with the payoff month, the interest and
+  the difference in dollars.
+- **The levers tornado.** How far each plan lever (retiring a year later, saving 2% more, spending 10%
+  less, returns a point lower, claiming a year later, part-time income, a windfall) moves the
+  success probability, under common random numbers, within a 20-second budget; a lever not reached
+  in time is reported, not dropped.
+- **Contribution room** from the year's limits in the parameter store and the year's contributions
+  in the investment activity; a year the store does not hold is refused.
+- **The plan's required-savings solve** is shared by the plan route and the catalogue, unchanged.
+
 ## v0.9.21: the advisor's knowledge base
 
 **Status:** a patch release on v0.9.20 (if an earlier v0.9.x has not been tagged when this is, tag

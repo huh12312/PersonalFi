@@ -31,7 +31,6 @@
  * Nothing else is written: no insight, no Brief row, no grant, no approval, no
  * setting.
  */
-import { NARRATOR_ADVISOR_ID, NARRATOR_MANIFEST } from '../local/manifest.ts';
 import {
   BREAKER_THRESHOLDS,
   decideContinue,
@@ -39,13 +38,13 @@ import {
   type RunSwitches,
 } from '../../policy/kill-switches.ts';
 import { RUN_WATCH_POLL_MS, RunCancelled, watchRun } from '../../policy/run-watch.ts';
-import { effectiveRunScopes, hasLiveApproval, queryShape } from '../../preview.ts';
+import { narratorGrantCeiling } from '../local/grant.ts';
+import { hasLiveApproval, queryShape } from '../../preview.ts';
 import type { InsightsContext, InsightsDatabase, InsightsExecutor } from '../../db.ts';
 import {
   findAdvisor,
   findRun,
   finishRun,
-  listGrants,
   lockAdvisor,
   quarantineAdvisor,
   recordRunHealth,
@@ -124,12 +123,7 @@ export async function briefNarrateCeiling(
   executor: InsightsExecutor,
   userId: string,
 ): Promise<readonly string[]> {
-  const grant = effectiveRunScopes(
-    NARRATOR_MANIFEST,
-    await listGrants(executor, userId, NARRATOR_ADVISOR_ID),
-  );
-  const bound = new Set<string>(BRIEF_NARRATE_SCOPES);
-  return grant.filter((scope) => bound.has(scope));
+  return narratorGrantCeiling(executor, userId, BRIEF_NARRATE_SCOPES);
 }
 
 /** The scopes of `target` outside the ceiling; empty when every one is inside. */

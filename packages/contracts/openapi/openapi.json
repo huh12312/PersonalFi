@@ -9294,6 +9294,179 @@
           "occurredAt"
         ]
       },
+      "AdvisorCatalogueFunctionInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "backing": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope_rule": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any"
+            ]
+          },
+          "parameters": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "result": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "name",
+          "summary",
+          "description",
+          "backing",
+          "scopes",
+          "scope_rule",
+          "parameters",
+          "result"
+        ]
+      },
+      "AdvisorCatalogueListingInput": {
+        "type": "object",
+        "properties": {
+          "catalogue_version": {
+            "type": "string"
+          },
+          "envelope": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "$defs": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "functions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdvisorCatalogueFunctionInput"
+            }
+          }
+        },
+        "required": [
+          "catalogue_version",
+          "envelope",
+          "$defs",
+          "functions"
+        ]
+      },
+      "AdvisorCatalogueResultInput": {
+        "type": "object",
+        "properties": {
+          "catalogue_version": {
+            "type": "string"
+          },
+          "function": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "not_available"
+            ]
+          },
+          "as_of": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "inputs": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "input_digest": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "not_available": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "reason"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "catalogue_version",
+          "function",
+          "status",
+          "as_of",
+          "scopes",
+          "inputs",
+          "input_digest",
+          "result",
+          "not_available"
+        ],
+        "description": "One call’s result: every figure in `result` is money, a decimal string or a date with `source_refs` into `inputs`."
+      },
       "AssumptionsFileInput": {
         "type": "object",
         "propertyNames": {
@@ -26858,6 +27031,183 @@
           "occurredAt"
         ],
         "additionalProperties": false
+      },
+      "AdvisorCatalogueFunction": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "backing": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope_rule": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any"
+            ]
+          },
+          "parameters": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "result": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "name",
+          "summary",
+          "description",
+          "backing",
+          "scopes",
+          "scope_rule",
+          "parameters",
+          "result"
+        ],
+        "additionalProperties": false
+      },
+      "AdvisorCatalogueListing": {
+        "type": "object",
+        "properties": {
+          "catalogue_version": {
+            "type": "string"
+          },
+          "envelope": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "$defs": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "functions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdvisorCatalogueFunction"
+            }
+          }
+        },
+        "required": [
+          "catalogue_version",
+          "envelope",
+          "$defs",
+          "functions"
+        ],
+        "additionalProperties": false
+      },
+      "AdvisorCatalogueResult": {
+        "type": "object",
+        "properties": {
+          "catalogue_version": {
+            "type": "string"
+          },
+          "function": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "not_available"
+            ]
+          },
+          "as_of": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "inputs": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "input_digest": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "not_available": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "catalogue_version",
+          "function",
+          "status",
+          "as_of",
+          "scopes",
+          "inputs",
+          "input_digest",
+          "result",
+          "not_available"
+        ],
+        "additionalProperties": false,
+        "description": "One call’s result: every figure in `result` is money, a decimal string or a date with `source_refs` into `inputs`."
       },
       "AssumptionsFile": {
         "type": "object",
@@ -55496,6 +55846,147 @@
             }
           },
           "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/advisor/catalogue": {
+      "get": {
+        "operationId": "listAdvisorCatalogue",
+        "summary": "The advisory functions this holder can call, with their parameters and results",
+        "tags": [
+          "advisors"
+        ],
+        "description": "The published catalogue description, filtered to the functions the holder’s grant to the narrator covers. A function not granted is not listed.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvisorCatalogueListing"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/advisor/catalogue/{name}": {
+      "post": {
+        "operationId": "callAdvisorCatalogue",
+        "summary": "Call one advisory function with its arguments and return its typed result",
+        "tags": [
+          "advisors"
+        ],
+        "description": "Read only: nothing is stored and no model is asked. The body is the function’s arguments as its `parameters` schema describes them (`{}` for none).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 64,
+              "pattern": "^[a-z_]+\\.[a-z_]+$"
+            },
+            "in": "path",
+            "name": "name",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvisorCatalogueResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "Default Response",
             "content": {
               "application/json": {

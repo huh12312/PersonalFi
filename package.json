@@ -21,6 +21,7 @@
     "migrate": "node packages/db/src/cli/migrate.ts",
     "openapi": "node apps/api/src/cli/emit-openapi.ts",
     "playbook": "node scripts/playbook-gen.ts",
+    "catalogue": "node scripts/advisor-catalogue-gen.ts",
     "dev:api": "node --watch apps/api/src/main.ts",
     "dev:worker": "node --watch apps/api/src/worker.ts"
   },

@@ -53,21 +53,15 @@ import {
   createScenario,
   currentRegistry,
   deleteLifeEvent,
-  getBaseline,
   listLifeEvents,
   listScenarios,
   LIFE_EVENT_KINDS,
   MAX_PLAN_AGE,
   PROJECTION_METHODS,
-  ProjectionRefused,
   readProjection,
-  resolveForUser,
   runProjection,
   saveBaseline,
-  solveRequiredSavings,
   updateLifeEvent,
-  assembleBaselinePlan,
-  lifeEventsForPlan,
   getGoal,
   type BaselineProfile,
   type ClaimAge,
@@ -91,6 +85,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { accountOverrideFingerprintFor, planningRevealedPortsFor } from '../domain.ts';
 import { mapDomainErrors } from './domain-errors.ts';
+import { solveRequiredSavingsFor } from '../required-savings.ts';
 import { problems } from '../problem.ts';
 import { booleanQuery, dateOnly, dateOnlyQuery, money, moneySchema } from '../wire.ts';
 import type { RouteDeps } from './deps.ts';
@@ -860,43 +855,17 @@ export const planRoutes = (deps: RouteDeps): FastifyPluginAsyncZod => {
             };
           }
 
-          const baseline = await getBaseline(database, session.userId);
-          if (baseline === null) {
-            throw new ProjectionRefused(
-              'planning.scenario_no_baseline',
-              'state a baseline plan before solving for required savings',
-            );
-          }
-
-          const resolved = await resolveForUser(
-            database,
-            { userId: session.userId, timeZone },
-            currentRegistry(),
-          );
-          const inputs = createProjectionInputsReader(
-            database,
-            planningRevealedPortsFor(database, { userId: session.userId, timeZone, clock }),
-          );
-          const derived = await inputs.derivedInputs({
+          return solveRequiredSavingsFor(database, {
             userId: session.userId,
+            timeZone,
+            clock,
+            objective,
+            maxMonthly: Money.fromJSON(request.body.maxMonthly),
             asOf:
               request.body.asOf === undefined || request.body.asOf === null
                 ? null
                 : DateOnly.parse(request.body.asOf),
             allowOpenDay: request.body.allowOpenDay ?? false,
-          });
-          const assembled = assembleBaselinePlan(baseline.profile, derived);
-          const events = lifeEventsForPlan(
-            await listLifeEvents(database, session.userId),
-            assembled.plan,
-          );
-          const plan = {
-            ...assembled.plan,
-            otherIncome: [...assembled.plan.otherIncome, ...events.income],
-          };
-          return solveRequiredSavings(plan, resolved, {
-            objective,
-            maxMonthly: Money.fromJSON(request.body.maxMonthly),
           });
         });
         switch (result.kind) {

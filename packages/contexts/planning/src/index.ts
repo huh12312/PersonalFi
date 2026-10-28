@@ -444,6 +444,31 @@ export {
   type Staleness,
 } from './projection-service.ts';
 // --- WP 9.2: a changed account overlay makes a stored run read stale ---------
+// WP 11.5b: the plan's figures for the advisor's catalogue — read, compute, never store — and
+// 07 §5.10's tornado under common random numbers.
+export {
+  LEVER_SENSITIVITY_DEADLINE_MS,
+  LEVER_STEP_DECLARATIONS,
+  TORNADO_LEVERS,
+  canonicalProbability,
+  compareScenarioFigures,
+  leverSensitivity,
+  leverStepsFor,
+  probabilityDelta,
+  projectScenarioFigures,
+  sensitivityOver,
+  type LeverOutcome,
+  type LeverSensitivity,
+  type LeverSensitivityOutcome,
+  type LeverSkipReason,
+  type LeverStep,
+  type ProjectionYearFigures,
+  type ScenarioComparisonFigures,
+  type ScenarioFigures,
+  type ScenarioFiguresOutcome,
+  type SensitivityBase,
+  type TornadoLever,
+} from './catalogue-projections.ts';
 export { overlayFactsOf, resolveOverlayFor, withOverlay } from './account-overlay.ts';
 export {
   diffOverrideFingerprints,

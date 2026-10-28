@@ -32,7 +32,7 @@
  *
  * Nothing else is written: no insight, no grant, no approval, no setting.
  */
-import { NARRATOR_ADVISOR_ID, NARRATOR_MANIFEST } from '../local/manifest.ts';
+import { narratorGrantCeiling } from '../local/grant.ts';
 import {
   BREAKER_THRESHOLDS,
   decideContinue,
@@ -40,13 +40,12 @@ import {
   type RunSwitches,
 } from '../../policy/kill-switches.ts';
 import { RUN_WATCH_POLL_MS, RunCancelled, watchRun } from '../../policy/run-watch.ts';
-import { effectiveRunScopes, hasLiveApproval, queryShape } from '../../preview.ts';
+import { hasLiveApproval, queryShape } from '../../preview.ts';
 import type { InsightsContext, InsightsDatabase, InsightsExecutor } from '../../db.ts';
 import {
   findAdvisor,
   findRun,
   finishRun,
-  listGrants,
   quarantineAdvisor,
   recordRunHealth,
   recordRunModel,
@@ -117,11 +116,10 @@ export async function ungrantedExplainScopes(
   userId: string,
   target: Pick<ExplainTarget, 'scopes'>,
 ): Promise<readonly string[]> {
-  const grant = new Set<string>(
-    effectiveRunScopes(NARRATOR_MANIFEST, await listGrants(executor, userId, NARRATOR_ADVISOR_ID)),
+  const ceiling = new Set<string>(
+    await narratorGrantCeiling(executor, userId, INSIGHT_EXPLAIN_SCOPES),
   );
-  const bound = new Set<string>(INSIGHT_EXPLAIN_SCOPES);
-  return target.scopes.filter((scope) => !grant.has(scope) || !bound.has(scope));
+  return target.scopes.filter((scope) => !ceiling.has(scope));
 }
 
 interface GateInputs {

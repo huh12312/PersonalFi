@@ -1,0 +1,1917 @@
+{
+  "catalogue_version": "catalogue/1",
+  "title": "PersonalFi advisory catalogue",
+  "description": "Deterministic advisory functions over the holder’s own data. Every figure in a result is money, a decimal string or a date, and carries source_refs into the result’s own inputs. A function the holder has not granted is not listed. No function moves money, and none asks a model.",
+  "envelope": {
+    "type": "object",
+    "properties": {
+      "catalogue_version": {
+        "type": "string",
+        "const": "catalogue/1"
+      },
+      "function": {
+        "type": "string"
+      },
+      "status": {
+        "type": "string",
+        "enum": ["ok", "not_available"]
+      },
+      "as_of": {
+        "type": "string",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "scopes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "inputs": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {}
+      },
+      "input_digest": {
+        "type": "string",
+        "pattern": "^sha256:[0-9a-f]{64}$"
+      },
+      "result": {
+        "anyOf": [
+          {},
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "not_available": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^[a-z_]+$"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 600
+              }
+            },
+            "required": ["code", "reason"],
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "catalogue_version",
+      "function",
+      "status",
+      "as_of",
+      "scopes",
+      "inputs",
+      "input_digest",
+      "result",
+      "not_available"
+    ],
+    "additionalProperties": false
+  },
+  "$defs": {
+    "DateFigure": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}(-\\d{2})?$"
+        },
+        "source_refs": {
+          "$ref": "#/$defs/SourceRefs"
+        }
+      },
+      "required": ["date", "source_refs"],
+      "additionalProperties": false
+    },
+    "DecimalFigure": {
+      "type": "object",
+      "properties": {
+        "decimal": {
+          "type": "string",
+          "pattern": "^-?\\d{1,25}(\\.\\d{1,12})?$"
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "ratio",
+            "probability",
+            "months",
+            "years",
+            "age",
+            "days",
+            "year",
+            "count",
+            "factor"
+          ]
+        },
+        "source_refs": {
+          "$ref": "#/$defs/SourceRefs"
+        }
+      },
+      "required": ["decimal", "unit", "source_refs"],
+      "additionalProperties": false
+    },
+    "Finding": {
+      "type": "object",
+      "properties": {
+        "rule_id": {
+          "type": "string"
+        },
+        "advisor_id": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "notable", "warning", "urgent"]
+        },
+        "annual_impact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MoneyFigure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "one_time_impact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MoneyFigure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "rule_id",
+        "advisor_id",
+        "key",
+        "title",
+        "severity",
+        "annual_impact",
+        "one_time_impact"
+      ],
+      "additionalProperties": false
+    },
+    "Money": {
+      "type": "object",
+      "properties": {
+        "minor": {
+          "type": "string",
+          "pattern": "^-?\\d{1,20}$"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        }
+      },
+      "required": ["minor", "currency"],
+      "additionalProperties": false
+    },
+    "MoneyFigure": {
+      "type": "object",
+      "properties": {
+        "money": {
+          "$ref": "#/$defs/Money"
+        },
+        "source_refs": {
+          "$ref": "#/$defs/SourceRefs"
+        }
+      },
+      "required": ["money", "source_refs"],
+      "additionalProperties": false
+    },
+    "SourceRefs": {
+      "minItems": 1,
+      "maxItems": 64,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "pattern": "^(snapshot:[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+|\\[\\d{1,4}\\])*|external:https:\\/\\/\\S+)$"
+      }
+    }
+  },
+  "functions": [
+    {
+      "name": "situation.snapshot",
+      "summary": "The minimised, scoped snapshot the advisors receive, under the scopes you granted.",
+      "description": "Returns the advisor snapshot (08 §4.2) built for the scopes the holder granted the narrator, minimised exactly as the advisors receive it: no account or institution name, merchants tokenised, net worth rounded to $100. The blocks are the inputs; the result lists them. Never includes row-level transactions.",
+      "backing": "SnapshotBuilder (snapshot/builder.ts) under the holder’s narrator grant",
+      "scopes": [
+        "networth.summary",
+        "cash.summary",
+        "cashflow.monthly",
+        "recurring.list",
+        "goals.list",
+        "holdings.aggregate",
+        "holdings.detail",
+        "transactions.summary",
+        "liabilities.terms",
+        "market.rates",
+        "plan.projection",
+        "transactions.anomalies",
+        "fees.summary"
+      ],
+      "scope_rule": "any",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "scope": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              },
+              "required": ["scope", "key"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["blocks"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "cash.emergency_fund",
+      "summary": "Months of recent spending your cash covers, the gap to a target or the excess over it, and what the excess earns against a 3-month Treasury bill.",
+      "description": "Monthly spending is the average of the last three complete months (C1’s cushion window). The target defaults to three months (C4). The excess over the target is compared with the parameter store’s 3-month Treasury bill reference rate. When the Budget screen has categories classified fixed or non-monthly, living expenses (WP 10.12) are reported beside it.",
+      "backing": "C4 and C1 (advisors/rules-cash.ts) over cash.summary and cashflow.monthly; WP 10.12 living expenses (health/living-expenses.ts); the parameter assumptions.market_reference.treasury_bill_3_month",
+      "scopes": ["cash.summary", "cashflow.monthly"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target_months": {
+            "default": 3,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 24
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "cash_held": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "monthly_spending": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "months_covered": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "target_months": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "target_amount": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "shortfall": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "excess": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "blended_apy": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "yield_spread": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DecimalFigure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "annual_spread_on_excess": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MoneyFigure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "living_expenses": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "monthly": {
+                    "$ref": "#/$defs/MoneyFigure"
+                  },
+                  "months_covered": {
+                    "$ref": "#/$defs/DecimalFigure"
+                  }
+                },
+                "required": ["monthly", "months_covered"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "living_expenses_withheld": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": [
+          "cash_held",
+          "monthly_spending",
+          "months_covered",
+          "target_months",
+          "target_amount",
+          "shortfall",
+          "excess",
+          "blended_apy",
+          "yield_spread",
+          "annual_spread_on_excess",
+          "living_expenses",
+          "living_expenses_withheld"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "debt.payoff_plan",
+      "summary": "Payoff date and total interest for paying debts in avalanche, snowball or your own order, side by side, and the difference in dollars.",
+      "description": "A month-by-month schedule in integer cents: interest accrues on each balance at its rate (a promotional rate while it lasts), every minimum is paid, and the rest of a fixed monthly budget (all minimums plus the extra) goes to one debt at a time in the chosen order; a cleared debt’s minimum rolls to the next. A debt with no rate or no minimum on record is left out and named. A schedule not clear in fifty years is reported as not paid off.",
+      "backing": "D1–D5’s inputs (liabilities.terms); the amortisation in catalogue/amortisation.ts, new in WP 11.5b because D1 states the ordering and not the cost",
+      "scopes": ["liabilities.terms"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "string",
+            "enum": ["avalanche", "snowball", "custom"]
+          },
+          "extra_monthly": {
+            "$ref": "#/$defs/Money"
+          },
+          "custom_order": {
+            "maxItems": 64,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        },
+        "required": ["order", "extra_monthly"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "chosen": {
+            "type": "string",
+            "enum": ["avalanche", "snowball", "custom"]
+          },
+          "included": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "liability_ref": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "balance": {
+                  "$ref": "#/$defs/MoneyFigure"
+                },
+                "apr": {
+                  "$ref": "#/$defs/DecimalFigure"
+                },
+                "promo_apr": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/DecimalFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "promo_apr_end": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/DateFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "minimum_payment": {
+                  "$ref": "#/$defs/MoneyFigure"
+                }
+              },
+              "required": [
+                "liability_ref",
+                "kind",
+                "balance",
+                "apr",
+                "promo_apr",
+                "promo_apr_end",
+                "minimum_payment"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "excluded": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "liability_ref": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": ["no_apr", "no_minimum_payment", "currency_mismatch"]
+                }
+              },
+              "required": ["liability_ref", "reason"],
+              "additionalProperties": false
+            }
+          },
+          "monthly_budget": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "order": {
+                  "type": "string",
+                  "enum": ["avalanche", "snowball", "custom"]
+                },
+                "sequence": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["paid_off", "not_paid_off"]
+                },
+                "months": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/DecimalFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "payoff_month": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/DateFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "total_interest": {
+                  "$ref": "#/$defs/MoneyFigure"
+                },
+                "total_paid": {
+                  "$ref": "#/$defs/MoneyFigure"
+                },
+                "debts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "liability_ref": {
+                        "type": "string"
+                      },
+                      "payoff_month": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/DateFigure"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "interest": {
+                        "$ref": "#/$defs/MoneyFigure"
+                      }
+                    },
+                    "required": ["liability_ref", "payoff_month", "interest"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "order",
+                "sequence",
+                "status",
+                "months",
+                "payoff_month",
+                "total_interest",
+                "total_paid",
+                "debts"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "differences": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "chosen": {
+                  "type": "string",
+                  "enum": ["avalanche", "snowball", "custom"]
+                },
+                "other": {
+                  "type": "string",
+                  "enum": ["avalanche", "snowball", "custom"]
+                },
+                "interest": {
+                  "$ref": "#/$defs/MoneyFigure"
+                },
+                "months": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/DecimalFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["chosen", "other", "interest", "months"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["chosen", "included", "excluded", "monthly_budget", "plans", "differences"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "goal.required_savings",
+      "summary": "The additional monthly contribution that reaches a goal’s target by its date.",
+      "description": "Solves for the extra monthly saving that closes the goal’s gap by its target date (or the date given), verified by running the plan with it. A gap no contribution under the ceiling can close answers unreachable with the binding constraint, never a number that implies a solution. The goal is named by its goal_ref from the snapshot; its id never crosses.",
+      "backing": "WP 4.6’s required-savings solver (solveRequiredSavings), as POST /plan/required-savings runs it",
+      "scopes": ["goals.list", "plan.projection"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "goal_ref": {
+            "type": "string",
+            "pattern": "^GOAL_[0-9a-f]{12}$"
+          },
+          "target_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "max_monthly": {
+            "$ref": "#/$defs/Money"
+          }
+        },
+        "required": ["goal_ref"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "goal_ref": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["already_met", "required", "unreachable"]
+          },
+          "monthly": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MoneyFigure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "target_date": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DateFigure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "horizon_months": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DecimalFigure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "planned_monthly": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MoneyFigure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "constraint": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "enum": ["no_contribution_window", "monthly_ceiling"]
+                  },
+                  "detail": {
+                    "type": "string"
+                  },
+                  "contributions_end_age": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/DecimalFigure"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ceiling": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/MoneyFigure"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "gap_at_ceiling": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/MoneyFigure"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "detail",
+                  "contributions_end_age",
+                  "ceiling",
+                  "gap_at_ceiling"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "goal_ref",
+          "name",
+          "kind",
+          "monthly",
+          "target",
+          "target_date",
+          "horizon_months",
+          "planned_monthly",
+          "constraint"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "plan.project",
+      "summary": "A scenario’s success probability and median path, served from a stored run or computed.",
+      "description": "Runs (or serves from the projection cache) one scenario of the holder’s plan: Monte Carlo when the engine is bound, deterministic otherwise, and the result says which. Nothing is stored. Money is rounded to $1,000 and years replace dates, as the plan.projection scope requires. A scenario whose assumptions no longer resolve answers not_available.",
+      "backing": "The projection service (WP 4.6, @ctx/planning projectScenarioFigures): prepareProjection and computeProjection, the phases POST /plan/scenarios/{id}/projections runs, without the store",
+      "scopes": ["plan.projection"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "scenario": {
+            "default": "baseline",
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "baseline"
+              },
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "scenario": {
+            "type": "string"
+          },
+          "scenario_kind": {
+            "type": "string",
+            "enum": ["baseline", "fork"]
+          },
+          "method": {
+            "type": "string",
+            "enum": ["monte_carlo", "deterministic"]
+          },
+          "success_probability": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "retirement_age": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "retirement_year": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "plan_end_age": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "median_path": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "age": {
+                  "$ref": "#/$defs/DecimalFigure"
+                },
+                "calendar_year": {
+                  "$ref": "#/$defs/DecimalFigure"
+                },
+                "p5": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/MoneyFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "p50": {
+                  "$ref": "#/$defs/MoneyFigure"
+                },
+                "p95": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/MoneyFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["age", "calendar_year", "p5", "p50", "p95"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "scenario",
+          "scenario_kind",
+          "method",
+          "success_probability",
+          "retirement_age",
+          "retirement_year",
+          "plan_end_age",
+          "median_path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "plan.compare",
+      "summary": "Two scenarios under common random numbers, and the difference in success and retirement date.",
+      "description": "Both scenarios run on the baseline’s seed, so the difference is the levers’ effect and not Monte Carlo noise. The success-probability delta is b − a, exactly, as a decimal; the retirement delta is in whole months, positive when b retires later. Nothing is stored.",
+      "backing": "The projection service’s compare (WP 4.6/4.8, GET /plan/compare), read-only: @ctx/planning compareScenarioFigures",
+      "scopes": ["plan.projection"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "baseline"
+              },
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              }
+            ]
+          },
+          "b": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "baseline"
+              },
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              }
+            ]
+          }
+        },
+        "required": ["a", "b"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "object",
+            "properties": {
+              "scenario": {
+                "type": "string"
+              },
+              "scenario_kind": {
+                "type": "string",
+                "enum": ["baseline", "fork"]
+              },
+              "method": {
+                "type": "string",
+                "enum": ["monte_carlo", "deterministic"]
+              },
+              "success_probability": {
+                "$ref": "#/$defs/DecimalFigure"
+              },
+              "retirement_age": {
+                "$ref": "#/$defs/DecimalFigure"
+              },
+              "retirement_year": {
+                "$ref": "#/$defs/DecimalFigure"
+              },
+              "plan_end_age": {
+                "$ref": "#/$defs/DecimalFigure"
+              },
+              "median_path": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "age": {
+                      "$ref": "#/$defs/DecimalFigure"
+                    },
+                    "calendar_year": {
+                      "$ref": "#/$defs/DecimalFigure"
+                    },
+                    "p5": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/MoneyFigure"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "p50": {
+                      "$ref": "#/$defs/MoneyFigure"
+                    },
+                    "p95": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/MoneyFigure"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["age", "calendar_year", "p5", "p50", "p95"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "scenario",
+              "scenario_kind",
+              "method",
+              "success_probability",
+              "retirement_age",
+              "retirement_year",
+              "plan_end_age",
+              "median_path"
+            ],
+            "additionalProperties": false
+          },
+          "b": {
+            "type": "object",
+            "properties": {
+              "scenario": {
+                "type": "string"
+              },
+              "scenario_kind": {
+                "type": "string",
+                "enum": ["baseline", "fork"]
+              },
+              "method": {
+                "type": "string",
+                "enum": ["monte_carlo", "deterministic"]
+              },
+              "success_probability": {
+                "$ref": "#/$defs/DecimalFigure"
+              },
+              "retirement_age": {
+                "$ref": "#/$defs/DecimalFigure"
+              },
+              "retirement_year": {
+                "$ref": "#/$defs/DecimalFigure"
+              },
+              "plan_end_age": {
+                "$ref": "#/$defs/DecimalFigure"
+              },
+              "median_path": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "age": {
+                      "$ref": "#/$defs/DecimalFigure"
+                    },
+                    "calendar_year": {
+                      "$ref": "#/$defs/DecimalFigure"
+                    },
+                    "p5": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/MoneyFigure"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "p50": {
+                      "$ref": "#/$defs/MoneyFigure"
+                    },
+                    "p95": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/MoneyFigure"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["age", "calendar_year", "p5", "p50", "p95"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "scenario",
+              "scenario_kind",
+              "method",
+              "success_probability",
+              "retirement_age",
+              "retirement_year",
+              "plan_end_age",
+              "median_path"
+            ],
+            "additionalProperties": false
+          },
+          "success_probability_delta": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "retirement_delta_months": {
+            "$ref": "#/$defs/DecimalFigure"
+          }
+        },
+        "required": ["a", "b", "success_probability_delta", "retirement_delta_months"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "plan.levers",
+      "summary": "The tornado: how much each plan lever moves the success probability, one declared step each, largest first.",
+      "description": "Re-runs the baseline once per lever step under common random numbers (the baseline’s seed) at the compare’s path count: retire a year later, save 2% more, spend 10% less in retirement, returns a point lower, claim Social Security a year later, $10,000 a year of part-time income for three years, a $10,000 windfall. Glidepath is not a magnitude and is reported skipped. A lever not reached before the deadline is reported skipped with reason deadline.",
+      "backing": "07 §5.10 over ScenarioLevers: @ctx/planning leverSensitivity (new in WP 11.5b), on the projection service’s computeProjection; bounded by LEVER_SENSITIVITY_DEADLINE_MS",
+      "scopes": ["plan.projection"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": ["monte_carlo", "deterministic"]
+          },
+          "deadline_ms": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "base_success_probability": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "levers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "lever": {
+                  "type": "string"
+                },
+                "step": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["computed", "skipped"]
+                },
+                "success_probability": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/DecimalFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "delta": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/DecimalFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "skip_reason": {
+                  "type": ["string", "null"]
+                },
+                "skip_detail": {
+                  "type": ["string", "null"]
+                }
+              },
+              "required": [
+                "lever",
+                "step",
+                "status",
+                "success_probability",
+                "delta",
+                "skip_reason",
+                "skip_detail"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["method", "deadline_ms", "base_success_probability", "levers"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "retirement.claiming",
+      "summary": "The Social Security benefit multiplier at each claiming age asked, beside the plan’s own.",
+      "description": "The statutory claim factor (early reduction before full retirement age, delayed credits to 70) at each age, from the projection engine over the holder’s own plan, and the change against the factor at the plan’s claiming age. A multiplier, never a benefit amount: no benefit figure crosses the plan.projection scope. Ages 62 to 70.",
+      "backing": "R4 (builtin.retirement.claiming_age) and the engine’s Social Security module (engine/social-security.ts), the computation createInsightsPlanningPort runs for the snapshot",
+      "scopes": ["plan.projection"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "ages": {
+            "minItems": 1,
+            "maxItems": 9,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 62,
+              "maximum": 70
+            }
+          }
+        },
+        "required": ["ages"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "planned_claim_age": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "planned_factor": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "ages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "age": {
+                  "$ref": "#/$defs/DecimalFigure"
+                },
+                "factor": {
+                  "$ref": "#/$defs/DecimalFigure"
+                },
+                "change_vs_planned": {
+                  "$ref": "#/$defs/DecimalFigure"
+                }
+              },
+              "required": ["age", "factor", "change_vs_planned"],
+              "additionalProperties": false
+            }
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Finding"
+            }
+          }
+        },
+        "required": ["planned_claim_age", "planned_factor", "ages", "findings"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "retirement.guardrail",
+      "summary": "This year’s withdrawal rate against the Guyton-Klinger band around the reference rate.",
+      "description": "In retirement, the portfolio withdrawal rate ((spending − income) ÷ portfolio) for the plan’s first year, the band drawn around 07 §5.6’s reference rate, and where the rate sits. Not available before retirement or when income covers spending.",
+      "backing": "R7 (builtin.retirement.withdrawal_guardrail) over plan.projection’s guardrail block",
+      "scopes": ["plan.projection"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "withdrawal_rate": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "reference_rate": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "lower": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "upper": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "position": {
+            "type": "string",
+            "enum": ["below", "within", "above"]
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Finding"
+            }
+          }
+        },
+        "required": [
+          "withdrawal_rate",
+          "reference_rate",
+          "lower",
+          "upper",
+          "position",
+          "stale",
+          "findings"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "retirement.rmd_window",
+      "summary": "When required minimum distributions start, the years until then, and the years between retirement and that start.",
+      "description": "SECURE 2.0’s start age for the holder’s birth year (from the parameter store, through the snapshot), the start year, the years until it and the years between retiring (or today, if later) and that start — the span R3 calls the widest Roth-conversion window — and the tax-deferred share of what the plan starts from. Not available when the store does not cover the birth year.",
+      "backing": "R3 (builtin.retirement.rmd_window) over plan.projection’s rmd and ages blocks",
+      "scopes": ["plan.projection"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "start_age": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "start_year": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "current_age": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "retirement_age": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "years_until_start": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "window_years": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "tax_deferred_share": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Finding"
+            }
+          }
+        },
+        "required": [
+          "start_age",
+          "start_year",
+          "current_age",
+          "retirement_age",
+          "years_until_start",
+          "window_years",
+          "tax_deferred_share",
+          "findings"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "investing.allocation",
+      "summary": "What the investable portfolio holds, by asset class, with the share no class covers.",
+      "description": "Weights and values per asset class over the investable total (07 §4.1), the unclassified share 07 §4.3 requires beside every allocation figure, and the account-type mix.",
+      "backing": "WP 3.3’s allocation report, through holdings.aggregate (snapshot/builder.ts)",
+      "scopes": ["holdings.aggregate"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "investable_total": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "unclassified_share": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "classes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "asset_class": {
+                  "type": "string"
+                },
+                "weight": {
+                  "$ref": "#/$defs/DecimalFigure"
+                },
+                "value": {
+                  "$ref": "#/$defs/MoneyFigure"
+                }
+              },
+              "required": ["asset_class", "weight", "value"],
+              "additionalProperties": false
+            }
+          },
+          "account_type_mix": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "account_type": {
+                  "type": "string"
+                },
+                "share": {
+                  "$ref": "#/$defs/DecimalFigure"
+                }
+              },
+              "required": ["account_type", "share"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["investable_total", "unclassified_share", "classes", "account_type_mix"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "investing.drift",
+      "summary": "Each asset class’s weight against your target, the gap, and the dollars that would close it.",
+      "description": "Per asset class in the target or the portfolio: the actual weight, the target weight, the drift (actual − target) and the dollars that would bring it to target ((target − actual) × the investable total; positive means more is needed). Not available with no target set: an unset target never becomes an implied 60/40. I1’s 5-point band is reported, and I1’s own finding when it fires.",
+      "backing": "I1 (builtin.investing.drift) and WP 3.3’s drift report, through holdings.aggregate",
+      "scopes": ["holdings.aggregate"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "investable_total": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "unclassified_share": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "band": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "classes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "asset_class": {
+                  "type": "string"
+                },
+                "actual": {
+                  "$ref": "#/$defs/DecimalFigure"
+                },
+                "target": {
+                  "$ref": "#/$defs/DecimalFigure"
+                },
+                "drift": {
+                  "$ref": "#/$defs/DecimalFigure"
+                },
+                "outside_band": {
+                  "type": "boolean"
+                },
+                "amount_to_target": {
+                  "$ref": "#/$defs/MoneyFigure"
+                }
+              },
+              "required": [
+                "asset_class",
+                "actual",
+                "target",
+                "drift",
+                "outside_band",
+                "amount_to_target"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Finding"
+            }
+          }
+        },
+        "required": ["investable_total", "unclassified_share", "band", "classes", "findings"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "investing.concentration",
+      "summary": "The largest positions’ shares of the portfolio, against the single-position and employer-stock lines.",
+      "description": "The top positions by weight with their values, whether each is above I4’s 20% line, and the combined share of positions tagged as employer stock against I5’s 10% line, with I4’s and I5’s own findings when they fire. A symbol is a fact about a holding, never a recommendation.",
+      "backing": "I4 and I5 (builtin.investing.concentration, .employer_stock) and WP 3.3’s concentration report",
+      "scopes": ["holdings.aggregate", "holdings.detail"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "single_position_line": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "employer_stock_line": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "symbol": {
+                  "type": "string"
+                },
+                "asset_class": {
+                  "type": "string"
+                },
+                "weight": {
+                  "$ref": "#/$defs/DecimalFigure"
+                },
+                "value": {
+                  "$ref": "#/$defs/MoneyFigure"
+                },
+                "employer_stock": {
+                  "type": "boolean"
+                },
+                "above_single_position_line": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "symbol",
+                "asset_class",
+                "weight",
+                "value",
+                "employer_stock",
+                "above_single_position_line"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "employer_stock_share": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Finding"
+            }
+          }
+        },
+        "required": [
+          "single_position_line",
+          "employer_stock_line",
+          "positions",
+          "employer_stock_share",
+          "findings"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "investing.costs",
+      "summary": "What each fund charges a year, against a comparable index fund where one is known.",
+      "description": "Per position with a known expense ratio: the ratio, a comparable fund’s where known, the annual cost (market value × ratio, rounded once upstream) and whether I2 calls it high; the total annual cost of the funds with a known ratio; I2’s own finding when it fires.",
+      "backing": "I2 (builtin.investing.expense_ratio) and WP 3.3’s fee report, through holdings.detail",
+      "scopes": ["holdings.detail"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "funds": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "symbol": {
+                  "type": "string"
+                },
+                "market_value": {
+                  "$ref": "#/$defs/MoneyFigure"
+                },
+                "expense_ratio": {
+                  "$ref": "#/$defs/DecimalFigure"
+                },
+                "peer_expense_ratio": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/DecimalFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "annual_cost": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/MoneyFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "high_fee": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "symbol",
+                "market_value",
+                "expense_ratio",
+                "peer_expense_ratio",
+                "annual_cost",
+                "high_fee"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total_annual_cost": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MoneyFigure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Finding"
+            }
+          }
+        },
+        "required": ["funds", "total_annual_cost", "findings"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "investing.tax_location",
+      "summary": "Asset location (07 I12): not available — no engine computes it yet.",
+      "description": "Always answers not_available with the reason. 07 I12 (bonds or high-dividend holdings in taxable while tax-advantaged space holds equities) is in the rule catalogue but not built, and the catalogue does not invent a finding to stand in for it.",
+      "backing": "none yet — I12 is listed in CATALOGUE_GAPS-style terms in the playbook’s tax-location page",
+      "scopes": ["holdings.detail"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "limits.contribution_room",
+      "summary": "A year’s contribution limit for an account kind, what has gone in, what is left and the days left.",
+      "description": "The limit is read from the parameter store for exactly the year asked; a year the store does not hold is refused (catalogue.year_unavailable), never answered from another year. What has gone in is the ledger’s investment activity classified as a contribution (WP 10.3’s classifier) into accounts of that kind, by month; transfers and rollovers are not counted. Catch-up amounts are listed, not added: the holder’s age is not read.",
+      "backing": "WP 4.2’s parameter store (tax.us.<year>.retirement.* / hsa.*, via parameterByKey) and the investment activity classifier (classifyActivity, GET /investments/transactions)",
+      "scopes": ["cashflow.monthly"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "minimum": 2000,
+            "maximum": 2100
+          },
+          "account_kind": {
+            "type": "string",
+            "enum": ["ira", "workplace_deferral", "hsa_self_only", "hsa_family"]
+          }
+        },
+        "required": ["year", "account_kind"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "account_kind": {
+            "type": "string",
+            "enum": ["ira", "workplace_deferral", "hsa_self_only", "hsa_family"]
+          },
+          "limit": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "catch_ups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "applies": {
+                  "type": "string"
+                },
+                "amount": {
+                  "$ref": "#/$defs/MoneyFigure"
+                }
+              },
+              "required": ["applies", "amount"],
+              "additionalProperties": false
+            }
+          },
+          "contributed": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "remaining": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "over_limit": {
+            "$ref": "#/$defs/MoneyFigure"
+          },
+          "days_left": {
+            "$ref": "#/$defs/DecimalFigure"
+          },
+          "caveats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "year",
+          "account_kind",
+          "limit",
+          "catch_ups",
+          "contributed",
+          "remaining",
+          "over_limit",
+          "days_left",
+          "caveats"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "recurring.waste",
+      "summary": "Subscription findings with their annual cost: price rises and the share of income.",
+      "description": "Runs U2 (a confirmed price increase) and U7 (subscriptions against take-home) over the recurring streams and reports each finding with the annual figure the rule computed. U3 (duplicate services) reads row-level transactions, which no catalogue function may, and is reported through the Brief instead. U1, U4, U5, U6 and U8 are not built and are not estimated. Vendors cross as tokens, never names.",
+      "backing": "U2 and U7 (advisors/rules-subscriptions.ts) over recurring.list and cashflow.monthly",
+      "scopes": ["recurring.list", "cashflow.monthly"],
+      "scope_rule": "all",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Finding"
+            }
+          }
+        },
+        "required": ["findings"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "insights.current",
+      "summary": "This week’s Brief: its ranked actions in order, with the dollar impact each states.",
+      "description": "The newest published Brief’s ranked items, in the Brief’s own order (by the dollar impact it computed), each with its title, summary and impact. An item built from a scope the holder has not granted the narrator is left out and counted. Read only; nothing is ranked again and no model is asked.",
+      "backing": "The weekly Brief (WP 5.6, advisory_briefs / advisory_brief_items), as brief.narrate reads it",
+      "scopes": [
+        "networth.summary",
+        "cash.summary",
+        "cashflow.monthly",
+        "recurring.list",
+        "goals.list",
+        "holdings.aggregate",
+        "holdings.detail",
+        "transactions.summary",
+        "liabilities.terms",
+        "market.rates",
+        "plan.projection",
+        "transactions.anomalies",
+        "fees.summary"
+      ],
+      "scope_rule": "any",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "iso_week": {
+            "type": "string"
+          },
+          "nothing_material": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "insight_id": {
+                  "type": ["string", "null"]
+                },
+                "title": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "carried": {
+                  "type": "boolean"
+                },
+                "annual_impact": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/MoneyFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "one_time_impact": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/MoneyFigure"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "position",
+                "insight_id",
+                "title",
+                "summary",
+                "carried",
+                "annual_impact",
+                "one_time_impact"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "withheld_count": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": ["iso_week", "nothing_material", "items", "withheld_count"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "insights.explain",
+      "summary": "The stored “Explain this” for one insight, if one has been given — never a new one.",
+      "description": "Returns the explanation WP 11.3 already stored for exactly this insight’s current evidence (or the refusal class, when the model’s draft was refused), or not_available when none is stored. Never triggers a model call. Refused when the insight was built from a scope the holder has not granted the narrator.",
+      "backing": "WP 11.3’s explanation cache (insight_explanations), keyed by the evidence digest",
+      "scopes": [
+        "networth.summary",
+        "cash.summary",
+        "cashflow.monthly",
+        "recurring.list",
+        "goals.list",
+        "holdings.aggregate",
+        "holdings.detail",
+        "transactions.summary",
+        "liabilities.terms",
+        "market.rates",
+        "plan.projection",
+        "transactions.anomalies",
+        "fees.summary"
+      ],
+      "scope_rule": "any",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "insight_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": ["insight_id"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "insight_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["shown", "refused"]
+          },
+          "text": {
+            "type": ["string", "null"]
+          },
+          "refusal_class": {
+            "type": ["string", "null"]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": ["insight_id", "status", "text", "refusal_class", "provider", "model"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

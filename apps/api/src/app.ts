@@ -50,6 +50,7 @@ import { buildPlatform } from './platform.ts';
 import { AppError, PROBLEM_CONTENT_TYPE, toProblem } from './problem.ts';
 import { accountRoutes } from './routes/accounts.ts';
 import { advisorGrantRoutes } from './routes/advisor-grants.ts';
+import { advisorCatalogueRoutes } from './routes/advisor-catalogue.ts';
 import { advisorRunRoutes } from './routes/advisor-runs.ts';
 import { assumptionsRoutes } from './routes/assumptions.ts';
 import { authRoutes } from './routes/auth.ts';
@@ -690,6 +691,8 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(planRoutes(deps));
   await app.register(assumptionsRoutes(deps));
   await app.register(advisorGrantRoutes(deps));
+  // WP 11.5b: the advisory catalogue — what this holder can call, and the call itself (read only).
+  await app.register(advisorCatalogueRoutes(deps));
   // WP 5.10 (05-phase-5-dispatch.md §3). Two routers, matching the dispatch's
   // file split: `brief.ts` (the Weekly Advisory Brief and the health-score
   // stub, under the existing `/insights` prefix) and `advisor-runs.ts` (the

@@ -1155,3 +1155,58 @@ export {
   type KnowledgeReadRecord,
   type SentKnowledge,
 } from './knowledge/citations.ts';
+
+// --- the advisory catalogue: typed, scoped, versioned deterministic functions (WP 11.5b) ---
+export { narratorGrantCeiling } from './advisors/local/grant.ts';
+export {
+  CATALOGUE,
+  CATALOGUE_FUNCTION_NAMES,
+  assertCatalogueResult,
+  callCatalogue,
+  callCatalogueByName,
+  catalogueDescription,
+  catalogueDescriptionDigest,
+  evaluateCatalogueFunction,
+  grantedScopesFor,
+  listCatalogue,
+  serialiseCatalogueDescription,
+  type CatalogueArgs,
+  type CatalogueDescription,
+  type CatalogueFunctionDescription,
+  type CatalogueFunctionName,
+  type CatalogueHolder,
+  type CatalogueListing,
+  type CataloguePayload,
+  type CatalogueRuntimeDependencies,
+} from './catalogue/catalogue.ts';
+export {
+  CATALOGUE_DESCRIPTION_DIGEST,
+  CATALOGUE_DESCRIPTION_FILE,
+  CATALOGUE_VERSION,
+} from './catalogue/version.ts';
+export {
+  CatalogueResultRejected,
+  checkCatalogueResult,
+  type CatalogueResult,
+  type CatalogueResultProblem,
+} from './catalogue/figures.ts';
+export {
+  CONTRIBUTION_ACCOUNT_KINDS,
+  CatalogueRefusal,
+  isCatalogueRefusal,
+  type CatalogueContributionsPort,
+  type CataloguePlanningPort,
+  type CataloguePorts,
+  type CatalogueRefusalCode,
+  type ContributionAccountKind,
+  type PortClaimFactors,
+  type PortComparison,
+  type PortContributions,
+  type PortLeverOutcome,
+  type PortLevers,
+  type PortNotAvailable,
+  type PortProjection,
+  type PortProjectionYear,
+  type PortRequiredSavings,
+} from './catalogue/ports.ts';
+export { amortise, avalancheOrder, snowballOrder } from './catalogue/amortisation.ts';

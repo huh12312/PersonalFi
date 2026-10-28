@@ -48,9 +48,9 @@ import { aggregateRef, detailRef, positionRef } from '../shared.ts';
 import { symbolKeyPart } from '../symbol-key.ts';
 
 /** 07 §3.3 I4: `> 20% of investable assets`. */
-const CONCENTRATION_THRESHOLD = 0.2;
+export const CONCENTRATION_THRESHOLD = 0.2;
 /** 07 §3.3 I5: `> 10%`, half I4's, because the paycheck is the other half. */
-const EMPLOYER_STOCK_THRESHOLD = 0.1;
+export const EMPLOYER_STOCK_THRESHOLD = 0.1;
 
 /**
  * The gain a trim in a taxable account would realise, and the ref behind it.

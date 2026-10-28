@@ -60,7 +60,7 @@ import {
 } from '../shared.ts';
 
 /** 07 §3.3 I1: `|actual_weight − target_weight| > 5pp`. */
-const DRIFT_BAND = 0.05;
+export const DRIFT_BAND = 0.05;
 /** Twice the band. Past it the sleeve is not drifting, it is somewhere else. */
 const DRIFT_WARNING_BAND = 0.1;
 

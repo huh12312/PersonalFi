@@ -2050,6 +2050,40 @@ and bump the version.
 `just playbook-check` (`pnpm run playbook -- --check`) fails when the module differs from what the
 markdown generates, and when any page breaks the format. CI runs it in the lint job.
 
+## The advisor's catalogue (v0.9.22)
+
+WP 11.5b (12 §2.1). These are the advisor's tools: nineteen deterministic functions over your own
+data (an emergency-fund check, payoff plans by order, required savings for a goal, projections and
+compares, the levers tornado, claiming ages, the withdrawal guardrail, the RMD window, allocation,
+drift, concentration, fund costs, asset location, contribution room, subscription findings, this
+week's Brief and a stored explanation). The Ask PersonalFi compiler (11.5c) and the advisor (11.5d),
+not yet built, will call them. Nothing here asks a model, stores a run or moves money.
+
+**What you can see.** `GET /api/advisor/catalogue` lists what you can call, with each function's
+parameters and result as JSON Schema; `POST /api/advisor/catalogue/<name>` with the arguments as a
+JSON body calls one. Both need only a signed-in session. Every figure in a result is money, a decimal
+string or a date, and carries `source_refs` that point into the result's own `inputs`: the scoped
+snapshot blocks it read, the arguments, and any parameter, projection or contribution total it used.
+
+**Grants.** A function is listed, and can be called, only when your grant to the narrator (Advisor
+management, the narrator's scopes) covers every scope it declares; the snapshot, the Brief and the
+stored explanation need any one. A function you have not granted is not listed at all, and a call to
+it is refused (403, `catalogue.scope_not_granted`). No function reads `transactions.raw`; the
+duplicate-services finding (U3) needs it and reaches you through the Brief instead.
+
+**Contribution room** reads the year's limit from the parameter store. A year the store does not hold
+is refused (422, `catalogue.year_unavailable`), never answered from another year: add the year to
+the assumptions file first. What has gone in is the investment activity the Activity tab calls a
+contribution, into accounts whose provider subtype names the kind (IRA, 401(k)/403(b)/457(b)/TSP,
+HSA); rollovers and transfers in are not counted.
+
+**The version.** The catalogue is `catalogue/1`. Its description is published at
+`packages/contracts/advisor/catalogue/catalogue-1.json`, generated from the definitions the runtime
+runs, and pinned by digest in `packages/contexts/insights/src/catalogue/version.ts`. A change to any
+function's name, scopes, words, parameters or result shape fails
+`node scripts/advisor-catalogue-gen.ts --check` and the pin test until the version is bumped (a new
+file) or the pin is moved on purpose (`pnpm run catalogue`, then update the digest it prints).
+
 ## Categorisation: measuring the tiers (`just categorization-eval`)
 
 WP 11.1. Replays every transaction you filed by hand (the categories you picked, plus any confirmed
