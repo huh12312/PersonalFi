@@ -70,3 +70,5 @@ d025adc820181a7e36d5ab353df1d270cdeebc44:apps/api/test/db/narrator-composition.t
 # scan; the commit-ful lines below it cover CI's full-history scan.
 packages/contexts/insights/test/wp115d-advisor.test.ts:generic-api-key:454
 docs/evidence/phase-11/wp11.5d-advisor-mode.md:generic-api-key:104
+f702fc77f9cfe4b03c1a1e93870683de4716f081:packages/contexts/insights/test/wp115d-advisor.test.ts:generic-api-key:454
+f702fc77f9cfe4b03c1a1e93870683de4716f081:docs/evidence/phase-11/wp11.5d-advisor-mode.md:generic-api-key:104
