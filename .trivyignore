@@ -47,3 +47,4 @@ CVE-2026-78667 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary net/htt
 CVE-2026-78669 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary x/net+stdlib HTTP/2 SETTINGS DoS; no upstream build clears it yet
 CVE-2026-97031 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary crypto/tls DoS; no upstream build clears it yet
 CVE-2026-111943 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary crypto/x509 MITM (Go stdlib < 1.26.10 / 1.27.3); caddy:2.11.7-alpine (the newest, 2026-10-03) still ships Go 1.26.8 — no upstream build clears it yet; re-rule with the other three on expiry
+CVE-2026-116587 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary go-jose/v4 JWK-parsing DoS (fixed in 4.1.6); caddy:2.11.7-alpine (the newest) still vendors 4.1.5 — no upstream build clears it yet; re-rule with the other four on expiry, or build Caddy from source with patched modules (queued)

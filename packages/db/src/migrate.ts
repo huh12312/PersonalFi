@@ -126,7 +126,27 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
   checksum     TEXT        NOT NULL,
   applied_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   execution_ms INTEGER     NOT NULL
-);`;
+);
+-- A re-stamp (below) keeps the checksum that was recorded when the file was
+-- applied, so the row still says what ran. Both columns are NULL for every
+-- migration that was never re-stamped.
+ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS previous_checksum TEXT;
+ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS restamped_at TIMESTAMPTZ;`;
+
+/**
+ * A deliberate, two-factor acknowledgement that an applied migration's *file*
+ * changed without its SQL changing — the only legitimate case is a comment
+ * edit, typically after a history rewrite. The operator names the version and
+ * the checksum the database recorded when it applied the file (at least its
+ * first twelve hex characters, which is what the refusal prints); the migrator
+ * records the file's new checksum and keeps the old one in `previous_checksum`.
+ * It never re-runs the SQL. Nothing here relaxes the immutability rule for a
+ * version the operator did not name.
+ */
+export interface RestampRequest {
+  readonly version: string;
+  readonly previousChecksum: string;
+}
 
 export interface RunMigrationsOptions {
   readonly databaseUrl: string;
@@ -134,12 +154,16 @@ export interface RunMigrationsOptions {
   readonly logger?: MigrationLogger;
   /** Report what would run, change nothing. */
   readonly dryRun?: boolean;
+  /** Applied migrations whose changed file the operator vouches for (see `RestampRequest`). */
+  readonly restamp?: readonly RestampRequest[];
 }
 
 export interface RunMigrationsResult {
   readonly applied: readonly AppliedMigration[];
   readonly alreadyApplied: number;
   readonly pending: readonly string[];
+  /** Versions whose recorded checksum was replaced by the file's (empty unless `restamp` was given). */
+  readonly restamped: readonly string[];
 }
 
 /**
@@ -170,16 +194,67 @@ export async function runMigrations(options: RunMigrationsOptions): Promise<RunM
     // "what would run" as much as to "run it".
     refuseDatabaseNewer(rows, files);
 
+    const restampByVersion = new Map((options.restamp ?? []).map((r) => [r.version, r]));
+    for (const request of restampByVersion.values()) {
+      if (!/^[0-9a-f]{12,64}$/u.test(request.previousChecksum)) {
+        throw new MigrationError(
+          'migration.restamp_invalid',
+          `--restamp ${request.version}: the previous checksum must be at least twelve hex characters.`,
+        );
+      }
+      if (!alreadyApplied.has(request.version)) {
+        throw new MigrationError(
+          'migration.restamp_invalid',
+          `--restamp ${request.version}: that migration has not been applied here; nothing to re-stamp.`,
+        );
+      }
+      if (!files.some((file) => file.version === request.version)) {
+        throw new MigrationError(
+          'migration.restamp_invalid',
+          `--restamp ${request.version}: no migration file carries that version.`,
+        );
+      }
+    }
+    const restamped: string[] = [];
+
     const pending: string[] = [];
     for (const file of files) {
       const record = alreadyApplied.get(file.version);
       if (record !== undefined) {
+        const request = restampByVersion.get(file.version);
+        if (request !== undefined) {
+          if (!record.checksum.startsWith(request.previousChecksum)) {
+            throw new MigrationError(
+              'migration.restamp_mismatch',
+              `--restamp ${file.version}: the database recorded ${record.checksum.slice(0, 12)}, ` +
+                `not ${request.previousChecksum.slice(0, 12)}. Re-stamping needs the recorded checksum.`,
+            );
+          }
+          if (record.checksum === file.checksum) {
+            throw new MigrationError(
+              'migration.restamp_unneeded',
+              `--restamp ${file.version}: the file's checksum already matches the record; nothing to do.`,
+            );
+          }
+          if (options.dryRun !== true) {
+            await client.query(
+              'UPDATE schema_migrations SET previous_checksum = $2, checksum = $3, restamped_at = now() WHERE version = $1',
+              [file.version, record.checksum, file.checksum],
+            );
+            logger.info(
+              `re-stamped ${file.version}_${file.name}: ${record.checksum.slice(0, 12)} → ${file.checksum.slice(0, 12)} (the SQL was not re-run)`,
+            );
+          }
+          restamped.push(`${file.version}_${file.name}`);
+          continue;
+        }
         if (record.checksum !== file.checksum) {
           throw new MigrationError(
             'migration.drift',
             `${file.version}_${file.name}.sql changed after it was applied ` +
               `(recorded ${record.checksum.slice(0, 12)}, file ${file.checksum.slice(0, 12)}). ` +
-              'Applied migrations are immutable: add a new migration instead.',
+              'Applied migrations are immutable: add a new migration instead. If only comments changed ' +
+              '(a history rewrite), an operator may vouch for it: --restamp <version>=<recorded checksum>.',
           );
         }
         continue;
@@ -188,7 +263,7 @@ export async function runMigrations(options: RunMigrationsOptions): Promise<RunM
     }
 
     if (options.dryRun === true) {
-      return { applied: [], alreadyApplied: alreadyApplied.size, pending };
+      return { applied: [], alreadyApplied: alreadyApplied.size, pending, restamped };
     }
 
     for (const file of files) {
@@ -220,7 +295,7 @@ export async function runMigrations(options: RunMigrationsOptions): Promise<RunM
     }
 
     if (applied.length === 0) logger.info('database is up to date; nothing to apply');
-    return { applied, alreadyApplied: alreadyApplied.size, pending: [] };
+    return { applied, alreadyApplied: alreadyApplied.size, pending: [], restamped };
   } finally {
     await client
       .query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_KEY.toString()])

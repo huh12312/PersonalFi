@@ -184,6 +184,19 @@ migrate:
 migrate-status:
     pnpm exec node packages/db/src/cli/migrate.ts --dry-run
 
+# Vouch for an applied migration whose FILE changed without its SQL changing (a
+# comment edit after a history rewrite): `just migrate-restamp 0045=48a0357c1375 0046=…`
+# — each is <version>=<the checksum the refusal printed>. Add --dry-run to preview.
+# Production: `docker compose run --rm migrator --restamp 0045=… [--dry-run]`.
+migrate-restamp *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    flags=()
+    for a in {{args}}; do
+      if [ "$a" = "--dry-run" ]; then flags+=(--dry-run); else flags+=(--restamp "$a"); fi
+    done
+    pnpm exec node packages/db/src/cli/migrate.ts "${flags[@]}"
+
 # Scaffold the next migration with the right name and header.
 migrate-new name:
     #!/usr/bin/env bash

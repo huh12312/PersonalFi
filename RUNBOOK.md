@@ -696,6 +696,24 @@ up` on the secrets it added (WP 9.4's finding F-94-2). If you ever must, run
 this checkout's `bash scripts/secrets-placeholders.sh --project-dir <that
 checkout>` first; it is the same step `just upgrade` runs.
 
+**If the migrator refuses with "changed after it was applied".** An applied migration's file is
+immutable by checksum, and the refusal is right: the same version number must mean the same SQL
+everywhere. The one legitimate exception is a file whose _comments_ changed — after the 2026-10-27
+history rewrite, for example, seven applied migrations differed only in comment lines and the next
+upgrade stopped at the migrator. Verify that first (diff the file against the version the database
+applied, which the refusal identifies by checksum; every changed line must be a `--` comment), then
+vouch for it with both factors, the version and the recorded checksum the refusal printed:
+
+```bash
+docker compose run --rm migrator --restamp 0045=48a0357c1375 --dry-run   # says what it would do
+docker compose run --rm migrator --restamp 0045=48a0357c1375             # records the new checksum
+```
+
+(`just migrate-restamp 0045=48a0357c1375` on a development checkout.) The migrator keeps the old
+checksum in `schema_migrations.previous_checksum` with `restamped_at`, never re-runs the SQL, and
+refuses a wrong checksum, an unchanged file, or a version it never applied. Then `just upgrade`
+again. Never edit the SQL of an applied migration; add a new one.
+
 **What is automatic** — every step that used to be a hand step:
 
 1. **New secrets.** `scripts/secrets-placeholders.sh` creates every _optional_

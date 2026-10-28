@@ -835,6 +835,119 @@ describeWithDb('runMigrations', () => {
     }
   }, 30_000);
 
+  it('re-stamps an applied migration whose file changed only when the operator names its recorded checksum', async () => {
+    // The 2026-10-27 history rewrite edited comment lines in applied migrations;
+    // the drift refusal above is right, and this is the deliberate way through
+    // it: name the version AND the checksum the database recorded, and the
+    // migrator records the file's new checksum, keeps the old one, re-runs
+    // nothing. A wrong or missing checksum is refused; an unchanged file is too.
+    const scratchDir = await mkdtemp(join(tmpdir(), 'pf-migrations-restamp-'));
+    const original = join(DEFAULT_MIGRATIONS_DIR, '0001_initial.sql');
+    const file = join(scratchDir, '0001_initial.sql');
+    writeFileSync(file, readFileSync(original, 'utf8'));
+    const name = `${SCRATCH_PREFIX}_restamp_test`;
+    const url = await createScratchDatabase(name);
+    try {
+      const first = await runMigrations({
+        databaseUrl: url,
+        migrationsDir: scratchDir,
+        logger: silent,
+      });
+      const recorded = first.applied[0]!.checksum;
+
+      // Unchanged file: a re-stamp is refused as unneeded.
+      await expect(
+        runMigrations({
+          databaseUrl: url,
+          migrationsDir: scratchDir,
+          logger: silent,
+          restamp: [{ version: '0001', previousChecksum: recorded.slice(0, 12) }],
+        }),
+      ).rejects.toThrow(/already matches the record/);
+
+      writeFileSync(
+        file,
+        `${readFileSync(file, 'utf8')}\n-- a comment edited after a history rewrite\n`,
+      );
+
+      // Drift without a re-stamp is still refused, and the refusal now names the way through.
+      await expect(
+        runMigrations({ databaseUrl: url, migrationsDir: scratchDir, logger: silent }),
+      ).rejects.toThrow(/--restamp <version>=<recorded checksum>/);
+
+      // The wrong recorded checksum is refused.
+      await expect(
+        runMigrations({
+          databaseUrl: url,
+          migrationsDir: scratchDir,
+          logger: silent,
+          restamp: [{ version: '0001', previousChecksum: 'deadbeefdeadbeef' }],
+        }),
+      ).rejects.toThrow(/Re-stamping needs the recorded checksum/);
+
+      // A version never applied here is refused.
+      await expect(
+        runMigrations({
+          databaseUrl: url,
+          migrationsDir: scratchDir,
+          logger: silent,
+          restamp: [{ version: '0002', previousChecksum: recorded.slice(0, 12) }],
+        }),
+      ).rejects.toThrow(/has not been applied here/);
+
+      // --dry-run reports the re-stamp and changes nothing.
+      const dry = await runMigrations({
+        databaseUrl: url,
+        migrationsDir: scratchDir,
+        logger: silent,
+        dryRun: true,
+        restamp: [{ version: '0001', previousChecksum: recorded.slice(0, 12) }],
+      });
+      expect(dry.restamped).toEqual(['0001_initial']);
+      await expect(
+        runMigrations({ databaseUrl: url, migrationsDir: scratchDir, logger: silent }),
+      ).rejects.toThrow(/changed after it was applied/);
+
+      // The right one re-stamps: the new checksum is recorded, the old one kept, nothing re-run.
+      const restamped = await runMigrations({
+        databaseUrl: url,
+        migrationsDir: scratchDir,
+        logger: silent,
+        restamp: [{ version: '0001', previousChecksum: recorded.slice(0, 12) }],
+      });
+      expect(restamped.restamped).toEqual(['0001_initial']);
+      expect(restamped.applied).toEqual([]);
+      const client = new pg.Client({ connectionString: url });
+      await client.connect();
+      try {
+        const { rows } = await client.query<{
+          checksum: string;
+          previous_checksum: string | null;
+          restamped_at: Date | null;
+        }>(
+          'SELECT checksum, previous_checksum, restamped_at FROM schema_migrations WHERE version = $1',
+          ['0001'],
+        );
+        expect(rows[0]!.previous_checksum).toBe(recorded);
+        expect(rows[0]!.checksum).not.toBe(recorded);
+        expect(rows[0]!.restamped_at).not.toBeNull();
+      } finally {
+        await client.end();
+      }
+      // And the next plain run is clean.
+      const after = await runMigrations({
+        databaseUrl: url,
+        migrationsDir: scratchDir,
+        logger: silent,
+      });
+      expect(after.applied).toEqual([]);
+      expect(after.restamped).toEqual([]);
+    } finally {
+      await dropScratchDatabase(name);
+      await rm(scratchDir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it('rolls a failing migration back rather than leaving a half-applied schema', async () => {
     const scratchDir = await mkdtemp(join(tmpdir(), 'pf-migrations-bad-'));
     writeFileSync(
