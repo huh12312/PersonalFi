@@ -127,6 +127,8 @@ export const NOT_FREE_TEXT: Readonly<Record<string, string>> = {
   'ops_restore_drills.max_migration': 'a migration number',
   'ops_restore_drills.verdict': 'the drill verdict enum (pass, fail)',
   'schema_migrations.checksum': 'a sha256 digest of a migration file',
+  'schema_migrations.previous_checksum':
+    'a sha256 hex digest kept when a migration is re-stamped (the migrator, 2026-10-28)',
   'schema_migrations.name': 'a migration file name from the repository',
   'schema_migrations.version': 'a migration number',
   'security_events.correlation_id': 'a request correlation id (uuid text)',
