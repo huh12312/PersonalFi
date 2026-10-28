@@ -1104,3 +1104,54 @@ export {
   enqueueBriefNarration,
   type BriefNarrateJobPayload,
 } from './advisors/brief-narrate/jobs.ts';
+
+// --- the knowledge base: reviewed playbook pages and cited parameters (WP 11.5a) ---
+/** The generated module, every page as parsed (drafts included). Serve pages through `createKnowledgeBase` only. */
+export { PLAYBOOK_PAGES } from '../data/playbook.ts';
+export {
+  PLAYBOOK_KEY_PATTERN,
+  PLAYBOOK_SECTIONS,
+  PLAYBOOK_STATUSES,
+  canonicalBody,
+  playbookDigest,
+  type PlaybookPageData,
+  type PlaybookSectionName,
+  type PlaybookSections,
+  type PlaybookSource,
+  type PlaybookStatus,
+} from './knowledge/page.ts';
+export {
+  PARAMETER_KEY_PATTERN,
+  parameterFigures,
+  renderMoney,
+  renderParameter,
+  renderRate,
+  type ParameterCitation,
+  type ParameterLookup,
+  type ParameterMoney,
+  type ParameterPort,
+  type ParameterValue,
+} from './knowledge/params.ts';
+export {
+  KNOWLEDGE_REFUSAL_CODES,
+  KnowledgeRefusal,
+  createKnowledgeBase,
+  isKnowledgeRefusal,
+  type KnowledgeBase,
+  type KnowledgeBaseOptions,
+  type KnowledgeRefusalCode,
+  type ReviewedPlaybookPage,
+} from './knowledge/playbook.ts';
+export {
+  CITATION_MARKER,
+  CITATION_REFUSAL_CLASSES,
+  knowledgeCatalogueOf,
+  knowledgeReadRecord,
+  knowledgeReadRecordSchema,
+  resolveCitations,
+  type CitationRefusalClass,
+  type CitationValidation,
+  type KnowledgeCatalogue,
+  type KnowledgeReadRecord,
+  type SentKnowledge,
+} from './knowledge/citations.ts';

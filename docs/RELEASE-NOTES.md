@@ -9,6 +9,48 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.21: the advisor's knowledge base
+
+**Status:** a patch release on v0.9.20 (if an earlier v0.9.x has not been tagged when this is, tag
+them in order). The tag `v0.9.21` is pushed by the maintainer once CI is green. Package 11.5a of the
+Phase 11 programme (12 §6). Nothing a holder sees changes: this is the base the advisor packages
+(11.5b–d) build on.
+
+### Upgrading to v0.9.21
+
+```bash
+git pull
+just upgrade
+```
+
+No migration. The assumptions file's version (`assumptionsVersion()`) is unchanged, so no stored
+plan or override reads stale.
+
+### Manual steps
+
+None for the upgrade. The eight playbook pages ship as drafts, and the advisor can use none of them
+until Chris reviews them and flips their status
+([RUNBOOK](../RUNBOOK.md#the-advisors-knowledge-base-v0921)).
+
+### What changed
+
+- **Parameter citations.** Every cited figure in the assumptions file (contribution limits,
+  brackets, NIIT, HSA, Social Security, RMD rules, the planning defaults) has a stable key, such as
+  `tax.us.2026.retirement.elective_deferral`, that resolves to its value, source and as-of date. A
+  key for a year the file does not hold is refused.
+- **The playbook.** Eight short pages under `docs/advisor/playbook/`: emergency fund, debt order,
+  the order of operations for tax-advantaged space, rebalancing with new money, tax location,
+  claiming age, guardrail withdrawals and the subscription audit. Each has the rule, why, when it
+  does not apply, and primary sources. Limits are written as placeholders rendered from the
+  parameter store, and every other number carries a source.
+- **The review gate, in code.** A page that is not `reviewed` (with a reviewer, a date and the
+  digest of the body that was reviewed) is never served.
+- **The citation resolver.** A narration cites `[playbook:<key>]` and `[param:<key>]`. Each
+  citation is checked against what was actually sent, and so is every figure. A record of the page
+  versions, digests and parameters the narration read is defined for 11.5d to store.
+- **A drift check.** The runtime reads a module generated from the markdown
+  (`just playbook-check`; CI's lint job).
+
 ## v0.9.20: the Brief in its own few sentences
 
 **Status:** a patch release on v0.9.19 (if v0.9.18 or v0.9.19 has not been tagged when this is, tag

@@ -224,6 +224,16 @@ seed-stats seed="1":
 openapi:
     pnpm run openapi
 
+# WP 11.5a. Regenerate packages/contexts/insights/data/playbook.ts from the advisor's
+# playbook pages (docs/advisor/playbook/*.md) — the only reader of the markdown.
+playbook:
+    pnpm run playbook
+
+# WP 11.5a. Fail when the generated playbook module has drifted from the markdown
+# (CI's lint job runs the same check).
+playbook-check:
+    pnpm run playbook -- --check
+
 # Run the API against the dev database.
 dev:
     LOG_PRETTY=true pnpm run dev:api

@@ -209,6 +209,15 @@ jobs:
       # tree has (self-test first). `just check-docs` is the local twin.
       - name: docs name only what the tree has
         run: node scripts/check-docs.ts
+      # WP 11.5a: the advisor's playbook pages are reviewed as markdown under
+      # docs/advisor/playbook/, but the api image ships no docs/, so the runtime
+      # reads a generated module (packages/contexts/insights/data/playbook.ts) —
+      # the openapi-current pattern, as a step here rather than a new job. Fails
+      # when the module drifts from the markdown, and when a page breaks the
+      # format (an uncited number, a `reviewed` page without its reviewer, date
+      # and reviewed digest). `just playbook-check` is the local twin.
+      - name: the playbook module matches the markdown
+        run: pnpm run playbook -- --check
 
   test:
     name: unit tests

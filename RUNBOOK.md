@@ -2006,6 +2006,50 @@ node --experimental-strip-types scripts/advisor-eval.ts --brief-week --cold \
   --endpoint http://ollama:11434 --model <name> --digest sha256:<64 hex> --out <dir>/brief-week.jsonl
 ```
 
+## The advisor's knowledge base (v0.9.21)
+
+WP 11.5a (12 §2.2). This is what the advisor (11.5b–d, not yet built) will know. It has two parts,
+and the model may assert no limit, rate or rule from memory.
+
+- **Parameters.** These are the figures: contribution limits, brackets, Social Security and RMD
+  rules, and the planning defaults. They are WP 4.2's cited, hashed assumptions file, unchanged
+  (`packages/contexts/planning/data/`). Each cited node has a key, such as
+  `tax.us.2026.retirement.ira_contribution`, and the key resolves to the value, its source and its
+  as-of date. A key for a tax year the file does not hold is refused, never answered from another
+  year.
+- **The playbook.** These are the rules: one short page per topic under `docs/advisor/playbook/`.
+  The format, and every rule a page must meet, are in that directory's README. A page cites a
+  parameter as `{{param:<key>}}`, which is rendered from the store when the page is read. Every
+  other number on a page carries a source marker.
+
+**Reviewing a page and flipping its status.** The eight pages land as `status: draft`, and **nothing
+in a draft reaches a model**: the knowledge base refuses it (`playbook.unreviewed`). To review one:
+
+1. Read the page in `docs/advisor/playbook/` and check its sources.
+2. Run `pnpm run playbook -- --digest` and copy the page's `sha256:…`.
+3. In the page's frontmatter, set `status: reviewed`, `reviewed_by: Chris`,
+   `reviewed_on: <today>` and `reviewed_digest: <the digest>`.
+4. Run `just playbook`, which regenerates `packages/contexts/insights/data/playbook.ts`.
+5. Commit the page and the module together.
+
+The generator refuses a `reviewed` page that is missing any of the three fields, or whose body no
+longer matches the digest you reviewed.
+
+**Bumping a version.** Any change to a reviewed page's body is a new version:
+
+1. Edit the body.
+2. Add one to `version`.
+3. Set `status: draft` and delete the three `reviewed_*` lines.
+4. Run `just playbook`.
+
+The page is out of the advisor's reach until you review it again. Moving a page to a new tax year
+works the same way: once the store holds the new year, edit its `{{param:tax.us.<year>.…}}` keys
+and bump the version.
+
+**The drift check.** The api image ships no `docs/`, so the runtime reads only the generated module.
+`just playbook-check` (`pnpm run playbook -- --check`) fails when the module differs from what the
+markdown generates, and when any page breaks the format. CI runs it in the lint job.
+
 ## Categorisation: measuring the tiers (`just categorization-eval`)
 
 WP 11.1. Replays every transaction you filed by hand (the categories you picked, plus any confirmed

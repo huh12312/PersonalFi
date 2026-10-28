@@ -83,6 +83,17 @@ export {
   type UsTaxYear,
 } from './assumptions.ts';
 
+// --- parameter citations: a key per cited node (WP 11.5a) ------------------
+export {
+  PARAMETER_KEY_PATTERN,
+  UnknownParameterKey,
+  isParameterRefusal,
+  parameterByKey,
+  parameterCatalogue,
+  type ParameterCitation,
+  type ParameterValue,
+} from './parameters.ts';
+
 // --- the ports the composition root implements -----------------------------
 export {
   ACCOUNT_KINDS,
