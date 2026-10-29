@@ -584,6 +584,8 @@ describe.skipIf(NO_DATABASE)('Phase 5 W-C wiring (apps/api/src/{modules,worker}.
     expect(insightsModule?.consumers ?? []).toHaveLength(1);
     expect((insightsModule?.jobs ?? []).map((job) => job.kind).sort()).toEqual(
       [
+        // WP 11.5d: the advisor's follow-up watcher (a picked plan's figure, daily).
+        'insights.advisor_follow_up',
         'insights.brief',
         // WP 10.12: the daily health snapshot (04:10 local).
         'insights.health_snapshot',

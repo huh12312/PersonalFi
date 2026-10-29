@@ -17,7 +17,11 @@ import {
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import { installBudgetCategoryMocks } from './support/mock-budget.ts';
 import { installCategoryMocks } from './support/mock-categories.ts';
-import { seedControlCheckRun, seedRunningControlCheckRun } from './support/mock-narrator.ts';
+import {
+  CONTROL_CHECKS,
+  seedControlCheckRun,
+  seedRunningControlCheckRun,
+} from './support/mock-narrator.ts';
 import {
   ABOVE_GATE_RESULT,
   BELOW_GATE_RESULT,
@@ -1241,8 +1245,9 @@ test.describe('WP 10.16 control checks and the controls on the backup line', () 
     const section = page.getByTestId('control-checks');
     await expect(section.getByTestId('control-checks-table')).toBeVisible();
     if (where === 'settings, running') {
+      // The count follows the mock's catalogue (sixteen since WP 11.5d), never a pinned number.
       await expect(section.getByTestId('control-checks-progress')).toHaveText(
-        'Running control checks… 3 of 15 checks done.',
+        `Running control checks… 3 of ${String(CONTROL_CHECKS.length)} checks done.`,
       );
       return;
     }
