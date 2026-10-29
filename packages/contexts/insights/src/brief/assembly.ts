@@ -21,6 +21,24 @@
  * never subject to it in the first place (`effectiveImpactMinor` is `null` for
  * one, so `isBelowFloor` never excludes it — `policy/alert-budget.ts`'s own
  * rule, reused unchanged).
+ *
+ * ## A plan the holder is working on is shown once (WP 11.5e)
+ *
+ * A follow-up item carries the plan's progress, and that progress names the
+ * finding the advisor session was opened from. When that finding is itself
+ * still a candidate this week, the Brief **dedupes** (`supersededFindings`):
+ *
+ *   1. the finding is withdrawn from both lists — it is not shown twice;
+ *   2. the progress item **stands in for it**: it is ranked on the higher of
+ *      its own score and the finding's (with that entry's factors, so the
+ *      stored score still equals its factors), and, should neither carry a
+ *      dollar figure while the finding was an attention item, it takes the
+ *      finding's place on the attention strip;
+ *   3. the progress item records the finding as **being worked on**
+ *      (`workedOn`), which the Brief shows on that item.
+ *
+ * Deterministic: progress items are considered in `key` order, and a finding
+ * claimed by two plans is claimed by the first.
  */
 import type { BriefCandidate } from './candidate.ts';
 import { findingIdentityOf } from './candidate.ts';
@@ -30,6 +48,7 @@ import {
   selectAttentionStrip,
   selectRanked,
   type ScoreFactors,
+  type ScoredCandidate,
 } from './ranking.ts';
 
 export const COLD_START_THRESHOLD_DAYS = 30;
@@ -60,6 +79,8 @@ export interface BriefItemAssembly {
   /** `null` for an attention-strip item: it was never ranked by score. */
   readonly score: number | null;
   readonly scoreFactors: ScoreFactors | null;
+  /** WP 11.5e: the finding this progress item stands in for this week (being worked on). */
+  readonly workedOn?: { readonly insightId: string; readonly title: string } | null;
 }
 
 export interface AssembledBrief {
@@ -94,18 +115,84 @@ function isEligible(
   );
 }
 
+/**
+ * WP 11.5e: origin insight id → the progress candidate that stands in for it.
+ * A progress item claims its origin only when the origin is itself among the
+ * candidates; progress items in `key` order, first claim wins. Pure.
+ */
+export function supersededFindings(
+  candidates: readonly BriefCandidate[],
+): ReadonlyMap<string, BriefCandidate> {
+  const present = new Set(candidates.map((candidate) => candidate.insightId));
+  const claims = new Map<string, BriefCandidate>();
+  const withProgress = candidates
+    .filter((candidate) => (candidate.progress?.origin ?? null) !== null)
+    .sort((left, right) => left.key.localeCompare(right.key));
+  for (const progress of withProgress) {
+    const origin = progress.progress?.origin?.insight_ref;
+    if (origin === undefined || origin === progress.insightId) continue;
+    if (!present.has(origin) || claims.has(origin)) continue;
+    claims.set(origin, progress);
+  }
+  return claims;
+}
+
 export function assembleBrief(input: AssembleBriefInput): AssembledBrief {
   const eligible = input.candidates.filter((candidate) =>
     isEligible(candidate, input.advisorKindOf),
   );
   const materiality = eligible.filter((candidate) => !isBelowFloor(candidate, input.currencyCode));
 
-  const scored = materiality
-    .map((candidate) => scoreOf(candidate, input.dismissRateOf(candidate.advisorId)))
+  // WP 11.5e: a finding being worked on is withdrawn; its progress item stands in for it.
+  const superseded = supersededFindings(materiality);
+  const standsInFor = new Map<string, BriefCandidate>();
+  for (const [originId, progress] of superseded) {
+    const origin = materiality.find((candidate) => candidate.insightId === originId);
+    if (origin !== undefined) standsInFor.set(progress.insightId, origin);
+  }
+  const pool = materiality.filter((candidate) => !superseded.has(candidate.insightId));
+
+  const scoreWith = (candidate: BriefCandidate) =>
+    scoreOf(candidate, input.dismissRateOf(candidate.advisorId));
+  const scored = pool
+    .map((candidate): ScoredCandidate | null => {
+      const own = scoreWith(candidate);
+      const origin = standsInFor.get(candidate.insightId);
+      if (origin === undefined) return own;
+      const theirs = scoreWith(origin);
+      if (theirs === null) return own;
+      // The higher of the two, with that entry's factors: the stored score still equals its factors.
+      if (own === null || theirs.score > own.score) {
+        return { candidate, score: theirs.score, factors: theirs.factors };
+      }
+      return own;
+    })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
   const ranked = selectRanked(scored);
-  const attention = selectAttentionStrip(materiality);
+  const rankedIds = new Set(ranked.map((entry) => entry.candidate.insightId));
+  const attentionOrigins = new Set(
+    selectAttentionStrip(materiality).map((candidate) => candidate.insightId),
+  );
+  const ownAttention = selectAttentionStrip(pool);
+  const ownAttentionIds = new Set(ownAttention.map((candidate) => candidate.insightId));
+  const attention = [
+    ...ownAttention,
+    // A progress item whose finding was an attention item takes its place there when it is not ranked.
+    ...pool.filter((candidate) => {
+      const origin = standsInFor.get(candidate.insightId);
+      return (
+        origin !== undefined &&
+        attentionOrigins.has(origin.insightId) &&
+        !rankedIds.has(candidate.insightId) &&
+        !ownAttentionIds.has(candidate.insightId)
+      );
+    }),
+  ].sort((a, b) => a.key.localeCompare(b.key));
 
+  const workedOnOf = (candidate: BriefCandidate) => {
+    const origin = standsInFor.get(candidate.insightId);
+    return origin === undefined ? null : { insightId: origin.insightId, title: origin.title };
+  };
   const rankedItems: BriefItemAssembly[] = ranked.map((entry, position) => ({
     section: 'ranked',
     position,
@@ -113,6 +200,7 @@ export function assembleBrief(input: AssembleBriefInput): AssembledBrief {
     carried: input.carriedIdentities.has(findingIdentityOf(entry.candidate)),
     score: entry.score,
     scoreFactors: entry.factors,
+    workedOn: workedOnOf(entry.candidate),
   }));
   const attentionItems: BriefItemAssembly[] = attention.map((candidate, position) => ({
     section: 'attention',
@@ -121,6 +209,7 @@ export function assembleBrief(input: AssembleBriefInput): AssembledBrief {
     carried: input.carriedIdentities.has(findingIdentityOf(candidate)),
     score: null,
     scoreFactors: null,
+    workedOn: workedOnOf(candidate),
   }));
 
   const coldStart = input.historyDays < COLD_START_THRESHOLD_DAYS;

@@ -28,9 +28,16 @@ import {
   installBriefMocks,
   NARRATED_OPENING,
   narratedBriefItems,
+  PROGRESS_SESSION_ID,
   SHOWN_NARRATION,
+  talkThroughBriefItems,
 } from './support/mock-brief.ts';
-import { ADVISOR_QUESTION, ADVISOR_QUESTIONS } from './support/mock-advisor.ts';
+import {
+  ADVISOR_FINDING_QUESTION,
+  ADVISOR_FINDING_TITLE,
+  ADVISOR_QUESTION,
+  ADVISOR_QUESTIONS,
+} from './support/mock-advisor.ts';
 import { ASK_OUT_OF_SCOPE_QUESTION, ASK_QUESTION } from './support/mock-ask.ts';
 import { CONTROL_CHECKS } from './support/mock-narrator.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
@@ -1369,4 +1376,48 @@ test('WP 11.5d /advisor: Tab to the box, start a session, answer the clarifying 
   await journey.tabTo(/^Goals$/, { backwards: true, max: 4 });
   await journey.press('Enter', 'Enter follows the plan link');
   await expect(page).toHaveURL(/\/goals$/u);
+});
+
+test('WP 11.5e /brief to /advisor: Tab to "Talk this through", Enter, the advisor opens about that finding with its origin header, and Tab goes on into the session; "Open the plan" leads to a followed plan', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await installSweepMocks(page);
+  await installBriefMocks(page, {
+    standalone: false,
+    brief: buildBrief({ isoWeek: '2026-W43', items: talkThroughBriefItems() }),
+  });
+  await visit(page, '/brief');
+  await hideDevtools(page);
+  await expect(page.getByTestId('brief-item-card')).toHaveCount(3);
+  const journey = new Journey(page, 'WP 11.5e /brief -> /advisor');
+
+  // The link is a real link, reached by Tab among the card's own controls.
+  const stop = await journey.tabTo(/^Talk this through$/, { max: 40 });
+  expect(stop.role === 'link' || stop.tag === 'a', 'it is a link').toBe(true);
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/advisor\?session=0190d000-/u, { timeout: 15_000 });
+  await expect(page.getByTestId('advisor-origin-line')).toHaveText(
+    `About: ${ADVISOR_FINDING_TITLE}, from the Brief of week 43 of 2026`,
+  );
+  await expect(page.getByTestId('advisor-pregathered')).toBeVisible();
+  await expect(page.getByTestId('advisor-clarify')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('heading', { name: ADVISOR_FINDING_QUESTION })).toBeVisible();
+
+  // Focus is somewhere visible on the new screen, and the session's own controls are the next stops.
+  await journey.tabTo(exactly(ADVISOR_QUESTIONS[0]!), { max: 30 });
+  await journey.tabTo(exactly(ADVISOR_QUESTIONS[1]!), { max: 3 });
+  await journey.tabTo(/^Continue$/, { max: 3 });
+
+  // The other way: the progress card's "Open the plan" by keyboard.
+  await visit(page, '/brief');
+  await hideDevtools(page);
+  await expect(page.getByTestId('brief-progress')).toBeVisible();
+  const second = new Journey(page, 'WP 11.5e /brief -> Open the plan');
+  await second.tabTo(/^Open the plan$/, { max: 60 });
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/advisor\\?session=${PROGRESS_SESSION_ID}$`, 'u'));
+  await expect(page.getByTestId('advisor-tracked-wording')).toBeVisible({ timeout: 15_000 });
+  await second.tabTo(/^See it in the Brief$/, { max: 60 });
 });

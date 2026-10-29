@@ -96,6 +96,16 @@ import {
 import { buildOptionsRequest, validateOptionsReply, type AdvisorOption } from './options.ts';
 import { buildPlanRequest, validatePlanReply } from './plan.ts';
 import {
+  findingFiguresResolve,
+  findingResultOf,
+  loadTalkThroughFinding,
+  mergeSeededCalls,
+  seededCallsFor,
+  talkThroughRuleById,
+  type FindingFigureDrop,
+} from './origin.ts';
+import { sessionOriginOf } from './progress.ts';
+import {
   claimAdvisorStep,
   findAdvisorSession,
   finishAdvisorStep,
@@ -545,6 +555,29 @@ export interface AdvisorGathered {
   readonly withheld: readonly { readonly key: string; readonly code: string }[];
   readonly topic_pages: readonly string[];
   readonly options_dropped?: number;
+  /**
+   * WP 11.5e, a session opened from a finding: the calls seeded from the finding's rule (always run, first),
+   * how many compiled calls the cap left out, and what became of the finding's own figures.
+   */
+  readonly seeded_calls?: readonly AskCompiledCall[];
+  readonly compiled_dropped?: number;
+  readonly finding?: {
+    readonly insight_ref: string;
+    /** `joined`: its figures are a result of the context object; otherwise why not. */
+    readonly outcome:
+      | 'joined'
+      | 'no_figures'
+      | 'scope_not_granted'
+      | 'unresolved'
+      | 'not_found'
+      | 'not_supported'
+      | 'narration'
+      | 'source_run_unknown';
+    readonly figures_dropped: readonly {
+      readonly position: number;
+      readonly reason: FindingFigureDrop;
+    }[];
+  };
 }
 
 export interface StoredClarification extends Clarification {
@@ -734,15 +767,39 @@ export async function runAdvisorPass(
     }
     const defaults = await advisorDefaultsFor(dependencies.catalogue, context.userId);
     const ceiling = await narratorGrantCeiling(database, context.userId);
-    const built = buildClarifyRequest({
-      question: session.question,
-      listing: listing.functions,
-      defaults,
-      grantedScopes: (['goals.list', 'plan.projection'] as const).filter(
+    // WP 11.5e: a session opened from a finding tells clarify what it is about — the title and the rule,
+    // quoted — and its payload names the scopes the finding was built from (inside the grant only).
+    const origin = sessionOriginOf(session);
+    const rule = origin === null ? null : talkThroughRuleById(origin.rule_id);
+    const about =
+      origin === null || rule === null
+        ? null
+        : { title: origin.title, rule: { name: rule.ruleName, text: rule.ruleText } };
+    const findingScopes =
+      origin === null
+        ? []
+        : await (async () => {
+            const loaded = await loadTalkThroughFinding(
+              database,
+              context.userId,
+              origin.insight_ref,
+            );
+            return loaded.status === 'found' ? loaded.finding.scopes : [];
+          })();
+    const clarifyScopes = new Set<string>([
+      ...(['goals.list', 'plan.projection'] as const).filter(
         (scope) =>
           ceiling.includes(scope) &&
           (scope === 'goals.list' ? defaults.goals.length > 0 : defaults.retirementAge !== null),
       ),
+      ...findingScopes.filter((scope) => ceiling.includes(scope)),
+    ]);
+    const built = buildClarifyRequest({
+      question: session.question,
+      listing: listing.functions,
+      defaults,
+      about,
+      grantedScopes: ADVISOR_SCOPES.filter((scope) => clarifyScopes.has(scope)),
       now: context.clock.now(),
       timeoutMs: ADVISOR_STEP_MANIFESTS.clarify.limits.timeout_ms,
       maxResponseBytes: ADVISOR_STEP_MANIFESTS.clarify.limits.max_response_bytes,
@@ -816,6 +873,48 @@ export async function runAdvisorPass(
       timeoutMs: ADVISOR_STEP_MANIFESTS.gather.limits.timeout_ms,
       maxResponseBytes: ADVISOR_STEP_MANIFESTS.gather.limits.max_response_bytes,
     });
+    // WP 11.5e: a session opened from a finding is pre-gathered on it — the calls its rule is answered by
+    // are seeded (always run, first), and its own resolved figures join the context object.
+    const origin = sessionOriginOf(session);
+    let seeded: readonly AskCompiledCall[] = [];
+    let findingResult: AskResultView | null = null;
+    let findingRecord: AdvisorGathered['finding'] | undefined;
+    if (origin !== null) {
+      const loaded = await loadTalkThroughFinding(database, context.userId, origin.insight_ref);
+      if (loaded.status === 'found') {
+        const finding = loaded.finding;
+        seeded = seededCallsFor(origin.rule_id, {
+          key: finding.key,
+          currency: dependencies.catalogue.baseCurrency,
+        });
+        const ceiling = await narratorGrantCeiling(database, context.userId);
+        const candidate = findingResultOf(finding);
+        const outcome =
+          finding.figures.length === 0
+            ? 'no_figures'
+            : !finding.scopes.every((scope) => ceiling.includes(scope))
+              ? 'scope_not_granted'
+              : !findingFiguresResolve(candidate, finding.evidence)
+                ? 'unresolved'
+                : 'joined';
+        if (outcome === 'joined') findingResult = candidate;
+        findingRecord = {
+          insight_ref: origin.insight_ref,
+          outcome,
+          figures_dropped: finding.dropped,
+        };
+      } else {
+        seeded = seededCallsFor(origin.rule_id, {
+          key: '',
+          currency: dependencies.catalogue.baseCurrency,
+        });
+        findingRecord = {
+          insight_ref: origin.insight_ref,
+          outcome: loaded.status,
+          figures_dropped: [],
+        };
+      }
+    }
     let compiled: readonly AskCompiledCall[] | null = null;
     const failed = failOnFinish('gathering');
     const outcome = await runModelStep(database, context, dependencies, {
@@ -842,6 +941,11 @@ export async function runAdvisorPass(
           await finish('refused', ['gathering'], { refusal: gatherRefusalOf(verdict.refusal) }, tx);
           return;
         }
+        if (verdict.kind === 'unanswerable' && seeded.length > 0) {
+          // The seeded calls answer the finding whatever the compiler made of the words.
+          compiled = [];
+          return;
+        }
         if (verdict.kind === 'unanswerable') {
           await finish(
             'unanswerable',
@@ -863,17 +967,27 @@ export async function runAdvisorPass(
     const calls = compiled as readonly AskCompiledCall[] | null;
     if (calls === null) return 'stopped';
 
-    // The calls: deterministic, in process, under the holder's grants.
-    const results = await runAskCalls(dependencies, context, calls);
-    const knowledge = advisorKnowledgeFor(dependencies.knowledge, { text, results });
+    // The calls: deterministic, in process, under the holder's grants — every seeded call first.
+    const merged = mergeSeededCalls(seeded, calls);
+    const ran = await runAskCalls(dependencies, context, merged.calls);
+    const knowledge = advisorKnowledgeFor(dependencies.knowledge, { text, results: ran });
+    const results: readonly AskResultView[] =
+      findingResult === null ? ran : [findingResult, ...ran];
     const gathered: AdvisorGathered = {
-      calls,
+      calls: merged.calls,
       results,
       date: today,
       pages: knowledge.pages,
       params: knowledge.params,
       withheld: knowledge.withheld,
       topic_pages: knowledge.topicPages,
+      ...(origin === null
+        ? {}
+        : {
+            seeded_calls: seeded,
+            compiled_dropped: merged.droppedCompiled,
+            ...(findingRecord === undefined ? {} : { finding: findingRecord }),
+          }),
     };
     if (!results.some((result) => result.status === 'ok')) {
       const screen: AskNearestScreen = results[0]?.screen ?? '/';
@@ -1207,6 +1321,7 @@ export async function runAdvisorPass(
           tradeoff,
           results: gathered.results,
           watcherKey: `advisor.follow_up.${watcherId}`,
+          pickedAt: todayIn(context.clock, dependencies.catalogue.timeZone),
         });
         if (watcher === null) {
           await finish(

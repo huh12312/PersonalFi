@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Bot, Loader2 } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
@@ -94,7 +94,28 @@ export interface AdvisorScreenProps {
  * a question is sent, and every state carries the disclaimer and names the provider and model it runs on.
  */
 export function AdvisorScreen({ pollMs }: AdvisorScreenProps = {}) {
-  const advisor = useAdvisor(pollMs === undefined ? {} : { pollMs });
+  // WP 11.5e: `?finding=&week=` starts one session about a finding; `?session=` opens one. The finding is shed from
+  // the URL as soon as the api has answered (the session replaces it, a refusal just removes it), so a refresh
+  // never posts again.
+  const search = useSearch({ strict: false }) as {
+    finding?: string;
+    week?: string;
+    session?: string;
+  };
+  const navigate = useNavigate();
+  const advisor = useAdvisor({
+    ...(pollMs === undefined ? {} : { pollMs }),
+    finding: search.finding,
+    week: search.week,
+    session: search.session,
+    onUrlSession: (id) => {
+      void navigate({
+        to: '/advisor',
+        search: id === null ? {} : { session: id },
+        replace: true,
+      });
+    },
+  });
   const { overview, session } = advisor;
   const sectionRef = useRef<HTMLElement>(null);
 

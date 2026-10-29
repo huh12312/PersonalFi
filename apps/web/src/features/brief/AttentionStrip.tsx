@@ -3,6 +3,8 @@ import { AlertTriangle } from 'lucide-react';
 import { useState } from 'react';
 
 import { SeverityBadge } from '../../components/finance/SeverityBadge.tsx';
+import { TalkThroughLink } from '../advisor/TalkThroughLink.tsx';
+import { BriefProgressBox } from './BriefProgressBox.tsx';
 import { EvidencePanel } from '../insights/EvidencePanel.tsx';
 import { insightViewOf } from './evidence-adapter.ts';
 import type { BriefItemWithNarration } from './types.ts';
@@ -20,14 +22,23 @@ function AttentionStripRow({ item }: { item: BriefItemWithNarration }) {
         <h3 className="text-body font-medium text-text-primary">{item.title}</h3>
       </div>
       <p className="mt-1 text-small text-text-secondary">{item.summaryMd}</p>
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((prev) => !prev)}
-        className="mt-2 min-h-6 rounded-sm text-small text-accent-text hover:underline focus-visible:outline-none"
-      >
-        {expanded ? 'Hide evidence panel' : 'Why am I seeing this?'}
-      </button>
+      {item.progress !== null && <BriefProgressBox progress={item.progress} />}
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((prev) => !prev)}
+          className="min-h-6 rounded-sm text-small text-accent-text hover:underline focus-visible:outline-none"
+        >
+          {expanded ? 'Hide evidence panel' : 'Why am I seeing this?'}
+        </button>
+        {item.talkThrough !== null && item.progress === null && (
+          <TalkThroughLink
+            insightId={item.talkThrough.insightId}
+            briefWeek={item.talkThrough.briefWeek}
+          />
+        )}
+      </div>
       {expanded && (
         <div className="mt-2">
           <EvidencePanel insight={insightViewOf(item)} />

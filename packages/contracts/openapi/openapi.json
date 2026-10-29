@@ -2413,6 +2413,184 @@
         "additionalProperties": false,
         "description": "A versioned list of blocks (`contractVersion` 1)."
       },
+      "BriefProgressInput": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "insightId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ruleId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "briefWeek": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "insightId",
+                  "ruleId",
+                  "title",
+                  "briefWeek"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pickedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "baseline": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "asOf": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "text",
+              "asOf"
+            ]
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "asOf": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "text",
+                  "asOf"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "down",
+                  "up",
+                  "same"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "tracking",
+              "reached",
+              "not_read"
+            ]
+          },
+          "wording": {
+            "type": "string"
+          },
+          "workedOn": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "insightId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "insightId",
+                  "title"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "sessionId",
+          "origin",
+          "pickedAt",
+          "label",
+          "baseline",
+          "latest",
+          "target",
+          "direction",
+          "state",
+          "wording",
+          "workedOn"
+        ]
+      },
       "BriefItemInput": {
         "type": "object",
         "properties": {
@@ -2853,6 +3031,40 @@
               "narratedBy"
             ]
           },
+          "talkThrough": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "insightId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "briefWeek": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "insightId",
+                  "briefWeek"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BriefProgressInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "blocks": {
             "$ref": "#/components/schemas/BlockDocumentInput"
           }
@@ -2878,6 +3090,8 @@
           "retirementEffect",
           "primaryAction",
           "narration",
+          "talkThrough",
+          "progress",
           "blocks"
         ]
       },
@@ -8768,6 +8982,7 @@
               "awaiting_pick",
               "planning",
               "tracked",
+              "completed",
               "refused",
               "unanswerable",
               "failed",
@@ -8887,6 +9102,69 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "insightId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ruleId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "briefWeek": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "insightId",
+                  "ruleId",
+                  "title",
+                  "briefWeek"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pregathered": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "seeded": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "finding": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "seeded",
+                  "finding"
+                ]
               },
               {
                 "type": "null"
@@ -9244,6 +9522,36 @@
                       "outcome",
                       "path"
                     ]
+                  },
+                  "target": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "pickedAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reached": {
+                    "type": "boolean"
+                  },
+                  "wording": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -9254,7 +9562,11 @@
                   "direction",
                   "status",
                   "checkedAt",
-                  "brief"
+                  "brief",
+                  "target",
+                  "pickedAt",
+                  "reached",
+                  "wording"
                 ]
               },
               {
@@ -9481,6 +9793,8 @@
           "disclaimer",
           "clarification",
           "answers",
+          "origin",
+          "pregathered",
           "lookedAt",
           "knowledge",
           "options",
@@ -9517,6 +9831,7 @@
               "awaiting_pick",
               "planning",
               "tracked",
+              "completed",
               "refused",
               "unanswerable",
               "failed",
@@ -9636,6 +9951,69 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "insightId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ruleId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "briefWeek": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "insightId",
+                  "ruleId",
+                  "title",
+                  "briefWeek"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pregathered": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "seeded": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "finding": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "seeded",
+                  "finding"
+                ]
               },
               {
                 "type": "null"
@@ -9993,6 +10371,36 @@
                       "outcome",
                       "path"
                     ]
+                  },
+                  "target": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "pickedAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reached": {
+                    "type": "boolean"
+                  },
+                  "wording": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -10003,7 +10411,11 @@
                   "direction",
                   "status",
                   "checkedAt",
-                  "brief"
+                  "brief",
+                  "target",
+                  "pickedAt",
+                  "reached",
+                  "wording"
                 ]
               },
               {
@@ -10390,6 +10802,8 @@
           "disclaimer",
           "clarification",
           "answers",
+          "origin",
+          "pregathered",
           "lookedAt",
           "knowledge",
           "options",
@@ -13662,6 +14076,9 @@
                 "type": "null"
               }
             ]
+          },
+          "talkThrough": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -13695,7 +14112,8 @@
           "mentions",
           "titleSegments",
           "bodySegments",
-          "contextLine"
+          "contextLine",
+          "talkThrough"
         ]
       },
       "AdvisorHealthInput": {
@@ -22324,6 +22742,190 @@
         "additionalProperties": false,
         "description": "A versioned list of blocks (`contractVersion` 1)."
       },
+      "BriefProgress": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "insightId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ruleId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "briefWeek": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "insightId",
+                  "ruleId",
+                  "title",
+                  "briefWeek"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pickedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "baseline": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "asOf": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "text",
+              "asOf"
+            ],
+            "additionalProperties": false
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "asOf": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "text",
+                  "asOf"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "down",
+                  "up",
+                  "same"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "tracking",
+              "reached",
+              "not_read"
+            ]
+          },
+          "wording": {
+            "type": "string"
+          },
+          "workedOn": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "insightId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "insightId",
+                  "title"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "sessionId",
+          "origin",
+          "pickedAt",
+          "label",
+          "baseline",
+          "latest",
+          "target",
+          "direction",
+          "state",
+          "wording",
+          "workedOn"
+        ],
+        "additionalProperties": false
+      },
       "BriefItem": {
         "type": "object",
         "properties": {
@@ -22776,6 +23378,41 @@
             ],
             "additionalProperties": false
           },
+          "talkThrough": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "insightId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "briefWeek": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "insightId",
+                  "briefWeek"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BriefProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "blocks": {
             "$ref": "#/components/schemas/BlockDocument"
           }
@@ -22801,6 +23438,8 @@
           "retirementEffect",
           "primaryAction",
           "narration",
+          "talkThrough",
+          "progress",
           "blocks"
         ],
         "additionalProperties": false
@@ -28745,6 +29384,7 @@
               "awaiting_pick",
               "planning",
               "tracked",
+              "completed",
               "refused",
               "unanswerable",
               "failed",
@@ -28867,6 +29507,71 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "insightId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ruleId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "briefWeek": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "insightId",
+                  "ruleId",
+                  "title",
+                  "briefWeek"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pregathered": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "seeded": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "finding": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "seeded",
+                  "finding"
+                ],
+                "additionalProperties": false
               },
               {
                 "type": "null"
@@ -29238,6 +29943,37 @@
                       "path"
                     ],
                     "additionalProperties": false
+                  },
+                  "target": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "pickedAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reached": {
+                    "type": "boolean"
+                  },
+                  "wording": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -29248,7 +29984,11 @@
                   "direction",
                   "status",
                   "checkedAt",
-                  "brief"
+                  "brief",
+                  "target",
+                  "pickedAt",
+                  "reached",
+                  "wording"
                 ],
                 "additionalProperties": false
               },
@@ -29483,6 +30223,8 @@
           "disclaimer",
           "clarification",
           "answers",
+          "origin",
+          "pregathered",
           "lookedAt",
           "knowledge",
           "options",
@@ -29520,6 +30262,7 @@
               "awaiting_pick",
               "planning",
               "tracked",
+              "completed",
               "refused",
               "unanswerable",
               "failed",
@@ -29642,6 +30385,71 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "insightId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ruleId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "briefWeek": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "insightId",
+                  "ruleId",
+                  "title",
+                  "briefWeek"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pregathered": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "seeded": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "finding": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "seeded",
+                  "finding"
+                ],
+                "additionalProperties": false
               },
               {
                 "type": "null"
@@ -30013,6 +30821,37 @@
                       "path"
                     ],
                     "additionalProperties": false
+                  },
+                  "target": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "pickedAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reached": {
+                    "type": "boolean"
+                  },
+                  "wording": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -30023,7 +30862,11 @@
                   "direction",
                   "status",
                   "checkedAt",
-                  "brief"
+                  "brief",
+                  "target",
+                  "pickedAt",
+                  "reached",
+                  "wording"
                 ],
                 "additionalProperties": false
               },
@@ -30420,6 +31263,8 @@
           "disclaimer",
           "clarification",
           "answers",
+          "origin",
+          "pregathered",
           "lookedAt",
           "knowledge",
           "options",
@@ -33760,6 +34605,9 @@
                 "type": "null"
               }
             ]
+          },
+          "talkThrough": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -33793,7 +34641,8 @@
           "mentions",
           "titleSegments",
           "bodySegments",
-          "contextLine"
+          "contextLine",
+          "talkThrough"
         ],
         "additionalProperties": false
       },
@@ -66306,11 +67155,25 @@
                   "question": {
                     "type": "string",
                     "maxLength": 2000
+                  },
+                  "origin": {
+                    "type": "object",
+                    "properties": {
+                      "insightId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "briefWeek": {
+                        "type": "string",
+                        "pattern": "^[0-9]{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$"
+                      }
+                    },
+                    "required": [
+                      "insightId"
+                    ]
                   }
-                },
-                "required": [
-                  "question"
-                ]
+                }
               }
             }
           }
@@ -66347,6 +67210,16 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {

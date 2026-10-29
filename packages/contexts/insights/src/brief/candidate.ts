@@ -14,6 +14,7 @@
 import type { Money } from '@core/kernel';
 import type { Severity } from '../contract/response.ts';
 import type { BriefPrimaryAction } from '../../schema/index.ts';
+import type { BriefProgress } from '../advisors/advisor/progress.ts';
 
 export interface BriefCandidateEvidence {
   readonly position: number;
@@ -52,6 +53,12 @@ export interface BriefCandidate {
   readonly primaryAction?: BriefPrimaryAction | null;
   readonly evidence: readonly BriefCandidateEvidence[];
   readonly inputDigest: string;
+  /**
+   * WP 11.5e: for a follow-up item (`advisor.follow_up`), the plan the holder picked — the session, the finding
+   * that opened it, the baseline and current figures and the wording — as the Brief will snapshot it. `null` or
+   * absent for every other candidate.
+   */
+  readonly progress?: BriefProgress | null;
 }
 
 /** The advisor-rule family a candidate belongs to: the dotted prefix of `type`. */

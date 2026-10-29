@@ -2232,6 +2232,43 @@ half, no model): a fixed trade-offs reply in which one option has no cost goes t
 validator, and passes when it is refused `tradeoffs.cost_missing` (and the same reply with the cost
 given is accepted).
 
+### The Brief and the advisor meet (v0.9.25)
+
+WP 11.5e (12 §2.3 step 6, §6 row 11.5e). Two additions to the advisor above, neither of which sends
+anything new off the machine.
+
+**"Talk this through".** A Brief item, and a pending insight card, whose finding comes from a rule the
+advisor's calculations answer (the cash rules, the debt rules, the investing rules, the subscription
+rules other than the one over raw transactions, the retirement rules and goal pace) carries a "Talk this
+through" link. It opens `/advisor` and starts a session **pre-gathered on that finding**:
+
+- the question is built by the app from the finding's title and its rule's name, by a template per
+  rule family — never typed and never a model's — and goes through the same pre-check as a typed
+  question (a goal name that smuggles an instruction into a title is refused before any model is asked);
+- the session records where it came from (`advisor_sessions.origin_insight_ref`, `origin_rule_id`,
+  `origin_title` and, from a Brief, `origin_brief_week`; migration `0062_advisor_sessions_origin`), and
+  the advisor screen opens with "About: <the finding>, from the Brief of <week>";
+- the clarify step is told the finding's title and rule as a quoted fact (it may name them; it may not
+  lift a figure out of them);
+- the gather step's compiler still runs, but the calculation the finding's rule is answered by is always
+  run first (C → `cash.emergency_fund`, D → `debt.payoff_plan`, I → `investing.*`, U → `recurring.waste`,
+  R4 → `retirement.claiming`, a goal → `goal.required_savings`, …), and the finding's own evidence figures
+  join the advisor's working figures, each with the snapshot reference it was checked against when the
+  finding was written. A name, a goal name or anything that is not a figure never joins.
+
+The finding must be built from data the language model is allowed to read (Advisor management); if it is
+not, the link answers "not allowed" and nothing starts. Every approval, the consent (D31), the one call
+per step and every validator apply exactly as for a typed question.
+
+**A plan you picked, in the Brief.** The follow-up watcher's item is now shown as progress: the finding
+the session came from, the day you picked the plan, what the watched figure was then and what it is now,
+and the direction — in fixed wording that uses the watcher's own figures and no others — with a link back
+to the session. When the finding that opened the session is itself still in the feed, the Brief shows it
+once, as this progress item, marked "being worked on". When the watched figure reaches its target (the
+extra a month a goal still needs, the debts in the payoff plan, the year's contribution room — each down
+to $0.00), the item reads as reached, the session moves to `completed` and its watcher stops. A
+completed session is final; start a new one to follow something else.
+
 ## Categorisation: measuring the tiers (`just categorization-eval`)
 
 WP 11.1. Replays every transaction you filed by hand (the categories you picked, plus any confirmed

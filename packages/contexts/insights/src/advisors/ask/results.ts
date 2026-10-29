@@ -295,7 +295,8 @@ function argText(name: string, args: Record<string, unknown>): string {
 
 /** "emergency-fund cover (target 3 months)". */
 export function askCallLabel(name: CatalogueFunctionName, args: Record<string, unknown>): string {
-  const base = ASK_FUNCTION_LABELS[name];
+  // `?? name`: a context result that is not a catalogue call (WP 11.5e's `finding.evidence`) has no label here.
+  const base = ASK_FUNCTION_LABELS[name] ?? String(name);
   const detail = argText(name, args);
   return detail.length === 0 ? base : `${base} (${detail})`;
 }

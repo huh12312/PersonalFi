@@ -10,6 +10,8 @@ import {
 import { Button } from '../../components/ui/button.tsx';
 import { SeverityBadge } from '../../components/finance/SeverityBadge.tsx';
 import { cn } from '../../lib/cn.ts';
+import { TalkThroughLink } from '../advisor/TalkThroughLink.tsx';
+import { BriefProgressBox } from './BriefProgressBox.tsx';
 import { DismissReasonDialog } from '../insights/DismissReasonDialog.tsx';
 import { EvidencePanel } from '../insights/EvidencePanel.tsx';
 import { insightViewOf } from './evidence-adapter.ts';
@@ -103,6 +105,8 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
         </div>
       </div>
 
+      {item.progress !== null && <BriefProgressBox progress={item.progress} />}
+
       <div
         data-testid="retirement-effect"
         className="mt-2 rounded-md bg-bg-subtle px-2.5 py-1.5 text-small text-text-secondary"
@@ -157,6 +161,12 @@ export function BriefItemCard({ item }: BriefItemCardProps) {
             )}
           />
         </button>
+        {item.talkThrough !== null && item.progress === null && (
+          <TalkThroughLink
+            insightId={item.talkThrough.insightId}
+            briefWeek={item.talkThrough.briefWeek}
+          />
+        )}
         <div className="ml-auto flex items-center gap-2">
           <Button
             variant="ghost"

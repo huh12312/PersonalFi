@@ -69,6 +69,7 @@ import {
   type InsightsDependencies,
   type InsightView,
   type RunSwitches,
+  talkThroughRuleOf,
 } from '@ctx/insights';
 import {
   INSIGHT_HELPFULNESS_VALUES,
@@ -209,6 +210,11 @@ const insightSchema = z
     bodySegments: z.array(insightTextSegmentSchema),
     /** "About Groceries, Checking · transaction 1 …", or `null` when the insight names no entity. */
     contextLine: z.array(insightTextSegmentSchema).nullable(),
+    /**
+     * WP 11.5e: whether this finding offers "Talk this through" — a pending built-in finding whose rule has a
+     * calculation the advisor can work from (`POST /advisor/sessions` with `origin`).
+     */
+    talkThrough: z.boolean(),
   })
   .meta({ id: 'Insight' });
 
@@ -307,6 +313,7 @@ function serialiseInsight(
     titleSegments: segmentText(view.title, linkable),
     bodySegments: segmentText(view.summaryMd, linkable),
     contextLine: contextLineOf(mentions),
+    talkThrough: view.status === 'pending_review' && talkThroughRuleOf(view.advisorId) !== null,
   };
 }
 

@@ -67,5 +67,7 @@ export function insightViewOf(item: BriefItem): Insight {
     titleSegments: [{ text: item.title }],
     bodySegments: [{ text: item.summaryMd }],
     contextLine: null,
+    // WP 11.5e: the evidence panel reads none of it; the Brief's own card offers the link.
+    talkThrough: false,
   };
 }

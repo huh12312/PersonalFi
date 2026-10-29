@@ -9,6 +9,43 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.25: the Brief and the advisor meet
+
+**Status:** a patch release on v0.9.24 (if an earlier v0.9.x has not been tagged when this is, tag
+them in order). The tag `v0.9.25` is pushed by the maintainer once CI is green. Package 11.5e of the
+Phase 11 programme (12 §6).
+
+### Upgrading to v0.9.25
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0062_advisor_sessions_origin` (expand-only: `advisor_sessions` gains four nullable origin
+columns and the `completed` status; `advisory_brief_items` gains a nullable `progress` column; no row is
+rewritten).
+
+### Manual steps
+
+None.
+
+### What changed
+
+- **"Talk this through"** on a Brief item or an insight card opens an advisor session pre-gathered on
+  that finding: the question built from it by template, the calculation its rule is answered by run
+  first, its own figures among the ones the advisor works from, and "About: …, from the Brief of …" at
+  the top ([RUNBOOK](../RUNBOOK.md#the-brief-and-the-advisor-meet-v0925)).
+- **A plan you picked appears as progress in the next Briefs**: when it was picked, the figure then and
+  now, the direction, a link back to the session. The finding it came from is shown once, as that item,
+  marked being worked on.
+- **`completed`**: when the watched figure reaches its target the item reads as reached, the session
+  completes and its watcher stops.
+- **API.** `POST /advisor/sessions` takes `origin: { insightId, briefWeek? }` instead of a question;
+  sessions carry `origin` and `pregathered`; Brief items carry `talkThrough` and `progress`; insights
+  carry `talkThrough`.
+- **Evaluation.** The advisor golden set gains six pre-gathered sessions, one per rule family.
+
 ## v0.9.24: the advisor
 
 **Status:** a patch release on v0.9.23 (if an earlier v0.9.x has not been tagged when this is, tag

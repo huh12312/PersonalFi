@@ -93,7 +93,9 @@ export function session(
     status,
     createdAt: '2026-10-28T14:22:00.000Z',
     updatedAt: '2026-10-28T14:22:09.000Z',
-    finishedAt: ['tracked', 'refused', 'unanswerable', 'failed', 'cancelled'].includes(status)
+    finishedAt: ['tracked', 'completed', 'refused', 'unanswerable', 'failed', 'cancelled'].includes(
+      status,
+    )
       ? '2026-10-28T14:22:09.000Z'
       : null,
     engine: LOCAL_ENGINE,
@@ -101,6 +103,8 @@ export function session(
     disclaimer: BRIEF_DISCLAIMER,
     clarification: null,
     answers: null,
+    origin: null,
+    pregathered: null,
     lookedAt: null,
     knowledge: null,
     options: null,
@@ -147,7 +151,50 @@ export const tracked = (id = 'sess-tracked', overrides: Partial<AdvisorSession> 
       status: 'following',
       checkedAt: null,
       brief: { outcome: 'out-1', path: '/brief' },
+      target: { text: '6.0 months' },
+      pickedAt: '2026-10-28',
+      reached: false,
+      wording:
+        'Emergency fund runway was 2.0 months when you picked this plan on 2026-10-28. It has not been checked since.',
     },
+    ...overrides,
+  });
+
+/** WP 11.5e: the plan's watched figure reached its target; the watcher stopped. */
+export const completed = (id = 'sess-completed', overrides: Partial<AdvisorSession> = {}) => {
+  const base = tracked(id);
+  return {
+    ...base,
+    status: 'completed',
+    finishedAt: '2026-12-02T08:00:00.000Z',
+    tracked: {
+      ...base.tracked!,
+      latest: { text: '6.1 months', asOf: '2026-12-01' },
+      direction: 'up',
+      status: 'reached',
+      reached: true,
+      checkedAt: '2026-12-02T08:00:00.000Z',
+      wording:
+        'Emergency fund runway was 2.0 months when you picked this plan on 2026-10-28. It is 6.1 months now: up since then, and past the 6.0 months target.',
+    },
+    ...overrides,
+  } satisfies AdvisorSession;
+};
+
+export const FINDING_ID = '0190c000-0000-7000-8000-0000000000f1';
+export const FINDING_TITLE = 'Your cash covers 2.4 months of spending';
+
+/** WP 11.5e: a session opened from a finding in the Brief of 2026-W43, with two calculations gathered first. */
+export const fromFinding = (id = 'sess-origin', overrides: Partial<AdvisorSession> = {}) =>
+  clarifying(id, {
+    question: `What could be done about “${FINDING_TITLE}”?`,
+    origin: {
+      insightId: FINDING_ID,
+      ruleId: 'C4',
+      title: FINDING_TITLE,
+      briefWeek: '2026-W43',
+    },
+    pregathered: { seeded: ['cash.emergency_fund'], finding: 'joined' },
     ...overrides,
   });
 

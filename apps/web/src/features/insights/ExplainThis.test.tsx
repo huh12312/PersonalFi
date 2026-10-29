@@ -117,6 +117,7 @@ function buildInsight(overrides: Partial<Insight> = {}): Insight {
     titleSegments: [{ text: 'Groceries ran higher than usual' }],
     bodySegments: [{ text: 'Spending in Groceries rose.' }],
     contextLine: null,
+    talkThrough: false,
     ...overrides,
   };
 }

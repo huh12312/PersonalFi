@@ -188,7 +188,8 @@ async function seedCanaryColumns(h: ApiHarness): Promise<void> {
   );
   await exec(
     h,
-    sql`UPDATE advisory_brief_items SET evidence = jsonb_build_array(${note}), retirement_effect = ${note}
+    sql`UPDATE advisory_brief_items SET evidence = jsonb_build_array(${note}), retirement_effect = ${note},
+               progress = ${note}
         WHERE user_id = ${h.userId}::uuid`,
   );
   await exec(

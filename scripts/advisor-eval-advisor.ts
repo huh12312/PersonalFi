@@ -22,6 +22,15 @@
  *
  * Reported: outcomes right by kind, calls precision/recall (micro), option
  * counts right, the validators' refusal classes, and the judge's scores.
+ *
+ * WP 11.5e adds **pre-gathered sessions** (`kind: 'pregathered'`, one per rule
+ * family): a session opened from a finding by "Talk this through". Its
+ * question is the family's template over the finding's title and rule (the
+ * entry's `question` must equal it); clarify is sent the finding as a quoted
+ * fact; the gather step's compiler still runs, but the rule's **seeded calls
+ * are always run first** (`expected.seeded`, asserted present and leading),
+ * and the finding's own evidence figures join the context object as result
+ * r1, each with the `source_ref` it resolved through.
  * Never a prompt or a reply on stdout; a live run's replies go to `--out`.
  *
  *     node scripts/advisor-eval.ts --advisor                    # replay the recorded replies
@@ -77,6 +86,14 @@ import {
 } from '../packages/contexts/insights/src/advisors/advisor/plan.ts';
 import { advisorRubricFor } from '../packages/contexts/insights/src/advisors/advisor/topics.ts';
 import {
+  findingEvidenceFigures,
+  findingResultOf,
+  mergeSeededCalls,
+  seededCallsFor,
+  talkThroughQuestion,
+  talkThroughRuleById,
+} from '../packages/contexts/insights/src/advisors/advisor/origin.ts';
+import {
   buildTradeoffsRequest,
   validateTradeoffsReply,
 } from '../packages/contexts/insights/src/advisors/advisor/tradeoffs.ts';
@@ -107,11 +124,27 @@ export interface AdvisorGoldenExpected {
   readonly options?: number;
   /** A judge refusal the session is expected to carry as evidence (it never stops the session). */
   readonly judge?: string;
+  /** WP 11.5e: a pre-gathered session's seeded calls — each must be run, ahead of the compiler's. */
+  readonly seeded?: readonly AdvisorGoldenCall[];
+}
+
+/** WP 11.5e: the finding a pre-gathered session is opened from (synthetic, over 11.5b's fixture). */
+export interface AdvisorGoldenOrigin {
+  readonly rule_id: string;
+  readonly title: string;
+  readonly key: string;
+  readonly evidence: readonly {
+    readonly label: string;
+    readonly value: string | null;
+    readonly source_ref: string | null;
+    readonly resolved_display: string | null;
+  }[];
 }
 
 export interface AdvisorGoldenEntry {
   readonly id: string;
-  readonly kind: 'session' | 'out_of_scope' | 'injection' | 'refusal' | 'not_computable';
+  readonly kind:
+    'session' | 'out_of_scope' | 'injection' | 'refusal' | 'not_computable' | 'pregathered';
   readonly question: string;
   readonly answers: readonly string[];
   readonly expected: AdvisorGoldenExpected;
@@ -119,6 +152,7 @@ export interface AdvisorGoldenEntry {
   readonly replies: Partial<Record<AdvisorGoldenStep, unknown>>;
   readonly example?: string;
   readonly note?: string;
+  readonly origin?: AdvisorGoldenOrigin;
 }
 
 export interface AdvisorGolden {
@@ -162,6 +196,9 @@ export interface AdvisorJudged {
   readonly modelCalls: number;
   readonly correct: boolean;
   readonly optionsCorrect: boolean | null;
+  /** WP 11.5e: every call the gather step ran (seeded first), and whether the seeded ones led. */
+  readonly ranCalls: readonly AdvisorGoldenCall[];
+  readonly seededCorrect: boolean | null;
 }
 
 function keyOf(callIn: AdvisorGoldenCall): string {
@@ -214,6 +251,8 @@ export async function judgeAdvisorEntry(
       modelCalls,
       correct: false,
       optionsCorrect: null,
+      ranCalls: [],
+      seededCorrect: null,
       ...fields,
     };
     const e = entry.expected;
@@ -225,6 +264,15 @@ export async function judgeAdvisorEntry(
         return want.size === got.size && [...want].every((key) => got.has(key));
       })();
     const optionsCorrect = e.options === undefined ? null : judged.options === e.options;
+    // WP 11.5e: the seeded calls were run, and ahead of every compiled call.
+    const seededCorrect =
+      e.seeded === undefined
+        ? null
+        : e.seeded.length <= judged.ranCalls.length &&
+          e.seeded.every(
+            (seed, index) =>
+              keyOf(seed) === keyOf(judged.ranCalls[index] ?? { name: '', args: {} }),
+          );
     const correct =
       judged.outcome === e.outcome &&
       (e.refusal === undefined || judged.refusal === e.refusal) &&
@@ -235,12 +283,23 @@ export async function judgeAdvisorEntry(
             : (e.refusal ?? null))) &&
       callsRight &&
       optionsCorrect !== false &&
+      seededCorrect !== false &&
       (e.judge === undefined || judged.judgeRefusal === e.judge);
-    return { ...judged, correct, optionsCorrect };
+    return { ...judged, correct, optionsCorrect, seededCorrect };
   };
 
+  // --- WP 11.5e: a session opened from a finding --------------------------------------
+  const origin = entry.origin ?? null;
+  const rule = origin === null ? null : talkThroughRuleById(origin.rule_id);
+  if (origin !== null && rule === null)
+    return result({ outcome: 'refused', refusal: 'origin.not_supported' });
+  const question =
+    origin === null || rule === null
+      ? entry.question
+      : talkThroughQuestion({ family: rule.family, title: origin.title, ruleName: rule.ruleName });
+
   // --- the pre-check ---------------------------------------------------------------
-  const pre = precheckQuestion(entry.question);
+  const pre = precheckQuestion(question);
   if (pre.kind === 'refused') return result({ outcome: 'precheck', refusal: pre.refusal });
   if (pre.kind === 'out_of_scope')
     return result({ outcome: 'precheck', refusal: `out_of_scope:${pre.topic}` });
@@ -259,6 +318,9 @@ export async function judgeAdvisorEntry(
     listing: listing().functions,
     defaults,
     grantedScopes: ['goals.list', 'plan.projection'],
+    ...(origin === null || rule === null
+      ? {}
+      : { about: { title: origin.title, rule: { name: rule.ruleName, text: rule.ruleText } } }),
     ...limits('clarify'),
   });
   modelCalls += 1;
@@ -293,20 +355,55 @@ export async function judgeAdvisorEntry(
   );
   if (!gathered.ok)
     return result({ outcome: 'refused', refusal: gatherRefusalOf(gathered.refusal) });
-  if (gathered.kind === 'unanswerable')
+  // WP 11.5e: the seeded calls answer the finding whatever the compiler made of the words.
+  const seeded =
+    origin === null ? [] : seededCallsFor(origin.rule_id, { key: origin.key, currency: 'USD' });
+  if (gathered.kind === 'unanswerable' && seeded.length === 0)
     return result({ outcome: 'unanswerable', refusal: gathered.reason });
-  const compiledCalls = gathered.calls.map((entryCall) => ({
+  const compiledOnly = gathered.kind === 'unanswerable' ? [] : gathered.calls;
+  const compiledCalls = compiledOnly.map((entryCall) => ({
     name: entryCall.name,
     args: entryCall.args,
   }));
+  const merged = mergeSeededCalls(seeded, compiledOnly).calls;
+  const ranCalls = merged.map((entryCall) => ({ name: entryCall.name, args: entryCall.args }));
   const results: AskResultView[] = [];
-  for (const compiled of gathered.calls) {
+  if (origin !== null && rule !== null) {
+    const evidence = origin.evidence.map((row) => ({
+      label: row.label,
+      value: row.value,
+      sourceRef: row.source_ref,
+      resolvedDisplay: row.resolved_display,
+    }));
+    const { figures, dropped } = findingEvidenceFigures({ evidence, prose: [origin.title] });
+    if (figures.length > 0) {
+      results.push(
+        findingResultOf({
+          insightId: '00000000-0000-7000-8000-000000000000',
+          advisorId: '',
+          key: origin.key,
+          ruleId: origin.rule_id,
+          family: rule.family,
+          title: origin.title,
+          ruleName: rule.ruleName,
+          ruleText: rule.ruleText,
+          severity: 'notable',
+          scopes: [],
+          figures,
+          dropped,
+          evidence,
+          asOf: golden.today,
+        }),
+      );
+    }
+  }
+  for (const compiled of merged) {
     results.push(
       askResultViewOf(compiled.name, compiled.args, await call(compiled.name, compiled.args)),
     );
   }
   if (!results.some((view) => view.status === 'ok')) {
-    return result({ outcome: 'unanswerable', refusal: 'not_computable', compiledCalls });
+    return result({ outcome: 'unanswerable', refusal: 'not_computable', compiledCalls, ranCalls });
   }
   const knowledge = createAdvisorKnowledgeBase();
   const sent = advisorKnowledgeFor(knowledge, { text, results });
@@ -330,7 +427,8 @@ export async function judgeAdvisorEntry(
     await ask(entry, 'options', optionsBuilt.request),
     built.check,
   );
-  if (!options.ok) return result({ outcome: 'refused', refusal: options.refusal, compiledCalls });
+  if (!options.ok)
+    return result({ outcome: 'refused', refusal: options.refusal, compiledCalls, ranCalls });
   const tradeoffsBuilt = buildTradeoffsRequest({
     context: built.context,
     options: options.options,
@@ -342,7 +440,12 @@ export async function judgeAdvisorEntry(
     ...built.check,
     options: options.options.map((option) => option.id),
   });
-  const counted = { compiledCalls, options: options.options.length, dropped: options.dropped };
+  const counted = {
+    compiledCalls,
+    ranCalls,
+    options: options.options.length,
+    dropped: options.dropped,
+  };
   if (!trades.ok) return result({ outcome: 'refused', refusal: trades.refusal, ...counted });
   const rubric = advisorRubricFor([
     ...sent.topicPages,
@@ -402,6 +505,8 @@ export interface AdvisorEvalReport {
     readonly recall: number | null;
   };
   readonly options: { readonly correct: number; readonly total: number; readonly dropped: number };
+  /** WP 11.5e: pre-gathered sessions whose seeded calls ran first. */
+  readonly seeded: { readonly correct: number; readonly total: number };
   readonly refusals: Readonly<Record<string, number>>;
   readonly judge: {
     readonly scored: number;
@@ -428,6 +533,8 @@ export function summariseAdvisor(judged: readonly AdvisorJudged[]): AdvisorEvalR
   let fn = 0;
   let optionsCorrect = 0;
   let optionsTotal = 0;
+  let seededCorrect = 0;
+  let seededTotal = 0;
   let dropped = 0;
   let thousandths = 0;
   let scored = 0;
@@ -443,6 +550,10 @@ export function summariseAdvisor(judged: readonly AdvisorJudged[]): AdvisorEvalR
       if (entry.optionsCorrect) optionsCorrect += 1;
     }
     dropped += entry.dropped;
+    if (entry.seededCorrect !== null) {
+      seededTotal += 1;
+      if (entry.seededCorrect) seededCorrect += 1;
+    }
     if (entry.judgeScore !== null) {
       scored += 1;
       distribution[entry.judgeScore] = (distribution[entry.judgeScore] ?? 0) + 1;
@@ -466,6 +577,7 @@ export function summariseAdvisor(judged: readonly AdvisorJudged[]): AdvisorEvalR
     outcomes: Object.fromEntries(Object.entries(outcomes).sort()),
     calls: { tp, fp, fn, precision: ratio(tp, tp + fp), recall: ratio(tp, tp + fn) },
     options: { correct: optionsCorrect, total: optionsTotal, dropped },
+    seeded: { correct: seededCorrect, total: seededTotal },
     refusals: Object.fromEntries(Object.entries(refusals).sort()),
     judge: {
       scored,
@@ -574,6 +686,7 @@ export function formatAdvisorReport(report: AdvisorEvalReport): readonly string[
       .join(', ')}`,
     `calls (micro): precision ${pct(report.calls.precision)} · recall ${pct(report.calls.recall)} · tp ${String(report.calls.tp)} fp ${String(report.calls.fp)} fn ${String(report.calls.fn)}`,
     `option counts right: ${String(report.options.correct)}/${String(report.options.total)} · options dropped for want of a backing figure: ${String(report.options.dropped)}`,
+    `pre-gathered sessions with their seeded calls run first: ${String(report.seeded.correct)}/${String(report.seeded.total)}`,
     `validator refusals: ${
       Object.entries(report.refusals)
         .map(([refusal, count]) => `${refusal} × ${String(count)}`)

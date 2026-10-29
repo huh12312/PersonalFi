@@ -45,6 +45,11 @@ import { deriveTokenKey } from '../snapshot/tokens.ts';
 import { isoWeekOf } from './iso-week.ts';
 import { briefPrefetchIds } from '../advisors/explain/jobs.ts';
 import type { RetirementImpactPort } from './ports.ts';
+import type { BriefCandidate } from './candidate.ts';
+import { ADVISOR_FOLLOW_UP_ADVISOR_ID } from '../advisors/advisor/manifest.ts';
+import { briefProgressOf } from '../advisors/advisor/progress.ts';
+import { findAdvisorSessionsByWatcher } from '../advisors/advisor/source.ts';
+import type { InsightsExecutor } from '../db.ts';
 import { retirementEffectOf } from './retirement.ts';
 import {
   findBriefByWeek,
@@ -207,7 +212,7 @@ export function createBriefJob(input: BriefJobDependencies): JobHandlerRegistrat
       ]);
 
       const assembled = assembleBrief({
-        candidates,
+        candidates: await withBriefProgress(input.database, context.userId, candidates),
         advisorKindOf: (advisorId) => advisorKinds.get(advisorId),
         dismissRateOf: (advisorId) => dismissRates.get(advisorId) ?? 0,
         carriedIdentities: carried,
@@ -368,4 +373,33 @@ export async function registerWeeklyBriefSchedule(
     },
     clock,
   );
+}
+
+const FOLLOW_UP_KEY = /^advisor\.follow_up\.([0-9a-f-]{36})$/u;
+
+/**
+ * WP 11.5e: each follow-up candidate gains its plan's progress — the session
+ * behind it (by the watcher id its key carries), tracked or completed — so the
+ * Brief can report it and dedupe the finding it is working on. Read-only.
+ */
+export async function withBriefProgress(
+  executor: InsightsExecutor,
+  userId: string,
+  candidates: readonly BriefCandidate[],
+): Promise<readonly BriefCandidate[]> {
+  const watcherIds = candidates.flatMap((candidate) => {
+    if (candidate.advisorId !== ADVISOR_FOLLOW_UP_ADVISOR_ID) return [];
+    const match = FOLLOW_UP_KEY.exec(candidate.key);
+    return match === null ? [] : [match[1] ?? ''];
+  });
+  if (watcherIds.length === 0) return candidates;
+  const sessions = await findAdvisorSessionsByWatcher(executor, userId, watcherIds);
+  const byWatcher = new Map(sessions.map((session) => [session.watcherId, session]));
+  return candidates.map((candidate) => {
+    if (candidate.advisorId !== ADVISOR_FOLLOW_UP_ADVISOR_ID) return candidate;
+    const match = FOLLOW_UP_KEY.exec(candidate.key);
+    const session = match === null ? undefined : byWatcher.get(match[1] ?? '');
+    if (session === undefined) return candidate;
+    return { ...candidate, progress: briefProgressOf(session) };
+  });
 }

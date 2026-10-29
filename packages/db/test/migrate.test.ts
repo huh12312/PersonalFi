@@ -634,6 +634,13 @@ describeWithDb('runMigrations', () => {
       //   knowledge read; a user-scoped composite FK to advisor_sessions); advisor_settings (the advisor's own
       //   hosted consent, D31: provider, consented_at with the consent text's sha256, together or not at all).
       //   Expand-only; references users and advisor_sessions. None exported (registry.ts exempts all three).
+      // 0062_advisor_sessions_origin (WP 11.5e): no new table. advisor_sessions gains origin_insight_ref and
+      //   origin_rule_id (the finding a "Talk this through" session was opened from: set together or not at all,
+      //   advisor_sessions_origin_pair), origin_title (rides with the pair) and origin_brief_week (only with a
+      //   finding); the status CHECK gains `completed` (a tracked plan whose watched figure reached its target;
+      //   tracked_whole and finished re-stated to admit it; advisor_sessions_completed_reached holds it to a
+      //   reached watcher). advisory_brief_items gains progress JSONB (a plan's progress as the Brief said it).
+      //   Expand-only: nullable columns, a value added to a CHECK, no row rewritten.
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called

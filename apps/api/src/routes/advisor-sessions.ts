@@ -5,7 +5,7 @@
  * | Operation | Guard | What |
  * | --- | --- | --- |
  * | `GET /advisor/sessions` | session | whether this holder can start a session now and why not, which model runs the advisor (and whether that is the hosted provider under the advisor's own consent), the disclaimer, examples, recent sessions |
- * | `POST /advisor/sessions` | session | one opening question: the deterministic pre-check first — refused or out of scope is answered at once (200), **no model asked**; otherwise a `clarifying` session is written and `insights.advisor_step` enqueued for the worker (202) |
+ * | `POST /advisor/sessions` | session | one opening question: the deterministic pre-check first — refused or out of scope is answered at once (200), **no model asked**; otherwise a `clarifying` session is written and `insights.advisor_step` enqueued for the worker (202). WP 11.5e: or an `origin` instead of a question — "Talk this through" on a finding: the question is built from the finding by its rule family's template, the session records the finding, and the worker pre-gathers on it |
  * | `GET /advisor/sessions/{id}` | session | the session as it stands, with **the inspector**: every step's `advisor_runs` id, input digest (the payload kept for the run inspector at `/advisors/runs/{runId}`), provider, model, knowledge read and outcome, and the context object's digest |
  * | `POST /advisor/sessions/{id}/answers` | session | the holder's answers to the clarifying questions (each through the pre-check) → `gathering`, enqueued |
  * | `POST /advisor/sessions/{id}/pick` | session | the option the holder picks → `planning`, enqueued |
@@ -48,11 +48,18 @@ import {
   requestRunCancel,
   transitionAdvisorSession,
   writeAdvisorSettings,
+  briefProgressOf,
+  findBriefByWeek,
+  loadTalkThroughFinding,
+  narratorGrantCeiling,
+  sessionOriginOf,
+  talkThroughQuestion,
   type AdvisorGathered,
   type AdvisorOption,
   type AdvisorPlanStep,
   type AdvisorTradeoff,
   type AdvisorWatcher,
+  type AdvisorSessionOrigin,
   type AskOutOfScopeTopic,
   type AskResultView,
   type InsightsExecutor,
@@ -80,6 +87,7 @@ const STATUSES = [
   'awaiting_pick',
   'planning',
   'tracked',
+  'completed',
   'refused',
   'unanswerable',
   'failed',
@@ -151,6 +159,29 @@ export const advisorSessionSchema = z
       })
       .nullable(),
     answers: z.array(z.string()).nullable(),
+    /**
+     * WP 11.5e: the finding a "Talk this through" session was opened from — its title as the holder saw it,
+     * the rule that made it and the Brief week it was opened from — or `null` for a typed question.
+     */
+    origin: z
+      .object({
+        insightId: z.uuid(),
+        ruleId: z.string(),
+        title: z.string(),
+        briefWeek: z.string().nullable(),
+      })
+      .nullable(),
+    /**
+     * WP 11.5e: what was pre-gathered for a session opened from a finding: the seeded calls (always run) and
+     * whether the finding's own figures joined the context object (`joined`) or why not. `null` otherwise or
+     * before the gather step.
+     */
+    pregathered: z
+      .object({
+        seeded: z.array(z.string()),
+        finding: z.string().nullable(),
+      })
+      .nullable(),
     /** "I looked at: …" — the app's line, and each call's figures. */
     lookedAt: z
       .object({
@@ -200,6 +231,14 @@ export const advisorSessionSchema = z
         status: z.string(),
         checkedAt: z.string().nullable(),
         brief: z.object({ outcome: z.string(), path: z.string() }),
+        /** WP 11.5e: what the plan aims at (`$0.00` left to go), or `null` for a figure with no target. */
+        target: z.object({ text: z.string() }).nullable(),
+        /** WP 11.5e: the day the plan was picked. */
+        pickedAt: z.string().nullable(),
+        /** WP 11.5e: the target is reached and the session completed; the watcher has stopped. */
+        reached: z.boolean(),
+        /** WP 11.5e: the progress sentence the Brief carries: a template, the watcher's own figures only. */
+        wording: z.string(),
       })
       .nullable(),
     judge: z
@@ -526,8 +565,26 @@ export function advisorSessionWire(
             href: entry.action_href,
             label: entry.action_label,
           })),
+    origin: (() => {
+      const origin = sessionOriginOf(row);
+      return origin === null
+        ? null
+        : {
+            insightId: origin.insight_ref,
+            ruleId: origin.rule_id,
+            title: origin.title,
+            briefWeek: origin.brief_week,
+          };
+    })(),
+    pregathered:
+      gathered === null || gathered.seeded_calls === undefined
+        ? null
+        : {
+            seeded: gathered.seeded_calls.map((call) => call.name),
+            finding: gathered.finding?.outcome ?? null,
+          },
     tracked:
-      row.status !== 'tracked' || watcher === null
+      (row.status !== 'tracked' && row.status !== 'completed') || watcher === null
         ? null
         : {
             kind: watcher.kind,
@@ -541,6 +598,15 @@ export function advisorSessionWire(
             status: watcher.status,
             checkedAt: watcher.checked_at,
             brief: { outcome: watcher.brief.outcome, path: '/brief' },
+            ...(() => {
+              const progress = briefProgressOf(row);
+              return {
+                target: progress?.target ?? null,
+                pickedAt: progress?.picked_at ?? null,
+                reached: row.status === 'completed',
+                wording: progress?.wording ?? '',
+              };
+            })(),
           },
     judge:
       row.judgeScore === null && row.judgeError === null
@@ -654,6 +720,63 @@ export const advisorSessionRoutes = (
     };
   }
 
+  /**
+   * WP 11.5e: a finding the holder may talk through — a built-in's, of a rule the table answers, built from
+   * scopes the language model is granted — and the question its rule family's template makes of it.
+   */
+  async function openFromFinding(
+    userId: string,
+    insightId: string,
+    briefWeek: string | null,
+  ): Promise<{ readonly origin: AdvisorSessionOrigin; readonly question: string }> {
+    const loaded = await loadTalkThroughFinding(database, userId, insightId);
+    if (loaded.status === 'not_found') {
+      throw new AppError({
+        status: 404,
+        code: 'insights.advisor_finding_not_found',
+        title: 'Not Found',
+        detail: `no finding ${insightId}`,
+        family: 'user',
+      });
+    }
+    if (loaded.status !== 'found') {
+      throw conflict(
+        'insights.advisor_finding_not_supported',
+        'This finding has no calculation the advisor can work from yet, so it cannot be talked through.',
+      );
+    }
+    const ceiling = await narratorGrantCeiling(database, userId);
+    if (!loaded.finding.scopes.every((scope) => ceiling.includes(scope))) {
+      throw conflict(
+        'insights.advisor_finding_not_granted',
+        'The language model is not allowed to read what this finding is built from. Grant it in Advisor management.',
+      );
+    }
+    if (briefWeek !== null && (await findBriefByWeek(database, userId, briefWeek)) === null) {
+      throw new AppError({
+        status: 400,
+        code: 'insights.advisor_brief_unknown',
+        title: 'Bad Request',
+        detail: `no Brief for ${briefWeek}`,
+        family: 'user',
+      });
+    }
+    const finding = loaded.finding;
+    return {
+      origin: {
+        insightRef: finding.insightId,
+        ruleId: finding.ruleId,
+        title: finding.title,
+        briefWeek,
+      },
+      question: talkThroughQuestion({
+        family: finding.family,
+        title: finding.title,
+        ruleName: finding.ruleName,
+      }),
+    };
+  }
+
   async function sessionOr404(userId: string, id: string): Promise<StoredAdvisorSession> {
     const row = await findAdvisorSession(database, userId, id);
     if (row === null) throw notFound(id);
@@ -739,11 +862,29 @@ export const advisorSessionRoutes = (
             '`insights.advisor_unavailable`, or `insights.advisor_in_flight` while another session ' +
             'has a step running.',
           tags: ['insights'],
-          body: z.object({ question: z.string().max(ADVISOR_QUESTION_MAX * 4) }),
+          body: z.object({
+            question: z
+              .string()
+              .max(ADVISOR_QUESTION_MAX * 4)
+              .optional(),
+            /**
+             * WP 11.5e, "Talk this through": the finding to talk through instead of a typed question — its
+             * insight id, and the ISO week of the Brief it was opened from (absent from an insight card).
+             */
+            origin: z
+              .object({
+                insightId: z.uuid(),
+                briefWeek: z
+                  .string()
+                  .regex(/^[0-9]{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$/u)
+                  .optional(),
+              })
+              .optional(),
+          }),
           response: {
             200: advisorSessionDetailSchema,
             202: advisorSessionDetailSchema,
-            ...problems(400, 401, 409),
+            ...problems(400, 401, 404, 409),
           },
         },
       },
@@ -751,13 +892,31 @@ export const advisorSessionRoutes = (
         const session = await guards.requireSession(request);
         const userId = session.userId;
         const context = { userId, clock, correlationId: correlationIdOf(request.id) };
-        const raw = request.body.question;
+        const { question, origin: asked } = request.body;
+        if ((question === undefined) === (asked === undefined)) {
+          throw new AppError({
+            status: 400,
+            code: 'insights.advisor_question_or_origin',
+            title: 'Bad Request',
+            detail: 'send either a question or the finding to talk through, not both',
+            family: 'user',
+          });
+        }
+        // WP 11.5e: "Talk this through" — the question is built from the finding, never typed or modelled.
+        let origin: AdvisorSessionOrigin | null = null;
+        let raw = question ?? '';
+        if (asked !== undefined) {
+          const opened = await openFromFinding(userId, asked.insightId, asked.briefWeek ?? null);
+          origin = opened.origin;
+          raw = opened.question;
+        }
         const pre = precheckQuestion(raw);
         const stored = raw.replace(/\s+/gu, ' ').trim().slice(0, ADVISOR_QUESTION_MAX);
         const base = {
           question: stored,
           catalogueVersion: ASK_CATALOGUE_VERSION,
           tokenBudget: ADVISOR_SESSION_TOKEN_BUDGET,
+          origin,
         };
         if (pre.kind === 'refused') {
           if (pre.refusal === 'question.empty') {

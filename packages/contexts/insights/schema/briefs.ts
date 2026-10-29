@@ -120,6 +120,12 @@ export const advisoryBriefItems = pgTable(
      * rewrites.
      */
     primaryAction: jsonb('primary_action').$type<BriefPrimaryAction | null>(),
+    /**
+     * WP 11.5e, migration `0062_advisor_sessions_origin.sql`: for an item reporting on a plan the holder
+     * picked in an advisor session, that plan's progress as this Brief said it (`BriefProgress`), snapshotted
+     * at publish. `null` for every other item.
+     */
+    progress: jsonb('progress').$type<Record<string, unknown> | null>(),
     createdAt: createdAtColumn(),
   },
   (table) => [

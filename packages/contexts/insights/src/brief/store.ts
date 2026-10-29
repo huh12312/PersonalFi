@@ -248,6 +248,8 @@ export interface StoredBriefItem {
   readonly retirementEffect: RetirementImpactAnswer;
   /** CF-24: what the Brief said the action was. `null` for a Brief published before 0038 ("no action recorded"). */
   readonly primaryAction: BriefPrimaryAction | null;
+  /** WP 11.5e: a plan's progress as this Brief said it; `null` for every other item. */
+  readonly progress: Record<string, unknown> | null;
 }
 
 function moneyOrNull(minor: bigint | null, currency: string | null): MoneyType | null {
@@ -291,6 +293,7 @@ export async function listBriefItems(
     scoreFactors: row.scoreFactors,
     retirementEffect: deserializeRetirementEffect(row.retirementEffect),
     primaryAction: row.primaryAction,
+    progress: row.progress ?? null,
   }));
 }
 
@@ -421,7 +424,21 @@ function itemRowOf(
     // CF-24: snapshotted here, with the title and the summary, and never read
     // through to `insight_actions` afterwards.
     primaryAction: item.candidate.primaryAction ?? null,
+    // WP 11.5e: a plan's progress, as this Brief said it — with the finding it stands in for, if any.
+    progress: progressRowOf(item),
   };
+}
+
+/** The progress JSON an item stores: the candidate's, with the finding it stands in for marked worked on. */
+export function progressRowOf(item: BriefItemAssembly): Record<string, unknown> | null {
+  const progress = item.candidate.progress ?? null;
+  if (progress === null) return null;
+  const workedOn = item.workedOn ?? null;
+  return {
+    ...progress,
+    worked_on:
+      workedOn === null ? null : { insight_ref: workedOn.insightId, title: workedOn.title },
+  } as unknown as Record<string, unknown>;
 }
 
 export interface PublishedBrief {

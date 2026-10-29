@@ -7,7 +7,9 @@
  * model call (UNIQUE per session and step: one call per step), and the
  * advisor's own hosted consent (D31). The status machine is
  * `clarifying → gathering → options → tradeoffs → awaiting_pick → planning →
- * tracked | refused | unanswerable | failed | cancelled`. The CHECKs live in
+ * tracked → completed | refused | unanswerable | failed | cancelled`. Migration
+ * `0062_advisor_sessions_origin.sql` (WP 11.5e) adds `completed` and the origin
+ * columns. The CHECKs live in
  * the SQL only, as for every other table of this package.
  */
 import { createdAtColumn, idColumn, instantColumn, userIdColumn } from '@core/db';
@@ -21,6 +23,8 @@ export const ADVISOR_SESSION_STATUSES = [
   'awaiting_pick',
   'planning',
   'tracked',
+  // WP 11.5e (0062): a tracked plan whose watched figure reached its target; the watcher stops.
+  'completed',
   'refused',
   'unanswerable',
   'failed',
@@ -93,6 +97,12 @@ export const advisorSessions = pgTable(
     createdAt: createdAtColumn(),
     updatedAt: instantColumn('updated_at').notNull(),
     finishedAt: instantColumn('finished_at'),
+    // WP 11.5e (0062): the finding a "Talk this through" session was opened from. The pair is set
+    // together or not at all; the title rides with it; the Brief week only with a finding.
+    originInsightRef: uuid('origin_insight_ref'),
+    originRuleId: text('origin_rule_id'),
+    originTitle: text('origin_title'),
+    originBriefWeek: text('origin_brief_week'),
   },
   (table) => [
     index('advisor_sessions_user_created_idx').on(table.userId, table.createdAt, table.id),

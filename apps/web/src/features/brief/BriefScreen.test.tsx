@@ -81,6 +81,8 @@ function buildItem(overrides: Partial<BriefItem> & Pick<BriefItem, 'id'>): Brief
     score: 50400,
     retirementEffect: COMPUTED_EFFECT,
     primaryAction: null,
+    talkThrough: null,
+    progress: null,
     narration: {
       status: 'none',
       aiAssisted: false,
@@ -661,5 +663,152 @@ describe('the Brief’s own wording on the screen (WP 11.4)', () => {
     const headings = screen.getAllByRole('heading').map((heading) => heading.textContent);
     expect(headings[0]).toBe("This week's Brief");
     expect(headings).not.toContain('Your week');
+  });
+});
+
+describe('the Brief and the advisor meet (WP 11.5e)', () => {
+  beforeEach(() => {
+    ensureApiClient();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const SESSION_ID = '0190c000-0000-7000-8000-0000000000a9';
+  const PROGRESS_WORDING =
+    'Balances in the payoff plan was $4,200.00 when you picked this plan on 2026-10-01. It is $3,150.00 now: down since then.';
+
+  function progressOf(overrides: Partial<NonNullable<BriefItem['progress']>> = {}) {
+    return {
+      sessionId: SESSION_ID,
+      origin: {
+        insightId: 'insight_fees',
+        ruleId: 'builtin.spending.fee_hunter',
+        title: 'Avoidable fees this year',
+        briefWeek: '2026-W40',
+      },
+      pickedAt: '2026-10-01',
+      label: 'Balances in the payoff plan',
+      baseline: { text: '$4,200.00', asOf: '2026-10-01' },
+      latest: { text: '$3,150.00', asOf: '2026-10-28' },
+      target: null,
+      direction: 'down' as const,
+      state: 'tracking' as const,
+      wording: PROGRESS_WORDING,
+      workedOn: null,
+      ...overrides,
+    };
+  }
+
+  it('offers "Talk this through" as a real link to the advisor only on an item that carries talkThrough', async () => {
+    stubFetchRoutes([
+      briefRoute(
+        buildBrief({
+          items: [
+            buildItem({
+              id: '1',
+              title: 'Offers the link',
+              talkThrough: { insightId: 'insight_1', briefWeek: '2026-W40' },
+            }),
+            buildItem({ id: '2', position: 1, title: 'Offers nothing' }),
+          ],
+        }),
+      ),
+      healthScoreNotComputedRoute(),
+    ]);
+    renderScreen();
+    const cards = await screen.findAllByTestId('brief-item-card');
+    const link = within(cards[0]!).getByRole('link', { name: 'Talk this through' });
+    expect(link.getAttribute('href')).toBe('/advisor?finding=insight_1&week=2026-W40');
+    expect(within(cards[1]!).queryByRole('link', { name: 'Talk this through' })).toBeNull();
+  });
+
+  it('offers the link on an attention-strip item too', async () => {
+    stubFetchRoutes([
+      briefRoute(
+        buildBrief({
+          items: [
+            buildItem({
+              id: 'a1',
+              section: 'attention',
+              annualizedImpact: null,
+              talkThrough: { insightId: 'insight_a1', briefWeek: '2026-W40' },
+            }),
+          ],
+        }),
+      ),
+      healthScoreNotComputedRoute(),
+    ]);
+    renderScreen();
+    const strip = await screen.findByTestId('attention-strip');
+    expect(
+      within(strip).getByRole('link', { name: 'Talk this through' }).getAttribute('href'),
+    ).toBe('/advisor?finding=insight_a1&week=2026-W40');
+  });
+
+  it('a progress card says "Plan you picked", the server’s wording verbatim, its origin, what is being worked on and "Open the plan"', async () => {
+    stubFetchRoutes([
+      briefRoute(
+        buildBrief({
+          items: [
+            buildItem({
+              id: 'p1',
+              title: 'Following your debt payoff plan',
+              progress: progressOf({
+                workedOn: { insightId: 'insight_debt', title: 'Credit card balances are high' },
+              }),
+              // The api never offers both; the card shows none even if a response did.
+              talkThrough: { insightId: 'insight_p1', briefWeek: '2026-W40' },
+            }),
+          ],
+        }),
+      ),
+      healthScoreNotComputedRoute(),
+    ]);
+    renderScreen();
+    const card = await screen.findByTestId('brief-item-card');
+    const box = within(card).getByTestId('brief-progress');
+    expect(box).toHaveTextContent('Plan you picked');
+    expect(within(box).getByTestId('brief-progress-wording').textContent).toBe(PROGRESS_WORDING);
+    expect(within(box).getByTestId('brief-progress-origin')).toHaveTextContent(
+      'From the finding “Avoidable fees this year”',
+    );
+    expect(within(box).getByTestId('brief-progress-worked-on')).toHaveTextContent(
+      'Being worked on: “Credit card balances are high”',
+    );
+    expect(within(box).queryByTestId('brief-progress-reached')).toBeNull();
+    expect(within(box).getByRole('link', { name: 'Open the plan' }).getAttribute('href')).toBe(
+      `/advisor?session=${SESSION_ID}`,
+    );
+    expect(within(card).queryByRole('link', { name: 'Talk this through' })).toBeNull();
+  });
+
+  it('a progress card with no origin and nothing being worked on says neither, and a reached plan says so in words', async () => {
+    stubFetchRoutes([
+      briefRoute(
+        buildBrief({
+          items: [
+            buildItem({
+              id: 'p2',
+              progress: progressOf({ origin: null, state: 'reached' }),
+            }),
+          ],
+        }),
+      ),
+      healthScoreNotComputedRoute(),
+    ]);
+    renderScreen();
+    const box = await screen.findByTestId('brief-progress');
+    expect(box).toHaveAttribute('data-state', 'reached');
+    expect(within(box).getByTestId('brief-progress-reached')).toHaveTextContent('Target reached');
+    expect(within(box).queryByTestId('brief-progress-origin')).toBeNull();
+    expect(within(box).queryByTestId('brief-progress-worked-on')).toBeNull();
+  });
+
+  it('a card with no progress shows no progress box', async () => {
+    stubFetchRoutes([briefRoute(buildBrief()), healthScoreNotComputedRoute()]);
+    renderScreen();
+    await screen.findByTestId('brief-item-card');
+    expect(screen.queryByTestId('brief-progress')).toBeNull();
   });
 });

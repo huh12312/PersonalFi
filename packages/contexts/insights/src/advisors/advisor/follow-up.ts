@@ -71,6 +71,8 @@ import type { AdvisorOption } from './options.ts';
 import type { AdvisorTradeoff } from './tradeoffs.ts';
 import type { StoredAdvisorSession } from './source.ts';
 import { transitionAdvisorSession } from './source.ts';
+import { isFindingResult } from './origin.ts';
+import { targetOf, targetReached, watcherTargetFor, type WatcherTarget } from './progress.ts';
 
 export const ADVISOR_WATCHER_KINDS = [
   'goal_pace',
@@ -100,8 +102,18 @@ export interface AdvisorWatcher {
   readonly baseline: WatchedValue;
   readonly latest: WatchedValue | null;
   readonly direction: 'down' | 'up' | 'same' | null;
-  readonly status: 'watching' | 'not_available' | 'scope_withdrawn';
+  /** `reached` (WP 11.5e): the latest reading met the target; the session is `completed` and the watcher stops. */
+  readonly status: 'watching' | 'not_available' | 'scope_withdrawn' | 'reached';
   readonly checked_at: string | null;
+  /**
+   * WP 11.5e: what the plan aims at (`progress.ts`'s `WATCHER_TARGETS`), fixed when the watcher is made;
+   * `null` for a watcher with no target. Absent on a watcher made before 11.5e: its kind's target applies.
+   */
+  readonly target?: WatcherTarget | null;
+  /** WP 11.5e: the day the holder picked the plan (the holder's zone), for the Brief's wording. */
+  readonly picked_at?: string | null;
+  /** WP 11.5e: when the follow-up check saw the target reached. */
+  readonly reached_at?: string | null;
   /** The Brief item: its insight key, and what the last check did with it. */
   readonly brief: {
     readonly key: string;
@@ -166,6 +178,8 @@ export function advisorWatcherFor(input: {
   readonly tradeoff: AdvisorTradeoff;
   readonly results: readonly AskResultView[];
   readonly watcherKey: string;
+  /** WP 11.5e: the day the holder picked it. */
+  readonly pickedAt?: string | null;
 }): AdvisorWatcher | null {
   const figures: AdvisorContextFigure[] = [
     ...input.tradeoff.cost,
@@ -178,7 +192,12 @@ export function advisorWatcherFor(input: {
   };
   const touched = figures
     .map((figure) => ({ figure, index: indexOf(figure) }))
-    .filter((entry) => entry.index >= 0 && entry.index < input.results.length);
+    .filter((entry) => entry.index >= 0 && entry.index < input.results.length)
+    // WP 11.5e: a finding's own evidence is not a catalogue call — it cannot be re-run, so it is never watched.
+    .filter((entry) => {
+      const result = input.results[entry.index];
+      return result !== undefined && !isFindingResult(result);
+    });
   if (touched.length === 0) return null;
   const pick = (() => {
     for (const [name, kind] of PRIORITY) {
@@ -200,6 +219,9 @@ export function advisorWatcherFor(input: {
     status: 'watching' as const,
     checked_at: null,
     brief,
+    target: watcherTargetFor(pick.kind),
+    picked_at: input.pickedAt ?? null,
+    reached_at: null,
   };
   if (pick.kind === 'goal_pace') {
     const monthly = result.figures.find((figure) => figure.key === 'monthly');
@@ -297,6 +319,44 @@ function valueOfFigure(figure: Record<string, unknown> | null): WatchedValue | n
     return { text: figure['decimal'], value: figure['decimal'], as_of: null };
   }
   return null;
+}
+
+/**
+ * A payoff plan the catalogue could not amortise because nothing is owed: every
+ * liability the watcher follows is at or below $0.00 in the call's own inputs,
+ * or no liability is on record at all. `null` otherwise (genuinely not
+ * available: a debt lost its rate, say).
+ */
+function paidOffReading(
+  watcher: AdvisorWatcher,
+  envelope: {
+    readonly not_available: { readonly code: string } | null;
+    readonly inputs: Readonly<Record<string, unknown>>;
+    readonly as_of: string | null;
+  },
+): WatchedValue | null {
+  const code = envelope.not_available?.code ?? null;
+  if (code !== 'no_debts' && code !== 'no_amortisable_debt') return null;
+  const terms = envelope.inputs['liabilities_terms'];
+  const liabilities =
+    isRecord(terms) && Array.isArray(terms['liabilities'])
+      ? (terms['liabilities'] as unknown[])
+      : [];
+  const wanted = new Set(watcher.liability_refs ?? []);
+  if (wanted.size === 0 && liabilities.length > 0) return null;
+  for (const entry of liabilities) {
+    if (!isRecord(entry) || typeof entry['liability_ref'] !== 'string') continue;
+    if (!wanted.has(entry['liability_ref'])) continue;
+    const balance = entry['current_balance'];
+    const minor =
+      isRecord(balance) && typeof balance['minor'] === 'string' ? balance['minor'] : null;
+    if (minor === null || BigInt(minor) > 0n) return null;
+  }
+  return {
+    text: formatMoneyJson({ minor: '0', currency: 'USD' }) ?? '$0.00',
+    value: '0',
+    as_of: envelope.as_of,
+  };
 }
 
 function directionOf(before: string | null, after: string | null): AdvisorWatcher['direction'] {
@@ -478,7 +538,10 @@ export async function evaluateAdvisorWatcher(
       watcher.args,
     );
     if (envelope.status !== 'ok') {
-      status = 'not_available';
+      // WP 11.5e: a payoff plan with nothing left to amortise, because every debt it watched is at
+      // $0.00 (or no liability is on record at all), reads $0.00 — not "not available".
+      latest = watcher.kind === 'debt_balance' ? paidOffReading(watcher, envelope) : null;
+      if (latest === null) status = 'not_available';
     } else if (watcher.kind === 'debt_balance') {
       const included = isRecord(envelope.result) ? envelope.result['included'] : null;
       let total = 0n;
@@ -501,10 +564,14 @@ export async function evaluateAdvisorWatcher(
     status = error.code === 'catalogue.scope_not_granted' ? 'scope_withdrawn' : 'not_available';
   }
 
+  // WP 11.5e: the target reached — the session completes and the watcher stops after this check.
+  const reached = status === 'watching' && targetReached(latest, targetOf(watcher));
+  if (reached) status = 'reached';
+
   // --- the Brief item: the candidate path, through the validator ------------
   let brief: AdvisorWatcher['brief'] = watcher.brief;
   const scope = SCOPE_OF[watcher.kind];
-  if (scope !== undefined && status === 'watching') {
+  if (scope !== undefined && (status === 'watching' || status === 'reached')) {
     brief = await writeFollowUpItem(database, context, dependencies, {
       watcher,
       scope,
@@ -518,10 +585,15 @@ export async function evaluateAdvisorWatcher(
     status,
     checked_at: now.toISOString(),
     brief,
+    target: targetOf(watcher),
+    picked_at: watcher.picked_at ?? null,
+    reached_at: reached ? now.toISOString() : (watcher.reached_at ?? null),
   };
   await transitionAdvisorSession(database, context, {
     sessionId: session.id,
     from: ['tracked'],
+    // Only a reading at or below the target moves the session on; `completed` is final.
+    ...(reached ? { to: 'completed' as const } : {}),
     fields: { watcher: next as unknown as Record<string, unknown> },
   });
   return next;

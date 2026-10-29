@@ -109,6 +109,7 @@ import {
   MODULE_FLAG_KEY,
   narrationsFor,
   retirementReasonInWords,
+  talkThroughRuleOf,
   type RunSwitches,
   type NarrationView,
 } from '@ctx/insights';
@@ -284,6 +285,91 @@ export function narratedByOf(
   return null;
 }
 
+/**
+ * WP 11.5e: a plan the holder picked in an advisor session, as this Brief reported it — snapshotted at
+ * publish. `wording` is a fixed template filled with the watcher's own figures only.
+ */
+const briefProgressSchema = z
+  .object({
+    sessionId: z.uuid(),
+    /** The finding the session was opened from ("Talk this through"), or `null` for a typed question. */
+    origin: z
+      .object({
+        insightId: z.uuid(),
+        ruleId: z.string(),
+        title: z.string(),
+        briefWeek: z.string().nullable(),
+      })
+      .nullable(),
+    pickedAt: z.string().nullable(),
+    label: z.string(),
+    baseline: z.object({ text: z.string(), asOf: z.string().nullable() }),
+    latest: z.object({ text: z.string(), asOf: z.string().nullable() }).nullable(),
+    target: z.object({ text: z.string() }).nullable(),
+    direction: z.enum(['down', 'up', 'same']).nullable(),
+    state: z.enum(['tracking', 'reached', 'not_read']),
+    wording: z.string(),
+    /** The finding that opened the session, withdrawn from this Brief because this plan is working on it. */
+    workedOn: z.object({ insightId: z.uuid(), title: z.string() }).nullable(),
+  })
+  .meta({ id: 'BriefProgress' });
+
+type BriefProgressWire = z.infer<typeof briefProgressSchema>;
+
+function str(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** The stored progress JSON as the wire carries it; `null` for anything not shaped like one. */
+export function briefProgressWire(raw: Record<string, unknown> | null): BriefProgressWire | null {
+  const row = recordOf(raw);
+  if (row === null || row['version'] !== 1) return null;
+  const sessionId = str(row['session_id']);
+  const baseline = recordOf(row['baseline']);
+  const wording = str(row['wording']);
+  const label = str(row['label']);
+  const state = str(row['state']);
+  if (sessionId === null || baseline === null || wording === null || label === null) return null;
+  if (state !== 'tracking' && state !== 'reached' && state !== 'not_read') return null;
+  const origin = recordOf(row['origin']);
+  const latest = recordOf(row['latest']);
+  const target = recordOf(row['target']);
+  const workedOn = recordOf(row['worked_on']);
+  const direction = str(row['direction']);
+  const parsed = briefProgressSchema.safeParse({
+    sessionId,
+    origin:
+      origin === null
+        ? null
+        : {
+            insightId: str(origin['insight_ref']),
+            ruleId: str(origin['rule_id']),
+            title: str(origin['title']),
+            briefWeek: str(origin['brief_week']),
+          },
+    pickedAt: str(row['picked_at']),
+    label,
+    baseline: { text: str(baseline['text']), asOf: str(baseline['as_of']) },
+    latest: latest === null ? null : { text: str(latest['text']), asOf: str(latest['as_of']) },
+    target: target === null ? null : { text: str(target['text']) },
+    direction:
+      direction === 'down' || direction === 'up' || direction === 'same' ? direction : null,
+    state,
+    wording,
+    workedOn:
+      workedOn === null
+        ? null
+        : { insightId: str(workedOn['insight_ref']), title: str(workedOn['title']) },
+  });
+  return parsed.success ? parsed.data : null;
+}
+
 const briefItemSchema = z
   .object({
     id: z.uuid(),
@@ -307,6 +393,14 @@ const briefItemSchema = z
     /** CF-24: the action as the Brief said it; null for a Brief published before 0038 ("no action recorded"). */
     primaryAction: primaryActionSchema.nullable(),
     narration: narrationSchema,
+    /**
+     * WP 11.5e: "Talk this through" — the finding and this Brief's week, for opening an advisor session
+     * pre-gathered on it; `null` when the finding's rule has no calculation the advisor can work from, or
+     * the item is itself a plan's progress.
+     */
+    talkThrough: z.object({ insightId: z.uuid(), briefWeek: z.string() }).nullable(),
+    /** WP 11.5e: the plan's progress when this item reports on a plan the holder picked; else `null`. */
+    progress: briefProgressSchema.nullable(),
     /**
      * WP 10.15 (V8): the card's deterministic content as blocks — its wording (a `text` block with role
      * `narration` under the badge whenever a narration exists or is expected), its headline figure or why there is
@@ -621,6 +715,18 @@ function serialiseBrief(
       retirementEffect: retirementEffectWire(item.retirementEffect),
       primaryAction: item.primaryAction,
       narration: narrationOfItem(item, narrations),
+      ...(() => {
+        const progress = briefProgressWire(item.progress ?? null);
+        return {
+          progress,
+          talkThrough:
+            progress === null &&
+            item.insightId !== null &&
+            talkThroughRuleOf(item.advisorId) !== null
+              ? { insightId: item.insightId, briefWeek: brief.isoWeek }
+              : null,
+        };
+      })(),
     })),
   };
 }

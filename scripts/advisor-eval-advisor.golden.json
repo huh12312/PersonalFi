@@ -1,6 +1,6 @@
 {
   "format": "personalfi.advisor-golden/1",
-  "description": "WP 11.5d: the advisor-mode golden set (12 §5). Each entry is one session: the opening question, the holder’s answers, the outcome a correct protocol reaches (tracked with its catalogue calls and option count, a refusal class, an unanswerable verdict, or the pre-check’s), and a recorded reply per model step. The recorded replies were authored for the harness — two deliberately wrong (each says so) so the measurement is seen to move; `scripts/advisor-eval.ts --advisor --live` against the pinned model writes real ones in the same shape. The catalogue results are 11.5b’s fixture (synthetic; no holder data).",
+  "description": "WP 11.5d: the advisor-mode golden set (12 §5). Each entry is one session: the opening question, the holder’s answers, the outcome a correct protocol reaches (tracked with its catalogue calls and option count, a refusal class, an unanswerable verdict, or the pre-check’s), and a recorded reply per model step. The recorded replies were authored for the harness — two deliberately wrong (each says so) so the measurement is seen to move; `scripts/advisor-eval.ts --advisor --live` against the pinned model writes real ones in the same shape. The catalogue results are 11.5b’s fixture (synthetic; no holder data). WP 11.5e adds six pre-gathered sessions (kind pregathered, one per rule family: cash, debt, investing, subscriptions, retirement, goals): opened from a finding, the question is the family’s template, and the seeded calls must run first.",
   "today": "2026-10-28",
   "catalogue_version": "catalogue/1",
   "replies_source": "authored",
@@ -1967,6 +1967,711 @@
         }
       },
       "note": "deliberately wrong: the recorded reply compiled the emergency fund for an IRA question"
+    },
+    {
+      "id": "pg-cash-c4",
+      "kind": "pregathered",
+      "question": "My Brief flagged “Your cash covers 4.84 months of spending” (A thin cushion). What could I do about my cash cushion, and what would each choice cost?",
+      "answers": [],
+      "origin": {
+        "rule_id": "C4",
+        "title": "Your cash covers 4.84 months of spending",
+        "key": "cash.emergency_fund",
+        "evidence": [
+          {
+            "label": "Cash in checking and savings",
+            "value": "$15,000.00",
+            "source_ref": "snapshot:cash_summary.total",
+            "resolved_display": "{\"minor\": \"1500000\", \"currency\": \"USD\"}"
+          },
+          {
+            "label": "Months covered",
+            "value": "4.84 months",
+            "source_ref": "snapshot:cash_summary.months_covered",
+            "resolved_display": "4.84"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "tracked",
+        "calls": [
+          {
+            "name": "cash.emergency_fund",
+            "args": {}
+          }
+        ],
+        "seeded": [
+          {
+            "name": "cash.emergency_fund",
+            "args": {
+              "target_months": 3
+            }
+          }
+        ],
+        "options": 2
+      },
+      "pick": "o1",
+      "replies": {
+        "clarify": {
+          "restatement": "What could be done about “Your cash covers 4.84 months of spending”, and what each choice costs.",
+          "questions": [],
+          "assumed": []
+        },
+        "gather": {
+          "calls": [
+            {
+              "name": "cash.emergency_fund",
+              "args": "{}"
+            }
+          ],
+          "unanswerable": null
+        },
+        "options": {
+          "options": [
+            {
+              "label": "Keeping the cushion",
+              "backed_by": ["r2:months_covered"],
+              "summary": "Cash covers 4.84 months of spending."
+            },
+            {
+              "label": "Investing the excess",
+              "backed_by": ["r2:excess"],
+              "summary": "There is $5,700.00 above the target."
+            }
+          ]
+        },
+        "tradeoffs": {
+          "tradeoffs": [
+            {
+              "option": "o1",
+              "benefit": ["r2:months_covered"],
+              "cost": ["r2:annual_spread_on_excess"],
+              "note": "A larger cushion, at $200.64 a year of yield given up."
+            },
+            {
+              "option": "o2",
+              "benefit": ["r2:annual_spread_on_excess"],
+              "cost": ["r2:months_covered"],
+              "note": "The excess earns more, and the cushion falls toward the target."
+            }
+          ]
+        },
+        "judge": {
+          "scores": [
+            {
+              "criterion": "cost_surfaced",
+              "met": true,
+              "reason": "Each option names what it gives up."
+            },
+            {
+              "criterion": "non_applicability",
+              "met": true,
+              "reason": "It says when the approach would not suit."
+            },
+            {
+              "criterion": "scope_kept",
+              "met": true,
+              "reason": "No security, timing or execution."
+            }
+          ]
+        },
+        "plan": {
+          "steps": [
+            {
+              "text": "Financial health shows the cushion in months.",
+              "action_href": "/health"
+            }
+          ]
+        }
+      },
+      "note": "C4, cash family: the compiler asks for the seeded call again; it runs once, first."
+    },
+    {
+      "id": "pg-debt-d1",
+      "kind": "pregathered",
+      "question": "My Brief flagged “Paying the highest rate first saves interest” (Two ways to order a payoff). What are my options for these debts, and what would each choice cost?",
+      "answers": [],
+      "origin": {
+        "rule_id": "D1",
+        "title": "Paying the highest rate first saves interest",
+        "key": "debt.payoff_order",
+        "evidence": [
+          {
+            "label": "Balance",
+            "value": "$300.00",
+            "source_ref": "snapshot:liabilities_terms.liabilities[0].current_balance",
+            "resolved_display": "{\"minor\": \"30000\", \"currency\": \"USD\"}"
+          },
+          {
+            "label": "Rate",
+            "value": "24%",
+            "source_ref": "snapshot:liabilities_terms.liabilities[0].apr",
+            "resolved_display": "0.24"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "tracked",
+        "calls": [],
+        "seeded": [
+          {
+            "name": "debt.payoff_plan",
+            "args": {
+              "order": "avalanche",
+              "extra_monthly": {
+                "minor": "0",
+                "currency": "USD"
+              }
+            }
+          }
+        ],
+        "options": 2
+      },
+      "pick": "o1",
+      "replies": {
+        "clarify": {
+          "restatement": "What could be done about “Paying the highest rate first saves interest”, and what each choice costs.",
+          "questions": [],
+          "assumed": []
+        },
+        "gather": {
+          "calls": [],
+          "unanswerable": {
+            "reason": "not_computable",
+            "nearest_screen": "/accounts"
+          }
+        },
+        "options": {
+          "options": [
+            {
+              "label": "Avalanche order",
+              "backed_by": ["r2:plans[0].total_interest"],
+              "summary": "The cards are paid off in 12 months with $47.05 of interest."
+            },
+            {
+              "label": "Snowball order",
+              "backed_by": ["r2:plans[1].total_interest"],
+              "summary": "Also 12 months, with $47.05 of interest."
+            }
+          ]
+        },
+        "tradeoffs": {
+          "tradeoffs": [
+            {
+              "option": "o1",
+              "benefit": ["r2:plans[0].months"],
+              "cost": ["r2:plans[0].total_interest"],
+              "note": "Clears the cards in 12 months at $47.05 of interest."
+            },
+            {
+              "option": "o2",
+              "benefit": ["r2:plans[1].months"],
+              "cost": ["r2:plans[1].total_interest"],
+              "note": "The same 12 months and $47.05 of interest, smallest balance first."
+            }
+          ]
+        },
+        "judge": {
+          "scores": [
+            {
+              "criterion": "cost_surfaced",
+              "met": true,
+              "reason": "Each option names what it gives up."
+            },
+            {
+              "criterion": "non_applicability",
+              "met": true,
+              "reason": "It says when the approach would not suit."
+            },
+            {
+              "criterion": "scope_kept",
+              "met": true,
+              "reason": "No security, timing or execution."
+            }
+          ]
+        },
+        "plan": {
+          "steps": [
+            {
+              "text": "Accounts lists each card with its balance and rate.",
+              "action_href": "/accounts"
+            }
+          ]
+        }
+      },
+      "note": "D1, debt family: the compiler answers not computable; the seeded payoff plan answers the finding anyway."
+    },
+    {
+      "id": "pg-investing-i1",
+      "kind": "pregathered",
+      "question": "My Brief flagged “Your allocation has drifted from its target” (Drift from your target allocation). What are my options for my investments here, and what would each choice cost?",
+      "answers": [],
+      "origin": {
+        "rule_id": "I1",
+        "title": "Your allocation has drifted from its target",
+        "key": "investing.drift",
+        "evidence": [
+          {
+            "label": "US equity share",
+            "value": "70%",
+            "source_ref": "snapshot:holdings_aggregate.classes[0].weight",
+            "resolved_display": "0.7"
+          },
+          {
+            "label": "Target share",
+            "value": "60%",
+            "source_ref": "snapshot:holdings_aggregate.target[0].weight",
+            "resolved_display": "0.6"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "tracked",
+        "calls": [
+          {
+            "name": "investing.allocation",
+            "args": {}
+          }
+        ],
+        "seeded": [
+          {
+            "name": "investing.drift",
+            "args": {}
+          }
+        ],
+        "options": 2
+      },
+      "pick": "o1",
+      "replies": {
+        "clarify": {
+          "restatement": "What could be done about “Your allocation has drifted from its target”, and what each choice costs.",
+          "questions": [],
+          "assumed": []
+        },
+        "gather": {
+          "calls": [
+            {
+              "name": "investing.allocation",
+              "args": "{}"
+            }
+          ],
+          "unanswerable": null
+        },
+        "options": {
+          "options": [
+            {
+              "label": "Rebalancing with new money",
+              "backed_by": ["r2:classes[1].amount_to_target"],
+              "summary": "Bonds are $24,000.00 below their target."
+            },
+            {
+              "label": "Leaving the mix as it is",
+              "backed_by": ["r2:classes[0].drift"],
+              "summary": "US equity sits 10% over its target."
+            }
+          ]
+        },
+        "tradeoffs": {
+          "tradeoffs": [
+            {
+              "option": "o1",
+              "benefit": ["r2:classes[1].drift"],
+              "cost": ["r2:classes[1].amount_to_target"],
+              "note": "Brings bonds back toward 40% at $24,000.00 of new money."
+            },
+            {
+              "option": "o2",
+              "benefit": ["r2:investable_total"],
+              "cost": ["r2:classes[0].drift"],
+              "note": "Nothing moves, and US equity stays 10% over its target."
+            }
+          ]
+        },
+        "judge": {
+          "scores": [
+            {
+              "criterion": "cost_surfaced",
+              "met": true,
+              "reason": "Each option names what it gives up."
+            },
+            {
+              "criterion": "non_applicability",
+              "met": true,
+              "reason": "It says when the approach would not suit."
+            },
+            {
+              "criterion": "scope_kept",
+              "met": true,
+              "reason": "No security, timing or execution."
+            }
+          ]
+        },
+        "plan": {
+          "steps": [
+            {
+              "text": "Investments shows the mix against its target.",
+              "action_href": "/investments"
+            }
+          ]
+        }
+      },
+      "note": "I1, investing family: the compiler asks for allocation; drift (seeded) runs first."
+    },
+    {
+      "id": "pg-subscriptions-u2",
+      "kind": "pregathered",
+      "question": "My Brief flagged “A subscription costs more than it did” (Subscription price increases). What are my options for these recurring charges, and what would each choice cost?",
+      "answers": [],
+      "origin": {
+        "rule_id": "U2",
+        "title": "A subscription costs more than it did",
+        "key": "subscription.price_increase",
+        "evidence": [
+          {
+            "label": "Previous price",
+            "value": "$15.99",
+            "source_ref": "snapshot:recurring_list.streams[0].price_changes[0].previous_amount",
+            "resolved_display": "{\"minor\": \"1599\", \"currency\": \"USD\"}"
+          },
+          {
+            "label": "New price",
+            "value": "$18.99",
+            "source_ref": "snapshot:recurring_list.streams[0].price_changes[0].new_amount",
+            "resolved_display": "{\"minor\": \"1899\", \"currency\": \"USD\"}"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "tracked",
+        "calls": [
+          {
+            "name": "recurring.waste",
+            "args": {}
+          }
+        ],
+        "seeded": [
+          {
+            "name": "recurring.waste",
+            "args": {}
+          }
+        ],
+        "options": 2
+      },
+      "pick": "o1",
+      "replies": {
+        "clarify": {
+          "restatement": "What could be done about “A subscription costs more than it did”, and what each choice costs.",
+          "questions": [],
+          "assumed": []
+        },
+        "gather": {
+          "calls": [
+            {
+              "name": "recurring.waste",
+              "args": "{}"
+            }
+          ],
+          "unanswerable": null
+        },
+        "options": {
+          "options": [
+            {
+              "label": "Keeping the subscription",
+              "backed_by": ["r2:findings[0].annual_impact"],
+              "summary": "It costs $36.00 a year more."
+            },
+            {
+              "label": "Reviewing what it is worth",
+              "backed_by": ["r1:evidence[1]"],
+              "summary": "The new price is $18.99."
+            }
+          ]
+        },
+        "tradeoffs": {
+          "tradeoffs": [
+            {
+              "option": "o1",
+              "benefit": ["r1:evidence[0]"],
+              "cost": ["r2:findings[0].annual_impact"],
+              "note": "Nothing changes, at $36.00 a year more."
+            },
+            {
+              "option": "o2",
+              "benefit": ["r2:findings[0].annual_impact"],
+              "cost": ["r1:evidence[1]"],
+              "note": "Up to $36.00 a year back if it goes, and the service with it."
+            }
+          ]
+        },
+        "judge": {
+          "scores": [
+            {
+              "criterion": "cost_surfaced",
+              "met": true,
+              "reason": "Each option names what it gives up."
+            },
+            {
+              "criterion": "non_applicability",
+              "met": true,
+              "reason": "It says when the approach would not suit."
+            },
+            {
+              "criterion": "scope_kept",
+              "met": true,
+              "reason": "No security, timing or execution."
+            }
+          ]
+        },
+        "plan": {
+          "steps": [
+            {
+              "text": "Recurring lists the charge and its history.",
+              "action_href": "/recurring"
+            }
+          ]
+        }
+      },
+      "note": "U2, subscriptions family: the finding’s own prices join the context as r1."
+    },
+    {
+      "id": "pg-retirement-r4",
+      "kind": "pregathered",
+      "question": "My Brief flagged “Claiming at a different age changes the benefit” (Claiming Social Security at seventy instead). What are my options for my retirement plan, and what would each choice cost?",
+      "answers": [],
+      "origin": {
+        "rule_id": "R4",
+        "title": "Claiming at a different age changes the benefit",
+        "key": "retirement.claiming_age.67_0",
+        "evidence": [
+          {
+            "label": "Planned claim age",
+            "value": "age 67",
+            "source_ref": "snapshot:plan_projection.social_security.claim_age_years",
+            "resolved_display": "67"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "tracked",
+        "calls": [
+          {
+            "name": "retirement.claiming",
+            "args": {
+              "ages": [62, 67, 70]
+            }
+          }
+        ],
+        "seeded": [
+          {
+            "name": "retirement.claiming",
+            "args": {
+              "ages": [62, 67, 70]
+            }
+          }
+        ],
+        "options": 2
+      },
+      "pick": "o1",
+      "replies": {
+        "clarify": {
+          "restatement": "What could be done about “Claiming at a different age changes the benefit”, and what each choice costs.",
+          "questions": [],
+          "assumed": []
+        },
+        "gather": {
+          "calls": [
+            {
+              "name": "retirement.claiming",
+              "args": "{\"ages\":[62,67,70]}"
+            }
+          ],
+          "unanswerable": null
+        },
+        "options": {
+          "options": [
+            {
+              "label": "Claiming at 62",
+              "backed_by": ["r2:ages[0].factor"],
+              "summary": "The benefit is 0.7× the planned one."
+            },
+            {
+              "label": "Claiming at 70",
+              "backed_by": ["r2:ages[2].factor"],
+              "summary": "The benefit is 1.24× the planned one."
+            }
+          ]
+        },
+        "tradeoffs": {
+          "tradeoffs": [
+            {
+              "option": "o1",
+              "benefit": ["r2:ages[0].age"],
+              "cost": ["r2:ages[0].factor"],
+              "note": "Payments start at age 62, with a factor of 0.7×."
+            },
+            {
+              "option": "o2",
+              "benefit": ["r2:ages[2].factor"],
+              "cost": ["r2:ages[2].age"],
+              "note": "A factor of 1.24×, with payments waiting until age 70."
+            }
+          ]
+        },
+        "judge": {
+          "scores": [
+            {
+              "criterion": "cost_surfaced",
+              "met": true,
+              "reason": "Each option names what it gives up."
+            },
+            {
+              "criterion": "non_applicability",
+              "met": true,
+              "reason": "It says when the approach would not suit."
+            },
+            {
+              "criterion": "scope_kept",
+              "met": true,
+              "reason": "No security, timing or execution."
+            }
+          ]
+        },
+        "plan": {
+          "steps": [
+            {
+              "text": "The Plan screen holds the claiming age.",
+              "action_href": "/plan"
+            }
+          ]
+        }
+      },
+      "note": "R4, retirement family: claiming at 62, 67 and 70, seeded."
+    },
+    {
+      "id": "pg-goals-r6",
+      "kind": "pregathered",
+      "question": "My Brief flagged “A goal is behind the pace that reaches it on time” (A goal below the pace that reaches it on time). What are my options for reaching this goal, and what would each choice cost?",
+      "answers": [],
+      "origin": {
+        "rule_id": "R6",
+        "title": "A goal is behind the pace that reaches it on time",
+        "key": "retirement.goal_pace.GOAL_df4b349dc937",
+        "evidence": [
+          {
+            "label": "Goal",
+            "value": "House deposit",
+            "source_ref": "snapshot:goals_list.goals[0].name",
+            "resolved_display": "House deposit"
+          },
+          {
+            "label": "Its target",
+            "value": "$60,000.00",
+            "source_ref": "snapshot:goals_list.goals[0].target",
+            "resolved_display": "{\"minor\": \"6000000\", \"currency\": \"USD\"}"
+          },
+          {
+            "label": "Needed per month",
+            "value": "$1,666.67",
+            "source_ref": "snapshot:goals_list.goals[0].pace.required_monthly",
+            "resolved_display": "{\"minor\": \"166667\", \"currency\": \"USD\"}"
+          }
+        ]
+      },
+      "expected": {
+        "outcome": "tracked",
+        "calls": [
+          {
+            "name": "goal.required_savings",
+            "args": {
+              "goal_ref": "GOAL_df4b349dc937"
+            }
+          }
+        ],
+        "seeded": [
+          {
+            "name": "goal.required_savings",
+            "args": {
+              "goal_ref": "GOAL_df4b349dc937"
+            }
+          }
+        ],
+        "options": 2
+      },
+      "pick": "o1",
+      "replies": {
+        "clarify": {
+          "restatement": "What could be done about “A goal is behind the pace that reaches it on time”, and what each choice costs.",
+          "questions": [],
+          "assumed": []
+        },
+        "gather": {
+          "calls": [
+            {
+              "name": "goal.required_savings",
+              "args": "{\"goal_ref\":\"GOAL_df4b349dc937\"}"
+            }
+          ],
+          "unanswerable": null
+        },
+        "options": {
+          "options": [
+            {
+              "label": "Raising the monthly saving",
+              "backed_by": ["r2:monthly"],
+              "summary": "About $1,312.00 a month more reaches $60,000.00 on time."
+            },
+            {
+              "label": "Keeping the planned amount",
+              "backed_by": ["r2:planned_monthly"],
+              "summary": "The plan keeps $1,000.00 a month going in."
+            }
+          ]
+        },
+        "tradeoffs": {
+          "tradeoffs": [
+            {
+              "option": "o1",
+              "benefit": ["r2:target"],
+              "cost": ["r2:monthly"],
+              "note": "Reaches $60,000.00 on time, at $1,312.00 a month more."
+            },
+            {
+              "option": "o2",
+              "benefit": ["r2:planned_monthly"],
+              "cost": ["r1:evidence[2]"],
+              "note": "Keeps $1,000.00 a month, while $1,666.67 a month is what reaches the target."
+            }
+          ]
+        },
+        "judge": {
+          "scores": [
+            {
+              "criterion": "cost_surfaced",
+              "met": true,
+              "reason": "Each option names what it gives up."
+            },
+            {
+              "criterion": "non_applicability",
+              "met": true,
+              "reason": "It says when the approach would not suit."
+            },
+            {
+              "criterion": "scope_kept",
+              "met": true,
+              "reason": "No security, timing or execution."
+            }
+          ]
+        },
+        "plan": {
+          "steps": [
+            {
+              "text": "The Goals screen holds the goal and its monthly contribution.",
+              "action_href": "/goals"
+            }
+          ]
+        }
+      },
+      "note": "R6, goals family: the goal is seeded by the ref its key carries; its name never enters the finding’s figures."
     }
   ]
 }

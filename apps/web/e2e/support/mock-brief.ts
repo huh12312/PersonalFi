@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import type { Page, Route } from '@playwright/test';
 
+import { ADVISOR_FINDING_ID, ADVISOR_FINDING_TITLE } from './mock-advisor.ts';
 import {
   blockDocumentOf,
   briefItemBlocks,
@@ -97,6 +98,9 @@ export function briefItem(
     retirementEffect: COMPUTED_EFFECT,
     // WP 9.6 items 3 and 4: the two fields the response now carries on every item.
     primaryAction: null,
+    // WP 11.5e: "Talk this through" and the plan's progress; most items offer neither.
+    talkThrough: null,
+    progress: null,
     narration: { status: 'none', aiAssisted: false, textShown: false, summaryMd: null },
     ...overrides,
   };
@@ -278,6 +282,75 @@ export function narratedBriefItems(): Record<string, unknown>[] {
       annualizedImpact: { minor: '31000', currency: 'USD' },
       carried: true,
     }),
+  ];
+}
+
+/** WP 11.5e: the seeded advisor history's followed session (`mock-advisor.ts`'s `…00b3`), the plan the progress item reports on. */
+export const PROGRESS_SESSION_ID = '0190d000-0000-7000-8000-0000000000b3';
+export const PROGRESS_WORDING =
+  'Emergency fund runway was 2.0 months when you picked this plan on 2026-10-28. It is 3.4 months now: up since then.';
+export const WORKED_ON_TITLE = 'Idle cash is earning little';
+
+/**
+ * WP 11.5e: the Brief of 2026-W43 with a cash finding offering "Talk this through", one item reporting on a plan the
+ * holder picked (it stands in for the finding being worked on, `workedOn`), and a spending finding with no link.
+ */
+export function talkThroughBriefItems(): Record<string, unknown>[] {
+  return [
+    briefItem({
+      id: '1',
+      insightId: ADVISOR_FINDING_ID,
+      advisorId: 'builtin.cash.emergency_fund',
+      insightKey: 'cash.emergency_fund.cover',
+      insightType: 'cash.emergency_fund',
+      title: ADVISOR_FINDING_TITLE,
+      summaryMd: 'Cash on hand covers 2.4 months of spending; the target is 3 months.',
+      annualizedImpact: null,
+      retirementEffect: { kind: 'not_computable', reason: 'no dollar figure' },
+      evidence: [
+        {
+          position: 0,
+          kind: 'metric',
+          label: 'Emergency-fund cover',
+          value: '2.4 months',
+          sourceRef: 'snapshot:emergency_fund.cover_months',
+          resolvedDisplay: '2.4 months',
+          href: null,
+        },
+      ],
+      talkThrough: { insightId: ADVISOR_FINDING_ID, briefWeek: '2026-W43' },
+    }),
+    briefItem({
+      id: '2',
+      position: 1,
+      advisorId: 'builtin.advisor.follow_up',
+      insightKey: 'advisor.follow_up.emergency_runway',
+      insightType: 'advisor.follow_up',
+      title: 'Following your emergency fund plan',
+      summaryMd: 'The plan you picked is being followed.',
+      annualizedImpact: { minor: '31000', currency: 'USD' },
+      retirementEffect: { kind: 'not_computable', reason: 'a plan you picked, not a saving' },
+      progress: {
+        sessionId: PROGRESS_SESSION_ID,
+        origin: {
+          insightId: 'insight_idle_cash',
+          ruleId: 'builtin.cash.idle_cash',
+          title: WORKED_ON_TITLE,
+          briefWeek: '2026-W40',
+        },
+        pickedAt: '2026-10-28',
+        label: 'Emergency fund runway',
+        baseline: { text: '2.0 months', asOf: '2026-10-28' },
+        latest: { text: '3.4 months', asOf: '2026-11-04' },
+        target: { text: '6.0 months' },
+        direction: 'up',
+        state: 'tracking',
+        wording: PROGRESS_WORDING,
+        workedOn: { insightId: 'insight_idle_cash', title: WORKED_ON_TITLE },
+      },
+    }),
+    // A spending finding: the advisor does not take these up, so it offers no link.
+    briefItem({ id: '3', position: 2 }),
   ];
 }
 

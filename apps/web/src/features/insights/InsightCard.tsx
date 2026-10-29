@@ -17,6 +17,7 @@ import { SeverityBadge } from '../../components/finance/SeverityBadge.tsx';
 import { cn } from '../../lib/cn.ts';
 import { useAccountsLookup } from '../accounts/useAccountsLookup.ts';
 import { TransactionDetailSheet } from '../transactions/TransactionDetailSheet.tsx';
+import { TalkThroughLink } from '../advisor/TalkThroughLink.tsx';
 import { CreateRuleFromInsight } from './CreateRuleFromInsight.tsx';
 import { DISMISS_REASON_CODES, DismissReasonDialog } from './DismissReasonDialog.tsx';
 import { EvidencePanel } from './EvidencePanel.tsx';
@@ -296,6 +297,7 @@ export function InsightCard({ insight, onReviewed }: InsightCardProps) {
           </button>
         )}
         <ExplainButton explanation={explanation} subject={insight.title} />
+        {insight.talkThrough && <TalkThroughLink insightId={insight.id} />}
         <div
           className="flex flex-wrap items-center gap-1"
           role="group"

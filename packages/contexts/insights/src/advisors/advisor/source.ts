@@ -117,6 +117,17 @@ export type AdvisorSessionOpening =
       readonly nearestScreen: string;
     };
 
+/**
+ * WP 11.5e: the finding a "Talk this through" session was opened from. Written
+ * whole or not at all (0062's `advisor_sessions_origin_pair`).
+ */
+export interface AdvisorSessionOrigin {
+  readonly insightRef: string;
+  readonly ruleId: string;
+  readonly title: string;
+  readonly briefWeek: string | null;
+}
+
 export async function createAdvisorSession(
   executor: InsightsExecutor,
   context: InsightsContext,
@@ -125,6 +136,7 @@ export async function createAdvisorSession(
     readonly catalogueVersion: string;
     readonly tokenBudget: number;
     readonly opening: AdvisorSessionOpening;
+    readonly origin?: AdvisorSessionOrigin | null;
   },
 ): Promise<StoredAdvisorSession> {
   const now = context.clock.now();
@@ -143,6 +155,10 @@ export async function createAdvisorSession(
       nearestScreen: opening.status === 'unanswerable' ? opening.nearestScreen : null,
       tokenBudget: input.tokenBudget,
       tokensUsed: 0,
+      originInsightRef: input.origin?.insightRef ?? null,
+      originRuleId: input.origin?.ruleId ?? null,
+      originTitle: input.origin?.title ?? null,
+      originBriefWeek: input.origin?.briefWeek ?? null,
       createdAt: now,
       updatedAt: now,
       finishedAt: opening.status === 'clarifying' ? null : now,
@@ -274,6 +290,7 @@ export type AdvisorSessionFields = Partial<
 
 const FINAL: ReadonlySet<AdvisorSessionStatus> = new Set([
   'tracked',
+  'completed',
   'refused',
   'unanswerable',
   'failed',
@@ -343,3 +360,25 @@ export async function recordAdvisorTokens(
 
 /** Every open status: what cancel may close. */
 export const ADVISOR_CANCELLABLE: readonly AdvisorSessionStatus[] = ADVISOR_SESSION_OPEN;
+
+/**
+ * WP 11.5e: the sessions behind the Brief's follow-up items, by watcher id
+ * (the item's key is `advisor.follow_up.<watcher id>`): tracked or completed.
+ */
+export async function findAdvisorSessionsByWatcher(
+  executor: InsightsExecutor,
+  userId: string,
+  watcherIds: readonly string[],
+): Promise<readonly StoredAdvisorSession[]> {
+  if (watcherIds.length === 0) return [];
+  return executor
+    .select()
+    .from(advisorSessions)
+    .where(
+      and(
+        eq(advisorSessions.userId, userId),
+        inArray(advisorSessions.watcherId, [...watcherIds]),
+        inArray(advisorSessions.status, ['tracked', 'completed']),
+      ),
+    );
+}

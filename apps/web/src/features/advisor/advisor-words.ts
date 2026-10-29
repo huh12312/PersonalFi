@@ -55,10 +55,14 @@ export function isWaiting(session: Pick<AdvisorSession, 'status' | 'clarificatio
   );
 }
 
-/** True once the session can no longer move. `tracked` is an ending too: the Brief carries it from there. */
+/**
+ * True once the session can no longer move. `tracked` is an ending too: the Brief carries it from there. So is
+ * `completed` (WP 11.5e): the plan's watched figure reached its target and the watcher stopped.
+ */
 export function isEnded(status: AdvisorStatus): boolean {
   return (
     status === 'tracked' ||
+    status === 'completed' ||
     status === 'refused' ||
     status === 'unanswerable' ||
     status === 'failed' ||
@@ -93,6 +97,8 @@ export function outcomeWords(session: Pick<AdvisorSession, 'status' | 'clarifica
       return 'The options are ready.';
     case 'tracked':
       return 'The plan is ready and is being followed in the Brief.';
+    case 'completed':
+      return "The plan's target is reached and the plan is no longer followed.";
     case 'refused':
       return 'The session was refused.';
     case 'unanswerable':
@@ -123,6 +129,8 @@ export function statusWords(session: Pick<AdvisorSession, 'status' | 'clarificat
       return 'Writing the steps';
     case 'tracked':
       return 'Followed in the Brief';
+    case 'completed':
+      return 'Target reached';
     case 'refused':
       return 'Refused';
     case 'unanswerable':
@@ -201,6 +209,15 @@ export const REQUEST_FAILED_WORDS = 'The request could not be sent. Nothing was 
 export const IN_FLIGHT_WORDS =
   'Another session is still being worked on; this one can start when it is done.';
 export const EMPTY_QUESTION_WORDS = 'The question is empty.';
+/** WP 11.5e: a finding the advisor was opened from (`origin`) that the api could not take up. */
+export const FINDING_NOT_FOUND_WORDS = 'That finding could not be found; it may have been removed.';
+export const FINDING_NOT_SUPPORTED_WORDS =
+  'The advisor does not take up this kind of finding yet. A question of your own can still be asked below.';
+export const FINDING_NOT_GRANTED_WORDS =
+  "This finding comes from a built-in check that has not been approved for the advisor's use. Approvals are in Advisor management.";
+export const BRIEF_UNKNOWN_WORDS = 'That Brief could not be found.';
+/** WP 11.5e: said in the tracked box once the plan's watched figure has reached its target. */
+export const REACHED_WORDS = "Reached: the plan's target is met; this plan is no longer followed.";
 export const NO_OPTIONS_WORDS =
   'No option came with its cost, so none is shown. The advisor does not offer a choice without what it costs.';
 
@@ -217,6 +234,60 @@ export function optionsDroppedWords(count: number): string {
 /** Options that carry a cost: the only ones the screen ever shows. */
 export function optionsWithCost(session: Pick<AdvisorSession, 'options'>): AdvisorOption[] {
   return (session.options ?? []).filter((option) => option.cost.length > 0);
+}
+
+const ISO_WEEK = /^(\d{4})-W(\d{2})$/u;
+
+/** "2026-W43" as "week 43 of 2026"; a value that is not an ISO week is returned as it came. */
+export function weekLabel(isoWeek: string): string {
+  const match = ISO_WEEK.exec(isoWeek);
+  return match === null ? isoWeek : `week ${String(Number(match[2]))} of ${match[1]!}`;
+}
+
+/** Whether a string is an ISO week the api accepts (`YYYY-Www`). */
+export function isIsoWeek(value: string): boolean {
+  return ISO_WEEK.test(value);
+}
+
+/** "About: Avoidable fees this year, from the Brief of week 43 of 2026", or "About: <title>" with no week. */
+export function originWords(origin: NonNullable<AdvisorSession['origin']>): string {
+  return origin.briefWeek === null
+    ? `About: ${origin.title}`
+    : `About: ${origin.title}, from the Brief of ${weekLabel(origin.briefWeek)}`;
+}
+
+/** `emergency_runway` as "Emergency runway": the fallback when a calculation has no label of its own yet. */
+export function humaniseFunction(name: string): string {
+  const spaced = name.replace(/[_.-]+/gu, ' ').trim();
+  return spaced === '' ? name : `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`;
+}
+
+/**
+ * What was gathered before the first question, for a session opened from a finding: the seeded calculations (by the
+ * label the "I looked at" line gives them once it exists, else the function name humanised) and, when it joined,
+ * the finding's own figures. `null` when nothing was gathered first.
+ */
+export function pregatheredWords(
+  session: Pick<AdvisorSession, 'pregathered' | 'lookedAt'>,
+): string | null {
+  const pregathered = session.pregathered;
+  if (pregathered === null) return null;
+  const labels = new Map(
+    (session.lookedAt?.items ?? []).map((item) => [item.function, item.label]),
+  );
+  const parts = pregathered.seeded.map((name) => labels.get(name) ?? humaniseFunction(name));
+  if (pregathered.finding === 'joined') parts.push("the finding's own figures");
+  if (parts.length === 0) return null;
+  const list =
+    parts.length === 1
+      ? parts[0]!
+      : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]!}`;
+  return `Gathered first: ${list}.`;
+}
+
+/** "Picked on 2026-10-01", or `null` when the day is not known. */
+export function pickedOnWords(pickedAt: string | null): string | null {
+  return pickedAt === null ? null : `Picked on ${pickedAt}`;
 }
 
 /** "Not checked yet" or "Latest: ...". */

@@ -102,6 +102,7 @@ function buildInsight(overrides: Partial<Insight> = {}): Insight {
       { text: ', ' },
       { text: 'Everyday Checking', entityType: 'account', entityId: ACCOUNT },
     ],
+    talkThrough: false,
     ...overrides,
   };
 }
@@ -125,8 +126,13 @@ function renderInRouter(node: () => ReactNode) {
     path: '/transactions',
     component: () => <p>transactions screen</p>,
   });
+  const advisor = createRoute({
+    getParentRoute: () => root,
+    path: '/advisor',
+    component: () => <p>advisor screen</p>,
+  });
   const router = createRouter({
-    routeTree: root.addChildren([page, category, account, transactions]),
+    routeTree: root.addChildren([page, category, account, transactions, advisor]),
     history: createMemoryHistory({ initialEntries: ['/'] }),
   });
   render(
@@ -209,6 +215,27 @@ describe('mentions', () => {
   it('segments that do not spell the field are ignored in favour of the field itself', () => {
     expect(segmentsFor([{ text: 'Something else' }], 'The title')).toEqual([{ text: 'The title' }]);
     expect(segmentsFor(null, 'The title')).toEqual([{ text: 'The title' }]);
+  });
+});
+
+describe('Talk this through (WP 11.5e)', () => {
+  beforeEach(() => ensureApiClient());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('is a real link to the advisor on a card whose finding the advisor takes up, with no week', async () => {
+    const user = userEvent.setup();
+    const router = card(buildInsight({ talkThrough: true }));
+    const link = await screen.findByRole('link', { name: 'Talk this through' });
+    expect(link).toHaveAttribute('href', `/advisor?finding=${INSIGHT_ID}`);
+    await user.click(link);
+    await waitFor(() => expect(router.state.location.pathname).toBe('/advisor'));
+    expect(router.state.location.search).toEqual({ finding: INSIGHT_ID });
+  });
+
+  it('is absent when the finding is not offered to the advisor', async () => {
+    card(buildInsight({ talkThrough: false }));
+    await screen.findByRole('heading', { level: 2 });
+    expect(screen.queryByRole('link', { name: 'Talk this through' })).toBeNull();
   });
 });
 

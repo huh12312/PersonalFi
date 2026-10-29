@@ -640,6 +640,12 @@ export {
 
 export { BriefPublished } from './events.ts';
 
+// WP 11.5e — the Brief and the advisor meet: the Brief's read of a published week, the progress
+// attachment and the dedupe (the advisor half is in `advisors/advisor/{origin,progress}.ts`).
+export { findBriefByWeek } from './brief/store.ts';
+export { withBriefProgress } from './brief/job.ts';
+export { supersededFindings } from './brief/assembly.ts';
+
 // WP 5.3 — The narrator: grounded narration only (advisor contract 1.5.0,
 // migration 0031). Appended as its own labelled block: this file is shared
 // with WP 5.6 this wave, and each package appends rather than edits another's

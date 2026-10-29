@@ -13,7 +13,11 @@ import {
   isWorking,
   judgeWords,
   latestWords,
+  originWords,
+  pickedOnWords,
+  pregatheredWords,
   refusalStepWords,
+  REACHED_WORDS,
   runsOnLabel,
   withheldWords,
   type AdvisorJudge,
@@ -46,20 +50,43 @@ function Plan({ plan }: { readonly plan: NonNullable<AdvisorSession['plan']> }) 
   );
 }
 
-function Tracked({ tracked }: { readonly tracked: NonNullable<AdvisorSession['tracked']> }) {
+function Tracked({
+  tracked,
+  completed,
+}: {
+  readonly tracked: NonNullable<AdvisorSession['tracked']>;
+  readonly completed: boolean;
+}) {
   const direction = directionWords(tracked.direction);
+  const pickedOn = pickedOnWords(tracked.pickedAt);
   return (
     <div
       className="mt-3 rounded-md border border-border-hairline bg-bg-surface p-3"
       data-testid="advisor-tracked"
+      data-completed={completed ? 'true' : undefined}
     >
-      <h4 className="text-small font-medium text-text-primary">Followed in the Brief</h4>
+      <h4 className="text-small font-medium text-text-primary">
+        {completed ? 'Target reached' : 'Followed in the Brief'}
+      </h4>
       <p
         className="mt-1 text-small text-text-primary [overflow-wrap:anywhere]"
         data-testid="advisor-tracked-label"
       >
         {tracked.label}
       </p>
+      {pickedOn !== null && (
+        <p className="mt-1 text-caption text-text-muted" data-testid="advisor-tracked-picked">
+          {pickedOn}
+        </p>
+      )}
+      {tracked.wording !== '' && (
+        <p
+          className="mt-1 text-small text-text-secondary [overflow-wrap:anywhere]"
+          data-testid="advisor-tracked-wording"
+        >
+          {tracked.wording}
+        </p>
+      )}
       <p className="mt-1 text-small text-text-secondary" data-testid="advisor-tracked-baseline">
         When you picked it: {tracked.baseline.text}
         {tracked.baseline.asOf !== null && (
@@ -72,18 +99,33 @@ function Tracked({ tracked }: { readonly tracked: NonNullable<AdvisorSession['tr
           <span className="text-caption text-text-muted"> (as of {tracked.latest.asOf})</span>
         )}
       </p>
+      {tracked.target !== null && (
+        <p className="mt-1 text-small text-text-secondary" data-testid="advisor-tracked-target">
+          Target: {tracked.target.text}
+        </p>
+      )}
       {direction !== null && tracked.latest !== null && (
         <p className="mt-1 text-caption text-text-muted" data-testid="advisor-tracked-direction">
           {direction}
         </p>
       )}
-      <p className="mt-2 text-small">
-        <ScreenLink
-          path={tracked.brief.path}
-          label="See it in the Brief"
-          testId="advisor-tracked-link"
-        />
-      </p>
+      {completed && (
+        <p
+          className="mt-2 text-small font-medium text-text-primary"
+          data-testid="advisor-tracked-reached"
+        >
+          {REACHED_WORDS}
+        </p>
+      )}
+      {!completed && (
+        <p className="mt-2 text-small">
+          <ScreenLink
+            path={tracked.brief.path}
+            label="See it in the Brief"
+            testId="advisor-tracked-link"
+          />
+        </p>
+      )}
     </div>
   );
 }
@@ -169,6 +211,7 @@ export const SessionView = forwardRef<HTMLElement, SessionViewProps>(function Se
   }
 
   const withheld = knowledge?.withheld.length ?? 0;
+  const pregathered = pregatheredWords(session);
 
   return (
     <section
@@ -180,6 +223,24 @@ export const SessionView = forwardRef<HTMLElement, SessionViewProps>(function Se
       data-state={status}
       data-working={working ? 'true' : undefined}
     >
+      {session.origin !== null && (
+        <div className="mb-2" data-testid="advisor-origin">
+          <p
+            className="text-caption font-medium text-text-secondary [overflow-wrap:anywhere]"
+            data-testid="advisor-origin-line"
+          >
+            {originWords(session.origin)}
+          </p>
+          {pregathered !== null && (
+            <p
+              className="mt-0.5 text-caption text-text-muted [overflow-wrap:anywhere]"
+              data-testid="advisor-pregathered"
+            >
+              {pregathered}
+            </p>
+          )}
+        </div>
+      )}
       <h3
         id={headingId}
         className="text-small font-medium text-text-primary [overflow-wrap:anywhere]"
@@ -225,16 +286,19 @@ export const SessionView = forwardRef<HTMLElement, SessionViewProps>(function Se
 
       {status === 'awaiting_pick' && <OptionsList session={session} busy={busy} onPick={onPick} />}
 
-      {(status === 'planning' || status === 'tracked') && picked !== null && (
-        <p className="mt-2 text-small text-text-primary" data-testid="advisor-picked">
-          Picked option: {picked.label}
-        </p>
-      )}
+      {(status === 'planning' || status === 'tracked' || status === 'completed') &&
+        picked !== null && (
+          <p className="mt-2 text-small text-text-primary" data-testid="advisor-picked">
+            Picked option: {picked.label}
+          </p>
+        )}
 
-      {status === 'tracked' && session.plan !== null && session.plan.length > 0 && (
-        <Plan plan={session.plan} />
+      {(status === 'tracked' || status === 'completed') &&
+        session.plan !== null &&
+        session.plan.length > 0 && <Plan plan={session.plan} />}
+      {(status === 'tracked' || status === 'completed') && session.tracked !== null && (
+        <Tracked tracked={session.tracked} completed={status === 'completed'} />
       )}
-      {status === 'tracked' && session.tracked !== null && <Tracked tracked={session.tracked} />}
 
       {heading !== null && (
         <h4

@@ -72,3 +72,10 @@ packages/contexts/insights/test/wp115d-advisor.test.ts:generic-api-key:454
 docs/evidence/phase-11/wp11.5d-advisor-mode.md:generic-api-key:104
 f702fc77f9cfe4b03c1a1e93870683de4716f081:packages/contexts/insights/test/wp115d-advisor.test.ts:generic-api-key:454
 f702fc77f9cfe4b03c1a1e93870683de4716f081:docs/evidence/phase-11/wp11.5d-advisor-mode.md:generic-api-key:104
+
+# False positive (WP 11.5e, 2026-10-29): the advisor eval golden set quotes the
+# catalogue result ref `retirement.claiming_age.67_0` under a JSON field named
+# "key" — a figure key inside a recorded reply, not a credential. JSON takes no
+# comment, so the fingerprint: the commit-less form for `protect --staged`, the
+# commit-ful line beneath it for CI's full-history scan.
+scripts/advisor-eval-advisor.golden.json:generic-api-key:2444

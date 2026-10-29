@@ -57,6 +57,7 @@ function insight(overrides: Partial<Insight> = {}): Insight {
     titleSegments: [],
     bodySegments: [],
     contextLine: null,
+    talkThrough: false,
     ...overrides,
   };
 }

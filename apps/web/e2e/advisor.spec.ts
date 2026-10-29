@@ -2,12 +2,17 @@
 import { expect, test as base } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-import { setTheme } from './support/axe.ts';
+import { expectNoAxeViolations, setTheme } from './support/axe.ts';
 import { installFakeWebAuthnAssertion } from './support/fake-webauthn.ts';
 import {
   ADVISOR_CONSENT_SHA,
   ADVISOR_CONSENT_TEXT,
+  ADVISOR_COMPLETED_WORDING,
   ADVISOR_COST_MISSING_WORDS,
+  ADVISOR_FINDING_ID,
+  ADVISOR_FINDING_PREGATHERED,
+  ADVISOR_FINDING_QUESTION,
+  ADVISOR_FINDING_TITLE,
   ADVISOR_LOCAL_BADGE,
   ADVISOR_LOOKED_AT_LINE,
   ADVISOR_OUT_OF_SCOPE_QUESTION,
@@ -16,8 +21,18 @@ import {
   ADVISOR_QUESTIONS,
   ADVISOR_RESTATEMENT,
   ADVISOR_UNAVAILABLE_WORDS,
+  completedSession,
+  seededAdvisorHistory,
   type AdvisorMockOptions,
 } from './support/mock-advisor.ts';
+import {
+  buildBrief,
+  installBriefMocks,
+  PROGRESS_SESSION_ID,
+  PROGRESS_WORDING,
+  talkThroughBriefItems,
+  WORKED_ON_TITLE,
+} from './support/mock-brief.ts';
 import { installSweepMocks, type SweepMocks } from './support/mock-sweep.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import { hideDevtools, visit } from './support/sweep.ts';
@@ -432,5 +447,215 @@ test.describe('Advisor (WP 11.5d)', () => {
         }
       }
     }
+  });
+});
+
+const COMPLETED_ID = '0190d000-0000-7000-8000-0000000000c1';
+
+/** The whole-app mocks with the 2026-W43 Brief on top: one finding to talk through, one plan being followed. */
+async function openBrief(page: Page, advisor: AdvisorMockOptions = {}): Promise<SweepMocks> {
+  const mocks = await installSweepMocks(page, { advisor });
+  await installBriefMocks(page, {
+    standalone: false,
+    brief: buildBrief({ isoWeek: '2026-W43', items: talkThroughBriefItems() }),
+  });
+  await visit(page, '/brief');
+  await hideDevtools(page);
+  await expect(page.getByTestId('brief-item-card')).toHaveCount(3);
+  return mocks;
+}
+
+test.describe('The Brief and the advisor meet (WP 11.5e)', () => {
+  test('"Talk this through" on a Brief item opens the advisor about that finding, once, and a refresh does not post again', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    const mocks = await openBrief(page);
+    const cards = page.getByTestId('brief-item-card');
+    // Only the cash finding offers it; the plan being followed and the spending finding do not.
+    await expect(cards.nth(0).getByRole('link', { name: 'Talk this through' })).toHaveAttribute(
+      'href',
+      `/advisor?finding=${ADVISOR_FINDING_ID}&week=2026-W43`,
+    );
+    await expect(cards.nth(1).getByRole('link', { name: 'Talk this through' })).toHaveCount(0);
+    await expect(cards.nth(2).getByRole('link', { name: 'Talk this through' })).toHaveCount(0);
+    expect(mocks.advisor.bodies).toEqual([]);
+
+    await cards.nth(0).getByRole('link', { name: 'Talk this through' }).click();
+    await expect(page).toHaveURL(/\/advisor\?session=0190d000-/u, SLOW);
+    expect(mocks.advisor.bodies).toEqual([
+      {
+        call: 'start',
+        body: { origin: { insightId: ADVISOR_FINDING_ID, briefWeek: '2026-W43' } },
+      },
+    ]);
+
+    // The origin header, and what was gathered first, above the question the api built from the finding.
+    await expect(page.getByTestId('advisor-origin-line')).toHaveText(
+      `About: ${ADVISOR_FINDING_TITLE}, from the Brief of week 43 of 2026`,
+    );
+    await expect(page.getByTestId('advisor-pregathered')).toHaveText(ADVISOR_FINDING_PREGATHERED);
+    await expect(page.getByRole('heading', { name: ADVISOR_FINDING_QUESTION })).toBeVisible();
+    await expect(page.getByTestId('advisor-session')).toHaveAttribute(
+      'data-state',
+      'clarifying',
+      SLOW,
+    );
+    await expect(page.getByTestId('advisor-clarify')).toBeVisible(SLOW);
+
+    // A refresh opens the same session and posts nothing.
+    await page.reload();
+    await hideDevtools(page);
+    await expect(page.getByTestId('advisor-origin-line')).toBeVisible(SLOW);
+    expect(mocks.advisor.bodies.filter((entry) => entry.call === 'start')).toHaveLength(1);
+    await expect(page).toHaveURL(/\/advisor\?session=0190d000-/u);
+  });
+
+  test('a finding that has no week (from an insight card) is about the finding alone', async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    const mocks = await installSweepMocks(page);
+    await visit(page, `/advisor?finding=${ADVISOR_FINDING_ID}`);
+    await hideDevtools(page);
+    await expect(page.getByTestId('advisor-origin-line')).toHaveText(
+      `About: ${ADVISOR_FINDING_TITLE}`,
+      SLOW,
+    );
+    expect(mocks.advisor.bodies).toEqual([
+      { call: 'start', body: { origin: { insightId: ADVISOR_FINDING_ID } } },
+    ]);
+  });
+
+  test('the progress item shows the server’s wording, what it came from and what is being worked on, and "Open the plan" leads to the session', async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    const mocks = await openBrief(page);
+    const card = page.getByTestId('brief-item-card').nth(1);
+    const box = card.getByTestId('brief-progress');
+    await expect(box).toContainText('Plan you picked');
+    await expect(box.getByTestId('brief-progress-wording')).toHaveText(PROGRESS_WORDING);
+    await expect(box.getByTestId('brief-progress-origin')).toHaveText(
+      `From the finding “${WORKED_ON_TITLE}”`,
+    );
+    await expect(box.getByTestId('brief-progress-worked-on')).toContainText(
+      `Being worked on: “${WORKED_ON_TITLE}”`,
+    );
+    await box.getByRole('link', { name: 'Open the plan' }).click();
+    await expect(page).toHaveURL(new RegExp(`/advisor\\?session=${PROGRESS_SESSION_ID}$`, 'u'));
+    await expect(page.getByTestId('advisor-session')).toHaveAttribute('data-state', 'tracked');
+    await expect(page.getByTestId('advisor-tracked-wording')).toContainText(
+      'when you picked this plan on 2026-10-28',
+    );
+    await expect(page.getByTestId('advisor-tracked-picked')).toHaveText('Picked on 2026-10-28');
+    // Opening a session reads; it asks nothing of a model.
+    expect(mocks.advisor.bodies).toEqual([]);
+  });
+
+  test('a completed session reads as reached and is no longer followed', async ({ page }) => {
+    test.setTimeout(60_000);
+    const mocks = await installSweepMocks(page, {
+      advisor: { sessions: [completedSession(COMPLETED_ID), ...seededAdvisorHistory()] },
+    });
+    await visit(page, `/advisor?session=${COMPLETED_ID}`);
+    await hideDevtools(page);
+    const session = page.getByTestId('advisor-session');
+    await expect(session).toHaveAttribute('data-state', 'completed');
+    const box = page.getByTestId('advisor-tracked');
+    await expect(box.getByTestId('advisor-tracked-wording')).toHaveText(ADVISOR_COMPLETED_WORDING);
+    await expect(box.getByTestId('advisor-tracked-target')).toHaveText('Target: 6.0 months');
+    await expect(box.getByTestId('advisor-tracked-reached')).toHaveText(
+      "Reached: the plan's target is met; this plan is no longer followed.",
+    );
+    await expect(page.getByTestId('advisor-close')).toHaveCount(0);
+    await expect(page.getByTestId('advisor-history')).toContainText('Target reached');
+    expect(mocks.advisor.bodies).toEqual([]);
+  });
+
+  for (const [problemName, words] of [
+    ['not_found', 'That finding could not be found'],
+    ['not_supported', 'does not take up this kind of finding'],
+    ['not_granted', 'not been approved for the advisor'],
+    ['brief_unknown', 'That Brief could not be found'],
+  ] as const) {
+    test(`a finding the api turns away (${problemName}) is said in words, and a refresh does not retry`, async ({
+      page,
+    }) => {
+      test.setTimeout(60_000);
+      const mocks = await installSweepMocks(page, { advisor: { originProblem: problemName } });
+      await visit(page, `/advisor?finding=${ADVISOR_FINDING_ID}&week=2026-W43`);
+      await hideDevtools(page);
+      await expect(page.getByRole('alert').filter({ hasText: words })).toBeVisible(SLOW);
+      await expect(page).toHaveURL(/\/advisor$/u);
+      expect(mocks.advisor.bodies).toHaveLength(1);
+      await expect(page.getByLabel('Your question')).toBeEnabled();
+    });
+  }
+
+  test('axe reports no violations on the Brief with a talk-through link and a progress card, or on the advisor opened from a finding, in light and dark', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await openBrief(page);
+    for (const theme of ['light', 'dark'] as const) {
+      await setTheme(page, theme);
+      await expectNoAxeViolations(page, `Brief › talk through and progress (${theme})`);
+    }
+    await page
+      .getByTestId('brief-item-card')
+      .nth(0)
+      .getByRole('link', { name: 'Talk this through' })
+      .click();
+    await expect(page.getByTestId('advisor-clarify')).toBeVisible(SLOW);
+    for (const theme of ['light', 'dark'] as const) {
+      await setTheme(page, theme);
+      await expectNoAxeViolations(page, `Advisor › opened from a finding (${theme})`);
+    }
+  });
+
+  // The screenshots the work package's evidence doc cites: written only when PLAYWRIGHT_EVIDENCE_DIR names the
+  // evidence directory; otherwise into the gitignored test-results directory.
+  test('WP 11.5e evidence: the advisor opened from a finding, and the Brief with the plan being followed, light and dark, at 1280 and 390', async ({
+    page,
+    evidenceDir,
+  }) => {
+    test.setTimeout(300_000);
+    const shoot = async (name: string, tall: number): Promise<void> => {
+      for (const [width, height] of [
+        [1280, 1100],
+        [390, tall],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        for (const theme of ['light', 'dark'] as const) {
+          await setTheme(page, theme);
+          await page.waitForTimeout(600);
+          await page.screenshot({
+            path: `${screenshotDir(evidenceDir)}wp11.5e-brief-advisor-${name}-${theme}-${String(width)}.png`,
+            animations: 'disabled',
+          });
+        }
+      }
+    };
+
+    await page.setViewportSize({ width: 1280, height: 1100 });
+    await openBrief(page);
+    await expect(page.getByTestId('brief-progress')).toBeVisible();
+    await shoot('progress', 2600);
+
+    // Follow the link: the advisor screen of the pre-gathered session.
+    await page.setViewportSize({ width: 1280, height: 1100 });
+    await page
+      .getByTestId('brief-item-card')
+      .nth(0)
+      .getByRole('link', { name: 'Talk this through' })
+      .click();
+    await expect(page.getByTestId('advisor-origin-line')).toBeVisible(SLOW);
+    await expect(page.getByTestId('advisor-clarify')).toBeVisible(SLOW);
+    await page.getByTestId('advisor-session').focus();
+    await shoot('origin', 2400);
   });
 });

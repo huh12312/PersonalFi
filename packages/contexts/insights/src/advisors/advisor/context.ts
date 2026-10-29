@@ -41,11 +41,17 @@ import {
 } from '../ask/narrate.ts';
 import type { AskResultView } from '../ask/results.ts';
 import { ADVISOR_FIGURES_PER_RESULT } from './manifest.ts';
+import { isFindingResult } from './origin.ts';
 
 export interface AdvisorContextFigure {
   readonly ref: string;
   readonly label: string;
   readonly text: string;
+  /**
+   * WP 11.5e: on a finding's own figures only (`finding.evidence`), the evidence row's `source_ref` — the
+   * snapshot path the validator resolved when the built-in wrote it. Absent on a catalogue figure.
+   */
+  readonly source_refs?: readonly string[];
 }
 
 export interface AdvisorContextResult {
@@ -119,8 +125,14 @@ export function buildAdvisorContext(input: {
   const results: AdvisorContextResult[] = input.results.map((result, index) => {
     const sent = result.figures.slice(0, ADVISOR_FIGURES_PER_RESULT);
     const narrated = subject.results[index];
+    const finding = isFindingResult(result);
     const figures = sent.map((figure) => {
-      const entry = { ref: figureRef(index, figure.key), label: figure.label, text: figure.text };
+      const entry: AdvisorContextFigure = {
+        ref: figureRef(index, figure.key),
+        label: figure.label,
+        text: figure.text,
+        ...(finding ? { source_refs: [...figure.source_refs] } : {}),
+      };
       refs.set(entry.ref, entry);
       return entry;
     });
@@ -156,6 +168,8 @@ export function buildAdvisorContext(input: {
     prose: [
       ...traced.trace.prose,
       ...input.answers.flatMap((entry) => [entry.question, entry.answer]),
+      // WP 11.5e: a finding's label carries its title — quotable whole, never a figure source.
+      ...input.results.filter((result) => isFindingResult(result)).map((result) => result.label),
     ].filter((text) => text.length >= 3),
   };
   return {

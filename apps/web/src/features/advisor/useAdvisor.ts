@@ -20,9 +20,14 @@ import { Sdk } from '../../api/generated/sdk.gen.ts';
 import type { Problem } from '../../api/generated/types.gen.ts';
 import {
   ADVISOR_POLL_MS,
+  BRIEF_UNKNOWN_WORDS,
   EMPTY_QUESTION_WORDS,
+  FINDING_NOT_FOUND_WORDS,
+  FINDING_NOT_GRANTED_WORDS,
+  FINDING_NOT_SUPPORTED_WORDS,
   IN_FLIGHT_WORDS,
   REQUEST_FAILED_WORDS,
+  isIsoWeek,
   isWorking,
   type AdvisorOverview,
   type AdvisorSession,
@@ -46,6 +51,14 @@ export function advisorErrorWords(error: unknown): string {
       return EMPTY_QUESTION_WORDS;
     case 'insights.advisor_unavailable':
       return 'The advisor cannot start a session right now.';
+    case 'insights.advisor_finding_not_found':
+      return FINDING_NOT_FOUND_WORDS;
+    case 'insights.advisor_finding_not_supported':
+      return FINDING_NOT_SUPPORTED_WORDS;
+    case 'insights.advisor_finding_not_granted':
+      return FINDING_NOT_GRANTED_WORDS;
+    case 'insights.advisor_brief_unknown':
+      return BRIEF_UNKNOWN_WORDS;
     case 'insights.advisor_not_awaiting_answers':
     case 'insights.advisor_not_awaiting_pick':
     case 'insights.advisor_session_closed':
@@ -57,7 +70,22 @@ export function advisorErrorWords(error: unknown): string {
 
 export interface UseAdvisorOptions {
   readonly pollMs?: number;
+  /**
+   * WP 11.5e, from the URL: `finding` (with its optional `week`) starts one session about that finding, once;
+   * `session` opens an existing one. `onUrlSession` is told the id of the session the finding opened (so the URL can
+   * carry `?session=` and a refresh never posts again) or `null` when it did not open one (so the URL sheds the
+   * finding and a refresh does not retry).
+   */
+  readonly finding?: string | undefined;
+  readonly week?: string | undefined;
+  readonly session?: string | undefined;
+  readonly onUrlSession?: (id: string | null) => void;
 }
+
+/** The body of `POST /advisor/sessions`: exactly one of a question and an origin. */
+type StartBody =
+  | { readonly question: string }
+  | { readonly origin: { readonly insightId: string; readonly briefWeek?: string } };
 
 export interface Advisor {
   readonly overview: AdvisorOverview | undefined;
@@ -76,7 +104,13 @@ export interface Advisor {
   readonly select: (id: string) => void;
 }
 
-export function useAdvisor({ pollMs = ADVISOR_POLL_MS }: UseAdvisorOptions = {}): Advisor {
+export function useAdvisor({
+  pollMs = ADVISOR_POLL_MS,
+  finding,
+  week,
+  session: sessionParam,
+  onUrlSession,
+}: UseAdvisorOptions = {}): Advisor {
   const queryClient = useQueryClient();
   const overviewQuery = useQuery({ ...getAdvisorOverviewOptions(), retry: false });
   const overview = overviewQuery.data;
@@ -142,16 +176,23 @@ export function useAdvisor({ pollMs = ADVISOR_POLL_MS }: UseAdvisorOptions = {})
   }
 
   const startMutation = useMutation({
-    mutationFn: async (question: string): Promise<AdvisorSession> => {
+    mutationFn: async (body: StartBody): Promise<AdvisorSession> => {
       const { data } = await Sdk.__registry.get().startAdvisorSession({
-        body: { question },
+        body,
         throwOnError: true,
       });
       return data;
     },
     onMutate: () => setError(null),
-    onSuccess: took,
-    onError: failed,
+    // A session opened from a finding tells the URL, win or lose, so a refresh never posts a second time.
+    onSuccess: (next, body) => {
+      took(next);
+      if ('origin' in body) onUrlSession?.(next.id);
+    },
+    onError: (cause, body) => {
+      failed(cause);
+      if ('origin' in body) onUrlSession?.(null);
+    },
   });
 
   const answerMutation = useMutation({
@@ -209,7 +250,7 @@ export function useAdvisor({ pollMs = ADVISOR_POLL_MS }: UseAdvisorOptions = {})
   const start = useCallback(
     (question: string, onSent?: () => void) => {
       if (sending) return;
-      mutateStart(question, { onSuccess: () => onSent?.() });
+      mutateStart({ question }, { onSuccess: () => onSent?.() });
     },
     [mutateStart, sending],
   );
@@ -233,6 +274,31 @@ export function useAdvisor({ pollMs = ADVISOR_POLL_MS }: UseAdvisorOptions = {})
     setSelectedId(id);
     setTouched(true);
   }, []);
+
+  // `?session=<id>`: open that session (a link from the Brief, a refresh after a finding opened one). Adjusted while
+  // rendering, when the URL's value changes (React's "adjust state when a value changes" pattern).
+  const [seenSessionParam, setSeenSessionParam] = useState<string | undefined>(undefined);
+  if (sessionParam !== seenSessionParam) {
+    setSeenSessionParam(sessionParam);
+    if (sessionParam !== undefined && sessionParam !== '') {
+      setError(null);
+      setSelectedId(sessionParam);
+      setTouched(true);
+    }
+  }
+
+  // `?finding=<id>`: start one session about it. The ref is what makes it once: it survives a StrictMode
+  // remount, and the URL is replaced by `?session=` (or by nothing, on a refusal) as soon as the api has answered.
+  const startedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (finding === undefined || finding === '' || startedFor.current === finding) return;
+    startedFor.current = finding;
+    const origin =
+      week !== undefined && isIsoWeek(week)
+        ? { insightId: finding, briefWeek: week }
+        : { insightId: finding };
+    mutateStart({ origin });
+  }, [finding, week, mutateStart]);
 
   return {
     overview,

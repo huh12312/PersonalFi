@@ -9,7 +9,9 @@ import {
 } from '@tanstack/react-router';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import {
   ensureApiClient,
@@ -27,8 +29,12 @@ import {
   OUT_OF_SCOPE_MESSAGE,
   QUESTION,
   awaitingPick,
+  FINDING_ID,
+  FINDING_TITLE,
   clarifying,
+  completed,
   failed,
+  fromFinding,
   overview,
   refused,
   session,
@@ -59,6 +65,12 @@ interface Api {
   calls: string[];
   bodies: Array<{ call: string; body: unknown }>;
 }
+
+const advisorSearch = z.object({
+  finding: z.string().optional(),
+  week: z.string().optional(),
+  session: z.string().optional(),
+});
 
 const SESSION_PATH = /^\/api\/advisor\/sessions\/([^/]+)(?:\/(answers|pick|cancel))?$/u;
 
@@ -110,11 +122,11 @@ function api(options: {
   return state;
 }
 
-function renderScreen(pollMs = 20) {
+function renderScreen(pollMs = 20, entry = '/advisor', strict = false) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const root = createRootRoute();
   const routes = [
-    '/',
+    '/advisor',
     '/goals',
     '/accounts',
     '/plan',
@@ -127,18 +139,22 @@ function renderScreen(pollMs = 20) {
     createRoute({
       getParentRoute: () => root,
       path,
-      component: path === '/' ? () => <AdvisorScreen pollMs={pollMs} /> : () => null,
+      ...(path === '/advisor' ? { validateSearch: advisorSearch } : {}),
+      component: path === '/advisor' ? () => <AdvisorScreen pollMs={pollMs} /> : () => null,
     }),
   );
   const router = createRouter({
     routeTree: root.addChildren(routes),
-    history: createMemoryHistory({ initialEntries: ['/'] }),
+    history: createMemoryHistory({ initialEntries: [entry] }),
   });
-  render(
+  const tree = (
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  // StrictMode runs every effect twice on mount: what a start-once guard has to survive.
+  render(strict ? <StrictMode>{tree}</StrictMode> : tree);
+  return router;
 }
 
 const gathering = (id = 'sess-new') => session(id, 'gathering');
@@ -680,5 +696,169 @@ describe('WP 11.5d Advisor screen', () => {
     return screen
       .findByTestId('advisor-disclaimer')
       .then((node) => expect(node).toHaveTextContent('Not investment, tax, or legal advice.'));
+  });
+});
+
+describe('WP 11.5e Advisor from a finding', () => {
+  beforeEach(() => {
+    ensureApiClient();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('with ?finding= and ?week= it posts once, with the origin and no question, then replaces the URL with ?session=', async () => {
+    const started = fromFinding('sess-f');
+    const state = api({
+      overview: overview(),
+      start: { status: 202, body: started },
+      reads: [started],
+    });
+    const router = renderScreen(20, `/advisor?finding=${FINDING_ID}&week=2026-W43`, true);
+    await waitFor(() => expect(router.state.location.search).toEqual({ session: 'sess-f' }));
+    expect(state.bodies).toEqual([
+      { call: 'start', body: { origin: { insightId: FINDING_ID, briefWeek: '2026-W43' } } },
+    ]);
+    expect(await screen.findByTestId('advisor-origin-line')).toHaveTextContent(
+      `About: ${FINDING_TITLE}, from the Brief of week 43 of 2026`,
+    );
+    // Let any stray second effect land: still one post.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(state.bodies.filter((entry) => entry.call === 'start')).toHaveLength(1);
+  });
+
+  it('from an insight card (no week) the origin carries only the finding', async () => {
+    const started = fromFinding('sess-f', {
+      origin: { ...fromFinding().origin!, briefWeek: null },
+    });
+    const state = api({
+      overview: overview(),
+      start: { status: 202, body: started },
+      reads: [started],
+    });
+    renderScreen(20, `/advisor?finding=${FINDING_ID}`);
+    expect(await screen.findByTestId('advisor-origin-line')).toHaveTextContent(
+      `About: ${FINDING_TITLE}`,
+    );
+    expect(screen.getByTestId('advisor-origin-line').textContent).not.toContain('Brief of');
+    expect(state.bodies).toEqual([{ call: 'start', body: { origin: { insightId: FINDING_ID } } }]);
+  });
+
+  it('a week that is not an ISO week is not sent', async () => {
+    const state = api({
+      overview: overview(),
+      start: { status: 202, body: fromFinding('sess-f') },
+      reads: [fromFinding('sess-f')],
+    });
+    renderScreen(20, `/advisor?finding=${FINDING_ID}&week=lastweek`);
+    await screen.findByTestId('advisor-origin-line');
+    expect(state.bodies).toEqual([{ call: 'start', body: { origin: { insightId: FINDING_ID } } }]);
+  });
+
+  it('with ?session= it opens that session and posts nothing', async () => {
+    const done = fromFinding('sess-open');
+    const state = api({ overview: overview([done]), reads: [done] });
+    renderScreen(20, '/advisor?session=sess-open');
+    expect(await screen.findByTestId('advisor-session')).toHaveAttribute(
+      'data-state',
+      'clarifying',
+    );
+    expect(state.bodies).toEqual([]);
+  });
+
+  it('shows the origin header and a line saying what was gathered first, as plain text', async () => {
+    const started = fromFinding('sess-f');
+    api({ overview: overview([started]), reads: [started] });
+    renderScreen(20, '/advisor?session=sess-f');
+    const header = await screen.findByTestId('advisor-origin');
+    expect(within(header).getByTestId('advisor-origin-line')).toHaveTextContent(
+      'About: Your cash covers 2.4 months of spending, from the Brief of week 43 of 2026',
+    );
+    expect(within(header).getByTestId('advisor-pregathered')).toHaveTextContent(
+      "Gathered first: Cash emergency fund and the finding's own figures.",
+    );
+    expect(within(header).queryByRole('link')).toBeNull();
+  });
+
+  it('a session with no origin has no origin header', async () => {
+    const plain = clarifying('sess-plain');
+    api({ overview: overview([plain]), reads: [plain] });
+    renderScreen(20, '/advisor?session=sess-plain');
+    await screen.findByTestId('advisor-session');
+    expect(screen.queryByTestId('advisor-origin')).toBeNull();
+  });
+
+  it.each([
+    ['insights.advisor_finding_not_found', 404, 'That finding could not be found'],
+    ['insights.advisor_finding_not_supported', 409, 'does not take up this kind of finding'],
+    ['insights.advisor_finding_not_granted', 409, 'not been approved for the advisor'],
+    ['insights.advisor_brief_unknown', 400, 'That Brief could not be found'],
+  ])(
+    '%s is said in words, and the URL sheds the finding so a refresh does not retry',
+    async (code, status, words) => {
+      const state = api({
+        overview: overview(),
+        start: { status, body: { type: 'about:blank', title: 'x', status, code } },
+      });
+      const router = renderScreen(20, `/advisor?finding=${FINDING_ID}&week=2026-W43`);
+      expect(await screen.findByRole('alert')).toHaveTextContent(words);
+      await waitFor(() => expect(router.state.location.search).toEqual({}));
+      expect(state.bodies).toHaveLength(1);
+    },
+  );
+
+  it('a session refused at once by the pre-check (200) is shown as refused', async () => {
+    const refusedAtOnce = refused('sess-r', {
+      origin: fromFinding().origin!,
+      refusal: { step: 'question', class: 'question.instruction', message: 'Refused at once.' },
+    });
+    api({
+      overview: overview(),
+      start: { status: 200, body: refusedAtOnce },
+      reads: [refusedAtOnce],
+    });
+    renderScreen(20, `/advisor?finding=${FINDING_ID}`);
+    expect(await screen.findByTestId('advisor-message')).toHaveTextContent('Refused at once.');
+    expect(screen.getByTestId('advisor-session')).toHaveAttribute('data-state', 'refused');
+  });
+
+  it('a completed session reads as reached: the wording, the day it was picked, the target, and the plan no longer followed', async () => {
+    const done = completed('sess-done');
+    api({ overview: overview([done]), reads: [done] });
+    renderScreen(20, '/advisor?session=sess-done');
+    const box = await screen.findByTestId('advisor-tracked');
+    expect(screen.getByTestId('advisor-session')).toHaveAttribute('data-state', 'completed');
+    expect(box).toHaveAttribute('data-completed', 'true');
+    expect(within(box).getByTestId('advisor-tracked-wording').textContent).toBe(
+      done.tracked!.wording,
+    );
+    expect(within(box).getByTestId('advisor-tracked-picked')).toHaveTextContent(
+      'Picked on 2026-10-28',
+    );
+    expect(within(box).getByTestId('advisor-tracked-target')).toHaveTextContent(
+      'Target: 6.0 months',
+    );
+    expect(within(box).getByTestId('advisor-tracked-reached')).toHaveTextContent(
+      "Reached: the plan's target is met; this plan is no longer followed.",
+    );
+    expect(within(box).queryByTestId('advisor-tracked-link')).toBeNull();
+    expect(screen.getByTestId('advisor-plan')).toBeInTheDocument();
+    // Finished: no working note, and nothing to close.
+    expect(screen.queryByTestId('advisor-working')).toBeNull();
+    expect(screen.queryByTestId('advisor-close')).toBeNull();
+    expect(screen.getByTestId('advisor-history')).toHaveTextContent('Target reached');
+  });
+
+  it('a followed (tracked) session shows the wording and the day picked, and still links to the Brief', async () => {
+    const followed = tracked('sess-t');
+    api({ overview: overview([followed]), reads: [followed] });
+    renderScreen(20, '/advisor?session=sess-t');
+    const box = await screen.findByTestId('advisor-tracked');
+    expect(within(box).getByTestId('advisor-tracked-wording')).toHaveTextContent(
+      'when you picked this plan on 2026-10-28',
+    );
+    expect(within(box).getByTestId('advisor-tracked-picked')).toHaveTextContent('Picked on');
+    expect(within(box).queryByTestId('advisor-tracked-reached')).toBeNull();
+    expect(within(box).getByTestId('advisor-tracked-link')).toBeInTheDocument();
   });
 });

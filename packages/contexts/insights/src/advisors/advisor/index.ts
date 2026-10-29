@@ -15,3 +15,6 @@ export * from './follow-up.ts';
 export * from './jobs.ts';
 export * from './run.ts';
 export * from './preview.ts';
+// WP 11.5e: "Talk this through" and the Brief's progress items.
+export * from './origin.ts';
+export * from './progress.ts';

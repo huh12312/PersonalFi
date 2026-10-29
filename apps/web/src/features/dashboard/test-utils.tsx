@@ -19,6 +19,7 @@ import type { SpendingPace } from '../../api/generated/types.gen.ts';
 const TARGETS = [
   '/accounts',
   '/accounts/connections',
+  '/advisor',
   '/budget',
   '/goals',
   '/health',

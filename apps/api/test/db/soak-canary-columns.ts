@@ -38,6 +38,8 @@ export const SEEDED: Readonly<Record<string, true>> = {
   'advisory_brief_items.summary_md': true,
   'advisory_brief_items.evidence': true,
   'advisory_brief_items.retirement_effect': true,
+  // WP 11.5e (0062): a plan's progress as the Brief said it — carries a finding's title, which can quote a goal name.
+  'advisory_brief_items.progress': true,
   'insight_feedback.advisor_id': true,
   'insight_feedback.reason': true,
   'jobs.payload': true,
@@ -147,7 +149,7 @@ export const NOT_READ_BY_THE_REPORT: Readonly<Record<string, string>> = {
   ask_sessions:
     "Ask PersonalFi's question log (WP 11.5c): question and narration_text are free text (the holder's question, a model's wording); the weekly report counts none of it.",
   advisor_sessions:
-    "The advisor's session log (WP 11.5d): question, answers and the JSONB of clarification, options, trade-offs and plan are free text (the holder's words, a model's wording); the weekly report counts none of it.",
+    "The advisor's session log (WP 11.5d): question, answers and the JSONB of clarification, options, trade-offs and plan are free text (the holder's words, a model's wording); WP 11.5e's origin_title is a finding's title as the holder saw it; the weekly report counts none of it.",
   advisor_session_steps:
     'One row per advisor model call (WP 11.5d): run ids, digests, provider and model, and the knowledge-read record; the weekly report counts none of it.',
   advisor_settings:

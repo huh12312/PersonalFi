@@ -28,6 +28,15 @@
  *   * `clarify.too_many_assumed`, and **`clarify.ref_not_sent`** — an assumed
  *     default (or a `GOAL_` pseudonym in the prose) that was not in the
  *     defaults sent.
+ *
+ * ## A session opened from a finding (WP 11.5e)
+ *
+ * The subject gains `about`: the finding's title and its rule's name and
+ * words, **as a quoted fact**. The restatement may name the finding by
+ * quoting them whole; they are never mined for a figure — the title is masked
+ * out of the question before the question's own figures are read, so a
+ * restatement that lifts "2.4 months" out of the title on its own is refused
+ * (`numeral`), exactly as a figure the holder never typed would be.
  */
 import { newId } from '@core/kernel';
 import { canonicalRunDigest } from '../../preview.ts';
@@ -62,12 +71,22 @@ export interface ClarifySubject {
     }[];
   };
   readonly max_questions: number;
+  /** WP 11.5e: the finding the session was opened from — quoted, never a figure source. Absent otherwise. */
+  readonly about?: ClarifyAbout;
+}
+
+/** The finding as the clarify step is told it: its title and its rule, in the app's words. */
+export interface ClarifyAbout {
+  readonly title: string;
+  readonly rule: { readonly name: string; readonly text: string };
 }
 
 export interface ClarifyCheck {
   readonly question: string;
   readonly refs: readonly string[];
   readonly goalRefs: readonly string[];
+  /** WP 11.5e: prose the restatement may quote whole and never mine (the finding's title and rule). */
+  readonly quoted?: readonly string[];
 }
 
 export interface AdvisorWireRequest<Subject> {
@@ -121,13 +140,24 @@ export function buildClarifyRequest(input: {
   readonly now: Date;
   readonly timeoutMs: number;
   readonly maxResponseBytes: number;
+  /** WP 11.5e: the finding a session opened from it is about. */
+  readonly about?: ClarifyAbout | null;
 }): BuiltClarifyRequest {
   const refs = clarifyDefaultRefs(input.defaults);
+  const about = input.about ?? null;
   const subject: ClarifySubject = {
     question: input.question,
     functions: input.listing.map((entry) => ({ name: entry.name, summary: entry.summary })),
     defaults: { refs: refs.map((entry) => ({ ...entry })) },
     max_questions: ADVISOR_MAX_QUESTIONS,
+    ...(about === null
+      ? {}
+      : {
+          about: {
+            title: about.title,
+            rule: { name: about.rule.name, text: about.rule.text },
+          },
+        }),
   };
   const payload = {
     snapshot: { advisor_clarify: subject },
@@ -146,6 +176,7 @@ export function buildClarifyRequest(input: {
       question: input.question,
       refs: refs.map((entry) => entry.ref),
       goalRefs: input.defaults.goals.map((goal) => goal.goal_ref),
+      ...(about === null ? {} : { quoted: [about.title, about.rule.name, about.rule.text] }),
     },
   };
 }
@@ -176,14 +207,28 @@ export type ClarifyValidation =
 const DATE_TOKEN = /\b\d{4}-\d{2}(?:-\d{2})?\b/gu;
 const GOAL_TOKEN = /\bGOAL_[0-9A-Za-z]{4,}\b/gu;
 
-/** The question's own figures, as written: the only figures a restatement may carry. */
-export function questionTraceContext(question: string): FindingTraceContext {
+/**
+ * The question's own figures, as written: the only figures a restatement may
+ * carry. WP 11.5e: `quoted` prose (a finding's title and rule) is masked out
+ * of the question before its figures are read and may be quoted whole — never
+ * mined for a figure.
+ */
+export function questionTraceContext(
+  question: string,
+  quoted: readonly string[] = [],
+): FindingTraceContext {
+  const prose = quoted.map((text) => text.trim()).filter((text) => text.length >= 3);
   const literals = [...new Set([...question.matchAll(DATE_TOKEN)].map((match) => match[0]))];
+  // Longest first, whole: `maskLiterals` skips long literals, and a title may run to 200 characters.
+  let masked = question;
+  for (const text of [...prose].sort((left, right) => right.length - left.length)) {
+    masked = masked.split(text).join(' ');
+  }
   const figures = new Set<string>();
-  for (const numeral of extractNumerals(maskLiterals(question, literals))) {
+  for (const numeral of extractNumerals(maskLiterals(masked, literals))) {
     figures.add(numeral.isPercent ? `${numeral.normalized}%` : numeral.normalized);
   }
-  return { figures, literals, prose: [] };
+  return { figures, literals, prose };
 }
 
 function refused(refusal: ClarifyRefusal, detail: string): ClarifyValidation {
@@ -215,7 +260,7 @@ export function validateClarifyReply(reply: unknown, check: ClarifyCheck): Clari
       return refused('clarify.schema', 'an assumed default is not exactly { about, value_ref }');
     }
   }
-  const trace = questionTraceContext(check.question);
+  const trace = questionTraceContext(check.question, check.quoted ?? []);
   const proseOf = (text: string, max: number, maxSentences: number) =>
     checkAdvisorProse(text, {
       max,

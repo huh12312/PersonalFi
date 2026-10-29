@@ -27,6 +27,7 @@ export type AdvisorStatus =
   | 'awaiting_pick'
   | 'planning'
   | 'tracked'
+  | 'completed'
   | 'refused'
   | 'unanswerable'
   | 'failed'
@@ -57,6 +58,10 @@ export interface AdvisorSessionBody {
     assumed: Array<{ about: string; valueRef: string; value: string }>;
   } | null;
   answers: string[] | null;
+  /** WP 11.5e: the finding the session was opened from; `null` for a question the holder typed. */
+  origin: { insightId: string; ruleId: string; title: string; briefWeek: string | null } | null;
+  /** WP 11.5e: what was gathered before the first question; `null` unless the session has an origin. */
+  pregathered: { seeded: string[]; finding: string | null } | null;
   lookedAt: {
     line: string;
     items: Array<{
@@ -90,6 +95,10 @@ export interface AdvisorSessionBody {
     status: string;
     checkedAt: string | null;
     brief: { outcome: string; path: string };
+    target: { text: string } | null;
+    pickedAt: string | null;
+    reached: boolean;
+    wording: string;
   } | null;
   judge: {
     score: string | null;
@@ -166,6 +175,20 @@ export const ADVISOR_CONSENT_TEXT =
   'I allow the advisor to send its approved payloads to the hosted provider I choose, for advisor sessions only. Without this tick it runs on the local model.';
 export const ADVISOR_CONSENT_SHA = `${'a1'.repeat(32)}`;
 
+/** WP 11.5e: the finding the mock knows (a Brief item's `talkThrough.insightId`) and the words built from it. */
+export const ADVISOR_FINDING_ID = '0190c000-0000-7000-8000-0000000000f1';
+export const ADVISOR_FINDING_TITLE = 'Your cash covers 2.4 months of spending';
+export const ADVISOR_FINDING_QUESTION = `What could be done about “${ADVISOR_FINDING_TITLE}”?`;
+export const ADVISOR_FINDING_RULE = 'C4';
+export const ADVISOR_FINDING_PREGATHERED =
+  "Gathered first: Emergency-fund cover (target 3 months) and the finding's own figures.";
+export const ADVISOR_FINDING_LOOKED_AT_LINE =
+  'I looked at: your cash cover and emergency-fund cover (target 3 months), as of 2026-10-28.';
+export const ADVISOR_TRACKED_WORDING =
+  'Emergency fund runway was 2.0 months when you picked this plan on 2026-10-28. It has not been checked since.';
+export const ADVISOR_COMPLETED_WORDING =
+  'Emergency fund runway was 2.0 months when you picked this plan on 2026-10-28. It is 6.1 months now: up since then, and past the 6.0 months target.';
+
 const NOW = '2026-10-28T14:22:00.000Z';
 const DONE = '2026-10-28T14:22:09.000Z';
 
@@ -188,6 +211,34 @@ const LOOKED_AT: NonNullable<AdvisorSessionBody['lookedAt']> = {
         { label: 'Cash set aside', text: '$6,200.00' },
         { label: 'Monthly essentials', text: '$3,100.00' },
         { label: 'Runway', text: '2.0 months' },
+      ],
+      screen: { path: '/health', label: 'Financial health' },
+    },
+  ],
+};
+
+const CASH_LOOKED_AT: NonNullable<AdvisorSessionBody['lookedAt']> = {
+  line: ADVISOR_FINDING_LOOKED_AT_LINE,
+  items: [
+    {
+      function: 'finding',
+      label: ADVISOR_FINDING_TITLE,
+      status: 'ok',
+      asOf: '2026-10-28',
+      figures: [
+        { label: 'Cash set aside', text: '$6,200.00' },
+        { label: 'Cover', text: '2.4 months' },
+      ],
+      screen: { path: '/health', label: 'Financial health' },
+    },
+    {
+      function: 'cash.emergency_fund',
+      label: 'Emergency-fund cover (target 3 months)',
+      status: 'ok',
+      asOf: '2026-10-28',
+      figures: [
+        { label: 'Target', text: '3 months' },
+        { label: 'Shortfall', text: '0.6 months' },
       ],
       screen: { path: '/health', label: 'Financial health' },
     },
@@ -236,7 +287,9 @@ function base(
   status: AdvisorStatus,
   createdAt = NOW,
 ): AdvisorSessionBody {
-  const ended = ['tracked', 'refused', 'unanswerable', 'failed', 'cancelled'].includes(status);
+  const ended = ['tracked', 'completed', 'refused', 'unanswerable', 'failed', 'cancelled'].includes(
+    status,
+  );
   return {
     id,
     question,
@@ -249,6 +302,8 @@ function base(
     disclaimer: ADVISOR_DISCLAIMER,
     clarification: null,
     answers: null,
+    origin: null,
+    pregathered: null,
     lookedAt: null,
     knowledge: null,
     options: null,
@@ -321,6 +376,10 @@ export function trackedSession(
       status: 'following',
       checkedAt: null,
       brief: { outcome: 'adv-out-1', path: '/brief' },
+      target: { text: '6.0 months' },
+      pickedAt: '2026-10-28',
+      reached: false,
+      wording: ADVISOR_TRACKED_WORDING,
     },
     judge: {
       score: '0.667',
@@ -334,6 +393,51 @@ export function trackedSession(
       error: null,
     },
     tokens: { used: 5400, budget: 8000, hostedWindowLeft: null },
+  };
+}
+
+/** WP 11.5e: the plan's watched figure reached its target; the watcher stopped. */
+export function completedSession(
+  id: string,
+  question = ADVISOR_QUESTION,
+  createdAt = NOW,
+): AdvisorSessionBody {
+  const followed = trackedSession(id, question, createdAt);
+  return {
+    ...followed,
+    status: 'completed',
+    finishedAt: '2026-12-02T08:00:00.000Z',
+    tracked: {
+      ...followed.tracked!,
+      latest: { text: '6.1 months', asOf: '2026-12-01' },
+      direction: 'up',
+      status: 'reached',
+      checkedAt: '2026-12-02T08:00:00.000Z',
+      reached: true,
+      wording: ADVISOR_COMPLETED_WORDING,
+    },
+  };
+}
+
+/**
+ * WP 11.5e: a session opened from a finding, already gathered from (the finding's own figures and the cash cover
+ * joined the context before the first question), waiting on the holder's answers.
+ */
+export function originSession(
+  id: string,
+  briefWeek: string | null,
+  createdAt = NOW,
+): AdvisorSessionBody {
+  return {
+    ...clarifyingSession(id, ADVISOR_FINDING_QUESTION, createdAt),
+    origin: {
+      insightId: ADVISOR_FINDING_ID,
+      ruleId: ADVISOR_FINDING_RULE,
+      title: ADVISOR_FINDING_TITLE,
+      briefWeek,
+    },
+    pregathered: { seeded: ['cash.emergency_fund'], finding: 'joined' },
+    lookedAt: CASH_LOOKED_AT,
   };
 }
 
@@ -415,6 +519,8 @@ export interface AdvisorMockOptions {
   /** How many reads stay at each step before the next. Default 1. */
   readonly readsPerStep?: number;
   readonly settings?: Partial<AdvisorSettingsBody>;
+  /** WP 11.5e: a `POST` with an `origin` is answered with this problem code (404/409/400) instead of a session. */
+  readonly originProblem?: 'not_found' | 'not_supported' | 'not_granted' | 'brief_unknown';
 }
 
 type Stage = 'start' | 'answered' | 'picked' | 'cancelled' | 'seed';
@@ -427,6 +533,8 @@ interface Walk {
   /** Reads answered since the stage began. */
   reads: number;
   seed: AdvisorSessionBody | null;
+  /** WP 11.5e: carried onto every body of a session opened from a finding. */
+  origin?: { briefWeek: string | null };
   ending: 'options' | 'refused';
   answers: string[];
   picked: string | null;
@@ -486,6 +594,19 @@ const ANSWER_STEPS = ['gathering', 'options', 'tradeoffs'] as const;
 
 /** The session as it stands now (a read advances the stage's clock, the caller does that). */
 function current(state: AdvisorMockState, walk: Walk): AdvisorSessionBody {
+  const body = currentBody(state, walk);
+  if (walk.origin === undefined || walk.stage === 'seed') return body;
+  // WP 11.5e: a session opened from a finding carries it, and what was gathered first, at every step.
+  const { origin } = originSession(walk.id, walk.origin.briefWeek);
+  return {
+    ...body,
+    origin,
+    pregathered: { seeded: ['cash.emergency_fund'], finding: 'joined' },
+    lookedAt: body.lookedAt ?? CASH_LOOKED_AT,
+  };
+}
+
+function currentBody(state: AdvisorMockState, walk: Walk): AdvisorSessionBody {
   const per = state.options.readsPerStep ?? 1;
   const hold = state.options.hold;
   const at = (steps: readonly string[], endsHold: boolean) => {
@@ -707,10 +828,35 @@ export async function handleAdvisor(
   }
 
   // POST /api/advisor/sessions
-  const sent = JSON.parse(route.request().postData() ?? '{}') as { question?: string };
+  const sent = JSON.parse(route.request().postData() ?? '{}') as {
+    question?: string;
+    origin?: { insightId: string; briefWeek?: string };
+  };
   state.bodies.push({ call: 'start', body: sent });
-  const question = sent.question ?? '';
+  const holdsQuestion = typeof sent.question === 'string' && sent.question !== '';
+  if (holdsQuestion === (sent.origin !== undefined)) {
+    const p = problem(400, 'insights.advisor_question_or_origin', 'Bad Request');
+    await json(route, p.status, p.body);
+    return true;
+  }
   const outcome = options.outcome ?? 'walk';
+  if (sent.origin !== undefined) {
+    const code = {
+      not_found: [404, 'insights.advisor_finding_not_found'],
+      not_supported: [409, 'insights.advisor_finding_not_supported'],
+      not_granted: [409, 'insights.advisor_finding_not_granted'],
+      brief_unknown: [400, 'insights.advisor_brief_unknown'],
+    } as const;
+    const scripted = options.originProblem === undefined ? null : code[options.originProblem];
+    const unknown = sent.origin.insightId !== ADVISOR_FINDING_ID;
+    const [status, problemCode] = scripted ?? (unknown ? code.not_found : [0, '']);
+    if (status !== 0) {
+      const p = problem(status, problemCode, 'Problem');
+      await json(route, p.status, p.body);
+      return true;
+    }
+  }
+  const question = sent.origin === undefined ? (sent.question ?? '') : ADVISOR_FINDING_QUESTION;
   if (outcome === 'unavailable') {
     const p = problem(409, 'insights.advisor_unavailable', 'Conflict', ADVISOR_UNAVAILABLE_WORDS);
     await json(route, p.status, p.body);
@@ -747,11 +893,12 @@ export async function handleAdvisor(
     stage: 'start',
     reads: 0,
     seed: null,
+    ...(sent.origin === undefined ? {} : { origin: { briefWeek: sent.origin.briefWeek ?? null } }),
     ending: outcome === 'refused' ? 'refused' : 'options',
     answers: [],
     picked: null,
   });
-  await json(route, 202, detail(base(id, question, 'clarifying')));
+  await json(route, 202, detail(current(state, state.walks.get(id)!)));
   return true;
 }
 
