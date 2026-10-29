@@ -5,7 +5,7 @@
 # Third-Party Notices
 
 PersonalFi is MIT-licensed. This file lists the runtime (production) dependency tree —
-`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:a1e7518f9d9dcac6.
+`pnpm licenses list --prod` across the whole workspace — generated from pnpm-lock.yaml sha256:c8a253a575dd7b01.
 devDependencies (build tooling, test frameworks) are not distributed and are not listed
 here; see `licenses.policy.yaml` for the policy that governs both.
 
@@ -317,7 +317,7 @@ not an npm dependency, so it is not in the tree below.
 - `safe-regex2`@5.1.1 — https://github.com/fastify/safe-regex2
 - `safe-stable-stringify`@2.5.0 — https://github.com/BridgeAR/safe-stable-stringify#readme
 - `scheduler`@0.27.0 — https://react.dev/
-- `seroval`@1.6.4 — https://github.com/lxsmnsyc/seroval/tree/main/packages/seroval
+- `seroval`@1.6.8 — https://github.com/lxsmnsyc/seroval/tree/main/packages/seroval
 - `seroval-plugins`@1.6.4 — https://github.com/lxsmnsyc/seroval/tree/main/packages/plugins
 - `set-cookie-parser`@2.7.2 — https://github.com/nfriedly/set-cookie-parser
 - `shebang-command`@2.0.0 — https://github.com/kevva/shebang-command#readme

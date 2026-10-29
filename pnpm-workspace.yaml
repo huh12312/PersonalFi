@@ -48,6 +48,11 @@ overrides:
   # Both older than minimumReleaseAge at the time of the bump (2026-10-27, CI trivy red after the billing hold).
   zod: 4.6.6
   follow-redirects: 1.16.1
+  # seroval 1.6.8 (2026-09-29) closes CVE-2026-116580/116581/116584 (function execution and two DoS
+  # via crafted input to its deserialiser); reached through @tanstack/router-core ← @tanstack/react-router
+  # (apps/web, client bundle only — no server deserialises holder input through it). Older than
+  # minimumReleaseAge at the bump (2026-10-29, CI trivy-fs red at d931707).
+  seroval: 1.6.8
   # CVE-2026-93749 (HIGH, DoS) in source-map-js 1.2.1, a transitive dev
   # dependency (postcss <- vite); snoozed in .trivyignore on 2026-10-06 while
   # 1.2.2 sat inside the 7-day minimumReleaseAge, bumped the day it matured.
