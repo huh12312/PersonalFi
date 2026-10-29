@@ -79,3 +79,4 @@ f702fc77f9cfe4b03c1a1e93870683de4716f081:docs/evidence/phase-11/wp11.5d-advisor-
 # comment, so the fingerprint: the commit-less form for `protect --staged`, the
 # commit-ful line beneath it for CI's full-history scan.
 scripts/advisor-eval-advisor.golden.json:generic-api-key:2444
+c90bc22f773c09333765d5bf1bcc09a2935bdf4e:scripts/advisor-eval-advisor.golden.json:generic-api-key:2444
