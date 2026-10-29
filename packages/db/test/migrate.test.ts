@@ -641,6 +641,13 @@ describeWithDb('runMigrations', () => {
       //   tracked_whole and finished re-stated to admit it; advisor_sessions_completed_reached holds it to a
       //   reached watcher). advisory_brief_items gains progress JSONB (a plan's progress as the Brief said it).
       //   Expand-only: nullable columns, a value added to a CHECK, no row rewritten.
+      // 0063_merchant_name_suggestions (WP 11.6): one new @ctx/ledger table, merchant_name_suggestions (a local
+      //   model's display-name suggestion for one noise merchant, merchant.name: one row per (user_id,
+      //   normalized_key) -- asked once --, the descriptor residue sent and the stripped processor prefix, status
+      //   suggested | accepted | dismissed | refused, display_name (1..40) exactly when not refused, refusal_class
+      //   exactly when refused, decided_at exactly when accepted or dismissed, llm_provider CHECK-pinned to
+      //   'ollama' (local only), llm_model, run_id, input_digest). Expand-only; references only users. Not
+      //   exported (registry.ts exempts it; an accepted name travels in transactions.user_merchant_name).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -714,6 +721,7 @@ describeWithDb('runMigrations', () => {
         'ledger_dedup_keys',
         'market_data_runs',
         'mcc_codes',
+        'merchant_name_suggestions',
         'merchant_profiles',
         'merchants',
         'narrator_provider_consents',

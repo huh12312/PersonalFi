@@ -280,3 +280,20 @@ export {
   type AdvisorModelStep,
   type AdvisorStepRequest,
 } from './advisor.ts';
+// WP 11.6: `merchant.name` — a display-name suggestion for one noise merchant, local model only.
+export {
+  createLocalMerchantNameAdapter,
+  MERCHANT_NAME_DESCRIPTOR_MAX,
+  MERCHANT_NAME_FORMAT,
+  MERCHANT_NAME_PROMPT_TEMPLATE_HASH,
+  MERCHANT_NAME_PROMPT_TEMPLATE_VERSION,
+  MERCHANT_NAME_SYSTEM_PROMPT,
+  MERCHANT_NAME_TEXT_MAX,
+  MERCHANT_NAME_USER_TRAILER,
+  renderMerchantNamePrompt,
+  type LocalMerchantNameAdapterDeps,
+  type MerchantNameModelAdapter,
+  type MerchantNameModelReply,
+  type MerchantNameRequest,
+  type RenderedMerchantNamePrompt,
+} from './merchant-name.ts';

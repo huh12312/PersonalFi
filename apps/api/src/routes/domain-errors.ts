@@ -64,6 +64,8 @@ const LEDGER_STATUS: Readonly<Record<LedgerErrorCode, number>> = {
   'ledger.transfer_same_account': 409,
   'ledger.transfer_already_paired': 409,
   'ledger.invalid_auto_placement': 422,
+  'ledger.merchant_name_suggestion_not_found': 404,
+  'ledger.merchant_name_suggestion_closed': 409,
 };
 
 const CONNECTIONS_STATUS: Readonly<Record<ConnectionsErrorCode, number>> = {

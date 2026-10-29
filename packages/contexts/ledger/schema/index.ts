@@ -64,3 +64,10 @@ export {
   type AccountOverrideRow,
   type NewAccountOverrideRow,
 } from './account-overrides.ts';
+export {
+  merchantNameSuggestions,
+  MERCHANT_NAME_STATUSES,
+  type MerchantNameStatus,
+  type MerchantNameSuggestionRow,
+  type NewMerchantNameSuggestionRow,
+} from './merchant-name-suggestions.ts';

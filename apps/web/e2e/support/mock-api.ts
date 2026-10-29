@@ -14,6 +14,11 @@ import {
   handleCategorySuggestions,
   type CategorySuggestionsMockState,
 } from './mock-category-suggestions.ts';
+import {
+  createMerchantNamesState,
+  handleMerchantNames,
+  type MerchantNamesMockState,
+} from './mock-merchant-names.ts';
 import { createNarratorState, handleNarrator, type NarratorMockState } from './mock-narrator.ts';
 
 /**
@@ -107,6 +112,8 @@ interface MockTransaction {
   categoryId: string | null;
   /** WP 11.2b: which tier the category came from; absent = the holder's pick when a category is set. */
   categorySource?: 'user' | 'rule' | 'auto' | null;
+  /** WP 11.6: the holder named this payee (`PATCH` with `payeeName`), so a merchant rename leaves it alone. */
+  holderNamed?: boolean;
   /** WP 11.2b: the provenance of an automatic placement (`categorySource: 'auto'`). */
   autoCategory?: { tier: string; confidence: number; decidedAt: string } | null;
   note: string | null;
@@ -281,6 +288,10 @@ export interface MockApiState {
   narrator: NarratorMockState;
   /** WP 11.2: Settings › Language model › Category suggestions (`mock-category-suggestions.ts`). */
   categorySuggestions: CategorySuggestionsMockState;
+  /** WP 11.6: merchant display-name suggestions (`mock-merchant-names.ts`); empty until a spec seeds it. */
+  merchantNames: MerchantNamesMockState;
+  /** WP 11.6: names every transaction of the merchant that carries no holder name yet (the accept); returns how many. */
+  renameMerchant(merchantId: string, name: string): number;
   /** WP 11.2b: the Inbox's "Auto-categorised, unreviewed" switch (`/api/inbox/preferences`), and what was saved. */
   inboxPreferences: { showAutoReview: boolean; puts: Array<{ showAutoReview: boolean }> };
   /** WP 11.2b: adds a transaction to the general fixture (an automatic placement, say). */
@@ -315,6 +326,8 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
     categorySuggestions: createCategorySuggestionsState(),
     inboxPreferences: { showAutoReview: true, puts: [] },
     addTransaction: () => undefined,
+    merchantNames: createMerchantNamesState(),
+    renameMerchant: () => 0,
   };
 
   const transactions = new Map<string, MockTransaction>([
@@ -377,6 +390,18 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       overrides.id,
       makeTransaction(overrides as Partial<MockTransaction> & { id: string }),
     );
+  };
+
+  state.renameMerchant = (merchantId, name) => {
+    let renamed = 0;
+    for (const t of transactions.values()) {
+      if (t.merchantId !== merchantId || t.holderNamed === true) continue;
+      t.name = name;
+      // Like the api's overlay write: the row carries the holder's name from now on, so a second pass skips it.
+      t.holderNamed = true;
+      renamed += 1;
+    }
+    return renamed;
   };
 
   interface MockRule {
@@ -479,6 +504,11 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
 
     // WP 10.6: Settings › Language model (GET; every write but Test behind the step-up).
     if (await handleNarrator(route, path, method, state.narrator, () => state.steppedUp)) return;
+
+    // WP 11.6: merchant display-name suggestions (GET; accept and dismiss are session-only).
+    if (await handleMerchantNames(route, path, method, state.merchantNames, state.renameMerchant)) {
+      return;
+    }
 
     // WP 11.2: the category-suggestion settings (GET; every write behind the step-up).
     if (
@@ -656,6 +686,11 @@ export async function installApiMocks(page: Page): Promise<MockApiState> {
       const patch = request.postDataJSON() as Record<string, unknown>;
       state.lastPatchBody = patch;
       Object.assign(t, patch);
+      // WP 11.6: the holder's own payee name is the row's name from then on, and a merchant rename keeps it.
+      if (typeof patch['payeeName'] === 'string') {
+        t.name = patch['payeeName'];
+        t.holderNamed = true;
+      }
       // WP 11.2b: a category the holder just picked is theirs, and carries no chip.
       if (typeof patch['categoryId'] === 'string') {
         t.categorySource = 'user';

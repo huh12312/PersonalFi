@@ -2,6 +2,11 @@
 import type { Page, Route } from '@playwright/test';
 
 import { installAdvisorSessionMocks, type AdvisorMockState } from './mock-advisor.ts';
+import {
+  handleMerchantNameAdvisor,
+  merchantNameAdvisorRow,
+  type MerchantNamesMockState,
+} from './mock-merchant-names.ts';
 
 /**
  * The advisor-management routes (WP 5.12), as a layerable mock: moved out of `advisors.spec.ts` by WP 9.8
@@ -186,7 +191,7 @@ export function doneRun() {
  */
 export async function installAdvisorMocks(
   page: Page,
-  state: { steppedUp: boolean },
+  state: { steppedUp: boolean; merchantNames?: MerchantNamesMockState },
   advisor?: AdvisorMockState,
 ): Promise<Store> {
   // WP 11.5d: the advisor's own sessions and hosted consent (`/api/advisor/**`; the management screen reads the
@@ -224,6 +229,16 @@ export async function installAdvisorMocks(
         403,
       );
 
+    // WP 11.6: `merchant.name` is listed (and answered) only once a spec has seeded merchant names.
+    const merchantNames = state.merchantNames;
+    if (
+      merchantNames?.advisorListed === true &&
+      path.startsWith('/api/advisors/merchant.name/') &&
+      (await handleMerchantNameAdvisor(route, path, method, merchantNames, () => state.steppedUp))
+    ) {
+      return;
+    }
+
     if (path === '/api/advisors' && method === 'GET') {
       return json({
         advisors: [
@@ -241,6 +256,7 @@ export async function installAdvisorMocks(
             lastRunStatus: store.liveStatus,
             lastRunRejected: 1,
           },
+          ...(merchantNames?.advisorListed === true ? [merchantNameAdvisorRow()] : []),
         ],
       });
     }

@@ -220,7 +220,7 @@ const LOCAL_COST =
 /**
  * WP 10.16: Settings › Language model › Control checks - Chris's "a 'Run control checks' button on the Language
  * model screen would exercise every control against your live instance with your own session". Against
- * `support/mock-narrator.ts`'s control-checks machine (202 with sixteen pending checks; each read moves the run on by
+ * `support/mock-narrator.ts`'s control-checks machine (202 with seventeen pending checks; each read moves the run on by
  * three; the api's ten-minute 409), with a real CDP virtual authenticator for the passkey step-up.
  */
 test.describe('Settings › Language model › Control checks (WP 10.16)', () => {
@@ -299,7 +299,7 @@ test.describe('Settings › Language model › Control checks (WP 10.16)', () =>
     );
     await expect(table.getByTestId('control-check-kill_level_4_cancel')).toContainText('1.8 s');
     await expect(section.getByTestId('control-checks-summary')).toContainText(
-      'Result: Partial: some checks could not run. 12 passed, 1 skipped, 2 not applicable, 1 reported.',
+      'Result: Partial: some checks could not run. 13 passed, 1 skipped, 2 not applicable, 1 reported.',
     );
     await expect(section.getByTestId('control-checks-wait')).toHaveText(
       // Dated when the ten-minute window crosses midnight (CI runs in UTC): "28 Oct, 00:01".

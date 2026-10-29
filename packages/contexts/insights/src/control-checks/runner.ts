@@ -35,6 +35,7 @@ import {
   checkBriefNarrationGrounding,
   checkAskGrounding,
   checkAdvisorCostPairing,
+  checkMerchantNameSubstring,
   checkSuggestEnumRefusal,
   errorClass,
   pendingRow,
@@ -117,6 +118,8 @@ export async function runApiControlChecks(
     narration_badge: () => checkNarrationBadge(ports.badge),
     // WP 11.5d: no model, no database — the shipped validator over a fixed reply.
     advisor_cost_pairing: () => checkAdvisorCostPairing(),
+    // WP 11.6: no model, no database — the shipped merchant-name validator over a fixed reply.
+    merchant_name_substring: () => checkMerchantNameSubstring(),
   };
   for (const definition of CONTROL_CHECKS) {
     if (definition.side !== 'api') continue;

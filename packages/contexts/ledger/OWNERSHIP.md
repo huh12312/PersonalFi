@@ -55,6 +55,20 @@ reader of the effective category reads `transactions`. It is derived data: the e
 import re-derives it from `@ctx/categorization`'s `category_assignments`. The ledger never reads that
 table; the categorisation pass hands the placements over through its `LedgerPort`.
 
+### Built (migration 0063, WP 11.6)
+
+A local model's display-name suggestion for a **noise** merchant (`merchant.name`), one row per
+`(user, normalized_key)`, asked once. It sits here, beside `merchants`, rather than in `@ctx/insights`
+(which owns the query type's kill ladder, approval and validator) or `@ctx/categorization` (which owns
+naming-adjacent profiles) for three reasons: its key is a `merchants.normalized_key`; deciding which
+merchants are noise reads `merchants`, `transactions` and `transactions_provider`, all this context's; and
+the only thing an accepted suggestion does is write the `user_merchant_name` overlay through
+`setTransactionOverlay`, the manual rename's own path. Any other owner would have to read three ledger
+tables directly, which the ownership rule forbids. `merchants.display_name` and
+`transactions.effective_name` are never written from it.
+
+- `merchant_name_suggestions`
+
 ### Claimed, not yet built
 
 - `institutions`

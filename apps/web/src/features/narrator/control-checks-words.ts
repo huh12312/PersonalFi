@@ -15,7 +15,7 @@ export type ControlCheckStatus = ControlCheckRow['status'];
 export type ControlCheckProvider = ControlCheckRun['provider'];
 
 /** How many checks a run always has (the api's `CONTROL_CHECK_IDS`). */
-export const CONTROL_CHECK_COUNT = 15;
+export const CONTROL_CHECK_COUNT = 17;
 
 /** What the Result column reads. A skip that is a property of the provider reads "Not applicable". */
 export function checkStatusWord(row: Pick<ControlCheckRow, 'status' | 'notApplicable'>): string {
@@ -107,7 +107,7 @@ export function providerModelWords(provider: ControlCheckProvider, model: string
   return `${name}, ${shown}`;
 }
 
-/** The live region's sentence while a run is going: "4 of 15 checks done." */
+/** The live region's sentence while a run is going: "4 of 17 checks done." */
 export function progressWords(run: Pick<ControlCheckRun, 'results'>): string {
   const done = run.results.filter(isSettled).length;
   const total = run.results.length === 0 ? CONTROL_CHECK_COUNT : run.results.length;

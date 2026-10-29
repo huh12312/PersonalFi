@@ -39,6 +39,13 @@ import {
   ADVISOR_QUESTIONS,
 } from './support/mock-advisor.ts';
 import { ASK_OUT_OF_SCOPE_QUESTION, ASK_QUESTION } from './support/mock-ask.ts';
+import {
+  EBAY_SUGGESTION_ID,
+  EBAY_TXN_IDS,
+  PATREON_SUGGESTION_ID,
+  PATREON_TXN_ID,
+  seedMerchantNames,
+} from './support/mock-merchant-names.ts';
 import { CONTROL_CHECKS } from './support/mock-narrator.ts';
 import { installSweepMocks } from './support/mock-sweep.ts';
 import { installInvestmentsMocks } from './support/mock-investments.ts';
@@ -783,7 +790,7 @@ test('settings › language model (WP 10.16): Tab to Run control checks, press i
   await page.keyboard.press('Enter');
   const history = section.getByTestId('control-checks-history');
   await expect(history.getByRole('table')).toBeVisible();
-  // One row per check in the mock's catalogue (derived, so a new check is picked up: sixteen since WP 11.5d's advisor_cost_pairing).
+  // One row per check in the mock's catalogue (derived, so a new check is picked up: seventeen since WP 11.6's merchant_name_substring).
   await expect(history.getByRole('table').locator('tbody tr')).toHaveCount(CONTROL_CHECKS.length);
   await journey.expectFocus(/\(latest\)/, 'focus stays on the opened summary');
   await page.unrouteAll({ behavior: 'ignoreErrors' });
@@ -1152,6 +1159,63 @@ test('transactions: Tab to the chip’s Confirm, Enter files it without opening 
   await expect(row).toBeFocused();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await journey.check('after Confirm, on the row');
+});
+
+// ---------------------------------------------------------------------------
+// WP 11.6: a merchant display-name suggestion, by keyboard
+// ---------------------------------------------------------------------------
+
+test('transactions: Tab to the name chip’s Accept, Enter renames the merchant’s rows without opening one; focus is on the row, the confirmation is announced', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const mocks = await installSweepMocks(page);
+  seedMerchantNames(mocks.api, { mode: 'suggested' });
+  await visit(page, '/transactions');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'transactions merchant name, Accept');
+  const row = page.locator(`[role="row"][data-transaction-id="${EBAY_TXN_IDS[0]}"]`);
+  await expect(row.getByTestId('merchant-name-chip')).toBeVisible();
+
+  await journey.tabTo(/^Accept the name Ebay$/, { max: 60 });
+  await journey.check('on the first Accept');
+  // The name is the control's own: Dismiss follows Accept in the tab order, and is reachable.
+  await page.keyboard.press('Tab');
+  await journey.expectFocus(/^Dismiss the name Ebay$/, 'Dismiss follows Accept');
+  await page.keyboard.press('Shift+Tab');
+  await journey.expectFocus(/^Accept the name Ebay$/, 'Shift+Tab returns to Accept');
+
+  await page.keyboard.press('Enter');
+  await expect.poll(() => mocks.api.merchantNames.accepts).toEqual([EBAY_SUGGESTION_ID]);
+  await expect(page.getByTestId('merchant-name-status')).toHaveText(
+    'Renamed 2 transactions to Ebay.',
+  );
+  await expect(row.getByTestId('merchant-name-chip')).toHaveCount(0);
+  await expect(row).toBeFocused();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await journey.check('after Accept, on the row');
+});
+
+test('transactions: Dismiss on the name chip by keyboard records it; the chip goes and focus is on the row', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const mocks = await installSweepMocks(page);
+  seedMerchantNames(mocks.api, { mode: 'suggested' });
+  await visit(page, '/transactions');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'transactions merchant name, Dismiss');
+  const row = page.locator(`[role="row"][data-transaction-id="${PATREON_TXN_ID}"]`);
+  await expect(row.getByTestId('merchant-name-chip')).toBeVisible();
+
+  await journey.tabTo(/^Dismiss the name Patreon Membership$/, { max: 80 });
+  await page.keyboard.press('Enter');
+  await expect.poll(() => mocks.api.merchantNames.dismisses).toEqual([PATREON_SUGGESTION_ID]);
+  await expect(row.getByTestId('merchant-name-chip')).toHaveCount(0);
+  await expect(row).toBeFocused();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await journey.check('after Dismiss, on the row');
+  expect(mocks.api.merchantNames.accepts).toEqual([]);
 });
 
 // ---------------------------------------------------------------------------

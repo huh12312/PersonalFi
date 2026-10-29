@@ -99,6 +99,9 @@ import {
   loadInsightExplainTarget,
   previewInsightExplain,
   ungrantedExplainScopes,
+  MERCHANT_NAME_ADVISOR_ID,
+  approveMerchantName,
+  previewMerchantName,
   type ExplainTarget,
   previewRequest,
   requestRunCancel,
@@ -132,6 +135,8 @@ import type { ExplainRuntime } from '../insight-explain.ts';
 import { loadBriefNarrateTarget, type BriefNarrateRuntime } from '../brief-narration.ts';
 import type { AskRuntime } from '../ask.ts';
 import type { AdvisorRuntime } from '../advisor-mode.ts';
+import type { MerchantNameRuntime } from '../merchant-names.ts';
+import { listMerchantNameCandidates } from '@ctx/ledger';
 import type { RouteDeps } from './deps.ts';
 
 /** D6: one account holder — the same reading every other route file uses. */
@@ -486,8 +491,45 @@ export const advisorRunRoutes = (
   briefNarrate?: { readonly runtime: Pick<BriefNarrateRuntime, 'resolve'> },
   ask?: { readonly runtime: Pick<AskRuntime, 'resolve'> },
   advisor?: { readonly runtime: Pick<AdvisorRuntime, 'resolve'> },
+  merchantName?: { readonly runtime: Pick<MerchantNameRuntime, 'resolve'> },
 ): FastifyPluginAsyncZod => {
   const { guards, database, clock } = deps;
+
+  /**
+   * WP 11.6: the holder's local model as `merchant.name`'s renderer (preview
+   * mode), or a 503 that says why — a hosted narrator binds none, because
+   * merchant names stay on this machine.
+   */
+  async function merchantNameRenderer(userId: string) {
+    const resolution =
+      merchantName === undefined ? null : await merchantName.runtime.resolve(userId);
+    if (resolution?.adapter == null) {
+      throw new AppError({
+        status: 503,
+        code: 'insights.prompt_renderer_unavailable',
+        title: 'Service Unavailable',
+        detail:
+          resolution?.reason === 'hosted_narrator'
+            ? 'merchant name suggestions run on the local model only, and your narrator is a ' +
+              'hosted provider, so the payload of merchant.name cannot be shown or approved: ' +
+              'choose the local model in Settings, Language model, first'
+            : 'no local language model is configured for you (the narrator is Off or not set up), ' +
+              'so the payload of merchant.name cannot be shown or approved: choose a model in ' +
+              'Settings, Language model, first',
+        family: 'internal',
+      });
+    }
+    return resolution.adapter;
+  }
+
+  /** The holder's own first noise merchant, for the preview; `null` shows the illustrative one. */
+  async function merchantNamePreviewSubject(userId: string) {
+    const listed = await listMerchantNameCandidates(database, userId, { limit: 1 });
+    const first = listed.candidates[0];
+    return first === undefined
+      ? null
+      : { descriptor: first.descriptor, stripped_prefix: first.strippedPrefix };
+  }
 
   /** WP 11.5d: the advisor's renderers for this holder (D31's provider rule, preview mode), or a 503. */
   async function advisorRenderers(userId: string) {
@@ -847,6 +889,36 @@ export const advisorRunRoutes = (
             approved: preview.approved,
           };
         }
+        if (request.params.advisorId === MERCHANT_NAME_ADVISOR_ID) {
+          const renderer = await merchantNameRenderer(session.userId);
+          const preview = await previewMerchantName(
+            database,
+            contextOf(deps, session.userId, request),
+            { renderer, subject: await merchantNamePreviewSubject(session.userId) },
+          );
+          return {
+            advisorId: preview.advisorId,
+            kind: 'local_model' as const,
+            queryShape: preview.queryShape,
+            scopes: [...preview.scopes],
+            promptTemplateHash: preview.promptTemplateHash,
+            request: {
+              request_id: preview.request.request_id,
+              subject: {
+                descriptor: preview.request.descriptor,
+                stripped_prefix: preview.request.stripped_prefix,
+              },
+              deadline: preview.request.deadline,
+              max_response_bytes: preview.request.max_response_bytes,
+              snapshot: preview.request.snapshot as unknown as Record<string, unknown>,
+              granted_scopes: [...preview.request.granted_scopes],
+              consent: { ...preview.request.consent },
+            },
+            prompt: preview.prompt,
+            approvalRequired: true,
+            approved: preview.approved,
+          };
+        }
         if (request.params.advisorId === INSIGHT_EXPLAIN_ADVISOR_ID) {
           const renderer = await explainRenderer(session.userId);
           const preview = await previewInsightExplain(
@@ -963,6 +1035,18 @@ export const advisorRunRoutes = (
           const renderer = await briefNarrateRenderer(session.userId);
           try {
             return await approveBriefNarrate(database, contextOf(deps, session.userId, request), {
+              renderer,
+              queryShape: request.body.queryShape,
+            });
+          } catch (error) {
+            if (error instanceof PreviewError) throw previewProblem(error);
+            throw error;
+          }
+        }
+        if (request.params.advisorId === MERCHANT_NAME_ADVISOR_ID) {
+          const renderer = await merchantNameRenderer(session.userId);
+          try {
+            return await approveMerchantName(database, contextOf(deps, session.userId, request), {
               renderer,
               queryShape: request.body.queryShape,
             });

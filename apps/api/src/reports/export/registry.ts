@@ -387,6 +387,10 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
     'insights: a language model\'s "Explain this" wording per evidence digest (WP 11.3), derived from the insight or pillar and the model, not data the holder entered; a restore explains again under its own approval.',
   ],
   [
+    'merchant_name_suggestions',
+    "ledger: a local model's display-name suggestion per noise merchant (WP 11.6), derived from the bank's text and the model, not data the holder entered. An accepted name is carried where it lives, in the transactions' user_merchant_name overlay, which is exported; a dismissal is not carried, so a restore may ask about that merchant once more under its own approval.",
+  ],
+  [
     'brief_narrations',
     "insights: a language model's wording of one published Brief and its weekly recap (WP 11.4), derived from the Brief and the model, not data the holder entered; a restore keeps the Brief's own deterministic opening and asks no model again.",
   ],

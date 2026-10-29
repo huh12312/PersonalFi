@@ -41,6 +41,31 @@ export {
   type MerchantCounterparty,
 } from './normalise.ts';
 export { pruneNoiseMerchants } from './merchant-store.ts';
+// WP 11.6: noise merchants, and the merchant.name suggestions recorded for them.
+export {
+  MERCHANT_NOISE_SHAPES,
+  detectMerchantNoise,
+  mayBeNoise,
+  noiseShapesOf,
+  type MerchantNoiseShape,
+  type MerchantNoiseShapeDefinition,
+  type MerchantNoiseVerdict,
+} from './merchant-noise.ts';
+export { processorPrefixOf } from './normalise.ts';
+export {
+  MERCHANT_NAME_LIST_MAX,
+  MERCHANT_NAME_RUN_CAP,
+  acceptMerchantNameSuggestion,
+  countMerchantNameSuggestions,
+  dismissMerchantNameSuggestion,
+  listMerchantNameCandidates,
+  listMerchantNameSuggestions,
+  recordMerchantNameAnswer,
+  type MerchantNameAnswer,
+  type MerchantNameCandidate,
+  type MerchantNameCandidates,
+  type MerchantNameSuggestionView,
+} from './merchant-name-suggestions.ts';
 export {
   EMPTY_OVERLAY,
   NO_AUTO,

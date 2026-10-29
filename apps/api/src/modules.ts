@@ -114,6 +114,8 @@ import {
   ADVISOR_FOLLOW_UP_MANIFEST,
   ADVISOR_STEP_MANIFESTS,
   registerAdvisorFollowUpSchedule,
+  MERCHANT_NAME_MANIFEST,
+  registerMerchantNamesSchedule,
   INSIGHTS_EVENTS,
   NARRATOR_MANIFEST,
   type InsightsDatabase,
@@ -196,6 +198,7 @@ import {
   enqueueSuggestionsAfterSync,
   type SuggestionRuntime,
 } from './category-suggestions.ts';
+import { createMerchantNamesJob, type MerchantNameRuntime } from './merchant-names.ts';
 
 export interface ModuleWiringOptions {
   /**
@@ -311,6 +314,14 @@ export interface ModuleWiringOptions {
    * whenever a token secret is configured.
    */
   readonly advisor?: { readonly runtime: AdvisorRuntime };
+  /**
+   * WP 11.6: merchant display-name suggestions — the worker's run-mode runtime
+   * (`merchant-names.ts`: the narrator's **local** model only). Present: the
+   * `insights.merchant_names` job is registered with its nightly schedule
+   * (05:20 local). Absent (the api): nothing runs here; the api lists,
+   * accepts and dismisses.
+   */
+  readonly merchantNames?: { readonly runtime: MerchantNameRuntime };
   /**
    * The account holder these modules are being built for — the same id
    * `resolveModules(platform, userId, …)` is called with.
@@ -590,6 +601,14 @@ export async function registerBuiltinAdvisors(
       { manifest, enabled: true },
     );
   }
+  // WP 11.6: `merchant.name`'s row, on — nothing is sent without an approved
+  // shape and the narrator's local model; level 3's switch in Advisor
+  // management still turns it off. Not in the nightly registry.
+  await registerAdvisor(
+    database,
+    { userId: context.userId, clock: context.clock, correlationId: context.correlationId },
+    { manifest: MERCHANT_NAME_MANIFEST, enabled: true },
+  );
   // WP 11.5d: the advisor's six query types, on — nothing is sent without each
   // shape approved; level 3's switches in Advisor management still turn any
   // off — and the follow-up watcher (builtin, no model). Not in the nightly registry.
@@ -1454,6 +1473,17 @@ function insightsModule(
               clock,
             }),
           ]),
+      // WP 11.6: `insights.merchant_names` — the nightly merchant.name pass, local model only, never the api.
+      ...(options.merchantNames === undefined
+        ? []
+        : [
+            createMerchantNamesJob({
+              database,
+              runtime: options.merchantNames.runtime,
+              switches: insightsRunSwitches(database, options),
+              clock,
+            }),
+          ]),
       // WP 11.3: `insights.explain` — the holder's tap or the Brief's prefetch, never the api.
       ...(options.insightExplain === undefined
         ? []
@@ -1513,6 +1543,14 @@ function insightsModule(
         { userId, timezone: options.timezone },
         clock,
       );
+      // WP 11.6: 05:20 local, every day — the merchant.name pass, where its job is registered.
+      if (options.merchantNames !== undefined) {
+        await registerMerchantNamesSchedule(
+          database,
+          { userId, timezone: options.timezone },
+          clock,
+        );
+      }
     },
   };
 }

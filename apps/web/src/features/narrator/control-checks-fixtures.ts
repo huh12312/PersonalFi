@@ -2,7 +2,7 @@
 /**
  * A stand-in for `apps/api/src/routes/narrator-control-checks.ts` with real state, for the unit tests (WP 10.16).
  * It answers in the api's shapes and with its rules: `POST` needs a fresh step-up (403 `step_up_required`), answers
- * 202 with a run whose sixteen checks are all pending, and refuses a second run inside ten minutes with the api's 409
+ * 202 with a run whose seventeen checks are all pending, and refuses a second run inside ten minutes with the api's 409
  * `narrator.control_checks_too_soon` and `Retry-After`; each `GET` after a start moves the run on by
  * `advancePerRead` checks (pending → running → its outcome) until it is finished. `e2e/support/mock-narrator.ts` is
  * the same machine for Playwright (e2e never imports from `src/`).
@@ -124,6 +124,13 @@ export const CATALOGUE: ReadonlyArray<Pick<ControlCheckRow, 'id' | 'name' | 'pro
       'An advisor reply that offers an option without a cost is refused by the validator (tradeoffs.cost_missing) and never shown.',
     side: 'api',
   },
+  {
+    id: 'merchant_name_substring',
+    name: 'Merchant name suggestions only reuse the bank’s words',
+    proves:
+      'A merchant name suggestion that names a brand the bank’s text does not carry is refused by the validator (name.invented) and never shown.',
+    side: 'api',
+  },
 ];
 
 const LOCAL_MODEL = `qwen2.5:7b-instruct-q4_K_M@sha256:${'3f'.repeat(32)}`;
@@ -233,6 +240,11 @@ export function localOutcomes(proveSwitch: boolean): Record<ControlCheckRow['id'
       'An advisor reply offering an option with no cost was refused (tradeoffs.cost_missing).',
       'The model was not called; the validator refused the reply and nothing was shown.',
     ),
+    merchant_name_substring: pass(
+      35,
+      'A merchant name suggestion that named a brand the bank’s text does not carry was refused (name.invented).',
+      'The model was not called; the validator refused the suggestion and nothing was shown.',
+    ),
   };
 }
 
@@ -331,7 +343,7 @@ const proveSwitchOf = new WeakMap<ControlCheckRun, boolean>();
 
 /**
  * Moves the newest run on by one read: the checks that were running get their outcome, and the next `n` pending
- * checks start running. With `n` = 3 the sixteen checks are done on the fifth read.
+ * checks start running. With `n` = 3 the seventeen checks are done on the fifth read.
  */
 function advance(state: ControlChecksFixtureState, n: number): void {
   const run = state.runs[0];

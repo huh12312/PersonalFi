@@ -30,6 +30,13 @@ import {
   SUGGESTED_MERCHANT,
   SUGGESTION_CHIP,
 } from './support/mock-category-suggestions.ts';
+import {
+  CONSENT,
+  MERCHANT_NAME_ADVISOR_NAME,
+  NOT_APPROVED_NOTE,
+  seedMerchantNames,
+  SUGGESTED_BY_LINE,
+} from './support/mock-merchant-names.ts';
 import { ABSTAINED_LINE, installRuleSuggestionMocks } from './support/mock-rule-suggestions.ts';
 import {
   EXPLAIN_LOCAL_BADGE,
@@ -1245,7 +1252,7 @@ test.describe('WP 10.16 control checks and the controls on the backup line', () 
     const section = page.getByTestId('control-checks');
     await expect(section.getByTestId('control-checks-table')).toBeVisible();
     if (where === 'settings, running') {
-      // The count follows the mock's catalogue (sixteen since WP 11.5d), never a pinned number.
+      // The count follows the mock's catalogue (seventeen since WP 11.6), never a pinned number.
       await expect(section.getByTestId('control-checks-progress')).toHaveText(
         `Running control checks… 3 of ${String(CONTROL_CHECKS.length)} checks done.`,
       );
@@ -1484,6 +1491,103 @@ test.describe('WP 11.2 category suggestions', () => {
       await expect(card.getByTestId('suggestions-measure-live')).toContainText('Measuring…');
       expect(await motionOffenders(page)).toEqual([]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7m2. WP 11.6: merchant display-name suggestions on /transactions, and the merchant.name advisor's preview
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep's fixtures carry no merchant name suggestion, so this block seeds WP 11.6's
+ * (`support/mock-merchant-names.ts`) into the sweep's general fixture and holds the screens with them present: the
+ * transaction list with the chip (Accept / Dismiss) under the bank's text on two merchants, the same list with the
+ * not-approved note and its link to Advisors, and Advisor management with the `merchant.name` row open on its
+ * preview (the descriptor, the consent wording, Approve) — in both themes, at 1280 and 320 px, at 200 % zoom with
+ * 1.4.12 text spacing, and with reduced motion.
+ */
+test.describe('WP 11.6 merchant name suggestions', () => {
+  type Where =
+    | '/transactions, with name chips'
+    | '/transactions, with the not-approved note'
+    | '/settings/advisors, merchant.name preview';
+  const WHERE: readonly Where[] = [
+    '/transactions, with name chips',
+    '/transactions, with the not-approved note',
+    '/settings/advisors, merchant.name preview',
+  ];
+
+  async function open(page: Page, where: Where): Promise<void> {
+    const mocks = await installSweepMocks(page);
+    if (where === '/transactions, with name chips') {
+      seedMerchantNames(mocks.api, { mode: 'suggested' });
+      await visit(page, '/transactions');
+      await hideDevtools(page);
+      await expect(page.getByTestId('merchant-name-chip').first()).toBeVisible();
+      await expect(page.getByTestId('merchant-name-chip-provenance').first()).toHaveText(
+        SUGGESTED_BY_LINE,
+      );
+      return;
+    }
+    seedMerchantNames(mocks.api, { mode: 'unavailable', reason: 'payload_not_approved' });
+    if (where === '/transactions, with the not-approved note') {
+      await visit(page, '/transactions');
+      await hideDevtools(page);
+      await expect(page.getByTestId('merchant-name-note').first()).toHaveText(NOT_APPROVED_NOTE);
+      return;
+    }
+    await visit(page, '/settings/advisors');
+    await hideDevtools(page);
+    await page
+      .getByTestId('advisor-row')
+      .filter({ hasText: MERCHANT_NAME_ADVISOR_NAME })
+      .getByRole('button', { name: 'Show detail' })
+      .click();
+    const detail = page.getByRole('region', { name: `${MERCHANT_NAME_ADVISOR_NAME} detail` });
+    await expect(detail.getByTestId('payload-consent-text')).toHaveText(CONSENT.text);
+    await expect(detail.getByTestId('untrusted-block')).toContainText('Ebayinc');
+    await detail.scrollIntoViewIfNeeded();
+  }
+
+  for (const where of WHERE) {
+    test(`${where}: axe-clean in both themes, at 1280 and at 320 px`, async ({ page }) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await open(page, where);
+      await scanBothThemes(page, `WP 11.6 ${where}`);
+      await page.setViewportSize(REFLOW);
+      await page.waitForTimeout(600);
+      expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+      await scanBothThemes(page, `WP 11.6 ${where}, at 320 px`);
+    });
+  }
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    for (const where of WHERE) {
+      test(`${where}: nothing is lost`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, where);
+        expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+        await scanBothThemes(page, `WP 11.6 ${where}, at 200 %`);
+        const before = new Set(await clippedTextElements(page));
+        await page.addStyleTag({ content: TEXT_SPACING });
+        await page.waitForTimeout(100);
+        const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+        expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+      });
+    }
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+    for (const where of WHERE) {
+      test(`${where}: nothing animates`, async ({ page }) => {
+        test.setTimeout(120_000);
+        await open(page, where);
+        expect(await motionOffenders(page)).toEqual([]);
+      });
+    }
   });
 });
 

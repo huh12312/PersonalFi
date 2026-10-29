@@ -164,8 +164,9 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
             className="rounded-md border border-border-hairline bg-bg-surface p-3"
             data-testid="scope-row"
           >
-            <div className="flex items-start justify-between gap-3">
-              <label className="flex items-start gap-2">
+            {/* Wraps at 320 px (WCAG 1.4.10): a long scope name and its badges never push the row sideways. */}
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <label className="flex min-w-0 items-start gap-2">
                 <input
                   type="checkbox"
                   className="mt-1"
@@ -177,7 +178,9 @@ export function ScopeGrantsPanel({ advisorId }: ScopeGrantsPanelProps) {
                   aria-label={`Grant ${scope.scope}`}
                 />
                 <span>
-                  <span className="font-mono text-small text-text-primary">{scope.scope}</span>
+                  <span className="break-all font-mono text-small text-text-primary">
+                    {scope.scope}
+                  </span>
                   {scope.granted && (
                     <Badge variant="success" className="ml-2">
                       Currently granted

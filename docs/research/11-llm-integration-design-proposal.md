@@ -108,7 +108,7 @@ Three rules make the right-hand column safe, and they are the same three the nar
 | 11.3 | **Explain this** (`insight.explain`): grounded explanations on insights and health pillars, cached per evidence digest. **Built:** [WP 11.3 evidence](../evidence/phase-11/wp11.3-explain-this.md) | — | S |
 | 11.4 | **Brief-level narration** (G5-15) and the recap narration over V8 blocks. **Built** as one query type, `brief.narrate` (one payload, one call, `{narration, recap}`): [WP 11.4 evidence](../evidence/phase-11/wp11.4-brief-narration.md) | — | S |
 | 11.5 | **Ask PersonalFi** (`ask.compile` + `ask.narrate`): the report-function catalogue as a typed tool set, the compile step, execution, the evidence line, the narrated answer, refusals, an Ask surface. **Reporting mode built** as 12 §6's 11.5c, over 11.5b's `catalogue/1`: `/ask`, two query types each approved on its own, one model call per step, a 64-question compile golden set: [WP 11.5c evidence](../evidence/phase-11/wp11.5c-ask-reporting.md) | 11.3 | L |
-| 11.6 | **Merchant display-name suggestions** (`merchant.name`), narrow | 11.2 | S |
+| 11.6 | **Merchant display-name suggestions** (`merchant.name`), narrow. **Built:** [WP 11.6 evidence](../evidence/phase-11/wp11.6-merchant-name.md) | 11.2 | S |
 | 11.7 | **Receipt and document extraction** with deterministic reconciliation (needs attachments + a vision-capable local model or hosted consent) | later | L |
 
 ---

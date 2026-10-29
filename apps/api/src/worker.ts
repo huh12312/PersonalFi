@@ -63,6 +63,7 @@ import { createStoredPlaid, withStoredPlaid } from './plaid-stored.ts';
 import { createNarratorRuntime, createNarratorWiring } from './narrator-wiring.ts';
 import { createNarratorStores } from './narrator-stores.ts';
 import { createSuggestionRuntime } from './category-suggestions.ts';
+import { createMerchantNameRuntime } from './merchant-names.ts';
 import { createExplainRuntime } from './insight-explain.ts';
 import { createBriefNarrateRuntime } from './brief-narration.ts';
 import { createAskRuntime } from './ask.ts';
@@ -516,6 +517,19 @@ async function main(): Promise<void> {
       clock: systemClock,
     });
 
+    // WP 11.6: merchant display-name suggestions on the narrator's local model
+    // only (a hosted narrator binds none). Run mode: this process calls it.
+    const merchantNameRuntime = createMerchantNameRuntime({
+      mode: 'run',
+      narrator: narratorRuntime,
+      stores: createNarratorStores({ database, secretBox: () => secretBox ?? undefined }),
+      localModel: config.localModel,
+      timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+      allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+      logger,
+      clock: systemClock,
+    });
+
     // WP 11.3: "Explain this" on the narrator's own provider — its model, its
     // consent, its key and its hourly window. Run mode: this process calls it.
     const explainRuntime = createExplainRuntime({
@@ -772,6 +786,8 @@ async function main(): Promise<void> {
               ask: { runtime: askRuntime },
               // WP 11.5d: the advisor's step job (the follow-up job needs no model).
               advisor: { runtime: advisorRuntime },
+              // WP 11.6: the nightly merchant.name pass and its schedule.
+              merchantNames: { runtime: merchantNameRuntime },
               // wp2.6-insights.md §6 open item 5: absent until an operator
               // writes `${SECRETS_DIR}/advisor_token_secret`; `module.insights`
               // then registers no consumer, no job and no schedule (see

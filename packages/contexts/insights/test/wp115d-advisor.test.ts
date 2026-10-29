@@ -1297,7 +1297,8 @@ describe('advisor.follow_up — no model: the watcher and the Brief item', () =>
 
 describe('the sixteenth control check, advisor_cost_pairing', () => {
   it('is in the catalogue (api side) and passes against the shipped validator', async () => {
-    expect(CONTROL_CHECKS).toHaveLength(16);
+    // Sixteen at WP 11.5d; WP 11.6's merchant_name_substring is the seventeenth.
+    expect(CONTROL_CHECKS.length).toBeGreaterThanOrEqual(16);
     expect(CONTROL_CHECKS.find((check) => check.id === 'advisor_cost_pairing')).toMatchObject({
       side: 'api',
     });

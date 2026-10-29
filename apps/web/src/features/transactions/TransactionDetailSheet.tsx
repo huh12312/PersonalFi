@@ -18,6 +18,7 @@ import {
 import { Label } from '../../components/ui/label.tsx';
 import { Money } from '../../components/finance/Money.tsx';
 import { formatDateOnly } from '../../lib/date.ts';
+import { MerchantNameSection } from '../merchant-names/MerchantNameSection.tsx';
 import { RuleFromTransactionDialog } from '../rules/RuleFromTransactionDialog.tsx';
 import { CategoryPicker } from './CategoryPicker.tsx';
 import { TransactionProvenanceChip } from './ProvenanceChip.tsx';
@@ -122,6 +123,8 @@ export function TransactionDetailSheet({
                 </Badge>
               )}
             </div>
+
+            <MerchantNameSection transaction={transaction} />
 
             {transaction.transfer !== null && (
               <div className="mt-4 rounded-md bg-bg-subtle p-3 text-small text-text-secondary">

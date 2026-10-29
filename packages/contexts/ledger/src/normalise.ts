@@ -179,6 +179,22 @@ export function normaliseMerchantName(raw: string): NormalisedMerchant {
 }
 
 /**
+ * WP 11.6: the processor prefix `normaliseMerchantName` strips from `raw`, as the
+ * table spells it (`PAYPAL *`, `SQ *`, `TST* `), or `null` when none matched or
+ * the prefix *is* the merchant (`AMZN MKTP …`, which resolves to "Amazon").
+ * The same table, tried in the same order, so the hint can never name a prefix
+ * the normaliser did not strip. Holder-visible: it is the start of the bank's text.
+ */
+export function processorPrefixOf(raw: string): string | null {
+  const upper = raw.replaceAll(/\s+/gu, ' ').trim().toUpperCase();
+  for (const prefix of PROCESSOR_PREFIXES) {
+    if (!upper.startsWith(prefix)) continue;
+    return PREFIX_IS_THE_MERCHANT.has(prefix) ? null : prefix.trim();
+  }
+  return null;
+}
+
+/**
  * Remove the parts of a descriptor that vary between two visits to the same shop:
  * a store number, a terminal id, a city/state tail, a trailing order reference.
  */

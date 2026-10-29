@@ -42,6 +42,8 @@ import { createNarratorRuntime } from './narrator-wiring.ts';
 import { narratorSettingsRoutes } from './routes/narrator-settings.ts';
 import { categorySuggestionRoutes } from './routes/category-suggestions.ts';
 import { createSuggestionRuntime } from './category-suggestions.ts';
+import { createMerchantNameRuntime } from './merchant-names.ts';
+import { merchantNameRoutes } from './routes/merchant-names.ts';
 import { createExplainRuntime } from './insight-explain.ts';
 import { createBriefNarrateRuntime } from './brief-narration.ts';
 import { createAskRuntime } from './ask.ts';
@@ -863,6 +865,27 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     fileKeys: narratorFileKeys,
     clock,
   });
+  // WP 11.6: merchant names in preview mode — for the list route's availability
+  // and Advisor management's preview and approval of `merchant.name`. The
+  // narrator's local model only; the worker asks.
+  const merchantNamePreview = createMerchantNameRuntime({
+    mode: 'preview',
+    narrator: narratorPreview,
+    stores: createNarratorStores({
+      database,
+      secretBox: () => {
+        try {
+          return security.requireSecretBox();
+        } catch {
+          return undefined;
+        }
+      },
+    }),
+    localModel: undefined,
+    timeoutMs: config.env.LOCAL_MODEL_TIMEOUT_MS,
+    allowRemote: config.env.LOCAL_MODEL_ALLOW_REMOTE,
+    clock,
+  });
   await app.register(
     advisorRunRoutes(
       deps,
@@ -872,7 +895,12 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       { runtime: briefNarratePreview },
       { runtime: askPreview },
       { runtime: advisorPreview },
+      { runtime: merchantNamePreview },
     ),
+  );
+  // WP 11.6: the holder's merchant name suggestions, Accept (the manual rename's own write) and Dismiss.
+  await app.register(
+    merchantNameRoutes(deps, { runtime: merchantNamePreview, switches: explainSwitchesOf(deps) }),
   );
   await app.register(askRoutes(deps, { runtime: askPreview, switches: explainSwitchesOf(deps) }));
   // WP 11.2: Settings → Language model → Category suggestions, and the Inbox's

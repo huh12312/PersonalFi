@@ -16,7 +16,10 @@ export type LedgerErrorCode =
   | 'ledger.transfer_same_account'
   | 'ledger.transfer_already_paired'
   | 'ledger.cursor_invalid'
-  | 'ledger.invalid_auto_placement';
+  | 'ledger.invalid_auto_placement'
+  // WP 11.6: a merchant name suggestion that is not this holder's, or no longer open to the call made.
+  | 'ledger.merchant_name_suggestion_not_found'
+  | 'ledger.merchant_name_suggestion_closed';
 
 export class LedgerError extends Error {
   readonly code: LedgerErrorCode;

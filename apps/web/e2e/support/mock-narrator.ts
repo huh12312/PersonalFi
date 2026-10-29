@@ -486,7 +486,7 @@ export async function handleNarrator(
 /**
  * The same machine as the unit tests' `src/features/narrator/control-checks-fixtures.ts`, in the shapes
  * `apps/api/src/routes/narrator-control-checks.ts` really sends: `POST` needs a fresh step-up (403
- * `step_up_required`), answers 202 with a run whose sixteen checks are pending, and refuses a second run inside ten
+ * `step_up_required`), answers 202 with a run whose seventeen checks are pending, and refuses a second run inside ten
  * minutes with the api's 409 `narrator.control_checks_too_soon` and `Retry-After`. Each `GET` after a start moves
  * the run on: the checks that were running get their outcome, and the next three start, so the run is finished on
  * the sixth read with a realistic mix for the local model (passes, two not-applicable skips, a skip with a reason,
@@ -512,7 +512,8 @@ type ControlCheckId =
   | 'explain_grounding'
   | 'brief_narration_grounding'
   | 'ask_grounding'
-  | 'advisor_cost_pairing';
+  | 'advisor_cost_pairing'
+  | 'merchant_name_substring';
 
 interface ControlCheckRow {
   id: ControlCheckId;
@@ -654,6 +655,13 @@ export const CONTROL_CHECKS: ReadonlyArray<
       'An advisor reply that offers an option without a cost is refused by the validator (tradeoffs.cost_missing) and never shown.',
     side: 'api',
   },
+  {
+    id: 'merchant_name_substring',
+    name: 'Merchant name suggestions only reuse the bank’s words',
+    proves:
+      'A merchant name suggestion that names a brand the bank’s text does not carry is refused by the validator (name.invented) and never shown.',
+    side: 'api',
+  },
 ];
 
 const LOCAL_LABEL = `${PINNED_MODEL}@${PINNED_DIGEST}`;
@@ -758,6 +766,11 @@ function localOutcomes(proveSwitch: boolean): Record<ControlCheckId, Outcome> {
       40,
       'An advisor reply offering an option with no cost was refused (tradeoffs.cost_missing).',
       'The model was not called; the validator refused the reply and nothing was shown.',
+    ),
+    merchant_name_substring: passed(
+      35,
+      'A merchant name suggestion that named a brand the bank’s text does not carry was refused (name.invented).',
+      'The model was not called; the validator refused the suggestion and nothing was shown.',
     ),
   };
 }

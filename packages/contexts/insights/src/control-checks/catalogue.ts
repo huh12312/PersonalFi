@@ -57,6 +57,7 @@ import { validateAskNarrateReply } from '../advisors/ask/narrate.ts';
 import type { AskResultView } from '../advisors/ask/results.ts';
 import { buildAdvisorContext } from '../advisors/advisor/context.ts';
 import { validateTradeoffsReply } from '../advisors/advisor/tradeoffs.ts';
+import { validateMerchantNameReply } from '../advisors/merchant-name/reply.ts';
 
 /** The catalogue's version, stored on every row: a result is read against the checks it ran. */
 export const CONTROL_CHECKS_EVIDENCE_VERSION = 'genai-controls/1';
@@ -89,6 +90,8 @@ export const CONTROL_CHECK_IDS = [
   'ask_grounding',
   // WP 11.5d: the advisor's cost-pairing validator, over a fixed reply (12 §2.3 step 4).
   'advisor_cost_pairing',
+  // WP 11.6: merchant.name's substring-preservation validator, over a fixed reply inventing a brand.
+  'merchant_name_substring',
 ] as const;
 export type ControlCheckId = (typeof CONTROL_CHECK_IDS)[number];
 
@@ -210,6 +213,13 @@ export const CONTROL_CHECKS: readonly ControlCheckDefinition[] = Object.freeze([
     name: 'Every advisor option carries its cost',
     proves:
       'An advisor reply that offers an option without a cost is refused by the validator (tradeoffs.cost_missing) and never shown.',
+    side: 'api',
+  },
+  {
+    id: 'merchant_name_substring',
+    name: 'Merchant name suggestions only reuse the bank’s words',
+    proves:
+      'A merchant name suggestion that names a brand the bank’s text does not carry is refused by the validator (name.invented) and never shown.',
     side: 'api',
   },
 ] satisfies readonly ControlCheckDefinition[]);
@@ -1548,6 +1558,51 @@ export function checkAdvisorCostPairing(): Promise<ControlCheckOutcome> {
   if (!mended.ok) {
     return Promise.resolve(
       fail('The validator refuses a reply that pairs every option with its cost.', facts),
+    );
+  }
+  return Promise.resolve(pass(facts));
+}
+
+// ---------------------------------------------------------------------------
+// WP 11.6: merchant.name's substring preservation (no model: a fixed reply)
+// ---------------------------------------------------------------------------
+
+/** The fixed descriptor residue the check sends: a squashed name with an order hash. Synthetic. */
+export const MERCHANT_NAME_PROBE_DESCRIPTOR = 'Bluebtl Coffee 2K4TT1FF2';
+
+/**
+ * The fixed reply: a well-known brand the descriptor does not carry. Pass
+ * exactly when the shipped validator refuses it `name.invented`, and accepts a
+ * cleanup of the same descriptor that drops the hash (so a validator that
+ * refuses everything does not pass either).
+ */
+export const MERCHANT_NAME_PROBE_REPLY = Object.freeze({ display_name: 'Starbucks Coffee' });
+export const MERCHANT_NAME_PROBE_CLEANUP = Object.freeze({ display_name: 'Bluebtl Coffee' });
+
+export function checkMerchantNameSubstring(): Promise<ControlCheckOutcome> {
+  const sent = { descriptor: MERCHANT_NAME_PROBE_DESCRIPTOR };
+  const invented = validateMerchantNameReply(MERCHANT_NAME_PROBE_REPLY, sent);
+  const cleanup = validateMerchantNameReply(MERCHANT_NAME_PROBE_CLEANUP, sent);
+  const facts = [
+    'A fixed merchant name reply named a brand the bank’s text does not carry.',
+    invented.verdict === 'refused'
+      ? `The merchant name validator refused it (${invented.refusal}).`
+      : 'The merchant name validator accepted it.',
+    cleanup.verdict === 'suggested'
+      ? 'A cleanup of the same text that only drops the order code was accepted.'
+      : `A cleanup of the same text that only drops the order code was refused too (${cleanup.verdict === 'refused' ? cleanup.refusal : cleanup.verdict}).`,
+  ];
+  if (invented.verdict !== 'refused') {
+    return Promise.resolve(
+      fail('A name the bank’s text does not carry got through the validator.', facts),
+    );
+  }
+  if (invented.refusal !== 'name.invented') {
+    return Promise.resolve(fail('The reply was refused, but not as an invented name.', facts));
+  }
+  if (cleanup.verdict !== 'suggested') {
+    return Promise.resolve(
+      fail('The validator refuses a name made only of the bank’s own words.', facts),
     );
   }
   return Promise.resolve(pass(facts));

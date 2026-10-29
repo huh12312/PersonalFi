@@ -289,7 +289,8 @@ describe.skipIf(NO_DATABASE)('Run control checks (WP 10.16)', () => {
     expect(run.state).toBe('running');
     expect(run.provider).toBe('anthropic');
     expect(run.model).toBe('anthropic:claude-sonnet-5-5');
-    expect(run.results.map((row) => row.status)).toEqual(Array(16).fill('pending'));
+    // Seventeen since WP 11.6's merchant_name_substring.
+    expect(run.results.map((row) => row.status)).toEqual(Array(17).fill('pending'));
 
     const callsBefore = fake.calls.length;
     await runWorker(async () => (await list()).runs[0]?.state === 'finished');
@@ -327,6 +328,9 @@ describe.skipIf(NO_DATABASE)('Run control checks (WP 10.16)', () => {
     // WP 11.5d: the api's own half, no model — the shipped cost-pairing validator over a fixed reply.
     expect(by['advisor_cost_pairing']).toMatchObject({ status: 'pass' });
     expect(by['advisor_cost_pairing']?.facts.join(' ')).toContain('tradeoffs.cost_missing');
+    // WP 11.6: the api's own half, no model — the shipped merchant-name validator over a fixed reply.
+    expect(by['merchant_name_substring']).toMatchObject({ status: 'pass' });
+    expect(by['merchant_name_substring']?.facts.join(' ')).toContain('name.invented');
     expect(done.overall).toBe('partial');
 
     // Three calls to the one host, nothing else; the key never in a fact.

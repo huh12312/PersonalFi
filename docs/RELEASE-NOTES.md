@@ -9,6 +9,46 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.26: merchant name suggestions
+
+**Status:** a patch release on v0.9.25 (if an earlier v0.9.x has not been tagged when this is, tag
+them in order). The tag `v0.9.26` is pushed by the maintainer once CI is green. Package 11.6 of the
+Phase 11 programme (11 §5).
+
+### Upgrading to v0.9.26
+
+```bash
+git pull
+just upgrade
+```
+
+Migration `0063_merchant_name_suggestions` (expand-only: one new table, `merchant_name_suggestions`,
+referencing only `users`; no existing table is touched, no row is rewritten, no backfill).
+
+### Manual steps
+
+None. Suggestions stay off until you approve the `merchant.name` payload in Advisor management.
+
+### What changed
+
+- **Merchant name suggestions.** For a merchant whose bank text is still noise after the normaliser
+  (a processor star, an order code, a reference word, a web address, an abbreviation without vowels,
+  words run together), the narrator's **local** model may suggest a cleaner name made only of the
+  bank's own words, shown beside the bank's text with **Accept** and **Dismiss**
+  ([RUNBOOK](../RUNBOOK.md#merchant-name-suggestions-v0926)). Accept renames the merchant's
+  transactions exactly as typing the name would; nothing is renamed without it.
+- **Local only.** The descriptor never leaves the machine: with a hosted narrator no suggestion is
+  made.
+- **The worker** gains `insights.merchant_names`, nightly at 05:20 local, at most fifty merchants a
+  night, each asked once.
+- **API.** `GET /merchants/name-suggestions`, `POST /merchants/name-suggestions/{id}/accept`,
+  `POST /merchants/name-suggestions/{id}/dismiss`; `merchant.name` in the payload preview and
+  approval routes.
+- **The controls self-test** gains its seventeenth check, `merchant_name_substring`: a fixed reply
+  naming a brand the bank's text does not carry must be refused.
+- **Evaluation.** `node scripts/advisor-eval.ts --merchant-name`: 53 descriptors, precision of the
+  accepted names and the refusal rate.
+
 ## v0.9.25: the Brief and the advisor meet
 
 **Status:** a patch release on v0.9.24 (if an earlier v0.9.x has not been tagged when this is, tag

@@ -74,6 +74,15 @@
  *   (replay, the default; CI runs it, and over the Ollama fake), or over the
  *   pinned model with `--live`.
  *
+ *     node --experimental-strip-types scripts/advisor-eval.ts --merchant-name [--live \
+ *       --endpoint http://ollama:11434 --model <name> --digest sha256:<64 hex> --out <dir>/merchant-name.jsonl]
+ *
+ *   WP 11.6: the merchant-name golden set (`advisor-eval-merchant-name.ts`):
+ *   at least forty bank descriptors, noise and not, through the noise detector
+ *   and the substring-preserving validator — precision of the accepted names
+ *   and the refusal rate — over the recorded replies (replay, the default; CI
+ *   runs it, and over the Ollama fake), or over the pinned model with `--live`.
+ *
  * ## What it prints, and what it never prints
  *
  * Counts, step names, refusal reasons, durations and token counts. **Never a
@@ -99,6 +108,11 @@ import type { AdvisorRequest } from '../packages/contexts/insights/src/contract/
 import { evalCases } from './advisor-eval.fixtures.ts';
 import { BRIEF_CASE_TYPES, briefWeek } from './advisor-eval-brief-week.ts';
 import { askGoldenOverModel, formatAskReport, replayAskGolden } from './advisor-eval-ask.ts';
+import {
+  formatMerchantNameReport,
+  merchantNameGoldenOverModel,
+  replayMerchantNameGolden,
+} from './advisor-eval-merchant-name.ts';
 import {
   advisorGoldenOverModel,
   formatAdvisorReport,
@@ -672,8 +686,35 @@ async function advisorMode(args: Args): Promise<void> {
   for (const line of formatAdvisorReport(report)) console.log(line);
 }
 
+/** `--merchant-name` (WP 11.6): the merchant-name golden set, replayed or live. */
+async function merchantNameMode(args: Args): Promise<void> {
+  if (!args.flags.has('live')) {
+    const { report } = replayMerchantNameGolden();
+    console.log("merchant-name: replay (recorded replies, today's detector and validator)");
+    for (const line of formatMerchantNameReport(report)) console.log(line);
+    return;
+  }
+  const endpoint = args.values.get('endpoint');
+  const model = args.values.get('model');
+  const digest = args.values.get('digest');
+  if (endpoint === undefined || model === undefined || digest === undefined) {
+    throw new Error('--merchant-name --live needs --endpoint, --model and --digest');
+  }
+  const out = args.values.get('out');
+  const { report, calls } = await merchantNameGoldenOverModel({
+    endpoint,
+    model,
+    digest,
+    timeoutMs: Number(args.values.get('timeout-ms') ?? '180000'),
+    ...(out === undefined ? {} : { out }),
+  });
+  console.log(`merchant-name: live (${String(calls)} calls, first attempt only)`);
+  for (const line of formatMerchantNameReport(report)) console.log(line);
+}
+
 const args = parseArgs(process.argv.slice(2));
-if (args.flags.has('advisor')) await advisorMode(args);
+if (args.flags.has('merchant-name')) await merchantNameMode(args);
+else if (args.flags.has('advisor')) await advisorMode(args);
 else if (args.flags.has('ask')) await askMode(args);
 else if (args.flags.has('live')) await live(args);
 else if (args.flags.has('brief-week')) await briefWeekMode(args);

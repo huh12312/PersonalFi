@@ -152,6 +152,8 @@ export const NOT_READ_BY_THE_REPORT: Readonly<Record<string, string>> = {
     "The advisor's session log (WP 11.5d): question, answers and the JSONB of clarification, options, trade-offs and plan are free text (the holder's words, a model's wording); WP 11.5e's origin_title is a finding's title as the holder saw it; the weekly report counts none of it.",
   advisor_session_steps:
     'One row per advisor model call (WP 11.5d): run ids, digests, provider and model, and the knowledge-read record; the weekly report counts none of it.',
+  merchant_name_suggestions:
+    "Merchant name suggestions (WP 11.6): descriptor and stripped_prefix are the bank's text as the normaliser left it, display_name is a local model's validated cleanup of it, refusal_class a code; the weekly report counts none of it.",
   advisor_settings:
     "The advisor's own hosted consent (WP 11.5d): a provider name and the sha256 of a consent text, no holder free text; the weekly report counts none of it.",
 };

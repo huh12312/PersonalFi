@@ -1224,3 +1224,60 @@ export { amortise, avalancheOrder, snowballOrder } from './catalogue/amortisatio
 // WP 11.5c — Ask PersonalFi, reporting mode: `ask.compile` and `ask.narrate`.
 export * from './advisors/ask/index.ts';
 export * from './advisors/advisor/index.ts';
+
+// --- WP 11.6: `merchant.name`, display-name suggestions for noise merchants (local only) ---
+export {
+  DEFAULT_MERCHANT_NAMES_CRON,
+  MERCHANT_NAMES_JOB_KIND,
+  MERCHANT_NAMES_SCHEDULE_NAME,
+  registerMerchantNamesSchedule,
+} from './advisors/merchant-name/jobs.ts';
+export {
+  MERCHANT_DESCRIPTOR_MAX,
+  MERCHANT_NAME_ADVISOR_ID,
+  MERCHANT_NAME_CONSENT_TEXT,
+  MERCHANT_NAME_CONSENT_VERSION,
+  MERCHANT_NAME_MANIFEST,
+  MERCHANT_NAME_MAX,
+  MERCHANT_NAME_SCOPES,
+  MERCHANT_NAME_VERSION,
+  merchantNameConsentSha256,
+  merchantNameShapeTemplateHash,
+} from './advisors/merchant-name/manifest.ts';
+export {
+  buildMerchantNameRequest,
+  type BuiltMerchantNameRequest,
+  type MerchantNameSubject,
+  type MerchantNameWireRequest,
+} from './advisors/merchant-name/request.ts';
+export {
+  MERCHANT_NAME_REFUSAL_CLASSES,
+  merchantNameRefusal,
+  nameTokensOf,
+  substringPreservationRefusal,
+  validateMerchantNameReply,
+  type MerchantNameRefusalClass,
+  type MerchantNameVerdict,
+} from './advisors/merchant-name/reply.ts';
+export {
+  merchantNameShape,
+  merchantNameUnavailable,
+  runMerchantName,
+  type MerchantNameDependencies,
+  type MerchantNameModelPort,
+  type MerchantNameRenderer,
+  type MerchantNameResult,
+} from './advisors/merchant-name/run.ts';
+export {
+  MERCHANT_NAME_PREVIEW_EXAMPLE,
+  approveMerchantName,
+  ensureMerchantNameAdvisor,
+  previewMerchantName,
+  type MerchantNamePreview,
+} from './advisors/merchant-name/preview.ts';
+export {
+  MERCHANT_NAME_PROBE_CLEANUP,
+  MERCHANT_NAME_PROBE_DESCRIPTOR,
+  MERCHANT_NAME_PROBE_REPLY,
+  checkMerchantNameSubstring,
+} from './control-checks/catalogue.ts';

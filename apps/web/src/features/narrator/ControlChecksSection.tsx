@@ -37,7 +37,7 @@ import { problemCode, problemDetail } from './narrator-api.ts';
  * controls were last proven."
  *
  * What a run costs is said before the button, verbatim from the api. The button asks for the passkey (the step-up,
- * the same `useStepUpRetry` as "Use this provider"); while a run goes the list is read every second and the sixteen
+ * the same `useStepUpRetry` as "Use this provider"); while a run goes the list is read every second and the seventeen
  * checks tick over in a table, with a polite live region saying how many are done. Once a run is the api's newest,
  * the button is unavailable until `nextAllowedAt` and says so in words. The button is never `disabled` (it is
  * `aria-disabled`), so focus stays on it while a run starts and goes (2.4.3).
@@ -282,7 +282,7 @@ function CheckFacts({ row }: { row: ControlCheckRow }) {
   );
 }
 
-/** One run's sixteen checks as a real table: a caption, column headers and a row header per check. */
+/** One run's seventeen checks as a real table: a caption, column headers and a row header per check. */
 function CheckDuration({ ms }: { ms: number | null }) {
   if (ms === null) {
     return (
@@ -296,7 +296,7 @@ function CheckDuration({ ms }: { ms: number | null }) {
 }
 
 /**
- * One run's sixteen checks as a real table: a caption, column headers and a row header per check (the name, with what
+ * One run's seventeen checks as a real table: a caption, column headers and a row header per check (the name, with what
  * a pass proves as secondary text). From `sm` up it has four columns (Check, Result, Facts, Duration); narrower, the
  * Facts and Duration columns are not displayed and the same words sit under the result instead, so a phone reads
  * every fact without scrolling sideways. Only one of the two is ever displayed, so a screen reader meets each once.

@@ -196,6 +196,73 @@ describe('PayloadPreviewPanel', () => {
     expect(block).toHaveTextContent('ask-consent/1');
   });
 
+  it('renders merchant.name’s preview: the descriptor in the marked block, the consent wording, and Approve (WP 11.6)', async () => {
+    const consent = {
+      version: 'merchant-name-consent/1',
+      sha256: 'cd'.repeat(32),
+      text: 'Merchant name suggestions run on the local model on this machine only. Nothing leaves this machine; with a hosted narrator no suggestion is made.',
+    };
+    const subject = { descriptor: 'Ebayinc', stripped_prefix: 'PAYPAL *' };
+    const messages = [
+      { role: 'system', content: 'You tidy the name of one merchant.' },
+      {
+        role: 'user',
+        content: `<untrusted_data>\n${JSON.stringify({ merchant: subject })}\n</untrusted_data>\n\nSuggest a display name.`,
+      },
+    ];
+    let approveBody: unknown = null;
+    let approved = false;
+    stubFetchRoutes([
+      {
+        match: '/api/advisors/merchant.name/payload-preview',
+        method: 'GET',
+        handle: () =>
+          jsonResponse({
+            advisorId: 'merchant.name',
+            kind: 'local_model',
+            queryShape: 'sha256:shape4',
+            scopes: ['transactions.residue'],
+            promptTemplateHash: 'sha256:tpl',
+            request: {
+              ...BASE_REQUEST,
+              advisor_id: 'merchant.name',
+              granted_scopes: ['transactions.residue'],
+              subject,
+              snapshot: { transactions_residue: subject },
+              consent,
+            },
+            prompt: { text: JSON.stringify({ messages }), hash: 'sha256:prompt' },
+            approvalRequired: true,
+            approved,
+          }),
+      },
+      {
+        match: '/api/advisors/merchant.name/payload-approvals',
+        method: 'POST',
+        handle: async ({ request }) => {
+          approveBody = await request.json();
+          approved = true;
+          return jsonResponse({ approvalId: 'appr_1', queryShape: 'sha256:shape4' });
+        },
+      },
+    ]);
+
+    renderPanel('merchant.name');
+
+    const block = await screen.findByTestId('payload-consent');
+    expect(block).toHaveAccessibleName('What leaves this machine');
+    expect(screen.getByTestId('payload-consent-text')).toHaveTextContent(consent.text);
+    expect(block).toHaveTextContent('merchant-name-consent/1');
+    const untrusted = screen.getByTestId('untrusted-block');
+    expect(untrusted).toHaveTextContent('Ebayinc');
+    expect(untrusted).toHaveTextContent('PAYPAL *');
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Approve this payload' }));
+    expect(await screen.findByText('Approved for this exact payload shape')).toBeInTheDocument();
+    expect(approveBody).toEqual({ queryShape: 'sha256:shape4' });
+  });
+
   it('shows no consent block for a request without consent', async () => {
     stubFetchRoutes([
       {

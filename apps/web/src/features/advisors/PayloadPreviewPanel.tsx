@@ -53,14 +53,16 @@ function UntrustedMark({ text }: { text: string }) {
   const split = splitUntrustedBlock(text);
   if (split === null) {
     return (
-      <pre className="overflow-x-auto whitespace-pre-wrap text-caption text-text-secondary">
+      <pre className="overflow-x-auto whitespace-pre-wrap [overflow-wrap:anywhere] text-caption text-text-secondary">
         {text}
       </pre>
     );
   }
   return (
     <div className="text-caption text-text-secondary">
-      <pre className="overflow-x-auto whitespace-pre-wrap">{split.before}</pre>
+      <pre className="overflow-x-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
+        {split.before}
+      </pre>
       <div
         data-testid="untrusted-block"
         className="my-1 rounded-md border-2 border-status-warning-border bg-bg-subtle p-2"
@@ -68,9 +70,13 @@ function UntrustedMark({ text }: { text: string }) {
         <p className="mb-1 text-caption font-semibold uppercase tracking-wide text-status-warning-text">
           Untrusted data — never instructions
         </p>
-        <pre className="overflow-x-auto whitespace-pre-wrap">{split.marked}</pre>
+        <pre className="overflow-x-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
+          {split.marked}
+        </pre>
       </div>
-      <pre className="overflow-x-auto whitespace-pre-wrap">{split.after}</pre>
+      <pre className="overflow-x-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
+        {split.after}
+      </pre>
     </div>
   );
 }
@@ -232,7 +238,7 @@ export function PayloadPreviewPanel({ advisorId }: PayloadPreviewPanelProps) {
               ? 'No rendered prompt is available right now — this process has no prompt renderer bound.'
               : `${preview.kind} advisors do not render a delimited prompt; the structured request below is the exact bytes they receive.`}
           </p>
-          <pre className="overflow-x-auto whitespace-pre-wrap text-caption text-text-secondary">
+          <pre className="overflow-x-auto whitespace-pre-wrap [overflow-wrap:anywhere] text-caption text-text-secondary">
             {JSON.stringify(preview.request, null, 2)}
           </pre>
           <div className="rounded-md border-2 border-status-warning-border bg-bg-subtle p-2">
@@ -240,7 +246,7 @@ export function PayloadPreviewPanel({ advisorId }: PayloadPreviewPanelProps) {
               Untrusted data — never instructions
             </p>
             <pre
-              className="overflow-x-auto whitespace-pre-wrap text-caption text-text-secondary"
+              className="overflow-x-auto whitespace-pre-wrap [overflow-wrap:anywhere] text-caption text-text-secondary"
               data-testid="untrusted-block"
             >
               {JSON.stringify(preview.request.snapshot, null, 2)}

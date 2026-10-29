@@ -589,6 +589,9 @@ describe.skipIf(NO_DATABASE)('Phase 5 W-C wiring (apps/api/src/{modules,worker}.
         'insights.brief',
         // WP 10.12: the daily health snapshot (04:10 local).
         'insights.health_snapshot',
+        // WP 11.6: `insights.merchant_names` is not here on purpose: like `insights.explain` and
+        // `insights.ask` it registers only with its runtime (the worker's `merchantNames`), which
+        // this build does not pass; `wp116-merchant-names.test.ts` pins it where it is passed.
         'insights.run',
         'insights.run_all',
         'insights.run_local',

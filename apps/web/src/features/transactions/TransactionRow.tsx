@@ -12,6 +12,12 @@ import type { Transaction } from '../../api/generated/types.gen.ts';
 import { cn } from '../../lib/cn.ts';
 import { SuggestionChip } from '../category-suggestions/SuggestionChip.tsx';
 import type { CategorySuggestion } from '../category-suggestions/suggestion-api.ts';
+import { MerchantNameChip } from '../merchant-names/MerchantNameChip.tsx';
+import { MerchantNameNote } from '../merchant-names/MerchantNameNote.tsx';
+import type {
+  MerchantNameSuggestion,
+  MerchantNameUnavailableReason,
+} from '../merchant-names/merchant-name-api.ts';
 import { TransactionProvenanceChip } from './ProvenanceChip.tsx';
 import { autoPlacementOf } from './provenance.ts';
 
@@ -22,6 +28,12 @@ export interface TransactionRowProps {
   category?: CategoryIconSource | null;
   /** WP 11.2: the model's suggestion for an uncategorised row (Confirm / Not this), or null. */
   suggestion?: CategorySuggestion | null;
+  /** WP 11.6: the local model's display name for this row's merchant (Accept / Dismiss), or null. */
+  merchantSuggestion?: MerchantNameSuggestion | null;
+  /** WP 11.6: why no name is suggested for this row's merchant (a short note where the chip would be), or null. */
+  merchantNote?: MerchantNameUnavailableReason | null;
+  /** WP 11.6: what an Accept or a Dismiss did, in words, for the list's status line. */
+  onMerchantResult?: (message: string) => void;
   index: number;
   selected: boolean;
   isFocused: boolean;
@@ -50,6 +62,9 @@ function TransactionRowImpl({
   accountName,
   category,
   suggestion = null,
+  merchantSuggestion = null,
+  merchantNote = null,
+  onMerchantResult,
   index,
   selected,
   isFocused,
@@ -74,7 +89,11 @@ function TransactionRowImpl({
       style={style}
       className={cn(
         'absolute left-0 top-0 flex w-full items-center gap-3 border-b border-border-hairline px-3 py-2 outline-none focus-visible:bg-accent-wash data-[selected=true]:bg-accent-wash',
-        (suggestion !== null || placedByMachine) && 'flex-wrap gap-y-1.5',
+        (suggestion !== null ||
+          placedByMachine ||
+          merchantSuggestion !== null ||
+          merchantNote !== null) &&
+          'flex-wrap gap-y-1.5',
       )}
       data-selected={selected}
       onFocus={() => onFocusRow(index)}
@@ -150,6 +169,22 @@ function TransactionRowImpl({
       {suggestion !== null && (
         <div role="gridcell" className="min-w-0 basis-full pl-7">
           <SuggestionChip transactionId={transaction.id} suggestion={suggestion} variant="list" />
+        </div>
+      )}
+
+      {merchantSuggestion !== null && (
+        <div role="gridcell" className="min-w-0 basis-full pl-7">
+          <MerchantNameChip
+            suggestion={merchantSuggestion}
+            variant="list"
+            {...(onMerchantResult === undefined ? {} : { onResult: onMerchantResult })}
+          />
+        </div>
+      )}
+
+      {merchantSuggestion === null && merchantNote !== null && (
+        <div role="gridcell" className="min-w-0 basis-full pl-7">
+          <MerchantNameNote reason={merchantNote} />
         </div>
       )}
 

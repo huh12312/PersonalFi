@@ -2269,6 +2269,83 @@ extra a month a goal still needs, the debts in the payoff plan, the year's contr
 to $0.00), the item reads as reached, the session moves to `completed` and its watcher stops. A
 completed session is final; start a new one to follow something else.
 
+## Merchant name suggestions (v0.9.26)
+
+WP 11.6 (11 §3.1's "Merchant display name for noise descriptors" row, §4's `merchant.name`). For a
+merchant whose name the bank sent as **noise** — the normaliser could strip what it knows, but what is
+left still reads like `Ebayinc`, `Cko*patreon* Membership` or `Whlfds MKT` — the local model may
+**suggest** a cleaner name. The transaction list and the transaction's detail show it beside the bank's
+text, with who suggested it ("Suggested by the local model …", the model and its digest) and **Accept**
+and **Dismiss**. Nothing is renamed until you tap Accept.
+
+**Which merchants.** Only noise, decided deterministically by the ledger (`detectMerchantNoise` in
+`packages/contexts/ledger/src/merchant-noise.ts`), from the bank's own text — never from a name you typed:
+
+| Shape                | What it catches                                                                | Example residue               |
+| -------------------- | ------------------------------------------------------------------------------ | ----------------------------- |
+| `processor_star`     | a `*` still in the residue: a payment processor the prefix table does not know | `Cko*patreon* Membership`     |
+| `hash_token`         | a token of 6+ letters and digits, at least two of each: an order id or hash    | `Ebay 2K4TT1FF2`              |
+| `reference_marker`   | REF, TXN, TRX, INV, ORDER, ORD, CONF, TRACE or ID beside another word          | `Netflix REF XK2`             |
+| `domain_tail`        | a web address or a path (`.COM`, `.NET`, `.ORG`, `.CO`, `.IO`, `.APP`, `/`)    | `Apple.com/bill`              |
+| `vowelless_run`      | a token of 5+ letters with no vowel: a terminal's abbreviation                 | `Whlfds MKT`                  |
+| `run_together`       | the whole residue is one word of 12+ letters                                   | `Bluebottlecoffee`            |
+| `processor_squashed` | a processor prefix was stripped and one word of 6+ letters is left             | `PAYPAL *EBAYINC` → `Ebayinc` |
+
+A descriptor that names a banking operation (`CHECK 1234`, `TRANSFER TO SAVINGS` — D25, the rule
+`pruneNoiseMerchants` applies) has no merchant and is never asked about; nor is one where the provider
+supplied its own merchant name. A cleanly cut-short word (`STARBUCKS COF`) is not caught: a suggestion
+may only drop, never complete.
+
+**What the model is sent, and where: the local model only.** One merchant per call: the residue as you
+read it and the processor prefix the normaliser removed (`PAYPAL *`), if any — no amount, date,
+account, category or other merchant; scope `transactions.residue`. The descriptor crosses
+untokenised, so this query type runs **only on the narrator's local model**: with a hosted narrator
+no suggestion is made and the screen says why, and `merchant_name_suggestions.llm_provider` is
+CHECK-pinned to `ollama`. There is no hosted tick-box for it. The prompt fences and sanitises the
+descriptor like every other string (03 §8.2).
+
+**What a suggestion may be.** A substring-preserving cleanup of that residue, validated
+(`validateMerchantNameReply`): every word of the name must be a word of the descriptor, or the start of
+one, in the descriptor's order, each used once; at most 40 characters; no markup, link, digits-only
+name or advice wording; not the residue unchanged. Anything else is refused with a named class
+(`name.invented`, `name.out_of_order`, `name.too_long`, `name.markup`, `name.link`,
+`name.digits_only`, `name.copy`, `name.unchanged`, `name.empty`, `schema`) and never shown. What the
+rule cannot catch is a name made of the descriptor's own words that is still wrong (`AMAZONIAN GRILL`
+→ "Amazon"); that is why it is only ever shown beside the bank's text and only applied on Accept.
+
+**Turning it on.** Advisors (Advisor management): **Merchant name suggestions (local model)** —
+preview the exact payload (your own first noise merchant when there is one, and the consent text,
+`merchant-name-consent/1`), then approve it. Until it is approved nothing is asked, and the
+transactions screen says so where a suggestion would be. Its switch on that page, the
+`advisors.kind.local_model` switch, the narrator's Off, the breaker and cancel all apply, as for every
+query type.
+
+**When it runs.** The worker's `insights.merchant_names` job, nightly at 05:20 local (schedule
+`insights.merchant_names_nightly`): at most **fifty** merchants per holder per night, most-used first,
+one call each, deduplicated by merchant key, and never a key that already has a suggestion, a
+dismissal, a refusal or a rename you made. Each call is a row in the run inspector with its digest.
+The api never calls a model.
+
+**Accept and Dismiss.** Accept is the manual rename: it writes the payee name you would type (the
+`user_merchant_name` overlay, `PATCH /transactions/{id}`'s `payeeName`) on every transaction of that
+merchant you have not renamed yourself, in one transaction; the bank's text and the merchant's own row
+are untouched, and a name you typed is kept. A transaction of the same merchant that arrives later
+still reads the bank's text and shows the suggestion again; Accept renames it the same way. Dismiss is
+final: the merchant is never asked about again. Undo an accepted name the way you undo any rename.
+
+**Measuring a model.** The golden set is `scripts/advisor-eval-merchant-name.golden.json` (53
+descriptors: 40 noise with recorded replies, 13 not noise). It reports how many reached the model, the
+precision of the accepted names and the refusal rate:
+
+```bash
+node scripts/advisor-eval.ts --merchant-name                     # replay the recorded replies
+node scripts/advisor-eval.ts --merchant-name --live --endpoint http://ollama:11434 \
+  --model <name> --digest sha256:<64 hex> --out /tmp/merchant-name.jsonl
+```
+
+The live run must reach the endpoint (inside the compose `llm` network); it prints counts and rates,
+never a descriptor or a reply.
+
 ## Categorisation: measuring the tiers (`just categorization-eval`)
 
 WP 11.1. Replays every transaction you filed by hand (the categories you picked, plus any confirmed

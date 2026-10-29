@@ -4721,6 +4721,135 @@
           "approved"
         ]
       },
+      "MerchantNameSuggestionInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "merchantId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The merchant the key names now; the rows whose `merchantId` this is carry the chip."
+          },
+          "descriptor": {
+            "type": "string",
+            "description": "The bank’s text as the app cleaned it: exactly what the model saw."
+          },
+          "strippedPrefix": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "suggested",
+              "accepted"
+            ]
+          },
+          "displayName": {
+            "type": "string",
+            "description": "Validated: made only of words of `descriptor`, in its order; at most 40 characters."
+          },
+          "provider": {
+            "type": "string",
+            "const": "ollama",
+            "description": "Always the local model: this query type has no hosted path."
+          },
+          "model": {
+            "type": "string"
+          },
+          "suggestedAt": {
+            "type": "string"
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "merchantId",
+          "descriptor",
+          "strippedPrefix",
+          "status",
+          "displayName",
+          "provider",
+          "model",
+          "suggestedAt",
+          "decidedAt"
+        ]
+      },
+      "MerchantNameAvailabilityInput": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "A suggestion could be asked for tonight."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "not_configured",
+                  "hosted_narrator",
+                  "key_unopenable",
+                  "endpoint_refused",
+                  "advisors_disabled",
+                  "module_disabled",
+                  "kind_disabled",
+                  "advisor_disabled",
+                  "advisor_quarantined",
+                  "payload_not_approved"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why not: the narrator is Off, no local model, a hosted narrator (merchant names stay on this machine), a switch, or `payload_not_approved` until the shape is approved in Advisors."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "ollama"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "reason",
+          "provider",
+          "model"
+        ]
+      },
       "AdvisorRunSummaryInput": {
         "type": "object",
         "properties": {
@@ -11199,7 +11328,8 @@
                     "explain_grounding",
                     "brief_narration_grounding",
                     "ask_grounding",
-                    "advisor_cost_pairing"
+                    "advisor_cost_pairing",
+                    "merchant_name_substring"
                   ]
                 },
                 "name": {
@@ -20299,6 +20429,23 @@
           "updatedAt"
         ]
       },
+      "MerchantNamePendingInput": {
+        "type": "object",
+        "properties": {
+          "merchantId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "descriptor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "merchantId",
+          "descriptor"
+        ]
+      },
       "Problem": {
         "type": "object",
         "properties": {
@@ -25094,6 +25241,137 @@
           "payload",
           "prompt",
           "approved"
+        ],
+        "additionalProperties": false
+      },
+      "MerchantNameSuggestion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "merchantId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The merchant the key names now; the rows whose `merchantId` this is carry the chip."
+          },
+          "descriptor": {
+            "type": "string",
+            "description": "The bank’s text as the app cleaned it: exactly what the model saw."
+          },
+          "strippedPrefix": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "suggested",
+              "accepted"
+            ]
+          },
+          "displayName": {
+            "type": "string",
+            "description": "Validated: made only of words of `descriptor`, in its order; at most 40 characters."
+          },
+          "provider": {
+            "type": "string",
+            "const": "ollama",
+            "description": "Always the local model: this query type has no hosted path."
+          },
+          "model": {
+            "type": "string"
+          },
+          "suggestedAt": {
+            "type": "string"
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "merchantId",
+          "descriptor",
+          "strippedPrefix",
+          "status",
+          "displayName",
+          "provider",
+          "model",
+          "suggestedAt",
+          "decidedAt"
+        ],
+        "additionalProperties": false
+      },
+      "MerchantNameAvailability": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "A suggestion could be asked for tonight."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "not_configured",
+                  "hosted_narrator",
+                  "key_unopenable",
+                  "endpoint_refused",
+                  "advisors_disabled",
+                  "module_disabled",
+                  "kind_disabled",
+                  "advisor_disabled",
+                  "advisor_quarantined",
+                  "payload_not_approved"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why not: the narrator is Off, no local model, a hosted narrator (merchant names stay on this machine), a switch, or `payload_not_approved` until the shape is approved in Advisors."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "ollama"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "reason",
+          "provider",
+          "model"
         ],
         "additionalProperties": false
       },
@@ -31668,7 +31946,8 @@
                     "explain_grounding",
                     "brief_narration_grounding",
                     "ask_grounding",
-                    "advisor_cost_pairing"
+                    "advisor_cost_pairing",
+                    "merchant_name_substring"
                   ]
                 },
                 "name": {
@@ -40982,6 +41261,24 @@
           "amount",
           "createdAt",
           "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "MerchantNamePending": {
+        "type": "object",
+        "properties": {
+          "merchantId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "descriptor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "merchantId",
+          "descriptor"
         ],
         "additionalProperties": false
       }
@@ -66009,6 +66306,272 @@
             }
           },
           "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/merchants/name-suggestions": {
+      "get": {
+        "operationId": "listMerchantNameSuggestions",
+        "summary": "Merchant name suggestions: the open ones, and whether more can be asked for",
+        "tags": [
+          "transactions"
+        ],
+        "description": "WP 11.6. `items`: this holder’s suggested and accepted names, each shown beside the bank’s text on the rows of its merchant. `pending`: noise merchants not asked about yet. `availability`: whether the nightly pass could ask now, and why not. Reads only.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "availability": {
+                      "$ref": "#/components/schemas/MerchantNameAvailability"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MerchantNameSuggestion"
+                      }
+                    },
+                    "pending": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MerchantNamePending"
+                      }
+                    }
+                  },
+                  "required": [
+                    "availability",
+                    "items",
+                    "pending"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/merchants/name-suggestions/{suggestionId}/accept": {
+      "post": {
+        "operationId": "acceptMerchantNameSuggestion",
+        "summary": "Accept a merchant name: rename the merchant’s transactions to it",
+        "tags": [
+          "transactions"
+        ],
+        "description": "Writes the holder’s payee name (`user_merchant_name`, the overlay `PATCH /transactions/{id}` writes) on every transaction of the merchant the holder has not renamed, in one transaction; a name the holder typed is kept. Re-runnable on an accepted suggestion, for rows that arrived since. 409 `ledger.merchant_name_suggestion_closed` when dismissed or refused.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "suggestionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "suggestion": {
+                      "$ref": "#/components/schemas/MerchantNameSuggestion"
+                    },
+                    "renamed": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "suggestion",
+                    "renamed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/merchants/name-suggestions/{suggestionId}/dismiss": {
+      "post": {
+        "operationId": "dismissMerchantNameSuggestion",
+        "summary": "Dismiss a merchant name: it is not shown again, and the merchant is not asked about again",
+        "tags": [
+          "transactions"
+        ],
+        "description": "Records the dismissal. A rename an earlier Accept made stays (it is the holder’s overlay now). 409 `ledger.merchant_name_suggestion_closed` when already dismissed or refused.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "suggestionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "dismissed"
+                      ]
+                    },
+                    "suggestionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": [
+                    "outcome",
+                    "suggestionId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "Default Response",
             "content": {
               "application/json": {
