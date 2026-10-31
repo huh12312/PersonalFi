@@ -8715,12 +8715,33 @@
           },
           "effective": {
             "type": "boolean"
+          },
+          "worker": {
+            "type": "object",
+            "properties": {
+              "insightsRegistered": {
+                "type": "boolean"
+              },
+              "reason": {
+                "description": "`advisor_token_secret absent` when `insightsRegistered` is false; null otherwise.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "insightsRegistered",
+              "reason"
+            ],
+            "description": "Whether the worker registers the insights module (its consumer, jobs and schedules). Independent of the holder’s flag: an install without `advisor_token_secret` has not opted in, and narration, the Brief, Ask, the advisor and the control checks cannot run."
           }
         },
         "required": [
           "operator",
           "user",
-          "effective"
+          "effective",
+          "worker"
         ]
       },
       "AskSessionInput": {
@@ -13406,6 +13427,27 @@
           "oldestPendingAgeSeconds"
         ]
       },
+      "ModuleRegistrationInput": {
+        "type": "object",
+        "properties": {
+          "flag": {
+            "type": "string",
+            "description": "The module flag, e.g. `module.insights`."
+          },
+          "registered": {
+            "type": "boolean",
+            "description": "Whether the worker registers the module’s consumers, jobs and schedules. A property of the install (its secrets), not of a holder’s flag."
+          },
+          "reason": {
+            "description": "Only when `registered` is false, e.g. `advisor_token_secret absent`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flag",
+          "registered"
+        ]
+      },
       "ReadyResponseInput": {
         "type": "object",
         "properties": {
@@ -13429,6 +13471,13 @@
           },
           "queue": {
             "$ref": "#/components/schemas/QueueHealthInput"
+          },
+          "modules": {
+            "description": "Every module flag and whether the worker registers it (WP 11.8), read from the same wiring the worker uses — no database read. Informational: an unregistered module never makes the service degraded or the probe fail.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModuleRegistrationInput"
+            }
           },
           "degradedReasons": {
             "type": "array",
@@ -29253,12 +29302,34 @@
           },
           "effective": {
             "type": "boolean"
+          },
+          "worker": {
+            "type": "object",
+            "properties": {
+              "insightsRegistered": {
+                "type": "boolean"
+              },
+              "reason": {
+                "description": "`advisor_token_secret absent` when `insightsRegistered` is false; null otherwise.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "insightsRegistered",
+              "reason"
+            ],
+            "additionalProperties": false,
+            "description": "Whether the worker registers the insights module (its consumer, jobs and schedules). Independent of the holder’s flag: an install without `advisor_token_secret` has not opted in, and narration, the Brief, Ask, the advisor and the control checks cannot run."
           }
         },
         "required": [
           "operator",
           "user",
-          "effective"
+          "effective",
+          "worker"
         ],
         "additionalProperties": false
       },
@@ -34065,6 +34136,28 @@
         ],
         "additionalProperties": false
       },
+      "ModuleRegistration": {
+        "type": "object",
+        "properties": {
+          "flag": {
+            "type": "string",
+            "description": "The module flag, e.g. `module.insights`."
+          },
+          "registered": {
+            "type": "boolean",
+            "description": "Whether the worker registers the module’s consumers, jobs and schedules. A property of the install (its secrets), not of a holder’s flag."
+          },
+          "reason": {
+            "description": "Only when `registered` is false, e.g. `advisor_token_secret absent`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flag",
+          "registered"
+        ],
+        "additionalProperties": false
+      },
       "ReadyResponse": {
         "type": "object",
         "properties": {
@@ -34088,6 +34181,13 @@
           },
           "queue": {
             "$ref": "#/components/schemas/QueueHealth"
+          },
+          "modules": {
+            "description": "Every module flag and whether the worker registers it (WP 11.8), read from the same wiring the worker uses — no database read. Informational: an unregistered module never makes the service degraded or the probe fail.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModuleRegistration"
+            }
           },
           "degradedReasons": {
             "type": "array",
@@ -65490,7 +65590,7 @@
         "tags": [
           "insights"
         ],
-        "description": "Needs a step-up (it spends hosted calls with your key and touches run state inside transactions that are rolled back). Answers 202 with the new run, every check pending; the checks run in the background and the row fills in as each finishes (read it back with GET). The checks that need a model run in the worker; this process never calls one. `proveSwitch: true` also proves kill switch 1 by turning the module off inside a rolled-back transaction. One run per holder per 10 minutes: 409 `narrator.control_checks_too_soon` with `Retry-After`.",
+        "description": "Needs a step-up (it spends hosted calls with your key and touches run state inside transactions that are rolled back). Answers 202 with the new run, every check pending; the checks run in the background and the row fills in as each finishes (read it back with GET). The checks that need a model run in the worker; this process never calls one. `proveSwitch: true` also proves kill switch 1 by turning the module off inside a rolled-back transaction. One run per holder per 10 minutes: 409 `narrator.control_checks_too_soon` with `Retry-After`. 503 `insights.advisor_token_secret_unconfigured` when the worker does not register the insights module (no `advisor_token_secret`, WP 11.8): nothing is started.",
         "requestBody": {
           "required": true,
           "content": {
@@ -66192,7 +66292,7 @@
         "tags": [
           "insights"
         ],
-        "description": "`operator.advisorsEnabled` is `ADVISORS_ENABLED` (static per process; the operator changes it with a restart). `user.enabled` is `module.insights`, which the holder flips with `PUT /advisors/module/enabled` (G5-14: until now it was a line of SQL).",
+        "description": "`operator.advisorsEnabled` is `ADVISORS_ENABLED` (static per process; the operator changes it with a restart). `user.enabled` is `module.insights`, which the holder flips with `PUT /advisors/module/enabled` (G5-14: until now it was a line of SQL). `worker.insightsRegistered` says whether the worker registers the insights module at all (WP 11.8): false on an install without `advisor_token_secret`, whatever the flags say.",
         "responses": {
           "200": {
             "description": "Default Response",

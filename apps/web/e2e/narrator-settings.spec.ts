@@ -371,6 +371,118 @@ test.describe('Settings › Language model › Control checks (WP 10.16)', () =>
 });
 
 /**
+ * WP 11.8: an install without the operator's `advisor_token_secret` never registers the insights module on the worker,
+ * so none of this card can ever run. `GET /advisors/module/enabled` says so (`worker.insightsRegistered: false`, which
+ * `api.narrator.insightsRegistered = false` sets in the mock): the card carries a notice at its top and again above the
+ * control checks, with the RUNBOOK link; "Run control checks" is unavailable, described by the notice's sentence, and
+ * pressing it sends nothing; provider, consent and key stay usable so an operator can set them up first.
+ */
+const INSIGHTS_NOT_ENABLED =
+  'The insights module is not enabled on this install: the operator has not written advisor_token_secret. Narration, the Brief, Ask and the advisor will not run until it is.';
+const RUNBOOK_URL =
+  'https://github.com/huh12312/PersonalFi/blob/main/RUNBOOK.md#enabling-the-insights-module';
+
+test.describe('Settings › Language model › the insights module is not registered (WP 11.8)', () => {
+  test.use({ viewport: { width: 1280, height: 2200 } });
+
+  test('WP 11.8: the notice and its RUNBOOK link are at the top and above the checks; Run control checks is unavailable and described by the notice; the setup controls stay usable', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const api = await installApiMocks(page);
+    await installFakeWebAuthnAssertion(page);
+    api.narrator.insightsRegistered = false;
+    await visit(page, '/settings');
+    await hideDevtools(page);
+    await page.getByRole('tab', { name: 'Language model' }).click();
+
+    const top = page.getByTestId('insights-module-notice-card');
+    await expect(top).toBeVisible();
+    await expect(top).toHaveAttribute('role', 'status');
+    await expect(top.locator('p').first()).toHaveText(INSIGHTS_NOT_ENABLED);
+    await expect(top.locator('code')).toHaveText('advisor_token_secret');
+    const link = top.getByRole('link', { name: /How to enable it \(RUNBOOK\)/ });
+    await expect(link).toHaveAttribute('href', RUNBOOK_URL);
+    await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    // At the top of the card: after the heading, before the provider cards.
+    const order = await top.evaluate((el) => {
+      const heading = document.getElementById('narrator-settings-heading') as Node;
+      const card = document.querySelector('[data-testid="narrator-card-openai"]') as Node;
+      return {
+        afterHeading: Boolean(
+          heading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+        beforeCards: Boolean(el.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING),
+      };
+    });
+    expect(order).toEqual({ afterHeading: true, beforeCards: true });
+
+    // Again above the control checks, whose button is unavailable and described by that sentence.
+    const section = page.getByTestId('control-checks');
+    const checksNotice = section.getByTestId('insights-module-notice-checks');
+    await expect(checksNotice).toBeVisible();
+    await expect(checksNotice.locator('p').first()).toHaveText(INSIGHTS_NOT_ENABLED);
+    await expect(checksNotice.getByRole('link', { name: /How to enable it/ })).toHaveAttribute(
+      'href',
+      RUNBOOK_URL,
+    );
+    const button = section.getByTestId('control-checks-run');
+    await expect(button).toHaveAccessibleName('Run control checks');
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    await expect(button).toHaveAccessibleDescription(INSIGHTS_NOT_ENABLED);
+    // Playwright will not click what is aria-disabled unless forced; a user's press must still send nothing.
+    await button.click({ force: true });
+    await page.waitForTimeout(300);
+    expect(api.narrator.controlChecks.calls.filter((call) => call.startsWith('POST'))).toEqual([]);
+    expect(api.steppedUp, 'no passkey was asked for').toBe(false);
+
+    // Provider, consent and key stay usable.
+    const anthropic = page.getByTestId('narrator-card-anthropic');
+    await expect(anthropic.getByLabel('Anthropic API key')).toBeEnabled();
+    await expect(anthropic.getByRole('checkbox')).toBeEnabled();
+    await expect(page.getByRole('radio', { name: /^Off/ })).toBeEnabled();
+  });
+
+  test('WP 11.8: a registered module shows no notice and Run control checks is available', async ({
+    page,
+  }) => {
+    await installApiMocks(page);
+    await visit(page, '/settings');
+    await hideDevtools(page);
+    await page.getByRole('tab', { name: 'Language model' }).click();
+    const section = page.getByTestId('control-checks');
+    await expect(section.getByTestId('control-checks-run')).toBeVisible();
+    await expect(section.getByTestId('control-checks-run')).not.toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    await expect(page.getByTestId('insights-module-notice-card')).toHaveCount(0);
+    await expect(page.getByTestId('insights-module-notice-checks')).toHaveCount(0);
+  });
+
+  test('WP 11.8: if the api refuses with 503 insights.advisor_token_secret_unconfigured, the screen shows its words', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const api = await installApiMocks(page);
+    await installFakeWebAuthnAssertion(page);
+    // The screen read the module as registered (or could not read it); the run itself is refused.
+    api.narrator.insightsRegistered = true;
+    api.narrator.controlChecks.calls.length = 0;
+    await visit(page, '/settings');
+    await page.getByRole('tab', { name: 'Language model' }).click();
+    const section = page.getByTestId('control-checks');
+    await expect(section.getByTestId('control-checks-run')).toBeVisible();
+    // Flip the mock after the screen has read the module as registered.
+    api.narrator.insightsRegistered = false;
+    await section.getByTestId('control-checks-run').click();
+    await expect(section.getByRole('alert')).toHaveText(INSIGHTS_NOT_ENABLED);
+    expect(api.narrator.controlChecks.runs).toHaveLength(0);
+  });
+});
+
+/**
  * WP 10.16 evidence: the results table on Settings › Language model, light and dark, at 1280 and 390. A finished run
  * is seeded (the passing one, kill switch 1 proven) over an older partial one, so the picture is the same every time.
  * `evidenceDir` unset writes to the gitignored directory; `PLAYWRIGHT_EVIDENCE_DIR` writes
@@ -407,6 +519,45 @@ test('WP 10.16 evidence: Settings › Language model › Control checks, light a
       await setTheme(page, theme);
       await section.screenshot({
         path: `${screenshotDir(evidenceDir)}wp10.16-settings-control-checks-${theme}-${String(width)}.png`,
+        animations: 'disabled',
+      });
+    }
+    await setTheme(page, 'light');
+  }
+});
+
+/**
+ * WP 11.8 evidence: the Language model card with the "insights module not enabled" notice, light and dark, at 1280 and
+ * 390. The top of the card is cut from the whole tab (heading, intro, the notice with its RUNBOOK link, the provider
+ * form), so the picture is the same every time. `evidenceDir` unset writes to the gitignored directory;
+ * `PLAYWRIGHT_EVIDENCE_DIR` writes `wp11.8-unregistered-{light,dark}-{1280,390}.png` on purpose.
+ */
+test('WP 11.8 evidence: Settings › Language model with the insights module not registered, light and dark, at 1280 and 390', async ({
+  page,
+  evidenceDir,
+}) => {
+  test.setTimeout(120_000);
+  const api = await installApiMocks(page);
+  api.narrator.insightsRegistered = false;
+  for (const [width, height, cut] of [
+    [1280, 3600, 760],
+    [390, 7600, 1100],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await visit(page, '/settings');
+    await hideDevtools(page);
+    await page.getByRole('tab', { name: 'Language model' }).click();
+    const card = page.getByTestId('narrator-settings');
+    const notice = card.getByTestId('insights-module-notice-card');
+    await expect(notice).toBeVisible();
+    await expect(card.getByTestId('control-checks-run')).toHaveAttribute('aria-disabled', 'true');
+    for (const theme of ['light', 'dark'] as const) {
+      await setTheme(page, theme);
+      const box = await card.boundingBox();
+      if (box === null) throw new Error('the Language model card has no box');
+      await page.screenshot({
+        path: `${screenshotDir(evidenceDir)}wp11.8-unregistered-${theme}-${String(width)}.png`,
+        clip: { x: box.x, y: box.y, width: box.width, height: Math.min(box.height, cut) },
         animations: 'disabled',
       });
     }

@@ -1305,6 +1305,63 @@ test.describe('WP 10.16 control checks and the controls on the backup line', () 
 });
 
 // ---------------------------------------------------------------------------
+// 7k2. WP 11.8: the insights module is not registered (no advisor_token_secret)
+// ---------------------------------------------------------------------------
+
+/**
+ * The route sweep reaches Settings › Language model with the module registered. An install without the operator's
+ * `advisor_token_secret` carries a warning notice at the top of the card and again above the control checks (with the
+ * RUNBOOK link) and an unavailable "Run control checks"; this holds that state, in both themes, at 1280 and 320 px,
+ * and with the notice and the button's reason read by the page's own accessibility tree.
+ */
+test.describe('WP 11.8 control checks: the insights module not registered', () => {
+  async function open(page: Page): Promise<void> {
+    const mocks = await installSweepMocks(page);
+    mocks.api.narrator.insightsRegistered = false;
+    await visit(page, '/settings');
+    await hideDevtools(page);
+    await page.getByRole('tab', { name: 'Language model' }).click();
+    await expect(page.getByTestId('insights-module-notice-card')).toBeVisible();
+    await expect(page.getByTestId('insights-module-notice-checks')).toBeVisible();
+    await expect(page.getByTestId('control-checks-run')).toHaveAttribute('aria-disabled', 'true');
+  }
+
+  test('WP 11.8 control checks: the notice, its link and the unavailable button are axe-clean in both themes, at 1280 and at 320 px', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await open(page);
+    await scanBothThemes(page, 'WP 11.8 settings › language model, module not registered');
+    await page.setViewportSize(REFLOW);
+    await page.waitForTimeout(600);
+    expect(await horizontalProblems(page), 'horizontal overflow at 320 px').toEqual([]);
+    await scanBothThemes(
+      page,
+      'WP 11.8 settings › language model, module not registered, at 320 px',
+    );
+  });
+
+  test.describe('at 200 % zoom with text spacing', () => {
+    test.use({ viewport: ZOOM_200, deviceScaleFactor: 2 });
+    test('WP 11.8 control checks: nothing is lost', async ({ page }) => {
+      test.setTimeout(120_000);
+      await open(page);
+      expect(await horizontalProblems(page), 'horizontal overflow at 200 %').toEqual([]);
+      await scanBothThemes(
+        page,
+        'WP 11.8 settings › language model, module not registered, at 200 %',
+      );
+      const before = new Set(await clippedTextElements(page));
+      await page.addStyleTag({ content: TEXT_SPACING });
+      await page.waitForTimeout(100);
+      const newlyClipped = (await clippedTextElements(page)).filter((e) => !before.has(e));
+      expect(newlyClipped, '1.4.12: text spacing clips text').toEqual([]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 7l. WP 11.1: the Inbox's explanation line and a rule suggestion, on /inbox and /insights
 // ---------------------------------------------------------------------------
 

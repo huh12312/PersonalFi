@@ -536,7 +536,11 @@ describe.skipIf(NO_DATABASE)('WP 9.6 item 2 — the kill levels report their rea
         operator: { advisorsEnabled: boolean };
         user: { enabled: boolean };
         effective: boolean;
+        worker: { insightsRegistered: boolean; reason: string | null };
       };
+      // WP 11.8: neither install has written advisor_token_secret, so the worker
+      // registers no insights module whatever the two halves say.
+      const unregistered = { insightsRegistered: false, reason: 'advisor_token_secret absent' };
       const get = async (api: EnvApi): Promise<ModuleState> => {
         const response = await api.request({
           method: 'GET',
@@ -550,6 +554,7 @@ describe.skipIf(NO_DATABASE)('WP 9.6 item 2 — the kill levels report their rea
         operator: { advisorsEnabled: true },
         user: { enabled: true },
         effective: true,
+        worker: unregistered,
       });
 
       // The user half follows a PUT; a stale session is refused.
@@ -578,6 +583,7 @@ describe.skipIf(NO_DATABASE)('WP 9.6 item 2 — the kill levels report their rea
         operator: { advisorsEnabled: true },
         user: { enabled: false },
         effective: false,
+        worker: unregistered,
       });
 
       // The operator half follows the config: ADVISORS_ENABLED=false is off
@@ -586,6 +592,7 @@ describe.skipIf(NO_DATABASE)('WP 9.6 item 2 — the kill levels report their rea
         operator: { advisorsEnabled: false },
         user: { enabled: true },
         effective: false,
+        worker: unregistered,
       });
     } finally {
       await on.close();

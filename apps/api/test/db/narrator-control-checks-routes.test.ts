@@ -123,7 +123,15 @@ describe.skipIf(NO_DATABASE)('Run control checks (WP 10.16)', () => {
   let stale: TestSession;
 
   beforeAll(async () => {
-    h = await createApiHarness({ suite: 'wp1016cc', clock, controlChecksCeilingMs: 4_000 });
+    // WP 11.8: an install that has opted into module.insights — without
+    // `advisor_token_secret` the route refuses 503 and the recipe exits 78
+    // (`wp118-insights-registration.test.ts`).
+    h = await createApiHarness({
+      suite: 'wp1016cc',
+      clock,
+      controlChecksCeilingMs: 4_000,
+      extraSecrets: { advisor_token_secret: 'wp1016-control-checks-token-secret-0123456789' },
+    });
     fresh = h.fresh;
     stale = h.stale;
     adapter = createHostedModelAdapter(
@@ -312,6 +320,8 @@ describe.skipIf(NO_DATABASE)('Run control checks (WP 10.16)', () => {
     expect(by['budget_window']).toMatchObject({ status: 'pass' });
     expect(by['budget_window']?.facts[0]).toBe('The window counted 3 call(s) for 3 probe(s) sent.');
     expect(by['module_switch']).toMatchObject({ status: 'reported' });
+    // WP 11.8: level 1 names the worker's registration, read from the same wiring.
+    expect(by['module_switch']?.facts[0]).toContain("the worker's insights module is registered.");
     expect(by['narration_badge']).toMatchObject({ status: 'skipped' });
     expect(by['model_pin']).toMatchObject({ status: 'skipped', notApplicable: true });
     // WP 11.2: this worker binds no suggestion model, so the enum probe does not apply.

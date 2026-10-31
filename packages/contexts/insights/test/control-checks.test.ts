@@ -594,6 +594,7 @@ describe('module_switch', () => {
         Promise.resolve({
           advisorsEnabled: true,
           moduleEnabled: true,
+          workerRegistered: true,
           kindFlag: false,
           kindConfigured: true,
           ...levels,
@@ -609,6 +610,14 @@ describe('module_switch', () => {
     const outcome = await checkModuleSwitch(port({ moduleEnabled: false }), { prove: false });
     expect(outcome.status).toBe('reported');
     expect(outcome.facts[0]).toContain('your insights module is off');
+  });
+  it('level 1 names the worker registration either way (WP 11.8)', async () => {
+    const registered = await checkModuleSwitch(port({}), { prove: false });
+    expect(registered.facts[0]).toContain("the worker's insights module is registered.");
+    const absent = await checkModuleSwitch(port({ workerRegistered: false }), { prove: false });
+    expect(absent.facts[0]).toContain(
+      "the worker's insights module is NOT registered: advisor_token_secret absent.",
+    );
   });
   it('proved: passes on module_disabled, fails otherwise or if the flags changed', async () => {
     expect((await checkModuleSwitch(port({}), { prove: true })).status).toBe('pass');

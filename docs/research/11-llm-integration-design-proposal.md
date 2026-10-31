@@ -110,6 +110,7 @@ Three rules make the right-hand column safe, and they are the same three the nar
 | 11.5 | **Ask PersonalFi** (`ask.compile` + `ask.narrate`): the report-function catalogue as a typed tool set, the compile step, execution, the evidence line, the narrated answer, refusals, an Ask surface. **Reporting mode built** as 12 §6's 11.5c, over 11.5b's `catalogue/1`: `/ask`, two query types each approved on its own, one model call per step, a 64-question compile golden set: [WP 11.5c evidence](../evidence/phase-11/wp11.5c-ask-reporting.md) | 11.3 | L |
 | 11.6 | **Merchant display-name suggestions** (`merchant.name`), narrow. **Built:** [WP 11.6 evidence](../evidence/phase-11/wp11.6-merchant-name.md) | 11.2 | S |
 | 11.7 | **Receipt and document extraction** with deterministic reconciliation (needs attachments + a vision-capable local model or hosted consent) — **deferred by Chris on 2026-10-31** after 11.1–11.6 landed; not scheduled | later | L |
+| 11.8 | **Defects found on the production install, 2026-10-31** (no model): an install without `advisor_token_secret` says so on the Language model card, Advisors, `GET /advisors/module/enabled`, `/ready`'s `modules` line, the control checks and `just genai-selftest`, all from the worker's own registration check; and a filtered consumer with nothing to do no longer reads as behind. **Built:** [WP 11.8 evidence](../evidence/phase-11/wp11.8-unregistered-insights.md) | 11.1–11.6 | S |
 
 ---
 

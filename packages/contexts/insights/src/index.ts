@@ -831,6 +831,7 @@ export {
   EXPLAIN_PROBE_TARGET,
   SUGGEST_PROBE_TAXONOMY,
   checkModuleSwitch,
+  workerRegistrationWords,
   checkNarrationBadge,
   checkNumeralsRefusal,
   checkSchemaRefusal,

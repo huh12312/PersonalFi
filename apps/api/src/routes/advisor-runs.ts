@@ -127,6 +127,11 @@ import {
   createInsightsRecurringPort,
 } from '../domain.ts';
 import { ADVISOR_KIND_FLAGS, MODULE_FLAGS } from '../platform.ts';
+import {
+  INSIGHTS_UNREGISTERED_REASON,
+  insightsRegistered,
+  registrationSourceOf,
+} from '../module-registration.ts';
 import { AppError, problems } from '../problem.ts';
 import { isoInstant } from '../wire.ts';
 import type { PreviewModel } from '../modules.ts';
@@ -443,8 +448,40 @@ const moduleStateSchema = z
     user: z.object({ enabled: z.boolean() }),
     /** Both. Advisors run only when the operator allows them and the holder has not switched them off. */
     effective: z.boolean(),
+    /**
+     * WP 11.8: whether the worker registers `module.insights` at all — a property of the install
+     * (`advisor_token_secret` present), read from the same wiring the worker uses. When false,
+     * nothing the holder sets here can run, whatever `effective` says.
+     */
+    worker: z
+      .object({
+        insightsRegistered: z.boolean(),
+        reason: z
+          .string()
+          .nullable()
+          .describe(
+            '`advisor_token_secret absent` when `insightsRegistered` is false; null otherwise.',
+          ),
+      })
+      .describe(
+        'Whether the worker registers the insights module (its consumer, jobs and schedules). ' +
+          'Independent of the holder’s flag: an install without `advisor_token_secret` has not ' +
+          'opted in, and narration, the Brief, Ask, the advisor and the control checks cannot run.',
+      ),
   })
   .meta({ id: 'AdvisorModuleState' });
+
+/** The `worker` half of `AdvisorModuleState`, from config alone (no database read). */
+function workerRegistrationOf(config: RouteDeps['config']): {
+  insightsRegistered: boolean;
+  reason: string | null;
+} {
+  const registered = insightsRegistered(registrationSourceOf(config));
+  return {
+    insightsRegistered: registered,
+    reason: registered ? null : INSIGHTS_UNREGISTERED_REASON,
+  };
+}
 
 /**
  * Maps a `PreviewError` (`@ctx/insights`'s `preview.ts`) to a named problem.
@@ -1175,7 +1212,9 @@ export const advisorRunRoutes = (
           description:
             '`operator.advisorsEnabled` is `ADVISORS_ENABLED` (static per process; the operator ' +
             'changes it with a restart). `user.enabled` is `module.insights`, which the holder ' +
-            'flips with `PUT /advisors/module/enabled` (G5-14: until now it was a line of SQL).',
+            'flips with `PUT /advisors/module/enabled` (G5-14: until now it was a line of SQL). ' +
+            '`worker.insightsRegistered` says whether the worker registers the insights module at ' +
+            'all (WP 11.8): false on an install without `advisor_token_secret`, whatever the flags say.',
           tags: ['insights'],
           response: {
             200: moduleStateSchema,
@@ -1191,6 +1230,7 @@ export const advisorRunRoutes = (
           operator: { advisorsEnabled },
           user: { enabled },
           effective: advisorsEnabled && enabled,
+          worker: workerRegistrationOf(deps.config),
         };
       },
     );
@@ -1227,6 +1267,7 @@ export const advisorRunRoutes = (
           operator: { advisorsEnabled },
           user: { enabled: request.body.enabled },
           effective: advisorsEnabled && request.body.enabled,
+          worker: workerRegistrationOf(deps.config),
         };
       },
     );

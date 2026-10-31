@@ -15,6 +15,7 @@ import { Switch } from '../../components/ui/switch.tsx';
 import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { useStepUpRetry } from '../../lib/step-up.ts';
 import { CATALOGUE_GAPS } from '../insights/catalogue-gaps.ts';
+import { InsightsModuleNotice, useInsightsRegistered } from '../narrator/InsightsModuleNotice.tsx';
 import { advisorLevelWords, kindLevelWords, runLevelWords } from './kill-levels.ts';
 import { AdvisorHostedConsentCard } from './AdvisorHostedConsentCard.tsx';
 import { KindSwitch } from './KindSwitch.tsx';
@@ -40,9 +41,13 @@ import { ScopeGrantsPanel } from './ScopeGrantsPanel.tsx';
  * `module.insights` and flips the latter; `KindSwitch` shows the kind flag and
  * whether a model is configured. Every word either prints is a read, never a
  * description standing in for one.
+ *
+ * WP 11.8: when the worker has not registered the insights module (no `advisor_token_secret`), a notice under the
+ * level-1 card says so, above the payload approvals it makes pointless; the approvals stay usable.
  */
 export function AdvisorManagementScreen() {
   const advisorsQuery = useQuery(listAdvisorsOptions());
+  const insightsRegistered = useInsightsRegistered();
   const queryClient = useQueryClient();
   const stepUp = useStepUpRetry();
   const setEnabled = useMutation(setAdvisorEnabledMutation());
@@ -97,6 +102,8 @@ export function AdvisorManagementScreen() {
       </div>
 
       <ModuleSwitch />
+
+      {!insightsRegistered && <InsightsModuleNotice testId="insights-module-notice-advisors" />}
 
       {hasLocalModelAdvisor && <KindSwitch kind="local_model" />}
 

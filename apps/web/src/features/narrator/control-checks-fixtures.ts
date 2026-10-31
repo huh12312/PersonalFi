@@ -193,14 +193,14 @@ export function localOutcomes(proveSwitch: boolean): Record<ControlCheckRow['id'
     module_switch: proveSwitch
       ? pass(
           60,
-          'Kill switch 1 (the module) and kill switch 2 (the model) are on.',
+          "Kill switch 1 (the module) and kill switch 2 (the model) are on; the worker's insights module is registered.",
           'With the module turned off inside a transaction that was rolled back, a run was refused module_disabled.',
         )
       : {
           status: 'reported',
           reason: null,
           facts: [
-            'Kill switch 1 (the module) and kill switch 2 (the model) are on.',
+            "Kill switch 1 (the module) and kill switch 2 (the model) are on; the worker's insights module is registered.",
             'Not asked to prove kill switch 1 this time.',
           ],
           notApplicable: false,
@@ -305,6 +305,11 @@ export interface ControlChecksFixtureState {
   reportWindow: boolean;
   /** Checks a `GET` moves on by, while the newest run is going (0: the run stands still). */
   advancePerRead: number;
+  /**
+   * WP 11.8: whether the worker registered the insights module. Unregistered, `POST` answers the api's 503
+   * `insights.advisor_token_secret_unconfigured` (after the step-up), and the list is unchanged.
+   */
+  insightsRegistered: boolean;
   fresh: boolean;
   stepUps: number;
   /** `METHOD path` of every call, in order. */
@@ -329,6 +334,7 @@ export function initialControlChecksState(
     cost: LOCAL_COST,
     reportWindow: true,
     advancePerRead: 3,
+    insightsRegistered: true,
     fresh: false,
     stepUps: 0,
     calls: [],
@@ -399,6 +405,10 @@ export interface ControlChecksReply {
   headers?: Record<string, string>;
 }
 
+/** The api's 503 `detail` for an unregistered insights module. */
+export const UNCONFIGURED_DETAIL =
+  'The insights module is not enabled on this install: the operator has not written advisor_token_secret. Narration, the Brief, Ask and the advisor will not run until it is.';
+
 let sequence = 0;
 
 /** Answers `GET` or `POST /api/narrator/control-checks`. */
@@ -416,6 +426,18 @@ export function controlChecksReply(
     return {
       status: 403,
       body: { type: 'about:blank', title: 'Forbidden', status: 403, code: 'step_up_required' },
+    };
+  }
+  if (!state.insightsRegistered) {
+    return {
+      status: 503,
+      body: {
+        type: 'about:blank',
+        title: 'Service Unavailable',
+        status: 503,
+        code: 'insights.advisor_token_secret_unconfigured',
+        detail: UNCONFIGURED_DETAIL,
+      },
     };
   }
   const latest = state.runs[0];

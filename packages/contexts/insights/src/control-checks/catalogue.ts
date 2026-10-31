@@ -529,6 +529,12 @@ export interface SwitchLevels {
   readonly advisorsEnabled: boolean;
   /** Level 1, the holder: `module.insights`. */
   readonly moduleEnabled: boolean;
+  /**
+   * Level 1, the install (WP 11.8): whether the worker registers the insights
+   * module at all — `advisor_token_secret` present. Read by the composition
+   * root from the same wiring the worker uses; nothing here can run without it.
+   */
+  readonly workerRegistered: boolean;
   /** Level 2: the local_model kind flag. */
   readonly kindFlag: boolean;
   /** Level 2's other half: something is configured to narrate for this holder. */
@@ -548,13 +554,20 @@ export interface ModuleSwitchPort {
 
 const onOff = (value: boolean): string => (value ? 'on' : 'off');
 
+/** The level-1 line's last clause (WP 11.8): the worker's registration, in words. */
+export function workerRegistrationWords(registered: boolean): string {
+  return registered
+    ? "the worker's insights module is registered"
+    : "the worker's insights module is NOT registered: advisor_token_secret absent";
+}
+
 export async function checkModuleSwitch(
   port: ModuleSwitchPort,
   options: { readonly prove: boolean },
 ): Promise<ControlCheckOutcome> {
   const levels = await port.levels();
   const facts = [
-    `Level 1: the operator's ADVISORS_ENABLED is ${onOff(levels.advisorsEnabled)}; your insights module is ${onOff(levels.moduleEnabled)}.`,
+    `Level 1: the operator's ADVISORS_ENABLED is ${onOff(levels.advisorsEnabled)}; your insights module is ${onOff(levels.moduleEnabled)}; ${workerRegistrationWords(levels.workerRegistered)}.`,
     `Level 2: the local-model kind switch is ${onOff(levels.kindFlag)}; a narrator is ${levels.kindConfigured ? '' : 'not '}configured for you.`,
   ];
   if (!options.prove) return reported(facts);

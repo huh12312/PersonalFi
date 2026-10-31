@@ -3,6 +3,7 @@ import { SkeletonText } from '../../components/patterns/Skeleton.tsx';
 import { CategorySuggestionsCard } from '../category-suggestions/CategorySuggestionsCard.tsx';
 import { ActiveProviderForm } from './ActiveProviderForm.tsx';
 import { ControlChecksSection } from './ControlChecksSection.tsx';
+import { InsightsModuleNotice, useInsightsRegistered } from './InsightsModuleNotice.tsx';
 import { NarratorProviderCard } from './NarratorProviderCard.tsx';
 import { NARRATOR_PROVIDERS, useNarratorSettingsQuery } from './narrator-api.ts';
 
@@ -17,9 +18,14 @@ import { NARRATOR_PROVIDERS, useNarratorSettingsQuery } from './narrator-api.ts'
  * (WP 10.16, `ControlChecksSection`), then WP 11.2's category suggestions (`CategorySuggestionsCard`): the model
  * that suggests a category for what the categoriser could not decide, its measurement against the gate, the Enable
  * switch, the payload approval and, under a hosted narrator, its own consent.
+ *
+ * WP 11.8: when the worker has not registered the insights module (the operator has not written
+ * `advisor_token_secret`), a notice at the top says so and the control checks cannot be run; the provider, consent and
+ * key controls stay usable, so an operator can set them up first.
  */
 export function NarratorSettingsSection() {
   const query = useNarratorSettingsQuery();
+  const insightsRegistered = useInsightsRegistered();
 
   return (
     <section
@@ -42,6 +48,8 @@ export function NarratorSettingsSection() {
           </p>
         )}
       </div>
+
+      {!insightsRegistered && <InsightsModuleNotice testId="insights-module-notice-card" />}
 
       {query.isLoading ? (
         <SkeletonText lines={4} />

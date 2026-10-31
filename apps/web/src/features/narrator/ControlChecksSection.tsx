@@ -28,7 +28,9 @@ import {
   type ControlCheckRun,
   type ControlCheckRuns,
 } from './control-checks-words.ts';
+import { InsightsModuleNotice, useInsightsRegistered } from './InsightsModuleNotice.tsx';
 import { problemCode, problemDetail } from './narrator-api.ts';
+import { INSIGHTS_NOT_ENABLED_TEXT, INSIGHTS_UNCONFIGURED_CODE } from './narrator-words.ts';
 
 /**
  * Settings › Language model › **Control checks** (WP 10.16). Chris's request: "a 'Run control checks' button on the
@@ -44,6 +46,8 @@ import { problemCode, problemDetail } from './narrator-api.ts';
  */
 export function ControlChecksSection() {
   const query = useControlChecksQuery();
+  const insightsRegistered = useInsightsRegistered();
+  const noticeTextId = useId();
 
   return (
     <section
@@ -62,6 +66,9 @@ export function ControlChecksSection() {
           proven.
         </p>
       </div>
+      {!insightsRegistered && (
+        <InsightsModuleNotice textId={noticeTextId} testId="insights-module-notice-checks" />
+      )}
       {query.isLoading ? (
         <SkeletonText lines={3} />
       ) : query.data === undefined ? (
@@ -69,13 +76,23 @@ export function ControlChecksSection() {
           The control checks cannot be read right now. Try again in a moment.
         </p>
       ) : (
-        <ControlChecksBody data={query.data} />
+        <ControlChecksBody
+          data={query.data}
+          unregisteredReasonId={insightsRegistered ? null : noticeTextId}
+        />
       )}
     </section>
   );
 }
 
-function ControlChecksBody({ data }: { data: ControlCheckRuns }) {
+function ControlChecksBody({
+  data,
+  unregisteredReasonId,
+}: {
+  data: ControlCheckRuns;
+  /** WP 11.8: set when the worker has no insights module; the id of the notice's sentence that says why. */
+  unregisteredReasonId: string | null;
+}) {
   const mutation = useRunControlChecksMutation();
   const stepUp = useStepUpRetry();
   const refresh = useRefreshControlChecks();
@@ -92,7 +109,11 @@ function ControlChecksBody({ data }: { data: ControlCheckRuns }) {
   const running = isRunning(data);
   const starting = mutation.isPending || stepUp.busy;
   const wait = nextAllowedWords(data.nextAllowedAt, now);
-  const unavailable = running || starting || wait !== null;
+  const unregistered = unregisteredReasonId !== null;
+  const describedBy =
+    [unregisteredReasonId, wait === null ? null : whyId].filter((id) => id !== null).join(' ') ||
+    undefined;
+  const unavailable = running || starting || wait !== null || unregistered;
 
   // When the wait is over, read the list again (the api then says `nextAllowedAt: null`) and redraw.
   useEffect(() => {
@@ -127,6 +148,9 @@ function ControlChecksBody({ data }: { data: ControlCheckRuns }) {
           ),
         );
         void refresh();
+      } else if (problemCode(cause) === INSIGHTS_UNCONFIGURED_CODE) {
+        // The api's 503: this screen read the module as registered (or could not read it), the api knows better.
+        setFailure(problemDetail(cause, INSIGHTS_NOT_ENABLED_TEXT));
       } else {
         setFailure(problemDetail(cause, 'The control checks could not start. Nothing was run.'));
       }
@@ -169,7 +193,7 @@ function ControlChecksBody({ data }: { data: ControlCheckRuns }) {
           <Button
             variant={unavailable ? 'secondary' : 'primary'}
             aria-disabled={unavailable}
-            aria-describedby={wait === null ? undefined : whyId}
+            aria-describedby={describedBy}
             className={cn(unavailable && 'cursor-not-allowed')}
             onClick={() => void handleRun()}
             data-testid="control-checks-run"

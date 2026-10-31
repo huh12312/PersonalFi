@@ -109,3 +109,22 @@ export function formatDate(iso: string): string {
     ? iso
     : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
+
+/**
+ * WP 11.8: the worker registers the insights module (its consumer, jobs and schedule) only when the operator has
+ * written `advisor_token_secret`. Without it nothing that needs the module can ever run, so the Language model card
+ * and the Advisors page say so, in these words (the api's own 503 detail says the same).
+ */
+export const INSIGHTS_RUNBOOK_URL =
+  'https://github.com/huh12312/PersonalFi/blob/main/RUNBOOK.md#enabling-the-insights-module';
+export const INSIGHTS_SECRET_NAME = 'advisor_token_secret';
+/** The notice, before the secret's name (which is drawn as code) and after it. */
+export const INSIGHTS_NOT_ENABLED_LEAD =
+  'The insights module is not enabled on this install: the operator has not written';
+export const INSIGHTS_NOT_ENABLED_TAIL =
+  '. Narration, the Brief, Ask and the advisor will not run until it is.';
+/** The whole notice as one sentence, for tests and for the plain-text reading. */
+export const INSIGHTS_NOT_ENABLED_TEXT = `${INSIGHTS_NOT_ENABLED_LEAD} ${INSIGHTS_SECRET_NAME}${INSIGHTS_NOT_ENABLED_TAIL}`;
+export const INSIGHTS_RUNBOOK_LINK_TEXT = 'How to enable it (RUNBOOK)';
+/** The api's problem code when `POST /narrator/control-checks` meets an unregistered module. */
+export const INSIGHTS_UNCONFIGURED_CODE = 'insights.advisor_token_secret_unconfigured';

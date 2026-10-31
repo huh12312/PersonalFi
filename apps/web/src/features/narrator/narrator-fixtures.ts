@@ -412,3 +412,19 @@ export function narratorReply(
 
   return problem(404, 'not_found', 'Not found.');
 }
+
+/**
+ * `GET /advisors/module/enabled` as the api answers it (WP 11.8): both halves of level 1 on, and the worker's
+ * registration of the insights module. `reason` is the api's `advisor_token_secret absent` when unregistered.
+ */
+export function moduleStateBody(insightsRegistered = true) {
+  return {
+    operator: { advisorsEnabled: true },
+    user: { enabled: true },
+    effective: true,
+    worker: {
+      insightsRegistered,
+      reason: insightsRegistered ? null : 'advisor_token_secret absent',
+    },
+  };
+}

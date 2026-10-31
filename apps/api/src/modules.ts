@@ -191,6 +191,7 @@ import {
 } from './domain.ts';
 import type { InvestmentSyncPort } from '@ctx/investments';
 import { ADVISOR_KIND_FLAGS, MODULE_FLAGS, type ModuleRegistration } from './platform.ts';
+import { insightsRegistered } from './module-registration.ts';
 import { createLivingExpensesPort } from './reports/living-expenses.ts';
 import {
   createCategorySuggestJob,
@@ -1226,7 +1227,9 @@ function insightsModule(
   options: ModuleWiringOptions,
   clock: Clock,
 ): ModuleRegistration {
-  if (options.advisorTokenSecret === undefined) {
+  // WP 11.8: the one test of registration, shared with the api's `/ready`
+  // `modules` line and `GET /advisors/module/enabled` (`module-registration.ts`).
+  if (!insightsRegistered(options)) {
     return { flagKey: 'module.insights', events: INSIGHTS_EVENTS };
   }
 

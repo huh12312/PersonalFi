@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import { ConfigError, type ConfigProblem } from './errors.ts';
-import { describeConfig, loadConfig } from './load.ts';
+import { describeConfig, loadConfig, readOptionalSecret } from './load.ts';
 import { REDACTED_MARKER, isRedacted, redact } from './redacted.ts';
 import { SECRET_SPECS } from './schema.ts';
 
@@ -1733,5 +1733,46 @@ describe('NARRATION_TEXT_SHOWN (R-2, WP 9.6 item 3)', () => {
       readSecret: secretsFrom({}),
     });
     expect(config.env.NARRATION_TEXT_SHOWN).toBe(true);
+  });
+});
+
+describe('readOptionalSecret (WP 11.8: one presence rule for every reader)', () => {
+  const reader =
+    (files: Readonly<Record<string, string | NodeJS.ErrnoException>>) =>
+    (path: string): string => {
+      const entry = files[path];
+      if (entry === undefined) {
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      }
+      if (typeof entry !== 'string') throw entry;
+      return entry;
+    };
+
+  it('a non-empty file is its trimmed value; an empty placeholder and a missing file are absent', () => {
+    const read = reader({
+      '/s/advisor_token_secret': '  a-secret\n',
+      '/s/empty': '',
+      '/s/blank': ' \n\t\n',
+    });
+    expect(readOptionalSecret('/s', 'advisor_token_secret', read)).toEqual({
+      value: 'a-secret',
+      unreadable: undefined,
+    });
+    for (const file of ['empty', 'blank', 'missing']) {
+      expect(readOptionalSecret('/s', file, read)).toEqual({
+        value: undefined,
+        unreadable: undefined,
+      });
+    }
+  });
+
+  it('a file that exists but cannot be read is reported by its code, never treated as absent', () => {
+    const read = reader({
+      '/s/locked': Object.assign(new Error('denied'), { code: 'EACCES' }),
+    });
+    expect(readOptionalSecret('/s', 'locked', read)).toEqual({
+      value: undefined,
+      unreadable: 'EACCES',
+    });
   });
 });

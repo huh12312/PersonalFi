@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -9,6 +9,7 @@ import {
   jsonResponse,
   stubFetchRoutes,
 } from '../../test-support/api-test-utils.ts';
+import { INSIGHTS_NOT_ENABLED_TEXT, INSIGHTS_RUNBOOK_URL } from '../narrator/narrator-words.ts';
 import { AdvisorManagementScreen } from './AdvisorManagementScreen.tsx';
 
 function renderScreen() {
@@ -83,7 +84,12 @@ function previewRoute(advisorId: string) {
   };
 }
 
-function moduleRoute(state = { advisorsEnabled: true, userEnabled: true }) {
+function moduleRoute(
+  state: { advisorsEnabled: boolean; userEnabled: boolean; insightsRegistered?: boolean } = {
+    advisorsEnabled: true,
+    userEnabled: true,
+  },
+) {
   return {
     match: '/api/advisors/module/enabled',
     method: 'GET',
@@ -92,6 +98,10 @@ function moduleRoute(state = { advisorsEnabled: true, userEnabled: true }) {
         operator: { advisorsEnabled: state.advisorsEnabled },
         user: { enabled: state.userEnabled },
         effective: state.advisorsEnabled && state.userEnabled,
+        worker: {
+          insightsRegistered: state.insightsRegistered !== false,
+          reason: state.insightsRegistered === false ? 'advisor_token_secret absent' : null,
+        },
       }),
   };
 }
@@ -195,5 +205,50 @@ describe('AdvisorManagementScreen', () => {
     renderScreen();
 
     expect(await screen.findByText('Not yet available')).toBeInTheDocument();
+  });
+
+  it('WP 11.8: an unregistered insights module is said where approvals are offered, with the RUNBOOK link, and approvals stay usable', async () => {
+    stubFetchRoutes([
+      {
+        match: '/api/advisors',
+        method: 'GET',
+        handle: () => jsonResponse({ advisors: [advisor()] }),
+      },
+      moduleRoute({ advisorsEnabled: true, userEnabled: true, insightsRegistered: false }),
+    ]);
+
+    renderScreen();
+
+    const notice = await screen.findByTestId('insights-module-notice-advisors');
+    expect(notice).toHaveAttribute('role', 'status');
+    expect(notice).toHaveTextContent(INSIGHTS_NOT_ENABLED_TEXT);
+    expect(within(notice).getByText('advisor_token_secret').tagName).toBe('CODE');
+    const link = within(notice).getByRole('link', {
+      name: /^How to enable it \(RUNBOOK\)/u,
+    });
+    expect(link).toHaveAttribute('href', INSIGHTS_RUNBOOK_URL);
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    // Never dismissable: nothing in it can be pressed but the link.
+    expect(within(notice).queryByRole('button')).not.toBeInTheDocument();
+    // The advisors and their approvals are still offered.
+    expect(await screen.findByText('Low balance warning')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show detail' })).toBeEnabled();
+  });
+
+  it('WP 11.8: a registered insights module shows no notice', async () => {
+    stubFetchRoutes([
+      {
+        match: '/api/advisors',
+        method: 'GET',
+        handle: () => jsonResponse({ advisors: [advisor()] }),
+      },
+      moduleRoute(),
+    ]);
+
+    renderScreen();
+
+    await screen.findByText('Low balance warning');
+    await screen.findByTestId('module-state-words');
+    expect(screen.queryByTestId('insights-module-notice-advisors')).not.toBeInTheDocument();
   });
 });

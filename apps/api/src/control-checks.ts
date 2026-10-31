@@ -47,6 +47,7 @@ import { narratorConsentSha256, NARRATOR_CONSENT_VERSION } from './narrator-cons
 import type { NarratorRuntime } from './narrator-wiring.ts';
 import { ADVISOR_KIND_FLAGS, MODULE_FLAGS } from './platform.ts';
 import type { PreviewModel } from './modules.ts';
+import { insightsRegistered, registrationSourceOf } from './module-registration.ts';
 import { previewDependenciesOf, timezoneOf } from './routes/advisor-runs.ts';
 import { narratedByOf } from './routes/brief.ts';
 import type { RouteDeps } from './routes/deps.ts';
@@ -80,6 +81,8 @@ export function moduleSwitchPort(input: {
   readonly database: Database;
   readonly userId: string;
   readonly advisorsEnabled: boolean;
+  /** WP 11.8: whether the worker registers `module.insights` (`module-registration.ts`). */
+  readonly workerRegistered: boolean;
   readonly configured: () => Promise<boolean>;
 }): ModuleSwitchPort {
   const { database, userId } = input;
@@ -92,7 +95,13 @@ export function moduleSwitchPort(input: {
         flags.isEnabled(userId, kindKey),
         input.configured(),
       ]);
-      return { advisorsEnabled: input.advisorsEnabled, moduleEnabled, kindFlag, kindConfigured };
+      return {
+        advisorsEnabled: input.advisorsEnabled,
+        moduleEnabled,
+        workerRegistered: input.workerRegistered,
+        kindFlag,
+        kindConfigured,
+      };
     },
     async flagState() {
       const rows = await database
@@ -157,6 +166,7 @@ export async function apiCheckPorts(
       database,
       userId: context.userId,
       advisorsEnabled: config.env.ADVISORS_ENABLED,
+      workerRegistered: insightsRegistered(registrationSourceOf(config)),
       configured: async () => (await composition.runtime.forUser(context.userId)) !== null,
     }),
   };

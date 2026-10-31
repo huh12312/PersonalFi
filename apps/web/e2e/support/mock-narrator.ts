@@ -86,6 +86,12 @@ export interface NarratorMockState {
   tests: Record<string, number>;
   /** WP 10.16: the controls self-test (`GET`/`POST /api/narrator/control-checks`). */
   controlChecks: ControlChecksMockState;
+  /**
+   * WP 11.8: whether the worker registered the insights module (`worker.insightsRegistered` of
+   * `GET /api/advisors/module/enabled`). `false` is an install without `advisor_token_secret`: `POST
+   * /api/narrator/control-checks` then answers the api's 503. `mock-advisors.ts` reads this same flag.
+   */
+  insightsRegistered: boolean;
 }
 
 export const PINNED_MODEL = 'qwen2.5:7b-instruct-q4_K_M';
@@ -115,6 +121,7 @@ export function createNarratorState(overrides: Partial<NarratorMockState> = {}):
     keyBodies: [],
     tests: {},
     controlChecks: createControlChecksState(),
+    insightsRegistered: true,
     ...overrides,
   };
 }
@@ -433,6 +440,24 @@ function narratorReply(
   return problem(404, 'not_found', 'Not found.');
 }
 
+/** `worker` of `AdvisorModuleState`: registered, or the api's `advisor_token_secret absent`. */
+export function workerOf(state: Pick<NarratorMockState, 'insightsRegistered'>) {
+  return {
+    insightsRegistered: state.insightsRegistered,
+    reason: state.insightsRegistered ? null : 'advisor_token_secret absent',
+  };
+}
+
+/** `GET /api/advisors/module/enabled` with both halves of level 1 on. */
+function workerModuleState(state: NarratorMockState) {
+  return {
+    operator: { advisorsEnabled: true },
+    user: { enabled: true },
+    effective: true,
+    worker: workerOf(state),
+  };
+}
+
 /**
  * Answers the request when `path` is a `/api/narrator/*` route and returns `true`; returns `false` (and touches
  * nothing) for any other path, so the caller's own routing carries on.
@@ -444,6 +469,15 @@ export async function handleNarrator(
   state: NarratorMockState,
   isFresh: () => boolean,
 ): Promise<boolean> {
+  // WP 11.8: level 1's read, for a spec that mounts no advisors layer (that layer, installed later, answers first).
+  if (path === '/api/advisors/module/enabled' && method === 'GET') {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(workerModuleState(state)),
+    });
+    return true;
+  }
   if (!path.startsWith('/api/narrator/')) return false;
   const raw = route.request().postData();
   if (path === '/api/narrator/control-checks') {
@@ -453,6 +487,7 @@ export async function handleNarrator(
       method,
       raw === null || raw === '' ? undefined : JSON.parse(raw),
       isFresh,
+      state.insightsRegistered,
     );
     await route.fulfill({
       status: checks.status,
@@ -723,14 +758,14 @@ function localOutcomes(proveSwitch: boolean): Record<ControlCheckId, Outcome> {
     module_switch: proveSwitch
       ? passed(
           60,
-          'Kill switch 1 (the module) and kill switch 2 (the model) are on.',
+          "Kill switch 1 (the module) and kill switch 2 (the model) are on; the worker's insights module is registered.",
           'With the module turned off inside a transaction that was rolled back, a run was refused module_disabled.',
         )
       : {
           status: 'reported',
           reason: null,
           facts: [
-            'Kill switch 1 (the module) and kill switch 2 (the model) are on.',
+            "Kill switch 1 (the module) and kill switch 2 (the model) are on; the worker's insights module is registered.",
             'Not asked to prove kill switch 1 this time.',
           ],
           notApplicable: false,
@@ -944,6 +979,7 @@ function controlChecksReply(
   method: 'GET' | 'POST',
   body: unknown,
   isFresh: () => boolean,
+  insightsRegistered: boolean,
 ): FixtureReply {
   state.calls.push(`${method} /api/narrator/control-checks`);
   if (method === 'GET') {
@@ -951,6 +987,13 @@ function controlChecksReply(
     return { status: 200, body: controlCheckRunsOf(state) };
   }
   if (!isFresh()) return STEP_UP;
+  if (!insightsRegistered) {
+    return problem(
+      503,
+      'insights.advisor_token_secret_unconfigured',
+      'The insights module is not enabled on this install: the operator has not written advisor_token_secret. Narration, the Brief, Ask and the advisor will not run until it is.',
+    );
+  }
   const latest = state.runs[0];
   if (latest !== undefined) {
     const left = new Date(latest.startedAt).getTime() + CONTROL_CHECKS_WINDOW_MS - Date.now();

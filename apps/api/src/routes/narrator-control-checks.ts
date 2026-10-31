@@ -11,7 +11,7 @@
  *
  * | Operation | Guard | What |
  * | --- | --- | --- |
- * | `POST /narrator/control-checks` | step-up | start a run: 202 with its row (every check pending); the checks run in the background — the api's half here, the worker's half as `insights.control_checks` — and the row fills in as each finishes. One per holder per 10 minutes (409 `narrator.control_checks_too_soon`, `Retry-After`) |
+ * | `POST /narrator/control-checks` | step-up | start a run: 202 with its row (every check pending); the checks run in the background — the api's half here, the worker's half as `insights.control_checks` — and the row fills in as each finishes. One per holder per 10 minutes (409 `narrator.control_checks_too_soon`, `Retry-After`); 503 `insights.advisor_token_secret_unconfigured` when the worker does not register the insights module (WP 11.8) |
  * | `GET /narrator/control-checks` | session | the last 20 runs, newest first, with their per-check rows; the cost of a run for the active provider, in words; when the next run is allowed; when the controls were last proven |
  *
  * Step-up, because a run spends hosted calls with the holder's key and
@@ -42,6 +42,11 @@ import {
   correlationIdOf,
   queueHandoff,
 } from '../control-checks.ts';
+import {
+  INSIGHTS_UNREGISTERED_NOTICE,
+  insightsRegistered,
+  registrationSourceOf,
+} from '../module-registration.ts';
 import type { PreviewModel } from '../modules.ts';
 import type { NarratorRuntime } from '../narrator-wiring.ts';
 import { AppError, problems } from '../problem.ts';
@@ -227,7 +232,9 @@ export const narratorControlCheckRoutes = (
             '(read it back with GET). The checks that need a model run in the worker; this ' +
             'process never calls one. `proveSwitch: true` also proves kill switch 1 by turning ' +
             'the module off inside a rolled-back transaction. One run per holder per 10 minutes: ' +
-            '409 `narrator.control_checks_too_soon` with `Retry-After`.',
+            '409 `narrator.control_checks_too_soon` with `Retry-After`. 503 ' +
+            '`insights.advisor_token_secret_unconfigured` when the worker does not register the insights ' +
+            'module (no `advisor_token_secret`, WP 11.8): nothing is started.',
           tags: ['insights'],
           body: z.object({ proveSwitch: z.boolean().optional() }).optional(),
           response: { 202: runWire, ...problems(400, 401, 403, 409, 503) },
@@ -235,6 +242,18 @@ export const narratorControlCheckRoutes = (
       },
       async (request, reply) => {
         const session = await guards.requireFreshSession(request);
+        // WP 11.8: no `advisor_token_secret`, no insights job on the worker —
+        // the run would wait out its five-minute ceiling for a hand-off nobody
+        // takes. Refused here as `just genai-selftest` refuses (exit 78).
+        if (!insightsRegistered(registrationSourceOf(deps.config))) {
+          throw new AppError({
+            status: 503,
+            code: 'insights.advisor_token_secret_unconfigured',
+            title: 'Service Unavailable',
+            detail: INSIGHTS_UNREGISTERED_NOTICE,
+            family: 'connector',
+          });
+        }
         const userId = session.userId;
         const nowMs = clock.nowMs();
         const [latest] = await listControlCheckRuns(database, userId, 1);

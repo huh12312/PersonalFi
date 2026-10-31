@@ -5,6 +5,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type pg from 'pg';
 import { z } from 'zod';
+import type { ModuleRegistrationLine } from '../module-registration.ts';
 import { PROBLEM_CONTENT_TYPE, problems, serviceUnavailable, toProblem } from '../problem.ts';
 
 const healthResponse = z
@@ -36,6 +37,22 @@ const queueSchema = z
   })
   .meta({ id: 'QueueHealth' });
 
+const moduleRegistrationSchema = z
+  .object({
+    flag: z.string().describe('The module flag, e.g. `module.insights`.'),
+    registered: z
+      .boolean()
+      .describe(
+        'Whether the worker registers the module’s consumers, jobs and schedules. A property of ' +
+          'the install (its secrets), not of a holder’s flag.',
+      ),
+    reason: z
+      .string()
+      .optional()
+      .describe('Only when `registered` is false, e.g. `advisor_token_secret absent`.'),
+  })
+  .meta({ id: 'ModuleRegistration' });
+
 const readyResponse = z
   .object({
     status: z.enum(['ready', 'degraded']),
@@ -43,6 +60,14 @@ const readyResponse = z
     migrations: z.literal('current'),
     outbox: outboxSchema.optional(),
     queue: queueSchema.optional(),
+    modules: z
+      .array(moduleRegistrationSchema)
+      .optional()
+      .describe(
+        'Every module flag and whether the worker registers it (WP 11.8), read from the same ' +
+          'wiring the worker uses — no database read. Informational: an unregistered module never ' +
+          'makes the service degraded or the probe fail.',
+      ),
     degradedReasons: z.array(z.string()).optional(),
   })
   .meta({ id: 'ReadyResponse' });
@@ -106,6 +131,7 @@ function toReadyBody(
   outbox: Awaited<ReturnType<typeof outboxHealth>>,
   queue: Awaited<ReturnType<typeof queueHealth>>,
   degradedReasons: readonly string[],
+  modules: readonly ModuleRegistrationLine[] | undefined,
 ): z.infer<typeof readyResponse> {
   return {
     status: degradedReasons.length === 0 ? 'ready' : 'degraded',
@@ -124,7 +150,22 @@ function toReadyBody(
       stalled: queue.stalled,
       oldestPendingAgeSeconds: queue.oldestPendingAgeSeconds,
     },
+    ...modulesLine(modules),
     ...(degradedReasons.length === 0 ? {} : { degradedReasons: [...degradedReasons] }),
+  };
+}
+
+/** The `modules` line, copied so the caller's array is never serialised by reference. */
+function modulesLine(
+  modules: readonly ModuleRegistrationLine[] | undefined,
+): Pick<z.infer<typeof readyResponse>, 'modules'> {
+  if (modules === undefined) return {};
+  return {
+    modules: modules.map((line) =>
+      line.registered
+        ? { flag: line.flag, registered: true }
+        : { flag: line.flag, registered: false, reason: line.reason },
+    ),
   };
 }
 
@@ -137,6 +178,12 @@ export interface HealthRouteOptions {
   readonly maxQueueWaitSeconds?: number;
   /** Whether `degraded` returns 503. Default false; see the doc comment below. */
   readonly failOnDegraded?: boolean;
+  /**
+   * WP 11.8: every module flag and whether the worker registers it
+   * (`module-registration.ts`'s `moduleRegistrations`). Computed once from
+   * config by the caller; reported on every 200 body, never a 503 rule.
+   */
+  readonly modules?: readonly ModuleRegistrationLine[];
 }
 
 /**
@@ -222,6 +269,7 @@ export const healthRoutes = (options: HealthRouteOptions): FastifyPluginAsyncZod
             status: 'ready',
             database: 'reachable',
             migrations: 'current',
+            ...modulesLine(options.modules),
           } as const);
         }
 
@@ -239,7 +287,7 @@ export const healthRoutes = (options: HealthRouteOptions): FastifyPluginAsyncZod
           }
         }
 
-        return reply.code(200).send(toReadyBody(outbox, queue, degradedReasons));
+        return reply.code(200).send(toReadyBody(outbox, queue, degradedReasons, options.modules));
       },
     );
   };

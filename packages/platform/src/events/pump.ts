@@ -188,6 +188,8 @@ export function createConsumerPump(options: ConsumerPumpOptions): ConsumerPump {
   const loops: Array<Promise<void>> = [];
   const leases = new Map<string, AdvisoryLease>();
   const sleeper = createSleeper();
+  /** Consumers whose offset `advancePastUnmatched` moved since the lag was last published. */
+  const idleAdvanced = new Set<string>();
 
   async function ensureOffsetRow(name: string): Promise<void> {
     await db.execute(sql`
@@ -279,7 +281,10 @@ export function createConsumerPump(options: ConsumerPumpOptions): ConsumerPump {
           `,
     );
 
-    if (rows.rows.length === 0) return 0;
+    if (rows.rows.length === 0) {
+      if (filter !== undefined) await advancePastUnmatched(consumer.name, filter);
+      return 0;
+    }
     metrics?.increment(METRIC.consumerBatches, { consumer: consumer.name });
 
     let handled = 0;
@@ -293,7 +298,65 @@ export function createConsumerPump(options: ConsumerPumpOptions): ConsumerPump {
         return handled;
       }
     }
+    // A short batch was everything the filter matched: what follows the last
+    // handled event is, as of now, events this consumer skips anyway.
+    if (filter !== undefined && rows.rows.length < consumer.batchSize) {
+      await advancePastUnmatched(consumer.name, filter);
+    }
     return handled;
+  }
+
+  /**
+   * Move a filtered consumer's offset past events its filter does not match
+   * (WP 11.8). Without this, a consumer whose filter matched nothing kept its
+   * first `last_seq` forever and `outboxHealth` counted the whole outbox as
+   * its lag — production read 763 behind on an idle `insights.advisors@v1`,
+   * and past `READINESS_MAX_OUTBOX_LAG_EVENTS` `/ready` reads `degraded`.
+   *
+   * **Where it may stop.** At the highest `seq` *visible in this statement*,
+   * and only when nothing in `(last_seq, that seq]` matches the filter — both
+   * read from one snapshot, because they are one statement. That is safe
+   * because of the outbox's own ordering rule: `append_domain_event` takes the
+   * `PFEVTSEQ` transaction-scoped advisory lock before it draws `nextval`
+   * (migration 0003), so `seq` order is commit order and an event that is not
+   * yet visible — drawn by a transaction still open, or yet to be drawn — has
+   * a higher `seq` than every visible one. "A lower seq commits after a higher
+   * one" cannot happen while every append goes through that function, which
+   * is the only write path (0003's comment: "no way to insert an event that
+   * bypasses it, including from psql"). So no time grace is needed: the
+   * visible maximum is exactly the committed prefix. What it must never be is
+   * the *sequence's* high-water mark (`domain_events_seq_seq.last_value`),
+   * which includes a seq drawn by a transaction that has not committed.
+   *
+   * **When it may not run.** Never for a `failed` or `paused` consumer (the
+   * status is re-read under the row lock, here, not trusted from the batch's
+   * read), and never past a matching event — handled or not. It writes no
+   * receipt and runs no handler: a skipped event was never this consumer's.
+   * One transaction, as `handleOne`'s offset advance is.
+   */
+  async function advancePastUnmatched(name: string, filter: readonly string[]): Promise<void> {
+    const advanced = await db.transaction(async (tx) => {
+      const result = await tx.execute<{ last_seq: bigint }>(sql`
+        WITH head AS (SELECT max(seq) AS seq FROM domain_events)
+        UPDATE event_consumer_offsets o
+           SET last_seq = head.seq,
+               updated_at = now()
+          FROM head
+         WHERE o.consumer_name = ${name}
+           AND o.status NOT IN ('failed', 'paused')
+           AND head.seq > o.last_seq
+           AND NOT EXISTS (
+                 SELECT 1 FROM domain_events e
+                  WHERE e.seq > o.last_seq
+                    AND e.seq <= head.seq
+                    AND e.event_type = ANY(${sql.param([...filter])}::text[])
+               )
+        RETURNING o.last_seq
+      `);
+      return result.rows.length > 0;
+    });
+    // The lag gauge moved without a handled event; the loop publishes it.
+    if (advanced) idleAdvanced.add(name);
   }
 
   async function handleOne(consumer: RegisteredConsumer, event: EventEnvelope): Promise<void> {
@@ -449,7 +512,7 @@ export function createConsumerPump(options: ConsumerPumpOptions): ConsumerPump {
           if (count < consumer.batchSize) break;
           if (!running) break;
         }
-        if (handled > 0) await publishLag();
+        if (idleAdvanced.delete(consumer.name) || handled > 0) await publishLag();
       } catch (cause) {
         logger.error({ consumer: consumer.name, err: describeError(cause) }, 'consumer loop error');
         await sleeper.sleep(1_000);

@@ -184,6 +184,64 @@ test('levels 1 and 2 show their real state in words', async ({ page }) => {
   await expect(kindWords).toContainText('Level 2 is off: the local_model flag is off');
 });
 
+// WP 11.8: an install without `advisor_token_secret` never registers the insights module on the worker, so nothing
+// an approval unlocks can run. The page says so where approvals are offered (and they stay usable).
+test('WP 11.8: an unregistered insights module is said above the advisors, with the RUNBOOK link, and approvals stay usable', async ({
+  page,
+}) => {
+  await installFakeWebAuthnAssertion(page);
+  const state = await installApiMocks(page);
+  state.narrator.insightsRegistered = false;
+  await installAdvisorMocks(page, state);
+
+  await login(page);
+  await openAdvisorManagement(page);
+
+  const notice = page.getByTestId('insights-module-notice-advisors');
+  await expect(notice).toBeVisible();
+  await expect(notice).toHaveAttribute('role', 'status');
+  await expect(notice.locator('p').first()).toHaveText(
+    'The insights module is not enabled on this install: the operator has not written advisor_token_secret. Narration, the Brief, Ask and the advisor will not run until it is.',
+  );
+  await expect(notice.locator('code')).toHaveText('advisor_token_secret');
+  const link = notice.getByRole('link', { name: /How to enable it \(RUNBOOK\)/ });
+  await expect(link).toHaveAttribute(
+    'href',
+    'https://github.com/huh12312/PersonalFi/blob/main/RUNBOOK.md#enabling-the-insights-module',
+  );
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  // Above the advisors list it is about, and nothing in it can dismiss it.
+  const above = await notice.evaluate((el) =>
+    Boolean(
+      el.compareDocumentPosition(document.querySelector('[data-testid="advisor-row"]') as Node) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    ),
+  );
+  expect(above, 'the notice precedes the advisors').toBe(true);
+  await expect(notice.getByRole('button')).toHaveCount(0);
+
+  // The approvals stay usable: the detail (scope grants, payload preview and its approval) opens, and flipping the
+  // holder's switch (the api's answer carries the worker's state too) leaves the notice where it is.
+  await openAdvisorDetail(page);
+  await expect(page.getByRole('button', { name: 'Approve this payload' })).toBeEnabled();
+  await page.getByRole('switch', { name: /Insights module/ }).click();
+  await expect(page.getByTestId('module-state-words')).toContainText('Level 1 is on');
+  await expect(notice).toBeVisible();
+});
+
+test('WP 11.8: a registered insights module shows no notice on the advisor page', async ({
+  page,
+}) => {
+  await installFakeWebAuthnAssertion(page);
+  const state = await installApiMocks(page);
+  await installAdvisorMocks(page, state);
+
+  await login(page);
+  await openAdvisorManagement(page);
+  await expect(page.getByTestId('module-state-words')).toBeVisible();
+  await expect(page.getByTestId('insights-module-notice-advisors')).toHaveCount(0);
+});
+
 test('the consent screen marks which scopes the advisor requests, and shows the history', async ({
   page,
 }) => {

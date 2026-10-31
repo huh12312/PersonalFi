@@ -214,6 +214,38 @@ function defaultReadSecret(path: string): string {
   return readFileSync(path, 'utf8');
 }
 
+/** One secret file, read by the rule `loadConfig` applies to every one of them. */
+export interface OptionalSecretRead {
+  /** The trimmed contents; `undefined` when the file is absent or empty once trimmed. */
+  readonly value: string | undefined;
+  /** The errno code when the file exists but could not be read (`EACCES`, ...). */
+  readonly unreadable: string | undefined;
+}
+
+/**
+ * Read `${secretsDir}/${file}`: absent (ENOENT/ENOTDIR) and empty-once-trimmed
+ * are the same thing — an empty placeholder (`scripts/secrets-placeholders.sh`)
+ * boots identically to no file — and any other read error is reported, never
+ * guessed. Exported so a tool outside the config loader (the soak report,
+ * WP 11.8) asks "is this secret present" by exactly this rule.
+ */
+export function readOptionalSecret(
+  secretsDir: string,
+  file: string,
+  readSecret: (path: string) => string = defaultReadSecret,
+): OptionalSecretRead {
+  try {
+    const raw = readSecret(join(secretsDir, file)).trim();
+    return { value: raw.length > 0 ? raw : undefined, unreadable: undefined };
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    if (code !== undefined && code !== 'ENOENT' && code !== 'ENOTDIR') {
+      return { value: undefined, unreadable: code };
+    }
+    return { value: undefined, unreadable: undefined };
+  }
+}
+
 function hintFor(key: string): string {
   return `set ${key} in the environment (see .env.example)`;
 }
@@ -258,21 +290,16 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
 
   for (const spec of SECRET_SPECS) {
     const path = join(secretsDir, spec.file);
-    let value: string | undefined;
-    try {
-      const raw = readSecret(path).trim();
-      if (raw.length > 0) value = raw;
-    } catch (cause) {
-      const code = (cause as NodeJS.ErrnoException).code;
-      if (code !== undefined && code !== 'ENOENT' && code !== 'ENOTDIR') {
-        problems.push({
-          key: `secret:${spec.name}`,
-          problem: `could not be read (${code})`,
-          hint: `check permissions on ${path}; it should be mode 0400 owned by the app user`,
-        });
-        continue;
-      }
+    const read = readOptionalSecret(secretsDir, spec.file, readSecret);
+    if (read.unreadable !== undefined) {
+      problems.push({
+        key: `secret:${spec.name}`,
+        problem: `could not be read (${read.unreadable})`,
+        hint: `check permissions on ${path}; it should be mode 0400 owned by the app user`,
+      });
+      continue;
     }
+    let value = read.value;
 
     if (value === undefined && spec.envFallback !== undefined) {
       const fallback = source[spec.envFallback];

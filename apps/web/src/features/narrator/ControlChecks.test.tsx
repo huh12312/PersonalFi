@@ -11,12 +11,15 @@ import {
   type FetchRoute,
 } from '../../test-support/api-test-utils.ts';
 import { ControlChecksSection } from './ControlChecksSection.tsx';
+import { moduleStateBody } from './narrator-fixtures.ts';
+import { INSIGHTS_NOT_ENABLED_TEXT, INSIGHTS_RUNBOOK_URL } from './narrator-words.ts';
 import {
   controlChecksReply,
   finishedRun,
   initialControlChecksState,
   LOCAL_COST,
   pendingRun,
+  UNCONFIGURED_DETAIL,
   type ControlChecksFixtureState,
 } from './control-checks-fixtures.ts';
 import {
@@ -43,9 +46,25 @@ vi.mock('@simplewebauthn/browser', () => ({
 
 const MINUTE = 60_000;
 
-function api(overrides: Partial<ControlChecksFixtureState> = {}) {
+/**
+ * `moduleRegistered` is what `GET /advisors/module/enabled` says (WP 11.8): `true` by default, `false` for an
+ * install without `advisor_token_secret`, `null` for a read that fails.
+ */
+function api(
+  overrides: Partial<ControlChecksFixtureState> = {},
+  options: { moduleRegistered?: boolean | null } = {},
+) {
   const state = initialControlChecksState(overrides);
+  const moduleRegistered = options.moduleRegistered === undefined ? true : options.moduleRegistered;
   const routes: FetchRoute[] = [
+    {
+      match: '/api/advisors/module/enabled',
+      method: 'GET',
+      handle: () =>
+        moduleRegistered === null
+          ? jsonResponse({ status: 500 }, 500)
+          : jsonResponse(moduleStateBody(moduleRegistered)),
+    },
     {
       match: '/api/narrator/control-checks',
       handle: async ({ request }) => {
@@ -347,6 +366,70 @@ describe('Settings › Language model › Control checks (WP 10.16)', () => {
       'The controls were checked less than 10 minutes ago. Try again in 8 min.',
     );
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('WP 11.8: with the insights module unregistered, says so above the checks and the Run control checks button is unavailable, with its reason', async () => {
+    const { state, routes } = api(
+      { fresh: true, insightsRegistered: false },
+      { moduleRegistered: false },
+    );
+    stubFetchRoutes(routes);
+    const user = userEvent.setup();
+    renderSection();
+
+    const notice = await screen.findByTestId('insights-module-notice-checks');
+    expect(notice).toHaveAttribute('role', 'status');
+    expect(notice).toHaveTextContent(INSIGHTS_NOT_ENABLED_TEXT);
+    expect(within(notice).getByText('advisor_token_secret').tagName).toBe('CODE');
+    const link = within(notice).getByRole('link', {
+      name: /^How to enable it \(RUNBOOK\)/u,
+    });
+    expect(link).toHaveAttribute('href', INSIGHTS_RUNBOOK_URL);
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+
+    const button = await screen.findByRole('button', { name: 'Run control checks' });
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    // Its reason is the visible sentence above it, and the notice comes first in the reading order.
+    expect(button).toHaveAccessibleDescription(
+      /^The insights module is not enabled on this install: .*advisor_token_secret.*will not run until it is\.$/u,
+    );
+    expect(notice.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: /Also prove kill switch 1/u })).toBeDisabled();
+
+    await user.click(button);
+    expect(state.calls.filter((c) => c.startsWith('POST'))).toEqual([]);
+    expect(state.stepUps).toBe(0);
+  });
+
+  it('WP 11.8: a registered module shows no notice and the button is available', async () => {
+    stubFetchRoutes(api().routes);
+    renderSection();
+    const button = await screen.findByRole('button', { name: 'Run control checks' });
+    expect(button).not.toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByTestId('insights-module-notice-checks')).toBeNull();
+  });
+
+  it('WP 11.8: while the module state cannot be read, nothing is shown or disabled on a guess', async () => {
+    stubFetchRoutes(api({}, { moduleRegistered: null }).routes);
+    renderSection();
+    const button = await screen.findByRole('button', { name: 'Run control checks' });
+    expect(button).not.toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByTestId('insights-module-notice-checks')).toBeNull();
+  });
+
+  it('WP 11.8: the api’s 503 insights.advisor_token_secret_unconfigured is shown in its words', async () => {
+    // The screen read the module as registered; the api knows better and says so.
+    const { state, routes } = api(
+      { fresh: true, insightsRegistered: false },
+      { moduleRegistered: true },
+    );
+    stubFetchRoutes(routes);
+    const user = userEvent.setup();
+    renderSection();
+    await user.click(await screen.findByRole('button', { name: 'Run control checks' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(UNCONFIGURED_DETAIL);
+    expect(state.calls.filter((c) => c.startsWith('POST'))).toHaveLength(1);
+    expect(state.runs).toEqual([]);
   });
 
   it('lists every past run with its result in words, and opens one to its table', async () => {

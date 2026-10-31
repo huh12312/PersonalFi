@@ -30,6 +30,7 @@ const body = (state: State) => ({
   operator: { advisorsEnabled: state.advisorsEnabled },
   user: { enabled: state.userEnabled },
   effective: state.advisorsEnabled && state.userEnabled,
+  worker: { insightsRegistered: true, reason: null },
 });
 
 function getRoute(state: State): FetchRoute {

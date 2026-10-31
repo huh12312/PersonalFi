@@ -796,6 +796,51 @@ test('settings › language model (WP 10.16): Tab to Run control checks, press i
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
 
+test('settings › language model (WP 11.8): with the insights module not registered, Tab reaches the RUNBOOK link in the notice, then Run control checks, which is unavailable and described by the notice — by keyboard', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  const mocks = await installSweepMocks(page);
+  mocks.api.narrator.insightsRegistered = false;
+  await visit(page, '/settings');
+  await hideDevtools(page);
+  const journey = new Journey(page, 'control checks, module not registered');
+
+  // The tab list is one stop; arrows move along it and Enter chooses.
+  await journey.tabTo(/^(Rules|Notifications|Market data|Language model|Crypto|Security)$/, {
+    max: 40,
+  });
+  for (let n = 0; n < 6 && !/^Language model$/.test(await journey.focusedName()); n += 1) {
+    await journey.press('ArrowRight', 'ArrowRight along the tabs');
+  }
+  await page.keyboard.press('Enter');
+  const top = page.getByTestId('insights-module-notice-card');
+  await expect(top).toBeVisible();
+
+  // The first link in the card is the notice's: the RUNBOOK page, with a visible focus ring (checked by the journey).
+  const first = await journey.tabTo(/^How to enable it \(RUNBOOK\)/, { max: 12 });
+  expect(first.tag).toBe('a');
+  await expect(top.getByRole('link')).toBeFocused();
+  // The second is the one above the control checks, then the button after the cost: unavailable, not skipped.
+  const second = await journey.tabTo(/^How to enable it \(RUNBOOK\)/, { max: 90 });
+  expect(second.tag).toBe('a');
+  const checksLink = page.getByTestId('insights-module-notice-checks').getByRole('link');
+  await expect(checksLink).toBeFocused();
+  const stop = await journey.tabTo(/^Run control checks$/, { max: 12 });
+  expect(stop.tag).toBe('button');
+  const button = page.getByTestId('control-checks-run');
+  await expect(button).toBeFocused();
+  await expect(button).toHaveAttribute('aria-disabled', 'true');
+  await expect(button).toHaveAccessibleDescription(
+    'The insights module is not enabled on this install: the operator has not written advisor_token_secret. Narration, the Brief, Ask and the advisor will not run until it is.',
+  );
+  // Enter on it does nothing: no passkey prompt, no run, and focus stays put.
+  await page.keyboard.press('Enter');
+  await journey.expectFocus(/^Run control checks$/, 'focus stays on the unavailable button');
+  expect(mocks.narrator.controlChecks.calls.filter((call) => call.startsWith('POST'))).toEqual([]);
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
 // ---------------------------------------------------------------------------
 // 10. The soft-lock: its 60 s warning is operable from the keyboard (2.2.1)
 // ---------------------------------------------------------------------------

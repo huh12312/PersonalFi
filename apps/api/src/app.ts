@@ -37,6 +37,7 @@ import {
 } from './domain.ts';
 import { buildLoggerOptions } from './logging.ts';
 import { createPreviewModel } from './modules.ts';
+import { moduleRegistrations, registrationSourceOf } from './module-registration.ts';
 import { createNarratorStores } from './narrator-stores.ts';
 import { createNarratorRuntime } from './narrator-wiring.ts';
 import { narratorSettingsRoutes } from './routes/narrator-settings.ts';
@@ -481,6 +482,8 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       maxOutboxLagEvents: config.env.READINESS_MAX_OUTBOX_LAG_EVENTS,
       maxQueueWaitSeconds: config.env.READINESS_MAX_QUEUE_WAIT_SECONDS,
       failOnDegraded: config.env.READINESS_FAIL_ON_DEGRADED,
+      // WP 11.8: what the worker registers, from the same config it reads.
+      modules: moduleRegistrations(registrationSourceOf(config)),
     }),
   );
 

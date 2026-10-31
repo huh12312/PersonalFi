@@ -16,7 +16,8 @@
  * dashboard reads. The 10-minute window applies here too.
  *
  * Exit codes: 0 pass, 2 partial (a check could not run), 1 fail or refused,
- * 78 config.
+ * 78 config — including an install whose worker does not register the
+ * insights module (no `advisor_token_secret`, WP 11.8): nothing is enqueued.
  */
 import { parseArgs } from 'node:util';
 import { ConfigError, loadConfig } from '@core/config';
@@ -29,6 +30,7 @@ import {
   listControlCheckRuns,
   runControlChecks,
   startControlCheckRun,
+  workerRegistrationWords,
   type InsightsContext,
 } from '@ctx/insights';
 import {
@@ -38,6 +40,11 @@ import {
   queueHandoff,
 } from '../control-checks.ts';
 import { appRoleDatabaseUrl, ensureAppRole } from '../db-role.ts';
+import {
+  INSIGHTS_UNREGISTERED_NOTICE,
+  insightsRegistered,
+  registrationSourceOf,
+} from '../module-registration.ts';
 import { createPreviewModel } from '../modules.ts';
 import { createNarratorStores } from '../narrator-stores.ts';
 import { createNarratorRuntime } from '../narrator-wiring.ts';
@@ -67,6 +74,17 @@ const config = (() => {
     throw error;
   }
 })();
+
+// WP 11.8: with no `advisor_token_secret` the worker registers no insights
+// job, so `insights.control_checks` would sit in the queue until the run's
+// five-minute ceiling closed it. Refuse before touching anything, as config.
+if (!insightsRegistered(registrationSourceOf(config))) {
+  fail(
+    `genai-selftest: ${workerRegistrationWords(false)}. ${INSIGHTS_UNREGISTERED_NOTICE} ` +
+      'See RUNBOOK.md, "Language model".',
+    78,
+  );
+}
 
 const appRole = await ensureAppRole(config.databaseUrl.reveal());
 if (!appRole.ok) fail(`could not ensure the database app role: ${appRole.error}`);

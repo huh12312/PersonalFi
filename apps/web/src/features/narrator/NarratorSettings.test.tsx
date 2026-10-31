@@ -18,8 +18,11 @@ import {
   type FetchRoute,
 } from '../../test-support/api-test-utils.ts';
 import { NarratorSettingsSection } from './NarratorSettingsSection.tsx';
+import { controlChecksReply, initialControlChecksState } from './control-checks-fixtures.ts';
+import { INSIGHTS_NOT_ENABLED_TEXT, INSIGHTS_RUNBOOK_URL } from './narrator-words.ts';
 import {
   consentText,
+  moduleStateBody,
   initialNarratorState,
   narratorReply,
   PINNED_MODEL,
@@ -608,5 +611,71 @@ describe('Settings › Language model (WP 10.6)', () => {
         'The language-model settings cannot be read right now. Try again in a moment.',
       ),
     ).toBeInTheDocument();
+  });
+
+  /** WP 11.8: the module state, and the control checks beside it (the section mounts both). */
+  function unregisteredApi(registered: boolean) {
+    const api = narratorApi();
+    const checks = initialControlChecksState({ fresh: true, insightsRegistered: registered });
+    const routes: FetchRoute[] = [
+      {
+        match: '/api/advisors/module/enabled',
+        method: 'GET',
+        handle: () => jsonResponse(moduleStateBody(registered)),
+      },
+      {
+        match: '/api/narrator/control-checks',
+        handle: async ({ request }) => {
+          const reply = controlChecksReply(checks, request.method, undefined);
+          return jsonResponse(reply.body, reply.status);
+        },
+      },
+      ...api.routes,
+    ];
+    return { ...api, checks, routes };
+  }
+
+  it('WP 11.8: an unregistered insights module is said at the top of the card, and the setup controls stay usable', async () => {
+    const api = unregisteredApi(false);
+    stubFetchRoutes(api.routes);
+    renderSection();
+    const user = userEvent.setup();
+
+    const notice = await screen.findByTestId('insights-module-notice-card');
+    expect(notice).toHaveTextContent(INSIGHTS_NOT_ENABLED_TEXT);
+    expect(within(notice).getByRole('link')).toHaveAttribute('href', INSIGHTS_RUNBOOK_URL);
+    // At the top: before the provider form and the cards.
+    const heading = screen.getByRole('heading', { name: 'Language model' });
+    expect(heading.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const anthropic = await card('anthropic');
+    expect(
+      notice.compareDocumentPosition(anthropic) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // And again above the control checks, whose button is unavailable.
+    const checksNotice = await screen.findByTestId('insights-module-notice-checks');
+    const run = await screen.findByRole('button', { name: 'Run control checks' });
+    expect(run).toHaveAttribute('aria-disabled', 'true');
+    expect(
+      checksNotice.compareDocumentPosition(run) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await user.click(run);
+    expect(api.checks.calls.filter((call) => call.startsWith('POST'))).toEqual([]);
+
+    // Provider, consent and key stay usable: an operator may set them up first.
+    expect(
+      within(anthropic).getByRole('checkbox', { name: consentText('anthropic') }),
+    ).toBeEnabled();
+    await user.type(within(anthropic).getByLabelText('Anthropic API key'), KEY);
+    expect(within(anthropic).getByRole('button', { name: 'Save with passkey' })).toBeEnabled();
+    expect(screen.getByRole('radio', { name: /^Off/u })).toBeEnabled();
+  });
+
+  it('WP 11.8: a registered insights module shows no notice and leaves Run control checks available', async () => {
+    stubFetchRoutes(unregisteredApi(true).routes);
+    renderSection();
+    const run = await screen.findByRole('button', { name: 'Run control checks' });
+    expect(run).not.toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByTestId('insights-module-notice-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('insights-module-notice-checks')).not.toBeInTheDocument();
   });
 });

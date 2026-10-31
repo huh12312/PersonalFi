@@ -82,6 +82,27 @@ gen-master-key` already assume — use exactly these names, with no extension.
 `compose.yml`'s top-level `secrets:` block is the authoritative list; `just secrets-placeholders`
 (item 4) reads it, so this section cannot drift from what compose will mount.
 
+**Read this first: `advisor_token_secret` turns the whole insights module on.** It is a secret you
+**generate**, not a provider key, and nothing about the language model works without it: with the
+file empty (the placeholder item 4 writes) the worker registers no insights consumer, job or
+schedule, so the nightly insights run, the Brief, the health snapshot, narration on any provider,
+Explain this, Ask, the advisor, merchant names and the control checks never run — while Settings,
+Language model still lets a provider, a consent and a key be saved (WP 11.8: the card, Advisors and
+`/ready`'s `modules` line now say so). Write it once the placeholders exist, from the install
+directory:
+
+```bash
+sudo sh -c 'umask 077; openssl rand -base64 48 | tr -d "\n" > secrets/advisor_token_secret' && just harden-secrets && docker compose restart api worker
+```
+
+The placeholder is owned by uid 10001 at mode 0400 after `just harden-secrets`, so a plain
+`openssl … > secrets/advisor_token_secret` as your own user fails with "Permission denied"; the
+`sudo sh -c` form above is the one that works before and after hardening. **Never rotate it once
+set**: it keys every merchant pseudonym, and a new value re-pseudonymises every merchant and orphans
+every `MERCHANT_…` reference already stored. Back it up with `master_key`. Confirm with the
+readiness check in [Bring the stack up](#4-bring-the-stack-up): the `modules` line reads
+`{"flag":"module.insights","registered":true}`.
+
 **1. The database credentials.** `compose.yml` mounts two: `pg_password` (Postgres's own bootstrap
 password) and `database_url` (the full connection string the app uses). One recipe writes both,
 because the password has to be URL-safe: a base64 password can contain `/`, `+` or `=`, any of
@@ -147,7 +168,7 @@ reads `PLAID_ENABLED` at start.
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `b2_key_id`, `b2_application_key`                           | Off-site backup to Backblaze B2                                                                                                                                                                                                                         | A B2 application key scoped to **one bucket with object lock**                                                                                                                                                            | `RCLONE_REMOTE=b2:<your-bucket-name>` in `.env`                                                                                                                                     |
 | `plaid_client_id`, `plaid_secret`, `plaid_env`              | Bank linking through Plaid                                                                                                                                                                                                                              | The client id, the secret, and `sandbox` (or `production`, see below) with `echo -n`                                                                                                                                      | `PLAID_ENABLED=true` so the proxy widens its CSP for Plaid's origins; `PLAID_REDIRECT_URI=https://<PUBLIC_HOST>/link/oauth` only for an OAuth institution (most US banks need none) |
-| `advisor_token_secret`                                      | The insights module (`module.insights`): keys every merchant pseudonym an advisor sees                                                                                                                                                                  | `openssl rand -hex 32 > secrets/advisor_token_secret`                                                                                                                                                                     | Rotating it re-pseudonymises every merchant and orphans every `MERCHANT_…` reference already stored                                                                                 |
+| `advisor_token_secret`                                      | **The whole insights module** (`module.insights`): without it nothing in [Language model](#enabling-the-insights-module) runs. Keys every merchant pseudonym an advisor sees. Generated, not a provider key                                             | The `sudo sh -c 'umask 077; openssl rand -base64 48 …'` line under "Read this first" above                                                                                                                                | **Never rotate once set**: rotating it re-pseudonymises every merchant and orphans every `MERCHANT_…` reference already stored                                                      |
 | `tiingo_api_key`                                            | Equity, ETF and fund end-of-day closes. Can also be entered in the product (Settings, Market data); a non-empty file wins                                                                                                                               | The key                                                                                                                                                                                                                   | `MARKET_DATA_ALLOWED_HOSTS` can only narrow the four hosts the code names                                                                                                           |
 | `fred_api_key`                                              | Macro series and FX. FRED has no header auth, so the key travels in the query string; `@ctx/integrations` redacts every provider-authored string before it is logged. Can also be entered in the product (Settings, Market data); a non-empty file wins | The key                                                                                                                                                                                                                   |                                                                                                                                                                                     |
 | `coingecko_api_key`                                         | Crypto prices (Demo plan). Can also be entered in the product (Settings, Market data); a non-empty file wins                                                                                                                                            | The key                                                                                                                                                                                                                   |                                                                                                                                                                                     |
@@ -1755,6 +1776,34 @@ ollama/ollama:<version>`, replace the digest, update `THIRD_PARTY.md`, run
 
 ## Language model: local or bring your own key (v0.9.5)
 
+### Enabling the insights module
+
+**Before any provider, consent or key below: the operator writes `advisor_token_secret`.** It gates
+the whole insights module — the nightly insights run, the Brief and its narration, the health
+snapshot, Explain this, Ask, the advisor, merchant names and the control checks — on every provider,
+hosted or local. It is a **generated** secret, not a provider key (the confusion that left production
+without the module for three weeks: a hosted key was saved in the card while this file was an empty
+placeholder). From the install directory:
+
+```bash
+sudo sh -c 'umask 077; openssl rand -base64 48 | tr -d "\n" > secrets/advisor_token_secret' && just harden-secrets && docker compose restart api worker
+```
+
+The placeholder is owned by uid 10001 at mode 0400 once `just harden-secrets` has run, so a plain
+redirect as your own user fails; this `sudo sh -c` line works either way, and the restart makes the
+worker register the module (its "modules resolved" log line is followed by `insights.*` job kinds).
+**Never rotate it once set** — see [Create secrets](#2-create-secrets). Until it is written:
+Settings, Language model and Advisors show a notice that the insights module is not enabled on this
+install, with **Run control checks** disabled (the provider, consent and key controls stay usable,
+so they can be set up first); `GET /advisors/module/enabled` reads `worker.insightsRegistered:
+false`; `/ready`'s `modules` line reads `{"flag":"module.insights","registered":false,"reason":"advisor_token_secret
+absent"}` (informational: it never makes the probe fail); the control checks' "Kill switches 1 and 2"
+row says the worker's insights module is NOT registered; `just genai-selftest` exits 78 without
+enqueueing anything; and the soak report's Brief criterion reads "insights module not registered on
+the worker".
+
+### Choosing the narrator
+
 The narrator — the only part of the product that uses a language model — rewords a Brief finding
 in plain English. It never decides anything and never adds a number: every figure is the app's, and
 a reply that introduces one is refused. By default it runs on the local model
@@ -1818,21 +1867,25 @@ holder="<name>"`) proves the narrator's controls against this install with your 
 10.16). It needs a passkey, it states its cost before you press it, and it writes one dated row to
 `ops_control_checks` that the dashboard's backup line reads ("controls proven 2026-10-19", or
 "controls never proven"). One run per holder per 10 minutes. The table on the screen and the
-recipe's text output are the same.
+recipe's text output are the same. It needs the insights module registered on the worker
+([Enabling the insights module](#enabling-the-insights-module)): without `advisor_token_secret` the
+button is disabled, `POST /narrator/control-checks` answers 503
+`insights.advisor_token_secret_unconfigured`, and the recipe exits 78, each before anything is
+enqueued (WP 11.8).
 
-| Check                         | What a pass proves                                                                                                                                  | Where it runs, and what it changes                                                              |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Payload approval gate         | A narration whose payload shape has no live approval is refused `payload_not_approved`, and the model is never called                               | api; withdraws the approval inside a transaction that is rolled back (levels 1–3 held on in it) |
-| Cancel a run in flight (4)    | Cancelling a probe 150 ms after it starts ends it `run_cancelled` within 2 s, through the production watcher, and the adapter closes its connection | worker; one model call                                                                          |
-| Numbers the app did not write | A reply asked to carry 4821 is refused by the unchanged validator (or the model declined; either way the number never reaches the Brief)            | worker; one model call, a fixed synthetic finding, no personal data                             |
-| Replies outside the format    | A reply asked for prose outside the reply format never reaches the Brief (refused, or held to the format at the model)                              | worker; one model call                                                                          |
-| Egress allow-list             | The adapter's own policy refuses `example.com` and allows its host — the policy is asked; nothing is resolved or dialled                            | worker; no call                                                                                 |
-| Consent withdrawal            | Withdrawing the active hosted provider's consent turns the narrator Off; using it again needs a fresh consent and withdraws the approval            | api; rolled back. Skipped (not applicable) for the local model or Off                           |
-| Run inspector digest          | The last narration's retained payload re-digests to the digest its run recorded                                                                     | api; read only. Skipped with no narration in the last 30 days                                   |
-| Hourly call window            | The provider's window (30 calls an hour, per process) counted exactly the probes sent                                                               | worker; read only. Not applicable to the local model                                            |
-| Kill switches 1 and 2         | Their state, reported. With "Also prove kill switch 1" (`prove_switch=true`): the module off refuses a run `module_disabled`                        | api; the proof writes the flag inside a rolled-back transaction                                 |
-| Narration badge               | The latest narration names the provider and model its payload was approved for                                                                      | api; read only                                                                                  |
-| Local model pin               | The worker's served digest is the pinned one                                                                                                        | worker; one `GET /api/tags`. Not applicable to a hosted provider                                |
+| Check                         | What a pass proves                                                                                                                                                                                  | Where it runs, and what it changes                                                              |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Payload approval gate         | A narration whose payload shape has no live approval is refused `payload_not_approved`, and the model is never called                                                                               | api; withdraws the approval inside a transaction that is rolled back (levels 1–3 held on in it) |
+| Cancel a run in flight (4)    | Cancelling a probe 150 ms after it starts ends it `run_cancelled` within 2 s, through the production watcher, and the adapter closes its connection                                                 | worker; one model call                                                                          |
+| Numbers the app did not write | A reply asked to carry 4821 is refused by the unchanged validator (or the model declined; either way the number never reaches the Brief)                                                            | worker; one model call, a fixed synthetic finding, no personal data                             |
+| Replies outside the format    | A reply asked for prose outside the reply format never reaches the Brief (refused, or held to the format at the model)                                                                              | worker; one model call                                                                          |
+| Egress allow-list             | The adapter's own policy refuses `example.com` and allows its host — the policy is asked; nothing is resolved or dialled                                                                            | worker; no call                                                                                 |
+| Consent withdrawal            | Withdrawing the active hosted provider's consent turns the narrator Off; using it again needs a fresh consent and withdraws the approval                                                            | api; rolled back. Skipped (not applicable) for the local model or Off                           |
+| Run inspector digest          | The last narration's retained payload re-digests to the digest its run recorded                                                                                                                     | api; read only. Skipped with no narration in the last 30 days                                   |
+| Hourly call window            | The provider's window (30 calls an hour, per process) counted exactly the probes sent                                                                                                               | worker; read only. Not applicable to the local model                                            |
+| Kill switches 1 and 2         | Their state, reported — level 1 also says whether the worker's insights module is registered. With "Also prove kill switch 1" (`prove_switch=true`): the module off refuses a run `module_disabled` | api; the proof writes the flag inside a rolled-back transaction                                 |
+| Narration badge               | The latest narration names the provider and model its payload was approved for                                                                                                                      | api; read only                                                                                  |
+| Local model pin               | The worker's served digest is the pinned one                                                                                                                                                        | worker; one `GET /api/tags`. Not applicable to a hosted provider                                |
 
 **What it costs.** With a hosted provider, up to **3 calls** with your key, from the install's
 window of 30 an hour (the screen says so before you press). With the local model, up to 3 short
@@ -2609,7 +2662,12 @@ reports degraded`.** The app is serving, but the platform sees something stuck: 
 a job waiting too long, or **a consumer stopped at an event it cannot handle** (`just upgrade`
 names it). Read `curl --cacert personalfi-ca.crt https://personalfi.lan/api/ready` and `docker
 compose logs worker | tail`. The thresholds are defaults compiled into the app: an outbox more than
-1,000 events behind, or a runnable job waiting more than 15 minutes.
+1,000 events behind, or a runnable job waiting more than 15 minutes. Since v0.9.27 a consumer that
+listens for only some event types moves past the events it does not listen for, so an idle one no
+longer reads as behind by the whole outbox; a lag that stays high names a consumer that is
+**registered but not running** — check the body's `modules` line (an insights consumer row left by
+an earlier run while `advisor_token_secret` is absent counts every event since; see [Enabling the
+insights module](#enabling-the-insights-module)).
 
 **`api` logs `could not ensure the database app role; queries will fail until the migrator has
 run`.** The api and the worker call `personalfi_app_grants()` at boot, and that function comes from

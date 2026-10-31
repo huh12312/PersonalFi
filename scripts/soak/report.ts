@@ -48,7 +48,7 @@
  * with a reachable database, `DATABASE_URL=... node
  * --experimental-strip-types scripts/soak/report.ts` runs it directly.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -1011,6 +1011,8 @@ export function computeClockState(rows: readonly ClockRow[], asOfDate: Date): Cl
 
 export type CriterionState =
   | { readonly kind: 'not_started' }
+  /** Cannot start, and why: a property of the install, not of the holder's use (WP 11.8). */
+  | { readonly kind: 'blocked'; readonly why: string }
   | { readonly kind: 'observing_since'; readonly date: string; readonly note?: string }
   | { readonly kind: 'met'; readonly date: string; readonly evidence: string }
   | { readonly kind: 'failed'; readonly date: string; readonly why: string };
@@ -1019,6 +1021,8 @@ export function renderCriterionState(state: CriterionState): string {
   switch (state.kind) {
     case 'not_started':
       return 'not started';
+    case 'blocked':
+      return state.why;
     case 'observing_since':
       return `observing since ${state.date}${state.note === undefined ? '' : ` (${state.note})`}`;
     case 'met':
@@ -1151,13 +1155,26 @@ function evaluateCriterionOne(results: readonly SoakQueryResult[], asOfDate: Dat
   };
 }
 
+/**
+ * The Brief row's words when there are no Briefs because the worker never
+ * registered the insights module (WP 11.8): production's W43/W44 reports read
+ * "not started" for three weeks for exactly this reason.
+ */
+export const BRIEF_BLOCKED_UNREGISTERED =
+  'insights module not registered on the worker (advisor_token_secret absent)';
+
 function evaluateBriefCriterion(
   results: readonly SoakQueryResult[],
   asOfDate: Date,
+  insightsRegistered: boolean | undefined,
 ): CriterionState {
   const row = rowsOf(results, 'brief_first_four')[0];
   const briefs = num(row?.['brief_count']);
-  if (briefs === 0) return { kind: 'not_started' };
+  if (briefs === 0) {
+    return insightsRegistered === false
+      ? { kind: 'blocked', why: BRIEF_BLOCKED_UNREGISTERED }
+      : { kind: 'not_started' };
+  }
   const accepted = num(row?.['accepted_count']);
   const items = num(row?.['item_count']);
   const week = String(row?.['last_iso_week'] ?? '');
@@ -1194,14 +1211,21 @@ export function evaluateCriteria(options: {
   readonly results: readonly SoakQueryResult[];
   readonly clockRows: readonly ClockRow[];
   readonly asOfDate: Date;
+  /**
+   * Whether the worker registers `module.insights` (WP 11.8), from the
+   * install's secrets — never the database. `undefined` = not known (the
+   * report was run without the secrets directory): the Brief row then reads as
+   * it always has.
+   */
+  readonly insightsRegistered?: boolean;
 }): Record<number, CriterionState> {
-  const { results, clockRows, asOfDate } = options;
+  const { results, clockRows, asOfDate, insightsRegistered } = options;
   const states: Record<number, CriterionState> = {};
   for (const { id } of CRITERIA) states[id] = { kind: 'not_started' };
 
   states[1] = evaluateCriterionOne(results, asOfDate);
   states[2] = evaluateCriterionTwo(results, asOfDate);
-  states[9] = evaluateBriefCriterion(results, asOfDate);
+  states[9] = evaluateBriefCriterion(results, asOfDate, insightsRegistered);
 
   const clock = computeClockState(clockRows, asOfDate);
   if (clock.anchorDate !== null) {
@@ -1264,12 +1288,19 @@ export interface RenderOptions {
   readonly assumptionsAsOfDates: readonly string[] | null;
   /** E.g. "DRY RUN from seed -- not real data". Printed under the title. */
   readonly label?: string;
+  /** WP 11.8: see `evaluateCriteria`. */
+  readonly insightsRegistered?: boolean;
 }
 
 export function renderSoakReport(options: RenderOptions): string {
-  const { results, clockRows, asOfDate, assumptionsAsOfDates, label } = options;
+  const { results, clockRows, asOfDate, assumptionsAsOfDates, label, insightsRegistered } = options;
   const clock = computeClockState(clockRows, asOfDate);
-  const criteria = evaluateCriteria({ results, clockRows, asOfDate });
+  const criteria = evaluateCriteria({
+    results,
+    clockRows,
+    asOfDate,
+    ...(insightsRegistered === undefined ? {} : { insightsRegistered }),
+  });
   const lines: string[] = [];
 
   lines.push('<!-- SPDX-License-Identifier: MIT -->');
@@ -1329,7 +1360,7 @@ export function renderSoakReport(options: RenderOptions): string {
   }
   lines.push('');
   lines.push(
-    '_Criteria 1, 2 and 9 are computed. The rest are Chris\'s own lines, read from `criterion` rows in `clock.md`. "met on D" is the as-of date of the first weekly file that read it so: see the earlier weeks._',
+    '_Criteria 1, 2 and 9 are computed. The rest are Chris\'s own lines, read from `criterion` rows in `clock.md`. "met on D" is the as-of date of the first weekly file that read it so: see the earlier weeks. Criterion 9 names the reason when the worker does not register the insights module (read from the mounted secrets, never the database)._',
   );
   lines.push('');
 
@@ -1397,11 +1428,37 @@ export function parseArgs(argv: readonly string[], now: Date): CliOptions {
   };
 }
 
+function secretsDir(): string {
+  return process.env['SECRETS_DIR'] ?? '/run/secrets';
+}
+
 function databaseUrl(): string {
   const fromEnv = process.env['DATABASE_URL'];
   if (fromEnv !== undefined && fromEnv !== '') return fromEnv;
-  const secretsDir = process.env['SECRETS_DIR'] ?? '/run/secrets';
-  return readFileSync(join(secretsDir, 'database_url'), 'utf8').trim();
+  return readFileSync(join(secretsDir(), 'database_url'), 'utf8').trim();
+}
+
+/**
+ * WP 11.8: whether the worker registers `module.insights`, by the same
+ * presence rule the config loader applies to every secret file
+ * (`readOptionalSecret`: present means non-empty once trimmed), handed to the
+ * api's own registration test. Read from this container's mounted secrets —
+ * the api container `run-report.sh` starts mounts the same files the worker
+ * does — never from the database. `undefined` when there is no secrets
+ * directory, or the file cannot be read, so a checkout run never claims either way.
+ */
+export async function insightsRegisteredIn(dir: string): Promise<boolean | undefined> {
+  try {
+    // A checkout run with DATABASE_URL and no secrets directory knows nothing either way.
+    if (!statSync(dir).isDirectory()) return undefined;
+    const { readOptionalSecret } = await import('../../packages/config/src/load.ts');
+    const { insightsRegistered } = await import('../../apps/api/src/module-registration.ts');
+    const secret = readOptionalSecret(dir, 'advisor_token_secret');
+    if (secret.unreadable !== undefined) return undefined;
+    return insightsRegistered(secret.value === undefined ? {} : { advisorTokenSecret: true });
+  } catch {
+    return undefined;
+  }
 }
 
 async function main(): Promise<void> {
@@ -1432,11 +1489,13 @@ async function main(): Promise<void> {
       // Printed as "unknown", never as fresh.
     }
 
+    const insightsRegistered = await insightsRegisteredIn(secretsDir());
     const markdown = renderSoakReport({
       results,
       clockRows,
       asOfDate: options.asOf,
       assumptionsAsOfDates,
+      ...(insightsRegistered === undefined ? {} : { insightsRegistered }),
       ...(options.label === undefined ? {} : { label: options.label }),
     });
 

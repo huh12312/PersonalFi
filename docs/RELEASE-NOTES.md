@@ -9,6 +9,57 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.9.27: the insights module says when it is not enabled
+
+**Status:** a patch release on v0.9.26 (if an earlier v0.9.x has not been tagged when this is, tag
+them in order). The tag `v0.9.27` is pushed by the maintainer once CI is green. Package 11.8 of the
+Phase 11 programme (11 §5): two defects found on the production install on 2026-10-31.
+
+### Upgrading to v0.9.27
+
+```bash
+git pull
+just upgrade
+```
+
+No migration.
+
+### Manual steps
+
+None for an install that already has `advisor_token_secret`. An install without it now **says so**
+(below); to enable the insights module, follow
+[Enabling the insights module](../RUNBOOK.md#enabling-the-insights-module) — a generated secret, not
+a provider key, and never rotated once set.
+
+### What changed
+
+- **An install without `advisor_token_secret` can no longer look set up.** The worker registers no
+  insights consumer, job or schedule without that secret (by design), but Settings, Language model
+  let a provider, a consent and a key be saved and offered **Run control checks**, none of which
+  could run. Now:
+  - Settings, Language model and Advisors show a notice that cannot be dismissed — "The insights
+    module is not enabled on this install: the operator has not written `advisor_token_secret`.
+    Narration, the Brief, Ask and the advisor will not run until it is." — with a link to the
+    RUNBOOK. The provider, consent and key controls stay usable; **Run control checks** is disabled
+    with that reason.
+  - `GET /advisors/module/enabled` (and the `PUT`) gain `worker: { insightsRegistered, reason }`.
+  - `/ready` gains a `modules` line: every module flag with `registered`, and the reason when not
+    (`advisor_token_secret absent`). Informational: it never fails the probe.
+  - The control checks' "Kill switches 1 and 2" row says whether the worker's insights module is
+    registered; `POST /narrator/control-checks` answers 503
+    `insights.advisor_token_secret_unconfigured` and `just genai-selftest` exits 78 instead of
+    enqueueing a job the worker would never take.
+  - The soak report's Brief criterion reads "insights module not registered on the worker" rather
+    than "not started" when that is why there are no Briefs.
+  - Every one of these reads the same check the worker's wiring uses, from the install's secrets;
+    none reads the database.
+- **A filtered consumer with nothing to do no longer reads as behind.** A consumer that listens for
+  only some event types advanced its offset only when it handled one, so an idle one counted the
+  whole outbox as lag (production read 763) and, past 1 000 events, `/ready` would have read
+  `degraded`. The pump now moves it past the events it would skip, never past one it listens for and
+  never for a paused or failed consumer; the outbox's ordering lock (sequence order is commit order)
+  is what makes that safe without a time grace.
+
 ## v0.9.26: merchant name suggestions
 
 **Status:** a patch release on v0.9.25 (if an earlier v0.9.x has not been tagged when this is, tag

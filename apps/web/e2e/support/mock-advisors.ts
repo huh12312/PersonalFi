@@ -56,11 +56,19 @@ export interface Store {
   grantEvents: Record<string, unknown>[];
 }
 
-export function moduleState(store: Store) {
+/**
+ * `AdvisorModuleState`. `worker` is the registration of the insights module (WP 11.8): registered unless a spec sets
+ * `state.narrator.insightsRegistered = false` (the one flag `mock-narrator.ts` also reads).
+ */
+export function moduleState(store: Store, insightsRegistered = true) {
   return {
     operator: { advisorsEnabled: store.advisorsEnabled },
     user: { enabled: store.moduleEnabled },
     effective: store.advisorsEnabled && store.moduleEnabled,
+    worker: {
+      insightsRegistered,
+      reason: insightsRegistered ? null : 'advisor_token_secret absent',
+    },
   };
 }
 
@@ -191,7 +199,12 @@ export function doneRun() {
  */
 export async function installAdvisorMocks(
   page: Page,
-  state: { steppedUp: boolean; merchantNames?: MerchantNamesMockState },
+  state: {
+    steppedUp: boolean;
+    merchantNames?: MerchantNamesMockState;
+    /** The api mock's narrator state; its `insightsRegistered` is the worker's registration (WP 11.8). */
+    narrator?: { insightsRegistered: boolean };
+  },
   advisor?: AdvisorMockState,
 ): Promise<Store> {
   // WP 11.5d: the advisor's own sessions and hosted consent (`/api/advisor/**`; the management screen reads the
@@ -355,14 +368,14 @@ export async function installAdvisorMocks(
     }
 
     if (path === '/api/advisors/module/enabled' && method === 'GET') {
-      return json(moduleState(store));
+      return json(moduleState(store, state.narrator?.insightsRegistered !== false));
     }
 
     if (path === '/api/advisors/module/enabled' && method === 'PUT') {
       if (!state.steppedUp) return stepUpRequired();
       const body = request.postDataJSON() as { enabled: boolean };
       store.moduleEnabled = body.enabled;
-      return json(moduleState(store));
+      return json(moduleState(store, state.narrator?.insightsRegistered !== false));
     }
 
     return route.fallback();
