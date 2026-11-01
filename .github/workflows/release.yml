@@ -185,6 +185,10 @@ jobs:
           echo "::warning title=docker.io attestation::the provenance attestation for docker.io/masterhuh/personalfi-${IMAGE} was not pushed to docker.io as a referrer (see the step above). The GitHub-store attestation for the same digest stands; the verify job checks it with gh attestation verify."
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          # v3.1.3 fixed a HIGH verification bypass (GHSA-fx35-mq7g-6g98); the installer's own
+          # default was 3.0.6. The install-side verifier pins its container to 3.1.4 too.
+          cosign-release: v3.1.4
 
       # Signatures live beside the image in each registry, so each reference
       # is signed (same digest, two Rekor entries).
@@ -255,6 +259,10 @@ jobs:
           merge-multiple: true
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          # v3.1.3 fixed a HIGH verification bypass (GHSA-fx35-mq7g-6g98); the installer's own
+          # default was 3.0.6. The install-side verifier pins its container to 3.1.4 too.
+          cosign-release: v3.1.4
 
       - name: cosign verify + gh attestation verify (GHCR and Docker Hub, by digest)
         env:
