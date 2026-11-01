@@ -17,12 +17,16 @@ tagged. Items land here as Phase 12's packages do.
 
 ### Upgrading to v0.10.0
 
+From a source build, as before:
+
 ```bash
 git pull
 just upgrade
 ```
 
-No migration from the items so far.
+Once v0.10.0 is published, an install can run the published images instead (no build): check out
+`v0.10.0`, set `PERSONALFI_VERSION=0.10.0` in `.env`, and run `just install-release 0.10.0`
+([README: Install](../README.md#install)). No migration from the items so far.
 
 ### Manual steps
 
@@ -55,6 +59,31 @@ None from the items so far.
   that builds from source.
   [RUNBOOK: Cutting a release](../RUNBOOK.md#cutting-a-release) has the steps and the commands to
   verify an image from either registry.
+- **One name per image, and an install that pulls instead of building (WP 12.3).** The images
+  compose runs are now named exactly as they are published:
+  `${REGISTRY:-ghcr.io/huh12312}/personalfi-{api,backup,proxy}:${PERSONALFI_VERSION:-dev}` (was
+  `${REGISTRY:-personalfi}/{api,backup,proxy}:…`). A source build is therefore tagged
+  `ghcr.io/huh12312/personalfi-api:dev` (or your commit), and `just build` and `just upgrade` refuse
+  to build a published release's tag (`x.y.z`, `x.y`, `latest`, `sha-…`) under `ghcr.io/huh12312`
+  or `masterhuh`, so a local build can never pose as a release. The new `just install-release
+x.y.z` installs or upgrades to a published release with no build at all: it refuses `latest`,
+  refuses unless `.env`'s `PERSONALFI_VERSION` and `REGISTRY` make compose run exactly the
+  release's names, verifies every image's cosign signature (this repository's `release.yml` at
+  `vx.y.z`) and provenance, pulls each by digest, and starts with `up --no-build --pull never`.
+  `scripts/verify-release.sh` gains `--source ghcr.io/huh12312|docker.io/masterhuh` (the recipe
+  passes `REGISTRY`), treats `gh` as optional (without it the attestation check is skipped with a
+  warning; `--strict` refuses), runs cosign v3.1.4 from its container when cosign is absent (v3,
+  because the release signs with cosign v3, whose signatures cosign v2 cannot find), and no longer
+  re-tags anything (`--registry` and `--version` are gone). The README's Install is now this
+  pull-first path, with the build under "Build from source (developers)". The three images'
+  `org.opencontainers.image.source` label now names this repository (it named a stale URL), with
+  `url`, `licenses`, `title` and `description` alongside, and the proxy's Caddy build raises
+  `go-chi/chi/v5` to 5.4.0, which clears the one MEDIUM finding with a fix that a public scanner
+  showed against the binary. Nothing to do on upgrade: an existing source build's next `just
+upgrade` builds the new names; the old `personalfi/{api,backup,proxy}:*` images are then unused
+  and can be removed by name (`docker image rm personalfi/api:<tag>` …), never by prune. The
+  production isolation guard accepts a release `x.y.z` as `PERSONALFI_VERSION`, as it accepts a
+  commit SHA.
 
 ## v0.9.27: the insights module says when it is not enabled
 

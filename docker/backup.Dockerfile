@@ -61,8 +61,9 @@ ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["/usr/local/bin/backup-loop.sh"]
 
 LABEL org.opencontainers.image.title="personalfi-backup" \
-      org.opencontainers.image.description="pg_dump + age encryption + optional rclone push, nightly loop" \
-      org.opencontainers.image.source="https://github.com/chris/personalfi" \
+      org.opencontainers.image.description="PersonalFi backup: pg_dump + age encryption + optional rclone push, nightly loop" \
+      org.opencontainers.image.source="https://github.com/huh12312/PersonalFi" \
+      org.opencontainers.image.url="https://github.com/huh12312/PersonalFi" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.vendor="PersonalFi" \
       org.opencontainers.image.base.name="docker.io/library/alpine:3.24"

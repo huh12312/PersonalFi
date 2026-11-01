@@ -47,14 +47,15 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "The proxy image's Caddy build (WP 12.1, docker/caddy.Dockerfile): the Go toolchain image, Caddy, xcaddy and the two module floors (golang.org/x/net, go-jose/v4) move together in one PR, never auto-merged, because they interact — a Caddy bump can need newer modules than a floor, and the build's buildinfo check fails by name if minimum version selection moves a pin. CI's proxy image scan (trivy, no snoozes) is the gate. An XCADDY_VERSION bump also needs XCADDY_SUM, the h1: sum sum.golang.org records for that version; the build refuses the tool until it matches.",
+      "description": "The proxy image's Caddy build (WP 12.1, docker/caddy.Dockerfile): the Go toolchain image, Caddy, xcaddy and the three module floors (golang.org/x/net, go-jose/v4, and since WP 12.3 go-chi/chi/v5) move together in one PR, never auto-merged, because they interact — a Caddy bump can need newer modules than a floor, and the build's buildinfo check fails by name if minimum version selection moves a pin. CI's proxy image scan (trivy, no snoozes) is the gate. An XCADDY_VERSION bump also needs XCADDY_SUM, the h1: sum sum.golang.org records for that version; the build refuses the tool until it matches.",
       "matchFileNames": ["docker/caddy.Dockerfile"],
       "matchPackageNames": [
         "golang",
         "github.com/caddyserver/caddy/v2",
         "github.com/caddyserver/xcaddy",
         "golang.org/x/net",
-        "github.com/go-jose/go-jose/v4"
+        "github.com/go-jose/go-jose/v4",
+        "github.com/go-chi/chi/v5"
       ],
       "groupName": "proxy: Caddy from source",
       "automerge": false
@@ -73,7 +74,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "docker/caddy.Dockerfile's Go-module pins for the Caddy build (CADDY_VERSION, XCADDY_VERSION, XNET_VERSION, GOJOSE_VERSION), each under a `# renovate: datasource=go depName=...` comment (WP 12.1). The golang builder image itself is a FROM ARG and the dockerfile manager already tracks it, digest-pinned.",
+      "description": "docker/caddy.Dockerfile's Go-module pins for the Caddy build (CADDY_VERSION, XCADDY_VERSION, XNET_VERSION, GOJOSE_VERSION, and CHI_VERSION since WP 12.3), each under a `# renovate: datasource=go depName=...` comment (WP 12.1). The golang builder image itself is a FROM ARG and the dockerfile manager already tracks it, digest-pinned.",
       "managerFilePatterns": ["/^docker/caddy\\.Dockerfile$/"],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+ARG [A-Z_]+_VERSION=(?<currentValue>\\S+)"

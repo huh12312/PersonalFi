@@ -332,9 +332,31 @@ gen-pg-secrets:
     echo "wrote ${SECRETS_DIR}/pg_password and ${SECRETS_DIR}/database_url"
     echo "run 'just harden-secrets' (needs sudo) to take them to 0400 owned by the consuming uid"
 
+# The images are named as compose.yml names them, `<REGISTRY>/personalfi-<image>:<PERSONALFI_VERSION>`
+# (default `ghcr.io/huh12312/personalfi-<image>:dev`); a published release's tag under a
+# publishing registry is refused (scripts/build-name-guard.sh, WP 12.3).
 # Build the api/worker/migrator, backup, and proxy images.
 build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # shellcheck disable=SC2046 # one image reference per line
+    bash scripts/build-name-guard.sh $(docker compose config --images | sort -u)
     docker compose build
+
+# WP 12.3. version: x.y.z (never `latest`). .env must set PERSONALFI_VERSION to the same x.y.z.
+# Install or upgrade to a published release: verify, pull by digest, start (no build)
+install-release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    v={{ quote(version) }}
+    if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "install-release: REFUSED: '${v}' is not a release x.y.z. 'latest' and 'x.y' move with every release and name no single commit, so they cannot be verified to one: pin a version (for example 0.10.0)." >&2
+      exit 1
+    fi
+    # The same recipe, verifier call and checks as a pull-mode upgrade: placeholders,
+    # verify-release.sh --source <REGISTRY> --pull, then `up --no-build --pull never`,
+    # /ready and the restart check. A first install is an upgrade from nothing.
+    PERSONALFI_PULL=1 PERSONALFI_RELEASE="$v" "{{ just_executable() }}" --justfile "{{ justfile() }}" upgrade
 
 # gate-security-review.md C-1c: the api image's Dockerfile fix (docker/api.Dockerfile,
 # F-1) is proven by `apps/api/test/gate-image-closure.test.ts`, but that test
@@ -345,7 +367,7 @@ build:
 # docker/network cost budget (gitleaks, trivy) and a full `docker compose
 # build` is minutes more on top for a check relevant only when
 # docker/api.Dockerfile or apps/api's production dependency closure changed.
-# `docker compose build api` names the image `${REGISTRY:-personalfi}/api:${PERSONALFI_VERSION:-dev}`
+# `docker compose build api` names the image `${REGISTRY:-ghcr.io/huh12312}/personalfi-api:${PERSONALFI_VERSION:-dev}`
 # — the test's own default when `PERSONALFI_API_IMAGE` is unset — so a plain
 # local run needs no env var. Run this before a push that touches either of
 # those; see RUNBOOK.md's pre-push list.
@@ -519,7 +541,7 @@ restore-drill:
       -v "$SCRATCH_SECRETS/pg_password:/run/secrets/pg_password:ro" \
       -e PGHOST=restore-drill-db -e PGUSER=personalfi -e PGDATABASE=personalfi_restore_drill \
       -e PGPASSWORD_FILE=/run/secrets/pg_password -e AGE_IDENTITY_FILE=/run/age_identity \
-      "${REGISTRY:-personalfi}/backup:${PERSONALFI_VERSION:-dev}" /usr/local/bin/restore.sh "$LATEST_BACKUP" \
+      "${REGISTRY:-ghcr.io/huh12312}/personalfi-backup:${PERSONALFI_VERSION:-dev}" /usr/local/bin/restore.sh "$LATEST_BACKUP" \
       || { RESTORE_OK=0; fail "restore.sh exited non-zero"; }
 
     q() { docker exec "$1" psql -U personalfi -d "$2" -tAc "$3" 2>/dev/null | tr -d '[:space:]'; }
@@ -602,7 +624,7 @@ restore-drill:
         -e AUTH_ALLOWED_ORIGINS="https://${PUBLIC_HOST:-personalfi.lan}" \
         -v "$SCRATCH_SECRETS/database_url:/run/secrets/database_url:ro" \
         -v "$SECRETS_HOST/master_key:/run/secrets/master_key:ro" \
-        "${REGISTRY:-personalfi}/api:${PERSONALFI_VERSION:-dev}" >/dev/null
+        "${REGISTRY:-ghcr.io/huh12312}/personalfi-api:${PERSONALFI_VERSION:-dev}" >/dev/null
       API_READY="fail"
       for _ in $(seq 1 30); do
         if docker exec "$DRILL_API" node -e "fetch('http://127.0.0.1:8080/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
@@ -700,11 +722,11 @@ scan:
         --ignorefile /repo/.trivyignore --exit-code 1 /repo
     just build
     docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "{{justfile_directory()}}:/repo" {{TRIVY_IMAGE}} \
-      image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /repo/.trivyignore --exit-code 1 personalfi/api:dev
+      image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /repo/.trivyignore --exit-code 1 "${REGISTRY:-ghcr.io/huh12312}/personalfi-api:${PERSONALFI_VERSION:-dev}"
     docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "{{justfile_directory()}}:/repo" {{TRIVY_IMAGE}} \
-      image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /repo/.trivyignore --exit-code 1 personalfi/backup:dev
+      image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /repo/.trivyignore --exit-code 1 "${REGISTRY:-ghcr.io/huh12312}/personalfi-backup:${PERSONALFI_VERSION:-dev}"
     docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "{{justfile_directory()}}:/repo" {{TRIVY_IMAGE}} \
-      image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /repo/.trivyignore --exit-code 1 personalfi/proxy:dev
+      image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /repo/.trivyignore --exit-code 1 "${REGISTRY:-ghcr.io/huh12312}/personalfi-proxy:${PERSONALFI_VERSION:-dev}"
 
 # SPDX + CycloneDX SBOMs for every image this repo builds (06 §5.4/§7.2 — the
 # syft SBOM is the output of record; THIRD_PARTY.md is generated separately by
@@ -725,7 +747,7 @@ sbom:
     for image in api backup proxy; do
       docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
         -v "{{justfile_directory()}}/docs/evidence/sbom:/out" \
-        {{SYFT_IMAGE}} "personalfi/${image}:dev" \
+        {{SYFT_IMAGE}} "${REGISTRY:-ghcr.io/huh12312}/personalfi-${image}:${PERSONALFI_VERSION:-dev}" \
         -o "spdx-json=/out/${image}.spdx.json" -o "cyclonedx-json=/out/${image}.cdx.json"
     done
     echo "sbom: wrote docs/evidence/sbom/{api,backup,proxy}.{spdx,cdx}.json"

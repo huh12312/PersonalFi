@@ -61,8 +61,17 @@ x-common: &common
   environment:
     TZ: UTC
 
+# One name per image (WP 12.3): the name compose runs IS the name
+# release.yml publishes, `<registry>/personalfi-<image>:<version>`, so a
+# verified pull (`just install-release x.y.z`) runs under the name it was
+# published as and nothing re-tags it. REGISTRY defaults to the canonical GHCR
+# namespace; `masterhuh` (or `docker.io/masterhuh`) is the Docker Hub mirror,
+# same digests. A source build (`just build`) uses the same form with
+# PERSONALFI_VERSION's default `dev`, a tag no release ever carries; `just
+# build` and `just upgrade` refuse to build a published release's tag under a
+# publishing registry, so a local build can never pose as a release.
 x-app-image: &app-image
-  image: ${REGISTRY:-personalfi}/api:${PERSONALFI_VERSION:-dev}
+  image: ${REGISTRY:-ghcr.io/huh12312}/personalfi-api:${PERSONALFI_VERSION:-dev}
   build:
     context: .
     dockerfile: docker/api.Dockerfile
@@ -279,7 +288,7 @@ secrets:
 services:
   proxy:
     <<: *common
-    image: ${REGISTRY:-personalfi}/proxy:${PERSONALFI_VERSION:-dev}
+    image: ${REGISTRY:-ghcr.io/huh12312}/personalfi-proxy:${PERSONALFI_VERSION:-dev}
     build:
       # Repo root, not `docker/`: this image builds and serves apps/web (see
       # docker/caddy.Dockerfile's `web-build` stage). .dockerignore keeps
@@ -700,7 +709,7 @@ services:
   # (WP 9.1): it runs against every older schema.
   pre-migrate-backup:
     <<: *common
-    image: ${REGISTRY:-personalfi}/backup:${PERSONALFI_VERSION:-dev}
+    image: ${REGISTRY:-ghcr.io/huh12312}/personalfi-backup:${PERSONALFI_VERSION:-dev}
     restart: 'no'
     networks: [backend]
     user: '10002:10002'
@@ -810,7 +819,7 @@ services:
 
   backup:
     <<: *common
-    image: ${REGISTRY:-personalfi}/backup:${PERSONALFI_VERSION:-dev}
+    image: ${REGISTRY:-ghcr.io/huh12312}/personalfi-backup:${PERSONALFI_VERSION:-dev}
     build:
       context: docker
       dockerfile: backup.Dockerfile

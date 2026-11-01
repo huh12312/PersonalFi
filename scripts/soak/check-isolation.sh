@@ -8,11 +8,14 @@
 #
 # Two findings, read in the code at `1417b36`, are what this guards against:
 #
-#   * CF-20: images are tagged `personalfi/api:${PERSONALFI_VERSION:-dev}`,
-#     and every gate or agent `docker compose build` overwrites `:dev`. A
-#     production stack running on `:dev` comes back up on unreviewed code at
+#   * CF-20: images are tagged `<registry>/<image>:${PERSONALFI_VERSION:-dev}`
+#     (since WP 12.3 `ghcr.io/huh12312/personalfi-api:...`, the published
+#     name), and every gate or agent `docker compose build` overwrites `:dev`.
+#     A production stack running on `:dev` comes back up on unreviewed code at
 #     its next `up` -- so production must pin a real commit SHA, never the
-#     floating tag.
+#     floating tag; or (WP 12.3) a published release x.y.z, which only a
+#     verified pull can produce under the publishing registries
+#     (scripts/build-name-guard.sh refuses to build that name).
 #   * CF-21: `compose.yml` has no top-level `name:`, so the compose project
 #     is the *directory name* by default. A production install cloned into
 #     this same checkout (or run with the dev checkout as its working
@@ -24,8 +27,10 @@
 # not just the first:
 #
 #   1. the compose project is exactly `personalfi-prod` (09 §6 Q1's default);
-#   2. the version is a 40-hex commit SHA, never the floating tag `dev`
-#      (09 §6 Q1: `PERSONALFI_VERSION=<sha>`; 09 §4 wiring batch 4: "W-A:
+#   2. the version is a 40-hex commit SHA (a source build) or a release
+#      x.y.z (a verified pull, `just install-release`), never the floating
+#      tag `dev`, `latest` or a minor line `x.y` (09 §6 Q1:
+#      `PERSONALFI_VERSION=<sha>`; 09 §4 wiring batch 4: "W-A:
 #      PERSONALFI_VERSION documented as required non-dev for production");
 #   3. the working directory is not this repository's own checkout -- the
 #      tree an agent or a gate runs `docker compose … down -v` against
@@ -74,8 +79,8 @@ check_isolation() {
     reasons+=("the compose project is '${project}', not 'personalfi-prod' (CF-21)")
   fi
 
-  if ! [[ "${version}" =~ ^[0-9a-f]{40}$ ]]; then
-    reasons+=("PERSONALFI_VERSION is '${version}', not a 40-hex commit SHA (CF-20; 'dev' is never production)")
+  if ! [[ "${version}" =~ ^[0-9a-f]{40}$ ]] && ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    reasons+=("PERSONALFI_VERSION is '${version}', not a 40-hex commit SHA or a release x.y.z (CF-20; 'dev' and 'latest' are never production)")
   fi
 
   local resolved_dir resolved_dev
@@ -112,13 +117,17 @@ self_test() {
     echo "check-isolation: self-test 1/4 ok -- project 'personalfi' refused" >&2
   fi
 
-  # 2. The floating tag 'dev' is refused, even with every other input good.
-  if check_isolation "personalfi-prod" "dev" "${scratch}" >/dev/null 2>&1; then
-    echo "check-isolation: SELF-TEST FAILED: version 'dev' was not refused" >&2
-    failures=$((failures + 1))
-  else
-    echo "check-isolation: self-test 2/4 ok -- version 'dev' refused" >&2
-  fi
+  # 2. The floating tags 'dev', 'latest' and a minor line are refused, even
+  # with every other input good.
+  local floating
+  for floating in dev latest 0.10; do
+    if check_isolation "personalfi-prod" "${floating}" "${scratch}" >/dev/null 2>&1; then
+      echo "check-isolation: SELF-TEST FAILED: version '${floating}' was not refused" >&2
+      failures=$((failures + 1))
+    else
+      echo "check-isolation: self-test 2/4 ok -- version '${floating}' refused" >&2
+    fi
+  done
 
   # 3. This checkout's own directory is refused, even with every other input
   # good. Run from inside the real checkout (DEV_CHECKOUT itself, or this
@@ -144,14 +153,18 @@ self_test() {
     echo "check-isolation: self-test 3/4 ok -- this checkout's directory refused" >&2
   fi
 
-  # 4. The converse: every input good is accepted. Without this, self-tests
-  # 1-3 could pass by refusing everything unconditionally.
-  if check_isolation "personalfi-prod" "${fake_sha}" "${scratch}" >/dev/null 2>&1; then
-    echo "check-isolation: self-test 4/4 ok -- a genuinely isolated invocation is accepted" >&2
-  else
-    echo "check-isolation: SELF-TEST FAILED: a genuinely isolated invocation was refused" >&2
-    failures=$((failures + 1))
-  fi
+  # 4. The converse: every input good is accepted, with a commit SHA (a
+  # source build) and with a release x.y.z (a verified pull, WP 12.3).
+  # Without this, self-tests 1-3 could pass by refusing everything.
+  local pinned
+  for pinned in "${fake_sha}" 0.10.0; do
+    if check_isolation "personalfi-prod" "${pinned}" "${scratch}" >/dev/null 2>&1; then
+      echo "check-isolation: self-test 4/4 ok -- a genuinely isolated invocation is accepted (version '${pinned}')" >&2
+    else
+      echo "check-isolation: SELF-TEST FAILED: a genuinely isolated invocation at '${pinned}' was refused" >&2
+      failures=$((failures + 1))
+    fi
+  done
 
   rm -rf "${scratch}"
 

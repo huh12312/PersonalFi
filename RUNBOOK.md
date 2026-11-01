@@ -16,20 +16,21 @@ every step and covers everything after.
 Commands are given as `just ...` where a recipe exists (`justfile`; `just --list` shows them all)
 and as raw `docker compose ...` otherwise. Everything here assumes Docker 29+ with the Compose v2
 plugin and these host tools: `git`, `just` 1.21+, Node.js 18+ (the host scripts only), `openssl`,
-`bash`. The machine the plan targets is the Arch Linux host of D13/D24; nothing here is
+`bash`; optionally `cosign` v3 and `gh` for the release verifier (it runs cosign from a pinned
+container image when cosign is absent, and skips the attestation half with a warning without `gh`). The machine the plan targets is the Arch Linux host of D13/D24; nothing here is
 Arch-specific except where a step says so.
 
-| Section                                                                                                                                     | When you need it                                       |
-| ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| [First install](#first-install)                                                                                                             | Once, on a new host                                    |
-| [Upgrade](#upgrade)                                                                                                                         | Every release: `git pull` then `just upgrade`          |
-| [Backup](#backup), [Restore](#restore), [Restore drill](#restore-drill)                                                                     | Nightly (automatic), after a disaster, monthly         |
-| [Production install and the real-use soak](#production-install-and-the-real-use-soak)                                                       | Running it as your only finance tool for 90 days       |
-| [Database roles](#database-roles), [Master-key rotation](#master-key-rotation), [Lockout and operator unlock](#lockout-and-operator-unlock) | Hardening the database login; a key or a login problem |
-| [Advisor kill switches](#advisor-kill-switches), [Local model](#local-model-profile-local-llm)                                              | The advisory layer                                     |
-| [Panic button](#panic-button-outline)                                                                                                       | You think the box or a credential is compromised       |
-| [Cryptography inventory](#cryptography-inventory), [Logging inventory](#logging-inventory)                                                  | What is encrypted, with what, and what is logged where |
-| [Resource envelope](#resource-envelope), [Troubleshooting](#troubleshooting)                                                                | Sizing, and errors with their fixes                    |
+| Section                                                                                                                                     | When you need it                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| [First install](#first-install)                                                                                                             | Once, on a new host                                                                                 |
+| [Upgrade](#upgrade)                                                                                                                         | Every release: `just install-release <x.y.z>`, or `git pull` then `just upgrade` for a source build |
+| [Backup](#backup), [Restore](#restore), [Restore drill](#restore-drill)                                                                     | Nightly (automatic), after a disaster, monthly                                                      |
+| [Production install and the real-use soak](#production-install-and-the-real-use-soak)                                                       | Running it as your only finance tool for 90 days                                                    |
+| [Database roles](#database-roles), [Master-key rotation](#master-key-rotation), [Lockout and operator unlock](#lockout-and-operator-unlock) | Hardening the database login; a key or a login problem                                              |
+| [Advisor kill switches](#advisor-kill-switches), [Local model](#local-model-profile-local-llm)                                              | The advisory layer                                                                                  |
+| [Panic button](#panic-button-outline)                                                                                                       | You think the box or a credential is compromised                                                    |
+| [Cryptography inventory](#cryptography-inventory), [Logging inventory](#logging-inventory)                                                  | What is encrypted, with what, and what is logged where                                              |
+| [Resource envelope](#resource-envelope), [Troubleshooting](#troubleshooting)                                                                | Sizing, and errors with their fixes                                                                 |
 
 ---
 
@@ -59,7 +60,64 @@ the console, and document your own answer here once you've made it. Nothing
 in this repo can make that call for you: it depends on the physical security
 model of wherever the box lives.
 
-### 1. Clone the repository
+### Install a published release (pull-first)
+
+The path for running PersonalFi: the three PersonalFi images are pulled, verified, and never built on
+the host, so no build toolchain is involved. **No release has been published yet**: v0.10.0, the
+first public release (D32), is in preparation. Until `gh release list --repo huh12312/PersonalFi`
+lists it, there is nothing to pull, and [Build from source](#build-from-source) below is the way to
+install. The steps, for 0.10.0:
+
+1. **The release's files.** A clone at the tag,
+   `git clone --branch v0.10.0 https://github.com/huh12312/PersonalFi.git personalfi`, or the
+   tag's source archive (`https://github.com/huh12312/PersonalFi/archive/refs/tags/v0.10.0.tar.gz`). What the install
+   reads from them must be the release's own: `compose.yml`, the `justfile` and the
+   `scripts/upgrade-test/upgrade.just` it imports, `scripts/` (the verifier, the placeholder and
+   name-guard helpers), `.env.example`, `docker/Caddyfile` (mounted into the proxy) and
+   `packages/db/migrations/` (read by `pre-migrate-backup`). From a clone, the verifier also ties the
+   images to the checked-out commit; from the archive, to the release tag only.
+2. **`.env`.** `cp .env.example .env`, then `PERSONALFI_VERSION=0.10.0`. Leave `REGISTRY` at its
+   default, `ghcr.io/huh12312` (canonical), or set `REGISTRY=masterhuh` for the Docker Hub mirror
+   (same digests, same signatures; Docker Hub rate-limits anonymous pulls). The rest is
+   [section 3](#3-configure-env) below. Compose then runs `<REGISTRY>/personalfi-<image>:0.10.0`,
+   the very names the release published.
+3. **Secrets**, as [section 2](#2-create-secrets) below: `just gen-pg-secrets`,
+   `just gen-master-key`, the age keypair, then `just secrets-placeholders`. The keypair comes from the
+   published backup image, verified first, instead of from a build:
+
+   ```bash
+   bash scripts/verify-release.sh --release 0.10.0 --pull       # add --source masterhuh for the mirror
+   (umask 077; docker run --rm --pull never --entrypoint age-keygen ghcr.io/huh12312/personalfi-backup:0.10.0 > "$HOME/personalfi-age-identity.txt")
+   grep '^# public key:' "$HOME/personalfi-age-identity.txt" | cut -d' ' -f4 > secrets/age_recipient
+   chmod 444 secrets/age_recipient
+   ```
+
+4. **Install.**
+
+   ```bash
+   just install-release 0.10.0
+   ```
+
+   It refuses anything but `x.y.z` (`latest` and `0.10` name no single commit), and it refuses
+   unless compose resolves exactly `<REGISTRY>/personalfi-{api,backup,proxy}:0.10.0` for every
+   PersonalFi service (`.env`'s `PERSONALFI_VERSION` and the release must agree). It then runs
+   `just upgrade` in pull mode (`PERSONALFI_PULL=1 PERSONALFI_RELEASE=0.10.0`, see
+   [Upgrade](#upgrade)): the secret placeholders, the verifier with `--source <REGISTRY> --pull`,
+   `docker compose pull` for the images that are not PersonalFi's,
+   `docker compose up -d --wait --no-build --pull never`, the `/ready` check and the restart check. A first install is an
+   upgrade from nothing.
+
+Then [section 5](#5-trust-the-internal-ca-lan-mode) (trust the CA), 6 and 7 below, as for a source
+build. The isolation guard of the production install accepts a release `x.y.z` as
+`PERSONALFI_VERSION`, as it accepts a 40-hex commit.
+
+### Build from source
+
+Sections 1 to 4 build the images from a checkout: for development, or to run a commit between
+releases. Sections 2 (secrets) and 3 (`.env`) apply to a release install as well; sections 5 to 7
+apply to both.
+
+#### 1. Clone the repository
 
 ```bash
 git clone https://github.com/huh12312/PersonalFi.git personalfi
@@ -71,7 +129,7 @@ The host does **not** need pnpm or the workspace's Node: every image is built in
 becomes the Compose project name and so the prefix of every volume (`personalfi_pgdata`, ...); the
 soak install below sets it explicitly instead.
 
-### 2. Create secrets
+#### 2. Create secrets
 
 Every secret is a **file** under `./secrets/`, never an environment variable
 (P0-2: `docker inspect` and `/proc/<pid>/environ` must stay clean). The
@@ -128,17 +186,19 @@ just gen-master-key
 (`age_recipient`; see `docker/backup/backup.sh`'s header for why); keep the private half **outside
 this repo and this host**, in a password manager entry plus one offline copy. Generate it with the
 backup image itself, so the host needs no `age`. The image must exist, so build first (several
-minutes the first time):
+minutes the first time; a release install uses the verified published image instead, see
+[Install a published release](#install-a-published-release-pull-first)):
 
 ```bash
 just build
-(umask 077; docker run --rm --entrypoint age-keygen personalfi/backup:dev > "$HOME/personalfi-age-identity.txt")
+(umask 077; docker run --rm --entrypoint age-keygen ghcr.io/huh12312/personalfi-backup:dev > "$HOME/personalfi-age-identity.txt")
 grep '^# public key:' "$HOME/personalfi-age-identity.txt" | cut -d' ' -f4 > secrets/age_recipient
 chmod 444 secrets/age_recipient
 ```
 
-(`personalfi/backup:dev` is the tag `just build` produced; if `.env` sets `PERSONALFI_VERSION` or
-`REGISTRY`, use that tag.) Move `$HOME/personalfi-age-identity.txt` to your password manager and an
+(`ghcr.io/huh12312/personalfi-backup:dev` is the name `just build` gave it: compose's
+`${REGISTRY:-ghcr.io/huh12312}/personalfi-backup:${PERSONALFI_VERSION:-dev}`. If `.env` sets
+`PERSONALFI_VERSION` or `REGISTRY`, use that name; `docker compose config --images` lists them.) Move `$HOME/personalfi-age-identity.txt` to your password manager and an
 offline copy, then `shred -u` it once it is safely stored. Never commit it, and do not leave it on a
 host that holds real data: you need it only to restore and to run the restore drill (bring it back
 for those few minutes), and whoever holds it can read every backup.
@@ -306,7 +366,7 @@ keyring into the wallet runtime), and a descriptor an earlier release stored in 
 re-sealed at the worker's next boot (it logs `wallet descriptors: re-sealed at boot`). A database
 dump or a backup therefore carries the descriptor only as ciphertext.
 
-#### Secret file modes: 0444 by default, 0400 via `just harden-secrets`
+##### Secret file modes: 0444 by default, 0400 via `just harden-secrets`
 
 `packages/config/src/schema.ts` and `.env.example` both say mode 0400, and the
 files this writes are 0444. That gap is real, was raised by the Phase 0
@@ -357,7 +417,7 @@ which is the point — and `just gen-*` will need `sudo` to rewrite them.
 it keeps working. Run it before handing the box real credentials; it is the
 one remaining hand action in this section.
 
-### 3. Configure `.env`
+#### 3. Configure `.env`
 
 ```bash
 cp .env.example .env
@@ -444,7 +504,7 @@ one's default:
 - `MONTE_CARLO_MAX_CONCURRENT` — the Monte Carlo concurrency cap. Defaults
   to `8`.
 
-### 4. Bring the stack up
+#### 4. Bring the stack up
 
 ```bash
 just build               # already done in step 2; re-run after any change to the code
@@ -681,7 +741,9 @@ age --decrypt -i "$HOME/personalfi-age-identity.txt" export.jsonl.age > export.d
 ```
 
 (Run `age` from the backup image if the host has none:
-`docker run --rm -i -v "$HOME/personalfi-age-identity.txt:/id:ro" --entrypoint age personalfi/backup:dev --decrypt -i /id < export.jsonl.age > export.decrypted.jsonl`.)
+`docker run --rm -i -v "$HOME/personalfi-age-identity.txt:/id:ro" --entrypoint age ghcr.io/huh12312/personalfi-backup:dev --decrypt -i /id < export.jsonl.age > export.decrypted.jsonl`,
+with your install's backup image in place of `…:dev`: `docker compose config --images backup` names it, for
+example `ghcr.io/huh12312/personalfi-backup:0.10.0` on a release install.)
 
 `POST /import` refuses to run against an instance that already has user
 data (`409 export.instance_not_empty`) — it is a same-schema restore, not a
@@ -697,9 +759,23 @@ you would for a first install, _then_ import.
 
 ## Upgrade
 
+A release install ([Install a published release](#install-a-published-release-pull-first)): the new
+release's files, its version in `.env`, and the same recipe as the first install.
+
+```bash
+git fetch --tags && git checkout v0.10.1      # an example version; or unpack its source archive
+sed -i 's/^PERSONALFI_VERSION=.*/PERSONALFI_VERSION=0.10.1/' .env
+just install-release 0.10.1
+```
+
+A source build:
+
 ```bash
 git pull && just upgrade
 ```
+
+`just install-release x.y.z` is `PERSONALFI_PULL=1 PERSONALFI_RELEASE=x.y.z just upgrade`; both
+paths run the same recipe, and everything below holds for both except where it names one.
 
 That is the whole upgrade, from any earlier release — including v0.1 — to this
 one, skipping as many releases as you like (WP 9.4 proves it on every release
@@ -748,8 +824,11 @@ again. Never edit the SQL of an applied migration; add a new one.
    `secret file <project>_<name> does not exist`, then
    `bind source path does not exist: …/secrets/<name>`
    (older Compose: `secret … file not found`).
-2. **The build** of `api`/`worker`/`migrator`, `backup` and `proxy` from the
-   checkout.
+2. **The images.** A source build builds `api`/`worker`/`migrator`, `backup`
+   and `proxy` from the checkout, and refuses to build a published release's
+   name (`scripts/build-name-guard.sh`: `PERSONALFI_VERSION=x.y.z` under
+   `ghcr.io/huh12312` or `masterhuh` is only ever a verified pull). A release
+   install verifies and pulls them instead (below).
 3. **The pre-migration backup.** `docker compose up -d --wait` starts the
    `pre-migrate-backup` one-shot before the migrator. When migrations are
    pending against a database that has any, it takes one full backup — the
@@ -785,36 +864,66 @@ unhealthy, before anything else.
 **On the production install, the isolation guard runs first.** When the compose project is
 `personalfi-prod` (as `docker compose config` resolves it, `.env` included), `just upgrade` runs
 `scripts/soak/check-isolation.sh` before it touches anything and stops on any violation: the
-wrong project name, `PERSONALFI_VERSION` not a 40-character commit SHA, or the agent checkout's
-directory. Every other project (a scratch install, the upgrade test, a gate) skips it, because
+wrong project name, `PERSONALFI_VERSION` neither a 40-character commit SHA nor a release `x.y.z`,
+or the agent checkout's directory. Every other project (a scratch install, the upgrade test, a gate) skips it, because
 the guard refuses every project but production by design.
 
 **Installing published images instead of building (pull-and-verify).** From v0.10.0, the first
-published release (D32), the images `release.yml` built, signed and attested can be used instead of
-a local build:
+published release (D32), the images `release.yml` built, signed and attested are used instead of a
+local build by `just install-release x.y.z` (which is `PERSONALFI_PULL=1 PERSONALFI_RELEASE=x.y.z
+just upgrade`). Since WP 12.3 there is one name per image: compose runs
+`${REGISTRY:-ghcr.io/huh12312}/personalfi-<image>:${PERSONALFI_VERSION}`, which is exactly what the
+release published, so with `PERSONALFI_VERSION=x.y.z` in `.env` the verified pull arrives under the
+name compose starts and nothing is re-tagged. In order, before anything is pulled:
 
-    git pull && git checkout v0.10.0
-    PERSONALFI_VERSION="$(git rev-parse HEAD)" PERSONALFI_PULL=1 PERSONALFI_RELEASE=0.10.0 just upgrade
+1. The release must be `x.y.z`; `latest` and `x.y` are refused (they move with every release).
+2. Compose must resolve exactly `<REGISTRY>/personalfi-api:x.y.z` for `api`, `worker` and
+   `migrator`, `…-backup:x.y.z` for `backup` and `pre-migrate-backup`, and `…-proxy:x.y.z` for
+   `proxy`; otherwise it refuses by name (set `PERSONALFI_VERSION` in `.env`; check that the
+   checkout is at `vx.y.z`).
+3. `scripts/verify-release.sh --release x.y.z --source <REGISTRY> --pull [--commit <HEAD>]`: for
+   each of `api`, `backup` and `proxy` it resolves `<REGISTRY>/personalfi-<image>:x.y.z` to a digest
+   once, then checks, by digest only, that the cosign signature was made by this repository's
+   `release.yml` at `refs/tags/vx.y.z` (issuer `https://token.actions.githubusercontent.com`) —
+   **at the commit you have checked out**, when the install is a git checkout — and that GitHub holds
+   a provenance attestation for it (`gh attestation verify`). Only if all three pass does it pull
+   each by digest, then pull the tag and require that it still names the verified digest (a tag
+   that moved in between is removed again and refused).
+4. `docker compose pull` for the images that are not PersonalFi's (Postgres; a profile's), then
+   `docker compose up -d --wait --no-build --pull never`: compose can neither build nor fetch a
+   PersonalFi image the verifier did not pass.
 
-For each of `api`, `backup` and `proxy`, `scripts/verify-release.sh` resolves
-`ghcr.io/<owner>/personalfi-<image>:0.10.0` to a digest once, then checks — by digest only — that the
-cosign signature was made by this repository's `release.yml` at `refs/tags/v0.10.0` **at the commit
-you have checked out**, and that GitHub holds a provenance attestation for it
-(`gh attestation verify`, so `gh` must be logged in). Only if all three images pass are they pulled
-by digest and tagged as the names compose runs; the upgrade then starts them with `--no-build`.
-Any failure stops before anything is pulled, and the old version keeps serving. `cosign` is used
-from your PATH, or run from its pinned container image if it is not installed. To check a release
-without upgrading: `bash scripts/verify-release.sh --release 0.10.0 --commit <sha>`; to check the
-verifier itself (it must accept a known-good signature and refuse an unsigned image):
-`bash scripts/verify-release.sh --self-test`. Building from source stays the default.
+Any failure stops before anything is pulled, and the old version keeps serving.
+
+- **`--source`.** `ghcr.io/huh12312` (the default; the canonical copy) or `docker.io/masterhuh`
+  (`masterhuh` is accepted for it; the Docker Hub mirror, same digests, separately signed). The
+  recipe passes `REGISTRY` as `--source`, so `REGISTRY=masterhuh` in `.env` installs from Docker Hub.
+  Any other source is read the same way and passes only with `release.yml`'s signature.
+- **`gh` is optional.** Without `gh` on the `PATH`, or logged out, the verifier prints
+  `WARNING: … the provenance-attestation check is SKIPPED` and decides on the signatures alone
+  (each still binds the digest to `release.yml` at the tag). `--strict` refuses instead, before
+  anything is resolved: `bash scripts/verify-release.sh --release 0.10.0 --strict`. Use it where
+  `gh` is set up; `just install-release` does not pass it.
+- **cosign v3.** `release.yml` signs with cosign v3, which stores the signature as a Sigstore bundle
+  attached to the image (an OCI referrer). cosign v2's `verify` reads only the older signature tag
+  and reports `no signatures found` for such an image, so a cosign on your `PATH` must be v3. Without
+  one, the verifier runs `ghcr.io/sigstore/cosign/cosign:v3.1.4` by digest (v3.1.3 fixed a HIGH
+  verification bypass, GHSA-fx35-mq7g-6g98).
+
+To check a release without installing it: `bash scripts/verify-release.sh --release 0.10.0`
+(`--source masterhuh` for the mirror, `--commit <sha>` to tie it to a checkout). To check the
+verifier itself — it must accept a known-good keyless signature made by a GitHub workflow with
+cosign v3, and refuse an unsigned image, the wrong identity and the wrong commit:
+`bash scripts/verify-release.sh --self-test`. Building from source remains available
+(`git pull && just upgrade`).
 
 **The same images on Docker Hub.** Every release is also published as
 `masterhuh/personalfi-<image>` on Docker Hub, from the same build: the digest is identical on both
 registries, and each copy carries its own cosign signature and provenance attestation. The release
 workflow verifies both copies before it creates the GitHub release
-([Cutting a release](#cutting-a-release)). `scripts/verify-release.sh` reads GHCR only for now; to
-check a copy from either registry by hand, resolve the tag to a digest and verify that digest
-(cosign v3, which is what signs; `gh` logged in):
+([Cutting a release](#cutting-a-release)), and `scripts/verify-release.sh --source masterhuh` checks
+the Hub copy on the install side. To check a copy from either registry by hand, resolve the tag to a
+digest and verify that digest (cosign v3, which is what signs; `gh` logged in):
 
 ```bash
 V=0.10.0
@@ -873,16 +982,17 @@ other image (the first build downloads Caddy's Go modules from `proxy.golang.org
 `sum.golang.org`, and takes a minute or two longer; later builds reuse the cache). Everything that
 decides the binary sits at the top of that Dockerfile:
 
-| Pin              | What it is                                                                         |
-| ---------------- | ---------------------------------------------------------------------------------- |
-| `GO_IMAGE`       | `golang:<1.26.x>-alpine3.24@sha256:…`, the toolchain, on the line Caddy ships with |
-| `CADDY_VERSION`  | the Caddy release built                                                            |
-| `XCADDY_VERSION` | the build tool, with `XCADDY_SUM` (its `h1:` module checksum) beside it            |
-| `XNET_VERSION`   | a floor on `golang.org/x/net` above what Caddy's own `go.mod` asks for             |
-| `GOJOSE_VERSION` | the same for `github.com/go-jose/go-jose/v4`                                       |
-| `ALPINE_IMAGE`   | the runtime base, by digest                                                        |
+| Pin              | What it is                                                                                |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| `GO_IMAGE`       | `golang:<1.26.x>-alpine3.24@sha256:…`, the toolchain, on the line Caddy ships with        |
+| `CADDY_VERSION`  | the Caddy release built                                                                   |
+| `XCADDY_VERSION` | the build tool, with `XCADDY_SUM` (its `h1:` module checksum) beside it                   |
+| `XNET_VERSION`   | a floor on `golang.org/x/net` above what Caddy's own `go.mod` asks for                    |
+| `GOJOSE_VERSION` | the same for `github.com/go-jose/go-jose/v4`                                              |
+| `CHI_VERSION`    | the same for `github.com/go-chi/chi/v5` (WP 12.3; clears a MEDIUM a public scanner shows) |
+| `ALPINE_IMAGE`   | the runtime base, by digest                                                               |
 
-**How a bump lands.** Renovate opens one PR, "proxy: Caddy from source", for the first five (never
+**How a bump lands.** Renovate opens one PR, "proxy: Caddy from source", for the first six (never
 auto-merged); the alpine digest comes with the other non-major bumps. CI's
 `docker build + trivy image scan (proxy)` job is the gate: `.trivyignore` holds no entry for this
 image, so a HIGH or CRITICAL finding with a fix fails the PR. The build itself refuses three
@@ -898,7 +1008,7 @@ diff in the build log, then update the file in the same PR).
 golang:<version>-alpine3.24` gives the digest). A Go-module finding: add or raise a floor, an `ARG`
 under a `# renovate: datasource=go depName=<module>` comment and a `--with <a package of that
 module>@${ARG}` on the `xcaddy build` line, which raises the version without adding a Caddy module.
-Then `docker build -f docker/caddy.Dockerfile -t personalfi/proxy:check .` and CI's scan command
+Then `docker build -f docker/caddy.Dockerfile -t personalfi/personalfi-proxy:check .` and CI's scan command
 (`.github/workflows/ci.yml`, without `--ignorefile`) must show 0 in `usr/bin/caddy`. A snooze in
 `.trivyignore` is the last resort, and a published image must not ship with one.
 
@@ -1216,19 +1326,26 @@ destroyable by a routine agent or gate command, and each rule below answers one:
    `personalfi-prod_backups`, …) by project name; the dev and gate stack's
    (`personalfi_*`) are a different set.
 
-2. **A real commit, never `dev`.** Every image is tagged
-   `${REGISTRY:-personalfi}/<service>:${PERSONALFI_VERSION:-dev}`, and every
-   gate or agent `docker compose build` **overwrites `:dev`**. A production stack
-   on `:dev` comes back up on unreviewed code at its next `up`. In the production
-   `.env`:
+2. **A real commit or a release, never `dev`.** Every image is tagged
+   `${REGISTRY:-ghcr.io/huh12312}/personalfi-<image>:${PERSONALFI_VERSION:-dev}`
+   (the published name's form since WP 12.3), and every gate or agent `docker
+compose build` **overwrites `:dev`**. A production stack on `:dev` comes back
+   up on unreviewed code at its next `up`. In the production `.env`:
 
    ```bash
-   PERSONALFI_VERSION=<the 40-hex commit SHA you cloned at>
+   PERSONALFI_VERSION=<the 40-hex commit SHA you cloned at>    # a source build
+   PERSONALFI_VERSION=0.10.0                                   # or a release install (just install-release)
    ```
 
-   `PERSONALFI_VERSION` is **required, and never `dev`, for production**. Build
-   from the checkout you pulled; never point a checkout at images built from a
-   different one.
+   `PERSONALFI_VERSION` is **required, and never `dev` or `latest`, for
+   production**. Build from the checkout you pulled, never point a checkout at
+   images built from a different one; a release install pulls the release the
+   checkout is at, and `just build`/`just upgrade` refuse to build a release's
+   tag under the publishing registries. (A production install that predates WP
+   12.3 ran `personalfi/api:<sha>`; its next upgrade builds
+   `ghcr.io/huh12312/personalfi-api:<sha>`, or `personalfi/personalfi-api:<sha>`
+   if its `.env` sets `REGISTRY=personalfi`. The old images are then unused and
+   can be removed by name.)
 
 3. **Own secrets, own address.** The production clone has its **own `secrets/`**
    (generated for it, never copied from the dev checkout), hardened per C-16
@@ -1238,7 +1355,7 @@ name>`, see "Enabling remote access"). The dev and gate stack stay on
    `127.0.0.1`.
 
 **The guard.** `scripts/soak/check-isolation.sh` refuses unless the project is
-exactly `personalfi-prod`, the version is a 40-hex SHA, and the directory is not
+exactly `personalfi-prod`, the version is a 40-hex SHA or a release `x.y.z`, and the directory is not
 the agent/gate checkout. It names **every** violation, not just the first:
 
 ```bash

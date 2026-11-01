@@ -17,6 +17,11 @@
  * - `PERSONALFI_PULL=1` verifies before anything else touches images: no
  *   release named → refused; a release that does not verify → refused, and
  *   no `compose build`, no `compose up`, no `docker pull`.
+ * - WP 12.3, one image name: pull mode refuses unless compose runs exactly
+ *   `<REGISTRY>/personalfi-<image>:<release>` for every PersonalFi service,
+ *   and passes REGISTRY to the verifier as `--source`; `just install-release`
+ *   refuses `latest` before anything runs; the build path refuses to build a
+ *   published release's name.
  */
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -100,7 +105,7 @@ describe('just upgrade (G-21)', () => {
         PATH: `${dir}:${process.env['PATH'] ?? ''}`,
         HOME: process.env['HOME'] ?? dir,
         FAKE_PROJECT: 'personalfi-prod',
-        FAKE_IMAGE: `personalfi/api:${'b'.repeat(40)}`,
+        FAKE_IMAGE: `ghcr.io/huh12312/personalfi-api:${'b'.repeat(40)}`,
         // The guard's default "agent checkout" is this host's path; on a CI
         // runner the checkout lives elsewhere and the guard would ACCEPT it.
         // The refusal under test is the mechanism, so pin it to this checkout.
@@ -131,14 +136,18 @@ describe('just upgrade pull-and-verify, past the placeholders', () => {
     secretsDir = mkdtempSync(join(tmpdir(), 'wp911-upgrade-secrets-'));
     chmodSync(secretsDir, 0o700);
     // A stub that also answers `compose config` with one optional secret, so
-    // secrets-placeholders passes and the recipe reaches the pull step.
+    // secrets-placeholders passes and the recipe reaches the pull step, and
+    // with the services' images as compose would resolve them from REGISTRY
+    // and PERSONALFI_VERSION (FAKE_PROXY_IMAGE overrides one, to disagree).
     writeFileSync(
       join(dir, 'docker'),
       `#!/usr/bin/env bash
 echo "$*" >> "${log}"
 if [ "$1 $2" = "compose version" ]; then echo "Docker Compose version v5.0.0"; exit 0; fi
 if [ "$1" = compose ] && [[ " $* " == *" config "* ]]; then
-  printf '{"name":"%s","secrets":{"opt":{"file":"%s/opt"}}}\\n' "$FAKE_PROJECT" "${secretsDir}"; exit 0
+  r="\${REGISTRY:-ghcr.io/huh12312}" v="\${PERSONALFI_VERSION:-dev}"
+  api="$r/personalfi-api:$v" backup="$r/personalfi-backup:$v" proxy="\${FAKE_PROXY_IMAGE:-$r/personalfi-proxy:$v}"
+  printf '{"name":"%s","services":{"api":{"image":"%s"},"worker":{"image":"%s"},"migrator":{"image":"%s"},"proxy":{"image":"%s"},"backup":{"image":"%s"},"pre-migrate-backup":{"image":"%s"},"db":{"image":"postgres:18"}},"secrets":{"opt":{"file":"%s/opt"}}}\\n' "$FAKE_PROJECT" "$api" "$api" "$api" "$proxy" "$backup" "$backup" "${secretsDir}"; exit 0
 fi
 exit 1
 `,
@@ -160,12 +169,111 @@ exit 1
       FAKE_PROJECT: 'pf-sec',
       PERSONALFI_PULL: '1',
       PERSONALFI_RELEASE: '0.9.0',
-      PERSONALFI_VERSION: 'a'.repeat(40),
+      PERSONALFI_VERSION: '0.9.0',
     });
     expect(run.status).not.toBe(0);
     expect(run.out).toContain('verify-release: REFUSED');
     expect(touchedImages(run.docker)).toEqual([]);
     // Building from source is the default, never the fallback.
+    expect(run.docker.some((line) => line.startsWith('compose build'))).toBe(false);
+  }, 60_000);
+
+  it('passes REGISTRY to the verifier as --source: the Docker Hub mirror is read from docker.io/masterhuh', () => {
+    const run = upgrade({
+      FAKE_PROJECT: 'pf-sec',
+      PERSONALFI_PULL: '1',
+      PERSONALFI_RELEASE: '0.9.0',
+      PERSONALFI_VERSION: '0.9.0',
+      REGISTRY: 'masterhuh',
+    });
+    expect(run.status).not.toBe(0);
+    expect(run.out).toContain('pull-and-verify v0.9.0 from masterhuh');
+    expect(run.docker).toContain(
+      'buildx imagetools inspect docker.io/masterhuh/personalfi-api:0.9.0 --format {{json .Manifest.Digest}}',
+    );
+    expect(touchedImages(run.docker)).toEqual([]);
+  }, 60_000);
+
+  it('one image name: compose must run <REGISTRY>/personalfi-<image>:<release>, or nothing is verified, pulled or started', () => {
+    // PERSONALFI_VERSION not the release: compose would start other bytes than the verified pull.
+    const stale = upgrade({
+      FAKE_PROJECT: 'pf-sec',
+      PERSONALFI_PULL: '1',
+      PERSONALFI_RELEASE: '0.9.0',
+      PERSONALFI_VERSION: '0.8.9',
+    });
+    expect(stale.status).not.toBe(0);
+    expect(stale.out).toContain(
+      "compose runs 'ghcr.io/huh12312/personalfi-api:0.8.9', not <REGISTRY>/personalfi-api:0.9.0",
+    );
+    expect(stale.out).not.toContain('verify-release');
+    expect(touchedImages(stale.docker)).toEqual([]);
+    // One service under another name (an older compose.yml, or a typo): refused by name.
+    const renamed = upgrade({
+      FAKE_PROJECT: 'pf-sec',
+      PERSONALFI_PULL: '1',
+      PERSONALFI_RELEASE: '0.9.0',
+      PERSONALFI_VERSION: '0.9.0',
+      FAKE_PROXY_IMAGE: 'ghcr.io/huh12312/proxy:0.9.0',
+    });
+    expect(renamed.status).not.toBe(0);
+    expect(renamed.out).toContain(
+      "compose names 'ghcr.io/huh12312/proxy:0.9.0' for proxy; release 0.9.0 publishes 'ghcr.io/huh12312/personalfi-proxy:0.9.0'",
+    );
+    expect(renamed.out).not.toContain('verify-release');
+    expect(touchedImages(renamed.docker)).toEqual([]);
+  }, 60_000);
+
+  it('`just install-release latest` (or x.y) is refused before anything runs', () => {
+    for (const version of ['latest', 'v0.10.0']) {
+      writeFileSync(log, '');
+      const result = spawnSync('just', ['install-release', version], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        timeout: 60_000,
+        env: {
+          PATH: `${dir}:${process.env['PATH'] ?? ''}`,
+          HOME: process.env['HOME'] ?? dir,
+          FAKE_PROJECT: 'pf-sec',
+        },
+      });
+      const out = `${result.stdout}${result.stderr}`;
+      expect(result.status, version).not.toBe(0);
+      expect(out, version).toContain(
+        `install-release: REFUSED: '${version}' is not a release x.y.z`,
+      );
+      expect(readFileSync(log, 'utf8'), version).toBe('');
+    }
+  }, 60_000);
+
+  it('`just install-release x.y.z` is the pull-mode upgrade: placeholders, then the verifier, from REGISTRY', () => {
+    writeFileSync(log, '');
+    const result = spawnSync('just', ['install-release', '0.9.0'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: {
+        PATH: `${dir}:${process.env['PATH'] ?? ''}`,
+        HOME: process.env['HOME'] ?? dir,
+        FAKE_PROJECT: 'pf-sec',
+        PERSONALFI_VERSION: '0.9.0',
+        PERSONALFI_DEV_CHECKOUT: REPO_ROOT,
+      },
+    });
+    const out = `${result.stdout}${result.stderr}`;
+    const docker = readFileSync(log, 'utf8').split('\n').filter(Boolean);
+    expect(result.status).not.toBe(0); // the stub registry has nothing to verify
+    expect(out).toContain('secrets-placeholders');
+    expect(out).toContain('pull-and-verify v0.9.0 from ghcr.io/huh12312');
+    expect(out).toContain('verify-release: REFUSED');
+    expect(touchedImages(docker)).toEqual([]);
+  }, 60_000);
+
+  it('the build path refuses to build a published release under its published name', () => {
+    const run = upgrade({ FAKE_PROJECT: 'pf-sec', PERSONALFI_VERSION: '0.9.0' });
+    expect(run.status).not.toBe(0);
+    expect(run.out).toContain('build-name-guard: REFUSED');
+    expect(run.out).toContain('ghcr.io/huh12312/personalfi-api:0.9.0');
     expect(run.docker.some((line) => line.startsWith('compose build'))).toBe(false);
   }, 60_000);
 

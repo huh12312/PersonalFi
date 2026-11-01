@@ -180,7 +180,8 @@ CMD []
 
 LABEL org.opencontainers.image.title="personalfi-api" \
       org.opencontainers.image.description="PersonalFi API / worker / migrator (Node 26, TypeScript run directly, ROLE-selected at runtime)" \
-      org.opencontainers.image.source="https://github.com/chris/personalfi" \
+      org.opencontainers.image.source="https://github.com/huh12312/PersonalFi" \
+      org.opencontainers.image.url="https://github.com/huh12312/PersonalFi" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.vendor="PersonalFi" \
       org.opencontainers.image.base.name="docker.io/library/node:26.8.2-alpine3.24"

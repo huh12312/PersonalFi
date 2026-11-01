@@ -40,8 +40,11 @@ is supported.
 ## Install
 
 The install guide is in the repository README:
-<https://github.com/huh12312/PersonalFi#install>. The operating guide, covering upgrade, backup and
-restore, is the [RUNBOOK](https://github.com/huh12312/PersonalFi/blob/main/RUNBOOK.md).
+<https://github.com/huh12312/PersonalFi#install>. It runs these images under the names above:
+`just install-release 0.10.0` verifies every signature, pulls by digest and starts the stack, with
+nothing built. Set `REGISTRY=masterhuh` in `.env` to install from this page's copies. The
+operating guide, covering upgrade, backup and restore, is the
+[RUNBOOK](https://github.com/huh12312/PersonalFi/blob/main/RUNBOOK.md).
 
 ## Licence
 

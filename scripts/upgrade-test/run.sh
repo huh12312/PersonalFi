@@ -26,7 +26,10 @@
 #
 # Never touches a project that is not pf-upgrade-* (lib.sh's assert_project),
 # binds only 127.0.0.1:${PROXY_HTTPS_PORT:-8451}/${PROXY_HTTP_PORT:-8452}, and
-# tags images pf-upgrade/<svc>:<sha>. Test-only secrets live under $WORK.
+# tags images by each era's own compose names (W0-W5 pf-upgrade/<svc>:<sha>,
+# HEAD pf-upgrade/personalfi-<svc>:<tag>, WP 12.3). Test-only secrets live
+# under $WORK. UPGRADE_TEST_OVERLAY="<path> ..." copies named uncommitted
+# files over HEAD's tree (lib.sh's prepare_tree; never set by CI).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -50,7 +53,7 @@ while [ "$#" -gt 0 ]; do
     --keep) KEEP=1 ;;
     --ci) CI_MODE=1 ;;
     --teardown) TEARDOWN_ONLY=1 ;;
-    -h | --help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $1" ;;
   esac
   shift
@@ -184,7 +187,7 @@ install_w0() {
   in_install "$v" just gen-pg-secrets >/dev/null
   in_install "$v" just gen-master-key >/dev/null
   in_install "$v" timeout 1800 just build >"$RUN_DIR/w0-build.log" 2>&1 || die "W0 build failed (see $RUN_DIR/w0-build.log)"
-  docker run --rm --entrypoint age-keygen "${REGISTRY_TEST}/backup:${v}" >"$AUTH_DIR/age-identity.txt" 2>/dev/null
+  docker run --rm --entrypoint age-keygen "$(image_ref "$INSTALL" backup "$v")" >"$AUTH_DIR/age-identity.txt" 2>/dev/null
   chmod 0600 "$AUTH_DIR/age-identity.txt"
   grep '^# public key:' "$AUTH_DIR/age-identity.txt" | cut -d' ' -f4 >"$INSTALL/secrets/age_recipient"
   chmod 444 "$INSTALL/secrets/age_recipient"
@@ -420,10 +423,42 @@ hop_head() {
       "$(docker inspect -f '{{.State.StartedAt}}' "$ap")") | the api's own boot (KEK derivation) follows |"
   fi
   grep -E '^upgrade: (pre-migrate|/ready|api |worker |WARNING)|^secrets-placeholders' "$logf" | sed 's/^/    /' | tee -a "$REPORT" >/dev/null
+  check_image_names "$wp" "$v"
   if grep -q '^upgrade: WARNING' "$logf"; then
     report "| ${wp} | readiness | **$(grep -m1 '^upgrade: WARNING' "$logf" | sed 's/^upgrade: //')** |"
   fi
   check_premigrate_backup "$wp" "$before"
+}
+
+# WP 12.3: one image name per image. Each era runs the names its own
+# compose.yml gives: W0's `pf-upgrade/<svc>:<sha>`, HEAD's
+# `pf-upgrade/personalfi-<svc>:<tag>`. After the hop, every running
+# PersonalFi service must be on exactly the name the installed (HEAD) tree's
+# compose.yml resolves, and W0's images must still exist under W0's names —
+# the new names are new images, never a re-tag of the old ones.
+check_image_names() {
+  local wp="$1" v="$2" svc id got want ok=1 w0 w0dir kept=""
+  for svc in api worker proxy backup; do
+    want="$(image_ref "$INSTALL" "${svc/worker/api}" "$v")"
+    id="$(dc "$PROJECT" "$INSTALL" ps -q "$svc" 2>/dev/null | head -1)"
+    got="$([ -n "$id" ] && docker inspect -f '{{.Config.Image}}' "$id" || echo absent)"
+    report "| ${wp} | image name: ${svc} | ${got} $([ "$got" = "$want" ] && echo "== compose's ${want}" || echo "**!= compose's ${want}**") |"
+    [ "$got" = "$want" ] || ok=0
+  done
+  w0="$(version_tag W0)"
+  w0dir="$WORK/src/$w0"
+  if [ -f "$w0dir/compose.yml" ]; then
+    for svc in api backup proxy; do
+      if docker image inspect "$(image_ref "$w0dir" "$svc" "$w0")" >/dev/null 2>&1; then
+        kept="${kept} $(image_ref "$w0dir" "$svc" "$w0")"
+      else
+        ok=0
+        kept="${kept} **$(image_ref "$w0dir" "$svc" "$w0") missing**"
+      fi
+    done
+    report "| ${wp} | W0's images under W0's names |${kept} |"
+  fi
+  [ "$ok" -eq 1 ] || flag "${wp}: image names — a running service is not on the name the installed compose.yml gives, or W0's images lost their names"
 }
 
 apply_sabotage() {

@@ -105,7 +105,8 @@ jobs:
           tag="$(git rev-parse --short=7 HEAD)-wp94"
           scanned=0
           for svc in api backup proxy; do
-            img="pf-upgrade/${svc}:${tag}"
+            # HEAD's compose names (WP 12.3): pf-upgrade/personalfi-<svc>:<tag>.
+            img="pf-upgrade/personalfi-${svc}:${tag}"
             if ! docker image inspect "$img" >/dev/null 2>&1; then
               echo "::warning::$img was not built (the jump failed before HEAD's build); not scanned"
               continue

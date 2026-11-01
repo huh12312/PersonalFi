@@ -36,8 +36,19 @@ mid-run, or a resume, never splits one run across two commits.
 | HEAD     | the tree  | `git archive <head.sha>` + WP 9.4's files |
 
 Trees come from `git archive <sha> | tar -x` — never `checkout` or `worktree`.
-Images are `pf-upgrade/{api,proxy,backup}:<sha>` (every era tags
-`${REGISTRY}/<svc>:${PERSONALFI_VERSION}`), never `personalfi/*:dev`.
+Every era builds and runs the image names its own `compose.yml` gives, with
+`REGISTRY=pf-upgrade`: W0–W5 `pf-upgrade/{api,proxy,backup}:<sha>`
+(`${REGISTRY}/<svc>:${PERSONALFI_VERSION}`), HEAD since WP 12.3
+`pf-upgrade/personalfi-{api,proxy,backup}:<sha7>-wp94` (the published name's
+form, `${REGISTRY}/personalfi-<svc>:${PERSONALFI_VERSION}`); never a
+publishing registry's names and never `:dev`. After the hop to HEAD the run
+checks that every running service is on HEAD's name and that W0's images still
+exist under W0's (`check_image_names`).
+
+An uncommitted package proves its own files across the upgrade with
+`UPGRADE_TEST_OVERLAY="compose.yml justfile …" bash scripts/upgrade-test/run.sh …`:
+the named paths are copied from the working tree over HEAD's commit, each copy
+logged. CI never sets it.
 
 ## What it does
 

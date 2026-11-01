@@ -19,7 +19,7 @@
 #
 # What a bump looks like (RUNBOOK "The proxy image: Caddy from source"):
 # Renovate proposes the golang digest, CADDY_VERSION, XCADDY_VERSION and the
-# two module floors from the `# renovate:` comments below; CI's proxy image
+# three module floors from the `# renovate:` comments below; CI's proxy image
 # scan (trivy, HIGH/CRITICAL, no snoozes for this image) is the control.
 #
 # WP 0.4 history, still binding: upstream's binary carried a
@@ -67,18 +67,23 @@ ARG CADDY_VERSION=v2.11.6
 # renovate: datasource=go depName=github.com/caddyserver/xcaddy
 ARG XCADDY_VERSION=v0.4.7
 ARG XCADDY_SUM=h1:WHNm6tqCFXcOxBovXqMzOvNa0W4arbQRxCeNap2S+aU=
-# Module floors above what Caddy v2.11.6's go.mod requires (x/net v0.59.0,
-# go-jose/v4 v4.1.5). Both are `go get` pins through xcaddy's `--with`, so
-# Go's minimum version selection applies: a later Caddy that needs a newer
-# version fails the build loudly instead of being silently held back (which a
-# go.mod `replace` would do). x/net v0.60.0 fixes CVE-2026-78669 (HTTP/2
-# SETTINGS flood); go-jose v4.1.6 fixes CVE-2026-116587 (JWK parsing DoS).
-# Both are the minimal fixing releases; drop a floor once CADDY_VERSION's own
-# go.mod requires at least it.
+# Module floors above what Caddy v2.11.6's module graph selects (x/net
+# v0.59.0, go-jose/v4 v4.1.5, chi/v5 v5.3.2). Each is a `go get` pin through
+# xcaddy's `--with`, so Go's minimum version selection applies: a later Caddy
+# that needs a newer version fails the build loudly instead of being silently
+# held back (which a go.mod `replace` would do). x/net v0.60.0 fixes
+# CVE-2026-78669 (HTTP/2 SETTINGS flood); go-jose v4.1.6 fixes CVE-2026-116587
+# (JWK parsing DoS); chi v5.4.0 (WP 12.3) clears the MEDIUM finding trivy
+# reports against v5.3.2 at every severity (WP 12.1 §2.4), which a public
+# scanner such as Docker Scout shows on the image's page. Each is the minimal
+# fixing release; drop a floor once CADDY_VERSION's own module graph selects
+# at least it.
 # renovate: datasource=go depName=golang.org/x/net
 ARG XNET_VERSION=v0.60.0
 # renovate: datasource=go depName=github.com/go-jose/go-jose/v4
 ARG GOJOSE_VERSION=v4.1.6
+# renovate: datasource=go depName=github.com/go-chi/chi/v5
+ARG CHI_VERSION=v5.4.0
 
 # ---------- caddy-build: compile Caddy for the target platform ----------
 # Runs on the BUILD platform and cross-compiles (GOOS/GOARCH from buildx's
@@ -90,6 +95,7 @@ ARG XCADDY_VERSION
 ARG XCADDY_SUM
 ARG XNET_VERSION
 ARG GOJOSE_VERSION
+ARG CHI_VERSION
 ARG TARGETOS
 ARG TARGETARCH
 # GOTOOLCHAIN=local: never let a go.mod `toolchain` line download a different
@@ -109,10 +115,11 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod,sharing=locked \
     fi
 # No plugins: the module set is the standard distribution's, pinned in
 # docker/caddy-modules.txt and checked against the built binary in the runtime
-# stage. The two `--with` lines import packages Caddy already links
-# (x/net/http2, go-jose/v4), so they add no Caddy module; they exist only to
-# raise the module floors. Flags: upstream's own release flags as read from
-# the v2.11.6 binary (`-trimpath`, tags nobadger,nomysql,nopgx, CGO off) plus
+# stage. The three `--with` lines import packages Caddy already links
+# (x/net/http2, go-jose/v4, chi/v5: all three are in the binary's build info
+# before the floors), so they add no Caddy module; they exist only to raise
+# the module floors. Flags: upstream's own release flags as read from the
+# v2.11.6 binary (`-trimpath`, tags nobadger,nomysql,nopgx, CGO off) plus
 # xcaddy's default `-w -s` and an empty build id, so two builds of the same
 # inputs are byte-identical (WP 12.1 evidence: an independent build outside
 # BuildKit, with empty caches, gave the same sha256).
@@ -124,7 +131,8 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod,sharing=locked \
     xcaddy build "${CADDY_VERSION}" \
       --output /out/caddy \
       --with "golang.org/x/net/http2@${XNET_VERSION}" \
-      --with "github.com/go-jose/go-jose/v4@${GOJOSE_VERSION}"
+      --with "github.com/go-jose/go-jose/v4@${GOJOSE_VERSION}" \
+      --with "github.com/go-chi/chi/v5@${CHI_VERSION}"
 # What actually got linked, read back from the binary's build info (works on a
 # cross-compiled binary; nothing is executed). Fails the build if minimum
 # version selection moved any pin, or the target is not what buildx asked for.
@@ -135,7 +143,8 @@ RUN go version -m /out/caddy > /out/buildinfo.txt && \
     for pair in \
       "github.com/caddyserver/caddy/v2=${CADDY_VERSION}" \
       "golang.org/x/net=${XNET_VERSION}" \
-      "github.com/go-jose/go-jose/v4=${GOJOSE_VERSION}"; do \
+      "github.com/go-jose/go-jose/v4=${GOJOSE_VERSION}" \
+      "github.com/go-chi/chi/v5=${CHI_VERSION}"; do \
       mod="${pair%%=*}"; want="${pair#*=}"; got="$(dep "$mod")"; \
       [ "$got" = "$want" ] || { echo "caddy build: $mod is '$got', expected '$want'" >&2; fail=1; }; \
     done && \
@@ -256,8 +265,9 @@ USER 10003:10003
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
 
 LABEL org.opencontainers.image.title="personalfi-proxy" \
-      org.opencontainers.image.description="Caddy 2 built from source on a patched Go, serving apps/web, non-root, no file capability (WP 0.4, WP 12.1)" \
-      org.opencontainers.image.source="https://github.com/chris/personalfi" \
+      org.opencontainers.image.description="PersonalFi proxy: Caddy 2 built from source on a patched Go, serving apps/web, non-root, no file capability (WP 0.4, WP 12.1)" \
+      org.opencontainers.image.source="https://github.com/huh12312/PersonalFi" \
+      org.opencontainers.image.url="https://github.com/huh12312/PersonalFi" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.vendor="PersonalFi" \
       org.opencontainers.image.base.name="docker.io/library/alpine:3.23.6"

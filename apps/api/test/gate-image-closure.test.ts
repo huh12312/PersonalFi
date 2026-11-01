@@ -43,7 +43,7 @@
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
-const IMAGE = process.env['PERSONALFI_API_IMAGE'] ?? 'personalfi/api:dev';
+const IMAGE = process.env['PERSONALFI_API_IMAGE'] ?? 'ghcr.io/huh12312/personalfi-api:dev';
 
 function run(command: string, args: readonly string[]): string {
   return execFileSync(command, [...args], {

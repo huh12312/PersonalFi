@@ -85,7 +85,23 @@ prepare_tree() {
       mkdir -p "$(dirname "$dest/$p")"
       cp -a "$REPO_ROOT/$p" "$dest/$p"
     done
+    # UPGRADE_TEST_OVERLAY (WP 12.3): space-separated paths an uncommitted
+    # package names explicitly, copied from the working tree over the commit
+    # — the way that package proves its own in-flight files (compose.yml's
+    # image names, the justfile, a Dockerfile) across the upgrade before they
+    # are committed. Never set by CI or by default; each copy is logged, and a
+    # path that does not exist in the working tree stops the run.
+    local o
+    for o in ${UPGRADE_TEST_OVERLAY:-}; do
+      case "$o" in /* | *..*) die "UPGRADE_TEST_OVERLAY: '$o' must be a relative path inside the repository" ;; esac
+      [ -e "$REPO_ROOT/$o" ] || die "UPGRADE_TEST_OVERLAY: $o does not exist in the working tree"
+      rm -rf "${dest:?}/$o"
+      mkdir -p "$(dirname "$dest/$o")"
+      cp -a "$REPO_ROOT/$o" "$dest/$o"
+      log "overlay: $o copied from the working tree over ${HEAD_SHA:0:7} (UPGRADE_TEST_OVERLAY)"
+    done
     for p in "${WP94_SHARED_PATHS[@]}"; do
+      case " ${UPGRADE_TEST_OVERLAY:-} " in *" $p "*) continue ;; esac
       if ! git -C "$REPO_ROOT" diff --quiet "$HEAD_SHA" -- "$p" 2>/dev/null; then
         log "note: the working tree's $p differs from ${HEAD_SHA:0:7} (a shared file); the test tree uses the commit's"
       fi
@@ -179,7 +195,11 @@ SQL
   fi
 }
 
-# The version tag a waypoint's images carry: pf-upgrade/<svc>:<tag>.
+# The version tag a waypoint's images carry. The image NAME is the era's own
+# compose.yml's: W0-W5 tag `pf-upgrade/<svc>:<tag>` (`${REGISTRY}/<svc>`),
+# HEAD since WP 12.3 `pf-upgrade/personalfi-<svc>:<tag>` (the published
+# name's form, `${REGISTRY}/personalfi-<svc>`). Each era builds and runs its
+# own names; `image_ref` below says which a tree uses.
 version_tag() {
   case "$1" in
     HEAD) echo "${HEAD_SHA:0:7}-wp94" ;;
@@ -188,6 +208,18 @@ version_tag() {
     HEAD-pristine) echo "${HEAD_SHA:0:7}" ;;
     *) echo "${WAYPOINT_SHA[$1]}" ;;
   esac
+}
+
+# image_ref <tree dir> <svc> <tag>: the image the tree's compose.yml runs for
+# <svc> under REGISTRY=pf-upgrade — read from the tree, never assumed by era.
+image_ref() {
+  local dir="$1" svc="$2" tag="$3"
+  # shellcheck disable=SC2016 # the literal `${PERSONALFI_VERSION` of compose.yml's text
+  if grep -q '/personalfi-api:\${PERSONALFI_VERSION' "$dir/compose.yml"; then
+    echo "${REGISTRY_TEST}/personalfi-${svc}:${tag}"
+  else
+    echo "${REGISTRY_TEST}/${svc}:${tag}"
+  fi
 }
 
 # "git pull": replace every tracked file, keep what the operator owns

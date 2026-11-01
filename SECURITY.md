@@ -88,8 +88,10 @@ gh attestation verify oci://ghcr.io/huh12312/personalfi-api:0.10.0 --repo huh123
 ```
 
 `scripts/verify-release.sh` runs both checks for all three images, resolves the tag to a digest
-once, and pulls by digest only if everything passes. The RUNBOOK's [Upgrade](RUNBOOK.md#upgrade)
-section shows how to use it.
+once, and pulls by digest only if everything passes (`--source docker.io/masterhuh` for the Docker
+Hub copy; without `gh` it checks the signatures only and says so, and `--strict` refuses instead).
+`just install-release <x.y.z>` runs it before every install and upgrade from published images. The
+RUNBOOK's [Upgrade](RUNBOOK.md#upgrade) section shows how to use it.
 
 **The signing identity.** A valid signature names the workflow
 `https://github.com/huh12312/PersonalFi/.github/workflows/release.yml` at a `refs/tags/v<x.y.z>`

@@ -49,10 +49,21 @@ describe('scripts/soak/check-isolation.sh (WP 9.1 part 1)', () => {
 
       // A scratch project is refused too: the guard is for production, and nothing else passes it.
       expect(run(['pf-prodlike', SHA, scratch]).status).toBe(1);
-      // A short SHA, an upper-case SHA and an empty version are not 40 lowercase hex.
-      for (const version of ['0123456', SHA.toUpperCase(), '']) {
+      // A short SHA, an upper-case SHA and an empty version are not 40 lowercase hex;
+      // `latest`, a minor line and a `v`-prefixed tag are not a release x.y.z (WP 12.3).
+      for (const version of [
+        '0123456',
+        SHA.toUpperCase(),
+        '',
+        'latest',
+        '0.10',
+        'v0.10.0',
+        'sha-0123456',
+      ]) {
         expect(run(['personalfi-prod', version, scratch]).status, version).toBe(1);
       }
+      // A verified pull runs the release's own tag (WP 12.3): accepted like a commit SHA.
+      expect(run(['personalfi-prod', '0.10.0', scratch]).status).toBe(0);
       // Env fallbacks, as `docker compose` itself would have set them: unset means refused.
       expect(run([], { COMPOSE_PROJECT_NAME: 'personalfi-prod' }).status).toBe(1);
 

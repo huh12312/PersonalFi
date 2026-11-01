@@ -38,17 +38,20 @@ Its security posture is documented, including what it does not defend against. R
 ## What you need on the host
 
 Install from a clean machine with these tools and nothing else. You do **not** need pnpm, and you do
-not need to install the workspace's own Node: the application is built inside Docker.
+not need to install the workspace's own Node: installing a release pulls images that were built
+elsewhere, and building from source happens inside Docker.
 
 | Tool                                          | Why it is needed                                                                                                                                 |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `git`                                         | To fetch the code, and to update it later (`git pull`).                                                                                          |
+| `git`                                         | To fetch the release's files and update them later. Optional for a release install: its source archive works too.                                |
 | Docker Engine 29 or newer, with Compose v2    | Everything runs in containers: `docker compose` and `docker run`. Measured on Compose 5.5.                                                       |
 | [`just`](https://github.com/casey/just) 1.21+ | The install, backup, restore-drill and upgrade steps are `just` recipes (`just --list` shows them all).                                          |
 | Node.js 18 or newer (`node` on the `PATH`)    | Only the host-side helper scripts use it: `just gen-pg-secrets`, `just gen-master-key` and the secret check that `just upgrade` runs. No `pnpm`. |
 | `openssl`, `bash`, and the usual `coreutils`  | `just gen-pg-secrets` draws its random bytes from `openssl`; the recipes are bash.                                                               |
 | `curl`                                        | The TLS check in install step 8 (`curl --cacert …`).                                                                                             |
 | `sudo` (optional)                             | Only for `just harden-secrets` (tighter secret file modes), the `/etc/hosts` line and importing the TLS certificate into your trust store.       |
+| `cosign` v3 (optional)                        | Checks the release images' signatures. Without it, the verifier runs cosign from its pinned container image.                                     |
+| `gh`, logged in (optional)                    | Checks the release images' provenance attestations. Without it, the verifier warns and checks the signatures only.                               |
 
 Package names, for a clean host: on Alpine, `apk add git just nodejs openssl bash coreutils curl`
 (Docker and its Compose plugin come from Docker's own packages); on Arch, `pacman -S git just nodejs
@@ -61,8 +64,8 @@ Sizing: a host with 4 GiB of RAM or more and a couple of cores. In steady state 
 sits near 0.3 to 0.5 GiB. At every start the API and the worker each derive their encryption key,
 one after the other, and the stack peaks near 1.5 GiB for a few seconds (the two never derive at
 once; if that lock cannot be taken they both do and the peak is near 2.4 GiB), so a host with less
-than 3 GiB free at that moment can be OOM-killed. Build the images on a machine with network access; the first
-build takes several minutes.
+than 3 GiB free at that moment can be OOM-killed. A release install downloads a few hundred megabytes of images;
+building from source needs network access and takes several minutes the first time.
 
 The machine holding real financial data should have its data disk encrypted (LUKS2 or equivalent).
 The RUNBOOK's "First install" has the one-time commands. A throwaway test machine does not need it.
@@ -81,34 +84,55 @@ The RUNBOOK's "First install" has the one-time commands. A throwaway test machin
   identity to check.
 - **Registries.** `ghcr.io/huh12312/personalfi-{api,backup,proxy}` is canonical. The Docker Hub
   mirror is `masterhuh/personalfi-{api,backup,proxy}`.
-- **`latest`.** Published for convenience. The upgrade path refuses it because it names no single
-  commit: pin a version. The install below still builds from the checkout; the RUNBOOK's
-  [Upgrade](RUNBOOK.md#upgrade) describes installing a verified published release instead.
+- **`latest`.** Published for convenience. `just install-release` and the upgrade path refuse it
+  because it names no single commit: pin a version. The install below pulls a verified, pinned
+  release; building from source is for development and is described after it.
 
 ## Install
 
-These steps take a clean host to a passkey login over TLS. Run them from the repository root unless
-a step says otherwise. Every `just` recipe named here is in the `justfile`, and `just --list` shows
-all of them.
+There are two ways in. **Install a published release** (below) pulls the three PersonalFi images,
+verified, and builds nothing: it is the path for running PersonalFi. **[Build from
+source](#build-from-source-developers)** builds the images from a checkout, for development or to
+run a commit between releases. Both end at the same steps 8 to 10.
 
-1. **Get the code.**
+**No release has been published yet.** v0.10.0 is the first public release and is in preparation;
+until `gh release list --repo huh12312/PersonalFi` shows it, the commands below that name
+`0.10.0` have nothing to pull, and [Build from source](#build-from-source-developers) is the way
+to install. Everything below is written for `0.10.0`; for a later release, use its number.
+
+These steps take a clean host to a passkey login over TLS. Run them from the top of the release's
+files unless a step says otherwise. Every `just` recipe named here is in the `justfile` (or the
+file it imports), and `just --list` shows all of them.
+
+1. **Get the release's files.** The install runs the published images, but it needs the release's
+   own `compose.yml` and recipes: `compose.yml`, `justfile`, `scripts/` (the verifier, the upgrade
+   recipe it imports and the helpers they call), `.env.example`, `docker/Caddyfile` (mounted into
+   the proxy) and `packages/db/migrations/` (read by the pre-migration backup). Take the whole tree
+   at the release tag, so these match the images exactly:
 
    ```bash
-   git clone https://github.com/huh12312/PersonalFi.git personalfi
+   git clone --branch v0.10.0 https://github.com/huh12312/PersonalFi.git personalfi
    cd personalfi
    ```
 
-   To run a released version rather than the tip of `main`, check out its tag (`git tag -l` lists
-   them) before step 2. The directory name becomes the Docker Compose project name (`personalfi`), and
-   so the prefix of your volume names.
+   Or, without `git`, the tag's source archive from the release page
+   (`https://github.com/huh12312/PersonalFi/archive/refs/tags/v0.10.0.tar.gz`, unpacked; rename
+   the directory to `personalfi`). A clone lets the verifier also check that the images were built
+   from the commit you have; from the archive it checks the release tag only. The directory name
+   becomes the Docker Compose project name (`personalfi`), and so the prefix of your volume names.
 
-2. **Choose the hostname, then write `.env`.**
+2. **Choose the hostname and the release, then write `.env`.**
 
    ```bash
    cp .env.example .env
+   echo "PERSONALFI_VERSION=0.10.0" >> .env
    ```
 
-   `.env` holds non-secret settings only. The defaults work as they are: the site is
+   `.env` holds non-secret settings only. `PERSONALFI_VERSION` is the release you run, and it must
+   be the one you pass to `just install-release` in step 7; `just install-release` refuses to start
+   if the names compose would run are not the release's. Leave `REGISTRY` at its default,
+   `ghcr.io/huh12312` (GitHub Container Registry, the canonical copy); to pull the identical Docker
+   Hub copy instead, add `REGISTRY=masterhuh`. The other defaults work as they are: the site is
    `personalfi.lan`, served on `127.0.0.1` ports 443 and 80. Edit `PUBLIC_HOST` if you want another
    name, and `BIND_ADDRESS` only if other devices on your LAN must reach the box (never `0.0.0.0`).
    **Pick the final `PUBLIC_HOST` now:** passkeys are bound to it, and changing it later invalidates
@@ -127,56 +151,60 @@ all of them.
    it somewhere that is not this machine** (a password manager). Losing it means re-linking every
    provider; the recipes refuse to overwrite an existing one.
 
-4. **Build the images.** This builds the API, worker, migrator, backup and proxy images from the
-   checkout, and takes several minutes the first time.
+4. **Verify and fetch the images.** Each image was signed by this repository's release workflow at
+   the tag `v0.10.0`. The verifier checks every signature (and, with `gh` installed and logged in,
+   the provenance attestation) before it pulls anything, then pulls each image by its digest under
+   its published name, which is the name compose runs:
 
    ```bash
-   just build
+   bash scripts/verify-release.sh --release 0.10.0 --pull
    ```
 
+   Add `--source masterhuh` if you set `REGISTRY=masterhuh`, and `--commit "$(git rev-parse HEAD)"`
+   from a clone. It prints `PASS` and three `pulled …` lines; any refusal stops it with nothing
+   pulled. `cosign` is used from your `PATH`, or run from its pinned container image. Without `gh`
+   it prints a warning and checks the signatures only; `--strict` refuses instead.
+
 5. **Create the backup keypair.** Backups are encrypted to a public key; the container never holds
-   the private half. Generate the pair with the backup image, so the host needs no `age`. Whoever
-   holds the identity file can read every backup, so for real data copy it to a password manager and
-   an offline copy and then remove it from this machine.
+   the private half. Generate the pair with the backup image you just verified (`--pull never`
+   makes sure it is that one), so the host needs no `age`. Whoever holds the identity file can read
+   every backup, so for real data copy it to a password manager and an offline copy and then remove
+   it from this machine.
 
    ```bash
-   (umask 077; docker run --rm --entrypoint age-keygen personalfi/backup:dev > "$HOME/personalfi-age-identity.txt")
+   (umask 077; docker run --rm --pull never --entrypoint age-keygen ghcr.io/huh12312/personalfi-backup:0.10.0 > "$HOME/personalfi-age-identity.txt")
    grep '^# public key:' "$HOME/personalfi-age-identity.txt" | cut -d' ' -f4 > secrets/age_recipient
    chmod 444 secrets/age_recipient
    ```
 
-   (`personalfi/backup:dev` is the image step 4 built; if you set `PERSONALFI_VERSION` in `.env`,
-   use that tag in place of `dev`.) You need the identity file only to restore and for the restore
-   drill below; on a throwaway test host, leave it where it is, and on a host with real data bring
-   it back for just those minutes.
+   (With `REGISTRY=masterhuh`, the image is `masterhuh/personalfi-backup:0.10.0`.) You need the
+   identity file only to restore and for the restore drill below; on a throwaway test host, leave
+   it where it is, and on a host with real data bring it back for just those minutes.
 
 6. **Create the empty placeholders for the optional secrets.** Compose will not start a service
    whose secret file is missing, and each optional feature (a bank aggregator, price feeds, the
    advisor token, off-site backup) is simply off while its file is empty. This recipe creates every
    optional secret `compose.yml` declares, empty, never overwrites a file, and refuses to run if a
-   required secret from steps 3 and 5 is missing.
+   required secret from steps 3 and 5 is missing (step 7 runs it again; it is safe to repeat).
 
    ```bash
    just secrets-placeholders
    ```
 
-7. **Start the stack and wait for it.**
+7. **Install the release: verify, pull by digest, start.**
 
    ```bash
-   docker compose up -d --wait --wait-timeout 900
-   docker compose ps
+   just install-release 0.10.0
    ```
 
-   `up --wait` returns once `db`, `api`, `worker`, `proxy` and `backup` are healthy and the one-shot
-   `pre-migrate-backup` and `migrator` containers have exited 0. Expect a minute or two on a cold
-   start. (`just up` is the same without the wait.) Then ask the API, from inside its own
-   container, whether it is ready (no certificate is involved yet):
-
-   ```bash
-   docker compose exec -T api node -e "fetch('http://127.0.0.1:8080/ready').then(async r => console.log(r.status, await r.text()))"
-   ```
-
-   It prints `200` and a JSON body with `"status":"ready"`.
+   It refuses `latest` and anything that is not `x.y.z`, and it refuses if `.env` names another
+   version or registry than the images it would verify. Then it checks the placeholders, runs the
+   verifier from step 4 again (the same call an upgrade makes), pulls the database image, and starts
+   the stack with `docker compose up -d --wait --no-build --pull never`, so it runs exactly the
+   verified images and never builds or fetches another. It returns once `db`, `api`, `worker`,
+   `proxy` and `backup` are healthy and the one-shot `pre-migrate-backup` and `migrator` have exited
+   0, prints the API's own `/ready` answer (`200` and a JSON body with `"status":"ready"`), and checks
+   that `api` and `worker` have not restarted. Expect two or three minutes on a cold start.
 
 8. **Trust the TLS certificate.** Caddy issues the certificate for your hostname from its own
    internal CA, so your browser does not trust it until you import that CA.
@@ -242,6 +270,72 @@ all of them.
     **Account** box empty; the passkey identifies you. You are at the dashboard: the install is
     complete.
 
+### Build from source (developers)
+
+This builds the images from a checkout instead of pulling them: for working on PersonalFi, or for
+running a commit between releases. It needs network access for the build, which takes several
+minutes the first time. Steps 1 to 3 differ from the release path only in what you check out:
+
+1. **Get the code.**
+
+   ```bash
+   git clone https://github.com/huh12312/PersonalFi.git personalfi
+   cd personalfi
+   ```
+
+   The tip of `main`, or any commit or tag you check out.
+
+2. **Write `.env`** as in step 2 above, but leave `PERSONALFI_VERSION` unset: the images are then
+   tagged `dev` (`ghcr.io/huh12312/personalfi-api:dev` and so on: compose's names, with a tag no
+   release ever carries), or set it to the commit you built. `just build` refuses a release's tag
+   such as `0.10.0` under `ghcr.io/huh12312` or `masterhuh`, so a local build can never pose as a
+   published image; set `REGISTRY=personalfi` if you would rather not see the registry's name on
+   local builds at all.
+
+3. **Create the secrets**: `just gen-pg-secrets` and `just gen-master-key`, as in step 3 above.
+
+4. **Build the images.** This builds the API, worker, migrator, backup and proxy images from the
+   checkout.
+
+   ```bash
+   just build
+   ```
+
+5. **Create the backup keypair** with the image step 4 built:
+
+   ```bash
+   (umask 077; docker run --rm --entrypoint age-keygen ghcr.io/huh12312/personalfi-backup:dev > "$HOME/personalfi-age-identity.txt")
+   grep '^# public key:' "$HOME/personalfi-age-identity.txt" | cut -d' ' -f4 > secrets/age_recipient
+   chmod 444 secrets/age_recipient
+   ```
+
+   (If you set `PERSONALFI_VERSION` or `REGISTRY` in `.env`, use that name and tag in place of
+   `ghcr.io/huh12312/personalfi-backup:dev`.)
+
+6. **Create the empty placeholders for the optional secrets.**
+
+   ```bash
+   just secrets-placeholders
+   ```
+
+7. **Start the stack and wait for it.**
+
+   ```bash
+   docker compose up -d --wait --wait-timeout 900
+   docker compose ps
+   ```
+
+   `up --wait` returns once `db`, `api`, `worker`, `proxy` and `backup` are healthy and the one-shot
+   `pre-migrate-backup` and `migrator` containers have exited 0. Expect a minute or two on a cold
+   start. (`just up` is the same without the wait.) Then ask the API, from inside its own
+   container, whether it is ready (no certificate is involved yet):
+
+   ```bash
+   docker compose exec -T api node -e "fetch('http://127.0.0.1:8080/ready').then(async r => console.log(r.status, await r.text()))"
+   ```
+
+   It prints `200` and a JSON body with `"status":"ready"`. Continue with steps 8 to 10 above.
+
 If a step fails, the RUNBOOK's [Troubleshooting](RUNBOOK.md#troubleshooting) section lists the
 failures people actually hit, with the exact error text.
 
@@ -294,15 +388,27 @@ and optional Plaid and price-feed keys. (Plaid's keys can also be entered in the
 
 ## Upgrade
 
+**A release install** (the path above): fetch the new release's files, set the new version (here, for example, 0.10.1), and
+install it the same way.
+
+```bash
+git fetch --tags && git checkout v0.10.1      # or unpack the new release's source archive
+sed -i 's/^PERSONALFI_VERSION=.*/PERSONALFI_VERSION=0.10.1/' .env
+just install-release 0.10.1
+```
+
+**A source build**:
+
 ```bash
 git pull
 just upgrade
 ```
 
-Expect three to five minutes (the images are rebuilt), and the site is unavailable while the new
-containers start. That is the whole upgrade, from any earlier release, however many you skipped. It creates any
-secret placeholder your install predates, rebuilds the images, takes a verified backup before the
-first migration, applies the migrations, and checks that the stack is ready and stable. If the
+Either way the site is unavailable for a few minutes while the new containers start (a source
+build also rebuilds the images first). That is the whole upgrade, from any earlier release, however
+many you skipped. It creates any secret placeholder your install predates, verifies and pulls the
+release's images (or rebuilds them from the checkout), takes a verified backup before the first
+migration, applies the migrations, and checks that the stack is ready and stable. If the
 stack comes up on a database newer than the code, it refuses to start rather than guess. The
 RUNBOOK's [Upgrade](RUNBOOK.md#upgrade) section says what to do when a step fails and how to roll
 back. The [release notes](docs/RELEASE-NOTES.md) name every manual step a release needs (v0.9.0

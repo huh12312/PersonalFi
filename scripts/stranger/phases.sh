@@ -72,7 +72,7 @@ phase_build() {
 # README Install steps 5-6
 phase_install5() {
   step s5-age pf "README Install 5: backup keypair (verbatim)" \
-    "(umask 077; docker run --rm --entrypoint age-keygen personalfi/backup:dev > \"\$HOME/personalfi-age-identity.txt\")
+    "(umask 077; docker run --rm --entrypoint age-keygen ghcr.io/huh12312/personalfi-backup:dev > \"\$HOME/personalfi-age-identity.txt\")
 grep '^# public key:' \"\$HOME/personalfi-age-identity.txt\" | cut -d' ' -f4 > secrets/age_recipient
 chmod 444 secrets/age_recipient
 cat secrets/age_recipient; ls -la secrets \$HOME/personalfi-age-identity.txt"
