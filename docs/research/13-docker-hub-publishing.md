@@ -228,3 +228,25 @@ the tag and the environment approval.
 [hub-limits]: https://github.com/docker/docs/pull/21494/files
 [hub-oat]: https://docs.docker.com/security/access-tokens/reference/
 [cosign-spec]: https://github.com/sigstore/cosign/blob/main/specs/BUNDLE_SPEC.md
+
+---
+
+## 9. Addendum (2026-11-01): mirror the PantryRadar setup
+
+Chris: "I have other repos like PantryRadar that use the docker setup tied to github. Mirror that."
+Read from `huh12312/pantryradar`'s `docker-publish.yml`: trigger on a `v*` tag push, gated on the
+repository's own CI and E2E reusable workflows, `docker/login-action` with the username
+`masterhuh` in the workflow and the token in the `DOCKER_PAT` secret, tags by
+`docker/metadata-action` (`{{version}}`, `{{major}}.{{minor}}`, `latest`), `docker/build-push-action`
+with the GHA cache, one image `masterhuh/pantryradar`. Its compose file pulls
+`masterhuh/pantryradar:latest`; the Hub repository was created by the first push (Docker Hub
+creates a public repository under your namespace on first push).
+
+What this settles for 12.2: the namespace is **`masterhuh`** (no `DOCKERHUB_NAMESPACE` variable),
+the images are `masterhuh/personalfi-{api,backup,proxy}`, the secret is **`DOCKER_PAT`** (the same
+token value, set on this repository by Chris), the username is written in the workflow as
+PantryRadar does, the tag set comes from `docker/metadata-action` with the same three patterns plus
+`sha-<7>`, and no Hub repository is created by hand. What stays from this document, because it is
+what a finance app's images need beyond PantryRadar's: actions pinned by commit SHA (06 §5.1),
+the upgrade-test gate, multi-arch, cosign and provenance per registry, the verify-before-release
+step, the reviewed `release` environment, and the version policy of D32.
