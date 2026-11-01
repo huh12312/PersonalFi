@@ -68,8 +68,9 @@ actually completes, and the community-facing hygiene a public image implies.
    that `cosign verify` and `gh attestation verify` both pass against the Hub reference, and the
    release job should assert it before the GitHub release is created.
 5. **Tag immutability.** Docker Hub can mark tags immutable per repository (_verify_ the setting's
-   current name on the Hub repository settings page). Turn it on for every version tag; `latest`
-   and the minor-line tag (`0.10`) stay movable by design.
+   current name on the Hub repository settings page). Turn it on for `X.Y.Z` and `sha-*` tags;
+   `latest` and the minor-line tag (`0.10`) move on every patch release by design (D32's wording
+   was corrected to this on 2026-11-01).
 6. **The README on the Hub page** is separate from GitHub's. It is kept in step by a pinned action
    that pushes a short file (what the image is, the three image names, the verify command, the
    link to the install guide) on every release.
