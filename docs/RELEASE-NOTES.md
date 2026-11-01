@@ -44,6 +44,17 @@ None from the items so far.
   modules and takes a minute or two longer. Renovate proposes Go, Caddy, xcaddy and module bumps
   as one PR; [RUNBOOK: The proxy image](../RUNBOOK.md#the-proxy-image-caddy-from-source) says how
   one lands.
+- **Releases publish to GHCR and Docker Hub, and verify both before the release exists (WP 12.2).**
+  A `vX.Y.Z` tag now runs the upgrade-test gate, waits for the maintainer's approval (the `release`
+  environment), then builds each image once for amd64 and arm64 and pushes it to
+  `ghcr.io/huh12312/personalfi-<image>` (canonical) and `masterhuh/personalfi-<image>` (the Docker
+  Hub mirror) with the tags `X.Y.Z`, `X.Y`, `latest` and `sha-<7>`: one digest on both registries.
+  Each registry's copy is signed with cosign and carries a provenance attestation, and a verify job
+  checks both copies, anonymously and by digest, before the GitHub release is created. The Hub
+  page's description is pushed from `docker/DOCKERHUB_README.md`. Nothing changes on an install
+  that builds from source.
+  [RUNBOOK: Cutting a release](../RUNBOOK.md#cutting-a-release) has the steps and the commands to
+  verify an image from either registry.
 
 ## v0.9.27: the insights module says when it is not enabled
 

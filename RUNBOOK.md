@@ -789,24 +789,47 @@ wrong project name, `PERSONALFI_VERSION` not a 40-character commit SHA, or the a
 directory. Every other project (a scratch install, the upgrade test, a gate) skips it, because
 the guard refuses every project but production by design.
 
-**Installing published images instead of building (pull-and-verify).** Once a release is tagged
-(`v0.9.0` onward), the images `release.yml` built, signed and attested can be used instead of a local
-build:
+**Installing published images instead of building (pull-and-verify).** From v0.10.0, the first
+published release (D32), the images `release.yml` built, signed and attested can be used instead of
+a local build:
 
-    git pull && git checkout v0.9.0
-    PERSONALFI_VERSION="$(git rev-parse HEAD)" PERSONALFI_PULL=1 PERSONALFI_RELEASE=0.9.0 just upgrade
+    git pull && git checkout v0.10.0
+    PERSONALFI_VERSION="$(git rev-parse HEAD)" PERSONALFI_PULL=1 PERSONALFI_RELEASE=0.10.0 just upgrade
 
 For each of `api`, `backup` and `proxy`, `scripts/verify-release.sh` resolves
-`ghcr.io/<owner>/personalfi-<image>:0.9.0` to a digest once, then checks — by digest only — that the
-cosign signature was made by this repository's `release.yml` at `refs/tags/v0.9.0` **at the commit
+`ghcr.io/<owner>/personalfi-<image>:0.10.0` to a digest once, then checks — by digest only — that the
+cosign signature was made by this repository's `release.yml` at `refs/tags/v0.10.0` **at the commit
 you have checked out**, and that GitHub holds a provenance attestation for it
 (`gh attestation verify`, so `gh` must be logged in). Only if all three images pass are they pulled
 by digest and tagged as the names compose runs; the upgrade then starts them with `--no-build`.
 Any failure stops before anything is pulled, and the old version keeps serving. `cosign` is used
 from your PATH, or run from its pinned container image if it is not installed. To check a release
-without upgrading: `bash scripts/verify-release.sh --release 0.9.0 --commit <sha>`; to check the
+without upgrading: `bash scripts/verify-release.sh --release 0.10.0 --commit <sha>`; to check the
 verifier itself (it must accept a known-good signature and refuse an unsigned image):
 `bash scripts/verify-release.sh --self-test`. Building from source stays the default.
+
+**The same images on Docker Hub.** Every release is also published as
+`masterhuh/personalfi-<image>` on Docker Hub, from the same build: the digest is identical on both
+registries, and each copy carries its own cosign signature and provenance attestation. The release
+workflow verifies both copies before it creates the GitHub release
+([Cutting a release](#cutting-a-release)). `scripts/verify-release.sh` reads GHCR only for now; to
+check a copy from either registry by hand, resolve the tag to a digest and verify that digest
+(cosign v3, which is what signs; `gh` logged in):
+
+```bash
+V=0.10.0
+for REF in ghcr.io/huh12312/personalfi-api docker.io/masterhuh/personalfi-api; do
+  D="$(docker buildx imagetools inspect "$REF:$V" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+  cosign verify "$REF@$D" \
+    --certificate-identity "https://github.com/huh12312/PersonalFi/.github/workflows/release.yml@refs/tags/v$V" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  gh attestation verify "oci://$REF@$D" --repo huh12312/PersonalFi
+done
+```
+
+Both registries must print the same digest; repeat for `personalfi-backup` and `personalfi-proxy`.
+Docker Hub limits anonymous pulls per IP address: if a pull or a verify is refused with
+`429 Too Many Requests`, run `docker login` or use the GHCR name.
 
 **Rollback is "restore the pre-migration backup"** — never "pin the prior
 image". Migrations are forward-only, and an older binary refuses the newer
@@ -1696,6 +1719,52 @@ seventeen rules fire, and once over the real files. The gate this replaced
 passed a privileged, host-networked, Docker-socket-mounting service for a
 month, so "the check ran and said PASS" is not evidence unless the check has
 been seen failing something.
+
+### Cutting a release
+
+From v0.10.0 a release is a tag, a gate, one approval, and a workflow that refuses to create the
+release unless both registries serve verified images (D32, `.github/workflows/release.yml`):
+
+1. **Tag a green commit.** `just verify` locally and CI green on the commit; the release notes'
+   `## vX.Y.Z` section says what changed and names every manual step. Then
+   `git tag vX.Y.Z <sha> && git push origin vX.Y.Z`. Only `vX.Y.Z` tags start the workflow, and one
+   run per tag runs at a time.
+2. **The gate runs by itself:** the unattended upgrade from v0.1 to the tagged commit, and trivy over
+   the three images it built (`upgrade-test.yml`). A red gate ends the run; nothing is published.
+3. **The approval.** The publishing job uses the `release` environment, whose required reviewer is
+   Chris. The run waits at "Review deployments"; one approval releases all three images.
+4. **Publish.** Each image is built once for `linux/amd64` and `linux/arm64` and pushed to
+   `ghcr.io/huh12312/personalfi-<image>` and `masterhuh/personalfi-<image>` with the tags `X.Y.Z`,
+   `X.Y`, `latest` and `sha-<7>`. Each registry's copy is signed with cosign (keyless) and gets a
+   SLSA provenance attestation; SPDX and CycloneDX SBOMs are generated.
+5. **Verify.** A separate job, logged in to neither registry (as a community install is), checks for
+   every image on both registries that the version tag resolves to the published digest, that
+   `cosign verify` accepts the digest with the identity `scripts/verify-release.sh` checks (this
+   repository's `release.yml` at `refs/tags/vX.Y.Z`, GitHub's OIDC issuer, the tagged commit), and
+   that `gh attestation verify` finds the provenance. Any failure fails the run.
+6. **The GitHub release** is created only after verify passes, with generated notes and the SBOMs
+   attached. In parallel, `docker/DOCKERHUB_README.md` is pushed as each Hub repository's
+   description.
+
+If verify fails on a registry problem (a 429, a package that is not public), fix it and use
+"Re-run failed jobs": the published images are not rebuilt, and the approval is not asked for again.
+`scripts/release-workflow.test.ts` pins the workflow's shape (pinned actions, the two logins, both
+image names, the four tag patterns, the environment, the verify job ahead of the release, the
+secrets it may name), because the workflow itself cannot run before a real tag.
+
+**The first release, once.** Docker Hub creates the three `masterhuh/personalfi-*` repositories on
+the first push; nothing is made by hand. GHCR may create its three packages as private: if verify
+reports a GHCR reference it cannot read, set each package's visibility to public (the package's
+settings page on GitHub) and re-run the failed jobs.
+
+**The Docker Hub token.** The workflow reads one credential beyond its own `GITHUB_TOKEN`: the
+repository secret `DOCKER_PAT`, a personal access token on Chris's Docker Hub account `masterhuh`
+(the account PantryRadar publishes from). Only the publishing job and the Hub-description job read
+it. It needs read and write to push; the description update needs read/write/delete, and with a
+narrower token the images still publish and verify but the description job fails. To rotate:
+create a new token on Docker Hub, set it with `gh secret set DOCKER_PAT -R huh12312/PersonalFi`,
+then revoke the old one on Docker Hub. Nothing else changes: the username is in the workflow, and no
+other file names the token.
 
 ---
 

@@ -1,15 +1,31 @@
 # SPDX-License-Identifier: MIT
 #
-# Tag-triggered release (06 §5.1 job 12, §5.2, §5.3). Runs only on `vX.Y.Z`
-# tags, after `ci.yml` has already passed on the commit being tagged — this
-# workflow does not repeat typecheck/lint/test/vuln-scan; it builds the
-# real multi-arch artifact, signs it, and publishes it.
+# Tag-triggered release (06 §5.1 job 12, §5.2, §5.3; D32; docs/research/13
+# §3 and §9). Runs only on `vX.Y.Z` tags, after `ci.yml` has already passed on
+# the commit being tagged — this workflow does not repeat typecheck/lint/test/
+# vuln-scan; it builds the real multi-arch artifact, signs it, publishes it to
+# two registries, verifies what it published, and only then cuts the release.
 #
-# Two independent attestations, on purpose (06 §5.3):
+#   upgrade-test ─► build-sign-publish ×3 ─► verify ─┬─► github-release
+#   (gate, auto)    (environment `release`:          └─► hub-readme ×3
+#                    waits for Chris's approval)
+#
+# Two registries, one build (D32): GHCR is canonical
+# (`ghcr.io/huh12312/personalfi-<image>`), Docker Hub the mirror
+# (`masterhuh/personalfi-<image>`, Chris's account, as PantryRadar publishes;
+# the token is the `DOCKER_PAT` secret). Both names take every tag from one
+# `docker/build-push-action` step — one manifest list, one digest on both.
+#
+# Two independent attestations, on purpose (06 §5.3), on BOTH references:
 #   - `actions/attest-build-provenance` -> SLSA provenance in GitHub's
-#     attestation store, verified with `gh attestation verify`.
+#     attestation store, verified with `gh attestation verify`;
 #   - `cosign sign --yes` keyless (OIDC -> Fulcio -> Rekor) -> verifiable by
 #     anyone with cosign and no GitHub account.
+# `verify` then checks both, by digest, for both registries, with the
+# identity scripts/verify-release.sh checks; `github-release` needs it, so a
+# release whose images do not verify is never cut.
+#
+# Releasing: RUNBOOK "Cutting a release". Invariants: scripts/release-workflow.test.ts.
 name: Release
 
 on:
@@ -19,6 +35,12 @@ on:
 permissions:
   contents: read
 
+# One run per tag at a time; a second push of the same tag queues behind the
+# first rather than cancelling a publish half-way through.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   NPM_CONFIG_IGNORE_SCRIPTS: 'true'
 
@@ -26,7 +48,8 @@ jobs:
   # WP 9.4 (09 §4 batch 6): the unattended-upgrade test is a required
   # predecessor of every release — a tag whose direct jump v0.1 -> this
   # commit is red never publishes an image. upgrade-test.yml exposes
-  # `workflow_call` for exactly this.
+  # `workflow_call` for exactly this; it also runs trivy over the three
+  # freshly built images (HIGH/CRITICAL, the repository's ignore file).
   upgrade-test:
     name: unattended upgrade from v0.1
     uses: ./.github/workflows/upgrade-test.yml
@@ -36,8 +59,16 @@ jobs:
   build-sign-publish:
     name: build, sign, publish (${{ matrix.image }})
     needs: upgrade-test
+    # D32: a publish is outward-facing and cannot be taken back (a pull may
+    # already have happened). The `release` environment has Chris as its
+    # required reviewer and a `v*` deployment tag policy, so this job waits
+    # for his approval once the gate is green. One approval releases all
+    # three matrix legs.
+    environment: release
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Two registries now: the second push uploads every layer of both
+    # platforms again. The approval wait does not count against this.
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write # push to GHCR
@@ -70,23 +101,45 @@ jobs:
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - name: log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: meta
-        run: |
-          repo_owner_lower=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "image_base=ghcr.io/${repo_owner_lower}/personalfi-${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+      # Docker Hub (the default registry), as PantryRadar logs in: the
+      # username in the workflow, Chris's Hub access token in DOCKER_PAT.
+      - name: log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: masterhuh
+          password: ${{ secrets.DOCKER_PAT }}
+
+      # One `images:` list, so every tag is made for both names. `latest` comes
+      # from the raw rule alone (flavor latest=false), so the tag set is
+      # exactly these four lines: x.y.z, x.y, latest and sha-<7> (WP 9.11's
+      # "pull mode cannot pin to a commit").
+      - name: tags for both registries
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: |
+            ghcr.io/huh12312/personalfi-${{ matrix.image }}
+            docker.io/masterhuh/personalfi-${{ matrix.image }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
 
       # linux/arm64 for the api image runs under QEMU (Node build-base compiles
       # a native dep or two) and is materially slower than amd64 — 06 §5.2
       # flags this as the point to split into a native-arm64-runner matrix if
-      # it ever crosses ~10 minutes. Not split yet: this is WP 0.4's first
-      # release build, and it has not been measured against that threshold.
-      - name: build and push (multi-arch)
+      # it ever crosses ~10 minutes. Not split yet: no release build has been
+      # measured against that threshold.
+      - name: build and push (multi-arch, both registries)
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -96,34 +149,66 @@ jobs:
           push: true
           provenance: mode=max
           sbom: true
-          tags: |
-            ${{ steps.meta.outputs.image_base }}:${{ steps.version.outputs.value }}
-            ${{ steps.meta.outputs.image_base }}:latest
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=release-${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=release-${{ matrix.image }}
 
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      - name: attest provenance (GHCR)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-name: ${{ steps.meta.outputs.image_base }}
+          subject-name: ghcr.io/huh12312/personalfi-${{ matrix.image }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
+      # The action writes the attestation to GitHub's store first and pushes
+      # it to the registry as an OCI referrer second (actions/attest
+      # createAttestation; @sigstore/oci falls back to the referrers tag
+      # schema where a registry lacks the referrers API). If Docker Hub
+      # refuses the referrer push, the GitHub-store attestation stays, and
+      # `gh attestation verify` finds it by digest whatever the registry — so
+      # the refusal is a warning here, and `verify` below is the hard check.
+      - name: attest provenance (Docker Hub)
+        id: attest-hub
+        continue-on-error: true
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          # actions/attest: "When pushing to Docker Hub, use docker.io".
+          subject-name: docker.io/masterhuh/personalfi-${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Docker Hub refused the attestation referrer
+        if: steps.attest-hub.outcome == 'failure'
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          echo "::warning title=docker.io attestation::the provenance attestation for docker.io/masterhuh/personalfi-${IMAGE} was not pushed to docker.io as a referrer (see the step above). The GitHub-store attestation for the same digest stands; the verify job checks it with gh attestation verify."
+
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
-      - name: cosign sign (keyless)
+      # Signatures live beside the image in each registry, so each reference
+      # is signed (same digest, two Rekor entries).
+      - name: cosign sign (keyless, both registries)
         env:
           COSIGN_YES: 'true'
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ matrix.image }}
         run: |
-          cosign sign --yes "${{ steps.meta.outputs.image_base }}@${{ steps.build.outputs.digest }}"
+          cosign sign --yes "ghcr.io/huh12312/personalfi-${IMAGE}@${DIGEST}"
+          cosign sign --yes "docker.io/masterhuh/personalfi-${IMAGE}@${DIGEST}"
 
       - name: sbom (syft, uploaded as a release artifact)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ matrix.image }}
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
           mkdir -p sbom
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "${{ github.workspace }}/sbom:/out" \
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "${GITHUB_WORKSPACE}/sbom:/out" \
             anchore/syft:v1.51.1@sha256:95fe0835e5bebc6f8b1f8acef68d47d63d594ef4c0f25c097ff853b23cbac74c \
-            "${{ steps.meta.outputs.image_base }}@${{ steps.build.outputs.digest }}" \
-            -o "spdx-json=/out/${{ matrix.image }}-${{ steps.version.outputs.value }}.spdx.json" \
-            -o "cyclonedx-json=/out/${{ matrix.image }}-${{ steps.version.outputs.value }}.cdx.json"
+            "ghcr.io/huh12312/personalfi-${IMAGE}@${DIGEST}" \
+            -o "spdx-json=/out/${IMAGE}-${VERSION}.spdx.json" \
+            -o "cyclonedx-json=/out/${IMAGE}-${VERSION}.cdx.json"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -131,9 +216,107 @@ jobs:
           path: sbom/
           retention-days: 365
 
+      # The digest, for `verify`: a matrix job's outputs cannot carry one
+      # value per leg.
+      - name: record the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ matrix.image }}
+        run: |
+          mkdir -p digest
+          printf '%s\n' "$DIGEST" > "digest/${IMAGE}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-digest-${{ matrix.image }}
+          path: digest/
+          retention-days: 30
+
+  # Proves on every release what docs/research/13 §2.4 could only expect:
+  # both registries serve the signed bytes under the version tag, cosign
+  # verifies each reference with the identity scripts/verify-release.sh
+  # checks (this repository's release.yml at refs/tags/v<version>, GitHub's
+  # OIDC issuer, and the tagged commit), and the provenance attestation
+  # verifies for each. Anonymous on both registries, as a community install
+  # is: a package that is not public fails here, before any release exists.
+  verify:
+    name: verify both registries before the release
+    needs: build-sign-publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-digest-*
+          path: digest
+          merge-multiple: true
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: cosign verify + gh attestation verify (GHCR and Docker Hub, by digest)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          identity="https://github.com/huh12312/PersonalFi/.github/workflows/release.yml@refs/tags/v${version}"
+          issuer="https://token.actions.githubusercontent.com"
+          failed=0
+          fail() {
+            echo "::error title=verify (${1})::${2}"
+            failed=1
+          }
+          {
+            echo "### Verified before release v${version}"
+            echo
+            echo "| reference | tag | cosign | attestation |"
+            echo "| --- | --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for image in api backup proxy; do
+            digest="$(cat "digest/${image}" 2>/dev/null || true)"
+            if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              fail "$image" "the publish job recorded no digest for ${image}"
+              continue
+            fi
+            for repo in "ghcr.io/huh12312/personalfi-${image}" "docker.io/masterhuh/personalfi-${image}"; do
+              registry="${repo%%/*}"
+              ref="${repo}@${digest}"
+              tag_ok=FAIL cosign_ok=FAIL attest_ok=FAIL
+              # The install side resolves the version tag to a digest
+              # (verify-release.sh): the tag must name exactly these bytes.
+              tagged="$(docker buildx imagetools inspect "${repo}:${version}" --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"')"
+              if [ "$tagged" = "$digest" ]; then
+                tag_ok=ok
+              else
+                fail "$registry" "${repo}:${version} resolves to '${tagged:-nothing}', not ${digest}"
+              fi
+              if cosign verify --certificate-identity "$identity" --certificate-oidc-issuer "$issuer" \
+                --certificate-github-workflow-sha "$GITHUB_SHA" "$ref" >/dev/null 2>cosign.err; then
+                cosign_ok=ok
+              else
+                fail "$registry" "cosign verify refused ${ref}: $(tail -1 cosign.err)"
+              fi
+              if gh attestation verify "oci://${ref}" --repo huh12312/PersonalFi >/dev/null 2>gh.err; then
+                attest_ok=ok
+              else
+                fail "$registry" "gh attestation verify refused ${ref}: $(tail -1 gh.err)"
+              fi
+              echo "${tag_ok}/${cosign_ok}/${attest_ok}  ${ref}"
+              echo "| \`${ref}\` | ${tag_ok} | ${cosign_ok} | ${attest_ok} |" >> "$GITHUB_STEP_SUMMARY"
+            done
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "verify: REFUSED — not every reference verified; no GitHub release is cut"
+            exit 1
+          fi
+          echo "verify: PASS — 3 images x 2 registries, signed by ${identity} at ${GITHUB_SHA}, provenance attested"
+
   github-release:
     name: publish GitHub release
-    needs: build-sign-publish
+    needs: [build-sign-publish, verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -151,3 +334,30 @@ jobs:
         with:
           generate_release_notes: true
           files: sbom/*
+
+  # The Hub page's text (WP 12.4's docker/DOCKERHUB_README.md), pushed to each
+  # mirror repository once its images have verified. The action needs a Hub
+  # token with read/write/delete scope; a narrower DOCKER_PAT publishes and
+  # verifies fine and fails only here (RUNBOOK "Cutting a release").
+  hub-readme:
+    name: Docker Hub description (${{ matrix.image }})
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [api, backup, proxy]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: masterhuh
+          password: ${{ secrets.DOCKER_PAT }}
+          repository: masterhuh/personalfi-${{ matrix.image }}
+          short-description: PersonalFi — self-hosted, single-user personal finance and advisory (${{ matrix.image }} image)
+          readme-filepath: docker/DOCKERHUB_README.md
