@@ -141,7 +141,7 @@ describe('InboxScreen', () => {
     expect(await screen.findByText('Blue Bottle Coffee')).toBeInTheDocument();
     expect(screen.getByText('1 item to review')).toBeInTheDocument();
 
-    const combobox = screen.getByRole('combobox', { name: 'Category' });
+    const combobox = await screen.findByRole('combobox', { name: 'Category' });
     await user.click(combobox);
     await user.click(await screen.findByRole('option', { name: 'Coffee Shops' }));
 
@@ -300,7 +300,9 @@ describe('InboxScreen › the explanation line', () => {
     renderInbox();
 
     expect(await screen.findByText('Corner Deli')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Category' })).toBeInTheDocument();
+    // The category select renders once the categories query lands, a tick after the row's name;
+    // `findByRole` waits for it (a one-off CI red on 2026-11-01 read the row before the select).
+    expect(await screen.findByRole('combobox', { name: 'Category' })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId('inbox-why')).not.toBeInTheDocument());
   });
 });
@@ -561,7 +563,7 @@ describe('InboxScreen › the model’s suggestion', () => {
     expect(within(row).getByTestId('inbox-why').textContent).toBe(`Why: ${ABSTAINED_LINE}`);
     expect(within(chip).getByRole('button', { name: `Confirm ${SUGGESTED_LABEL}` })).toBeVisible();
     expect(within(chip).getByRole('button', { name: 'Not this' })).toBeVisible();
-    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('Uncategorized');
+    expect(await screen.findByRole('combobox', { name: 'Category' })).toHaveValue('Uncategorized');
     expect(recorded.patches).toEqual([]);
     expect(recorded.rejects).toEqual([]);
   });
