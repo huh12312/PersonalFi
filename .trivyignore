@@ -56,11 +56,3 @@
 # the trivy DB of 2026-11-01), 0 after,
 # 0 in the alpine layer. No suppression for the proxy image remains; a published
 # image ships with none (docs/research/13 §6).
-
-# follow-redirects 1.16.1 (CVE-2026-116689, HIGH, information disclosure), transitive via axios <- plaid
-# in the api image. Fixed in 1.16.2 (2026-10-25), which sits inside minimumReleaseAge (7 days) until
-# 2026-11-01 — the source-map-js precedent above: snoozed for the two days until the fix matures, then
-# bumped by the pnpm-workspace.yaml override (1.16.1 -> 1.16.2). Residual: the api's only
-# follow-redirects path is axios to Plaid's exact host (the egress allow-list), so no redirect to an
-# untrusted host can occur in the window.
-CVE-2026-116689 exp:2026-11-02  ## expires: 2026-11-02 — follow-redirects info disclosure; fix 1.16.2 matures past minimumReleaseAge on 2026-11-01, bump then

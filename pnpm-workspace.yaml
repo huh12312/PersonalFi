@@ -47,7 +47,9 @@ overrides:
   # 1.16.1 (2026-10-01) closes CVE-2026-111755/111756 (information disclosure) reached through axios ← plaid.
   # Both older than minimumReleaseAge at the time of the bump (2026-10-27, CI trivy red after the billing hold).
   zod: 4.6.6
-  follow-redirects: 1.16.1
+  # follow-redirects 1.16.2 (2026-10-25) closes CVE-2026-116689 (information disclosure); bumped
+  # 2026-11-01, the day it cleared minimumReleaseAge (snoozed in .trivyignore for the two days before).
+  follow-redirects: 1.16.2
   # seroval 1.6.8 (2026-09-29) closes CVE-2026-116580/116581/116584 (function execution and two DoS
   # via crafted input to its deserialiser); reached through @tanstack/router-core ← @tanstack/react-router
   # (apps/web, client bundle only — no server deserialises holder input through it). Older than
