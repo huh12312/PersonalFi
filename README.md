@@ -67,6 +67,24 @@ build takes several minutes.
 The machine holding real financial data should have its data disk encrypted (LUKS2 or equivalent).
 The RUNBOOK's "First install" has the one-time commands. A throwaway test machine does not need it.
 
+## What is supported
+
+- **Architectures.** `linux/amd64`: built and exercised. `linux/arm64`: built, not yet exercised. If
+  you run PersonalFi on arm64 hardware (a Raspberry Pi 5, for example), please open an issue with
+  what you saw, working or not.
+- **Host.** Docker Engine 29 or newer with Compose v2, and `just` 1.21 or newer, as in "What you
+  need on the host" above.
+- **Database.** The PostgreSQL image pinned by digest in `compose.yml`; that is the one the
+  migrations and backups are tested against.
+- **Release.** The newest published release, from v0.10.0. Earlier releases and `main` between
+  releases get no fixes; [`SECURITY.md`](SECURITY.md) has the reporting route and the signing
+  identity to check.
+- **Registries.** `ghcr.io/huh12312/personalfi-{api,backup,proxy}` is canonical. The Docker Hub
+  mirror is `masterhuh/personalfi-{api,backup,proxy}`.
+- **`latest`.** Published for convenience. The upgrade path refuses it because it names no single
+  commit: pin a version. The install below still builds from the checkout; the RUNBOOK's
+  [Upgrade](RUNBOOK.md#upgrade) describes installing a verified published release instead.
+
 ## Install
 
 These steps take a clean host to a passkey login over TLS. Run them from the repository root unless

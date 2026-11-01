@@ -1,0 +1,85 @@
+name: Bug report
+description: Something in a PersonalFi install does not work as documented.
+title: '[bug] '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting this. A vulnerability is not a bug: do not file it here. Follow
+        [SECURITY.md](https://github.com/huh12312/PersonalFi/blob/main/SECURITY.md) instead.
+
+        This is a public page. Remove merchant names, amounts, account numbers, hostnames and
+        anything else personal from everything you paste.
+  - type: input
+    id: version
+    attributes:
+      label: Release version
+      description: The release you run, such as 0.10.0, or the commit if you build from the checkout (`git rev-parse --short HEAD`).
+      placeholder: '0.10.0'
+    validations:
+      required: true
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Architecture
+      description: The output of `uname -m` on the host. linux/arm64 is built but not yet exercised, so a report from arm64 is especially useful.
+      options:
+        - linux/amd64 (x86_64)
+        - linux/arm64 (aarch64)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: ready
+    attributes:
+      label: Body of GET /ready
+      description: |
+        Run this on the host and paste the JSON it prints. It carries no secrets. It shows the
+        migration state, the outbox lag and the per-module registration line (`modules`).
+
+        `docker compose exec -T api node -e "fetch('http://127.0.0.1:8080/ready').then(async r => console.log(r.status, await r.text()))"`
+
+        If the API will not start, say so and paste the start of `docker compose logs api` instead.
+      render: json
+    validations:
+      required: true
+  - type: dropdown
+    id: service
+    attributes:
+      label: Service whose log shows the problem
+      description: The service in `docker compose logs <service>` that shows the error.
+      options:
+        - api
+        - worker
+        - migrator
+        - proxy
+        - backup
+        - db
+        - ollama
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log lines around the error
+      description: |
+        About 20 lines before and after the error, from `docker compose logs --no-color --tail 200 <service>`.
+        Replace merchant names and amounts with placeholders such as MERCHANT and AMOUNT before you paste.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: The steps that led to the problem, in order, from a running install.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
