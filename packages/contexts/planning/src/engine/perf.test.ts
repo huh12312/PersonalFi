@@ -70,6 +70,7 @@ const BUDGET_MS = 800;
 const HOST_LOAD_CEILING = 3;
 
 // perf-skip: HOST_LOADED — an over-budget reading at a 1-minute load of 3 or more is not believed (09 §3 rule 4); in-budget readings pass at any load
+// perf-skip: ON_SHARED_RUNNER — a GitHub shared runner is not the target hardware (09 §6 Q1): an over-budget reading there is a named skip, an in-budget reading passes (mirrors apps/api/test/db/perf-support.ts)
 
 /**
  * `console.log` from a test is not shown by vitest's reporter in a non-TTY run, which
@@ -92,6 +93,13 @@ function assertWithinBudget(
 ): void {
   const over = checks.filter((check) => !(check.p95 <= BUDGET_MS));
   const load = loadavg()[0] ?? 0;
+  if (over.length > 0 && process.env['CI'] !== undefined) {
+    ctx.skip(
+      `ON_SHARED_RUNNER: ${over.map((c) => `${c.label} p95 ${c.p95.toFixed(1)} ms > ${String(BUDGET_MS)} ms`).join('; ')} ` +
+        `at load ${load.toFixed(2)} on a GitHub shared runner, which is not the target hardware (09 §6 Q1).`,
+    );
+    return;
+  }
   if (over.length > 0 && load >= HOST_LOAD_CEILING) {
     ctx.skip(
       `HOST_LOADED: ${over.map((check) => `${check.label} p95 ${check.p95.toFixed(1)} ms > ${String(BUDGET_MS)} ms`).join('; ')} ` +

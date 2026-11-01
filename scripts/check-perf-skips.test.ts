@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BARE_SKIP_FIXTURE,
   HOST_LOADED,
+  ON_SHARED_RUNNER,
   NAMED_SKIP_FIXTURE,
   checkSource,
   checkTree,
@@ -70,26 +71,32 @@ describe('check-perf-skips, against fixtures', () => {
   it('ctx.skip inside the definition of assertWithinBudget is the helper itself, not a skip; the same call elsewhere still fails', () => {
     const mirror = [
       '// perf-skip: HOST_LOADED — an over-budget reading at a 1-minute load of 3 or more is not believed',
+      '// perf-skip: ON_SHARED_RUNNER — a GitHub shared runner is not the target hardware (09 §6 Q1)',
       'function assertWithinBudget(ctx, checks) { ctx.skip("HOST_LOADED: over budget"); }',
       "it('p95', (ctx) => { assertWithinBudget(ctx, []); });",
     ].join('\n');
     const sites = checkSource('mirror-perf.test.ts', mirror);
-    expect(sites.map((site) => site.form)).toEqual(['load-conditional']);
-    expect(sites[0]?.problem).toBeNull();
+    expect(sites.map((site) => site.form)).toEqual(['load-conditional', 'load-conditional']);
+    expect(sites.map((site) => site.problem)).toEqual([null, null]);
 
     const elsewhere = "it('p95', (ctx) => { ctx.skip('slow today'); });";
     expect(checkSource('mirror-perf.test.ts', elsewhere)[0]?.problem).not.toBeNull();
   });
 
-  it('assertWithinBudget is a load-conditional skip named HOST_LOADED, and needs that name declared', () => {
+  it('assertWithinBudget is a load-conditional skip under HOST_LOADED and ON_SHARED_RUNNER, and needs both names declared', () => {
     const body = "it('p95', (ctx) => { assertWithinBudget(ctx, { label: 'x' }); });";
     const bare = checkSource('z-perf.test.ts', body);
-    expect(bare[0]?.form).toBe('load-conditional');
-    expect(bare[0]?.name).toBe(HOST_LOADED);
-    expect(bare[0]?.problem).not.toBeNull();
+    expect(bare.map((site) => site.form)).toEqual(['load-conditional', 'load-conditional']);
+    expect(bare.map((site) => site.name)).toEqual([HOST_LOADED, ON_SHARED_RUNNER]);
+    expect(bare.every((site) => site.problem !== null)).toBe(true);
 
-    const declared = `// perf-skip: ${HOST_LOADED} — an over-budget reading at load above the ceiling is not believed (rule 4)\n${body}`;
-    expect(checkSource('z-perf.test.ts', declared)[0]?.problem).toBeNull();
+    const one = `// perf-skip: ${HOST_LOADED} — an over-budget reading at load above the ceiling is not believed (rule 4)\n${body}`;
+    const half = checkSource('z-perf.test.ts', one);
+    expect(half[0]?.problem).toBeNull();
+    expect(half[1]?.problem).not.toBeNull();
+
+    const both = `// perf-skip: ${ON_SHARED_RUNNER} — a GitHub shared runner is not the target hardware (09 §6 Q1)\n${one}`;
+    expect(checkSource('z-perf.test.ts', both).map((site) => site.problem)).toEqual([null, null]);
   });
 
   it("skipNamed(ctx, 'NAME', …) is a named skip: it needs a literal name and a declared reason", () => {

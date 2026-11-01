@@ -25,16 +25,15 @@ import { loadReportAccounts, loadReportRows } from '../../src/reports/ledger-sou
 import { sankeyOf } from '../../src/reports/sankey.ts';
 import { categoryMonthCellsOf } from '../../src/reports/spending-income.ts';
 import { createApiHarness, NO_DATABASE, type ApiHarness } from '../helpers/api-harness.ts';
-import { assertWithinBudget, measureGet, settleLoad, skipNamed } from './perf-support.ts';
+import { assertWithinBudget, measureGet, settleLoad } from './perf-support.ts';
 
 // perf-skip: NO_DATABASE — DATABASE_URL is unset, so there is no Postgres to load the 50k corpus into (CI's migration-test job has one)
 // perf-skip: HOST_LOADED — an over-budget reading at a 1-minute load of 3 or more is not believed (09 §3 rule 4); in-budget readings pass at any load
-// perf-skip: ON_SHARED_RUNNER — a GitHub shared runner is not the target hardware (09 §6 Q1): the route is measured and printed there and an in-budget reading passes, but an over-budget one is a named skip, not a regression (221 ms at load 1.3 on 2026-11-01 against 195–216 on the target host)
+// perf-skip: ON_SHARED_RUNNER — a GitHub shared runner is not the target hardware (09 §6 Q1): the corpus loads and the route is measured and printed there, an in-budget reading passes, an over-budget one is a named skip, not a regression (assertWithinBudget, perf-support.ts)
 const describeWithDb = describe.skipIf(NO_DATABASE);
 
 const EXPECTED_TRANSACTION_COUNT = 50_040;
 const BUDGET_MS = 200;
-const ON_SHARED_RUNNER = process.env['CI'] !== undefined;
 
 type Dataset = ReturnType<typeof generateDemoData>;
 
@@ -185,14 +184,6 @@ describeWithDb('[slow] Cash Flow hub p95, over real HTTP (50k seed, dense)', () 
     // quiet runs, p50 ~150), Postgres summing them on one backend being ~85 ms of it — recorded in the evidence, with
     // what would move it (a maintained monthly aggregate, a schema change outside this package).
     void currentYear;
-    if (ON_SHARED_RUNNER && !(year.p95 < BUDGET_MS)) {
-      skipNamed(
-        ctx,
-        'ON_SHARED_RUNNER',
-        `${year.label} p95 ${year.p95.toFixed(1)} ms > ${String(BUDGET_MS)} ms on a shared runner`,
-      );
-      return;
-    }
     assertWithinBudget(ctx, [{ label: year.label, p95: year.p95, budgetMs: BUDGET_MS }]);
   }, 300_000);
 });

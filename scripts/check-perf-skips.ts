@@ -25,7 +25,9 @@
  *     literal and must be declared like a `skipIf` identifier.
  *   * `assertWithinBudget(…)` (apps/api/test/db/perf-support.ts) — a timing
  *     assertion that turns an over-budget reading into a skip when the host's
- *     load average is above the ceiling. Its name is fixed: `HOST_LOADED`.
+ *     load average is above the ceiling (`HOST_LOADED`) or when the host is a
+ *     GitHub shared runner (`ON_SHARED_RUNNER`). Both names are fixed, and a
+ *     file that calls it declares both.
  *   * `it.skip` / `describe.skip` / `.todo` / `ctx.skip(…)` — a skip with no
  *     condition at all. Always a failure: use `skipIf(NAME)`.
  *
@@ -65,8 +67,9 @@ export interface SkipSite {
   readonly problem: string | null;
 }
 
-/** The name `assertWithinBudget` skips under: the host-load ceiling. */
+/** The names `assertWithinBudget` skips under: the host-load ceiling, and a GitHub shared runner. */
 export const HOST_LOADED = 'HOST_LOADED';
+export const ON_SHARED_RUNNER = 'ON_SHARED_RUNNER';
 
 const ANNOTATION = /perf-skip:\s*([A-Za-z_$][\w$]*)\s*[—–-]+\s*(\S.*)$/;
 const MIN_REASON_LENGTH = 12;
@@ -229,15 +232,17 @@ export function checkSource(file: string, text: string): readonly SkipSite[] {
           });
         }
       } else if (ts.isIdentifier(callee) && callee.text === 'assertWithinBudget') {
-        const verdict = named(HOST_LOADED);
-        sites.push({
-          file,
-          line: lineOf(source, node),
-          form: 'load-conditional',
-          name: HOST_LOADED,
-          reason: verdict.reason,
-          problem: verdict.problem,
-        });
+        for (const name of [HOST_LOADED, ON_SHARED_RUNNER]) {
+          const verdict = named(name);
+          sites.push({
+            file,
+            line: lineOf(source, node),
+            form: 'load-conditional',
+            name,
+            reason: verdict.reason,
+            problem: verdict.problem,
+          });
+        }
       }
     }
     ts.forEachChild(node, visit);

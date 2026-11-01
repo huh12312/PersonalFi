@@ -16,7 +16,7 @@
  * sites. It needs no database and never skips for the lack of one.
  */
 import type * as NodeOs from 'node:os';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const load = vi.hoisted(() => ({ one: 0 }));
 vi.mock('node:os', async (importOriginal) => {
@@ -49,6 +49,16 @@ function context(): FakeContext {
 const asContext = (fake: FakeContext): Parameters<typeof assertWithinBudget>[0] =>
   fake as unknown as Parameters<typeof assertWithinBudget>[0];
 
+// The suite runs on GitHub's runners too, where `CI` is set: every case about the host-load rule
+// must see a non-runner host, so `CI` is off for the whole file and the shared-runner rule's own
+// cases stub it on.
+beforeEach(() => {
+  vi.stubEnv('CI', undefined);
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe('assertWithinBudget', () => {
   beforeEach(() => {
     load.one = 0;
@@ -63,6 +73,33 @@ describe('assertWithinBudget', () => {
         assertWithinBudget(asContext(fake), { label: 'x', p95: 120, budgetMs: 200 }),
       ).not.toThrow();
       expect(fake.skip).not.toHaveBeenCalled();
+    }
+  });
+
+  it('an over-budget reading on a GitHub shared runner is the named ON_SHARED_RUNNER skip, at any load', () => {
+    vi.stubEnv('CI', 'true');
+    try {
+      load.one = 0.5;
+      const fake = context();
+      assertWithinBudget(asContext(fake), { label: 'GET /x', p95: 152.8, budgetMs: 150 });
+      expect(fake.skip).toHaveBeenCalledTimes(1);
+      const note = String(fake.skip.mock.calls[0]?.[0]);
+      expect(note).toMatch(/^ON_SHARED_RUNNER: /);
+      expect(note).toContain('152.8 ms > 150 ms');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('an in-budget reading on a GitHub shared runner passes and never skips', () => {
+    vi.stubEnv('CI', 'true');
+    try {
+      load.one = 0.5;
+      const fake = context();
+      assertWithinBudget(asContext(fake), { label: 'GET /x', p95: 120, budgetMs: 200 });
+      expect(fake.skip).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 

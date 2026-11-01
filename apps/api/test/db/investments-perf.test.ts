@@ -48,6 +48,7 @@ import { assertWithinBudget, describeLoad, settleLoad } from './perf-support.ts'
 
 // perf-skip: NO_DATABASE — DATABASE_URL is unset, so there is no Postgres to load the seed into (CI's migration-test job has one)
 // perf-skip: HOST_LOADED — an over-budget reading at a 1-minute load of 3 or more is not believed (09 §3 rule 4); in-budget readings pass at any load
+// perf-skip: ON_SHARED_RUNNER — a GitHub shared runner is not the target hardware (09 §6 Q1): the corpus loads and the route is measured and printed there, an in-budget reading passes, an over-budget one is a named skip, not a regression (assertWithinBudget, perf-support.ts)
 const DAY_MS = 86_400_000;
 const BUDGET_MS = 200;
 const SAMPLE_COUNT = 15;
