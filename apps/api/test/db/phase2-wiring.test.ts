@@ -107,7 +107,11 @@ describe.skipIf(NO_DATABASE)(
       if (diningCategoryId === undefined) throw new Error('unreachable');
 
       const today = DateOnly.parse(systemClock.now().toISOString().slice(0, 10));
-      const diningDate = DateOnly.addDays(today, -3);
+      // Three days ago, clamped to the current month: the budget period below is opened on
+      // `today`, and a charge posted in the previous month lands in no line of it — on the
+      // 1st–3rd this read `activity_minor` 0 instead of -6000 (CI, 2026-11-01).
+      const threeDaysAgo = DateOnly.addDays(today, -3);
+      const diningDate = threeDaysAgo.slice(0, 7) === today.slice(0, 7) ? threeDaysAgo : today;
       // Exactly two hits, not three: three perfectly regular, identical-amount
       // monthly charges score confidently enough to auto-confirm straight to
       // `ACTIVE` (`AUTO_CONFIRM_CONFIDENCE = 0.8`) and skip the candidate
