@@ -840,6 +840,45 @@ verify, then cut over. Renovate is configured to require manual approval for
 this (`renovate.json`'s `postgres` package rule) rather than proposing it as
 a routine bump.
 
+### The proxy image: Caddy from source
+
+The `proxy` image does not pull Caddy's binary from upstream's `caddy:2-alpine`: since v0.10.0
+(WP 12.1) `docker/caddy.Dockerfile` compiles it with xcaddy on a pinned Go, because an upstream
+binary keeps the Go toolchain and modules of its own build date and once carried six HIGH findings
+no upstream rebuild cleared. For an install nothing changes: `just upgrade` builds it like every
+other image (the first build downloads Caddy's Go modules from `proxy.golang.org`, checked against
+`sum.golang.org`, and takes a minute or two longer; later builds reuse the cache). Everything that
+decides the binary sits at the top of that Dockerfile:
+
+| Pin              | What it is                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| `GO_IMAGE`       | `golang:<1.26.x>-alpine3.24@sha256:…`, the toolchain, on the line Caddy ships with |
+| `CADDY_VERSION`  | the Caddy release built                                                            |
+| `XCADDY_VERSION` | the build tool, with `XCADDY_SUM` (its `h1:` module checksum) beside it            |
+| `XNET_VERSION`   | a floor on `golang.org/x/net` above what Caddy's own `go.mod` asks for             |
+| `GOJOSE_VERSION` | the same for `github.com/go-jose/go-jose/v4`                                       |
+| `ALPINE_IMAGE`   | the runtime base, by digest                                                        |
+
+**How a bump lands.** Renovate opens one PR, "proxy: Caddy from source", for the first five (never
+auto-merged); the alpine digest comes with the other non-major bumps. CI's
+`docker build + trivy image scan (proxy)` job is the gate: `.trivyignore` holds no entry for this
+image, so a HIGH or CRITICAL finding with a fix fails the PR. The build itself refuses three
+mistakes by name: an `XCADDY_VERSION` without its matching `XCADDY_SUM` (copy the `h1:` line, not
+the `/go.mod` one, from `https://sum.golang.org/lookup/github.com/caddyserver/xcaddy@<version>`), a
+linked module whose version is not the pinned one (minimum version selection moved it: raise the
+floor or drop it once Caddy's own `go.mod` requires at least that version), and a module set that
+differs from `docker/caddy-modules.txt` (a new Caddy release added or removed a module: read the
+diff in the build log, then update the file in the same PR).
+
+**When trivy finds something before Renovate does.** A Go standard-library finding: bump
+`GO_IMAGE` to the fixing patch of the same line (`docker buildx imagetools inspect
+golang:<version>-alpine3.24` gives the digest). A Go-module finding: add or raise a floor, an `ARG`
+under a `# renovate: datasource=go depName=<module>` comment and a `--with <a package of that
+module>@${ARG}` on the `xcaddy build` line, which raises the version without adding a Caddy module.
+Then `docker build -f docker/caddy.Dockerfile -t personalfi/proxy:check .` and CI's scan command
+(`.github/workflows/ci.yml`, without `--ignorefile`) must show 0 in `usr/bin/caddy`. A snooze in
+`.trivyignore` is the last resort, and a published image must not ship with one.
+
 ---
 
 ## Backup
@@ -2630,12 +2669,12 @@ and `compose.dev.yml` both mount `pgdata:/var/lib/postgresql` for exactly this r
 hand-rolling a `docker run` for debugging, mounting at `.../data` instead makes the container refuse
 to start with a confusing message rather than an obvious one.
 
-**`proxy` exits immediately with "operation not permitted."** Something rebuilt or replaced
+**`proxy` exits immediately with "operation not permitted."** Something replaced
 `docker/caddy.Dockerfile`'s image with stock `caddy:2-alpine` while `compose.yml`'s `cap_drop:
 [ALL]` + `no-new-privileges:true` are still set. Stock Caddy's binary carries a
 `cap_net_bind_service` file capability (`getcap /usr/bin/caddy`); with an empty capability set and
-`no-new-privileges`, the kernel refuses to apply it at `execve`, and Caddy never starts.
-`docker/caddy.Dockerfile` strips that capability at build time (this proxy only ever binds
+`no-new-privileges`, the kernel refuses to apply it at `execve`, and Caddy never starts. The
+binary `docker/caddy.Dockerfile` builds from source never has one (this proxy only ever binds
 unprivileged container ports 8443/8080) — rebuild with `just build` rather than pulling the
 upstream image directly.
 

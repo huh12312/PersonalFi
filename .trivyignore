@@ -43,12 +43,19 @@
 # that clears them is the procedure in RUNBOOK "Upgrading the image" (Renovate
 # watches the digest). If none exists by the expiry, build caddy with xcaddy on
 # a patched Go, the fallback 09 reserved.
-CVE-2026-78667 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary net/http DoS; no upstream build clears it yet
-CVE-2026-78669 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary x/net+stdlib HTTP/2 SETTINGS DoS; no upstream build clears it yet
-CVE-2026-97031 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary crypto/tls DoS; no upstream build clears it yet
-CVE-2026-111943 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary crypto/x509 MITM (Go stdlib < 1.26.10 / 1.27.3); caddy:2.11.7-alpine (the newest, 2026-10-03) still ships Go 1.26.8 — no upstream build clears it yet; re-rule with the other three on expiry
-CVE-2026-116587 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary go-jose/v4 JWK-parsing DoS (fixed in 4.1.6); caddy:2.11.7-alpine (the newest) still vendors 4.1.5 — no upstream build clears it yet; re-rule with the other four on expiry, or build Caddy from source with patched modules (queued)
-CVE-2026-56857 exp:2026-11-07  ## expires: 2026-11-07 — caddy gobinary Go stdlib os.Root.Mkdir(All) follows junctions out of the root ON WINDOWS ONLY (fixed in 1.26.9 / 1.27.2); the proxy is a Linux alpine container with no Windows junctions and Caddy does not expose os.Root to any input, so there is no path here; caddy:2.11.7-alpine as rebuilt 2026-10-22 (sha256:eb4d35b7…) still ships Go 1.26.8 and adds alpine brotli/curl findings of its own, so no digest to bump to — re-rule with the other five on expiry (xcaddy on a patched Go is the queued fallback)
+# CVE-2026-111943 (crypto/x509, Go < 1.26.10 / 1.27.3) and CVE-2026-116587
+# (go-jose/v4 < 4.1.6) joined the same snooze on 2026-10-27 (e040926, a477f76),
+# CVE-2026-56857 (os.Root on Windows, Go < 1.26.9 / 1.27.2) on 2026-10-28
+# (0402962): six entries, all to 2026-11-07. Every caddy:2-alpine build through
+# the 2026-10-22 rebuild still shipped Go 1.26.8, x/net 0.59.0 and go-jose 4.1.5.
+# All six were CLOSED on 2026-11-01 by WP 12.1: docker/caddy.Dockerfile now builds
+# Caddy v2.11.6 itself with xcaddy on Go 1.26.10, with golang.org/x/net raised to
+# v0.60.0 and go-jose/v4 to v4.1.6 (docs/evidence/phase-12/wp12.1-caddy-from-source.md).
+# CI's exact image scan without this file: 6 rows in usr/bin/caddy before (five
+# CVEs, 78669 in both x/net and stdlib; CVE-2026-56857 was no longer reported by
+# the trivy DB of 2026-11-01), 0 after,
+# 0 in the alpine layer. No suppression for the proxy image remains; a published
+# image ships with none (docs/research/13 §6).
 
 # follow-redirects 1.16.1 (CVE-2026-116689, HIGH, information disclosure), transitive via axios <- plaid
 # in the api image. Fixed in 1.16.2 (2026-10-25), which sits inside minimumReleaseAge (7 days) until

@@ -9,6 +9,42 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
+## v0.10.0 (in preparation)
+
+**Status:** not tagged. v0.10.0 is the first public release line (D32, Phase 12): the images are
+published to GHCR and Docker Hub, and the per-package `v0.9.N` entries below fold into it when it is
+tagged. Items land here as Phase 12's packages do.
+
+### Upgrading to v0.10.0
+
+```bash
+git pull
+just upgrade
+```
+
+No migration from the items so far.
+
+### Manual steps
+
+None from the items so far.
+
+### What changed
+
+- **The proxy image builds its own Caddy, and scans clean (WP 12.1).** The `proxy` image used to
+  wrap upstream's `caddy:2-alpine`, whose `caddy` binary keeps the Go toolchain and Go modules of
+  upstream's build: the pinned v2.11.6 carried six HIGH findings (Go 1.26.8's standard library,
+  `golang.org/x/net` 0.59.0, `go-jose/v4` 4.1.5) that no upstream rebuild cleared, snoozed in
+  `.trivyignore` until 2026-11-07. `docker/caddy.Dockerfile` now compiles the same Caddy v2.11.6
+  with xcaddy on Go 1.26.10, with `x/net` raised to 0.60.0 and `go-jose/v4` to 4.1.6, on the same
+  alpine base upstream's image uses. The image scans with no HIGH or CRITICAL finding and no
+  snooze; the six suppressions are gone. Caddy's version, its module set (checked against
+  `docker/caddy-modules.txt` at build time), the headers it sends, the non-root user and the
+  capability-free binary are unchanged; the image is 98 MB rather than 181 MB (the old build
+  carried the upstream binary twice). The first build after this upgrade downloads Caddy's Go
+  modules and takes a minute or two longer. Renovate proposes Go, Caddy, xcaddy and module bumps
+  as one PR; [RUNBOOK: The proxy image](../RUNBOOK.md#the-proxy-image-caddy-from-source) says how
+  one lands.
+
 ## v0.9.27: the insights module says when it is not enabled
 
 **Status:** a patch release on v0.9.26 (if an earlier v0.9.x has not been tagged when this is, tag
