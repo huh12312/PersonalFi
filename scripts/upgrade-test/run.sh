@@ -273,7 +273,13 @@ check_premigrate_backup() {
   local listing older
   listing="$(docker run --rm -v "${PROJECT}_backups:/b:ro" alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b \
     sh -c 'ls -1 /b')"
-  older="$(printf '%s\n' "$listing" | sed -n 's/^personalfi-\([0-9T]*Z\)\.dump\.age$/\1/p' | awk -v f="$first_new" '$1 < f' | sort | tail -1)"
+  # `<=`, not `<`: both stamps are whole seconds, and the backup is taken 0.1 s
+  # before the migrator starts (compose orders them: the migrator depends on the
+  # backup's completion), so the two routinely share a second — the v0.10.0
+  # release gate read backup 20261102T205653Z against a first migration applied
+  # at 20261102T205653Z and failed on `<` (2026-11-02). A backup stamped in the
+  # same second as the first new migration still precedes it.
+  older="$(printf '%s\n' "$listing" | sed -n 's/^personalfi-\([0-9T]*Z\)\.dump\.age$/\1/p' | awk -v f="$first_new" '$1 <= f' | sort | tail -1)"
   if [ -z "$older" ]; then
     report "| ${wp} | pre-migration backup | **FAIL: no backup older than the first new migration (applied ${first_new})** |"
     return 1
