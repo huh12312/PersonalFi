@@ -9,7 +9,7 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
-## v0.10.0 (in preparation)
+## v0.10.0 (2026-11-02): the first public release
 
 **Status:** not tagged. v0.10.0 is the first public release line (D32, Phase 12): the images are
 published to GHCR and Docker Hub, and the per-package `v0.9.N` entries below fold into it when it is
