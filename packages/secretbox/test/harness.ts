@@ -64,6 +64,10 @@ export async function createTestDatabase(name: string): Promise<TestDatabase> {
     userId,
     createUser,
     async drop(): Promise<void> {
+      // A FORCE drop can terminate a backend whose Terminate is still in flight;
+      // pg-pool re-emits the server's FATAL as the pool's 'error', uncaught
+      // without this (see `endPool` in @core/testkit).
+      pool.on('error', () => undefined);
       await pool.end().catch(() => undefined);
       const cleanup = createPool({
         databaseUrl: ADMIN_URL,

@@ -179,9 +179,36 @@ export async function createTestDatabase(
  * out" from the test runner instead.
  */
 export async function endPool(pool: pg.Pool, timeoutMs = 5_000): Promise<void> {
+  // pg-pool resolves `end()` once it has *asked* every idle client to end, not
+  // once their sockets have closed. A `DROP DATABASE … WITH (FORCE)` issued the
+  // moment it resolves can reach a backend whose Terminate is still in flight;
+  // the server's FATAL 57P01 then lands on the ending client, pg-pool re-emits
+  // it as the pool's 'error', and with no listener Node treats it as an
+  // uncaught exception — vitest failed a 1509-green run that way (CI run
+  // 41645348902, 2026-11-03). Nothing after teardown can act on a pool error,
+  // so swallow them from here on, and resolve only when every client the pool
+  // held has actually gone ('remove' fires from `client.end()`'s callback).
+  pool.on('error', () => undefined);
+  const allClosed = new Promise<void>((resolve) => {
+    let remaining = pool.totalCount;
+    if (remaining === 0) {
+      resolve();
+      return;
+    }
+    pool.on('remove', () => {
+      remaining -= 1;
+      if (remaining <= 0) resolve();
+    });
+  });
   const giveUp = new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, timeoutMs);
     timer.unref?.();
   });
-  await Promise.race([pool.end().catch(() => undefined), giveUp]);
+  await Promise.race([
+    pool
+      .end()
+      .then(() => allClosed)
+      .catch(() => undefined),
+    giveUp,
+  ]);
 }
