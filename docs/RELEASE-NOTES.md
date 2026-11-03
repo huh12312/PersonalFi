@@ -9,7 +9,49 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
-## v0.10.0 (2026-11-02): the first public release
+## v0.10.1 (in preparation)
+
+**Status:** not tagged. Items land here as they do.
+
+### Upgrading to v0.10.1
+
+As for v0.10.0: `git pull && just upgrade` from source, or, once v0.10.1 is published, check out
+`v0.10.1`, set `PERSONALFI_VERSION=0.10.1` and run `just install-release 0.10.1`. One migration,
+`0064_market_data_consent` (a new table; expand-only), applied by the upgrade's own migrator after
+its automatic backup.
+
+### Manual steps
+
+None. Yahoo Finance stays off unless you choose it (below).
+
+### What changed
+
+- **Yahoo Finance through `yfinance`, opt-in and unofficial (WP 12.6, D33).** A best-effort price
+  source for stocks, ETFs and funds, in its own container (`yahoo`, compose profile `yahoo`, the
+  fourth published image `personalfi-yahoo`, both registries, both architectures, signed and
+  attested). It is never the default and never ranked for anyone. Two halves must both hold before
+  a single request leaves: the operator sets `YAHOO_FINANCE_ENABLED=true` and runs `docker compose
+--profile yahoo up -d`, and each holder ticks a versioned consent in Settings → Market data
+  (`yahoo-consent/1`: unofficial; Yahoo's terms prohibit automated collection; personal use only;
+  best effort, may stop working; not licensed for redistribution) and places Yahoo in a ladder.
+  What leaves: ticker symbols and dates, from the sidecar to `query1`/`query2.finance.yahoo.com`
+  only. 60 requests an hour; a 429 backs off and keeps the last known price. Every Yahoo figure is
+  labelled "Yahoo Finance via yfinance — unofficial, best effort". RUNBOOK "Yahoo Finance".
+- `just install-release` and `just upgrade` verify the fourth image exactly when the `yahoo` profile
+  is on (`scripts/verify-release.sh --with-yahoo`); an install without it never pulls it.
+- `THIRD_PARTY.md` gains "Python (the yahoo sidecar)", and the licence gate now checks that tree.
+- The weekly soak report gains a **Market data** table: price-refresh runs per provider and outcome.
+
+## v0.10.1 (2026-11-03): the first published release
+
+**Status:** the same tree as v0.10.0 plus three fixes that landed while its release was being
+cut — the upgrade gate's same-second pre-migration-backup comparison, the release workflow's
+cosign pinned to 3.1.4, and the index-dependent apk layers in every image. v0.10.0 was tagged on
+2026-11-02 but never published: its release run stopped in the gate on the first of those (a
+harness comparison, with the backup present and correct), and a tag is never moved. Everything
+under v0.10.0 below applies to this release; there is no separate manual step.
+
+## v0.10.0 (2026-11-02): tagged, not published — see v0.10.1
 
 **Status:** not tagged. v0.10.0 is the first public release line (D32, Phase 12): the images are
 published to GHCR and Docker Hub, and the per-package `v0.9.N` entries below fold into it when it is
