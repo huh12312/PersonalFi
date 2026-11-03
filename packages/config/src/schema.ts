@@ -274,6 +274,19 @@ export const environmentSchema = z.object({
   // property the allow-list exists to deny.
   MARKET_DATA_ALLOWED_HOSTS: z.string().default(''),
 
+  /**
+   * WP 12.6 (D33; docs/research/14): the OPERATOR half of Yahoo Finance through
+   * yfinance, an opt-in, unofficial, best-effort price source. `true` only
+   * with the `yahoo` compose profile up (`docker compose --profile yahoo up
+   * -d`): the worker then registers the yfinance adapter over the `yahoo`
+   * sidecar (`http://yahoo:8000`, a name only the worker's network resolves)
+   * and logs one line either way. Even then nothing is asked until the
+   * HOLDER has also ticked the consent in Settings → Market data and placed
+   * Yahoo in a priority ladder. The api reads it only to say so on the card;
+   * it never reaches the sidecar. Default false; nothing turns it on.
+   */
+  YAHOO_FINANCE_ENABLED: z.stringbool().default(false),
+
   // ------------------------------------------------------------------ planning
   //
   // A writable volume for WP 4.5's fetched-once, checksum-pinned return series

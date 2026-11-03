@@ -301,6 +301,13 @@ export interface LocalEndpointRequest {
   readonly method: 'GET' | 'POST';
   /** An absolute path the adapter chose, e.g. `/api/chat`. Never user-supplied. */
   readonly path: string;
+  /**
+   * Query parameters (WP 12.6: the yahoo sidecar's `/quote?symbol=&date=`).
+   * Encoded here with `URLSearchParams` — a value is never trusted to be
+   * pre-encoded — and appended after the path has passed its own check, so a
+   * value can carry `^` or `=` (`^GSPC`, `EURUSD=X`) but never a second path.
+   */
+  readonly query?: Readonly<Record<string, string>>;
   /** From a fixed set of names the adapter builds. Never user-supplied keys. */
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: string;
@@ -394,7 +401,7 @@ export function createLocalEndpointTransport(
         host: policy.host,
         address,
         port: policy.port,
-        path: input.path,
+        path: withQuery(input.path, input.query),
         method: input.method,
         hostHeader: `${policy.host}:${String(policy.port)}`,
         headers,
@@ -417,6 +424,12 @@ export function createLocalEndpointTransport(
   }
 
   return Object.freeze({ policy, request });
+}
+
+function withQuery(path: string, query: Readonly<Record<string, string>> | undefined): string {
+  if (query === undefined) return path;
+  const search = new URLSearchParams(query).toString();
+  return search === '' ? path : `${path}?${search}`;
 }
 
 function toLocalEndpointError(error: unknown): LocalEndpointRefusedError {

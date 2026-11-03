@@ -109,6 +109,15 @@ EXPECTED_RULES=(
   ollama-pull-network-shared
   # WP 9.4 (CF-3): the pre-migration backup gate.
   migrator-missing-pre-migrate-backup
+  # WP 12.6: the yahoo sidecar (`yahoo`, the `yahoo` network), mirroring the ollama set.
+  yahoo-network
+  yahoo-published-port
+  yahoo-secret
+  yahoo-image-unpinned
+  yahoo-missing-limits
+  yahoo-missing-healthcheck
+  yahoo-missing-profile
+  yahoo-network-shared
 )
 
 # WP 5.2: rule ids alone could all fire on one service and still leave a
@@ -142,6 +151,17 @@ EXPECTED_SERVICE_RULES=(
   $'migrator\tmigrator-missing-pre-migrate-backup'
   # WP 9.11 (G-08): a service with no PIDs cap (the fixture's migrator has none).
   $'migrator\tmissing-pids-limit'
+  # WP 12.6: the yahoo sidecar on `backend`, publishing a port, mounting a
+  # secret, an unpinned image, no limits, no healthcheck, no profile; and a
+  # third service on its network.
+  $'yahoo\tyahoo-network'
+  $'yahoo\tyahoo-published-port'
+  $'yahoo\tyahoo-secret'
+  $'yahoo\tyahoo-image-unpinned'
+  $'yahoo\tyahoo-missing-limits'
+  $'yahoo\tyahoo-missing-healthcheck'
+  $'yahoo\tyahoo-missing-profile'
+  $'hostile-api-on-yahoo\tyahoo-network-shared'
 )
 
 EVALUATOR="$(mktemp -t compose-hardening-XXXXXX.mjs)"
@@ -583,6 +603,70 @@ for (const [service, spec] of Object.entries(services)) {
   }
 }
 
+// ---------- WP 12.6: the yahoo sidecar (Yahoo Finance through yfinance, opt-in) ----------
+//
+// The mirror of the ollama runtime's rules, with one difference that is the
+// point of the sidecar: its network `yahoo` is NOT internal (the sidecar must
+// reach query1/query2.finance.yahoo.com), so who else is on it matters more,
+// not less. Identified by image (`personalfi-yahoo`, or any name the sidecar
+// could be renamed to) or by service name, so neither a rename nor an image
+// swap escapes the rules.
+const YAHOO_IMAGE_RE = /(?:^|\/)personalfi-yahoo(?:[:@]|$)/;
+const YAHOO_NETWORK = 'yahoo';
+const YAHOO_MEMBERS = new Set(['yahoo', 'worker']);
+
+function isYahoo(name, spec) {
+  return YAHOO_IMAGE_RE.test(String(spec.image ?? '')) || /^yahoo(?:-|$)/.test(name);
+}
+
+// Any service on `yahoo` other than the sidecar and the worker: `api`, `db`,
+// `proxy`, another sidecar. The network routes to the internet; a third
+// member would be a service with a path to Yahoo it was never given, and the
+// sidecar a peer it was never meant to answer.
+for (const service of membersOf.get(YAHOO_NETWORK) ?? []) {
+  if (!YAHOO_MEMBERS.has(service)) {
+    report(service, 'yahoo-network-shared', `joins "${YAHOO_NETWORK}", whose only members may be yahoo and worker`);
+  }
+}
+
+for (const [service, spec] of Object.entries(services)) {
+  if (!isYahoo(service, spec)) continue;
+  const nets = networksOf(spec);
+  const image = String(spec.image ?? '');
+  // Our own image, at a stated version or by digest: never a floating
+  // upstream Python image, never `latest`, never an untagged name.
+  const tag = /:([^:@/]+)$/.exec(image.replace(/@sha256:[0-9a-f]{64}$/, ''))?.[1];
+  const byDigest = /@sha256:[0-9a-f]{64}$/.test(image);
+  if (!YAHOO_IMAGE_RE.test(image) || (!byDigest && (tag === undefined || tag === 'latest'))) {
+    report(service, 'yahoo-image-unpinned', `image ${JSON.stringify(spec.image ?? null)} is not personalfi-yahoo at a stated version or digest`);
+  }
+  if ((spec.ports ?? []).length > 0) {
+    report(service, 'yahoo-published-port', `publishes ${(spec.ports ?? []).length} port(s); the sidecar is reached over "${YAHOO_NETWORK}" by the worker only`);
+  }
+  if ((spec.secrets ?? []).length > 0) {
+    report(service, 'yahoo-secret', `mounts ${(spec.secrets ?? []).length} secret(s); the sidecar needs no credential`);
+  }
+  const limits = spec.deploy?.resources?.limits ?? {};
+  const missing = [];
+  if (limits.memory === undefined && spec.mem_limit === undefined) missing.push('memory');
+  if (limits.cpus === undefined && spec.cpus === undefined) missing.push('cpus');
+  if (limits.pids === undefined && spec.pids_limit === undefined) missing.push('pids');
+  if (missing.length > 0) {
+    report(service, 'yahoo-missing-limits', `no ${missing.join(', ')} limit`);
+  }
+  const profiles = spec.profiles ?? [];
+  if (profiles.length !== 1 || profiles[0] !== 'yahoo') {
+    report(service, 'yahoo-missing-profile', `profiles ${JSON.stringify(profiles)}: the sidecar must be only in "yahoo" (opt-in; never on a plain \`up\`)`);
+  }
+  if (spec.network_mode !== undefined || nets.length !== 1 || nets[0] !== YAHOO_NETWORK) {
+    report(service, 'yahoo-network', `networks ${JSON.stringify(nets)}${spec.network_mode ? ` network_mode ${spec.network_mode}` : ''}: the sidecar joins "${YAHOO_NETWORK}" and nothing else`);
+  }
+  const healthcheck = spec.healthcheck;
+  if (healthcheck === undefined || healthcheck.disable === true || (healthcheck.test ?? []).length === 0) {
+    report(service, 'yahoo-missing-healthcheck', 'no healthcheck');
+  }
+}
+
 for (const v of violations) {
   process.stdout.write(`${v.rule}\t${v.service}\t${v.detail}\n`);
   process.stderr.write(`    FAIL ${label}: ${v.service}: ${v.rule}: ${v.detail}\n`);
@@ -699,7 +783,7 @@ self_test() {
     echo "compose-hardening-check: SELF-TEST FAILED: these service:rule pairs did not fire: ${missing_pairs[*]}" >&2
     rc=1
   else
-    echo "  per-service cases (ollama sandbox, pre-migrate-backup, migrator): all ${#EXPECTED_SERVICE_RULES[@]} service:rule pairs fired" >&2
+    echo "  per-service cases (ollama sandbox, yahoo sidecar, pre-migrate-backup, migrator): all ${#EXPECTED_SERVICE_RULES[@]} service:rule pairs fired" >&2
   fi
   if [ "$rc" -eq 0 ]; then
     echo "compose-hardening-check: SELF-TEST PASS (all ${#EXPECTED_RULES[@]} rules fire on a hostile file)" >&2

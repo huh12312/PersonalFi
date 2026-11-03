@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: MIT
+#
+# The yahoo sidecar's Python dependencies (WP 12.6; docs/research/14 §3):
+# yfinance and its complete transitive closure, each pinned by version and by
+# the sha256 of every wheel this image may install — the musllinux_1_2 x86_64
+# and aarch64 wheels for CPython 3.15 where the package is compiled, the one
+# universal wheel where it is pure Python. docker/yahoo.Dockerfile installs it
+# with `pip install --require-hashes --no-deps --only-binary=:all:`, so a
+# package not named here, a version not named here, a file whose hash is not
+# listed, or an sdist that would need a compiler all fail the build.
+#
+# How this file was made (docs/evidence/phase-12/wp12.6-yahoo-finance.md §2):
+#   1. inside python:3.15-alpine (the base pinned in the Dockerfile):
+#        pip download --only-binary=:all: -d amd64 yfinance
+#      which resolves the closure for musllinux x86_64;
+#   2. the same pins for arm64, without resolving again:
+#        pip download --no-deps --only-binary=:all: --platform musllinux_1_2_aarch64 \
+#          --python-version 3.15 --implementation cp -d arm64 -r pins.txt
+#   3. `pip hash -a sha256` on every file in both directories, one --hash per file.
+# A bump repeats all three steps; never hand-edit a hash.
+#
+# Licences: docker/yahoo/licenses.json, checked by scripts/python-licenses.ts
+# (`just licenses`) and listed in THIRD_PARTY.md. frozendict, the LGPL-3.0
+# dependency research 14 §2 anticipated, is no longer part of yfinance 1.7.0's
+# closure (yfinance vendors its own `frozendict` helper in utils.py).
+
+beautifulsoup4==4.15.0 \
+    --hash=sha256:d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9
+certifi==2026.10.23 \
+    --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
+cffi==2.1.1 \
+    --hash=sha256:42a494cee34437f05546455144f2b5d9ac09b1face62bcfce597d2e521066688 \
+    --hash=sha256:cc572dace3f60ef98d7b12ff411d20f5362feb31a0439eab0085bbfd349982d7
+charset-normalizer==3.5.2 \
+    --hash=sha256:183b88127acdb4fabe59d951ab424faf1af7b63cdbb5f776186c1ea2ffcaed98 \
+    --hash=sha256:f3c96f633825733f735c5a9cf21d21a257d8e1edf0b1cee0a064b9c424ca0f7d
+curl-cffi==0.17.0 \
+    --hash=sha256:0e70d25d88adc66818d831805e460704088f445269eaabbf884ab05d437c2f99 \
+    --hash=sha256:4f3413b62c780f2a5c7f8a0f6a1d8114f055043a273981b9732abedb5367202b
+idna==3.20 \
+    --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+lxml==6.1.3 \
+    --hash=sha256:2f5b2a2b9811b853b39bfa41367c6d78747b8e3e80e07fc5a24aae295c1a4d7d \
+    --hash=sha256:90f709b9accab6b2e4d14f5c8718203877a0486bcb3afd74d8b539ecd1e961d4
+multitasking==0.0.13 \
+    --hash=sha256:ec9243af140c67bfe52dc98d7173c294512735a88e8425c458b250db99dc2b48
+numpy==2.5.4 \
+    --hash=sha256:5ec3753760c1a6d8bb91200666e545c3a9728e6269dfb5d6ce02340996698aa3 \
+    --hash=sha256:b1185012870173de7ae33d370bd45b1cf5baee747ea4b97036b65f4e93016877
+pandas==3.1.0 \
+    --hash=sha256:a13199463b129363701a540c7b79586581b246b10b6a7ad682c41b268e7991d5 \
+    --hash=sha256:8e4de3fe8017e3445f1174707cd977e4e1154a704af2c060a1f648862f81acb9
+peewee==4.5.3 \
+    --hash=sha256:4c5db9d2a3c4ae9a5725b229c29af51dbd063193f3a6c03b837974a90e44548c
+platformdirs==4.14.3 \
+    --hash=sha256:cba2d05fe5e18b26b1fa6f376b8e6234c012abe1f8696c486fface7d0054e931
+protobuf==7.36.2 \
+    --hash=sha256:bdb3a345d48db958e6ce1f18e508beb0cc981d64f24088427549c866cd039f1e
+pycparser==3.12 \
+    --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
+python-dateutil==4.0.0 \
+    --hash=sha256:a5e246f79eb80475e691bf93862cead98decd8a498cf53ba0516fcdc0f50dc1c
+pytz==2026.6 \
+    --hash=sha256:7fed3fee8fd6bd4a2b7b75a8d56021d0624127bf69bd5691f115db929ac570b3
+requests==2.34.2 \
+    --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+soupsieve==3.0.4 \
+    --hash=sha256:8412826614f9c632227067d0985aeb9f584bd15efc852955430e097a9fe7afbf
+typing-extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+tzdata==2026.6 \
+    --hash=sha256:0a10eec6e13ef16b627fabed9a5f2ba61a62b1c67f327305f4e7e412a70b4aec
+urllib3==2.8.0 \
+    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3
+websockets==17.4 \
+    --hash=sha256:8d148b4b295224d3a19e7bd9f02ebe7344de254b3b2c4d0628ce42ade0bca119 \
+    --hash=sha256:9a4e95d56994a45ac76541853796720436ffe462957d0b1b89e87ff3d3b1627e
+yfinance==1.7.0 \
+    --hash=sha256:91281ecd1f71069a37155ff8653aff2d3085f3492bd8721f18b70955da62911a

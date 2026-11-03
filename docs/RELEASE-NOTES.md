@@ -9,14 +9,14 @@ older release wrote. Every release names every manual step an upgrade needs; **t
 and a release with none says so. Rolling back is a restore of the pre-migration backup, never a
 reverse migration ([RUNBOOK: Upgrade](../RUNBOOK.md#upgrade)).
 
-## v0.10.1 (in preparation)
+## v0.10.2 (in preparation)
 
 **Status:** not tagged. Items land here as they do.
 
-### Upgrading to v0.10.1
+### Upgrading to v0.10.2
 
-As for v0.10.0: `git pull && just upgrade` from source, or, once v0.10.1 is published, check out
-`v0.10.1`, set `PERSONALFI_VERSION=0.10.1` and run `just install-release 0.10.1`. One migration,
+As for v0.10.1: `git pull && just upgrade` from source, or, once v0.10.2 is published, check out
+`v0.10.2`, set `PERSONALFI_VERSION=0.10.2` and run `just install-release 0.10.2`. One migration,
 `0064_market_data_consent` (a new table; expand-only), applied by the upgrade's own migrator after
 its automatic backup.
 

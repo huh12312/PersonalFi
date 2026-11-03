@@ -63,7 +63,7 @@ jobs:
     # already have happened). The `release` environment has Chris as its
     # required reviewer and a `v*` deployment tag policy, so this job waits
     # for his approval once the gate is green. One approval releases all
-    # three matrix legs.
+    # four matrix legs.
     environment: release
     runs-on: ubuntu-24.04
     # Two registries now: the second push uploads every layer of both
@@ -89,6 +89,12 @@ jobs:
             # Repo root: this image builds apps/web and serves dist/ (see
             # docker/caddy.Dockerfile's web-build stage).
             context: .
+          # WP 12.6 (D33): the opt-in Yahoo Finance sidecar. Published like
+          # the other three — both registries, both architectures, signed,
+          # attested, verified — and run only under compose's `yahoo` profile.
+          - image: yahoo
+            dockerfile: docker/yahoo.Dockerfile
+            context: docker
     outputs:
       version: ${{ steps.version.outputs.value }}
     steps:
@@ -283,7 +289,7 @@ jobs:
             echo "| reference | tag | cosign | attestation |"
             echo "| --- | --- | --- | --- |"
           } >> "$GITHUB_STEP_SUMMARY"
-          for image in api backup proxy; do
+          for image in api backup proxy yahoo; do
             digest="$(cat "digest/${image}" 2>/dev/null || true)"
             if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
               fail "$image" "the publish job recorded no digest for ${image}"
@@ -320,7 +326,7 @@ jobs:
             echo "verify: REFUSED — not every reference verified; no GitHub release is cut"
             exit 1
           fi
-          echo "verify: PASS — 3 images x 2 registries, signed by ${identity} at ${GITHUB_SHA}, provenance attested"
+          echo "verify: PASS — 4 images x 2 registries, signed by ${identity} at ${GITHUB_SHA}, provenance attested"
 
   github-release:
     name: publish GitHub release
@@ -357,7 +363,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [api, backup, proxy]
+        image: [api, backup, proxy, yahoo]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -146,6 +146,14 @@ export interface PriceRefreshOptions {
   readonly clock?: Clock;
   /** Every key this process holds, so nothing provider-authored is logged raw. */
   readonly keys?: readonly ApiKey[];
+  /**
+   * WP 12.6: the holder's `price_source_priority` per security kind, strongest
+   * first (source names as stored). Consulted only to place an **opt-in**
+   * provider (`yfinance`) where the holder ranked it relative to the kind's
+   * default provider; absent ⇒ `PROVIDER_FOR_KIND` alone, as before. See
+   * `providersForKind`.
+   */
+  readonly ladders?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
@@ -202,6 +210,11 @@ export interface PriceRefreshResult {
   readonly priceRowsWritten: number;
   readonly fxRowsWritten: number;
   readonly securitiesPriced: readonly string[];
+  /** WP 12.6: which provider priced each id in `securitiesPriced` (the holder's ranking may differ from `PROVIDER_FOR_KIND`). */
+  readonly pricedBy: readonly {
+    readonly securityId: string;
+    readonly provider: MarketDataProvider;
+  }[];
   readonly securitiesUnpriced: readonly string[];
   /** WP 10.5: one entry per id in `securitiesUnpriced`, with its reason. */
   readonly unpriced: readonly UnpricedSecurity[];
@@ -231,6 +244,41 @@ export const PROVIDER_FOR_KIND: Readonly<Record<string, MarketDataProvider>> = O
   mutual_fund: 'tiingo',
   crypto: 'coingecko',
 });
+
+/** Providers a holder may place in a ladder that are never asked unless they did (D33). */
+export const OPT_IN_PROVIDERS: readonly MarketDataProvider[] = Object.freeze(['yfinance']);
+
+/**
+ * The providers to ask for a security of `kind`, strongest first (WP 12.6).
+ *
+ * The kind's default provider (`PROVIDER_FOR_KIND`, D17) is always asked — it
+ * was before this function existed, whatever the ladder said, and a holder who
+ * removed Tiingo from the equity ladder still expects the ladder's *read* to be
+ * what decides. An opt-in provider is asked **only** if the holder placed it in
+ * this kind's ladder, and in the order they placed it: above the default ⇒
+ * first, below it ⇒ only for a subject the default could not answer. Never
+ * inserted on anyone's behalf.
+ */
+export function providersForKind(
+  kind: string,
+  ladder: readonly string[] | undefined,
+): readonly MarketDataProvider[] {
+  const primary = PROVIDER_FOR_KIND[kind];
+  if (primary === undefined) return [];
+  if (ladder === undefined) return [primary];
+  const ranked: MarketDataProvider[] = [];
+  for (const source of ladder) {
+    const provider =
+      source === primary
+        ? primary
+        : (OPT_IN_PROVIDERS as readonly string[]).includes(source)
+          ? (source as MarketDataProvider)
+          : undefined;
+    if (provider !== undefined && !ranked.includes(provider)) ranked.push(provider);
+  }
+  if (!ranked.includes(primary)) ranked.push(primary);
+  return ranked;
+}
 
 export function createPriceRefreshJob(options: PriceRefreshOptions) {
   const clock = options.clock ?? systemClock;
@@ -296,6 +344,7 @@ export function createPriceRefreshJob(options: PriceRefreshOptions) {
       const priceRows: PriceRowToWrite[] = [];
       const fxRows: FxRowToWrite[] = [];
       const priced: string[] = [];
+      const pricedBy: { securityId: string; provider: MarketDataProvider }[] = [];
       const unpriced: string[] = [];
       const unpricedDetail: UnpricedSecurity[] = [];
       const fxUnfetched: UnfetchedFxPair[] = [];
@@ -334,71 +383,107 @@ export function createPriceRefreshJob(options: PriceRefreshOptions) {
       // Prices
       // -------------------------------------------------------------------
       for (const security of plan.securities) {
-        const provider = PROVIDER_FOR_KIND[security.kind];
-        const source = provider === undefined ? undefined : byProvider.get(provider);
-        if (provider === undefined || source === undefined) {
+        const candidates = providersForKind(security.kind, options.ladders?.[security.kind]);
+        if (candidates.length === 0) {
           // No provider prices this kind. Not a failure: `@ctx/investments`'
           // ladder answers from `exchange_fill` or `last_known`.
           unpriced.push(security.securityId);
           unpricedDetail.push({
             securityId: security.securityId,
-            provider: provider ?? null,
-            reason: provider === undefined ? 'no_provider_for_kind' : 'source_not_configured',
+            provider: null,
+            reason: 'no_provider_for_kind',
             detail: null,
           });
           continue;
         }
 
-        const entry = tally(provider, 'price_refresh');
-        entry.symbolsAsked += 1;
+        // WP 12.6: the holder's ranking, strongest first. With one candidate —
+        // every install that has not placed an opt-in provider — this is the
+        // pre-12.6 path exactly. With more, the next candidate is asked only
+        // when the one above it could not answer for this subject at all (not
+        // registered, no key, no data); a provider that is rate-limited, refused
+        // or failing stops the walk, so a Tiingo outage never becomes a burst
+        // of Yahoo requests the holder did not rank first.
+        let settled: UnpricedSecurity | null = null;
+        let pricedHere = false;
+        for (const [index, provider] of candidates.entries()) {
+          const last = index === candidates.length - 1;
+          const source = byProvider.get(provider);
+          if (source === undefined) {
+            settled ??= {
+              securityId: security.securityId,
+              provider,
+              reason: 'source_not_configured',
+              detail: null,
+            };
+            continue;
+          }
 
-        const outcome = await source.price({
-          subject: security.subject,
-          date: plan.asOfDate,
-          currency: security.currency,
-        });
+          const entry = tally(provider, 'price_refresh');
+          entry.symbolsAsked += 1;
 
-        if (outcome.kind === 'ok') {
-          entry.requestsMade += 1;
-          contributing.add(provider);
-          priced.push(security.securityId);
-          priceRows.push({
-            securityId: security.securityId,
-            priceDate: outcome.value.date,
-            close: outcome.value.close,
-            currency: outcome.value.currency,
-            source: provider,
-            stale: outcome.value.stale,
-            observedAt: outcome.value.observedAt,
+          const outcome = await source.price({
+            subject: security.subject,
+            date: plan.asOfDate,
+            currency: security.currency,
           });
-          continue;
-        }
 
-        unpriced.push(security.securityId);
-        const failure = unavailabilityOf(outcome);
-        if (failure === null) {
-          // `no_data`. The request was still made and still cost a unit.
-          entry.requestsMade += 1;
-          unpricedDetail.push({
+          if (outcome.kind === 'ok') {
+            entry.requestsMade += 1;
+            contributing.add(provider);
+            priced.push(security.securityId);
+            pricedBy.push({ securityId: security.securityId, provider });
+            priceRows.push({
+              securityId: security.securityId,
+              priceDate: outcome.value.date,
+              close: outcome.value.close,
+              currency: outcome.value.currency,
+              source: provider,
+              stale: outcome.value.stale,
+              observedAt: outcome.value.observedAt,
+            });
+            pricedHere = true;
+            break;
+          }
+
+          const failure = unavailabilityOf(outcome);
+          if (failure === null) {
+            // `no_data`. The request was still made and still cost a unit.
+            entry.requestsMade += 1;
+            settled = {
+              securityId: security.securityId,
+              provider,
+              reason: 'no_data',
+              detail: outcome.kind === 'no_data' ? redactSecrets(outcome.detail, keys) : null,
+            };
+            if (!last) continue;
+            break;
+          }
+          // A refusal never left the process, so it is not a request. Everything
+          // else reached the provider.
+          if (failure.reason !== 'refused' && failure.reason !== 'skipped_no_key') {
+            entry.requestsMade += 1;
+          }
+          settled = {
             securityId: security.securityId,
             provider,
-            reason: 'no_data',
-            detail: outcome.kind === 'no_data' ? redactSecrets(outcome.detail, keys) : null,
-          });
-          continue;
+            reason: failure.reason,
+            detail: failure.detail,
+          };
+          recordFailure(entry, failure);
+          if (failure.reason === 'skipped_no_key' && !last) continue;
+          break;
         }
-        // A refusal never left the process, so it is not a request. Everything
-        // else reached the provider.
-        if (failure.reason !== 'refused' && failure.reason !== 'skipped_no_key') {
-          entry.requestsMade += 1;
-        }
-        unpricedDetail.push({
-          securityId: security.securityId,
-          provider,
-          reason: failure.reason,
-          detail: failure.detail,
-        });
-        recordFailure(entry, failure);
+        if (pricedHere) continue;
+        unpriced.push(security.securityId);
+        unpricedDetail.push(
+          settled ?? {
+            securityId: security.securityId,
+            provider: candidates[0] ?? null,
+            reason: 'source_not_configured',
+            detail: null,
+          },
+        );
       }
 
       // -------------------------------------------------------------------
@@ -530,6 +615,7 @@ export function createPriceRefreshJob(options: PriceRefreshOptions) {
         priceRowsWritten,
         fxRowsWritten,
         securitiesPriced: priced,
+        pricedBy,
         securitiesUnpriced: unpriced,
         unpriced: unpricedDetail,
         fxUnfetched,

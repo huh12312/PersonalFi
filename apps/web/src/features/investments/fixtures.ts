@@ -29,6 +29,7 @@ import type {
   PeriodSummary,
   PriceQuote,
 } from '../../api/generated/types.gen.ts';
+import { yahooSettings } from '../market-data/yahoo-fixtures.ts';
 
 export function usd(minor: string): { minor: string; currency: string } {
   return { minor, currency: 'USD' };
@@ -112,6 +113,7 @@ export function marketDataSettingsResponse(): GetMarketDataSettingsResponse {
     ],
     settingsAttributions: [coinGeckoAttribution()],
     allowedHostsNarrowed: true,
+    yahoo: yahooSettings(),
   };
 }
 

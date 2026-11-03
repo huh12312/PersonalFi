@@ -27,6 +27,12 @@ import { SecretBox } from '@core/secretbox';
 import { UserService, withKekDerivationLock, type UserRecord } from '@ctx/identity';
 import { loadAssumptions } from '@ctx/planning';
 import {
+  YAHOO_SIDECAR_ENDPOINT,
+  YFINANCE_SIDECAR_MAX_BYTES,
+  YFINANCE_SIDECAR_TIMEOUT_MS,
+  standingConsentHolds,
+} from '@ctx/integrations';
+import {
   createConsumerPump,
   createJobRunner,
   createLivenessWriter,
@@ -38,6 +44,8 @@ import {
   type ConsumerPump,
   type JobRunner,
   type Scheduler,
+  createLocalEndpointPolicy,
+  createLocalEndpointTransport,
 } from '@core/platform';
 import pino from 'pino';
 import {
@@ -59,6 +67,7 @@ import { APP_DATABASE_ROLE, appRoleDatabaseUrl, ensureAppRole } from './db-role.
 import { buildLoggerOptions } from './logging.ts';
 import { appModules } from './modules.ts';
 import { createStoredMarketDataKeys } from './market-data-keys.ts';
+import { currentYahooConsent } from './yahoo-consent.ts';
 import { createStoredPlaid, withStoredPlaid } from './plaid-stored.ts';
 import { createNarratorRuntime, createNarratorWiring } from './narrator-wiring.ts';
 import { createNarratorStores } from './narrator-stores.ts';
@@ -626,6 +635,30 @@ async function main(): Promise<void> {
         secretBox: () => secretBox ?? undefined,
         logger,
       }),
+      // WP 12.6 (D33): Yahoo Finance through the `yahoo` sidecar, opt-in. The
+      // operator half is YAHOO_FINANCE_ENABLED (one log line either way, from
+      // the runtime); the holder half is their standing consent, read when
+      // their view is built and again by the adapter before every request.
+      // The transport is the local-endpoint one (`yahoo:8000`, a single-label
+      // compose name, every resolved address private, no redirects) — the
+      // worker is the only service on the `yahoo` network, and it never
+      // dials Yahoo itself.
+      yahooFinance: {
+        enabled: config.env.YAHOO_FINANCE_ENABLED,
+        ...(config.env.YAHOO_FINANCE_ENABLED
+          ? {
+              transport: createLocalEndpointTransport(
+                createLocalEndpointPolicy({
+                  endpoint: YAHOO_SIDECAR_ENDPOINT,
+                  timeoutMs: YFINANCE_SIDECAR_TIMEOUT_MS,
+                  maxResponseBytes: YFINANCE_SIDECAR_MAX_BYTES,
+                }),
+              ),
+            }
+          : {}),
+        consented: (holder) =>
+          standingConsentHolds(database, holder, 'yfinance', currentYahooConsent()),
+      },
     });
     // Prime each provider's budget from `market_data_runs` so a restart does
     // not reset the day's spend (wp3.4-market-data.md §9 item 4). Best-effort

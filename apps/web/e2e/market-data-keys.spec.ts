@@ -9,6 +9,7 @@ import type { MarketDataKeyProvider } from './support/mock-market-data-keys.ts';
 import { installNetworthMocks } from './support/mock-networth.ts';
 import { screenshotDir } from './support/screenshot-dir.ts';
 import { hideDevtools } from './support/sweep.ts';
+import { defaultYahooSettings } from './support/mock-yahoo.ts';
 
 /**
  * WP 10.4: a holder's own market-data keys, in Settings › Market data › API keys - the market-data twin of
@@ -99,6 +100,7 @@ async function installSettingsFromKeys(page: Page, api: MockApiState): Promise<v
         ],
         settingsAttributions: [COINGECKO_ATTRIBUTION],
         allowedHostsNarrowed: false,
+        yahoo: defaultYahooSettings(),
       }),
     });
   });

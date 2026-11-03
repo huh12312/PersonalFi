@@ -307,12 +307,22 @@ export const EXEMPT_TABLES: ReadonlyMap<string, string> = new Map([
   // with calls it never made.
   [
     'prices',
-    "market data (WP 3.4); provider facts, re-fetched on the next refresh; Tiingo's ToS forbids redistribution.",
+    "market data (WP 3.4); provider facts, re-fetched on the next refresh; Tiingo's ToS forbids redistribution, and so does the absence of any Yahoo data licence (WP 12.6).",
   ],
   ['fx_rates', 'market data (WP 3.4); provider facts, re-fetched on the next refresh.'],
   [
     'market_data_runs',
     "market data (WP 3.4); another deployment's run history would seed this one's rate budget with calls it never made.",
+  ],
+  // WP 12.6 (D33): the holder's consent to Yahoo Finance's terms. Given on this
+  // install, for this install, as narrator_provider_consents is (WP 10.6): a
+  // restored instance asks again rather than inheriting an agreement made
+  // elsewhere. A ladder that names `yfinance` does travel (price_source_priority
+  // is exported), and is inert there until the holder consents again — the
+  // priority route refuses it and the adapter is never built without it.
+  [
+    'market_data_consents',
+    'market data (WP 12.6); a consent to an unofficial source is given on this install and asked again after a restore.',
   ],
   // Phase 3 WP 3.7's provider fact staging (migration 0018) — the sibling of
   // `connection_staged_facts` above and exempt for the same reason, not a new

@@ -326,6 +326,10 @@ CoinGecko key"), naming every holding it could not price and why. Both spend aga
 per-provider budgets (`market_data_runs`). Before v0.9.4 the nightly job priced nothing on any
 install: it was never given the list of holdings.
 
+**Yahoo Finance is not one of these providers by default (v0.10.2).** It is an opt-in, unofficial,
+best-effort source with its own section below — "Yahoo Finance (profile `yahoo`, opt-in,
+unofficial)" — and nothing above turns it on.
+
 **When the health score is recorded (v0.9.11).** Every day at about 04:10 (your time zone, with up
 to two minutes' jitter) the worker records that day's financial health score, after the 03:45 price
 refresh and the 04:00 net-worth snapshot and before the 04:15 advisor pass. One row per day: a
@@ -1998,6 +2002,88 @@ ollama/ollama:<version>`, replace the digest, update `THIRD_PARTY.md`, run
 `docs/evidence/phase-5/wp5.2-local-model.md` §8 on the new image.
 
 ---
+
+## Yahoo Finance (profile `yahoo`, opt-in, unofficial)
+
+**What it is.** An optional price source for stocks, ETFs and funds: Yahoo Finance, reached through
+the open-source `yfinance` library (Apache-2.0) running in its own container, `yahoo`
+(WP 12.6, decision D33; `docs/research/14-yahoo-finance-optional.md`). It is **unofficial and best
+effort**: Yahoo offers no data licence and its terms prohibit automated collection, `yfinance`
+itself says it is "intended for personal use only", and Yahoo changes its undocumented endpoints
+without notice. It is never the default, never suggested and never ranked for anyone; Tiingo
+remains the supported source. Turn it on only for your own portfolio, on your own machine.
+
+**The two halves.** A single request leaves only when both hold, and the worker checks both before
+**every** request, not only at start-up:
+
+1. **The operator's.** `YAHOO_FINANCE_ENABLED=true` in `.env` **and** the profile up. Without the
+   variable the worker logs one line (`yfinance not enabled; adapter not registered`) and never
+   builds the adapter; with it, `yfinance enabled; adapter registered over the yahoo sidecar (each
+holder must also consent)`.
+2. **The holder's.** Settings → Market data → **Yahoo Finance (unofficial)**: tick the consent
+   (`yahoo-consent/1`; the exact words are on the card and recorded with their sha256 and the
+   time), then **Use this provider** to place Yahoo in a ladder — after Tiingo (it answers only
+   what Tiingo could not: no key, no data) or before it. Placing it is refused until the box is
+   ticked; unticking it removes Yahoo from every ladder at once.
+
+**What leaves the machine.** The ticker symbols and dates asked for, sent by the `yahoo` container to
+Yahoo — never your name, an account, a quantity or an amount. The container's own host check
+allows exactly two destinations, `query1.finance.yahoo.com` and `query2.finance.yahoo.com`, on 443,
+before every request and every redirect; the cookie hosts `yfinance` also tries (`fc.yahoo.com`,
+`guce.yahoo.com`, `consent.yahoo.com`) are refused, and the chart and search endpoints answer
+without them. The `yahoo` network's only other member is `worker`; `api` and `db` are not on it, the
+api never reaches the sidecar, and `MARKET_DATA_ALLOWED_HOSTS` still names no Yahoo host. No
+secret, no `.env` value and no data of yours reaches the container.
+
+**The budget.** 60 requests per sliding hour, self-imposed (Yahoo publishes none), counted twice:
+by the worker per call to the sidecar (`YFINANCE_WINDOWS`, primed from `market_data_runs` at boot,
+so a restart does not reset it) and by the sidecar per request that actually leaves for Yahoo (the
+first quote for a symbol costs two: its exchange's time zone, then the closes). The card shows how
+much of the hour is left.
+
+**On a 429 (Yahoo's "Too Many Requests").** The holding keeps its last known price, labelled as
+such; the run records `rate_limited` with the reason, and the card shows it as the last outcome. Both
+the sidecar and the worker back off — one minute, then two, four … at most an hour — and nothing is
+sent to Yahoo meanwhile. A changed response shape is recorded `failed` ("Yahoo's response shape
+changed") the same way, never a crash. The weekly soak report's **Market data** table shows Yahoo's
+rows beside Tiingo's.
+
+**Turn it on.**
+
+```bash
+# .env
+YAHOO_FINANCE_ENABLED=true
+```
+
+```bash
+docker compose --profile yahoo up -d
+docker compose ps yahoo        # healthy once GET /health answers (it never calls Yahoo)
+```
+
+(or put `COMPOSE_PROFILES=yahoo` in `.env` so every `docker compose up -d`, `just upgrade` and
+`just install-release` includes it). A published install pulls the fourth image, `personalfi-yahoo`,
+signed and attested like the other three: `just install-release x.y.z` verifies it with the rest
+exactly when the profile is on (`scripts/verify-release.sh --with-yahoo`), and never pulls it
+otherwise. Then each holder ticks the consent and places Yahoo in Settings → Market data.
+
+**Turn it off.** Untick the consent (Yahoo leaves every ladder at once; already-stored Yahoo closes
+stay, labelled, until newer prices replace them), or for the whole install:
+
+```bash
+# .env: remove the line, or YAHOO_FINANCE_ENABLED=false
+docker compose stop yahoo && docker compose rm -f yahoo
+docker compose up -d worker api
+```
+
+**Labels.** Every price, holding value and chart point that came from Yahoo carries "Yahoo Finance
+via yfinance — unofficial, best effort". The export never carries Yahoo's prices (no price table is
+exported); a ladder naming `yfinance` travels, and stays inert on a restored install until a holder
+consents there.
+
+**The image.** `docker/yahoo.Dockerfile`: Python 3.15 on Alpine by digest, `yfinance` and every
+dependency pinned by version and sha256 (`docker/yahoo/requirements.txt`, whose header says how to
+regenerate it), uid 10004, read-only root filesystem, 384 MB / half a core / 64 processes. The
+Python licences are in `THIRD_PARTY.md` ("Python (the yahoo sidecar)"), checked by `just licenses`.
 
 ## Language model: local or bring your own key (v0.9.5)
 

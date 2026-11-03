@@ -1736,6 +1736,27 @@ describe('NARRATION_TEXT_SHOWN (R-2, WP 9.6 item 3)', () => {
   });
 });
 
+/** WP 12.6 (D33): the operator half of Yahoo Finance. Off unless the operator says so. */
+describe('YAHOO_FINANCE_ENABLED (WP 12.6, the operator half)', () => {
+  it('is false by default — nothing turns Yahoo on', () => {
+    const config = loadConfig({ env: env(), readSecret: secretsFrom({}) });
+    expect(config.env.YAHOO_FINANCE_ENABLED).toBe(false);
+  });
+
+  it('is true only when set to true', () => {
+    for (const [value, expected] of [
+      ['true', true],
+      ['false', false],
+    ] as const) {
+      const config = loadConfig({
+        env: env({ YAHOO_FINANCE_ENABLED: value }),
+        readSecret: secretsFrom({}),
+      });
+      expect(config.env.YAHOO_FINANCE_ENABLED, value).toBe(expected);
+    }
+  });
+});
+
 describe('readOptionalSecret (WP 11.8: one presence rule for every reader)', () => {
   const reader =
     (files: Readonly<Record<string, string | NodeJS.ErrnoException>>) =>

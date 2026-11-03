@@ -41,6 +41,12 @@ export interface HoldingsTableProps {
    * (`wp3.14-carryovers.md` item 1).
    */
   readonly coinGeckoAttribution?: Attribution;
+  /**
+   * WP 12.6: Yahoo Finance's label (`useProviderAttribution('yfinance')`) —
+   * "unofficial, best effort" — rendered exactly as CoinGecko's is, when at
+   * least one row is priced `price.source === 'yfinance'`.
+   */
+  readonly yahooAttribution?: Attribution;
 }
 
 interface AccountRow {
@@ -69,6 +75,7 @@ export function HoldingsTable({
   accountNameOf,
   onOpenAccount,
   coinGeckoAttribution,
+  yahooAttribution,
 }: HoldingsTableProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
@@ -83,6 +90,7 @@ export function HoldingsTable({
   }
 
   const hasCoinGeckoPrice = holdings.some((holding) => holding.price?.source === 'coingecko');
+  const hasYahooPrice = holdings.some((holding) => holding.price?.source === 'yfinance');
 
   function accountRowsFor(securityId: string): AccountRow[] {
     const rows: AccountRow[] = [];
@@ -268,6 +276,9 @@ export function HoldingsTable({
       </ScrollRegion>
       {hasCoinGeckoPrice && coinGeckoAttribution !== undefined && (
         <ProviderAttribution attribution={coinGeckoAttribution} className="mt-3" />
+      )}
+      {hasYahooPrice && yahooAttribution !== undefined && (
+        <ProviderAttribution attribution={yahooAttribution} className="mt-3" />
       )}
     </>
   );

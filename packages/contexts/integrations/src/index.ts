@@ -90,7 +90,10 @@ export {
   MARKET_DATA_ALLOWED_PORTS,
   MARKET_DATA_MAX_RESPONSE_BYTES,
   MARKET_DATA_TIMEOUT_MS,
+  NoDirectEgressError,
   PROVIDER_HOSTS,
+  YAHOO_SIDECAR_ENDPOINT,
+  YAHOO_SIDECAR_UPSTREAM_HOSTS,
   baseUrlFor,
   createMarketDataEgressPolicy,
   policyFor,
@@ -175,6 +178,31 @@ export {
   type OpenFigiMapper,
   type OpenFigiOptions,
 } from './adapters/openfigi.ts';
+export {
+  YFINANCE_BACKOFF_BASE_MS,
+  YFINANCE_BACKOFF_MAX_MS,
+  YFINANCE_GATE_CODES,
+  YFINANCE_SIDECAR_MAX_BYTES,
+  YFINANCE_SIDECAR_TIMEOUT_MS,
+  createYfinancePriceSource,
+  type YahooSidecarTransport,
+  type YfinanceOptions,
+} from './adapters/yfinance.ts';
+
+// ---------------------------------------------------------------------------
+// The holder half of an opt-in provider (WP 12.6)
+// ---------------------------------------------------------------------------
+
+export {
+  consentIsCurrent,
+  giveMarketDataConsent,
+  readMarketDataConsent,
+  standingConsentHolds,
+  withdrawMarketDataConsent,
+  type ConsentExecutor,
+  type ConsentText,
+  type MarketDataConsentView,
+} from './consent.ts';
 
 export {
   createFakePriceSource,
@@ -193,8 +221,10 @@ export {
 // ---------------------------------------------------------------------------
 
 export {
+  OPT_IN_PROVIDERS,
   PROVIDER_FOR_KIND,
   UNPRICED_REASONS,
+  providersForKind,
   createPriceRefreshJob,
   inMemoryMarketDataWriter,
   inMemoryRunRecorder,

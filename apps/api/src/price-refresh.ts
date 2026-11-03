@@ -49,6 +49,8 @@ import {
   type RefreshSubject,
 } from '@ctx/integrations';
 import { readPricingPositions, type PricingPosition } from '@ctx/investments';
+import { priceSourcePriority } from '@ctx/investments/schema';
+import { and, asc, eq } from 'drizzle-orm';
 import type { MarketDataView } from './domain.ts';
 
 /** Why the planner could not build a subject for a security a provider would price. */
@@ -214,10 +216,14 @@ export async function runPriceRefresh(input: {
   readonly recorder: MarketDataRunRecorder;
 }): Promise<PriceRefreshRun> {
   const plan = await input.planFor(input.userId, input.asOfDate);
+  const ladders = await readPriceLadders(input.database, input.userId);
   const result = await input.database.transaction(async (tx) => {
     const job = createPriceRefreshJob({
       userId: input.userId,
       sources: input.view.sources,
+      // WP 12.6: the holder's ranking, so an opt-in provider is asked where
+      // (and only if) they placed it — `providersForKind`.
+      ladders,
       writer: input.writer,
       recorder: input.recorder,
       outbox: { execute: (query) => tx.execute(query) as never },
@@ -228,4 +234,27 @@ export async function runPriceRefresh(input: {
     return job.run(plan);
   });
   return { plan, result };
+}
+
+/**
+ * The holder's `price_source_priority`, per kind, strongest rung first —
+ * enabled rows only. WP 12.6: what `createPriceRefreshJob` reads to place an
+ * opt-in provider. A kind with no rows is absent (the job then uses
+ * `PROVIDER_FOR_KIND` alone, as before).
+ */
+export async function readPriceLadders(
+  database: Database,
+  userId: string,
+): Promise<Record<string, readonly string[]>> {
+  const rows = await database
+    .select({
+      kind: priceSourcePriority.securityKind,
+      source: priceSourcePriority.source,
+    })
+    .from(priceSourcePriority)
+    .where(and(eq(priceSourcePriority.userId, userId), eq(priceSourcePriority.enabled, true)))
+    .orderBy(asc(priceSourcePriority.securityKind), asc(priceSourcePriority.rung));
+  const ladders: Record<string, string[]> = {};
+  for (const row of rows) (ladders[row.kind] ??= []).push(row.source);
+  return ladders;
 }

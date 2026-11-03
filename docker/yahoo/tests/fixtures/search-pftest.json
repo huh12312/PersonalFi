@@ -1,0 +1,35 @@
+{
+  "explains": [],
+  "count": 2,
+  "quotes": [
+    {
+      "exchange": "NMS",
+      "shortname": "PersonalFi Test Co",
+      "quoteType": "EQUITY",
+      "symbol": "PFTEST",
+      "index": "quotes",
+      "score": 1000.0,
+      "typeDisp": "Equity",
+      "longname": "PersonalFi Test Company",
+      "exchDisp": "NASDAQ",
+      "isYahooFinance": true
+    },
+    {
+      "exchange": "PCX",
+      "shortname": "PersonalFi Test Fund",
+      "quoteType": "ETF",
+      "symbol": "PFTF",
+      "index": "quotes",
+      "score": 900.0,
+      "typeDisp": "ETF",
+      "exchDisp": "NYSEArca",
+      "isYahooFinance": true
+    }
+  ],
+  "news": [],
+  "nav": [],
+  "lists": [],
+  "researchReports": [],
+  "totalTime": 10,
+  "timeTakenForQuotes": 5
+}

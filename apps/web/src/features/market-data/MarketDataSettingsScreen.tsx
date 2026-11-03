@@ -11,6 +11,7 @@ import { EmptyState } from '../../components/patterns/EmptyState.tsx';
 import { CloudOff } from 'lucide-react';
 import { useStepUpRetry } from '../../lib/step-up.ts';
 import { ProviderAttribution } from './Attribution.tsx';
+import { YahooFinanceCard } from './YahooFinanceCard.tsx';
 import {
   useMarketDataSettingsQuery,
   useSetMarketDataPriorityMutation,
@@ -267,7 +268,10 @@ export function MarketDataSettingsScreen() {
         <ul className="mt-3 flex flex-col gap-2">
           {(settingsQuery.data?.ladders ?? []).map((ladder) => (
             <PriorityLadderEditor
-              key={ladder.securityKind}
+              key={`${ladder.securityKind}:${[...ladder.sources]
+                .sort((a, b) => a.rung - b.rung)
+                .map((s) => s.source)
+                .join(',')}`}
               ladder={ladder}
               saving={savingKind === ladder.securityKind}
               onSave={(sources) => handleSavePriority(ladder.securityKind, sources)}
@@ -275,6 +279,8 @@ export function MarketDataSettingsScreen() {
           ))}
         </ul>
       </section>
+
+      {settingsQuery.data !== undefined && <YahooFinanceCard settings={settingsQuery.data} />}
 
       <section>
         <h2 className="text-h3 text-text-primary">Test fetch</h2>
@@ -296,7 +302,7 @@ export function MarketDataSettingsScreen() {
                 setTestProvider(event.target.value as TestMarketDataFetchData['body']['provider'])
               }
             >
-              {['tiingo', 'fred', 'coingecko', 'openfigi', 'yfinance'].map((provider) => (
+              {['tiingo', 'fred', 'coingecko', 'openfigi'].map((provider) => (
                 <option key={provider} value={provider}>
                   {provider}
                 </option>

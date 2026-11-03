@@ -12,6 +12,9 @@
 #   docker compose --profile local-llm up -d   -> + ollama, the local model runtime (WP 5.2; RUNBOOK "Local model")
 #   docker compose --profile local-llm-pull run --rm ollama-pull  -> the one-shot model pull (WP 5.2)
 #   docker compose --profile webhooks up -d    -> + placeholder webhook listener scaffold
+#   docker compose --profile yahoo up -d       -> + yahoo, Yahoo Finance via yfinance: opt-in, unofficial,
+#                                                 best effort; also needs YAHOO_FINANCE_ENABLED=true and each
+#                                                 holder's consent (WP 12.6; RUNBOOK "Yahoo Finance")
 #
 # Every secret is a file under ./secrets, mounted at /run/secrets (never an env
 # var); the top-level `secrets:` block below is the authoritative list, and
@@ -22,7 +25,7 @@
 # `compose.dev.yml` is the *other* file (dev-only Postgres). This file is never
 # layered on top of it and never the other way around — see that file's header.
 #
-# Network topology (memo 06 §2.1's four, plus WP 5.2's two):
+# Network topology (memo 06 §2.1's four, plus WP 5.2's two and WP 12.6's one):
 #   frontend  bridge            proxy <-> api only.
 #   backend   bridge            api, worker, db, migrator, pre-migrate-backup, backup.
 #                                Carries both internal DB traffic and each service's
@@ -41,6 +44,10 @@
 #   llm-pull  bridge            `ollama-pull` alone, the one container allowed to
 #                                reach the internet to fetch a model, sharing a
 #                                network with nothing else.
+#   yahoo     bridge            `yahoo` and `worker` only (the hardening check
+#                                refuses a third member). NOT internal: the
+#                                sidecar must reach query1/query2.finance.yahoo.com,
+#                                the only two hosts its own host check allows.
 #
 # Only `proxy` publishes a port, and only to `${BIND_ADDRESS}` (default
 # 127.0.0.1 — see .env.example). `scripts/compose-hardening-check.sh` asserts
@@ -93,6 +100,13 @@ networks:
   # must reach registry.ollama.ai — and joined by nothing else, so the one
   # container with internet access shares a network with no other service.
   llm-pull: {}
+  # WP 12.6: the yahoo sidecar's network. `yahoo` and `worker` only (the
+  # hardening check's `yahoo-network-shared` refuses any third member). Not
+  # internal — the sidecar must reach Yahoo — so it is the one network whose
+  # membership is a statement about who may reach the internet through it:
+  # nobody but the sidecar, which speaks only to the worker. `db` and `api`
+  # are not on it; the api never reaches the sidecar or Yahoo.
+  yahoo: {}
 
 volumes:
   pgdata: {}
@@ -447,6 +461,10 @@ services:
       LOCAL_MODEL_CLASSIFIER_NAME: ${LOCAL_MODEL_CLASSIFIER_NAME:-}
       LOCAL_MODEL_CLASSIFIER_DIGEST: ${LOCAL_MODEL_CLASSIFIER_DIGEST:-}
       NARRATION_TEXT_SHOWN: ${NARRATION_TEXT_SHOWN:-false}
+      # WP 12.6: the api reads the operator half of Yahoo Finance only to say
+      # so on the Settings card. It is not on the `yahoo` network and never
+      # reaches the sidecar or Yahoo. Same value as `worker`, below.
+      YAHOO_FINANCE_ENABLED: ${YAHOO_FINANCE_ENABLED:-false}
     secrets:
       [
         database_url,
@@ -577,6 +595,11 @@ services:
       LOCAL_MODEL_ALLOW_REMOTE: ${LOCAL_MODEL_ALLOW_REMOTE:-false}
       LOCAL_MODEL_CLASSIFIER_NAME: ${LOCAL_MODEL_CLASSIFIER_NAME:-}
       LOCAL_MODEL_CLASSIFIER_DIGEST: ${LOCAL_MODEL_CLASSIFIER_DIGEST:-}
+      # WP 12.6 (D33): the operator half of Yahoo Finance through yfinance.
+      # `true` only with `docker compose --profile yahoo up -d`: the worker
+      # then registers the adapter over http://yahoo:8000 (one log line either
+      # way) and asks it only for holders who ticked the consent in Settings.
+      YAHOO_FINANCE_ENABLED: ${YAHOO_FINANCE_ENABLED:-false}
       MONTE_CARLO_MAX_CONCURRENT: ${MONTE_CARLO_MAX_CONCURRENT:-8}
     # WP 3.4's four market-data keys and WP 3.5's CDP pair join the list here
     # and on `worker` — and on neither `migrator` nor `proxy` nor `backup`.
@@ -603,7 +626,12 @@ services:
     # `llm` (WP 5.2): the worker runs the `insights.run_local` lane, so it is
     # the one service that reaches `ollama`. Internal, and worker listens on
     # no port, so `ollama` gains nothing by sharing it.
-    networks: [backend, llm]
+    #
+    # `yahoo` (WP 12.6): the worker runs the nightly price refresh, so it is
+    # the one service that reaches the `yahoo` sidecar — and only when the
+    # operator set YAHOO_FINANCE_ENABLED=true and a holder consented. On an
+    # install without the `yahoo` profile the network has no other member.
+    networks: [backend, llm, yahoo]
     tmpfs: ['/tmp:size=64m,mode=1777,noexec,nosuid,nodev']
     # WP 4.5/4.6 (WP 4.12b, the Wave C wiring handover §4.4): the only named,
     # writable volume this service mounts, and the only service that mounts
@@ -1003,6 +1031,52 @@ services:
         kill "$$server"
     deploy:
       resources: { limits: { cpus: '1.0', memory: 1G, pids: 256 } }
+
+  # ---------- profile: yahoo (WP 12.6, D33) ----------
+  # Yahoo Finance through yfinance: OPT-IN, UNOFFICIAL, BEST EFFORT. Yahoo
+  # publishes no data licence and its terms prohibit automated collection
+  # (docs/research/14 §2), so nothing here runs unless the operator chooses
+  # it, and even then the worker asks it nothing for a holder who has not
+  # ticked the consent in Settings → Market data. RUNBOOK.md "Yahoo Finance
+  # (profile `yahoo`, opt-in, unofficial)" is the operator's page;
+  # docs/evidence/phase-12/wp12.6-yahoo-finance.md is the proof.
+  #
+  # The sandbox, line by line:
+  #   * image: our own `personalfi-yahoo` (docker/yahoo.Dockerfile), the fourth
+  #     published image — python by digest, yfinance and every dependency by
+  #     version and sha256, non-root, signed and attested like the other three.
+  #   * networks: `yahoo` and nothing else. Its only other member is `worker`.
+  #     Not `backend` (db), not `frontend`, not `llm`. No published port.
+  #   * the host check is inside the image (`docker/yahoo/server.py`): every
+  #     outbound request, and every redirect, must be https to exactly
+  #     query1.finance.yahoo.com or query2.finance.yahoo.com on 443.
+  #   * user 10004, read_only rootfs, cap_drop ALL, no-new-privileges
+  #     (x-common); yfinance's caches on the tmpfs, gone with the container.
+  #   * no secret, no credential, no environment from `.env`: the sidecar
+  #     needs none, and the holder's identity never reaches it.
+  #   * limits: one Python process with pandas loaded is ~150 MB resident;
+  #     384M leaves room for a burst and keeps a runaway from the db's share.
+  #     Half a core; 64 pids (the server thread pool and curl's resolver).
+  yahoo:
+    <<: *common
+    profiles: ['yahoo']
+    image: ${REGISTRY:-ghcr.io/huh12312}/personalfi-yahoo:${PERSONALFI_VERSION:-dev}
+    build:
+      context: docker
+      dockerfile: yahoo.Dockerfile
+    networks: [yahoo]
+    user: '10004:10004'
+    tmpfs: ['/tmp:size=32m,mode=1777,noexec,nosuid,nodev']
+    healthcheck:
+      # No shell, curl or wget needed: the image's own Python asks GET /health,
+      # which never contacts Yahoo and spends nothing from the budget.
+      test: ['CMD', 'python', '-I', '/app/healthcheck.py']
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    deploy:
+      resources: { limits: { cpus: '0.5', memory: 384M, pids: 64 } }
 
   # ---------- profile: webhooks (optional, D12/06 §3.3) ----------
   # Placeholder for the future minimal-exposure webhook listener. Off by

@@ -34,6 +34,7 @@ const DIGEST: Record<string, string> = {
   api: `sha256:${'a'.repeat(64)}`,
   backup: `sha256:${'b'.repeat(64)}`,
   proxy: `sha256:${'c'.repeat(64)}`,
+  yahoo: `sha256:${'d'.repeat(64)}`,
 };
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 
@@ -49,7 +50,7 @@ beforeAll(() => {
     join(dir, 'docker'),
     `#!/usr/bin/env bash
 echo "docker $*" >> "${log}"
-digest_of() { case "$1" in *personalfi-api*) echo "sha256:${'a'.repeat(64)}" ;; *personalfi-backup*) echo "sha256:${'b'.repeat(64)}" ;; *personalfi-proxy*) echo "sha256:${'c'.repeat(64)}" ;; esac; }
+digest_of() { case "$1" in *personalfi-api*) echo "sha256:${'a'.repeat(64)}" ;; *personalfi-backup*) echo "sha256:${'b'.repeat(64)}" ;; *personalfi-proxy*) echo "sha256:${'c'.repeat(64)}" ;; *personalfi-yahoo*) echo "sha256:${'d'.repeat(64)}" ;; esac; }
 if [ "$1 $2 $3" = "buildx imagetools inspect" ]; then
   case " \${FAKE_UNRESOLVED:-} " in *" $4 "*) exit 1 ;; esac
   printf '"%s"\\n' "$(digest_of "$4")"; exit 0
@@ -151,6 +152,25 @@ describe('verify-release.sh: what it checks', () => {
       ),
     );
     expect(pulls(run.calls)).toEqual([]);
+  });
+
+  it('WP 12.6: the opt-in yahoo image is verified only with --with-yahoo, and then like the rest', () => {
+    const without = verify(['--release', '0.10.0']);
+    expect(without.status, without.out).toBe(0);
+    expect(without.calls.some((c) => c.includes('personalfi-yahoo'))).toBe(false);
+    const withYahoo = verify(['--release', '0.10.0', '--with-yahoo']);
+    expect(withYahoo.status, withYahoo.out).toBe(0);
+    expect(withYahoo.out).toContain('PASS: 4 image(s) verified');
+    expect(cosignCalls(withYahoo.calls).at(-1)).toBe(
+      `cosign verify --certificate-identity ${identity('0.10.0')} --certificate-oidc-issuer ${ISSUER} ghcr.io/huh12312/personalfi-yahoo@${DIGEST['yahoo'] ?? ''}`,
+    );
+    // An unsigned sidecar refuses the whole release: nothing at all is pulled.
+    const unsigned = verify(['--release', '0.10.0', '--with-yahoo', '--pull'], {
+      FAKE_UNSIGNED: `ghcr.io/huh12312/personalfi-yahoo@${DIGEST['yahoo'] ?? ''}`,
+    });
+    expect(unsigned.status).not.toBe(0);
+    expect(unsigned.out).toContain('FAIL yahoo: cosign verify refused');
+    expect(pulls(unsigned.calls)).toEqual([]);
   });
 
   it('--commit adds the workflow sha; a signature from another commit is refused', () => {

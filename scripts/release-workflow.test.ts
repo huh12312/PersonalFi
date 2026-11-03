@@ -22,6 +22,10 @@
  *     the GitHub release `needs:` it — a verification failure stops the run
  *     before any release exists;
  *   - the Hub description is pushed from docker/DOCKERHUB_README.md;
+ *   - four images (WP 12.6 added `yahoo`, the opt-in sidecar), every one of
+ *     them in BOTH registries, signed, attested, verified and described — no
+ *     step is conditioned on which image a leg builds, so none can be left
+ *     out of one registry;
  *   - no secret but DOCKER_PAT and GITHUB_TOKEN; `persist-credentials: false`
  *     on every checkout; minimal permissions per job; a timeout on every job;
  *     concurrency on the tag.
@@ -49,6 +53,8 @@ const HUB_IMAGE = 'docker.io/masterhuh/personalfi-${{ matrix.image }}';
 const IDENTITY =
   'https://github.com/huh12312/PersonalFi/.github/workflows/release.yml@refs/tags/v${version}';
 const OIDC_ISSUER = 'https://token.actions.githubusercontent.com';
+/** Every published image, sorted. WP 12.6 made it four. */
+const IMAGES = ['api', 'backup', 'proxy', 'yahoo'];
 
 function steps(job: YMap): YMap[] {
   return asList(job['steps']).filter(isMap);
@@ -168,10 +174,20 @@ describe('release.yml: the publish job', () => {
     expect(needsOf(job)).toContain(gate?.[0]);
   });
 
-  it('builds the three images', () => {
+  it('builds the four images (WP 12.6: the opt-in yahoo sidecar is the fourth)', () => {
     const [, job] = publishJob();
     const include = asList(asMap(asMap(job['strategy'])['matrix'])['include']).map(asMap);
-    expect(include.map((m) => m['image']).sort()).toEqual(['api', 'backup', 'proxy']);
+    expect(include.map((m) => m['image']).sort()).toEqual(IMAGES);
+    const yahoo = include.find((m) => m['image'] === 'yahoo');
+    expect(yahoo?.['dockerfile']).toBe('docker/yahoo.Dockerfile');
+    expect(yahoo?.['context']).toBe('docker');
+  });
+
+  it('no step is conditioned on the image, so no image can skip a registry', () => {
+    const [, job] = publishJob();
+    for (const step of steps(job)) {
+      expect(asText(step['if']), asText(step['name'])).not.toMatch(/matrix\.image/);
+    }
   });
 
   it('logs in to GHCR with GITHUB_TOKEN and to Docker Hub as masterhuh with DOCKER_PAT', () => {
@@ -295,7 +311,8 @@ describe('release.yml: verify before the release is cut', () => {
     expect(run).toMatch(/gh attestation verify "oci:\/\/\$\{ref\}" --repo huh12312\/PersonalFi/);
     expect(run).toContain('"ghcr.io/huh12312/personalfi-${image}"');
     expect(run).toContain('"docker.io/masterhuh/personalfi-${image}"');
-    expect(run).toMatch(/for image in api backup proxy/);
+    expect(run).toMatch(/for image in api backup proxy yahoo; do/);
+    expect(run).toContain('verify: PASS — 4 images x 2 registries');
     expect(run).toMatch(/exit 1/);
   });
 
@@ -333,7 +350,7 @@ describe('release.yml: the Docker Hub description', () => {
       'PersonalFi — self-hosted, single-user personal finance and advisory (${{ matrix.image }} image)',
     );
     const images = asList(asMap(asMap(job?.['strategy'])['matrix'])['image']).map(asText);
-    expect(images.sort()).toEqual(['api', 'backup', 'proxy']);
+    expect(images.sort()).toEqual(IMAGES);
   });
 });
 

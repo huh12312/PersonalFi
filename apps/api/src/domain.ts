@@ -303,6 +303,8 @@ import {
   OPENFIGI_WINDOWS,
   TIINGO_WINDOWS,
   USER_AGENT,
+  YAHOO_SIDECAR_ENDPOINT,
+  YFINANCE_WINDOWS,
   apiKeyOf,
   createCoinGeckoPriceSource,
   createFredSource,
@@ -310,9 +312,11 @@ import {
   createProviderClient,
   createRateBudget,
   createTiingoPriceSource,
+  createYfinancePriceSource,
   missingKey,
   policyFor,
   type ApiKey,
+  type YahooSidecarTransport,
   type FredSource,
   type MarketDataProvider,
   type MarketDataRunRecorder,
@@ -2934,6 +2938,19 @@ export function createMarketDataRuntime(options: {
   readonly resolve?: Resolver;
   /** How long a holder's view is trusted. Defaults to `MARKET_DATA_KEY_CACHE_TTL_MS`. */
   readonly cacheTtlMs?: number;
+  /**
+   * WP 12.6 (D33): Yahoo Finance through the `yahoo` sidecar. Absent ⇒ off.
+   * `enabled` is the operator half (`YAHOO_FINANCE_ENABLED`); `consented` is
+   * the holder half, read per holder when the view is built **and** by the
+   * adapter before every request. Only the worker passes a `transport`: the
+   * api is not on the `yahoo` network, so its view carries the budget (for the
+   * card) and never a source.
+   */
+  readonly yahooFinance?: {
+    readonly enabled: boolean;
+    readonly transport?: YahooSidecarTransport;
+    readonly consented: (userId: string) => Promise<boolean>;
+  };
 }): MarketDataRuntime {
   const clock = options.clock ?? systemClock;
   const logger = options.logger;
@@ -2965,6 +2982,9 @@ export function createMarketDataRuntime(options: {
   const coingeckoBudget = createRateBudget(COINGECKO_WINDOWS);
   const openfigiKeyedBudget = createRateBudget(OPENFIGI_WINDOWS);
   const openfigiAnonymousBudget = createRateBudget(OPENFIGI_ANONYMOUS_WINDOWS);
+  const yfinanceBudget = createRateBudget(YFINANCE_WINDOWS);
+  const yahoo = options.yahooFinance;
+  const yahooEnabled = yahoo?.enabled === true;
 
   const fileKeys: Readonly<Record<MarketDataKeyedProvider, ApiKey>> = {
     tiingo: keyFor('tiingo', options.secrets.tiingo_api_key),
@@ -3089,7 +3109,48 @@ export function createMarketDataRuntime(options: {
   const inflight = new Map<string, Promise<MarketDataView>>();
   let generation = 0;
 
-  const resolve = async (userId: string): Promise<MarketDataView> => {
+  /**
+   * WP 12.6: add the yfinance source to a holder's view when — and only when —
+   * both halves hold: the operator enabled it (and this process can reach the
+   * sidecar) and this holder's consent to the current text is standing. The
+   * adapter asks both again before every request; this is the first of the
+   * two checks, so a holder who never consented has no yfinance source at all
+   * and the nightly refresh writes no `market_data_runs` row for it.
+   */
+  const withYahoo = async (view: MarketDataView, userId: string): Promise<MarketDataView> => {
+    if (yahoo === undefined || !yahooEnabled) return view;
+    const budgets = new Map(view.budgets);
+    budgets.set('yfinance', yfinanceBudget);
+    const transport = yahoo.transport;
+    if (transport === undefined || !(await yahoo.consented(userId))) return { ...view, budgets };
+    return {
+      ...view,
+      budgets,
+      sources: [
+        ...view.sources,
+        createYfinancePriceSource({
+          transport,
+          now,
+          budget: yfinanceBudget,
+          operatorEnabled: yahooEnabled,
+          consentHolds: () => yahoo.consented(userId),
+        }),
+      ],
+    };
+  };
+
+  if (yahoo !== undefined) {
+    logger?.info(
+      { provider: 'yfinance', sidecar: yahooEnabled ? YAHOO_SIDECAR_ENDPOINT : null },
+      yahooEnabled
+        ? yahoo.transport === undefined
+          ? 'yfinance enabled; no sidecar route from this process (the worker registers the adapter)'
+          : 'yfinance enabled; adapter registered over the yahoo sidecar (each holder must also consent)'
+        : 'yfinance not enabled; adapter not registered',
+    );
+  }
+
+  const resolveKeys = async (userId: string): Promise<MarketDataView> => {
     const storedKeys = options.storedKeys;
     if (storedKeys === undefined) return operatorView;
     // The files win: a provider whose file is non-empty never consults the store.
@@ -3121,6 +3182,9 @@ export function createMarketDataRuntime(options: {
     return buildView(chosen, keySources);
   };
 
+  const resolve = async (userId: string): Promise<MarketDataView> =>
+    withYahoo(await resolveKeys(userId), userId);
+
   return {
     ...operatorView,
     allBudgets: Object.freeze([
@@ -3129,6 +3193,7 @@ export function createMarketDataRuntime(options: {
       ['coingecko', coingeckoBudget],
       ['openfigi', openfigiKeyedBudget],
       ['openfigi', openfigiAnonymousBudget],
+      ['yfinance', yfinanceBudget],
     ] as const),
     async forUser(userId) {
       const cached = cache.get(userId);
@@ -3163,8 +3228,10 @@ const MARKET_DATA_PROVIDER_HOSTS: Readonly<Record<MarketDataProvider, string>> =
   fred: 'api.stlouisfed.org',
   coingecko: 'api.coingecko.com',
   openfigi: 'api.openfigi.com',
-  // Opt-in only and deliberately not allow-listed by `@ctx/integrations`; no
-  // adapter exists. Present so this record stays exhaustive over the union.
+  // Opt-in only and deliberately not allow-listed by `@ctx/integrations`: the
+  // WP 12.6 adapter reaches the `yahoo` sidecar, never this host, and
+  // `MARKET_DATA_ALLOWED_HOSTS` narrowing does not apply to it (the operator
+  // switch is YAHOO_FINANCE_ENABLED). Present so this record stays exhaustive.
   yfinance: 'query1.finance.yahoo.com',
 });
 

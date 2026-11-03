@@ -1,0 +1,65 @@
+{
+  "chart": {
+    "result": [
+      {
+        "meta": {
+          "currency": "USD",
+          "symbol": "PFTEST",
+          "exchangeName": "NMS",
+          "fullExchangeName": "NasdaqGS",
+          "instrumentType": "EQUITY",
+          "firstTradeDate": 946909800,
+          "regularMarketTime": 1793390400,
+          "hasPrePostMarketData": true,
+          "gmtoffset": -14400,
+          "timezone": "EDT",
+          "exchangeTimezoneName": "America/New_York",
+          "regularMarketPrice": 103.125,
+          "chartPreviousClose": 100.0,
+          "priceHint": 2,
+          "currentTradingPeriod": {
+            "pre": {
+              "timezone": "EDT",
+              "start": 1793347200,
+              "end": 1793367000,
+              "gmtoffset": -14400
+            },
+            "regular": {
+              "timezone": "EDT",
+              "start": 1793367000,
+              "end": 1793390400,
+              "gmtoffset": -14400
+            },
+            "post": {
+              "timezone": "EDT",
+              "start": 1793390400,
+              "end": 1793404800,
+              "gmtoffset": -14400
+            }
+          },
+          "dataGranularity": "1d",
+          "range": "",
+          "validRanges": ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
+        },
+        "timestamp": [1793021400, 1793107800, 1793194200, 1793280600, 1793367000],
+        "indicators": {
+          "quote": [
+            {
+              "open": [100.0, 100.75, 99.25, 101.5, 102.625],
+              "high": [101.5, 102.25, 100.75, 103.0, 104.125],
+              "low": [99.5, 100.25, 98.75, 101.0, 102.125],
+              "close": [100.5, 101.25, 99.75, 102.0, 103.125],
+              "volume": [1000, 1100, 1200, 1300, 1400]
+            }
+          ],
+          "adjclose": [
+            {
+              "adjclose": [100.5, 101.25, 99.75, 102.0, 103.125]
+            }
+          ]
+        }
+      }
+    ],
+    "error": null
+  }
+}

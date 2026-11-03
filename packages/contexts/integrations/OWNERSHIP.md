@@ -24,11 +24,14 @@ Tables listed here are _claimed_; most do not exist yet. Claiming early is the p
 - `integration_artifacts`
 - `integration_contract_versions`
 - `market_data_runs`
+- `market_data_consents`
 
 `market_data_runs` exists as of `0015_market_data.sql` (WP 3.4): one row per
 outbound market-data call, with the spend against each provider's published rate
-budget and the egress refusal code when the guard says no. The rest are still
-claims.
+budget and the egress refusal code when the guard says no.
+`market_data_consents` exists as of `0064_market_data_consent.sql` (WP 12.6): the
+holder's versioned, hashed consent to an opt-in provider (`yfinance`). The rest are
+still claims.
 
 Note what this context deliberately does **not** own: `prices` and `fx_rates`.
 It is the only context that fetches them, and 08 §1.3 #7 still gives them to

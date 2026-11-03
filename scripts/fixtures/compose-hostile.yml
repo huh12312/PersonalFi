@@ -146,11 +146,39 @@ services:
     depends_on:
       pre-migrate-backup: { condition: service_started }
 
+  # WP 12.6 — the yahoo sidecar, broken every way the gate refuses: on
+  # `backend` as well as `yahoo` (it would reach db and the api), publishing a
+  # port, mounting a secret, a floating upstream image instead of the pinned
+  # personalfi-yahoo build, no limits, no healthcheck, and no profile (it would
+  # start, and reach Yahoo, on every plain `up`).
+  yahoo:
+    image: python:3-alpine
+    user: '10004:10004'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    networks: [backend, yahoo]
+    ports:
+      - '127.0.0.1:8000:8000'
+    secrets: [hostile_secret]
+
+  # `api` has no business on `yahoo`: only the worker speaks to the sidecar,
+  # and a third member would share the one network that routes to Yahoo.
+  hostile-api-on-yahoo:
+    image: alpine:3.24
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    command: ['sleep', 'infinity']
+    networks: [yahoo]
+
 networks:
   backend: {}
   # Not internal: the model's network would route off the host.
   llm: {}
   llm-pull: {}
+  yahoo: {}
 
 secrets:
   hostile_secret:

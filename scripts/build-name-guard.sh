@@ -56,7 +56,7 @@ self_test() {
   local fails=0 ref
   for ref in ghcr.io/huh12312/personalfi-api:0.10.0 masterhuh/personalfi-proxy:0.10 \
     docker.io/masterhuh/personalfi-backup:latest ghcr.io/huh12312/personalfi-api:sha-53413c4 \
-    ghcr.io/huh12312/personalfi-api; do
+    ghcr.io/huh12312/personalfi-api ghcr.io/huh12312/personalfi-yahoo:0.10.1 masterhuh/personalfi-yahoo:latest; do
     if poses_as_release "$ref"; then echo "build-name-guard: self-test refuses ${ref} — ok"; else
       echo "build-name-guard: SELF-TEST FAILED: ${ref} was allowed" >&2
       fails=$((fails + 1))
@@ -64,6 +64,7 @@ self_test() {
   done
   for ref in ghcr.io/huh12312/personalfi-api:dev "ghcr.io/huh12312/personalfi-api:$(printf 'a%.0s' {1..40})" \
     personalfi/personalfi-api:0.10.0 pf-upgrade/personalfi-proxy:53413c4-wp94 127.0.0.1:5001/personalfi-api:0.10.0 \
+    ghcr.io/huh12312/personalfi-yahoo:dev \
     ghcr.io/huh12312/personalfi-api@sha256:0000000000000000000000000000000000000000000000000000000000000000; do
     if poses_as_release "$ref"; then
       echo "build-name-guard: SELF-TEST FAILED: ${ref} was refused" >&2

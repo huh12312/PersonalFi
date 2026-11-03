@@ -356,6 +356,34 @@ describe('local-endpoint transport: the dial', () => {
     SOCKET_TIMEOUT,
   );
 
+  it(
+    'query parameters are encoded by the transport, never spliced into the path (WP 12.6)',
+    async () => {
+      const seen: string[] = [];
+      const server = await listen((req, res) => {
+        seen.push(req.url ?? '?');
+        res.end('{}');
+      });
+      const transport = createLocalEndpointTransport(
+        createLocalEndpointPolicy({ endpoint: `yahoo:${String(server.port)}` }),
+        { resolve: fixed('127.0.0.1') },
+      );
+      await transport.request({
+        method: 'GET',
+        path: '/quote',
+        query: { symbol: 'EURUSD=X', date: '2026-10-30' },
+      });
+      await transport.request({ method: 'GET', path: '/fx', query: { q: '/../admin?x=1#y' } });
+      await transport.request({ method: 'GET', path: '/health', query: {} });
+      expect(seen).toEqual([
+        '/quote?symbol=EURUSD%3DX&date=2026-10-30',
+        '/fx?q=%2F..%2Fadmin%3Fx%3D1%23y',
+        '/health',
+      ]);
+    },
+    SOCKET_TIMEOUT,
+  );
+
   it('a path or header the adapter did not build is refused', async () => {
     const transport = createLocalEndpointTransport(
       createLocalEndpointPolicy({ endpoint: 'ollama:11434' }),

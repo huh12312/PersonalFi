@@ -141,6 +141,12 @@ describe('the market-data egress allow-list', () => {
     };
 
     for (const [provider, address] of Object.entries(internal)) {
+      if (provider === 'yfinance') {
+        // WP 12.6: stronger than a refusal — yfinance has no direct-egress
+        // policy at all (it reaches the yahoo sidecar, never Yahoo).
+        expect(() => policyFor('yfinance')).toThrow(/no direct egress/);
+        continue;
+      }
       const decision = await guardUrl(
         `https://${PROVIDER_HOSTS[provider as MarketDataProvider]}/x`,
         policyFor(provider as MarketDataProvider),

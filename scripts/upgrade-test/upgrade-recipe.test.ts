@@ -147,7 +147,10 @@ if [ "$1 $2" = "compose version" ]; then echo "Docker Compose version v5.0.0"; e
 if [ "$1" = compose ] && [[ " $* " == *" config "* ]]; then
   r="\${REGISTRY:-ghcr.io/huh12312}" v="\${PERSONALFI_VERSION:-dev}"
   api="$r/personalfi-api:$v" backup="$r/personalfi-backup:$v" proxy="\${FAKE_PROXY_IMAGE:-$r/personalfi-proxy:$v}"
-  printf '{"name":"%s","services":{"api":{"image":"%s"},"worker":{"image":"%s"},"migrator":{"image":"%s"},"proxy":{"image":"%s"},"backup":{"image":"%s"},"pre-migrate-backup":{"image":"%s"},"db":{"image":"postgres:18"}},"secrets":{"opt":{"file":"%s/opt"}}}\\n' "$FAKE_PROJECT" "$api" "$api" "$api" "$proxy" "$backup" "$backup" "${secretsDir}"; exit 0
+  yahoo=""
+  # WP 12.6: the opt-in sidecar is in compose's model only with the \`yahoo\` profile on.
+  if [ -n "\${FAKE_YAHOO:-}" ]; then yahoo=",\\"yahoo\\":{\\"image\\":\\"\${FAKE_YAHOO_IMAGE:-$r/personalfi-yahoo:$v}\\"}"; fi
+  printf '{"name":"%s","services":{"api":{"image":"%s"},"worker":{"image":"%s"},"migrator":{"image":"%s"},"proxy":{"image":"%s"},"backup":{"image":"%s"},"pre-migrate-backup":{"image":"%s"},"db":{"image":"postgres:18"}%s},"secrets":{"opt":{"file":"%s/opt"}}}\\n' "$FAKE_PROJECT" "$api" "$api" "$api" "$proxy" "$backup" "$backup" "$yahoo" "${secretsDir}"; exit 0
 fi
 exit 1
 `,
@@ -223,6 +226,41 @@ exit 1
     expect(renamed.out).not.toContain('verify-release');
     expect(touchedImages(renamed.docker)).toEqual([]);
   }, 60_000);
+
+  it('WP 12.6: the yahoo sidecar is verified with the rest exactly when its profile is on', () => {
+    const base = {
+      FAKE_PROJECT: 'pf-sec',
+      PERSONALFI_PULL: '1',
+      PERSONALFI_RELEASE: '0.10.1',
+      PERSONALFI_VERSION: '0.10.1',
+    };
+    const inspected = (docker: string[]): string[] =>
+      docker
+        .filter((line) => line.startsWith('buildx imagetools inspect '))
+        .map((line) => line.split(' ')[3] ?? '');
+    // Profile off: six services, three images; the sidecar is never asked for.
+    const off = upgrade(base);
+    expect(off.status).not.toBe(0); // the stub registry has nothing to verify
+    expect(inspected(off.docker)).toEqual([
+      'ghcr.io/huh12312/personalfi-api:0.10.1',
+      'ghcr.io/huh12312/personalfi-backup:0.10.1',
+      'ghcr.io/huh12312/personalfi-proxy:0.10.1',
+    ]);
+    // Profile on: the seventh service, under its published name, verified too —
+    // never handed to `docker compose pull` as one of the "others".
+    const on = upgrade({ ...base, FAKE_YAHOO: '1' });
+    expect(on.status).not.toBe(0);
+    expect(inspected(on.docker)).toContain('ghcr.io/huh12312/personalfi-yahoo:0.10.1');
+    expect(on.out).toContain('FAIL yahoo: could not resolve');
+    expect(touchedImages(on.docker)).toEqual([]);
+    // And under another name it is refused by name, before anything is verified.
+    const renamed = upgrade({ ...base, FAKE_YAHOO: '1', FAKE_YAHOO_IMAGE: 'python:3-alpine' });
+    expect(renamed.status).not.toBe(0);
+    expect(renamed.out).toContain(
+      "compose names 'python:3-alpine' for yahoo; release 0.10.1 publishes 'ghcr.io/huh12312/personalfi-yahoo:0.10.1'",
+    );
+    expect(renamed.out).not.toContain('verify-release');
+  }, 120_000);
 
   it('`just install-release latest` (or x.y) is refused before anything runs', () => {
     for (const version of ['latest', 'v0.10.0']) {

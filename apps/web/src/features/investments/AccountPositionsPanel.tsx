@@ -43,6 +43,12 @@ export interface AccountPositionsPanelProps {
    * field, so the obligation is derived per row, scoped to this account).
    */
   readonly coinGeckoAttribution?: Attribution;
+  /**
+   * WP 12.6: Yahoo Finance's label (`useProviderAttribution('yfinance')`) —
+   * "unofficial, best effort" — rendered exactly as CoinGecko's is, when at
+   * least one row is priced `price.source === 'yfinance'`.
+   */
+  readonly yahooAttribution?: Attribution;
 }
 
 /**
@@ -68,6 +74,7 @@ export function AccountPositionsPanel({
   election,
   onBack,
   coinGeckoAttribution,
+  yahooAttribution,
 }: AccountPositionsPanelProps) {
   if (isLoading) return <Skeleton variant="block" height={280} />;
   if (data === undefined) return null;
@@ -75,6 +82,8 @@ export function AccountPositionsPanel({
   const hasCoinGeckoPrice = data.positions.some(
     (position) => position.price?.source === 'coingecko',
   );
+
+  const hasYahooPrice = data.positions.some((position) => position.price?.source === 'yfinance');
 
   return (
     <section className="flex flex-col gap-4" aria-labelledby="account-holdings-heading">
@@ -262,6 +271,9 @@ export function AccountPositionsPanel({
 
       {hasCoinGeckoPrice && coinGeckoAttribution !== undefined && (
         <ProviderAttribution attribution={coinGeckoAttribution} />
+      )}
+      {hasYahooPrice && yahooAttribution !== undefined && (
+        <ProviderAttribution attribution={yahooAttribution} />
       )}
     </section>
   );

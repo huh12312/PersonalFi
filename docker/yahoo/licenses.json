@@ -1,0 +1,32 @@
+{
+  "//": "The SPDX licence of every package in docker/yahoo/requirements.txt (WP 12.6). Checked by scripts/python-licenses.ts against licenses.policy.yaml and rendered into THIRD_PARTY.md. Each entry is read from the wheel's own METADATA (License-Expression, else License, else the OSI classifier) for the pinned version — see docs/evidence/phase-12/wp12.6-yahoo-finance.md §5 for the command. A bump re-reads it; never guess one.",
+  "packages": {
+    "beautifulsoup4": "MIT",
+    "certifi": "MPL-2.0",
+    "cffi": "MIT-0",
+    "charset-normalizer": "MIT",
+    "curl-cffi": "MIT",
+    "idna": "BSD-3-Clause",
+    "lxml": "BSD-3-Clause",
+    "multitasking": "Apache-2.0",
+    "numpy": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+    "pandas": "BSD-3-Clause",
+    "peewee": "MIT",
+    "platformdirs": "MIT",
+    "protobuf": "BSD-3-Clause",
+    "pycparser": "BSD-3-Clause",
+    "python-dateutil": "BSD-3-Clause",
+    "pytz": "MIT",
+    "requests": "Apache-2.0",
+    "soupsieve": "MIT",
+    "typing-extensions": "PSF-2.0",
+    "tzdata": "Apache-2.0",
+    "urllib3": "MIT",
+    "websockets": "BSD-3-Clause",
+    "yfinance": "Apache-2.0"
+  },
+  "reviews": {
+    "certifi": "MPL-2.0 (file-level copyleft, 06 §5.4 'allowed with review'): Mozilla's CA bundle, consumed unmodified as a separate PyPI package in a separate container, never statically linked.",
+    "frozendict": "LGPL-3.0 (06 §5.4 'allowed with review'), named by research 14 §2: not in yfinance 1.7.0's closure (yfinance ships its own fallback helper). Were it pinned again, the same reason holds: a separate package in a separate container, unmodified, not statically linked."
+  }
+}

@@ -6,6 +6,7 @@ import {
   handleMarketDataRefresh,
   type MarketDataRefreshMockState,
 } from './mock-market-data-keys.ts';
+import { defaultYahooSettings } from './mock-yahoo.ts';
 
 /**
  * WP 3.11's own network mock for `e2e/investments.spec.ts`, entirely separate
@@ -150,6 +151,7 @@ function marketDataSettingsResponse() {
     ],
     settingsAttributions: [COINGECKO_ATTRIBUTION],
     allowedHostsNarrowed: true,
+    yahoo: defaultYahooSettings(),
   };
 }
 

@@ -10,6 +10,7 @@ import {
   stubFetchRoutes,
 } from '../../test-support/api-test-utils.ts';
 import { MarketDataSettingsScreen } from './MarketDataSettingsScreen.tsx';
+import { yahooSettings } from './yahoo-fixtures.ts';
 
 vi.mock('@simplewebauthn/browser', () => ({
   startAuthentication: vi.fn(async () => ({})),
@@ -74,6 +75,7 @@ function settingsResponse(overrides?: { tiingoExtra?: Record<string, unknown> })
     ],
     settingsAttributions: [COINGECKO_ATTRIBUTION],
     allowedHostsNarrowed: true,
+    yahoo: yahooSettings(),
   };
 }
 

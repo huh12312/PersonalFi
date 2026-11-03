@@ -84,6 +84,9 @@ The RUNBOOK's "First install" has the one-time commands. A throwaway test machin
   identity to check.
 - **Registries.** `ghcr.io/huh12312/personalfi-{api,backup,proxy}` is canonical. The Docker Hub
   mirror is `masterhuh/personalfi-{api,backup,proxy}`.
+- **Yahoo Finance.** Available opt-in; unofficial. A best-effort price source through `yfinance`
+  in its own container (`personalfi-yahoo`, profile `yahoo`), off unless the operator enables it
+  and each holder consents to its terms; see RUNBOOK.md "Yahoo Finance".
 - **`latest`.** Published for convenience. `just install-release` and the upgrade path refuse it
   because it names no single commit: pin a version. The install below pulls a verified, pinned
   release; building from source is for development and is described after it.

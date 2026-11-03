@@ -3,6 +3,7 @@ import type { Page, Route } from '@playwright/test';
 
 import { createMarketDataKeysState, handleMarketDataKeys } from './mock-market-data-keys.ts';
 import { bucketsFor, pointsFor, splitDay, stackedDays } from './networth-buckets.ts';
+import { defaultYahooSettings } from './mock-yahoo.ts';
 
 /**
  * WP 3.12's own mock module, entirely separate from `mock-api.ts` — the
@@ -261,6 +262,7 @@ function marketDataSettingsResponse() {
     ],
     settingsAttributions: [COINGECKO_ATTRIBUTION, FRED_ATTRIBUTION],
     allowedHostsNarrowed: true,
+    yahoo: defaultYahooSettings(),
   };
 }
 

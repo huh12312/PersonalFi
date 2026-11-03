@@ -7,14 +7,16 @@ you own.
 
 ## Images
 
-Three images make up the application. Each is published for `linux/amd64` and `linux/arm64`
+Three images make up the application, and a fourth, the Yahoo Finance sidecar, is an opt-in
+extra (compose profile `yahoo`; never started by default). Each is published for `linux/amd64` and `linux/arm64`
 (arm64 is built, not yet exercised).
 
-| Image              | GitHub Container Registry (canonical) | Docker Hub (mirror)           |
-| ------------------ | ------------------------------------- | ----------------------------- |
-| API and worker     | `ghcr.io/huh12312/personalfi-api`     | `masterhuh/personalfi-api`    |
-| Backup             | `ghcr.io/huh12312/personalfi-backup`  | `masterhuh/personalfi-backup` |
-| Proxy (Caddy, TLS) | `ghcr.io/huh12312/personalfi-proxy`   | `masterhuh/personalfi-proxy`  |
+| Image                                      | GitHub Container Registry (canonical) | Docker Hub (mirror)           |
+| ------------------------------------------ | ------------------------------------- | ----------------------------- |
+| API and worker                             | `ghcr.io/huh12312/personalfi-api`     | `masterhuh/personalfi-api`    |
+| Backup                                     | `ghcr.io/huh12312/personalfi-backup`  | `masterhuh/personalfi-backup` |
+| Proxy (Caddy, TLS)                         | `ghcr.io/huh12312/personalfi-proxy`   | `masterhuh/personalfi-proxy`  |
+| Yahoo Finance sidecar (opt-in, unofficial) | `ghcr.io/huh12312/personalfi-yahoo`   | `masterhuh/personalfi-yahoo`  |
 
 Docker Hub limits anonymous pulls per IP address. If you
 see `429 Too Many Requests`, run `docker login` or pull from GitHub Container Registry.

@@ -566,6 +566,11 @@ jobs:
             # Repo root: this image builds apps/web and serves dist/ (see
             # docker/caddy.Dockerfile's web-build stage).
             context: .
+          # WP 12.6: the opt-in Yahoo Finance sidecar, held to the same bar —
+          # trivy HIGH/CRITICAL with --ignore-unfixed must be 0, no snooze.
+          - image: yahoo
+            dockerfile: docker/yahoo.Dockerfile
+            context: docker
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -14774,6 +14774,221 @@
           "attribution"
         ]
       },
+      "YahooFinanceSettingsInput": {
+        "type": "object",
+        "properties": {
+          "operatorEnabled": {
+            "type": "boolean",
+            "description": "The operator half: YAHOO_FINANCE_ENABLED=true (with the `yahoo` compose profile up). When true the worker registers the adapter; this api never reaches the sidecar."
+          },
+          "consent": {
+            "type": "object",
+            "properties": {
+              "given": {
+                "type": "boolean",
+                "description": "A standing consent to the current text (version and sha256)."
+              },
+              "consentedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "given",
+              "consentedAt",
+              "version"
+            ]
+          },
+          "consentVersion": {
+            "type": "string",
+            "description": "The version of the text below, `yahoo-consent/1`."
+          },
+          "consentText": {
+            "type": "string",
+            "description": "The exact words the holder ticks."
+          },
+          "consentSha256": {
+            "type": "string",
+            "description": "`sha256:` of the exact bytes of `consentText`."
+          },
+          "whatLeaves": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean",
+            "description": "Both halves hold: the worker may ask Yahoo for this holder."
+          },
+          "notReady": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "operator_disabled",
+                  "consent_required"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "placements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "securityKind": {
+                  "type": "string"
+                },
+                "rung": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "position": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "1-based place among the kind’s enabled sources."
+                },
+                "of": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "securityKind",
+                "rung",
+                "position",
+                "of"
+              ]
+            },
+            "description": "Every ladder the holder placed Yahoo in. Never inserted automatically."
+          },
+          "lastOutcome": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "enum": [
+                      "price_refresh",
+                      "fx_refresh",
+                      "macro_series",
+                      "symbol_search",
+                      "figi_map",
+                      "test_fetch"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "partial",
+                      "failed",
+                      "refused",
+                      "rate_limited",
+                      "skipped_no_key"
+                    ]
+                  },
+                  "at": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "refusalCode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "retryAfterMs": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "operation",
+                  "outcome",
+                  "at",
+                  "detail",
+                  "refusalCode",
+                  "retryAfterMs"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The newest `market_data_runs` row for yfinance, as the worker recorded it."
+          },
+          "budget": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "used": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "label",
+                "used",
+                "limit"
+              ]
+            }
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/AttributionInput"
+          }
+        },
+        "required": [
+          "operatorEnabled",
+          "consent",
+          "consentVersion",
+          "consentText",
+          "consentSha256",
+          "whatLeaves",
+          "ready",
+          "notReady",
+          "placements",
+          "lastOutcome",
+          "budget",
+          "attribution"
+        ]
+      },
       "MarketDataCredentialsStatusInput": {
         "type": "object",
         "properties": {
@@ -35511,6 +35726,226 @@
           "keySource",
           "registered",
           "capabilities",
+          "budget",
+          "attribution"
+        ],
+        "additionalProperties": false
+      },
+      "YahooFinanceSettings": {
+        "type": "object",
+        "properties": {
+          "operatorEnabled": {
+            "type": "boolean",
+            "description": "The operator half: YAHOO_FINANCE_ENABLED=true (with the `yahoo` compose profile up). When true the worker registers the adapter; this api never reaches the sidecar."
+          },
+          "consent": {
+            "type": "object",
+            "properties": {
+              "given": {
+                "type": "boolean",
+                "description": "A standing consent to the current text (version and sha256)."
+              },
+              "consentedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "given",
+              "consentedAt",
+              "version"
+            ],
+            "additionalProperties": false
+          },
+          "consentVersion": {
+            "type": "string",
+            "description": "The version of the text below, `yahoo-consent/1`."
+          },
+          "consentText": {
+            "type": "string",
+            "description": "The exact words the holder ticks."
+          },
+          "consentSha256": {
+            "type": "string",
+            "description": "`sha256:` of the exact bytes of `consentText`."
+          },
+          "whatLeaves": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean",
+            "description": "Both halves hold: the worker may ask Yahoo for this holder."
+          },
+          "notReady": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "operator_disabled",
+                  "consent_required"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "placements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "securityKind": {
+                  "type": "string"
+                },
+                "rung": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "position": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "1-based place among the kind’s enabled sources."
+                },
+                "of": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "securityKind",
+                "rung",
+                "position",
+                "of"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Every ladder the holder placed Yahoo in. Never inserted automatically."
+          },
+          "lastOutcome": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "enum": [
+                      "price_refresh",
+                      "fx_refresh",
+                      "macro_series",
+                      "symbol_search",
+                      "figi_map",
+                      "test_fetch"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "partial",
+                      "failed",
+                      "refused",
+                      "rate_limited",
+                      "skipped_no_key"
+                    ]
+                  },
+                  "at": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "refusalCode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "retryAfterMs": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "operation",
+                  "outcome",
+                  "at",
+                  "detail",
+                  "refusalCode",
+                  "retryAfterMs"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The newest `market_data_runs` row for yfinance, as the worker recorded it."
+          },
+          "budget": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "used": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "label",
+                "used",
+                "limit"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/Attribution"
+          }
+        },
+        "required": [
+          "operatorEnabled",
+          "consent",
+          "consentVersion",
+          "consentText",
+          "consentSha256",
+          "whatLeaves",
+          "ready",
+          "notReady",
+          "placements",
+          "lastOutcome",
           "budget",
           "attribution"
         ],
@@ -57164,13 +57599,17 @@
                     },
                     "allowedHostsNarrowed": {
                       "type": "boolean"
+                    },
+                    "yahoo": {
+                      "$ref": "#/components/schemas/YahooFinanceSettings"
                     }
                   },
                   "required": [
                     "providers",
                     "ladders",
                     "settingsAttributions",
-                    "allowedHostsNarrowed"
+                    "allowedHostsNarrowed",
+                    "yahoo"
                   ],
                   "additionalProperties": false
                 }
@@ -57207,7 +57646,7 @@
         "tags": [
           "market-data"
         ],
-        "description": "Needs a step-up assertion: this decides which provider’s number becomes the price of everything the user owns. Rung numbers are **computed**, not accepted — `user_override` is pinned to 1 and `last_known` to 99 by CHECK constraints, and a client that could choose them could disable the one rung a human controls.",
+        "description": "Needs a step-up assertion: this decides which provider’s number becomes the price of everything the user owns. Rung numbers are **computed**, not accepted — `user_override` is pinned to 1 and `last_known` to 99 by CHECK constraints, and a client that could choose them could disable the one rung a human controls. WP 12.6: `yfinance` is refused (409 `market_data.consent_required`) unless the holder has a standing consent to the current Yahoo Finance text; it is never inserted automatically.",
         "requestBody": {
           "required": true,
           "content": {
@@ -57324,6 +57763,16 @@
             }
           },
           "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -57591,6 +58040,172 @@
             }
           },
           "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market-data/providers/{provider}/consent": {
+      "put": {
+        "operationId": "putMarketDataConsent",
+        "summary": "Consent to Yahoo Finance’s terms (opt-in, unofficial, best effort)",
+        "tags": [
+          "market-data"
+        ],
+        "description": "Needs a step-up. Carries the consent text version the holder was shown; 409 `market_data.consent_version_unknown` when it is not the current one. Recorded with the version and the sha256 of the exact text. Does not place Yahoo in any ladder.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "consentVersion": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "consentVersion"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "yfinance"
+              ]
+            },
+            "in": "path",
+            "name": "provider",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/YahooFinanceSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteMarketDataConsent",
+        "summary": "Withdraw the Yahoo Finance consent (removes Yahoo from every ladder at once)",
+        "tags": [
+          "market-data"
+        ],
+        "description": "Needs a step-up. Withdraws the standing consent and, in the same transaction, removes `yfinance` from every price ladder. Idempotent.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "yfinance"
+              ]
+            },
+            "in": "path",
+            "name": "provider",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/YahooFinanceSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
             "description": "Default Response",
             "content": {
               "application/json": {

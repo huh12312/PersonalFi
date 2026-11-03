@@ -224,10 +224,10 @@ describe('WP 10.4 — the market-data runtime', () => {
     expect((await runtime.forUser('u')).keySources.fred).toBe('stored');
   });
 
-  it('allBudgets carries every provider, both OpenFIGI tiers, so a stored key spends against a primed budget', async () => {
+  it('allBudgets carries every provider, both OpenFIGI tiers and the yfinance one (WP 12.6), so a stored key spends against a primed budget', async () => {
     const runtime = createMarketDataRuntime({ secrets: NO_SECRETS, allowedHosts: [] });
     const providers = runtime.allBudgets.map(([provider]) => provider);
-    expect(providers).toEqual(['tiingo', 'fred', 'coingecko', 'openfigi', 'openfigi']);
+    expect(providers).toEqual(['tiingo', 'fred', 'coingecko', 'openfigi', 'openfigi', 'yfinance']);
     // The operator's view with no files has only the anonymous OpenFIGI budget in force.
     expect([...runtime.budgets.keys()]).toEqual(['openfigi']);
     // And the stored view reuses the same budget objects, so nothing resets.
@@ -333,5 +333,93 @@ describe('WP 10.4 — validating a key before it is stored', () => {
       }),
     ).toEqual({ verdict: 'narrowed_out' });
     expect(fake.requests).toHaveLength(0);
+  });
+});
+
+describe('WP 12.6 — Yahoo Finance registration (the operator half, and the holder half per view)', () => {
+  const SIDECAR = {
+    requests: 0,
+    request() {
+      this.requests += 1;
+      return Promise.resolve({
+        status: 200,
+        body: JSON.stringify({ symbol: 'PFTEST', date: '2026-10-29', close: 1, currency: 'USD' }),
+        bytesRead: 1,
+        address: '172.30.0.2',
+      });
+    },
+  };
+
+  function logLines(): { lines: string[]; logger: never } {
+    const lines: string[] = [];
+    const logger = {
+      info: (_fields: unknown, message: string) => lines.push(message),
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+    } as never;
+    return { lines, logger };
+  }
+
+  it('not enabled: no source for anyone, and one log line saying so', async () => {
+    const { lines, logger } = logLines();
+    const runtime = createMarketDataRuntime({
+      secrets: NO_SECRETS,
+      allowedHosts: [],
+      logger,
+      yahooFinance: { enabled: false, transport: SIDECAR, consented: () => Promise.resolve(true) },
+    });
+    const view = await runtime.forUser('01920000-0000-7000-8000-000000000001');
+    expect(view.sources.map((source) => source.provider)).not.toContain('yfinance');
+    expect(view.budgets.has('yfinance')).toBe(false);
+    expect(lines.filter((line) => line.startsWith('yfinance'))).toEqual([
+      'yfinance not enabled; adapter not registered',
+    ]);
+  });
+
+  it('enabled in the worker: registered for a consenting holder only, and one log line', async () => {
+    const { lines, logger } = logLines();
+    const consenting = '01920000-0000-7000-8000-000000000001';
+    const runtime = createMarketDataRuntime({
+      secrets: NO_SECRETS,
+      allowedHosts: [],
+      logger,
+      yahooFinance: {
+        enabled: true,
+        transport: SIDECAR,
+        consented: (userId) => Promise.resolve(userId === consenting),
+      },
+    });
+    expect(lines.filter((line) => line.startsWith('yfinance'))).toEqual([
+      'yfinance enabled; adapter registered over the yahoo sidecar (each holder must also consent)',
+    ]);
+    const yes = await runtime.forUser(consenting);
+    const no = await runtime.forUser('01920000-0000-7000-8000-000000000002');
+    expect(yes.sources.map((source) => source.provider)).toEqual(['yfinance']);
+    expect(no.sources.map((source) => source.provider)).toEqual([]);
+    // Both views carry the one shared budget, so the card and hydrate see the spend.
+    expect(yes.budgets.get('yfinance')).toBe(no.budgets.get('yfinance'));
+    expect(runtime.allBudgets.map(([provider]) => provider)).toContain('yfinance');
+  });
+
+  it('enabled in the api (no transport: not on the yahoo network): a budget for the card, never a source', async () => {
+    const runtime = createMarketDataRuntime({
+      secrets: NO_SECRETS,
+      allowedHosts: [],
+      yahooFinance: { enabled: true, consented: () => Promise.resolve(true) },
+    });
+    const view = await runtime.forUser('01920000-0000-7000-8000-000000000001');
+    expect(view.sources).toEqual([]);
+    expect(view.budgets.get('yfinance')?.windows[0]?.limit).toBe(60);
+  });
+
+  it('MARKET_DATA_ALLOWED_HOSTS narrowing neither adds Yahoo nor is needed for it', async () => {
+    const runtime = createMarketDataRuntime({
+      secrets: NO_SECRETS,
+      allowedHosts: ['api.tiingo.com'],
+      yahooFinance: { enabled: true, transport: SIDECAR, consented: () => Promise.resolve(true) },
+    });
+    const view = await runtime.forUser('01920000-0000-7000-8000-000000000001');
+    expect(view.sources.map((source) => source.provider)).toEqual(['yfinance']);
   });
 });

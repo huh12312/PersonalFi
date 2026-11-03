@@ -80,13 +80,18 @@ upgrade:
         exit 1
       fi
       source_ns="${api_image%/personalfi-api:"$release"}"
-      others=() bad=0
+      others=() bad=0 verify_args=()
       while IFS=$'\t' read -r svc img; do
         [ -n "$svc" ] || continue
         case "$svc" in
           api | worker | migrator) want="${source_ns}/personalfi-api:${release}" ;;
           backup | pre-migrate-backup) want="${source_ns}/personalfi-backup:${release}" ;;
           proxy) want="${source_ns}/personalfi-proxy:${release}" ;;
+          # WP 12.6: the opt-in sidecar is in compose's model only when the
+          # `yahoo` profile is on (COMPOSE_PROFILES in .env); then it is held
+          # to the same name and verified with the rest, never pulled as one
+          # of the "others" below.
+          yahoo) want="${source_ns}/personalfi-yahoo:${release}"; verify_args+=(--with-yahoo) ;;
           *) want="" ;;
         esac
         if [ -n "$want" ]; then
@@ -106,7 +111,7 @@ upgrade:
       else
         echo "upgrade: pull-and-verify v${release} from ${source_ns} (not a git checkout: the images are tied to the v${release} tag by their signature, not to a commit here)"
       fi
-      bash scripts/verify-release.sh --release "$release" --source "$source_ns" --pull ${commit_args[@]+"${commit_args[@]}"}
+      bash scripts/verify-release.sh --release "$release" --source "$source_ns" --pull ${commit_args[@]+"${commit_args[@]}"} ${verify_args[@]+"${verify_args[@]}"}
       # The images that are not PersonalFi's (Postgres, and any profile's) by
       # compose's own pins; never ours, which arrived verified above.
       if [ "${#others[@]}" -gt 0 ]; then

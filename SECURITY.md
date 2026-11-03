@@ -53,8 +53,10 @@ any earlier release to the current one; the README's
 
 ## What is out of scope
 
-- Third-party services a holder chooses to connect: the bank aggregator, price feeds, a hosted
-  language-model provider, a notification host. Report those to the vendor.
+- Third-party services a holder chooses to connect: the bank aggregator, price feeds (Yahoo Finance
+  among them, when an install opts in to the `yahoo` sidecar), a hosted language-model provider, a
+  notification host. Report those to the vendor. The sidecar itself — its host check, its network,
+  its image — is in scope.
 - The holder's own host: its operating system, its Docker daemon, its disk encryption, its network,
   and anyone with root or `docker` group access to it. The
   [threat model](docs/security/threat-model.md) says what is assumed about the host.

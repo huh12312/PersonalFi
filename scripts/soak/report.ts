@@ -623,6 +623,29 @@ export const SOAK_QUERIES: readonly SoakQuery[] = [
     `,
   },
   {
+    // WP 12.6: one row per provider per outcome, so an opt-in source (Yahoo
+    // through the yahoo sidecar) is visible beside Tiingo and CoinGecko the
+    // week it is turned on — including its 429s (`rate_limited`) and refusals.
+    name: 'price_refresh_by_week',
+    section: 'Market data',
+    description:
+      'The nightly and manual price refresh per ISO week, provider and outcome (market_data_runs): runs, requests, symbols asked, rows written.',
+    sql: `
+      SELECT
+        ${ISO_WEEK('started_at')} AS iso_week,
+        provider,
+        outcome AS status,
+        count(*) AS run_count,
+        sum(requests_made) AS request_count,
+        sum(symbols_asked) AS symbol_count,
+        sum(rows_written) AS row_count
+      FROM market_data_runs
+      WHERE operation = 'price_refresh' AND started_at <= $1::timestamptz
+      GROUP BY 1, 2, 3
+      ORDER BY 1, 2, 3
+    `,
+  },
+  {
     name: 'jobs_failed_dead',
     section: 'Jobs',
     description: 'Failed or dead jobs per ISO week by job kind.',

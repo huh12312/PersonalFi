@@ -54,16 +54,21 @@ import {
   MARKET_DATA_OPERATIONS,
   MARKET_DATA_OUTCOMES,
   MARKET_DATA_PROVIDERS,
-  PROVIDER_FOR_KIND,
   UNPRICED_REASONS,
+  consentIsCurrent,
+  giveMarketDataConsent,
+  readMarketDataConsent,
   redactedMessageOf,
+  standingConsentHolds,
+  withdrawMarketDataConsent,
   type MarketDataProvider,
   type PriceSource,
   type SourceOutcome,
 } from '@ctx/integrations';
 import { ladderRows } from '@ctx/investments';
 import { PRICE_SOURCES, priceSourcePriority } from '@ctx/investments/schema';
-import { and, eq } from 'drizzle-orm';
+import { marketDataRuns } from '@ctx/integrations/schema';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { newId } from '@core/kernel';
@@ -79,6 +84,12 @@ import {
   type StoredMarketDataKeys,
 } from '../domain.ts';
 import { validateMarketDataKey } from '../market-data-keys.ts';
+import {
+  currentYahooConsent,
+  YAHOO_CONSENT_TEXT,
+  YAHOO_CONSENT_VERSION,
+  YAHOO_CONSENT_WHAT_LEAVES,
+} from '../yahoo-consent.ts';
 import { AppError, problems } from '../problem.ts';
 import { dateOnly, isoInstant } from '../wire.ts';
 import {
@@ -115,8 +126,8 @@ const KEY_SECRET: Readonly<Record<MarketDataProvider, keyof AppConfig['secrets']
     fred: 'fred_api_key',
     coingecko: 'coingecko_api_key',
     openfigi: 'openfigi_api_key',
-    // 01 §4.2: opt-in, best-effort, no adapter, no key file. Present so this
-    // record stays exhaustive over the union.
+    // 01 §4.2 / D33: opt-in, best-effort, no key file — its two halves are
+    // YAHOO_FINANCE_ENABLED and the holder's consent (WP 12.6).
     yfinance: null,
   });
 
@@ -161,6 +172,57 @@ const providerWire = z
     attribution: attributionWire,
   })
   .meta({ id: 'MarketDataProviderSettings' });
+
+/** WP 12.6: the Yahoo Finance card — both halves, the consent text, where it sits, how it went. */
+const yahooWire = z
+  .object({
+    operatorEnabled: z
+      .boolean()
+      .describe(
+        'The operator half: YAHOO_FINANCE_ENABLED=true (with the `yahoo` compose profile up). ' +
+          'When true the worker registers the adapter; this api never reaches the sidecar.',
+      ),
+    consent: z.object({
+      given: z.boolean().describe('A standing consent to the current text (version and sha256).'),
+      consentedAt: isoInstant.nullable(),
+      /** The version of a standing consent, current or not. */
+      version: z.string().nullable(),
+    }),
+    consentVersion: z.string().describe('The version of the text below, `yahoo-consent/1`.'),
+    consentText: z.string().describe('The exact words the holder ticks.'),
+    consentSha256: z.string().describe('`sha256:` of the exact bytes of `consentText`.'),
+    whatLeaves: z.string(),
+    ready: z.boolean().describe('Both halves hold: the worker may ask Yahoo for this holder.'),
+    notReady: z.enum(['operator_disabled', 'consent_required']).nullable(),
+    placements: z
+      .array(
+        z.object({
+          securityKind: z.string(),
+          rung: z.int().positive(),
+          position: z.int().positive().describe('1-based place among the kind’s enabled sources.'),
+          of: z.int().positive(),
+        }),
+      )
+      .describe('Every ladder the holder placed Yahoo in. Never inserted automatically.'),
+    lastOutcome: z
+      .object({
+        operation: z.enum(MARKET_DATA_OPERATIONS),
+        outcome: z.enum(MARKET_DATA_OUTCOMES),
+        at: isoInstant,
+        detail: z.string().nullable(),
+        refusalCode: z.string().nullable(),
+        retryAfterMs: z.int().nonnegative().nullable(),
+      })
+      .nullable()
+      .describe('The newest `market_data_runs` row for yfinance, as the worker recorded it.'),
+    budget: z.array(
+      z.object({ label: z.string(), used: z.int().nonnegative(), limit: z.int().nonnegative() }),
+    ),
+    attribution: attributionWire,
+  })
+  .meta({ id: 'YahooFinanceSettings' });
+
+type YahooSettings = z.infer<typeof yahooWire>;
 
 const ladderWire = z.object({
   securityKind: z.string(),
@@ -253,6 +315,9 @@ const keyBody = z.object({
 });
 
 const providerParams = z.object({ provider: z.enum(MARKET_DATA_KEYED_PROVIDERS) });
+
+/** WP 12.6: the providers a holder consents to — `yfinance` only. */
+const consentParams = z.object({ provider: z.enum(['yfinance']) });
 
 /** The audit kinds `@ctx/identity` defines (WP 10.1). The detail carries the provider only. */
 const EVENT_KIND = {
@@ -371,15 +436,12 @@ function summaryOf(
       kind: held?.kind ?? 'other',
     };
   };
-  const kindOf = new Map(
-    plan.securities.map((security) => [security.securityId, security.kind] as const),
-  );
-  // The job routes each planned security through `PROVIDER_FOR_KIND`; a priced
-  // one was priced by exactly that provider.
-  const priced = result.securitiesPriced.flatMap((securityId) => {
-    const provider = PROVIDER_FOR_KIND[kindOf.get(securityId) ?? ''];
-    return provider === undefined ? [] : [{ ...describe(securityId), provider }];
-  });
+  // WP 12.6: the job reports which provider priced each security — the
+  // kind's default, or an opt-in provider the holder ranked.
+  const priced = result.pricedBy.map(({ securityId, provider }) => ({
+    ...describe(securityId),
+    provider,
+  }));
   const unpriced = [
     ...plan.unplannable.map((entry) => ({
       ...describe(entry.securityId),
@@ -469,7 +531,99 @@ export const marketDataRoutes = (
       ...(options.storedKeys === undefined ? {} : { storedKeys: options.storedKeys }),
       ...(options.transport === undefined ? {} : { transport: options.transport }),
       ...(options.resolve === undefined ? {} : { resolve: options.resolve }),
+      // WP 12.6: the operator half and the holder half, for the card's budget.
+      // No transport: this process is not on the `yahoo` network.
+      yahooFinance: {
+        enabled: config.env.YAHOO_FINANCE_ENABLED,
+        consented: (holder) =>
+          standingConsentHolds(database, holder, 'yfinance', currentYahooConsent()),
+      },
     }).forUser(userId);
+
+  /** WP 12.6: the Yahoo card, from the consent, the ladders, the run ledger and the budget. */
+  async function yahooSettingsFor(userId: string, view: MarketDataView): Promise<YahooSettings> {
+    const now = clock.now();
+    const current = currentYahooConsent();
+    const consent = await readMarketDataConsent(database, userId, 'yfinance');
+    const given = consentIsCurrent(consent, current);
+    const operatorEnabled = config.env.YAHOO_FINANCE_ENABLED;
+
+    const ladder = await database
+      .select({
+        kind: priceSourcePriority.securityKind,
+        source: priceSourcePriority.source,
+        rung: priceSourcePriority.rung,
+      })
+      .from(priceSourcePriority)
+      .where(and(eq(priceSourcePriority.userId, userId), eq(priceSourcePriority.enabled, true)))
+      .orderBy(priceSourcePriority.securityKind, priceSourcePriority.rung);
+    const byKind = new Map<string, { source: string; rung: number }[]>();
+    for (const row of ladder) {
+      const list = byKind.get(row.kind) ?? [];
+      list.push({ source: row.source, rung: row.rung });
+      byKind.set(row.kind, list);
+    }
+    const placements = [...byKind]
+      .flatMap(([securityKind, sources]) => {
+        const index = sources.findIndex((entry) => entry.source === 'yfinance');
+        const placed = sources[index];
+        return placed === undefined
+          ? []
+          : [{ securityKind, rung: placed.rung, position: index + 1, of: sources.length }];
+      })
+      .sort((a, b) => a.securityKind.localeCompare(b.securityKind));
+
+    const [last] = await database
+      .select({
+        operation: marketDataRuns.operation,
+        outcome: marketDataRuns.outcome,
+        at: marketDataRuns.startedAt,
+        detail: marketDataRuns.errorMessage,
+        refusalCode: marketDataRuns.refusalCode,
+        retryAfterMs: marketDataRuns.retryAfterMs,
+      })
+      .from(marketDataRuns)
+      .where(and(eq(marketDataRuns.userId, userId), eq(marketDataRuns.provider, 'yfinance')))
+      .orderBy(desc(marketDataRuns.startedAt))
+      .limit(1);
+
+    const budget = view.budgets.get('yfinance');
+    return {
+      operatorEnabled,
+      consent: {
+        given,
+        consentedAt: given && consent !== null ? consent.consentedAt.toISOString() : null,
+        version: consent?.consentTextVersion ?? null,
+      },
+      consentVersion: YAHOO_CONSENT_VERSION,
+      consentText: YAHOO_CONSENT_TEXT,
+      consentSha256: current.sha256,
+      whatLeaves: YAHOO_CONSENT_WHAT_LEAVES,
+      ready: operatorEnabled && given,
+      notReady: !operatorEnabled ? 'operator_disabled' : !given ? 'consent_required' : null,
+      placements,
+      lastOutcome:
+        last === undefined
+          ? null
+          : {
+              operation: last.operation,
+              outcome: last.outcome,
+              at: last.at.toISOString(),
+              detail: last.detail === null ? null : redactSafely(last.detail, view),
+              refusalCode: last.refusalCode,
+              retryAfterMs: last.retryAfterMs,
+            },
+      budget:
+        budget === undefined
+          ? []
+          : budget.spent(now).map((entry) => ({
+              label: entry.window.label,
+              used: entry.used,
+              limit: entry.window.limit,
+            })),
+      attribution: attributionWireOf('yfinance'),
+    };
+  }
 
   const fileHasKey = (provider: MarketDataProvider): boolean => {
     const name = KEY_SECRET[provider];
@@ -547,6 +701,8 @@ export const marketDataRoutes = (
               /** Every obligation that binds on *this* screen. */
               settingsAttributions: z.array(attributionWire),
               allowedHostsNarrowed: z.boolean(),
+              /** WP 12.6: the Yahoo Finance card (opt-in, unofficial, best effort). */
+              yahoo: yahooWire,
             }),
             ...problems(401, 503),
           },
@@ -573,7 +729,14 @@ export const marketDataRoutes = (
             // OpenFIGI is not a `PriceSource` — it is the resolver's mapper —
             // so "registered" for it means the mapper exists, not that a price
             // source does. Reported truthfully rather than as a false `false`.
-            registered: provider === 'openfigi' ? runtime.figi !== undefined : source !== undefined,
+            // yfinance (WP 12.6): the worker registers it when the operator
+            // enabled it; this process never holds the source.
+            registered:
+              provider === 'openfigi'
+                ? runtime.figi !== undefined
+                : provider === 'yfinance'
+                  ? config.env.YAHOO_FINANCE_ENABLED
+                  : source !== undefined,
             capabilities: source?.capabilities ?? {
               prices: false,
               fx: false,
@@ -613,12 +776,17 @@ export const marketDataRoutes = (
           ladders: [...byKind]
             .map(([securityKind, sources]) => ({ securityKind, sources }))
             .sort((a, b) => a.securityKind.localeCompare(b.securityKind)),
+          // yfinance's label is carried by its own card (`yahoo.attribution`):
+          // listing it among the screen's obligations would put an opt-in,
+          // unofficial source in front of every holder (D33: never suggested).
           settingsAttributions: MARKET_DATA_PROVIDERS.filter(
             (provider) =>
+              provider !== 'yfinance' &&
               ATTRIBUTIONS[provider].required &&
               ATTRIBUTIONS[provider].surfaces.includes('settings'),
           ).map(attributionWireOf),
           allowedHostsNarrowed: config.marketData.allowedHosts.length > 0,
+          yahoo: await yahooSettingsFor(session.userId, runtime),
         };
       },
     );
@@ -633,7 +801,10 @@ export const marketDataRoutes = (
             'Needs a step-up assertion: this decides which provider’s number becomes the price ' +
             'of everything the user owns. Rung numbers are **computed**, not accepted — ' +
             '`user_override` is pinned to 1 and `last_known` to 99 by CHECK constraints, and a ' +
-            'client that could choose them could disable the one rung a human controls.',
+            'client that could choose them could disable the one rung a human controls. ' +
+            'WP 12.6: `yfinance` is refused (409 `market_data.consent_required`) unless the holder ' +
+            'has a standing consent to the current Yahoo Finance text; it is never inserted ' +
+            'automatically.',
           tags: ['market-data'],
           body: z.object({
             securityKind: z.enum([
@@ -649,7 +820,7 @@ export const marketDataRoutes = (
           }),
           response: {
             200: ladderWire,
-            ...problems(400, 401, 403, 503),
+            ...problems(400, 401, 403, 409, 503),
           },
         },
       },
@@ -664,6 +835,23 @@ export const marketDataRoutes = (
             detail: 'a source may appear in the ladder at most once',
             family: 'user',
           });
+        }
+
+        if (request.body.sources.includes('yfinance')) {
+          // WP 12.6, the holder half: placing Yahoo is "Use this provider",
+          // and it is refused until the consent is ticked.
+          const consent = await readMarketDataConsent(database, session.userId, 'yfinance');
+          if (!consentIsCurrent(consent, currentYahooConsent())) {
+            throw new AppError({
+              status: 409,
+              code: 'market_data.consent_required',
+              title: 'Conflict',
+              detail:
+                'Yahoo Finance cannot be placed in a price ladder until you tick its consent in ' +
+                'Settings → Market data: it is unofficial, best effort, and for personal use only.',
+              family: 'domain',
+            });
+          }
         }
 
         const rows = ladderRows(session.userId, request.body.securityKind, request.body.sources);
@@ -760,6 +948,19 @@ export const marketDataRoutes = (
       async (request) => {
         const session = await guards.requireFreshSession(request);
         const provider = request.body.provider;
+        if (provider === 'yfinance') {
+          // WP 12.6: only the worker is on the `yahoo` network. A test fetch
+          // from here could not reach the sidecar, and must never reach Yahoo.
+          throw new AppError({
+            status: 400,
+            code: 'market_data.not_testable_here',
+            title: 'Bad Request',
+            detail:
+              'Yahoo Finance is reached only by the worker, through the yahoo sidecar. Its card ' +
+              'shows the last outcome the worker recorded.',
+            family: 'user',
+          });
+        }
         const runtime = await viewFor(session.userId);
         await hydrateMarketDataBudgets(database, session.userId, runtime.budgets, clock);
         const source: PriceSource | undefined = runtime.sources.find(
@@ -986,6 +1187,88 @@ export const marketDataRoutes = (
           clock.now(),
           new Date(now.getTime() + PRICE_REFRESH_MIN_INTERVAL_MS),
         );
+      },
+    );
+
+    // -------------------------------------------------------------------------
+    // WP 12.6: the holder half of Yahoo Finance — a versioned consent, in the
+    // narrator-consent pattern. Step-up both ways (D21), like the narrator's.
+    // Giving it never places Yahoo in a ladder; withdrawing it removes Yahoo
+    // from every ladder in the same transaction, and the worker's adapter
+    // re-reads the consent before every request, so the next request stops.
+    // -------------------------------------------------------------------------
+
+    app.put(
+      '/market-data/providers/:provider/consent',
+      {
+        schema: {
+          operationId: 'putMarketDataConsent',
+          summary: 'Consent to Yahoo Finance’s terms (opt-in, unofficial, best effort)',
+          description:
+            'Needs a step-up. Carries the consent text version the holder was shown; 409 ' +
+            '`market_data.consent_version_unknown` when it is not the current one. Recorded with ' +
+            'the version and the sha256 of the exact text. Does not place Yahoo in any ladder.',
+          tags: ['market-data'],
+          params: consentParams,
+          body: z.object({ consentVersion: z.string() }),
+          response: { 200: yahooWire, ...problems(400, 401, 403, 409, 503) },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireFreshSession(request);
+        if (request.body.consentVersion !== YAHOO_CONSENT_VERSION) {
+          throw new AppError({
+            status: 409,
+            code: 'market_data.consent_version_unknown',
+            title: 'Conflict',
+            detail: 'The consent text has changed since it was shown. Read it again and tick it.',
+            family: 'domain',
+          });
+        }
+        await database.transaction((tx) =>
+          giveMarketDataConsent(tx, {
+            userId: session.userId,
+            provider: request.params.provider,
+            current: currentYahooConsent(),
+            clock,
+          }),
+        );
+        return yahooSettingsFor(session.userId, await viewFor(session.userId));
+      },
+    );
+
+    app.delete(
+      '/market-data/providers/:provider/consent',
+      {
+        schema: {
+          operationId: 'deleteMarketDataConsent',
+          summary: 'Withdraw the Yahoo Finance consent (removes Yahoo from every ladder at once)',
+          description:
+            'Needs a step-up. Withdraws the standing consent and, in the same transaction, removes ' +
+            '`yfinance` from every price ladder. Idempotent.',
+          tags: ['market-data'],
+          params: consentParams,
+          response: { 200: yahooWire, ...problems(401, 403, 503) },
+        },
+      },
+      async (request) => {
+        const session = await guards.requireFreshSession(request);
+        await database.transaction(async (tx) => {
+          await withdrawMarketDataConsent(tx, {
+            userId: session.userId,
+            provider: request.params.provider,
+            clock,
+          });
+          await tx
+            .delete(priceSourcePriority)
+            .where(
+              and(
+                eq(priceSourcePriority.userId, session.userId),
+                inArray(priceSourcePriority.source, ['yfinance']),
+              ),
+            );
+        });
+        return yahooSettingsFor(session.userId, await viewFor(session.userId));
       },
     );
 

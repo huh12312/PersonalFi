@@ -66,8 +66,8 @@ sidecar with its own profile, network, user and limits):
 
 ## 5. Package
 
-| #    | Package                                                                                                                                                                                                                                             | Depends on | Size |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ---- |
-| 12.6 | **Yahoo Finance via `yfinance`, opt-in**: the sidecar image and compose service, the adapter, the two-half opt-in (operator variable + profile, holder consent), labels and attribution, hardening rules, the fourth published image, RUNBOOK and release notes | 12.3       | M    |
+| # | Package | Depends on | Size | Evidence |
+| --- | --- | --- | --- | --- |
+| 12.6 | **Yahoo Finance via `yfinance`, opt-in**: the sidecar image and compose service, the adapter, the two-half opt-in (operator variable + profile, holder consent), labels and attribution, hardening rules, the fourth published image, RUNBOOK and release notes | 12.3 | M | [`docs/evidence/phase-12/wp12.6-yahoo-finance.md`](../evidence/phase-12/wp12.6-yahoo-finance.md) |
 
 Decisions for Chris are in D33; the rest follows the precedents above.

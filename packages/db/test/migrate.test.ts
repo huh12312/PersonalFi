@@ -648,6 +648,10 @@ describeWithDb('runMigrations', () => {
       //   exactly when refused, decided_at exactly when accepted or dismissed, llm_provider CHECK-pinned to
       //   'ollama' (local only), llm_model, run_id, input_digest). Expand-only; references only users. Not
       //   exported (registry.ts exempts it; an accepted name travels in transactions.user_merchant_name).
+      // 0064_market_data_consent (WP 12.6): one new @ctx/integrations table, market_data_consents (the
+      //   holder's consent to an opt-in market-data provider, D33: provider CHECK-pinned to 'yfinance', the
+      //   consent text version and its sha256, consented_at, withdrawn_at; at most one standing consent per
+      //   (user_id, provider)). Expand-only; references only users. Not exported (registry.ts exempts it).
       // 0040_plan_levers_search_path: no new table. F-94-6 (WP 9.4's upgrade
       //   chain, the HEAD restore drill): 0022's
       //   plan_scenario_levers_are_well_formed called
@@ -719,6 +723,7 @@ describeWithDb('runMigrations', () => {
         'job_runs',
         'jobs',
         'ledger_dedup_keys',
+        'market_data_consents',
         'market_data_runs',
         'mcc_codes',
         'merchant_name_suggestions',

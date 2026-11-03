@@ -25,3 +25,9 @@ export {
   type MarketDataRunRow,
   type NewMarketDataRunRow,
 } from './market-data.ts';
+export {
+  CONSENTED_MARKET_DATA_PROVIDERS,
+  marketDataConsents,
+  type ConsentedMarketDataProvider,
+  type MarketDataConsentRow,
+} from './consent.ts';

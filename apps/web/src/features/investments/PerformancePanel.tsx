@@ -39,6 +39,9 @@ export interface PerformancePanelProps {
    */
   readonly hasCoinGeckoCryptoHolding?: boolean;
   readonly coinGeckoAttribution?: Attribution;
+  /** WP 12.6: whether any holding is priced `price.source === 'yfinance'`; derived by the parent from `GET /holdings`. */
+  readonly hasYahooHolding?: boolean;
+  readonly yahooAttribution?: Attribution;
 }
 
 const SCOPE_OPTIONS: readonly { value: PerformanceScopeKind; label: string }[] = [
@@ -82,6 +85,8 @@ export function PerformancePanel({
   byManagementLoading = false,
   hasCoinGeckoCryptoHolding = false,
   coinGeckoAttribution,
+  hasYahooHolding = false,
+  yahooAttribution,
 }: PerformancePanelProps) {
   if (isLoading) return <Skeleton variant="block" height={200} />;
   if (data === undefined) return null;
@@ -129,6 +134,9 @@ export function PerformancePanel({
 
       {hasCoinGeckoCryptoHolding && coinGeckoAttribution !== undefined && (
         <ProviderAttribution attribution={coinGeckoAttribution} />
+      )}
+      {hasYahooHolding && yahooAttribution !== undefined && (
+        <ProviderAttribution attribution={yahooAttribution} />
       )}
     </section>
   );

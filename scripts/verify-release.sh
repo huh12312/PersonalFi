@@ -5,7 +5,9 @@
 # gap G-21; WP 9.11; WP 12.3). `release.yml` signs every image keyless with
 # cosign (GitHub OIDC -> Fulcio -> Rekor) on both registries and attests SLSA
 # provenance in GitHub's attestation store. This checks, for each of the three
-# images (api, backup, proxy):
+# images every install runs (api, backup, proxy) — and, with --with-yahoo, the
+# fourth, the opt-in `yahoo` sidecar (WP 12.6), which `just upgrade` /
+# `just install-release` ask for exactly when compose's `yahoo` profile is on:
 #
 #   1. resolves `<source>/personalfi-<image>:<release>` to a DIGEST once, and
 #      from then on uses only the digest (a tag can move; a digest cannot);
@@ -31,6 +33,7 @@
 #   bash scripts/verify-release.sh --release 0.10.0                      # GHCR, the canonical copy
 #   bash scripts/verify-release.sh --release 0.10.0 --source masterhuh   # the Docker Hub mirror
 #   bash scripts/verify-release.sh --release 0.10.0 --commit <sha> --pull [--strict]
+#   bash scripts/verify-release.sh --release 0.10.1 --with-yahoo          # + the opt-in yahoo sidecar
 #   bash scripts/verify-release.sh --self-test     # needs the network; a known-good and a known-bad image
 #
 # --source: `ghcr.io/huh12312` (default) or `docker.io/masterhuh` (`masterhuh`
@@ -53,6 +56,10 @@ set -euo pipefail
 COSIGN_IMAGE="ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d"
 GITHUB_OIDC_ISSUER="https://token.actions.githubusercontent.com"
 IMAGES=(api backup proxy)
+# WP 12.6: the opt-in sidecar is verified only when asked. An install without
+# the `yahoo` profile never pulls it, and must not be refused for an image it
+# does not run; an install WITH the profile must never run it unverified.
+WITH_YAHOO=0
 CANONICAL_SOURCES=("ghcr.io/huh12312" "docker.io/masterhuh")
 
 OWNER="huh12312"
@@ -142,6 +149,7 @@ run() {
   identity="https://github.com/${OWNER}/${REPO}/.github/workflows/release.yml@refs/tags/v${RELEASE}"
 
   local verified=() image repo tagged digest ref failed=0
+  [ "$WITH_YAHOO" -eq 0 ] || IMAGES+=(yahoo)
   for image in "${IMAGES[@]}"; do
     repo="${SOURCE}/personalfi-${image}"
     tagged="${repo}:${RELEASE}"
@@ -292,10 +300,11 @@ while [ $# -gt 0 ]; do
     --repo) REPO="${2:-}"; shift ;;
     --pull) PULL=1 ;;
     --strict) STRICT=1 ;;
+    --with-yahoo) WITH_YAHOO=1 ;;
     --registry | --version)
       die "$1 was removed in v0.10.0 (WP 12.3): a pulled image keeps its published name, which is compose's when REGISTRY=<source> and PERSONALFI_VERSION=<release>; use --source"
       ;;
-    -h | --help) sed -n '3,43p' "$0"; exit 0 ;;
+    -h | --help) sed -n '3,46p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
   shift

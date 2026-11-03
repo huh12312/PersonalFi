@@ -8,7 +8,7 @@ import { StatTile } from '../../components/finance/StatTile.tsx';
 import { Tabs, TabsIndicator, TabsList, TabsPanel, TabsTab } from '../../components/ui/tabs.tsx';
 import { Button } from '../../components/ui/button.tsx';
 import { useAccountsLookup } from '../accounts/useAccountsLookup.ts';
-import { useCoinGeckoAttribution } from '../market-data/api.ts';
+import { useCoinGeckoAttribution, useProviderAttribution } from '../market-data/api.ts';
 import { useRefreshPrices } from '../market-data/refresh-api.ts';
 import { RefreshPricesButton, RefreshPricesResult } from '../market-data/RefreshPricesButton.tsx';
 import { AccountPositionsPanel } from './AccountPositionsPanel.tsx';
@@ -135,6 +135,10 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
   const coinGeckoAttribution = useCoinGeckoAttribution();
   const hasCoinGeckoCryptoHolding =
     holdings?.holdings.some((holding) => holding.price?.source === 'coingecko') ?? false;
+  // WP 12.6: the same obligation for Yahoo Finance ("unofficial, best effort"), derived the same way.
+  const yahooAttribution = useProviderAttribution('yfinance');
+  const hasYahooHolding =
+    holdings?.holdings.some((holding) => holding.price?.source === 'yfinance') ?? false;
 
   return (
     <div className="flex flex-col gap-6">
@@ -218,6 +222,7 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
               election={election}
               onBack={() => onSearchChange({ ...search, account: undefined })}
               coinGeckoAttribution={coinGeckoAttribution}
+              yahooAttribution={yahooAttribution}
             />
           ) : (
             <div className="flex flex-col gap-4">
@@ -242,6 +247,7 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
                 accountNameOf={accounts.nameOf}
                 onOpenAccount={(accountId) => update({ account: accountId })}
                 coinGeckoAttribution={coinGeckoAttribution}
+                yahooAttribution={yahooAttribution}
               />
               <UnresolvedSecuritiesNotice unresolved={holdings?.unresolved ?? []} />
               {holdings !== undefined && holdings.excluded.length > 0 && (
@@ -286,6 +292,8 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
             onDimensionChange={(next) => update({ dimension: next })}
             hasCoinGeckoCryptoHolding={hasCoinGeckoCryptoHolding}
             coinGeckoAttribution={coinGeckoAttribution}
+            hasYahooHolding={hasYahooHolding}
+            yahooAttribution={yahooAttribution}
           />
         </TabsPanel>
 
@@ -326,6 +334,8 @@ export function InvestmentsScreen({ search, onSearchChange, today }: Investments
             byManagementLoading={byManagementQuery.isLoading}
             hasCoinGeckoCryptoHolding={hasCoinGeckoCryptoHolding}
             coinGeckoAttribution={coinGeckoAttribution}
+            hasYahooHolding={hasYahooHolding}
+            yahooAttribution={yahooAttribution}
           />
         </TabsPanel>
       </Tabs>

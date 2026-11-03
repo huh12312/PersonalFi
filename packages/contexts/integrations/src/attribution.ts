@@ -128,16 +128,20 @@ export const ATTRIBUTIONS: Readonly<Record<MarketDataProvider, Attribution>> = O
 
   yfinance: Object.freeze({
     provider: 'yfinance' as const,
-    required: false,
-    text: '',
+    // WP 12.6 (D33): not a licence condition — Yahoo publishes no licence to
+    // satisfy — but research 14 §2's posture: every figure that came from it is
+    // labelled, on every surface showing one, in these words.
+    required: true,
+    text: 'Yahoo Finance via yfinance — unofficial, best effort',
     linkUrl: null,
     logoRequired: false,
-    surfaces: Object.freeze([]),
+    surfaces: Object.freeze(['any_price' as const, 'settings' as const]),
     clause:
       'Yahoo via yfinance (01 §4.2): "The library is Apache-2.0 and safe to depend on from MIT ' +
       'code. The legal risk is the data, not the code." There is no Yahoo data licence, so ' +
       'there is no attribution that would make redistribution lawful; this adapter is opt-in ' +
-      'and labelled best-effort, and is never the documented default (D17).',
+      'and labelled best-effort, and is never the documented default (D17). Research 14 §2 ' +
+      '(D33): "labels every figure that came from it."',
     redistribution: 'forbidden' as const,
   }),
 });

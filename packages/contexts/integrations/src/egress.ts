@@ -42,13 +42,22 @@
  * blast radius of every provider we happen to speak to, and the refusal matrix
  * in the evidence is then a per-adapter claim rather than a per-context one.
  *
- * ## yfinance is not in the default list
+ * ## yfinance is not in the default list, and never dials Yahoo from here
  *
  * 01 §4.2 is unambiguous that Yahoo data is unlicensed and that shipping it as
  * a documented default "puts the project in the position of instructing every
- * user to violate a ToS". `PROVIDER_HOSTS` knows the host so that an opt-in
- * adapter has somewhere to put it; `MARKET_DATA_ALLOWED_HOSTS` does not include
- * it, so an opt-in that was never opted into cannot reach the network.
+ * user to violate a ToS". `PROVIDER_HOSTS` knows the host so the record stays
+ * exhaustive; `MARKET_DATA_ALLOWED_HOSTS` does not include it, and
+ * `policyFor('yfinance')` / `baseUrlFor('yfinance')` **throw**: no api or
+ * worker process builds a policy that reaches Yahoo (WP 12.6,
+ * `test/yfinance-egress.test.ts`).
+ *
+ * The opt-in adapter (WP 12.6, D33) speaks to the `yahoo` sidecar instead —
+ * `YAHOO_SIDECAR_ENDPOINT`, a single-label compose service name on the `yahoo`
+ * network — through `@core/platform`'s **local-endpoint** policy, the inverse
+ * type the local model uses: one host, one port, every resolved address
+ * private, no redirects. Only the sidecar talks to Yahoo, and only to
+ * `YAHOO_SIDECAR_UPSTREAM_HOSTS`, enforced inside it (`docker/yahoo/server.py`).
  */
 import { createEgressPolicy, type EgressPolicy, type EgressPolicyInput } from '@core/platform';
 import type { MarketDataProvider } from '../schema/index.ts';
@@ -84,6 +93,34 @@ export const MARKET_DATA_ALLOWED_HOSTS: readonly string[] = Object.freeze([
   PROVIDER_HOSTS.coingecko,
   PROVIDER_HOSTS.openfigi,
 ]);
+
+/**
+ * Where the yfinance adapter's requests go: the `yahoo` sidecar on the `yahoo`
+ * compose network (WP 12.6). An origin, not a URL: the adapter names its own
+ * paths. Built into a `LocalEndpointPolicy`, never an `EgressPolicy`.
+ */
+export const YAHOO_SIDECAR_ENDPOINT = 'http://yahoo:8000';
+
+/**
+ * The only two hosts the sidecar itself may speak to, on 443, recorded here so
+ * the TypeScript side states the same fact `docker/yahoo/server.py`'s
+ * `ALLOWED_HOSTS` enforces. Neither is reachable from this process.
+ */
+export const YAHOO_SIDECAR_UPSTREAM_HOSTS: readonly string[] = Object.freeze([
+  'query1.finance.yahoo.com',
+  'query2.finance.yahoo.com',
+]);
+
+/** Thrown when code asks for a direct-egress policy for a provider that has none. */
+export class NoDirectEgressError extends Error {
+  constructor(provider: MarketDataProvider) {
+    super(
+      `${provider} has no direct egress from this process: it is reached through the ` +
+        `yahoo sidecar (${YAHOO_SIDECAR_ENDPOINT}), never at ${PROVIDER_HOSTS[provider]}`,
+    );
+    this.name = 'NoDirectEgressError';
+  }
+}
 
 /**
  * 443 and nothing else.
@@ -147,10 +184,12 @@ export function policyFor(
   provider: MarketDataProvider,
   input: Omit<EgressPolicyInput, 'allowedHosts'> = {},
 ): EgressPolicy {
+  if (provider === 'yfinance') throw new NoDirectEgressError(provider);
   return createMarketDataEgressPolicy({ ...input, allowedHosts: [PROVIDER_HOSTS[provider]] });
 }
 
 /** The base URL an adapter builds its paths onto. Always https, always the allow-listed host. */
 export function baseUrlFor(provider: MarketDataProvider): string {
+  if (provider === 'yfinance') throw new NoDirectEgressError(provider);
   return `https://${PROVIDER_HOSTS[provider]}`;
 }

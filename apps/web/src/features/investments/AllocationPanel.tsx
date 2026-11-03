@@ -42,6 +42,9 @@ export interface AllocationPanelProps {
    */
   readonly hasCoinGeckoCryptoHolding?: boolean;
   readonly coinGeckoAttribution?: Attribution;
+  /** WP 12.6: whether any holding is priced `price.source === 'yfinance'`; derived by the parent from `GET /holdings`. */
+  readonly hasYahooHolding?: boolean;
+  readonly yahooAttribution?: Attribution;
 }
 
 /**
@@ -65,6 +68,8 @@ export function AllocationPanel({
   onDimensionChange,
   hasCoinGeckoCryptoHolding = false,
   coinGeckoAttribution,
+  hasYahooHolding = false,
+  yahooAttribution,
 }: AllocationPanelProps) {
   if (isLoading) return <Skeleton variant="block" height={260} />;
   if (data === undefined) return null;
@@ -159,6 +164,9 @@ export function AllocationPanel({
 
       {hasCoinGeckoCryptoHolding && coinGeckoAttribution !== undefined && (
         <ProviderAttribution attribution={coinGeckoAttribution} />
+      )}
+      {hasYahooHolding && yahooAttribution !== undefined && (
+        <ProviderAttribution attribution={yahooAttribution} />
       )}
     </section>
   );

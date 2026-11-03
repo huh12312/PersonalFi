@@ -29,11 +29,13 @@ const COMPOSE = read('compose.yml');
 const RELEASE = read('.github/workflows/release.yml');
 const CI = read('.github/workflows/ci.yml');
 const UPGRADE_TEST = read('.github/workflows/upgrade-test.yml');
-const IMAGES = ['api', 'backup', 'proxy'] as const;
+const IMAGES = ['api', 'backup', 'proxy', 'yahoo'] as const;
 const DOCKERFILE: Record<(typeof IMAGES)[number], string> = {
   api: 'docker/api.Dockerfile',
   backup: 'docker/backup.Dockerfile',
   proxy: 'docker/caddy.Dockerfile',
+  // WP 12.6: the opt-in Yahoo Finance sidecar, the fourth published image.
+  yahoo: 'docker/yahoo.Dockerfile',
 };
 const REPO_URL = 'https://github.com/huh12312/PersonalFi';
 
@@ -55,7 +57,7 @@ function labels(dockerfile: string): Record<string, string> {
 }
 
 describe('one name per image (WP 12.3)', () => {
-  it('release.yml publishes personalfi-<image> on GHCR and Docker Hub for exactly api, backup and proxy', () => {
+  it('release.yml publishes personalfi-<image> on GHCR and Docker Hub for exactly api, backup, proxy and yahoo', () => {
     expect(RELEASE).toContain('ghcr.io/huh12312/personalfi-${{ matrix.image }}');
     expect(RELEASE).toContain('docker.io/masterhuh/personalfi-${{ matrix.image }}');
     // The publish job's matrix (`- image: <name>` entries).
@@ -63,7 +65,10 @@ describe('one name per image (WP 12.3)', () => {
       'api',
       'backup',
       'proxy',
+      'yahoo',
     ]);
+    // CI scans the same four.
+    expect([...CI.matchAll(/^\s*- image: (\w+)\s*$/gm)].map((m) => m[1])).toEqual([...IMAGES]);
   });
 
   it('compose.yml runs every PersonalFi service under the published name, with GHCR as the default registry', () => {
@@ -75,10 +80,11 @@ describe('one name per image (WP 12.3)', () => {
         '${REGISTRY:-ghcr.io/huh12312}/personalfi-backup:${PERSONALFI_VERSION:-dev}',
         '${REGISTRY:-ghcr.io/huh12312}/personalfi-backup:${PERSONALFI_VERSION:-dev}',
         '${REGISTRY:-ghcr.io/huh12312}/personalfi-proxy:${PERSONALFI_VERSION:-dev}',
+        '${REGISTRY:-ghcr.io/huh12312}/personalfi-yahoo:${PERSONALFI_VERSION:-dev}',
       ].sort(),
     );
     // No service is left on the pre-12.3 names.
-    expect(COMPOSE).not.toMatch(/\}\/(api|backup|proxy):\$\{PERSONALFI_VERSION/);
+    expect(COMPOSE).not.toMatch(/\}\/(api|backup|proxy|yahoo):\$\{PERSONALFI_VERSION/);
   });
 
   it.each(IMAGES)(

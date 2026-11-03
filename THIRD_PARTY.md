@@ -353,3 +353,69 @@ not an npm dependency, so it is not in the tree below.
 
 - `isbot`@5.2.2 — https://isbot.js.org
 - `robust-predicates`@3.0.3 — https://github.com/mourner/robust-predicates#readme
+
+# Python (the yahoo sidecar)
+
+The optional `yahoo` sidecar (WP 12.6, compose profile `yahoo`: Yahoo Finance through
+`yfinance`, opt-in, unofficial, best effort) is PersonalFi’s own image, `personalfi-yahoo`,
+and installs this Python tree from `docker/yahoo/requirements.txt`, every package pinned by
+version and sha256. Licences are recorded in `docker/yahoo/licenses.json` from each wheel’s
+own metadata and checked against `licenses.policy.yaml` by `scripts/python-licenses.ts`.
+The data Yahoo serves is not covered by any of these licences: Yahoo publishes none
+(docs/research/14 §2).
+
+Bundled native libraries, recorded rather than gated (the gate reads each package’s declared
+licence): numpy’s and pandas’s musllinux wheels carry the GCC runtime (libgcc_s, libstdc++;
+numpy also libgfortran, libquadmath and OpenBLAS), which numpy’s own LICENSE.txt records as
+`GPL-3.0-or-later WITH GCC-exception-3.1`, dynamically linked — the exception that lets any
+program ship it, and the same runtime Alpine’s libgcc and libstdc++ packages carry in every
+image here.
+
+## Python: Apache-2.0
+
+- `multitasking`==0.0.13
+- `requests`==2.34.2
+- `tzdata`==2026.6
+- `yfinance`==1.7.0
+
+## Python: BSD-3-Clause
+
+- `idna`==3.20
+- `lxml`==6.1.3
+- `pandas`==3.1.0
+- `protobuf`==7.36.2
+- `pycparser`==3.12
+- `python-dateutil`==4.0.0
+- `websockets`==17.4
+
+## Python: BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0
+
+- `numpy`==2.5.4
+
+## Python: MIT
+
+- `beautifulsoup4`==4.15.0
+- `charset-normalizer`==3.5.2
+- `curl-cffi`==0.17.0
+- `peewee`==4.5.3
+- `platformdirs`==4.14.3
+- `pytz`==2026.6
+- `soupsieve`==3.0.4
+- `urllib3`==2.8.0
+
+## Python: MIT-0
+
+- `cffi`==2.1.1
+
+## Python: MPL-2.0
+
+- `certifi`==2026.10.23
+
+## Python: PSF-2.0
+
+- `typing-extensions`==4.16.0
+
+## Python: allowed with review (06 §5.4)
+
+- `certifi`: MPL-2.0 (file-level copyleft, 06 §5.4 'allowed with review'): Mozilla's CA bundle, consumed unmodified as a separate PyPI package in a separate container, never statically linked.
+- `frozendict`: LGPL-3.0 (06 §5.4 'allowed with review'), named by research 14 §2: not in yfinance 1.7.0's closure (yfinance ships its own fallback helper). Were it pinned again, the same reason holds: a separate package in a separate container, unmodified, not statically linked.

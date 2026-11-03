@@ -400,6 +400,23 @@ describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
       sql`INSERT INTO ops_restore_drills (id, verdict, ran_at, restored_table_count, live_table_count, max_migration, rto_seconds)
           VALUES (${newId()}::uuid, 'pass', '2026-10-30T10:00:00Z', 99, 99, '0036', 74)`,
     );
+    // WP 12.6: the price refresh, with the opt-in Yahoo source beside Tiingo —
+    // one ok run and one 429 (rate_limited) — so its row is in the table.
+    for (const [provider, outcome, requests, rows] of [
+      ['tiingo', 'ok', 3, 3],
+      ['yfinance', 'ok', 2, 2],
+      ['yfinance', 'rate_limited', 1, 0],
+    ] as const) {
+      await exec(
+        h,
+        // fixture: market_data_runs row written by SQL because soak-report: the report reads counts by provider and outcome only; its writer is createMarketDataRunRecorder (domain.ts), exercised in market-data-routes.test.ts.
+        sql`INSERT INTO market_data_runs (id, user_id, provider, operation, started_at, finished_at,
+                                          outcome, requests_made, units_spent, symbols_asked, rows_written)
+            VALUES (${newId()}::uuid, ${h.userId}::uuid, ${provider}, 'price_refresh',
+                    '2026-11-04T08:45:00Z', '2026-11-04T08:45:05Z', ${outcome},
+                    ${requests}, ${requests}, ${requests}, ${rows})`,
+      );
+    }
     await seedCanaryColumns(h);
   }, 180_000);
 
@@ -435,6 +452,37 @@ describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
     });
     expect(rows('categorisation_30d')[0]?.['auto_rate_pct']).toBe('75.0');
     expect(rows('review_burden')).toEqual([{ iso_week: '2026-W45', overlay_write_count: 1n }]);
+    // WP 12.6: the price-refresh table shows the opt-in provider's rows.
+    expect(rows('price_refresh_by_week')).toEqual([
+      {
+        iso_week: '2026-W45',
+        provider: 'tiingo',
+        status: 'ok',
+        run_count: 1n,
+        request_count: 3n,
+        symbol_count: 3n,
+        row_count: 3n,
+      },
+      {
+        iso_week: '2026-W45',
+        provider: 'yfinance',
+        status: 'ok',
+        run_count: 1n,
+        request_count: 2n,
+        symbol_count: 2n,
+        row_count: 2n,
+      },
+      {
+        iso_week: '2026-W45',
+        provider: 'yfinance',
+        status: 'rate_limited',
+        run_count: 1n,
+        request_count: 1n,
+        symbol_count: 1n,
+        row_count: 0n,
+      },
+    ]);
+    expect(markdown).toContain('## Market data');
     expect(markdown).toContain('## Sync health');
     expect(markdown).toContain('## Criteria ledger');
 
