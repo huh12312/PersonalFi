@@ -71,15 +71,18 @@ ARG XCADDY_SUM=h1:WHNm6tqCFXcOxBovXqMzOvNa0W4arbQRxCeNap2S+aU=
 # v0.59.0, go-jose/v4 v4.1.5, chi/v5 v5.3.2). Each is a `go get` pin through
 # xcaddy's `--with`, so Go's minimum version selection applies: a later Caddy
 # that needs a newer version fails the build loudly instead of being silently
-# held back (which a go.mod `replace` would do). x/net v0.60.0 fixes
-# CVE-2026-78669 (HTTP/2 SETTINGS flood); go-jose v4.1.6 fixes CVE-2026-116587
+# held back (which a go.mod `replace` would do). x/net v0.60.0 fixed
+# CVE-2026-78669 (HTTP/2 SETTINGS flood); v0.62.0 (the floor since
+# 2026-11-03, after the seven-day maturity window) fixes CVE-2026-78661 and
+# CVE-2026-97045 in x/net/html, both UNKNOWN-severity lines a public scanner
+# shows against the image; go-jose v4.1.6 fixes CVE-2026-116587
 # (JWK parsing DoS); chi v5.4.0 (WP 12.3) clears the MEDIUM finding trivy
 # reports against v5.3.2 at every severity (WP 12.1 §2.4), which a public
 # scanner such as Docker Scout shows on the image's page. Each is the minimal
 # fixing release; drop a floor once CADDY_VERSION's own module graph selects
 # at least it.
 # renovate: datasource=go depName=golang.org/x/net
-ARG XNET_VERSION=v0.60.0
+ARG XNET_VERSION=v0.62.0
 # renovate: datasource=go depName=github.com/go-jose/go-jose/v4
 ARG GOJOSE_VERSION=v4.1.6
 # renovate: datasource=go depName=github.com/go-chi/chi/v5
