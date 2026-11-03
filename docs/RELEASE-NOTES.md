@@ -53,9 +53,10 @@ under v0.10.0 below applies to this release; there is no separate manual step.
 
 ## v0.10.0 (2026-11-02): tagged, not published — see v0.10.1
 
-**Status:** not tagged. v0.10.0 is the first public release line (D32, Phase 12): the images are
-published to GHCR and Docker Hub, and the per-package `v0.9.N` entries below fold into it when it is
-tagged. Items land here as Phase 12's packages do.
+**Status:** tagged 2026-11-02 at `b31e42b`, never published — its release run stopped in the
+upgrade gate on a harness comparison, and a tag is never moved. v0.10.1 publishes this tree with
+three fixes. v0.10.0 is the first public release line (D32, Phase 12): the images publish to GHCR
+and Docker Hub, and the per-package `v0.9.N` entries below fold into it.
 
 ### Upgrading to v0.10.0
 
