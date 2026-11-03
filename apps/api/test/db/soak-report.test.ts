@@ -83,6 +83,17 @@ async function exec(h: ApiHarness, statement: ReturnType<typeof sql>): Promise<v
   await h.database.db.execute(statement);
 }
 
+/** One failed price refresh a day back, so the canary in the redacted error text is really there (WP 12.6). */
+async function seedMarketDataRun(h: ApiHarness): Promise<void> {
+  await exec(
+    h,
+    // fixture: market_data_runs row written by SQL because soak-report: price_refresh_by_week (WP 12.6) reads counts per provider and outcome, never the redacted error text
+    sql`INSERT INTO market_data_runs (id, user_id, provider, operation, started_at, finished_at, outcome, requests_made, error_message)
+        VALUES (${newId()}::uuid, ${h.userId}::uuid, 'tiingo', 'price_refresh', ${new Date(AS_OF.getTime() - 86_400_000).toISOString()}::timestamptz,
+                ${new Date(AS_OF.getTime() - 86_400_000 + 2_000).toISOString()}::timestamptz, 'failed', 1, 'CANARY-MEMO-ORCHID')`,
+  );
+}
+
 /** One scheduled, successful sync on each of the seven complete UTC days before AS_OF, per connection. */
 async function seedSyncRuns(h: ApiHarness, connectionIds: readonly string[]): Promise<void> {
   for (const connectionId of connectionIds) {
@@ -344,6 +355,8 @@ describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
     }
 
     await seedSyncRuns(h, [connectionA, connectionB]);
+
+    await seedMarketDataRun(h);
     await seedBriefs(h);
 
     // Jobs, advisors, notifications, security events, backups and drills.
@@ -454,6 +467,16 @@ describe.skipIf(NO_DATABASE)('the weekly soak report (WP 9.1 part 3)', () => {
     expect(rows('review_burden')).toEqual([{ iso_week: '2026-W45', overlay_write_count: 1n }]);
     // WP 12.6: the price-refresh table shows the opt-in provider's rows.
     expect(rows('price_refresh_by_week')).toEqual([
+      {
+        // the canary-carrying failed run `seedMarketDataRun` writes (G-29); the report counts it, never reads it
+        iso_week: '2026-W45',
+        provider: 'tiingo',
+        status: 'failed',
+        run_count: 1n,
+        request_count: 1n,
+        symbol_count: 0n,
+        row_count: 0n,
+      },
       {
         iso_week: '2026-W45',
         provider: 'tiingo',

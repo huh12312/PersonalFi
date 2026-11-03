@@ -50,10 +50,21 @@ export const SEEDED: Readonly<Record<string, true>> = {
   'notification_outbox.deep_link': true,
   'security_events.detail': true,
   'ops_backup_runs.reason': true,
+  // WP 12.6: `price_refresh_by_week` reads market_data_runs; the redacted provider error can quote a symbol.
+  'market_data_runs.error_message': true,
 };
 
 /** Columns that cannot carry what a holder typed, with the reason. */
 export const NOT_FREE_TEXT: Readonly<Record<string, string>> = {
+  // WP 12.6: the soak report's price_refresh_by_week table reads market_data_runs (migration 0015).
+  'market_data_runs.provider':
+    'the provider enum, CHECK-constrained (tiingo, fred, coingecko, openfigi, yfinance)',
+  'market_data_runs.operation':
+    'the operation enum, CHECK-constrained (price_refresh, fx_refresh, …)',
+  'market_data_runs.outcome':
+    'the outcome enum, CHECK-constrained (ok, partial, failed, refused, rate_limited, skipped_no_key)',
+  'market_data_runs.refusal_code':
+    "@core/platform's RefusalCode, a code from one TypeScript list; no holder text",
   'transactions.effective_currency': 'ISO 4217 code, CHECK-constrained',
   'transactions.superseded_reason': 'a system code written by the pending-to-posted supersession',
   'ledger_dedup_keys.currency': 'ISO 4217 code, CHECK-constrained',
