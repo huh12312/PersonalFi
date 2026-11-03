@@ -105,6 +105,17 @@ RUN rm -rf scripts docs .github \
 COPY docker/entrypoint.mjs ./entrypoint.mjs
 
 # ---------- runtime ----------
+# The apk layers below are rebuilt whenever Alpine's package index changes:
+# BuildKit checksums these two remote files on every build (an `ADD <url>`),
+# and each `apk` RUN bind-mounts the stage, so a cached layer can never again
+# hide a package Alpine has since fixed — on 2026-11-03 CI's scan read rclone
+# 1.74.1-r3 from a cached layer three days after v3.24/community shipped
+# 1.75.2-r0 (CVE-2026-116189, CVE-2026-116191). Nothing from this stage
+# reaches the image; the mount is the dependency.
+FROM ${NODE_IMAGE} AS apk-index
+ADD https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/APKINDEX.tar.gz /index/main.tar.gz
+ADD https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/APKINDEX.tar.gz /index/community.tar.gz
+
 FROM ${NODE_IMAGE} AS runtime
 # Pin policy (WP 9.11, G-22 / F-94-8; the same as docker/backup.Dockerfile's,
 # which carries the reasoning): the base image is pinned by digest above, apk
@@ -116,7 +127,8 @@ FROM ${NODE_IMAGE} AS runtime
 #
 # `age` (WP 4.12b, C-5; G3-4): `GET /export?encrypt=true` shells out to it
 # (`apps/api/src/reports/export/bundle.ts`'s `encryptWithAge`).
-RUN apk add --no-cache tini age && \
+RUN --mount=type=bind,from=apk-index,source=/index,target=/apk-index,readonly \
+    apk add --no-cache tini age && \
     apk upgrade --no-cache libssl3 libcrypto3 && \
     addgroup -g 10001 -S app && \
     adduser -u 10001 -S -G app -H -D -s /sbin/nologin app && \

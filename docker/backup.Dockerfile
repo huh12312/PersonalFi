@@ -12,6 +12,17 @@
 # the packages below are deliberately not (WP 9.11's pin policy, below).
 ARG ALPINE_IMAGE=alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
+# The apk layers below are rebuilt whenever Alpine's package index changes:
+# BuildKit checksums these two remote files on every build (an `ADD <url>`),
+# and each `apk` RUN bind-mounts the stage, so a cached layer can never again
+# hide a package Alpine has since fixed — on 2026-11-03 CI's scan read rclone
+# 1.74.1-r3 from a cached layer three days after v3.24/community shipped
+# 1.75.2-r0 (CVE-2026-116189, CVE-2026-116191). Nothing from this stage
+# reaches the image; the mount is the dependency.
+FROM ${ALPINE_IMAGE} AS apk-index
+ADD https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/APKINDEX.tar.gz /index/main.tar.gz
+ADD https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/APKINDEX.tar.gz /index/community.tar.gz
+
 FROM ${ALPINE_IMAGE} AS runtime
 
 # Pin policy (WP 9.11, G-22 / F-94-8, ruled from WP 9.10 §6): the BASE IMAGE
@@ -28,7 +39,8 @@ FROM ${ALPINE_IMAGE} AS runtime
 # takes the index's current openssl (CVE-2026-14456 was fixed in an index
 # build the base predated). A digest bump (Renovate) refreshes the base.
 # `scripts/upgrade-test/dockerfile-pin-policy.test.ts` holds both halves.
-RUN apk add --no-cache \
+RUN --mount=type=bind,from=apk-index,source=/index,target=/apk-index,readonly \
+    apk add --no-cache \
       tini \
       postgresql18-client \
       age \
