@@ -122,14 +122,18 @@ FROM ${NODE_IMAGE} AS runtime
 # packages are not pinned to an exact build — Alpine serves only the current
 # build, so an exact pin is a build that expires — and `trivy image` (CI, and
 # upgrade-test.yml's weekly no-cache build) controls what arrives. `apk
-# upgrade` of openssl takes the index's fixed build (CVE-2026-14456 postdated
-# the base's last build).
+# upgrade` takes the index's current build of EVERY base package (06 §5.5, as
+# the proxy and yahoo images do): it began as openssl only (CVE-2026-14456
+# postdated the base's last build), and on 2026-11-09 the weekly build failed
+# on musl 1.2.6-r2 (CVE-2026-107891) and zlib 1.3.2-r0 (CVE-2026-85091), both
+# fixed in the index for days while the digest-pinned base, which only a
+# Renovate bump refreshes, still carried them.
 #
 # `age` (WP 4.12b, C-5; G3-4): `GET /export?encrypt=true` shells out to it
 # (`apps/api/src/reports/export/bundle.ts`'s `encryptWithAge`).
 RUN --mount=type=bind,from=apk-index,source=/index,target=/apk-index,readonly \
     apk add --no-cache tini age && \
-    apk upgrade --no-cache libssl3 libcrypto3 && \
+    apk upgrade --no-cache && \
     addgroup -g 10001 -S app && \
     adduser -u 10001 -S -G app -H -D -s /sbin/nologin app && \
     # The runtime never runs npm: the entrypoint is `node`, every dependency

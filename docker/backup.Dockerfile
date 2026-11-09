@@ -36,8 +36,11 @@ FROM ${ALPINE_IMAGE} AS runtime
 # arrives is controlled instead by `trivy image` — CI's image job on every push
 # and `upgrade-test.yml`'s weekly no-cache build of all three images — and the
 # postgres client's major version stays in the package NAME. `apk upgrade`
-# takes the index's current openssl (CVE-2026-14456 was fixed in an index
-# build the base predated). A digest bump (Renovate) refreshes the base.
+# takes the index's current build of every base package (06 §5.5): openssl
+# first (CVE-2026-14456 was fixed in an index build the base predated), and
+# since 2026-11-09 all of them, after the api image's weekly build failed on
+# musl and zlib fixes the digest-pinned base did not yet carry. A digest bump
+# (Renovate) refreshes the base itself.
 # `scripts/upgrade-test/dockerfile-pin-policy.test.ts` holds both halves.
 RUN --mount=type=bind,from=apk-index,source=/index,target=/apk-index,readonly \
     apk add --no-cache \
@@ -46,7 +49,7 @@ RUN --mount=type=bind,from=apk-index,source=/index,target=/apk-index,readonly \
       age \
       rclone \
       tzdata && \
-    apk upgrade --no-cache libssl3 libcrypto3 && \
+    apk upgrade --no-cache && \
     addgroup -g 10002 -S backup && \
     adduser -u 10002 -S -G backup -H -D -s /sbin/nologin backup && \
     mkdir -p /backups && chown 10002:10002 /backups
