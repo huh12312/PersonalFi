@@ -36,15 +36,29 @@ function problemDetail(cause: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * Providers that take no key at all. The api reports `keySource: 'none'` for
+ * them always, which is the same wire value as a keyed provider whose key is
+ * missing — and "No key configured" on such a row reads as something to fix
+ * (Chris, 2026-11-14, on the yfinance row). Yahoo through yfinance is the only
+ * one; its switch is the operator's, shown on the Yahoo Finance card below.
+ */
+const KEYLESS_PROVIDERS: ReadonlySet<string> = new Set(['yfinance']);
+
 /** One provider's key/registration/capabilities/budget/attribution — every field named explicitly, never a raw object spread, so an unexpected extra field on the wire (a key value, say) has no path onto the screen. */
 function ProviderRow({ provider }: { provider: Provider }) {
+  const keyless = KEYLESS_PROVIDERS.has(provider.provider);
   return (
     <li className="rounded-md border border-border-hairline p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-medium text-text-primary">{provider.provider}</p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant={provider.keyPresent ? 'success' : 'neutral'}>
-            {provider.keyPresent ? 'Key configured' : 'No key configured'}
+            {keyless
+              ? 'No key needed'
+              : provider.keyPresent
+                ? 'Key configured'
+                : 'No key configured'}
           </Badge>
           {/* WP 10.4: where the key in force comes from (the "API keys" cards above change it). */}
           {provider.keyPresent && provider.keySource === 'file' && (
@@ -56,6 +70,11 @@ function ProviderRow({ provider }: { provider: Provider }) {
           <Badge variant={provider.registered ? 'success' : 'neutral'}>
             {provider.registered ? 'Registered' : 'Not registered'}
           </Badge>
+          {keyless && !provider.registered && (
+            <span className="text-caption text-text-muted">
+              off until the operator enables it — see Yahoo Finance below
+            </span>
+          )}
         </div>
       </div>
 

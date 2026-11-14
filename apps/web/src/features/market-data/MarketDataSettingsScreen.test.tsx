@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,7 +10,7 @@ import {
   stubFetchRoutes,
 } from '../../test-support/api-test-utils.ts';
 import { MarketDataSettingsScreen } from './MarketDataSettingsScreen.tsx';
-import { yahooSettings } from './yahoo-fixtures.ts';
+import { YAHOO_ATTRIBUTION, yahooSettings } from './yahoo-fixtures.ts';
 
 vi.mock('@simplewebauthn/browser', () => ({
   startAuthentication: vi.fn(async () => ({})),
@@ -30,7 +30,23 @@ const COINGECKO_ATTRIBUTION = {
   redistribution: 'permitted_with_attribution',
 };
 
-function settingsResponse(overrides?: { tiingoExtra?: Record<string, unknown> }) {
+/** The yfinance row as the api reports it: never a key (`keySource: 'none'`), registered only by the operator's switch. */
+function yfinanceProvider(registered: boolean) {
+  return {
+    provider: 'yfinance',
+    keyPresent: false,
+    keySource: 'none',
+    registered,
+    capabilities: { prices: true, fx: false, macro: false, search: false },
+    budget: [{ label: 'requests/hour', used: 0, limit: 60 }],
+    attribution: YAHOO_ATTRIBUTION,
+  };
+}
+
+function settingsResponse(overrides?: {
+  tiingoExtra?: Record<string, unknown>;
+  extraProviders?: readonly Record<string, unknown>[];
+}) {
   return {
     providers: [
       {
@@ -62,6 +78,7 @@ function settingsResponse(overrides?: { tiingoExtra?: Record<string, unknown> })
         budget: [{ label: 'requests/min', used: 0, limit: 100 }],
         attribution: COINGECKO_ATTRIBUTION,
       },
+      ...(overrides?.extraProviders ?? []),
     ],
     ladders: [
       {
@@ -113,6 +130,50 @@ describe('MarketDataSettingsScreen', () => {
     expect(await screen.findByText('Key configured')).toBeInTheDocument();
     expect(screen.getByText('No key configured')).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(SYNTHETIC_KEY_MARKER);
+  });
+
+  it('a provider that takes no key says "No key needed", never "No key configured" (Chris, 2026-11-14: the yfinance row read as if a key were missing)', async () => {
+    stubFetchRoutes([
+      {
+        match: '/api/market-data/settings',
+        method: 'GET',
+        handle: () => jsonResponse(settingsResponse({ extraProviders: [yfinanceProvider(false)] })),
+      },
+    ]);
+
+    renderScreen();
+
+    const row = (await screen.findByText('yfinance', { selector: 'p' })).closest('li');
+    expect(row).not.toBeNull();
+    const yfinance = within(row as HTMLElement);
+    expect(yfinance.getByText('No key needed')).toBeInTheDocument();
+    expect(yfinance.queryByText('No key configured')).toBeNull();
+    // Off, and the row says whose switch it is and where to look.
+    expect(yfinance.getByText('Not registered')).toBeInTheDocument();
+    expect(yfinance.getByText(/off until the operator enables it/i)).toBeInTheDocument();
+
+    // A keyed provider with no key keeps the old words: there, a key really is missing.
+    const coingecko = within(screen.getByText('coingecko', { selector: 'p' }).closest('li')!);
+    expect(coingecko.getByText('No key configured')).toBeInTheDocument();
+    expect(coingecko.queryByText(/off until the operator enables it/i)).toBeNull();
+  });
+
+  it('once the operator enabled it, the yfinance row reads Registered and drops the hint', async () => {
+    stubFetchRoutes([
+      {
+        match: '/api/market-data/settings',
+        method: 'GET',
+        handle: () => jsonResponse(settingsResponse({ extraProviders: [yfinanceProvider(true)] })),
+      },
+    ]);
+
+    renderScreen();
+
+    const row = (await screen.findByText('yfinance', { selector: 'p' })).closest('li');
+    const yfinance = within(row as HTMLElement);
+    expect(yfinance.getByText('No key needed')).toBeInTheDocument();
+    expect(yfinance.getByText('Registered')).toBeInTheDocument();
+    expect(yfinance.queryByText(/off until the operator enables it/i)).toBeNull();
   });
 
   it('renders the CoinGecko attribution beside its provider row, with the licence clause quoted', async () => {
