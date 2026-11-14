@@ -41,6 +41,8 @@ None. Yahoo Finance stays off unless you choose it (below).
   is on (`scripts/verify-release.sh --with-yahoo`); an install without it never pulls it.
 - `THIRD_PARTY.md` gains "Python (the yahoo sidecar)", and the licence gate now checks that tree.
 - The weekly soak report gains a **Market data** table: price-refresh runs per provider and outcome.
+- The `yahoo` sidecar's `soupsieve` is 4.0.1 (CVE-2026-126190, a denial of service in selector
+  matching, fixed in 4.0; the sidecar asks Yahoo for JSON only and never parses a page with it).
 - Settings → Market data: the provider row for Yahoo says **No key needed** (it takes none) instead
   of "No key configured", and while the operator has not enabled it the row adds "off until the
   operator enables it — see Yahoo Finance below".

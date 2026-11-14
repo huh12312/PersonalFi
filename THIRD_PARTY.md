@@ -400,7 +400,7 @@ image here.
 - `peewee`==4.5.3
 - `platformdirs`==4.14.3
 - `pytz`==2026.6
-- `soupsieve`==3.0.4
+- `soupsieve`==4.0.1
 - `urllib3`==2.8.0
 
 ## Python: MIT-0
